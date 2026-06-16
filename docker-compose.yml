@@ -120,7 +120,6 @@ services:
       INFOCHAT_LLM_API_KEY: ${INFOCHAT_LLM_API_KEY:-}
       INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID: ${INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID:-}
       INFOCHAT_SIGNAL_ADMIN_CONTACT_ID: ${INFOCHAT_SIGNAL_ADMIN_CONTACT_ID:-}
-      SIMPLEX_SESSION_TOKEN: ${SIMPLEX_SESSION_TOKEN:-}
     volumes:
       # Runtime config — same mount as the Collector (§7.7.2): carries the operator's
       # quarkus.profile, infochat.llm.*, infochat.adapters, and the per-adapter

@@ -18,15 +18,20 @@ SECRETS_FILE="$RUNTIME_DIR/secrets.env"
 # (§7.7) and is never offered here — production must not mix it with simplex/signal.
 VALID_ADAPTERS="simplex signal"
 DEFAULT_ADAPTERS="simplex"
-DEFAULT_SIMPLEX_URL="ws://localhost:5225"
-DEFAULT_SIMPLEX_IDENTITY_DIR="/var/lib/infochat/simplex"
-DEFAULT_SIGNAL_IDENTITY_DIR="/var/lib/infochat/signal-cli"
+# Default binary paths follow the adapters' documentary config reference
+# (06-messaging.md §6.4 / §6.5); the bot identity lives under the data-dir,
+# which is the same on-disk state directory the operator registered out-of-band.
+DEFAULT_SIMPLEX_BINARY="/usr/local/bin/simplex-chat"
+DEFAULT_SIMPLEX_DATA_DIR="/var/lib/infochat/simplex"
+DEFAULT_SIMPLEX_WS_PORT="5225"
+DEFAULT_SIGNAL_BINARY="/usr/local/bin/signal-cli"
+DEFAULT_SIGNAL_DATA_DIR="/var/lib/infochat/signal-cli"
 
 usage() {
   echo "Usage: 6-adapter.sh [--defaults] [-h|--help]"
   echo "  For each chosen messaging adapter (${VALID_ADAPTERS// /|}), drive its"
-  echo "  out-of-band registration, capture the identity-dir (+ session token for"
-  echo "  SimpleX) into the runtime config/secrets, collect its bootstrap-admin"
+  echo "  out-of-band registration, capture the binary path + data-dir (+ the"
+  echo "  Signal account) into the runtime config, collect its bootstrap-admin"
   echo "  contact id, and enforce a non-empty admin union (§7.6.3) before writing"
   echo "  infochat.adapters and the per-adapter blocks into application.properties."
   echo "  --defaults  take ${DEFAULT_ADAPTERS} and the default dirs without prompting"
@@ -42,7 +47,8 @@ case "${1:-}" in
 esac
 
 # umask 077 + explicit chmod so secrets.env is owner-only regardless of caller
-# umask (mirrors 2-secrets.sh — the session token captured below is a secret).
+# umask (mirrors 2-secrets.sh — the bootstrap-admin contact ids captured below
+# live here and are referenced from application.properties as ${VAR}).
 umask 077
 mkdir -p "$RUNTIME_DIR"
 touch "$SECRETS_FILE"
@@ -61,25 +67,21 @@ prompt_with_default() {
   printf '%s' "${answer:-$def}"
 }
 
-# Capture a required secret (hidden input) into secrets.env, skipping if already
-# set so a resumed run never re-prompts for or overwrites a captured value
-# (§7.7.2 idempotent/resumable contract). Always prompts even under --defaults:
-# the value comes from the out-of-band registration a human must perform.
-capture_secret() {
-  local key="$1" prompt="$2" val
-  if grep -qE "^${key}=.+" "$SECRETS_FILE"; then
-    echo "skip ${key} (already set)"
-    return 0
-  fi
-  # -s: do not echo the secret; the trailing echo restores the newline -s eats.
-  read -rsp "$prompt: " val || true
-  echo
+# Prompt for a REQUIRED non-secret value (e.g. the Signal account / phone
+# number) and return it on stdout. Always prompts — even under --defaults: the
+# value comes from the out-of-band registration a human must perform and has no
+# sensible default — and fails closed if left empty (the adapter's boot-time
+# config validation requires it, e.g. SignalConfig requires a non-empty
+# .account). Visible input: unlike a secret, the value is written into
+# application.properties, not secrets.env.
+prompt_required() {
+  local prompt="$1" val
+  read -rp "$prompt: " val || true
   if [[ -z "$val" ]]; then
-    echo "FAIL: ${key} must not be empty (required when the adapter is enabled, §7.5)." >&2
+    echo "FAIL: a value is required for the adapter ('${prompt#"${prompt%%[![:space:]]*}"}')." >&2
     exit 1
   fi
-  printf '%s=%s\n' "$key" "$val" >> "$SECRETS_FILE"
-  echo "+ recorded ${key}"
+  printf '%s' "$val"
 }
 
 # Collect an OPTIONAL per-adapter bootstrap-admin contact id into secrets.env.
@@ -131,12 +133,17 @@ fi
 
 # ── Per-adapter registration + capture ─────────────────────────────────
 # admin_union tallies how many chosen adapters supply a bootstrap admin; the gate
-# below refuses to proceed when it is zero. Identity-dir / url values are gathered
-# now and written to application.properties only after the gate passes.
+# below refuses to proceed when it is zero. The binary / data-dir / port / account
+# values are gathered now and written to application.properties only after the
+# gate passes (the keys the Provider actually reads — 06-messaging.md §6.4/§6.5,
+# ProductionAdapterBeans / SimpleXConfig / SignalConfig).
 admin_union=0
-simplex_url=""
-simplex_identity_dir=""
-signal_identity_dir=""
+simplex_binary=""
+simplex_data_dir=""
+simplex_ws_port=""
+signal_binary=""
+signal_data_dir=""
+signal_account=""
 
 for adapter in "${chosen[@]}"; do
   case "$adapter" in
@@ -145,10 +152,12 @@ for adapter in "${chosen[@]}"; do
       echo "== SimpleX adapter =="
       echo "Create the bot's SimpleX messaging queue out-of-band with simplex-cli"
       echo "(§7.7 operator note, 06-messaging.md §6.5.1), then point the wizard at"
-      echo "the resulting on-disk state directory."
-      simplex_url="$(prompt_with_default "  SimpleX server URL" "$DEFAULT_SIMPLEX_URL")"
-      simplex_identity_dir="$(prompt_with_default "  SimpleX identity-dir" "$DEFAULT_SIMPLEX_IDENTITY_DIR")"
-      capture_secret SIMPLEX_SESSION_TOKEN "  SimpleX session token (input hidden)"
+      echo "the simplex-chat binary and the resulting on-disk data directory. The"
+      echo "Provider spawns simplex-chat as a subprocess and talks to it over the"
+      echo "loopback WebSocket port (no session token — bot identity is in data-dir)."
+      simplex_binary="$(prompt_with_default "  simplex-chat binary path" "$DEFAULT_SIMPLEX_BINARY")"
+      simplex_data_dir="$(prompt_with_default "  SimpleX data-dir (bot state directory)" "$DEFAULT_SIMPLEX_DATA_DIR")"
+      simplex_ws_port="$(prompt_with_default "  simplex-chat WebSocket port (loopback)" "$DEFAULT_SIMPLEX_WS_PORT")"
       if collect_admin INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID simplex; then
         admin_union=$((admin_union + 1))
       fi
@@ -158,8 +167,11 @@ for adapter in "${chosen[@]}"; do
       echo "== Signal adapter =="
       echo "Register the bot's Signal phone number out-of-band with signal-cli"
       echo "(phone number + captcha — §7.7 operator note, 06-messaging.md §6.5.1),"
-      echo "then point the wizard at the signal-cli account data directory."
-      signal_identity_dir="$(prompt_with_default "  Signal identity-dir" "$DEFAULT_SIGNAL_IDENTITY_DIR")"
+      echo "then point the wizard at the signal-cli binary and account data dir,"
+      echo "and supply the registered account identifier (the bot's phone number)."
+      signal_binary="$(prompt_with_default "  signal-cli binary path" "$DEFAULT_SIGNAL_BINARY")"
+      signal_data_dir="$(prompt_with_default "  Signal data-dir (signal-cli account directory)" "$DEFAULT_SIGNAL_DATA_DIR")"
+      signal_account="$(prompt_required "  Signal account (registered phone number, e.g. +15551234567)")"
       if collect_admin INFOCHAT_SIGNAL_ADMIN_CONTACT_ID signal; then
         admin_union=$((admin_union + 1))
       fi
@@ -197,15 +209,17 @@ fi
   for adapter in "${chosen[@]}"; do
     case "$adapter" in
       simplex)
-        printf 'infochat.adapters.simplex.url=%s\n' "$simplex_url"
-        printf 'infochat.adapters.simplex.session-token=%s\n' '${SIMPLEX_SESSION_TOKEN}'
-        printf 'infochat.adapters.simplex.identity-dir=%s\n' "$simplex_identity_dir"
+        printf 'infochat.adapters.simplex.binary=%s\n' "$simplex_binary"
+        printf 'infochat.adapters.simplex.data-dir=%s\n' "$simplex_data_dir"
+        printf 'infochat.adapters.simplex.ws-port=%s\n' "$simplex_ws_port"
         if grep -qE '^INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID=.+' "$SECRETS_FILE"; then
           printf 'infochat.adapters.simplex.bootstrap-admin-contact-id=%s\n' '${INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID}'
         fi
         ;;
       signal)
-        printf 'infochat.adapters.signal.identity-dir=%s\n' "$signal_identity_dir"
+        printf 'infochat.adapters.signal.binary=%s\n' "$signal_binary"
+        printf 'infochat.adapters.signal.data-dir=%s\n' "$signal_data_dir"
+        printf 'infochat.adapters.signal.account=%s\n' "$signal_account"
         if grep -qE '^INFOCHAT_SIGNAL_ADMIN_CONTACT_ID=.+' "$SECRETS_FILE"; then
           printf 'infochat.adapters.signal.bootstrap-admin-contact-id=%s\n' '${INFOCHAT_SIGNAL_ADMIN_CONTACT_ID}'
         fi

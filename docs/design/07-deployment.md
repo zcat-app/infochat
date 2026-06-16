@@ -129,7 +129,7 @@ Operators override on disk; no rebuild required for ops changes. Secrets always 
 
 ## 7.4 Canonical `application.properties`
 
-A single file, used by both services (each ignores keys not relevant to it). The example below is the v1 production multi-adapter shape (SimpleX + Signal in the same Provider, D46); the property keys for the messaging-adapter block are byte-equivalent to the example in [06-messaging.md §6.7](06-messaging.md). Operators running a single-adapter deployment trim the `infochat.adapters=` list and the unused per-adapter blocks.
+A single file, used by both services (each ignores keys not relevant to it). The example below is the v1 production multi-adapter shape (SimpleX + Signal in the same Provider, D46); the property keys for the messaging-adapter block follow the same key shape as the example in [06-messaging.md §6.7](06-messaging.md). Operators running a single-adapter deployment trim the `infochat.adapters=` list and the unused per-adapter blocks.
 
 ```properties
 # ── Profile ────────────────────────────────────────────────────────────
@@ -183,18 +183,24 @@ infochat.bootstrap.sources-file=bootstrap-sources.json
 # (production deployments MUST NOT mix 'inmemory' with simplex/signal).
 infochat.adapters=simplex,signal
 
-# SimpleX
-infochat.adapters.simplex.url=ws://localhost:5225
-infochat.adapters.simplex.session-token=${SIMPLEX_SESSION_TOKEN}
-infochat.adapters.simplex.identity-dir=/var/lib/infochat/simplex
+# SimpleX — the Provider spawns simplex-chat as a subprocess and speaks its
+# loopback WebSocket bot API; bot identity lives in the data-dir (no session
+# token). Keys read by SimpleXConfig / ProductionAdapterBeans.
+infochat.adapters.simplex.binary=/usr/local/bin/simplex-chat
+infochat.adapters.simplex.data-dir=/var/lib/infochat/simplex
+infochat.adapters.simplex.ws-port=5225
 # Optional bootstrap admin contact id for SimpleX. Per-adapter optional;
 # only the union across enabled adapters MUST be non-empty (§7.6.3).
 infochat.adapters.simplex.bootstrap-admin-contact-id=${INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID}
 # infochat.adapters.simplex.allow-low-trust=false   # default
 
-# Signal (provisional default wire-protocol: signal-cli JSON-RPC subprocess —
-# see 06-messaging.md §6.5.1)
-infochat.adapters.signal.identity-dir=/var/lib/infochat/signal-cli/data/+15551234567
+# Signal (signal-cli JSON-RPC subprocess — see 06-messaging.md §6.5.1). Keys
+# read by SignalConfig / ProductionAdapterBeans; .account is the registered
+# phone number, .endpoint defaults to the loopback signal-cli daemon.
+infochat.adapters.signal.binary=/usr/local/bin/signal-cli
+infochat.adapters.signal.data-dir=/var/lib/infochat/signal-cli
+infochat.adapters.signal.account=+15551234567
+# infochat.adapters.signal.endpoint=127.0.0.1:7654  # default (loopback daemon)
 infochat.adapters.signal.bootstrap-admin-contact-id=${INFOCHAT_SIGNAL_ADMIN_CONTACT_ID}
 # infochat.adapters.signal.allow-low-trust=false    # default
 
@@ -332,13 +338,12 @@ Notes:
 | `INFOCHAT_PROVIDER_PASSWORD` | yes | provider | Provider DB role password |
 | `INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID` | optional per-adapter; union across enabled adapters MUST be non-empty (§7.6.3) | provider | Bootstrap bot-admin contact id on the SimpleX adapter |
 | `INFOCHAT_SIGNAL_ADMIN_CONTACT_ID` | optional per-adapter; union across enabled adapters MUST be non-empty (§7.6.3) | provider | Bootstrap bot-admin contact id on the Signal adapter (Signal ACI) |
-| `SIMPLEX_SESSION_TOKEN` | yes (if `simplex` is in `infochat.adapters`) | provider | SimpleX bot auth |
 | `OLLAMA_URL` | optional | both | Override default `http://localhost:11434` |
 | `ANTHROPIC_API_KEY` | yes (if Anthropic provider used) | both | Anthropic auth |
 | `OPENAI_API_KEY` | optional | both | Used by `openai-compatible` provider when targeting OpenAI |
 | `NANOGPT_API_KEY` | optional | both | Used by `openai-compatible` provider when targeting NanoGPT |
 
-Per-adapter identity material (e.g., the `signal-cli` account directory and the SimpleX queue keypair file) lives **on disk** under `infochat.adapters.<name>.identity-dir`, not in env vars; the operator owns its lifecycle (see [06-messaging.md §6.4.1, §6.5.4](06-messaging.md)). Each adapter validates its own identity material at adapter startup and refuses to start that adapter if the directory is missing or unreadable; per-adapter resilience ([06-messaging.md §6.7](06-messaging.md)) means one adapter's identity-store failure does not abort Provider.
+Per-adapter identity material (e.g., the `signal-cli` account directory and the SimpleX queue keypair file) lives **on disk** under `infochat.adapters.<name>.data-dir`, not in env vars; the operator owns its lifecycle (see [06-messaging.md §6.4.1, §6.5.4](06-messaging.md)). Each adapter validates its own identity material at adapter startup and refuses to start that adapter if the directory is missing or unreadable; per-adapter resilience ([06-messaging.md §6.7](06-messaging.md)) means one adapter's identity-store failure does not abort Provider.
 
 The Provider refuses to start if any required variable for the active configuration is missing. The error message names the missing variable. For the bootstrap-admin variables specifically: Provider counts the `bootstrap-admin-contact-id` properties across all enabled adapters; if the union is empty, startup fails with a fatal log message naming the constraint (last-admin protection only works if at least one admin row exists somewhere — [../spec/deployment.md](../spec/deployment.md) §Operator inputs).
 
@@ -553,7 +558,7 @@ The two **operator** ops scripts live under `prod/scripts/`, not here (they are 
 | Script | Wraps | Notes |
 |---|---|---|
 | `prod/scripts/reembed.sh` | The embedding migration described in §7.2.1 / §7.15. | Named in §7.2.1 ("Switching profiles") and §7.15 ("Disaster scenarios"). |
-| `prod/scripts/backup.sh` | The cron commands in §7.10 (`pg_dump` + per-adapter identity-dir tarball). | Wraps the two-line cron pair so an operator's crontab can call one script. |
+| `prod/scripts/backup.sh` | The cron commands in §7.10 (`pg_dump` + per-adapter data-dir tarball). | Wraps the two-line cron pair so an operator's crontab can call one script. |
 
 Every script in both sets obeys the same shape:
 
@@ -600,7 +605,7 @@ environment:
 
 Result: `docker compose --profile prod up` with the three variables exported (the wizard's `secrets.env`, a secrets manager, or an `EnvironmentFile` mounted at 0600) creates the roles with the operator's chosen secrets; with a variable unset it resolves to empty, the init script's `${VAR:?}` aborts, and the container exits non-zero rather than starting with a guessable credential. There is no `'changeme'` or other known password baked anywhere in the repo — randomness, where wanted, is generated by the wizard's `2-secrets.sh` via `openssl rand` (a shell, where command substitution works), not by the compose file. Developers running `--profile dev up` export the three variables (or keep a local git-ignored `.env`).
 
-**Operator note — `simplex-cli` and `signal-cli` are out-of-band.** v1 does not ship containers for the messaging clients. The `simplex-cli` WebSocket bot client and the `signal-cli` JSON-RPC subprocess each require interactive bot-account registration (queue creation for SimpleX; phone-number/captcha for Signal — [06-messaging.md §6.5.1](06-messaging.md)) that doesn't fit cleanly into compose. Operators — and the wizard's step 6 (§7.7.2) — run them on the host or in their own dedicated containers and point the per-adapter `identity-dir` at the on-disk state directory each tool produces. For a SimpleX-only or Signal-only deployment, omit the other client; for the SimpleX + Signal v1 production shape, run both.
+**Operator note — `simplex-cli` and `signal-cli` are out-of-band.** v1 does not ship containers for the messaging clients. The `simplex-cli` WebSocket bot client and the `signal-cli` JSON-RPC subprocess each require interactive bot-account registration (queue creation for SimpleX; phone-number/captcha for Signal — [06-messaging.md §6.5.1](06-messaging.md)) that doesn't fit cleanly into compose. Operators — and the wizard's step 6 (§7.7.2) — run them on the host or in their own dedicated containers and point the per-adapter `data-dir` at the on-disk state directory each tool produces. For a SimpleX-only or Signal-only deployment, omit the other client; for the SimpleX + Signal v1 production shape, run both.
 
 ---
 
@@ -637,7 +642,7 @@ The right-hand column maps each step to the operator inputs enumerated in [../sp
 | 3 | `3-postgres.sh` | `docker compose --profile prod up -d postgres`; the service-role password bootstrap runs from `docker/postgres-init.sh` (§7.7) on first container init. | 5 (DB creds) |
 | 4 | `4-llm.sh` | Branch on the choice. **Ollama:** start the ollama service and `ollama pull` the profile's chat / security / embedding models. **llama.cpp:** start the llama.cpp service and fetch the configured GGUF. **Remote:** collect base-URL + key only. Writes `infochat.llm.*` and `infochat.embeddings.*` (§7.4). | 6 (LLM config) |
 | 5 | `5-bootstrap.sh` | Copy the `prod/config/bootstrap-sources.json` template into the runtime dir if none exists; optionally enable `bootstrap-assets.json` (§7.6.2). | 3 (sources), 4 (assets) |
-| 6 | `6-adapter.sh` | For each chosen adapter: drive the out-of-band registration (SimpleX queue creation; Signal phone+captcha — §7.7 operator note, [06-messaging.md §6.5.1](06-messaging.md)), capture the resulting `identity-dir` (plus `SIMPLEX_SESSION_TOKEN`), and collect that adapter's `bootstrap-admin-contact-id`. Enforces a non-empty admin union before proceeding (§7.6.3). Writes `infochat.adapters` and the per-adapter blocks (§7.4). | 2 (bootstrap admin), 7 (adapters) |
+| 6 | `6-adapter.sh` | For each chosen adapter: drive the out-of-band registration (SimpleX queue creation; Signal phone+captcha — §7.7 operator note, [06-messaging.md §6.5.1](06-messaging.md)), capture the `binary` path + `data-dir` (plus the Signal `account`), and collect that adapter's `bootstrap-admin-contact-id`. Enforces a non-empty admin union before proceeding (§7.6.3). Writes `infochat.adapters` and the per-adapter blocks (§7.4). | 2 (bootstrap admin), 7 (adapters) |
 | 7 | `7-apps.sh` | `docker compose --profile prod up -d` the Collector (which runs Flyway), wait until it is healthy, then the Provider — encoding the [../spec/deployment.md](../spec/deployment.md) §Topology startup ordering (only the Collector migrates in production). | — |
 | 8 | `8-verify.sh` | Poll `/q/health` on each app's **main loopback HTTP port** (collector 8080 / provider 8081; the §7.12.1 shipped-default shape, not a management interface), reached inside the container via `docker compose exec` — the same loopback bind the Collector's own compose healthcheck uses — until ready or timeout; print a green/red summary naming any unhealthy component. | — |
 
@@ -652,7 +657,7 @@ Every subscript obeys the §7.7.1 script shape (`set -euo pipefail`, echoes the 
 
 #### What stays manual
 
-The wizard drives but cannot fully eliminate the interactive parts of messaging-client registration: SimpleX queue creation and Signal phone-number / captcha enrolment require human steps (§7.7 operator note). The wizard's contribution is to *sequence* those steps, capture their on-disk output into the correct `identity-dir`, and wire the resulting properties — not to remove the human from the loop.
+The wizard drives but cannot fully eliminate the interactive parts of messaging-client registration: SimpleX queue creation and Signal phone-number / captcha enrolment require human steps (§7.7 operator note). The wizard's contribution is to *sequence* those steps, capture their on-disk output into the correct `data-dir`, and wire the resulting properties — not to remove the human from the loop.
 
 #### Runtime config delivery to the containers
 
@@ -660,7 +665,7 @@ The wizard writes its generated config to the git-ignored runtime directory (abo
 
 - **`secrets.env` → process environment.** The orchestrator sources the runtime `secrets.env` into its own environment before running the steps, so every subscript's `docker compose up` resolves the compose file's `${INFOCHAT_*_PASSWORD}` / `${INFOCHAT_LLM_API_KEY}` interpolations (§7.5). Compose auto-loads only a repo-root `.env`, never the runtime-dir `secrets.env`, so the wizard makes the values present explicitly. Secrets stay in the environment, never in a mounted config file (§7.3).
 - **`runtime/application.properties` → mounted at `config/application.properties` in each app container.** The fast-jar runs from the image's working directory, so Quarkus reads `config/application.properties` relative to it at a higher config ordinal than the image-baked per-service defaults and a lower one than the explicit compose `environment:` overrides (datasource URL, role password). This is how the operator's `quarkus.profile`, `infochat.llm.*`, `infochat.adapters`, and the per-adapter blocks reach the running services. The `application.properties` baked into each image carries only the profile-independent defaults — and the Provider's image declares **no production `infochat.adapters`** (only `%test`), so that key MUST arrive via this mount or the Provider refuses to boot.
-- **Adapter `identity-dir`s → bind-mounted into the Provider.** The out-of-band identity material the operator registered in step 6 lives on the host at each adapter's `identity-dir`; the Provider container bind-mounts those paths so the running adapters can read the queue keypair / `signal-cli` account directory they validate at startup (§7.5, [06-messaging.md §6.4.1, §6.5.4](06-messaging.md)).
+- **Adapter `data-dir`s → bind-mounted into the Provider.** The out-of-band identity material the operator registered in step 6 lives on the host at each adapter's `data-dir`; the Provider container bind-mounts those paths so the running adapters can read the queue keypair / `signal-cli` account directory they validate at startup (§7.5, [06-messaging.md §6.4.1, §6.5.4](06-messaging.md)).
 
 **Health surface.** The containerized v1 deployment serves `/q/health` on each service's **main HTTP port** (collector 8080 / provider 8081), bound to container loopback (`quarkus.http.host=127.0.0.1`) — the §7.12.1 *shipped per-module defaults* shape, **not** a separate management interface. In v1 the app port serves only the health probes (no other HTTP consumer) and no metrics backend is wired (§7.12.1), so the management interface the §7.4 canonical example shows (`quarkus.management.enabled=true`) buys nothing here; the wizard's generated `application.properties` leaves it unset. `8-verify.sh` therefore probes health with `docker compose exec <service> curl 127.0.0.1:<port>/q/health`, inside the container's loopback namespace — the same bind the Collector's compose healthcheck already uses. A deployment that later wires a metrics backend and an off-host prober opts into the management interface per §7.12.1; the v1 wizard does not.
 
@@ -831,7 +836,7 @@ What to back up:
 
 - **Postgres data** — full `pg_dump -F c` daily; WAL archiving optional for PITR.
 - **`application.properties` and bootstrap files** — keep in operator's config repo (separate from code repo). This includes `bootstrap-sources.json` and (if configured) `bootstrap-assets.json`.
-- **Per-adapter bot identity material** — the contents of every `infochat.adapters.<name>.identity-dir` (D46): the SimpleX queue keypair file under `adapters/simplex/` and the `signal-cli` account directory tree under `adapters/signal-cli/`. **This material is unrecoverable on loss** — Signal account-recovery flows are external and SimpleX queue keypairs cannot be regenerated for the same address. Back up at least nightly, encrypted at rest.
+- **Per-adapter bot identity material** — the contents of every `infochat.adapters.<name>.data-dir` (D46): the SimpleX queue keypair file under `adapters/simplex/` and the `signal-cli` account directory tree under `adapters/signal-cli/`. **This material is unrecoverable on loss** — Signal account-recovery flows are external and SimpleX queue keypairs cannot be regenerated for the same address. Back up at least nightly, encrypted at rest.
 - **Audit log** — included in DB backup.
 - **Models** — not backed up; Ollama re-pulls them.
 
@@ -1073,7 +1078,7 @@ A SimpleX queue address has no third-party recovery path; rotation is the routin
 The Signal adapter has its own auth-failure terminal state ([06-messaging.md §6.5](06-messaging.md)) reached on repeated `signal-cli` rejection (e.g., the account is no longer valid on the upstream). Recovery is operator-driven:
 
 1. Stop the `signal-cli` daemon and re-register the account out-of-band: `signal-cli -u <number> register --captcha <token>` then `signal-cli -u <number> verify <code>`.
-2. Make sure the new account directory at `infochat.adapters.signal.identity-dir` has the same on-disk shape as before; back up any state files first (§7.10).
+2. Make sure the new account directory at `infochat.adapters.signal.data-dir` has the same on-disk shape as before; back up any state files first (§7.10).
 3. Restart Provider. The Signal adapter takes its lock and re-attaches; the SimpleX adapter is unaffected (per-adapter resilience).
 
 **"Restart a single adapter without restarting the deployment."**
@@ -1125,14 +1130,13 @@ See §7.8.5. Likely causes: a previous Provider crashed without releasing its ad
 - DB roles created with strong passwords; passwords in `secrets.env` (mode 0600).
 - JDK 25 installed; `/opt/infochat/jdk-25/bin/java -version` confirms `25.x` (D1).
 - `infochat.adapters` list set; for each enabled adapter:
-  - `infochat.adapters.<name>.identity-dir` exists, is owned by the `infochat` user, and contains valid bot identity material (out-of-band registration completed for SimpleX and/or Signal).
+  - `infochat.adapters.<name>.data-dir` exists, is owned by the `infochat` user, and contains valid bot identity material (out-of-band registration completed for SimpleX and/or Signal); `infochat.adapters.<name>.binary` points at the installed `simplex-chat` / `signal-cli` executable.
   - `infochat.adapters.<name>.bootstrap-admin-contact-id` is set on **at least one** adapter (the union-non-empty rule, §7.6.3); each value is parseable by its own adapter.
-  - For the SimpleX adapter: `SIMPLEX_SESSION_TOKEN` is set.
 - `bootstrap-sources.json` validated (per-`kind` config block, especially `nostr` relays); URLs reachable from the host.
 - If asset commands are wanted: `infochat.bootstrap.assets-file` set and the file parses cleanly (§7.6.2 — file-state semantics).
 - Ollama models pre-pulled.
 - Disk has ≥ 30 GB free, swap enabled.
-- Backups scheduled (cron + `pg_dump` + per-adapter identity-dir tarball script tested on a non-prod DB first; §7.10).
+- Backups scheduled (cron + `pg_dump` + per-adapter data-dir tarball script tested on a non-prod DB first; §7.10).
 - systemd units have `Restart=on-failure` and `RestartPreventExitStatus=42` (§7.8.5).
 - First boot logs reviewed: profile detected, sources loaded, assets loaded (or info-line opt-out), per-adapter admin bootstrapped, every enabled adapter shows `adapter.connection.status=1` or its retry path.
 - Smoke: `/help`, `/add-source`, `/summary -w 1h` all work end-to-end on each adapter where the operator is admin.

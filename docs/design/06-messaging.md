@@ -489,7 +489,7 @@
 
   SimpleX provides a self-hosted Chat CLI / SimpleX Chat server with a WebSocket-based bot API. The adapter speaks that WebSocket protocol.                                                                                                             
    
-  - Connection: WebSocket to simplex-cli (default ws://localhost:5225), configurable via infochat.adapters.simplex.url.
+  - Connection: WebSocket to the local simplex-chat on a loopback port (default 5225), configured via infochat.adapters.simplex.ws-port; the simplex-chat executable is infochat.adapters.simplex.binary.
   - Authentication: cookie-based session against the local simplex-cli; cookie configured via infochat.adapters.simplex.session-token (read from env in production).
   - **Bot identity** (per [../spec/deployment.md](../spec/deployment.md) §Operator inputs item 7): the bot's per-adapter contact id — the queue address the mention-recognition rule compares against (§6.2.3 / §6.10) — is **queried from the running simplex-chat over the adapter's own WebSocket at `start()`** (a `/show_address`-shaped self-address command; the bare queue id is extracted from the returned contact link) and re-derived on supervised subprocess restart so the post-restart anchor stays consistent with the process serving the frames. It is NOT an operator-typed property and is not parsed from disk — no identity-dir property exists. Query, decode, or extraction failure refuses *that adapter's* startup but does not abort the Provider (per-adapter resilience, §6.7).
   - Identity: the SimpleX contact display ID (e.g., xftp://...); cryptographically bound. trustLevel = HIGH.
@@ -895,14 +895,18 @@
   ```properties
   # Production: SimpleX only
   infochat.adapters=simplex
-  infochat.adapters.simplex.url=ws://localhost:5225
-  infochat.adapters.simplex.session-token=${SIMPLEX_SESSION_TOKEN}
+  infochat.adapters.simplex.binary=/usr/local/bin/simplex-chat
+  infochat.adapters.simplex.data-dir=/var/lib/infochat/simplex
+  infochat.adapters.simplex.ws-port=5225
 
   # Production: SimpleX + Signal in the same Provider (the v1 multi-adapter shape)
   infochat.adapters=simplex,signal
-  infochat.adapters.simplex.url=ws://localhost:5225
-  infochat.adapters.simplex.session-token=${SIMPLEX_SESSION_TOKEN}
-  infochat.adapters.signal.identity-dir=/var/lib/infochat/signal-cli/data/+15551234567
+  infochat.adapters.simplex.binary=/usr/local/bin/simplex-chat
+  infochat.adapters.simplex.data-dir=/var/lib/infochat/simplex
+  infochat.adapters.simplex.ws-port=5225
+  infochat.adapters.signal.binary=/usr/local/bin/signal-cli
+  infochat.adapters.signal.data-dir=/var/lib/infochat/signal-cli
+  infochat.adapters.signal.account=+15551234567
 
   # CI / tests (test-time deployment shape — must NOT include simplex/signal, §6.6)
   infochat.adapters=inmemory
