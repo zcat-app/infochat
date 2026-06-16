@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 17 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 409 |
 | deferred | 5 |
-| **total** | **422** |
+| **total** | **431** |
 
 ---
 
@@ -32,6 +32,14 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-375 — provider: key the per-turn chat-tool cache on clamped args so over-cap duplicates do not double-charge the call budget (complexity: low, risk: low)
 - M1-376 — messaging: deterministic SimpleX adapterMessageId fallback and shared decode-ladder helper (complexity: low, risk: low)
 - M1-377 — collector: replace the re-eval one-element-array transaction workaround and unify the two fail-closed test-seam idioms (complexity: low, risk: low)
+- M1-387 — wizard 6-adapter.sh + design §7.4: emit the adapter config keys the Provider actually reads (binary/data-dir/account), drop the never-read url/session-token/identity-dir (complexity: medium, risk: high)
+- M1-388 — Provider image: make simplex-chat and signal-cli available at the configured .binary paths (the adapters spawn them as subprocesses) (complexity: high, risk: high)
+- M1-389 — wizard: stop sourcing secrets.env as a shell script — operator-pasted values (SimpleX queue addresses with #/&, API keys, tokens) truncate or inject; feed compose via --env-file (complexity: medium, risk: high)
+- M1-390 — 0-doctor.sh: drop the unpublished 8080/8081 port checks (the app services bind no host ports); add a tool-presence preflight (openssl, ss, curl, df) (complexity: low, risk: low)
+- M1-392 — wizard: build the app images in an explicit phase before the step-7 readiness wait; raise the doctor disk floor for the build (complexity: low, risk: low)
+- M1-393 — evaluate dropping SUPERUSER from the Postgres infochat owner role (the Collector holds owner creds for Flyway) (complexity: low, risk: medium)
+- M1-394 — 4-llm.sh: verify GGUF download integrity (operator-supplied SHA-256) and strip query/fragment from the derived model filename (complexity: low, risk: low)
+- M1-395 — setup.sh --reset: also tear down the LLM backend services (ollama/llamacpp are under their own compose profiles, untouched by --profile prod down) (complexity: low, risk: low)
 
 ---
 
@@ -48,7 +56,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-391 — blocked_by: M1-387 (pending), M1-388 (pending)
 
 ---
 
@@ -588,4 +596,14 @@ M1-378 (done)
         └── M1-386 (done) [see above]
 M1-381 (done)
   └── M1-383 (done) [see above]
+M1-387 (pending) ← runnable
+  └── M1-391 (pending)
+M1-388 (pending) ← runnable
+  └── M1-391 (pending) [see above]
+M1-389 (pending) ← runnable
+M1-390 (pending) ← runnable
+M1-392 (pending) ← runnable
+M1-393 (pending) ← runnable
+M1-394 (pending) ← runnable
+M1-395 (pending) ← runnable
 ```
