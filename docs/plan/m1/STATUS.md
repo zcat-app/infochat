@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 17 |
+| pending | 18 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 409 |
 | deferred | 5 |
-| **total** | **431** |
+| **total** | **432** |
 
 ---
 
@@ -57,6 +57,7 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-391 — blocked_by: M1-387 (pending), M1-388 (pending)
+- M1-396 — blocked_by: M1-387 (pending)
 
 ---
 
@@ -597,7 +598,8 @@ M1-378 (done)
 M1-381 (done)
   └── M1-383 (done) [see above]
 M1-387 (pending) ← runnable
-  └── M1-391 (pending)
+  ├── M1-391 (pending)
+  └── M1-396 (pending)
 M1-388 (pending) ← runnable
   └── M1-391 (pending) [see above]
 M1-389 (pending) ← runnable
