@@ -1,9 +1,16 @@
 ---
 id: M1-388
 title: "Provider image: make simplex-chat and signal-cli available at the configured .binary paths (the adapters spawn them as subprocesses)"
-status: pending
+status: done
 created: 2026-06-16
-last_updated: 2026-06-16
+last_updated: 2026-06-17
+clarity_check:
+  date: 2026-06-16
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 3: pinned-versions-named-in-comment is an inspection check, not runnable; consider a grep-based command."
+    - "ACCEPTANCE-RUNNABLE item 4: design-doc reconciliation is verified by inspection; reviewer should read the stale §7.7.2 line to confirm the 'no messaging-client containers' claim is removed/updated."
+  blockers: []
 blocked_by: []
 files_budget: 3
 files_scope:
@@ -15,6 +22,7 @@ risk: high
 round_cap: 2
 security_relevant: true
 migration_touch: false
+outline_file: target/m1-tick-outline-M1-388.md
 out_of_scope:
   - The adapter config-key names the wizard writes (M1-387) — this ticket assumes the .binary key is being set correctly and provides the file it points at.
   - Changing the adapters' subprocess model (SimpleXSubprocess / SignalSubprocess spawn the clients in-process) — that is the shipped, tested behavior this ticket supplies the binaries for; no Java change.
@@ -34,14 +42,40 @@ spec_refs:
   - docs/design/07-deployment.md §7.4 Canonical
 decision_refs:
   - D46
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-16
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 42
+      removed: 9
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-06-16
+    verdict: CLEAN
+    base: c92e86d156474bf5c1285899be2e955ab7cc16aa
+    head: "working-tree (m1/M1-388-provider-image-messaging-client-binaries, uncommitted, in-review)"
+    verdict_file: docs/plan/m1/redteam/M1-388-2026-06-16.md
+    out_of_model_count: 2
+    note: |
+      Pre-commit adversarial audit of the baked-in messaging-client binaries and the
+      §7.7 design-note reconcile. CLEAN — no findings. The diff touches no
+      auth/authz/input/ban/audit code surface (Dockerfile + markdown only). Two
+      advisory out-of-model observations are recorded verbatim in the verdict file;
+      neither blocks commit/merge. Operator may review them when extending the
+      threat model.
 ---
 
 # M1-388: Provider image must provide the messaging-client binaries

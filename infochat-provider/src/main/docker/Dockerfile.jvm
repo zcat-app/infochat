@@ -31,6 +31,33 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
+# --- messaging-client binaries (M1-388) ---
+# The Provider drives both clients as OS subprocesses inside this container
+# (SimpleXSubprocess / SignalSubprocess, D46), and each adapter's .binary config
+# (default /usr/local/bin/<name>, §7.4) must point at an existing executable or
+# the adapter fails validate() at startup. Bake both in, pinned to explicit
+# upstream release tags (M1-004 pinned-tag precedent), fetched over TLS and
+# verified against a build-time sha256 so a changed upstream artifact fails the
+# build non-zero (M1-394 integrity spirit). One RUN layer, placed above the app
+# COPY so an app-only rebuild reuses it; the signal-cli archive is removed in the
+# same layer so it never reaches the image.
+#   simplex-chat v6.5.4: ubuntu-22_04-x86_64 dynamic Haskell binary; links only
+#     libs already in the Ubuntu base (verified ldd: libgmp/libcrypto.so.3/libzstd).
+#   signal-cli   0.14.5: JVM distribution, runs on this image's JRE 25.
+ENV SIMPLEX_CHAT_VERSION=v6.5.4 \
+    SIGNAL_CLI_VERSION=0.14.5
+RUN SIMPLEX_CHAT_SHA256=8c33b69e3cd5691e7a7aec455fc82955347d631572f0ff2c68eb3e12f50ab655 \
+    && SIGNAL_CLI_SHA256=62d38ebfef3988d78f437e7328183b75ee549d111382e66c1af70d3ebd3cd7a7 \
+    && curl -fsSL -o /usr/local/bin/simplex-chat \
+        "https://github.com/simplex-chat/simplex-chat/releases/download/${SIMPLEX_CHAT_VERSION}/simplex-chat-ubuntu-22_04-x86_64" \
+    && echo "${SIMPLEX_CHAT_SHA256}  /usr/local/bin/simplex-chat" | sha256sum -c - \
+    && chmod +x /usr/local/bin/simplex-chat \
+    && curl -fsSL -o /tmp/signal-cli.tar.gz \
+        "https://github.com/AsamK/signal-cli/releases/download/v${SIGNAL_CLI_VERSION}/signal-cli-${SIGNAL_CLI_VERSION}.tar.gz" \
+    && echo "${SIGNAL_CLI_SHA256}  /tmp/signal-cli.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/signal-cli.tar.gz -C /opt \
+    && ln -s "/opt/signal-cli-${SIGNAL_CLI_VERSION}/bin/signal-cli" /usr/local/bin/signal-cli \
+    && rm -f /tmp/signal-cli.tar.gz
 # Default Quarkus fast-jar layout: quarkus-run.jar resolves lib/, app/, and
 # quarkus/ relative to itself, so the whole quarkus-app/ dir is copied as a unit.
 COPY --from=build /build/infochat-provider/target/quarkus-app/ ./
