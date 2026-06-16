@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 15 |
+| pending | 16 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 412 |
 | deferred | 5 |
-| **total** | **432** |
+| **total** | **433** |
 
 ---
 
@@ -39,6 +39,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-394 — 4-llm.sh: verify GGUF download integrity (operator-supplied SHA-256) and strip query/fragment from the derived model filename (complexity: low, risk: low)
 - M1-395 — setup.sh --reset: also tear down the LLM backend services (ollama/llamacpp are under their own compose profiles, untouched by --profile prod down) (complexity: low, risk: low)
 - M1-396 — SimpleX auth-model doc reconcile: align the §6.4.1 cookie/session + AUTH_FAILED narrative, the §6.4.6/§6.12 references, and the §7.14 runbook to the shipped subprocess+WebSocket adapter, and resolve the unimplemented adapter.simplex.auth.fail metric (complexity: medium, risk: medium)
+- M1-397 — wizard: escape operator-pasted secret values so a literal quote / backslash / ${...} can't corrupt or interpolate the secrets.env entry (complexity: low, risk: low)
 
 ---
 
@@ -601,6 +602,7 @@ M1-387 (done)
 M1-388 (done)
   └── M1-391 (pending) [see above]
 M1-389 (done)
+  └── M1-397 (pending) ← runnable
 M1-390 (pending) ← runnable
 M1-392 (pending) ← runnable
 M1-393 (pending) ← runnable
