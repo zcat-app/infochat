@@ -17,6 +17,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$PROD_DIR/.." && pwd)"
+RUNTIME_DIR="${INFOCHAT_RUNTIME_DIR:-$PROD_DIR/runtime}"
+SECRETS_FILE="$RUNTIME_DIR/secrets.env"
 COMPOSE_FILE="$REPO_ROOT/docker-compose.yml"
 POLL_TIMEOUT=120
 POLL_INTERVAL=5
@@ -44,7 +46,7 @@ poll_health() {
   local service="$1" port="$2" body
   local deadline=$(( SECONDS + POLL_TIMEOUT ))
   while (( SECONDS < deadline )); do
-    if body=$(docker compose -f "$COMPOSE_FILE" --profile prod exec -T "$service" \
+    if body=$(docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod exec -T "$service" \
                 curl -fsS "http://127.0.0.1:${port}/q/health" 2>/dev/null); then
       printf '%s' "$body"
       return 0

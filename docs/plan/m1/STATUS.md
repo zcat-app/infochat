@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 16 |
+| pending | 15 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 411 |
+| done | 412 |
 | deferred | 5 |
 | **total** | **432** |
 
@@ -32,7 +32,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-375 — provider: key the per-turn chat-tool cache on clamped args so over-cap duplicates do not double-charge the call budget (complexity: low, risk: low)
 - M1-376 — messaging: deterministic SimpleX adapterMessageId fallback and shared decode-ladder helper (complexity: low, risk: low)
 - M1-377 — collector: replace the re-eval one-element-array transaction workaround and unify the two fail-closed test-seam idioms (complexity: low, risk: low)
-- M1-389 — wizard: stop sourcing secrets.env as a shell script — operator-pasted values (SimpleX queue addresses with #/&, API keys, tokens) truncate or inject; feed compose via --env-file (complexity: medium, risk: high)
 - M1-390 — 0-doctor.sh: drop the unpublished 8080/8081 port checks (the app services bind no host ports); add a tool-presence preflight (openssl, ss, curl, df) (complexity: low, risk: low)
 - M1-391 — wizard/compose: honor an operator-overridden adapter data-dir (the provider bind-mount is hardcoded to the default path) (complexity: medium, risk: medium)
 - M1-392 — wizard: build the app images in an explicit phase before the step-7 readiness wait; raise the doctor disk floor for the build (complexity: low, risk: low)
@@ -75,6 +74,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-389 | wizard: stop sourcing secrets.env as a shell script — operator-pasted values (SimpleX queue addresses with #/&, API keys, tokens) truncate or inject; feed compose via --env-file | 2026-06-17 | round 2 APPROVE |
 | M1-388 | Provider image: make simplex-chat and signal-cli available at the configured .binary paths (the adapters spawn them as subprocesses) | 2026-06-17 | round 1 APPROVE |
 | M1-387 | wizard 6-adapter.sh + design §7.4: emit the adapter config keys the Provider actually reads (binary/data-dir/account), drop the never-read url/session-token/identity-dir | 2026-06-16 | round 1 APPROVE |
 | M1-385 | wizard 6d: 7-apps.sh (ordered prod up) + 8-verify.sh (health smoke) | 2026-06-16 | round 1 APPROVE |
@@ -84,7 +84,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-382 | wizard 6a: prod/setup.sh orchestrator + 0-doctor + 1-profile + 2-secrets | 2026-06-15 | round 1 APPROVE |
 | M1-381 | deploy: commit a default bootstrap-sources.json template under prod/config/ | 2026-06-15 | round 1 APPROVE |
 | M1-380 | deploy: add ollama + llama.cpp compose services, profile-gated so only the chosen backend starts | 2026-06-15 | round 1 APPROVE |
-| M1-379 | deploy: containerize Collector + Provider (Dockerfiles) and add them as prod-profile compose services | 2026-06-15 | round 2 APPROVE |
 
 ---
 
@@ -601,7 +600,7 @@ M1-387 (done)
   └── M1-396 (pending) ← runnable
 M1-388 (done)
   └── M1-391 (pending) [see above]
-M1-389 (pending) ← runnable
+M1-389 (done)
 M1-390 (pending) ← runnable
 M1-392 (pending) ← runnable
 M1-393 (pending) ← runnable

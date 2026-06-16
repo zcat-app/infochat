@@ -128,13 +128,16 @@ case "$backend" in
       echo "FAIL: profile '$profile' has no local models; choose the 'remote' backend." >&2
       exit 1
     fi
-    echo "+ docker compose -f $COMPOSE_FILE --profile prod --profile ollama up -d ollama"
-    docker compose -f "$COMPOSE_FILE" --profile prod --profile ollama up -d ollama
+    # --env-file feeds secrets.env to compose's dotenv parser (M1-389) — the
+    # orchestrator no longer sources it into the environment; all compose calls
+    # below carry it so the full file's ${INFOCHAT_*} interpolations resolve.
+    echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod --profile ollama up -d ollama"
+    docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile ollama up -d ollama
     # Ollama declares no compose healthcheck, so poll its API until the daemon
     # answers before issuing pulls (exec needs the container actually serving).
     echo "+ wait for ollama daemon (up to ${WAIT_TIMEOUT}s)"
     deadline=$(( SECONDS + WAIT_TIMEOUT ))
-    until docker compose -f "$COMPOSE_FILE" --profile prod --profile ollama exec -T ollama ollama list >/dev/null 2>&1; do
+    until docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile ollama exec -T ollama ollama list >/dev/null 2>&1; do
       if (( SECONDS >= deadline )); then
         echo "FAIL: ollama daemon not ready after ${WAIT_TIMEOUT}s." >&2
         exit 1
@@ -146,7 +149,7 @@ case "$backend" in
     # it once.
     for model in $(printf '%s\n%s\n%s\n' "$security_model" "$chat_model" "$embedding_model" | sort -u); do
       echo "+ ollama pull $model"
-      docker compose -f "$COMPOSE_FILE" --profile prod --profile ollama exec -T ollama ollama pull "$model"
+      docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile ollama exec -T ollama ollama pull "$model"
     done
     set_all_base_urls "$OLLAMA_URL"
     set_prop infochat.llm.security.model "$security_model"
@@ -167,8 +170,8 @@ case "$backend" in
       exit 1
     fi
     gguf_file="$(basename "$gguf_url")"
-    echo "+ docker compose -f $COMPOSE_FILE --profile prod --profile llamacpp up -d llamacpp"
-    docker compose -f "$COMPOSE_FILE" --profile prod --profile llamacpp up -d llamacpp
+    echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod --profile llamacpp up -d llamacpp"
+    docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile llamacpp up -d llamacpp
     # Populate the named model volume via a one-shot container that mounts it.
     # The presence probe runs `ls` as the entrypoint (argv, no shell) so the
     # operator-supplied filename cannot inject; skip the download when present.
@@ -209,7 +212,9 @@ case "$backend" in
       if [[ -n "$llm_key" ]]; then
         touch "$SECRETS_FILE"
         chmod 600 "$SECRETS_FILE"
-        printf 'INFOCHAT_LLM_API_KEY=%s\n' "$llm_key" >> "$SECRETS_FILE"
+        # Quote the value for compose's --env-file dotenv parse (M1-389): a '#'
+        # or whitespace in the key is data, not a comment / field break.
+        printf 'INFOCHAT_LLM_API_KEY="%s"\n' "$llm_key" >> "$SECRETS_FILE"
         echo "+ recorded INFOCHAT_LLM_API_KEY in secrets.env"
       fi
     fi

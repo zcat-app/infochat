@@ -1,11 +1,30 @@
 ---
 id: M1-389
 title: "wizard: stop sourcing secrets.env as a shell script — operator-pasted values (SimpleX queue addresses with #/&, API keys, tokens) truncate or inject; feed compose via --env-file"
-status: pending
+status: done
 created: 2026-06-16
-last_updated: 2026-06-16
+last_updated: 2026-06-17
 blocked_by: []
-files_budget: 7
+clarity_check:
+  date: 2026-06-17
+  verdict: PASS
+  warnings: []
+  blockers: []
+redteam_findings: []
+redteam_audits:
+  - date: 2026-06-17
+    verdict: CLEAN
+    base: main
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-389-2026-06-17.md
+    out_of_model_count: 3
+    note: |
+      In-progress audit of the secrets-env-no-shell-source implementation
+      (prod/scripts/* + setup.sh, uncommitted working tree). No threat-model
+      gaps: the change moves secrets from shell `source` to compose's --env-file
+      dotenv parser, which closes (not opens) an injection surface. 3 out-of-model
+      advisories recorded in the verdict file; advisory only, not blockers.
+files_budget: 8
 files_scope:
   - prod/setup.sh
   - prod/scripts/2-secrets.sh
@@ -14,6 +33,7 @@ files_scope:
   - prod/scripts/6-adapter.sh
   - prod/scripts/7-apps.sh
   - prod/scripts/8-verify.sh
+  - docs/design/07-deployment.md
 complexity: medium
 risk: high
 round_cap: 2
@@ -28,6 +48,7 @@ acceptance:
   - "2-secrets.sh, 6-adapter.sh, and 4-llm.sh write each value quoted (KEY=\"value\") so a value containing '#' or whitespace survives the env-file parse."
   - "Regression check: with INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID set to a value containing '#' and the substring '$(touch /tmp/inj)', a `prod/setup.sh` dry path (or a unit of load logic) does NOT create /tmp/inj and the full untruncated value is what `docker compose --profile prod config` resolves into the provider environment."
   - "All seven scripts pass `bash -n`; `docker compose --profile prod config` exits 0; `mvn -B verify` from the repo root exits 0."
+  - "docs/design/07-deployment.md §7.7.2 'Runtime config delivery to the containers' (the `secrets.env` → process environment bullet) is updated so the prose describes the new mechanism — each subscript passes `docker compose --env-file \"$SECRETS_FILE\"` so compose's own dotenv parser populates the `${INFOCHAT_*}` interpolations — and no longer states the orchestrator sources `secrets.env` into its environment. (Round-1 reviewer SPEC-CONFORMANCE-CHECK: FAIL; design must move in lockstep with the code.)"
 test_plan:
   adds: []
   preserves:
@@ -36,9 +57,64 @@ spec_refs:
   - docs/design/07-deployment.md §7.3 Configuration sources and precedence
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
 decision_refs: []
-reviews: []
-escalations: []
-revisions: []
+reviews:
+  - round: 1
+    date: 2026-06-17
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PARTIAL
+    diff_stats:
+      files: 9
+      added: 64
+      removed: 46
+  - round: 2
+    date: 2026-06-17
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 134
+      removed: 51
+escalations:
+  - date: 2026-06-17
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      SPEC-CONFORMANCE-CHECK: FAIL — docs/design/07-deployment.md §7.7.2,
+      the "secrets.env → process environment" bullet (line 666), states "The
+      orchestrator sources the runtime secrets.env into its own environment
+      before running the steps, so every subscript's docker compose up resolves
+      the compose file's ${INFOCHAT_*} interpolations." That is the exact
+      mechanism this ticket abolishes; the design prose must move in lockstep,
+      but docs/design/07-deployment.md is outside files_scope and the
+      files_budget of 7.
+revisions:
+  - date: 2026-06-17
+    reason: |
+      budget-breach refine (round 1 rework): the round-1 reviewer's sole REWORK
+      item requires updating docs/design/07-deployment.md §7.7.2 in lockstep with
+      the code, but that file was outside scope. Added it to files_scope, raised
+      files_budget 7 → 8, and added acceptance item #6 for the design-prose
+      update. No other criteria changed.
+    snapshot:
+      files_budget: 7
+      files_scope:
+        - prod/setup.sh
+        - prod/scripts/2-secrets.sh
+        - prod/scripts/3-postgres.sh
+        - prod/scripts/4-llm.sh
+        - prod/scripts/6-adapter.sh
+        - prod/scripts/7-apps.sh
+        - prod/scripts/8-verify.sh
+      acceptance_items: 5
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -100,3 +176,24 @@ See frontmatter.
 ```bash
 python3 scripts/lint-ticket.py docs/plan/m1/tickets/M1-389-*.md
 ```
+
+## Round 1 rework
+
+Reviewer verdict round 1: REWORK (SPEC-CONFORMANCE-CHECK: FAIL). One item:
+
+1. Update `docs/design/07-deployment.md` §7.7.2 "Runtime config delivery to the
+   containers" (the `secrets.env` → process environment bullet at line 666) so
+   the prose matches the new mechanism: the orchestrator no longer **sources**
+   `secrets.env` into its own environment — each subscript passes
+   `docker compose --env-file "$SECRETS_FILE" ...` so compose's own dotenv parser
+   populates the `${INFOCHAT_*}` interpolations, and operator-pasted values
+   (SimpleX queue ids with `#` / `&`, API keys) cannot truncate or execute as
+   shell. Verified at source: line 666 currently reads "The orchestrator sources
+   the runtime `secrets.env` into its own environment …" — the exact mechanism
+   this ticket abolishes.
+
+This item requires editing `docs/design/07-deployment.md`, which is outside the
+current `files_scope` (the 7 prod scripts) and the `files_budget` of 7. Per the
+"never silently expand files_scope/files_budget" rule and the out-of-scope
+immediate-escalation trigger, the fix needs `escalate → refine` to add that file
+to `files_scope` and raise `files_budget` to 8 before the design edit is made.

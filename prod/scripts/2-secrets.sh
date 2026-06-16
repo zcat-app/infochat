@@ -47,7 +47,9 @@ ensure_secret() {
     return 0
   fi
   echo "+ generate ${key} (openssl rand -hex 24)"
-  printf '%s=%s\n' "$key" "$(openssl rand -hex 24)" >> "$SECRETS_FILE"
+  # Quote the value so compose's --env-file dotenv parser (M1-389) takes it
+  # whole: a '#' or whitespace in a value is data, not a comment delimiter.
+  printf '%s="%s"\n' "$key" "$(openssl rand -hex 24)" >> "$SECRETS_FILE"
 }
 
 ensure_secret INFOCHAT_DB_PASSWORD
@@ -65,7 +67,7 @@ else
   read -rsp "Remote LLM API key (blank for local Ollama/llama.cpp) [blank]: " llm_key
   echo
   if [[ -n "$llm_key" ]]; then
-    printf 'INFOCHAT_LLM_API_KEY=%s\n' "$llm_key" >> "$SECRETS_FILE"
+    printf 'INFOCHAT_LLM_API_KEY="%s"\n' "$llm_key" >> "$SECRETS_FILE"
     echo "+ recorded INFOCHAT_LLM_API_KEY"
   fi
 fi

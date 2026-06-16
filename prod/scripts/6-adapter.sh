@@ -95,7 +95,10 @@ collect_admin() {
   fi
   read -rp "Bootstrap admin contact id for ${adapter} (optional; blank for none): " val || true
   if [[ -n "$val" ]]; then
-    printf '%s=%s\n' "$key" "$val" >> "$SECRETS_FILE"
+    # Quote the value: a SimpleX queue address carries '#' / '&' / '?' / '+' /
+    # '=' — unquoted, compose's --env-file dotenv parse would truncate it at '#'
+    # (M1-389), so the bootstrap-admin id reaching the Provider would be wrong.
+    printf '%s="%s"\n' "$key" "$val" >> "$SECRETS_FILE"
     echo "+ recorded ${key}"
     return 0
   fi

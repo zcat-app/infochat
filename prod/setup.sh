@@ -62,31 +62,20 @@ print_menu() {
 mark_done() { printf '%s\n' "$1" >> "$STATE_FILE"; }
 is_done()   { [[ -f "$STATE_FILE" ]] && grep -qxF "$1" "$STATE_FILE"; }
 
-# Source secrets.env into the orchestrator environment so each subscript's
-# `docker compose up` resolves the compose ${INFOCHAT_*_PASSWORD} /
-# ${INFOCHAT_LLM_API_KEY} interpolations and the apps' mounted
-# application.properties ${VAR} references (§7.7.2 "Runtime config delivery").
-# Re-sourced before every step rather than once up front: a first run has no
-# secrets.env until step 2 mints the DB passwords (and step 6 adds the adapter
-# session token / bootstrap-admin ids), and steps 3/7's compose-up need those
-# freshly written values. `set -a` exports each assignment so child subscripts
-# inherit it; the secrets stay in the environment, never in a container-mounted
-# file (§7.3).
-load_secrets() {
-  [[ -f "$SECRETS_FILE" ]] || return 0
-  set -a
-  # shellcheck source=/dev/null
-  . "$SECRETS_FILE"
-  set +a
-}
-
 do_reset() {
+  # Feed secrets to compose via its own dotenv parser (--env-file), never a shell
+  # `source` of secrets.env: operator-pasted values (SimpleX queue addresses with
+  # '#' / '&', API keys) would otherwise truncate at '#' or execute as shell
+  # (M1-389). Guarded — a --reset before the wizard minted secrets.env has no file
+  # yet, and compose's ${INFOCHAT_*:-} defaults let `down` run without it.
+  local env_file_args=()
+  [[ -f "$SECRETS_FILE" ]] && env_file_args=(--env-file "$SECRETS_FILE")
   echo "+ docker compose -f $COMPOSE_FILE --profile prod down"
-  docker compose -f "$COMPOSE_FILE" --profile prod down
+  docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" --profile prod down
   read -rp "Also drop data volumes (-v)? This deletes all DB data. [y/N]: " ans
   if [[ "$ans" == "y" || "$ans" == "Y" ]]; then
     echo "+ docker compose -f $COMPOSE_FILE --profile prod down -v"
-    docker compose -f "$COMPOSE_FILE" --profile prod down -v
+    docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" --profile prod down -v
   fi
   if [[ -f "$STATE_FILE" ]]; then
     echo "+ rm $STATE_FILE"
@@ -110,8 +99,11 @@ mkdir -p "$RUNTIME_DIR"
 print_menu
 echo
 
+# Each subscript that runs `docker compose` feeds secrets.env to compose's own
+# dotenv parser via --env-file (M1-389); the orchestrator no longer sources the
+# file into its environment, so an operator-pasted value containing '#' or
+# '$(...)' can neither truncate nor execute as shell here.
 for entry in "${STEPS[@]}"; do
-  load_secrets
   script="${entry%%:*}"
   desc="${entry##*:}"
   if is_done "$script"; then

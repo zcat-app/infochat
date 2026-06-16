@@ -15,6 +15,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$PROD_DIR/.." && pwd)"
+RUNTIME_DIR="${INFOCHAT_RUNTIME_DIR:-$PROD_DIR/runtime}"
+SECRETS_FILE="$RUNTIME_DIR/secrets.env"
 COMPOSE_FILE="$REPO_ROOT/docker-compose.yml"
 # Generous: the Collector applies the full Flyway migration set on first boot
 # before its readiness probe passes (healthcheck start_period 40s + retries).
@@ -35,10 +37,14 @@ case "${1:-}" in
   *) usage >&2; exit 2 ;;
 esac
 
-echo "+ docker compose -f $COMPOSE_FILE --profile prod up -d --wait --wait-timeout $WAIT_TIMEOUT infochat-collector"
-docker compose -f "$COMPOSE_FILE" --profile prod up -d --wait --wait-timeout "$WAIT_TIMEOUT" infochat-collector
+# --env-file feeds secrets.env to compose's dotenv parser (M1-389) so the apps'
+# INFOCHAT_*_PASSWORD / *_API_KEY / *_ADMIN_CONTACT_ID interpolations and the
+# Provider environment passthroughs resolve; the orchestrator no longer sources
+# secrets into the environment.
+echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod up -d --wait --wait-timeout $WAIT_TIMEOUT infochat-collector"
+docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod up -d --wait --wait-timeout "$WAIT_TIMEOUT" infochat-collector
 echo "collector: healthy (migrations applied)."
 
-echo "+ docker compose -f $COMPOSE_FILE --profile prod up -d infochat-provider"
-docker compose -f "$COMPOSE_FILE" --profile prod up -d infochat-provider
+echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod up -d infochat-provider"
+docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod up -d infochat-provider
 echo "provider: started."

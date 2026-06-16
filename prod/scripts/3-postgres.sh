@@ -11,6 +11,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$PROD_DIR/.." && pwd)"
+RUNTIME_DIR="${INFOCHAT_RUNTIME_DIR:-$PROD_DIR/runtime}"
+SECRETS_FILE="$RUNTIME_DIR/secrets.env"
 COMPOSE_FILE="$REPO_ROOT/docker-compose.yml"
 WAIT_TIMEOUT=120
 
@@ -29,6 +31,9 @@ case "${1:-}" in
   *) usage >&2; exit 2 ;;
 esac
 
-echo "+ docker compose -f $COMPOSE_FILE --profile prod up -d --wait --wait-timeout $WAIT_TIMEOUT postgres"
-docker compose -f "$COMPOSE_FILE" --profile prod up -d --wait --wait-timeout "$WAIT_TIMEOUT" postgres
+# --env-file feeds the INFOCHAT_*_PASSWORD values to compose's dotenv parser
+# (M1-389) so postgres-init's ${VAR:?} bootstrap guards see the minted secrets;
+# the orchestrator no longer sources secrets.env into the environment.
+echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod up -d --wait --wait-timeout $WAIT_TIMEOUT postgres"
+docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod up -d --wait --wait-timeout "$WAIT_TIMEOUT" postgres
 echo "postgres: healthy."
