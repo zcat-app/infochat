@@ -128,13 +128,17 @@ services:
       # past AdapterRegistry gate 1 (§7.12.1). Read-only — the app never writes it.
       - ./prod/runtime/application.properties:/app/config/application.properties:ro
       # Adapter identity material captured out-of-band in step 6 (§7.5, §7.7.2):
-      # bind-mounted at the documented default identity-dir paths so the running
-      # adapters read the queue keypair / signal-cli account dir they validate at
-      # startup. Read-write — signal-cli mutates its account directory at runtime
-      # (§7.8.1 ReadWritePaths). Static default locations (operator-overridden paths
-      # would need a wizard-emitted compose variable, out of this ticket's scope).
-      - /var/lib/infochat/simplex:/var/lib/infochat/simplex
-      - /var/lib/infochat/signal-cli:/var/lib/infochat/signal-cli
+      # bind-mounted at the adapter's configured data-dir so the running adapters
+      # read the queue keypair / signal-cli account dir they validate at startup.
+      # Read-write — signal-cli mutates its account directory at runtime (§7.8.1
+      # ReadWritePaths). 6-adapter.sh emits the operator's data-dir as
+      # INFOCHAT_<NAME>_DATA_DIR into secrets.env (fed to compose via --env-file in
+      # 7-apps.sh), so a non-default dir is mounted source+target = the path written
+      # to infochat.adapters.<name>.data-dir and the adapter's validate() finds it
+      # (M1-391). Absent the var — e.g. a bare `docker compose config` — the
+      # documented default below applies.
+      - ${INFOCHAT_SIMPLEX_DATA_DIR:-/var/lib/infochat/simplex}:${INFOCHAT_SIMPLEX_DATA_DIR:-/var/lib/infochat/simplex}
+      - ${INFOCHAT_SIGNAL_DATA_DIR:-/var/lib/infochat/signal-cli}:${INFOCHAT_SIGNAL_DATA_DIR:-/var/lib/infochat/signal-cli}
     depends_on:
       # Only the Collector runs Flyway in production (spec/deployment.md
       # §Topology), so the Provider must not start until the Collector is

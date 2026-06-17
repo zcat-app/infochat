@@ -202,6 +202,23 @@ if [[ -f "$CONFIG_FILE" ]]; then
   sed -i -e '/^infochat\.adapters=/d' -e '/^infochat\.adapters\./d' "$CONFIG_FILE"
 fi
 
+# The Provider container bind-mounts each adapter's data-dir at the SAME path it
+# is configured at (docker-compose.yml uses ${INFOCHAT_<NAME>_DATA_DIR:-<default>}
+# for both the mount source and target); without this the mount is pinned to the
+# default path and a custom data-dir lands the identity material where the
+# adapter's validate() can't see it (M1-391). Emit the operator's value into
+# secrets.env — compose's --env-file (7-apps.sh) interpolates it at `up`. It is
+# not a secret, but secrets.env is the only --env-file the orchestrator passes to
+# compose. Quoted for the dotenv parser (M1-389). Drop any prior value first so a
+# re-run with a changed dir or selection cannot leave a stale mount path behind.
+sed -i -e '/^INFOCHAT_SIMPLEX_DATA_DIR=/d' -e '/^INFOCHAT_SIGNAL_DATA_DIR=/d' "$SECRETS_FILE"
+for adapter in "${chosen[@]}"; do
+  case "$adapter" in
+    simplex) printf 'INFOCHAT_SIMPLEX_DATA_DIR="%s"\n' "$simplex_data_dir" >> "$SECRETS_FILE" ;;
+    signal)  printf 'INFOCHAT_SIGNAL_DATA_DIR="%s"\n' "$signal_data_dir" >> "$SECRETS_FILE" ;;
+  esac
+done
+
 # The bot contact-id property is intentionally NEVER written: it is derived from
 # the adapter's own identity material at startup, not operator-typed (§7.5).
 # Secrets/admin contacts are referenced via ${VAR}; their values live in

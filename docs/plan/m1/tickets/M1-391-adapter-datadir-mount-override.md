@@ -1,9 +1,15 @@
 ---
 id: M1-391
 title: "wizard/compose: honor an operator-overridden adapter data-dir (the provider bind-mount is hardcoded to the default path)"
-status: pending
+status: done
 created: 2026-06-16
-last_updated: 2026-06-16
+last_updated: 2026-06-17
+clarity_check:
+  date: 2026-06-17
+  verdict: WARN
+  warnings:
+    - "Acceptance item 2 uses an EITHER/OR form that leaves the implementation approach open; a reviewer cannot determine which branch to verify before reading the diff. Both branches are individually testable, so this does not block implementation."
+  blockers: []
 blocked_by:
   - M1-387
   - M1-388
@@ -30,7 +36,20 @@ spec_refs:
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
 decision_refs:
   - D46
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-17
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 41
+      removed: 16
 escalations: []
 revisions: []
 overrides: []
