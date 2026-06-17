@@ -41,6 +41,19 @@ esac
 # INFOCHAT_*_PASSWORD / *_API_KEY / *_ADMIN_CONTACT_ID interpolations and the
 # Provider environment passthroughs resolve; the orchestrator no longer sources
 # secrets into the environment.
+
+# Build both images explicitly before the readiness gate below. On first run
+# this is a cold multi-module Maven reactor build (the Dockerfiles run
+# `mvn -am clean install` from the maven:3.9-eclipse-temurin-25 image,
+# downloading the full dependency tree) that can run well over five minutes;
+# building implicitly underneath `up --wait` would conflate a build failure with
+# a health-check timeout. A separate `build` phase makes a build error
+# attributable and keeps the readiness wait meaningful (M1-392). Idempotent:
+# unchanged sources rebuild from the layer cache.
+echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod build infochat-collector infochat-provider"
+docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod build infochat-collector infochat-provider
+echo "images: built."
+
 echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod up -d --wait --wait-timeout $WAIT_TIMEOUT infochat-collector"
 docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod up -d --wait --wait-timeout "$WAIT_TIMEOUT" infochat-collector
 echo "collector: healthy (migrations applied)."

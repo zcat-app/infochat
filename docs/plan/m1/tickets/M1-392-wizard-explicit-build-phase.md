@@ -1,9 +1,14 @@
 ---
 id: M1-392
 title: "wizard: build the app images in an explicit phase before the step-7 readiness wait; raise the doctor disk floor for the build"
-status: pending
+status: done
 created: 2026-06-16
-last_updated: 2026-06-16
+last_updated: 2026-06-17
+clarity_check:
+  date: 2026-06-17
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 2
 files_scope:
@@ -28,7 +33,20 @@ test_plan:
 spec_refs:
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-17
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 33
+      removed: 10
 escalations: []
 revisions: []
 overrides: []

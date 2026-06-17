@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 14 |
+| pending | 13 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 414 |
+| done | 415 |
 | deferred | 5 |
 | **total** | **433** |
 
@@ -32,7 +32,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-375 — provider: key the per-turn chat-tool cache on clamped args so over-cap duplicates do not double-charge the call budget (complexity: low, risk: low)
 - M1-376 — messaging: deterministic SimpleX adapterMessageId fallback and shared decode-ladder helper (complexity: low, risk: low)
 - M1-377 — collector: replace the re-eval one-element-array transaction workaround and unify the two fail-closed test-seam idioms (complexity: low, risk: low)
-- M1-392 — wizard: build the app images in an explicit phase before the step-7 readiness wait; raise the doctor disk floor for the build (complexity: low, risk: low)
 - M1-393 — evaluate dropping SUPERUSER from the Postgres infochat owner role (the Collector holds owner creds for Flyway) (complexity: low, risk: medium)
 - M1-394 — 4-llm.sh: verify GGUF download integrity (operator-supplied SHA-256) and strip query/fragment from the derived model filename (complexity: low, risk: low)
 - M1-395 — setup.sh --reset: also tear down the LLM backend services (ollama/llamacpp are under their own compose profiles, untouched by --profile prod down) (complexity: low, risk: low)
@@ -73,6 +72,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-392 | wizard: build the app images in an explicit phase before the step-7 readiness wait; raise the doctor disk floor for the build | 2026-06-17 | round 1 APPROVE |
 | M1-391 | wizard/compose: honor an operator-overridden adapter data-dir (the provider bind-mount is hardcoded to the default path) | 2026-06-17 | round 1 APPROVE |
 | M1-390 | 0-doctor.sh: drop the unpublished 8080/8081 port checks (the app services bind no host ports); add a tool-presence preflight (openssl, ss, curl, df) | 2026-06-17 | round 1 APPROVE |
 | M1-389 | wizard: stop sourcing secrets.env as a shell script — operator-pasted values (SimpleX queue addresses with #/&, API keys, tokens) truncate or inject; feed compose via --env-file | 2026-06-17 | round 2 APPROVE |
@@ -82,7 +82,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-386 | wizard 6e: orchestrator step wiring (0-8) + container config delivery (compose mounts + secrets.env) | 2026-06-15 | round 1 APPROVE |
 | M1-384 | wizard 6c: 6-adapter.sh — SimpleX/Signal registration capture + bootstrap-admin union | 2026-06-15 | round 1 APPROVE |
 | M1-383 | wizard 6b: 3-postgres + 4-llm + 5-bootstrap subscripts | 2026-06-15 | round 1 APPROVE |
-| M1-382 | wizard 6a: prod/setup.sh orchestrator + 0-doctor + 1-profile + 2-secrets | 2026-06-15 | round 1 APPROVE |
 
 ---
 
@@ -602,7 +601,7 @@ M1-388 (done)
 M1-389 (done)
   └── M1-397 (pending) ← runnable
 M1-390 (done)
-M1-392 (pending) ← runnable
+M1-392 (done)
 M1-393 (pending) ← runnable
 M1-394 (pending) ← runnable
 M1-395 (pending) ← runnable

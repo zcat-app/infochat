@@ -15,8 +15,15 @@ REQUIRED_PORTS="5432"
 # curl in 8-verify, df in the disk check below); a missing tool must fail loud,
 # not silently — `port_in_use` swallows a missing `ss` as "port free".
 REQUIRED_TOOLS="openssl ss curl df"
-# Minimum free disk for the container images plus at least one local LLM model.
-MIN_FREE_DISK_GB=10
+# Minimum free disk. On first run the apps build from source (7-apps.sh), so the
+# floor must cover, beyond the runtime container images and at least one local
+# LLM model, the build-time footprint that the prior 10 GB predated: the
+# maven:3.9-eclipse-temurin-25 build image (~1 GB) and the Maven dependency cache
+# the cold multi-module reactor downloads (~1-2 GB). Budget (approx): build image
+# ~1 GB + eclipse-temurin:25-jre runtime + pgvector images ~1 GB + .m2 cache
+# ~2 GB + the two app images ~1 GB + one small local model ~4-5 GB + Docker
+# layer/build scratch headroom — rounded up to a 15 GB floor (M1-392).
+MIN_FREE_DISK_GB=15
 
 usage() {
   echo "Usage: 0-doctor.sh [--defaults] [-h|--help]"
