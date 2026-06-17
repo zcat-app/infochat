@@ -6,8 +6,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Ports the prod compose stack binds: Postgres, Collector HTTP, Provider HTTP.
-REQUIRED_PORTS="5432 8080 8081"
+# Host-published ports the prod compose stack binds: only Postgres
+# (127.0.0.1:5432). The collector/provider services declare no `ports:` mapping
+# — they are reached over the compose network and bind their HTTP on in-container
+# loopback only, so their HTTP ports are never published to the host.
+REQUIRED_PORTS="5432"
+# External tools the wizard's later steps invoke (ss here, openssl in 2-secrets,
+# curl in 8-verify, df in the disk check below); a missing tool must fail loud,
+# not silently — `port_in_use` swallows a missing `ss` as "port free".
+REQUIRED_TOOLS="openssl ss curl df"
 # Minimum free disk for the container images plus at least one local LLM model.
 MIN_FREE_DISK_GB=10
 
@@ -48,6 +55,16 @@ if ! docker compose version >/dev/null 2>&1; then
   echo "FAIL: Docker Compose v2 not available ('docker compose version' failed)." >&2
   exit 1
 fi
+
+echo "+ check: required tools present ($REQUIRED_TOOLS)"
+# Must run before the port loop: port_in_use relies on ss, which it greps with
+# 2>/dev/null, so an absent ss would read as "all ports free" (a false pass).
+for tool in $REQUIRED_TOOLS; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "FAIL: required tool '$tool' not found on PATH." >&2
+    exit 1
+  fi
+done
 
 echo "+ check: TCP ports free ($REQUIRED_PORTS)"
 for port in $REQUIRED_PORTS; do

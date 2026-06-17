@@ -1,10 +1,15 @@
 ---
 id: M1-390
 title: "0-doctor.sh: drop the unpublished 8080/8081 port checks (the app services bind no host ports); add a tool-presence preflight (openssl, ss, curl, df)"
-status: pending
+status: done
 created: 2026-06-16
-last_updated: 2026-06-16
+last_updated: 2026-06-17
 blocked_by: []
+clarity_check:
+  date: 2026-06-17
+  verdict: PASS
+  warnings: []
+  blockers: []
 files_budget: 1
 files_scope:
   - prod/scripts/0-doctor.sh
@@ -27,7 +32,20 @@ test_plan:
 spec_refs:
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-17
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 30
+      removed: 10
 escalations: []
 revisions: []
 overrides: []
