@@ -1,9 +1,11 @@
 ---
 id: M1-372
 title: "messaging: align the SimpleX auth-failure design note with the loopback-trusted v1 transport and drop the dead auth.fail meter"
-status: pending
+status: deferred
 created: 2026-06-14
-last_updated: 2026-06-14
+last_updated: 2026-06-18
+deferred_on: [M1-396]
+deferred_reason: superseded-by-M1-396
 blocked_by: []
 files_budget: 5
 files_scope:
@@ -43,6 +45,15 @@ redteam_audits: []
 ---
 
 # M1-372: SimpleX auth design/metrics alignment
+
+> **SUPERSEDED (2026-06-18) — deferred onto M1-396.** This ticket's scope (drop
+> the dead `adapter.simplex.auth.fail` meter, update the metrics test, reframe
+> §6.4.6/§6.4.7 as auth-deferred for the loopback-IPC transport) was absorbed
+> into **M1-396**, which independently surfaced the same drift from M1-387 and
+> is broader (it also reconciles §6.4.1, §6.12, and the §7.14/07-deployment
+> runbook). M1-396 carries forward this ticket's `security_relevant: true` flag
+> and DEFER framing. No work is lost; this ticket stays deferred for the audit
+> trail rather than being reopened.
 
 ## Context
 

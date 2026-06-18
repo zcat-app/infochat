@@ -10,12 +10,12 @@
 
 | Status | Count |
 |---|---|
-| pending | 10 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 419 |
-| deferred | 5 |
+| done | 420 |
+| deferred | 6 |
 | **total** | **434** |
 
 ---
@@ -26,13 +26,11 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-370 — collector: add a per-attempt re-eval cooldown so the fail-open backlog is not re-judged each tick (complexity: medium, risk: low)
 - M1-371 — collector: give stream dispatch keys a distinct type so they cannot collide with FetchScheduler source keys (complexity: medium, risk: low)
-- M1-372 — messaging: align the SimpleX auth-failure design note with the loopback-trusted v1 transport and drop the dead auth.fail meter (complexity: low, risk: low)
 - M1-373 — core+provider: reconcile internal null-handling with the null-marked contract (InfochatProfile, RateCapBucket.Key) (complexity: low, risk: low)
 - M1-374 — ssrf: seal IpBlocklist and drive the test loopback carve-out through an injected predicate instead of subclassing (complexity: medium, risk: low)
 - M1-375 — provider: key the per-turn chat-tool cache on clamped args so over-cap duplicates do not double-charge the call budget (complexity: low, risk: low)
 - M1-376 — messaging: deterministic SimpleX adapterMessageId fallback and shared decode-ladder helper (complexity: low, risk: low)
 - M1-377 — collector: replace the re-eval one-element-array transaction workaround and unify the two fail-closed test-seam idioms (complexity: low, risk: low)
-- M1-396 — SimpleX auth-model doc reconcile: align the §6.4.1 cookie/session + AUTH_FAILED narrative, the §6.4.6/§6.12 references, and the §7.14 runbook to the shipped subprocess+WebSocket adapter, and resolve the unimplemented adapter.simplex.auth.fail metric (complexity: medium, risk: medium)
 - M1-397 — wizard: escape operator-pasted secret values so a literal quote / backslash / ${...} can't corrupt or interpolate the secrets.env entry (complexity: low, risk: low)
 
 ---
@@ -70,6 +68,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-398 | flaky IT: EmbeddingWorkerIT.postAlreadyEmbeddedIsNotPickedUpByEnumeratePending fails once its fixed-date seed (2026-05-16) falls outside enumeratePending's rolling fetched_at >= now() - 32d scan window | 2026-06-18 | round 1 APPROVE |
+| M1-396 | SimpleX auth-model doc reconcile: align the §6.4.1 cookie/session + AUTH_FAILED narrative, the §6.4.6/§6.12 references, and the §7.14 runbook to the shipped subprocess+WebSocket adapter, and resolve the unimplemented adapter.simplex.auth.fail metric | 2026-06-18 | round 1 APPROVE |
 | M1-395 | setup.sh --reset: also tear down the LLM backend services (ollama/llamacpp are under their own compose profiles, untouched by --profile prod down) | 2026-06-18 | round 1 APPROVE |
 | M1-394 | 4-llm.sh: verify GGUF download integrity (operator-supplied SHA-256) and strip query/fragment from the derived model filename | 2026-06-18 | round 1 APPROVE |
 | M1-393 | evaluate dropping SUPERUSER from the Postgres infochat owner role (the Collector holds owner creds for Flyway) | 2026-06-18 | round 1 APPROVE |
@@ -78,7 +77,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-390 | 0-doctor.sh: drop the unpublished 8080/8081 port checks (the app services bind no host ports); add a tool-presence preflight (openssl, ss, curl, df) | 2026-06-17 | round 1 APPROVE |
 | M1-389 | wizard: stop sourcing secrets.env as a shell script — operator-pasted values (SimpleX queue addresses with #/&, API keys, tokens) truncate or inject; feed compose via --env-file | 2026-06-17 | round 2 APPROVE |
 | M1-388 | Provider image: make simplex-chat and signal-cli available at the configured .binary paths (the adapters spawn them as subprocesses) | 2026-06-17 | round 1 APPROVE |
-| M1-387 | wizard 6-adapter.sh + design §7.4: emit the adapter config keys the Provider actually reads (binary/data-dir/account), drop the never-read url/session-token/identity-dir | 2026-06-16 | round 1 APPROVE |
 
 ---
 
@@ -93,6 +91,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 ### spec-amend (1)
 - M1-314 → M1-324
+
+### superseded-by-M1-396 (1)
+- M1-372 → M1-396
 
 ### wont-do-infeasible (1)
 - M1-258 → unspecified
@@ -567,7 +568,6 @@ M1-368 (done)
 M1-369 (done)
 M1-370 (pending) ← runnable
 M1-371 (pending) ← runnable
-M1-372 (pending) ← runnable
 M1-373 (pending) ← runnable
 M1-374 (pending) ← runnable
 M1-375 (pending) ← runnable
@@ -592,7 +592,8 @@ M1-381 (done)
   └── M1-383 (done) [see above]
 M1-387 (done)
   ├── M1-391 (done)
-  └── M1-396 (pending) ← runnable
+  └── M1-396 (done)
+        └── M1-372 (deferred)
 M1-388 (done)
   └── M1-391 (done) [see above]
 M1-389 (done)

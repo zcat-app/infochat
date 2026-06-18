@@ -1,7 +1,6 @@
 package app.zcat.infochat.messaging.metrics;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 import app.zcat.infochat.messaging.AdapterTrustLevel;
@@ -21,7 +20,7 @@ import java.time.Duration;
  * every metric name, label key, and label-value domain the design
  * commits to, plus the per-adapter registration contract of
  * {@link AdapterMetrics#bindAdapter} — gauges sampling the live adapter,
- * the eagerly-registered counters, and the {@code bindMetrics} hand-off.
+ * the eagerly-registered counter, and the {@code bindMetrics} hand-off.
  */
 class AdapterMetricsTest {
 
@@ -68,19 +67,6 @@ class AdapterMetricsTest {
                 "identity.assert.fail must be eagerly registered at zero");
         assertSame(metrics, adapter.boundMetrics,
                 "bindAdapter must hand the emission point to the adapter");
-    }
-
-    @Test
-    void simplexAuthFailCounterIsRegisteredOnlyForTheSimplexAdapter() {
-        metrics.bindAdapter(new StubAdapter("simplex"));
-        metrics.bindAdapter(new StubAdapter("signal"));
-
-        assertEquals(0.0, registry.get("adapter.simplex.auth.fail")
-                        .tags("adapter", "simplex").counter().count(),
-                "the SimpleX-specific counter must be eagerly registered for simplex");
-        assertNull(registry.find("adapter.simplex.auth.fail")
-                        .tags("adapter", "signal").counter(),
-                "no simplex.auth.fail series may exist for other adapters");
     }
 
     @Test

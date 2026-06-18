@@ -25,7 +25,6 @@ import java.time.Duration;
  *   <li>{@code adapter.outbound.queue.size}{adapter} — gauge</li>
  *   <li>{@code adapter.connection.status}{adapter} — gauge (1 connected, 0 disconnected)</li>
  *   <li>{@code adapter.identity.assert.fail}{adapter} — counter</li>
- *   <li>{@code adapter.simplex.auth.fail}{adapter} — counter</li>
  *   <li>{@code adapter.message.bytes}{adapter, direction} — histogram</li>
  *   <li>{@code adapter.outbound.update.total}{adapter, scope_kind, outcome} — counter,
  *       outcome ∈ {ok, coalesced, fail, fallback_send}</li>
@@ -50,17 +49,13 @@ import java.time.Duration;
  * The per-adapter gauges are registered once per activated adapter via
  * {@link #bindAdapter}.</p>
  *
- * <p><b>Registered-but-unwired counters.</b>
- * {@code adapter.identity.assert.fail} and
- * {@code adapter.simplex.auth.fail} are eagerly registered at
+ * <p><b>Registered-but-unwired counter.</b>
+ * {@code adapter.identity.assert.fail} is eagerly registered at
  * {@link #bindAdapter} so the catalogue is complete on every scrape,
- * but no production path increments them yet: identity-assertion drops
+ * but no production path increments it yet: identity-assertion drops
  * happen inside the codec decode paths (which discard malformed frames
- * without distinguishing identity failures from other ignore reasons),
- * and the §6.4.6 session-token auth classification that
- * {@code adapter.simplex.auth.fail} counts is not implemented in the
- * SimpleX transport. Each increment site lands with the machinery it
- * counts.</p>
+ * without distinguishing identity failures from other ignore reasons).
+ * The increment site lands with the machinery it counts.</p>
  */
 public final class AdapterMetrics {
 
@@ -154,13 +149,6 @@ public final class AdapterMetrics {
         }
     }
 
-    /**
-     * Reserved production name of the SimpleX adapter — gates the
-     * SimpleX-only {@code adapter.simplex.auth.fail} registration in
-     * {@link #bindAdapter}. Mirrors {@code SimpleXAdapter.name()}.
-     */
-    static final String SIMPLEX_NAME = "simplex";
-
     private final MeterRegistry registry;
 
     public AdapterMetrics(MeterRegistry registry) {
@@ -182,7 +170,7 @@ public final class AdapterMetrics {
 
     /**
      * Register the per-adapter gauges and the eagerly-registered
-     * counters for one activated adapter, then hand this emission point
+     * counter for one activated adapter, then hand this emission point
      * to the adapter for its transport-internal signals
      * ({@link MessagingAdapter#bindMetrics}). Called once per adapter by
      * the registry's activation loop; gauge re-registration on an
@@ -202,9 +190,6 @@ public final class AdapterMetrics {
         registry.gauge("adapter.outbound.queue.size", Tags.of("adapter", name),
                 adapter, a -> 0.0);
         registry.counter("adapter.identity.assert.fail", "adapter", name);
-        if (SIMPLEX_NAME.equals(name)) {
-            registry.counter("adapter.simplex.auth.fail", "adapter", name);
-        }
         adapter.bindMetrics(this);
     }
 

@@ -954,7 +954,6 @@ Recommended monitoring:
   `for: 0m` is deliberate: `AUTH_FAILED` is a terminal state ([06-messaging.md §6.5](06-messaging.md)) reached only after `signal-cli` has been rejected enough times to give up; transient connect/reconnect blips never reach this state. The runbook is "Re-register `signal-cli`" in §7.14. See [09-reference.md §9.2.4](09-reference.md) `E4012`.
 - Metrics to watch (panel suggestions):
   - `adapter.connection.status{adapter}` — should be 1 for every enabled adapter.
-  - `adapter.simplex.auth.fail{adapter}` — non-zero is the cue to check for a revoked SimpleX session token (see §7.14).
   - `llm.calls.total{outcome="fail"}` rate-of-change.
   - `eval.queue.size` near `infochat.eval.queue-size` for too long → fetcher back-pressure.
   - `embedding.calls.total{outcome="fallback"}` non-zero → model down.
@@ -1026,7 +1025,7 @@ The stack is operator-deployed alongside Provider/Collector. Nothing in this sub
 2. `journalctl -u infochat-provider -n 200` — errors?
 3. `curl localhost:8081/q/health/ready` — 200?
 4. Per-adapter status in `/status` (admin) or via metrics: which `adapter.connection.status{adapter}` is 0? Provider readiness can be 200 while one adapter is down (the at-least-one-up rule, §7.12).
-5. SimpleX side: is `simplex-cli` running? Check `adapter.simplex.auth.fail` — three consecutive auth failures terminate the SimpleX adapter (`AUTH_FAILED`); see "Rotate a SimpleX session token" below.
+5. SimpleX side: is the `simplex-chat` subprocess running? The transport is loopback IPC to a co-located subprocess (no session token), so a wedged SimpleX adapter is a subprocess/connection problem, not an auth one — check `adapter.connection.status{adapter="simplex"}` and the subprocess logs.
 6. Signal side: is `signal-cli` running? Has the account directory been touched (e.g., re-registration moved files)? See "Re-register `signal-cli`" below.
 
 **"A source is producing junk."**
@@ -1078,14 +1077,13 @@ INFOCHAT_LLM_SUMMARIZER_MODEL=gpt-4o-mini
 
 Permanent: edit `application.properties`, restart Provider.
 
-**"Rotate a SimpleX session token / SimpleX bootstrap admin."**
+**"Rotate the SimpleX bootstrap admin contact."**
 
-A SimpleX queue address has no third-party recovery path; rotation is the routine mitigation for suspected exposure ([04-security.md §4.4](04-security.md)). Steps:
+A SimpleX queue address has no third-party recovery path; rotation is the routine mitigation for suspected exposure ([04-security.md §4.4](04-security.md)). (There is no SimpleX session token to rotate — the transport is loopback IPC to a co-located subprocess, §6.4.1.) Steps:
 
 1. Generate a fresh queue (operator's SimpleX client) and update `INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID` (and/or the underlying property in `application.properties`).
 2. Restart Provider. The new admin row is created; the old admin row is **left in place** with `is_admin = true` (bootstrap admin drift, §7.6.3). Check `audit_log` for the `BOOTSTRAP` rows confirming both.
 3. From the new admin's chat session, run `/revoke-admin <old-contact-id>`. Last-admin protection (global across adapters; [02-schema.md §2.1.2](02-schema.md)) prevents the revoke if no other admin exists anywhere.
-4. If `SIMPLEX_SESSION_TOKEN` was also compromised, rotate it in `secrets.env` and restart.
 
 **"Re-register `signal-cli` (post-`AUTH_FAILED`)."**
 
@@ -1111,13 +1109,13 @@ See §7.8.5. Likely causes: a previous Provider crashed without releasing its ad
 |---|---|
 | DB corruption | Restore from `pg_dump`. Loss of up-to-24h of new posts. Saved posts and admin state preserved. |
 | LLM outage > 1 day | Eval pipeline degrades; user-facing summaries become "raw post lists". Restore Ollama / switch provider; the eval queue auto-drains via outbox rehydrator. |
-| One adapter wedged, others fine | Per-adapter resilience ([06-messaging.md §6.7](06-messaging.md)): Provider stays ready, remaining adapters continue serving. Diagnose the failing adapter via §7.14 (SimpleX session-token rotation, `signal-cli` re-registration); cycle Provider once the underlying client is healthy again. |
+| One adapter wedged, others fine | Per-adapter resilience ([06-messaging.md §6.7](06-messaging.md)): Provider stays ready, remaining adapters continue serving. Diagnose the failing adapter via §7.14 (SimpleX subprocess/connection check, `signal-cli` re-registration); cycle Provider once the underlying client is healthy again. |
 | All adapters wedged | Bot appears offline. Fix at least one adapter; on reconnect, queued outbounds (if any, in-memory only — see §7.16) flush. No DB state loss. |
 | Profile mistake (e.g., switched embedding dimension) | Run `prod/scripts/reembed.sh`. 4-day window self-heals. |
 | Compromised LLM API key | Rotate the env var. Restart Provider. Add an audit row noting rotation reason. |
 | Lost SimpleX bootstrap admin | Edit `application.properties` to point `infochat.adapters.simplex.bootstrap-admin-contact-id` at a different SimpleX contact. Restart Provider (bootstrap admin drift, §7.6.3). The new contact becomes admin; the old admin keeps `is_admin=true` until `/revoke-admin`. |
 | Lost Signal bootstrap admin | Same shape on the Signal adapter: rotate `infochat.adapters.signal.bootstrap-admin-contact-id`, restart, `/revoke-admin` the prior. |
-| Bot account compromised on one adapter | Per-adapter scope ([04-security.md §4.4](04-security.md)). Rotate the relevant session token / re-register the account; rotate the bootstrap admin per the rows above; reissue invite links to known users. Source data and the other adapter are untouched. Cross-adapter elevation is impossible by design (`/grant-admin` and `/revoke-admin` are inbound-adapter-scoped). |
+| Bot account compromised on one adapter | Per-adapter scope ([04-security.md §4.4](04-security.md)). Recover the relevant client (rotate the SimpleX bootstrap-admin contact / queue per §7.14; re-register Signal); rotate the bootstrap admin per the rows above; reissue invite links to known users. Source data and the other adapter are untouched. Cross-adapter elevation is impossible by design (`/grant-admin` and `/revoke-admin` are inbound-adapter-scoped). |
 | Both messaging clients lost simultaneously | Treat each adapter recovery independently; Provider stays down (zero adapters connected → readiness fails) until at least one is restored. Source data is untouched. |
 | Duplicate-instance brought up by a misconfigured deploy | The new instance is rejected by `pg_try_advisory_lock` (§7.8.5) and exits non-zero; the running instance is unaffected. Fix the deploy script. |
 

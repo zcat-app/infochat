@@ -40,6 +40,13 @@ import java.util.function.Consumer;
  * from the SimpleX-cryptographically-routed inbound envelope (decision
  * D10 + D32, {@code docs/spec/messaging.md} §Per-adapter trust level).
  *
+ * <p>The transport carries <b>no authentication</b>: the WebSocket bot API
+ * is a loopback channel to the co-located {@link SimpleXSubprocess}, and the
+ * bot identity lives in the subprocess data-dir, not in any session token or
+ * cookie. Session-token auth and a terminal {@code AUTH_FAILED} state are
+ * therefore deferred for the v1 loopback-IPC transport — there is nothing to
+ * authenticate against a process the adapter itself spawned (design §6.4.6).</p>
+ *
  * <p>The no-arg constructor is preserved so the pre-existing
  * {@code SimpleXAdapterSkeletonTest} (which only inspects the static
  * capability flags) keeps passing. Call sites that intend to
