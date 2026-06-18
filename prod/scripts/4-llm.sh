@@ -82,6 +82,19 @@ set_all_base_urls() {
   set_prop infochat.embeddings.base-url "$url"
 }
 
+# Escape an arbitrary value for a double-quoted secrets.env field so compose's
+# --env-file dotenv parser reads it back byte-for-byte (M1-397). Order matters:
+# backslash first (so the escapes we add next are not themselves re-escaped),
+# then the '"' that would prematurely close the field and the '$' that some
+# compose versions would treat as ${...} interpolation.
+dotenv_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//\$/\\\$}"
+  printf '%s' "$value"
+}
+
 umask 077
 mkdir -p "$RUNTIME_DIR"
 
@@ -239,7 +252,7 @@ case "$backend" in
         chmod 600 "$SECRETS_FILE"
         # Quote the value for compose's --env-file dotenv parse (M1-389): a '#'
         # or whitespace in the key is data, not a comment / field break.
-        printf 'INFOCHAT_LLM_API_KEY="%s"\n' "$llm_key" >> "$SECRETS_FILE"
+        printf 'INFOCHAT_LLM_API_KEY="%s"\n' "$(dotenv_escape "$llm_key")" >> "$SECRETS_FILE"
         echo "+ recorded INFOCHAT_LLM_API_KEY in secrets.env"
       fi
     fi

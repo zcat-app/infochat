@@ -84,6 +84,19 @@ prompt_required() {
   printf '%s' "$val"
 }
 
+# Escape an arbitrary value for a double-quoted secrets.env field so compose's
+# --env-file dotenv parser reads it back byte-for-byte (M1-397). Order matters:
+# backslash first (so the escapes we add next are not themselves re-escaped),
+# then the '"' that would prematurely close the field and the '$' that some
+# compose versions would treat as ${...} interpolation.
+dotenv_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//\$/\\\$}"
+  printf '%s' "$value"
+}
+
 # Collect an OPTIONAL per-adapter bootstrap-admin contact id into secrets.env.
 # Returns 0 when a contact ends up set for this adapter (whether captured now or
 # on a prior run), 1 when none is set — the caller tallies the union (§7.6.3).
@@ -98,7 +111,7 @@ collect_admin() {
     # Quote the value: a SimpleX queue address carries '#' / '&' / '?' / '+' /
     # '=' — unquoted, compose's --env-file dotenv parse would truncate it at '#'
     # (M1-389), so the bootstrap-admin id reaching the Provider would be wrong.
-    printf '%s="%s"\n' "$key" "$val" >> "$SECRETS_FILE"
+    printf '%s="%s"\n' "$key" "$(dotenv_escape "$val")" >> "$SECRETS_FILE"
     echo "+ recorded ${key}"
     return 0
   fi

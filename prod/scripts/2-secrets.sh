@@ -38,6 +38,20 @@ mkdir -p "$RUNTIME_DIR"
 touch "$SECRETS_FILE"
 chmod 600 "$SECRETS_FILE"
 
+# Escape an arbitrary value for a double-quoted secrets.env field so compose's
+# --env-file dotenv parser reads it back byte-for-byte (M1-397). Order matters:
+# backslash first (so the escapes we add next are not themselves re-escaped),
+# then the '"' that would prematurely close the field and the '$' that some
+# compose versions would treat as ${...} interpolation. openssl-hex passwords
+# need none of this, but an operator-pasted key/contact id can contain any byte.
+dotenv_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//\$/\\\$}"
+  printf '%s' "$value"
+}
+
 # Append KEY=<openssl rand> only if KEY has no non-empty value yet, so a resumed
 # run never overwrites an already-minted secret.
 ensure_secret() {
@@ -67,7 +81,7 @@ else
   read -rsp "Remote LLM API key (blank for local Ollama/llama.cpp) [blank]: " llm_key
   echo
   if [[ -n "$llm_key" ]]; then
-    printf 'INFOCHAT_LLM_API_KEY="%s"\n' "$llm_key" >> "$SECRETS_FILE"
+    printf 'INFOCHAT_LLM_API_KEY="%s"\n' "$(dotenv_escape "$llm_key")" >> "$SECRETS_FILE"
     echo "+ recorded INFOCHAT_LLM_API_KEY"
   fi
 fi

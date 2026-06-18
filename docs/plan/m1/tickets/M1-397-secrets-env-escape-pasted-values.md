@@ -1,9 +1,14 @@
 ---
 id: M1-397
 title: "wizard: escape operator-pasted secret values so a literal quote / backslash / ${...} can't corrupt or interpolate the secrets.env entry"
-status: pending
+status: done
 created: 2026-06-17
-last_updated: 2026-06-17
+last_updated: 2026-06-19
+clarity_check:
+  date: 2026-06-18
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: [M1-389]
 remediates: M1-389
 files_budget: 3
@@ -34,14 +39,40 @@ spec_refs:
   - docs/design/07-deployment.md §7.3 Configuration sources and precedence
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-19
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 54
+      removed: 11
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-06-19
+    verdict: CLEAN
+    base: 85bc10aa6c662de5f70bf13cedcbaa1ba8e249c4
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-397-2026-06-19.md
+    out_of_model_count: 3
+    note: |
+      Adversarial pass over the working-tree diff. CLEAN — no in-model finding.
+      The change only hardens on-disk encoding of operator-pasted secret values,
+      which the threat model places inside the trust boundary; no
+      attacker-reachable surface is touched. Three out-of-model advisories are
+      recorded verbatim in the verdict file (advisory only, no action required
+      for this ticket).
 ---
 
 # M1-397: escape operator-pasted secret values in secrets.env
