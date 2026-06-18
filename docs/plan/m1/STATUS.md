@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 421 |
+| done | 422 |
 | deferred | 6 |
 | **total** | **435** |
 
@@ -31,7 +31,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-375 — provider: key the per-turn chat-tool cache on clamped args so over-cap duplicates do not double-charge the call budget (complexity: low, risk: low)
 - M1-376 — messaging: deterministic SimpleX adapterMessageId fallback and shared decode-ladder helper (complexity: low, risk: low)
 - M1-377 — collector: replace the re-eval one-element-array transaction workaround and unify the two fail-closed test-seam idioms (complexity: low, risk: low)
-- M1-399 — wizard: route the two operator-typed adapter data-dir writes to secrets.env through dotenv_escape (6-adapter.sh), consistent with M1-397 (complexity: low, risk: low)
 
 ---
 
@@ -67,6 +66,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-399 | wizard: route the two operator-typed adapter data-dir writes to secrets.env through dotenv_escape (6-adapter.sh), consistent with M1-397 | 2026-06-19 | round 1 APPROVE |
 | M1-397 | wizard: escape operator-pasted secret values so a literal quote / backslash / ${...} can't corrupt or interpolate the secrets.env entry | 2026-06-19 | round 1 APPROVE |
 | M1-398 | flaky IT: EmbeddingWorkerIT.postAlreadyEmbeddedIsNotPickedUpByEnumeratePending fails once its fixed-date seed (2026-05-16) falls outside enumeratePending's rolling fetched_at >= now() - 32d scan window | 2026-06-18 | round 1 APPROVE |
 | M1-396 | SimpleX auth-model doc reconcile: align the §6.4.1 cookie/session + AUTH_FAILED narrative, the §6.4.6/§6.12 references, and the §7.14 runbook to the shipped subprocess+WebSocket adapter, and resolve the unimplemented adapter.simplex.auth.fail metric | 2026-06-18 | round 1 APPROVE |
@@ -76,7 +76,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-392 | wizard: build the app images in an explicit phase before the step-7 readiness wait; raise the doctor disk floor for the build | 2026-06-17 | round 1 APPROVE |
 | M1-391 | wizard/compose: honor an operator-overridden adapter data-dir (the provider bind-mount is hardcoded to the default path) | 2026-06-17 | round 1 APPROVE |
 | M1-390 | 0-doctor.sh: drop the unpublished 8080/8081 port checks (the app services bind no host ports); add a tool-presence preflight (openssl, ss, curl, df) | 2026-06-17 | round 1 APPROVE |
-| M1-389 | wizard: stop sourcing secrets.env as a shell script — operator-pasted values (SimpleX queue addresses with #/&, API keys, tokens) truncate or inject; feed compose via --env-file | 2026-06-17 | round 2 APPROVE |
 
 ---
 
@@ -598,7 +597,7 @@ M1-388 (done)
   └── M1-391 (done) [see above]
 M1-389 (done)
   └── M1-397 (done)
-        └── M1-399 (pending) ← runnable
+        └── M1-399 (done)
 M1-390 (done)
 M1-392 (done)
 M1-393 (done)

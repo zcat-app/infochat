@@ -227,8 +227,8 @@ fi
 sed -i -e '/^INFOCHAT_SIMPLEX_DATA_DIR=/d' -e '/^INFOCHAT_SIGNAL_DATA_DIR=/d' "$SECRETS_FILE"
 for adapter in "${chosen[@]}"; do
   case "$adapter" in
-    simplex) printf 'INFOCHAT_SIMPLEX_DATA_DIR="%s"\n' "$simplex_data_dir" >> "$SECRETS_FILE" ;;
-    signal)  printf 'INFOCHAT_SIGNAL_DATA_DIR="%s"\n' "$signal_data_dir" >> "$SECRETS_FILE" ;;
+    simplex) printf 'INFOCHAT_SIMPLEX_DATA_DIR="%s"\n' "$(dotenv_escape "$simplex_data_dir")" >> "$SECRETS_FILE" ;;
+    signal)  printf 'INFOCHAT_SIGNAL_DATA_DIR="%s"\n' "$(dotenv_escape "$signal_data_dir")" >> "$SECRETS_FILE" ;;
   esac
 done
 

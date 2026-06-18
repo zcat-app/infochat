@@ -1,9 +1,14 @@
 ---
 id: M1-399
 title: "wizard: route the two operator-typed adapter data-dir writes to secrets.env through dotenv_escape (6-adapter.sh), consistent with M1-397"
-status: pending
+status: done
 created: 2026-06-19
 last_updated: 2026-06-19
+clarity_check:
+  date: 2026-06-19
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: [M1-397]
 remediates: M1-391
 files_budget: 1
@@ -32,14 +37,39 @@ spec_refs:
   - docs/design/07-deployment.md §7.3 Configuration sources and precedence
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-19
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 12
+      removed: 9
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-06-19
+    verdict: CLEAN
+    base: 68f552a44207bdd92cbef4e0ca8ec1112704abbf
+    head: m1/M1-399-secrets-env-escape-datadir-paths
+    verdict_file: docs/plan/m1/redteam/M1-399-2026-06-19.md
+    out_of_model_count: 1
+    note: |
+      In-progress audit between APPROVE (round 1) and commit. CLEAN, 0 findings.
+      One out-of-model advisory: the same operator-typed values are also written
+      un-escaped to application.properties (6-adapter.sh:246/254) via the Quarkus
+      properties parser — already documented in this ticket's out_of_scope as a
+      distinct parser with distinct escaping rules, so not a gap here.
 ---
 
 # M1-399: escape the operator-typed adapter data-dir writes to secrets.env
