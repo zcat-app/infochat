@@ -59,6 +59,16 @@ notes. The spec-level commitments below cover all of them.
    is an explicit operator action (widen the bind, firewall the port to
    the prober), never a default (`deployment.md` §Health and
    observability).
+7. **SimpleX local transport → network.** The SimpleX adapter speaks an
+   unauthenticated WebSocket bot API to a co-located `simplex-chat`
+   subprocess it spawns; there is no session, cookie, or token, because
+   the bot's identity lives in the subprocess data-dir, not in a
+   presented credential. That "no authentication" property is sound only
+   while the channel stays loopback: the shipped default binds the
+   adapter's ws-port to loopback. Exposing it beyond the host — binding
+   off-loopback or forwarding the port — is an explicit operator action,
+   never a default, and voids the property: any host that reaches the
+   port can then drive the bot's SimpleX identity with no credential.
 
 ## Ingest pipeline (security side)
 
