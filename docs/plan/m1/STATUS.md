@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 14 |
+| pending | 13 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 415 |
+| done | 416 |
 | deferred | 5 |
 | **total** | **434** |
 
@@ -37,7 +37,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-395 — setup.sh --reset: also tear down the LLM backend services (ollama/llamacpp are under their own compose profiles, untouched by --profile prod down) (complexity: low, risk: low)
 - M1-396 — SimpleX auth-model doc reconcile: align the §6.4.1 cookie/session + AUTH_FAILED narrative, the §6.4.6/§6.12 references, and the §7.14 runbook to the shipped subprocess+WebSocket adapter, and resolve the unimplemented adapter.simplex.auth.fail metric (complexity: medium, risk: medium)
 - M1-397 — wizard: escape operator-pasted secret values so a literal quote / backslash / ${...} can't corrupt or interpolate the secrets.env entry (complexity: low, risk: low)
-- M1-398 — flaky IT: EmbeddingWorkerIT.postAlreadyEmbeddedIsNotPickedUpByEnumeratePending fails when cross-class pollution leaves ≥10 pending posts in the shared DevServices DB (complexity: low, risk: low)
 
 ---
 
@@ -73,6 +72,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-398 | flaky IT: EmbeddingWorkerIT.postAlreadyEmbeddedIsNotPickedUpByEnumeratePending fails once its fixed-date seed (2026-05-16) falls outside enumeratePending's rolling fetched_at >= now() - 32d scan window | 2026-06-18 | round 1 APPROVE |
 | M1-392 | wizard: build the app images in an explicit phase before the step-7 readiness wait; raise the doctor disk floor for the build | 2026-06-17 | round 1 APPROVE |
 | M1-391 | wizard/compose: honor an operator-overridden adapter data-dir (the provider bind-mount is hardcoded to the default path) | 2026-06-17 | round 1 APPROVE |
 | M1-390 | 0-doctor.sh: drop the unpublished 8080/8081 port checks (the app services bind no host ports); add a tool-presence preflight (openssl, ss, curl, df) | 2026-06-17 | round 1 APPROVE |
@@ -82,7 +82,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-385 | wizard 6d: 7-apps.sh (ordered prod up) + 8-verify.sh (health smoke) | 2026-06-16 | round 1 APPROVE |
 | M1-386 | wizard 6e: orchestrator step wiring (0-8) + container config delivery (compose mounts + secrets.env) | 2026-06-15 | round 1 APPROVE |
 | M1-384 | wizard 6c: 6-adapter.sh — SimpleX/Signal registration capture + bootstrap-admin union | 2026-06-15 | round 1 APPROVE |
-| M1-383 | wizard 6b: 3-postgres + 4-llm + 5-bootstrap subscripts | 2026-06-15 | round 1 APPROVE |
 
 ---
 
@@ -606,5 +605,5 @@ M1-392 (done)
 M1-393 (pending) ← runnable
 M1-394 (pending) ← runnable
 M1-395 (pending) ← runnable
-M1-398 (pending) ← runnable
+M1-398 (done)
 ```

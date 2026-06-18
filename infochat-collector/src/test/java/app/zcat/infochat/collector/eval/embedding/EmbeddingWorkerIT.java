@@ -23,6 +23,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -221,13 +222,29 @@ class EmbeddingWorkerIT {
         // of EmbeddingWorker's responsibility — the ReadyPromoter is
         // the next stage. EmbeddingWorker.enumeratePending must not
         // return it.
-        SeededPost already = seedAlreadyEmbeddedPost("embed-it-already");
+        // enumeratePending applies a rolling floor: fetched_at >= now() -
+        // scanWindow (= retention-days.post + 2d slack = "32 days"). Seed inside
+        // that window so the SUT does not legitimately filter `fresh` out: the
+        // shared FETCHED_AT constant is pinned to May 2026 and, once now() - 32d
+        // passes it, the post falls outside the window and the test rots into a
+        // daily time-bomb (the M1-398 failure). @Order(5) writes no
+        // post_embedding row, so it is NOT bound by V11's May-2026
+        // post_embedding partition that pins FETCHED_AT for the
+        // embedding-writing scenarios — use a near-now timestamp instead. (M1-398)
+        Instant withinScanWindow = Instant.now().minus(Duration.ofDays(1));
+        SeededPost already = seedAlreadyEmbeddedPost("embed-it-already", withinScanWindow);
         // Sanity: a fresh pickup-ready post IS returned, so the
         // negative assertion is meaningful (not a coincidence of an
         // empty pending list).
-        SeededPost fresh = seedPickupReadyPost("embed-it-fresh");
+        SeededPost fresh = seedPickupReadyPost("embed-it-fresh", withinScanWindow);
 
-        List<EmbeddingWorker.PostRow> pending = embeddingWorker.enumeratePending(10);
+        // Enumerate the FULL in-window pending set rather than a fixed LIMIT 10
+        // top slice: other collector ITs (e.g. EmbeddingWorkerPickupFloorIT)
+        // leave their own in-window pickup-ready posts uncleaned in the shared
+        // DevServices DB, which could order-dependently crowd `fresh` out of a
+        // small limit. Against the whole set, membership reflects the WHERE
+        // filter alone. (M1-398)
+        List<EmbeddingWorker.PostRow> pending = embeddingWorker.enumeratePending(Integer.MAX_VALUE);
 
         boolean foundAlready = pending.stream().anyMatch(r -> r.id().equals(already.id));
         assertFalse(foundAlready,
@@ -296,12 +313,21 @@ class EmbeddingWorkerIT {
         return seedPost(slug, /* taggerDone */ true, /* embeddingDone */ false, "RAW");
     }
 
-    private SeededPost seedAlreadyEmbeddedPost(String slug) throws Exception {
-        return seedPost(slug, /* taggerDone */ true, /* embeddingDone */ true, "RAW");
+    private SeededPost seedPickupReadyPost(String slug, Instant fetchedAt) throws Exception {
+        return seedPost(slug, /* taggerDone */ true, /* embeddingDone */ false, "RAW", fetchedAt);
+    }
+
+    private SeededPost seedAlreadyEmbeddedPost(String slug, Instant fetchedAt) throws Exception {
+        return seedPost(slug, /* taggerDone */ true, /* embeddingDone */ true, "RAW", fetchedAt);
     }
 
     private SeededPost seedPost(String slug, boolean taggerDone, boolean embeddingDone, String status)
             throws Exception {
+        return seedPost(slug, taggerDone, embeddingDone, status, FETCHED_AT);
+    }
+
+    private SeededPost seedPost(String slug, boolean taggerDone, boolean embeddingDone, String status,
+            Instant fetchedAt) throws Exception {
         UUID sourceId = seedRssSource(slug);
         String uid = "embed-it/" + slug;
 
@@ -321,15 +347,15 @@ class EmbeddingWorkerIT {
             ps.setString(3, "embed-it-upstream-" + slug);
             ps.setString(4, "Embed IT title " + slug);
             ps.setString(5, "Embed IT body for slug " + slug);
-            ps.setTimestamp(6, Timestamp.from(FETCHED_AT));
+            ps.setTimestamp(6, Timestamp.from(fetchedAt));
             ps.setString(7, status);
             ps.setBoolean(8, taggerDone);
             ps.setBoolean(9, embeddingDone);
             try (ResultSet rs = ps.executeQuery()) {
                 assertTrue(rs.next(), "INSERT INTO post must yield an id");
                 UUID id = (UUID) rs.getObject(1);
-                Instant fetchedAt = rs.getTimestamp(2).toInstant();
-                return new SeededPost(id, uid, fetchedAt);
+                Instant storedFetchedAt = rs.getTimestamp(2).toInstant();
+                return new SeededPost(id, uid, storedFetchedAt);
             }
         }
     }
