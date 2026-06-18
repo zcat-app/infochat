@@ -1,9 +1,9 @@
 ---
 id: M1-395
 title: "setup.sh --reset: also tear down the LLM backend services (ollama/llamacpp are under their own compose profiles, untouched by --profile prod down)"
-status: pending
+status: done
 created: 2026-06-16
-last_updated: 2026-06-16
+last_updated: 2026-06-18
 blocked_by: []
 files_budget: 1
 files_scope:
@@ -25,7 +25,20 @@ test_plan:
 spec_refs:
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-18
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 19
+      removed: 12
 escalations: []
 revisions: []
 overrides: []
@@ -33,6 +46,11 @@ aborted_attempts: []
 reopens: []
 redteam_findings: []
 redteam_audits: []
+clarity_check:
+  date: 2026-06-18
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-395: --reset must tear down the LLM backend services

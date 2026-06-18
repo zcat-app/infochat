@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 11 |
+| pending | 10 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 418 |
+| done | 419 |
 | deferred | 5 |
 | **total** | **434** |
 
@@ -32,7 +32,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-375 — provider: key the per-turn chat-tool cache on clamped args so over-cap duplicates do not double-charge the call budget (complexity: low, risk: low)
 - M1-376 — messaging: deterministic SimpleX adapterMessageId fallback and shared decode-ladder helper (complexity: low, risk: low)
 - M1-377 — collector: replace the re-eval one-element-array transaction workaround and unify the two fail-closed test-seam idioms (complexity: low, risk: low)
-- M1-395 — setup.sh --reset: also tear down the LLM backend services (ollama/llamacpp are under their own compose profiles, untouched by --profile prod down) (complexity: low, risk: low)
 - M1-396 — SimpleX auth-model doc reconcile: align the §6.4.1 cookie/session + AUTH_FAILED narrative, the §6.4.6/§6.12 references, and the §7.14 runbook to the shipped subprocess+WebSocket adapter, and resolve the unimplemented adapter.simplex.auth.fail metric (complexity: medium, risk: medium)
 - M1-397 — wizard: escape operator-pasted secret values so a literal quote / backslash / ${...} can't corrupt or interpolate the secrets.env entry (complexity: low, risk: low)
 
@@ -71,6 +70,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-398 | flaky IT: EmbeddingWorkerIT.postAlreadyEmbeddedIsNotPickedUpByEnumeratePending fails once its fixed-date seed (2026-05-16) falls outside enumeratePending's rolling fetched_at >= now() - 32d scan window | 2026-06-18 | round 1 APPROVE |
+| M1-395 | setup.sh --reset: also tear down the LLM backend services (ollama/llamacpp are under their own compose profiles, untouched by --profile prod down) | 2026-06-18 | round 1 APPROVE |
 | M1-394 | 4-llm.sh: verify GGUF download integrity (operator-supplied SHA-256) and strip query/fragment from the derived model filename | 2026-06-18 | round 1 APPROVE |
 | M1-393 | evaluate dropping SUPERUSER from the Postgres infochat owner role (the Collector holds owner creds for Flyway) | 2026-06-18 | round 1 APPROVE |
 | M1-392 | wizard: build the app images in an explicit phase before the step-7 readiness wait; raise the doctor disk floor for the build | 2026-06-17 | round 1 APPROVE |
@@ -79,7 +79,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-389 | wizard: stop sourcing secrets.env as a shell script — operator-pasted values (SimpleX queue addresses with #/&, API keys, tokens) truncate or inject; feed compose via --env-file | 2026-06-17 | round 2 APPROVE |
 | M1-388 | Provider image: make simplex-chat and signal-cli available at the configured .binary paths (the adapters spawn them as subprocesses) | 2026-06-17 | round 1 APPROVE |
 | M1-387 | wizard 6-adapter.sh + design §7.4: emit the adapter config keys the Provider actually reads (binary/data-dir/account), drop the never-read url/session-token/identity-dir | 2026-06-16 | round 1 APPROVE |
-| M1-385 | wizard 6d: 7-apps.sh (ordered prod up) + 8-verify.sh (health smoke) | 2026-06-16 | round 1 APPROVE |
 
 ---
 
@@ -602,6 +601,6 @@ M1-390 (done)
 M1-392 (done)
 M1-393 (done)
 M1-394 (done)
-M1-395 (pending) ← runnable
+M1-395 (done)
 M1-398 (done)
 ```

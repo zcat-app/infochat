@@ -70,12 +70,16 @@ do_reset() {
   # yet, and compose's ${INFOCHAT_*:-} defaults let `down` run without it.
   local env_file_args=()
   [[ -f "$SECRETS_FILE" ]] && env_file_args=(--env-file "$SECRETS_FILE")
-  echo "+ docker compose -f $COMPOSE_FILE --profile prod down"
-  docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" --profile prod down
+  # Include the ollama / llamacpp profiles so a reset stops every service the
+  # wizard may have started: those backends are gated under their own compose
+  # profiles ([dev, ollama] and [llamacpp]), which a bare --profile prod down
+  # does not match, leaving the LLM container + model-cache volume behind (M1-395).
+  echo "+ docker compose -f $COMPOSE_FILE --profile prod --profile ollama --profile llamacpp down"
+  docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" --profile prod --profile ollama --profile llamacpp down
   read -rp "Also drop data volumes (-v)? This deletes all DB data. [y/N]: " ans
   if [[ "$ans" == "y" || "$ans" == "Y" ]]; then
-    echo "+ docker compose -f $COMPOSE_FILE --profile prod down -v"
-    docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" --profile prod down -v
+    echo "+ docker compose -f $COMPOSE_FILE --profile prod --profile ollama --profile llamacpp down -v"
+    docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" --profile prod --profile ollama --profile llamacpp down -v
   fi
   if [[ -f "$STATE_FILE" ]]; then
     echo "+ rm $STATE_FILE"
