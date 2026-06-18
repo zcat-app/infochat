@@ -1,9 +1,9 @@
 ---
 id: M1-393
 title: "evaluate dropping SUPERUSER from the Postgres infochat owner role (the Collector holds owner creds for Flyway)"
-status: pending
+status: done
 created: 2026-06-16
-last_updated: 2026-06-16
+last_updated: 2026-06-18
 blocked_by: []
 files_budget: 2
 files_scope:
@@ -26,14 +26,44 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-18
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 67
+      removed: 13
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
+clarity_check:
+  date: 2026-06-17
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 1: the positive-outcome path (SUPERUSER removed) is verified by a manual prod-shape wizard run that cannot be reproduced from the diff alone; treat the wizard-run result as a developer attestation rather than a reproducible automated check."
+  blockers: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-06-18
+    verdict: CLEAN
+    base: 7f619226^
+    head: 7f619226
+    verdict_file: docs/plan/m1/redteam/M1-393-2026-06-18.md
+    out_of_model_count: 1
+    note: |
+      Adversarial review of the SUPERUSER->CREATEROLE owner-role downgrade
+      (docker/postgres-init.sh + docs/design/07-deployment.md §7.7). CLEAN:
+      no critical/high/medium/low findings. One out-of-model observation,
+      advisory only — no remediation ticket required.
 ---
 
 # M1-393: least-privilege for the Flyway owner role
@@ -75,3 +105,21 @@ See frontmatter.
 ```bash
 python3 scripts/lint-ticket.py docs/plan/m1/tickets/M1-393-*.md
 ```
+
+## Pause note (2026-06-18)
+
+Implementation is **complete** on branch `m1/M1-393-postgres-owner-least-privilege`
+(working tree): `docker/postgres-init.sh` drops SUPERUSER → CREATEROLE + adds the
+two `WITH ADMIN OPTION` grants; the determination is recorded in
+`docs/design/07-deployment.md §7.7`. The positive path was proven end-to-end by
+running the actual modified init script in a real `pgvector/pgvector:pg16`
+container and replaying all 51 migrations (V1..V51) as the non-SUPERUSER owner —
+clean. (Acceptance item 1 satisfied as a developer attestation per the clarity
+WARN.)
+
+**Paused, not done:** acceptance item 2 (`mvn -B verify` exits 0) is blocked by a
+pre-existing flaky test on `main` — `EmbeddingWorkerIT.postAlreadyEmbeddedIsNot`
+`PickedUpByEnumeratePending`, filed as M1-398 (reproduced 3/3 including on a
+clean main checkout; M1-393's docs+shell diff cannot affect it). **Resume:** once
+M1-398 lands and `main` is green, run `/m1-tick review M1-393` (no code rework
+needed).

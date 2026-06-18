@@ -322,7 +322,7 @@ Either approach works; what is **not** allowed is setting `quarkus.http.port` tw
 Notes:
 
 - The canonical block above is shared keys only; per-service `quarkus.http.port` lives in each service's own `application.properties` (collector=8080, provider=8081) as shown in the two blocks immediately above.
-- DB credentials use service-specific roles (infochat_collector, infochat_provider). The infochat superuser is reserved for migrations and admin psql.
+- DB credentials use service-specific roles (infochat_collector, infochat_provider). The `infochat` owner role (CREATEROLE, not superuser — §7.7 "Database role bootstrap") is reserved for migrations; admin psql connects as the cluster bootstrap superuser.
 - All secrets read from env vars; no plaintext secrets in the file.
 - The `infochat.adapters` list is **closed at startup**; adding or removing an adapter is a Provider restart ([06-messaging.md §6.7](06-messaging.md)).
 
@@ -333,7 +333,7 @@ Notes:
 | Variable | Required? | Read by | Purpose |
 |---|---|---|---|
 | `INFOCHAT_PROFILE` | optional | both | Override `infochat.profile` |
-| `INFOCHAT_DB_PASSWORD` | yes | collector (owner datasource: migrations + partition DDL) | Superuser DB password |
+| `INFOCHAT_DB_PASSWORD` | yes | collector (owner datasource: migrations + partition DDL) | Migration-owner DB-role password (`infochat`; CREATEROLE, not superuser — see §7.7 "Database role bootstrap") |
 | `INFOCHAT_COLLECTOR_PASSWORD` | yes | collector | Collector DB role password |
 | `INFOCHAT_PROVIDER_PASSWORD` | yes | provider | Provider DB role password |
 | `INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID` | optional per-adapter; union across enabled adapters MUST be non-empty (§7.6.3) | provider | Bootstrap bot-admin contact id on the SimpleX adapter |
@@ -573,6 +573,14 @@ The scripts themselves are not implemented in Milestone 0 — they ship at Miles
 
 Flyway already creates the application roles and the pgvector extension: `V1__init.sql` runs `CREATE EXTENSION vector`, `V2__roles.sql` creates `infochat_collector` / `infochat_provider` / `infochat_admin`, and `V31` grants `LOGIN` to the two service roles. What Flyway **cannot** do is set the service-role *passwords* — a SQL migration cannot read the container's environment, and the passwords live in env vars (§7.5). `docker/postgres-init.sh` fills exactly that gap. It runs at container init (before the Collector's first Flyway pass), so it creates the roles **with** their passwords; Flyway's `V2` `DO`-block `IF NOT EXISTS` role guard then idempotently no-ops, and the `V4`/`V31` `ALTER ROLE … NOLOGIN`/`LOGIN` toggling leaves the password untouched.
 
+**Owner privilege — CREATEROLE, not SUPERUSER (M1-393).** The Collector holds the `infochat` owner credentials to run Flyway, so that role's privilege set is the blast radius of a credential leak. The owner is created `CREATEROLE` (not `SUPERUSER`), the **minimum** the migration set needs. The full `V1..V51` set was replayed against `pgvector/pgvector:pg16` as a `LOGIN`/`CREATEROLE`-only owner (no `SUPERUSER`, no `CREATEDB`) and applied cleanly. The determination:
+
+- **`SUPERUSER` — not required.** No migration creates a superuser role, runs `ALTER SYSTEM`, accesses another database, or uses a superuser-only path (`COPY … FROM PROGRAM`, untrusted PL, event triggers). The schema enforces its trust split with `GRANT`/`REVOKE` and `SECURITY DEFINER` functions, not RLS, so there is no `BYPASSRLS` to preserve. Dropping `SUPERUSER` contains a leaked owner credential to this one database: no cluster takeover, no reading of other databases, no OS-level access.
+- **`CREATEDB` — not required.** The database is created here by the bootstrap superuser (`CREATE DATABASE infochat OWNER infochat`); no migration issues `CREATE DATABASE`.
+- **`CREATEROLE` — required.** `V2` creates `infochat_admin`, and `V4`/`V31` toggle the two service roles' `LOGIN` attribute.
+- **`ADMIN OPTION` on the two service roles — required.** On PG16 a `CREATEROLE` (non-superuser) role may only `ALTER` roles it administers. Because `infochat_collector` / `infochat_provider` are created here by the **bootstrap superuser** (not by the owner), `V4`/`V31`'s `ALTER ROLE … NOLOGIN`/`LOGIN` fail with *"permission denied to alter role"* unless the script grants the owner `ADMIN OPTION` on them. The grant changes only the owner's administrative reach over those roles — it does not alter the service roles' own attributes, privileges, or passwords (so the least-privilege service-role split is preserved). `infochat_admin` needs no such grant: the owner creates it (`V2`) and so administers it automatically.
+- **`CREATE EXTENSION` — not the owner's privilege.** `vector` is an untrusted extension whose install normally needs `SUPERUSER`, but it (and `pgcrypto`) are created here by the image's bootstrap superuser before Flyway runs, so `V1`'s `CREATE EXTENSION IF NOT EXISTS vector` is a no-op skip under the owner.
+
 **Why a `.sh`, not a `.sql`** — the official `postgres` image runs `/docker-entrypoint-initdb.d/*.sql` files through `psql`, which does **not** expand shell `${VAR}` references; only `*.sh` init files are shell-evaluated. A `.sql` would therefore store the literal string `${INFOCHAT_DB_PASSWORD:?…}` as the password and complete init silently. The `.sh` pipes a here-doc to `psql`, so the **shell** performs the `${VAR:?…}` expansion: an unset *or* empty variable (the `:?` colon form fails on both) aborts the script and exits the container non-zero rather than creating an unusable role. (Verified against `pgvector/pgvector:pg16`, M1-378.)
 
 **No literal passwords in this file.**
@@ -582,11 +590,17 @@ Flyway already creates the application roles and the pgvector extension: `V1__in
 set -euo pipefail
 # Role attributes (NOLOGIN/LOGIN) and per-table grants are managed by Flyway
 # migrations V2__roles.sql / V31, run by the Collector as the owner role; this
-# script only creates the owner + roles WITH their env-driven passwords.
+# script only creates the owner + roles WITH their env-driven passwords. The
+# owner is CREATEROLE (not SUPERUSER) — the minimum the migration set needs;
+# see the privilege determination above.
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<EOSQL
-CREATE ROLE infochat WITH LOGIN SUPERUSER PASSWORD '${INFOCHAT_DB_PASSWORD:?INFOCHAT_DB_PASSWORD is required}';
+CREATE ROLE infochat WITH LOGIN CREATEROLE PASSWORD '${INFOCHAT_DB_PASSWORD:?INFOCHAT_DB_PASSWORD is required}';
 CREATE ROLE infochat_collector WITH LOGIN PASSWORD '${INFOCHAT_COLLECTOR_PASSWORD:?INFOCHAT_COLLECTOR_PASSWORD is required}';
 CREATE ROLE infochat_provider WITH LOGIN PASSWORD '${INFOCHAT_PROVIDER_PASSWORD:?INFOCHAT_PROVIDER_PASSWORD is required}';
+-- PG16: a CREATEROLE owner may only ALTER roles it administers, so grant it
+-- ADMIN OPTION on the two superuser-created service roles (else V4/V31 fail).
+GRANT infochat_collector TO infochat WITH ADMIN OPTION;
+GRANT infochat_provider  TO infochat WITH ADMIN OPTION;
 CREATE DATABASE infochat OWNER infochat;
 \c infochat
 CREATE EXTENSION IF NOT EXISTS vector;
