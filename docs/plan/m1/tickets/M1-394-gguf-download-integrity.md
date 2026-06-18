@@ -1,9 +1,9 @@
 ---
 id: M1-394
 title: "4-llm.sh: verify GGUF download integrity (operator-supplied SHA-256) and strip query/fragment from the derived model filename"
-status: pending
+status: done
 created: 2026-06-16
-last_updated: 2026-06-16
+last_updated: 2026-06-18
 blocked_by: []
 files_budget: 1
 files_scope:
@@ -25,14 +25,44 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-18
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 38
+      removed: 9
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-06-18
+    verdict: CLEAN
+    base: main
+    head: m1/M1-394-gguf-download-integrity
+    verdict_file: docs/plan/m1/redteam/M1-394-2026-06-18.md
+    out_of_model_count: 2
+    note: |
+      Adversarial audit on the in-progress branch tip (post-commit, pre-merge,
+      via --in-progress). No findings: the optional SHA-256 integrity check and
+      the query/fragment-strip introduce no gap against docs/spec/security.md.
+      Two out-of-model advisory observations recorded in the verdict file.
+clarity_check:
+  date: 2026-06-18
+  verdict: WARN
+  warnings:
+    - "security_relevant: false may be under-flagged — the ticket adds a SHA-256 integrity check on a downloaded model binary (body says it closes the tamper window). Consider security_relevant: true so the change is captured in security audit scope; low severity is a separate question from relevance."
+  blockers: []
 ---
 
 # M1-394: GGUF download integrity + clean filename

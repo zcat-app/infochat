@@ -169,7 +169,17 @@ case "$backend" in
       echo "FAIL: a GGUF URL is required for the llamacpp backend." >&2
       exit 1
     fi
-    gguf_file="$(basename "$gguf_url")"
+    # Strip any ?query or #fragment before the basename so the derived model id
+    # is a clean filename — a signed URL like model.gguf?token=x must not carry
+    # the token into infochat.llm.*.model. Fragment first, then query: in a
+    # well-formed URL the fragment is last (path?query#fragment).
+    gguf_path="${gguf_url%%#*}"
+    gguf_path="${gguf_path%%\?*}"
+    gguf_file="$(basename "$gguf_path")"
+    # Optional integrity check: blank skips. The URL is operator-trusted and
+    # fetched over TLS, so a checksum is hardening that closes the tamper window
+    # (M1-394).
+    read -rp "GGUF SHA-256 checksum (blank to skip integrity check): " gguf_sha256
     echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod --profile llamacpp up -d llamacpp"
     docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile llamacpp up -d llamacpp
     # Populate the named model volume via a one-shot container that mounts it.
@@ -180,6 +190,21 @@ case "$backend" in
     else
       echo "+ download $gguf_url -> volume infochat-llamacpp-models/$gguf_file"
       docker run --rm -v infochat-llamacpp-models:/models "$CURL_IMAGE" -fL -o "/models/$gguf_file" "$gguf_url"
+    fi
+    # Verify the GGUF against the operator-supplied checksum before the backend
+    # is configured; a tampered or truncated download must not become the active
+    # model. Compute the digest in a no-shell container (argv only) and compare
+    # in bash, so the operator value is never interpolated into a shell string
+    # (same injection-avoidance posture as the ls presence probe above).
+    if [[ -n "$gguf_sha256" ]]; then
+      actual_sha256="$(docker run --rm -v infochat-llamacpp-models:/models --entrypoint sha256sum "$CURL_IMAGE" "/models/$gguf_file" | awk '{print $1}')"
+      expected_sha256="$(printf '%s' "$gguf_sha256" | tr '[:upper:]' '[:lower:]')"
+      if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+        echo "FAIL: GGUF checksum mismatch (expected $expected_sha256, got $actual_sha256); removing $gguf_file." >&2
+        docker run --rm -v infochat-llamacpp-models:/models --entrypoint rm "$CURL_IMAGE" -f "/models/$gguf_file"
+        exit 1
+      fi
+      echo "GGUF checksum verified ($expected_sha256)"
     fi
     set_all_base_urls "$LLAMACPP_URL"
     # llama.cpp serves one GGUF; record its filename as the model id for every
