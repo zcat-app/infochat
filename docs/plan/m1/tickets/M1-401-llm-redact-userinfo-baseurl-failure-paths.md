@@ -1,9 +1,9 @@
 ---
 id: M1-401
 title: "llm: redact userinfo on requireHttpBaseUrl failure paths"
-status: pending
+status: done
 created: 2026-06-19
-last_updated: 2026-06-19
+last_updated: 2026-06-20
 blocked_by: []
 files_budget: 3
 files_scope:
@@ -31,12 +31,56 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-19
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 92
+      removed: 11
+  - round: 2
+    date: 2026-06-20
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 222
+      removed: 14
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-19
+    verdict: CLEAN
+    base: main
+    head: "m1/M1-401-llm-redact-userinfo-baseurl-failure-paths (working tree, uncommitted — pre-commit --in-progress audit)"
+    verdict_file: docs/plan/m1/redteam/M1-401-2026-06-19.md
+    out_of_model_count: 1
+    note: |
+      CLEAN, 0 findings. One OUT-OF-MODEL advisory: redactUserInfo has a reachable
+      incomplete-redaction edge case (an illegal char forcing URISyntaxException
+      PLUS a '/'/'?'/'#' before the '@' defeats the authority scan, echoing the
+      credential). Ruled out-of-model because operator-set base-url config is
+      TRUSTED per security.md; the whole ticket is M1-330 defense-in-depth beyond
+      documented commitments. Advisory only; does not block commit/merge.
+clarity_check:
+  date: 2026-06-19
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-401: redact userinfo on requireHttpBaseUrl failure paths
@@ -88,3 +132,18 @@ than just the password, which is the safe direction.
   useful part of the message for the common non-credential typo, and
   `URISyntaxException.getMessage()` may itself quote an input fragment, so dropping
   the echo is not a complete guarantee on its own.
+
+## Round 2 rework (redteam-driven, user-accepted)
+
+`/redteam M1-401 --in-progress` (2026-06-19) returned CLEAN with one OUT-OF-MODEL
+advisory: the first-cut `redactUserInfo` bounded the authority at the first
+`/`/`?`/`#`, which a raw delimiter INSIDE the userinfo truncates before the real
+`@` — so a malformed credential-bearing base-url like
+`https://us er:pa/ss@host/v1` (space forces the parse-failure branch; `/` defeats
+the scan) echoed the credential verbatim, missing acceptance item 1's "cannot
+appear verbatim" guarantee. Strictly out-of-model (operator-set base-url config is
+TRUSTED per security.md), but the user opted to close it in-branch rather than
+ship a known-incomplete redactor. Fix: mask from `://` to the LAST `@`
+(over-redaction safe direction); new test
+`requireHttpBaseUrlRedactsCredentialWhenUserinfoContainsPathDelimiter` pins it.
+Audit record: docs/plan/m1/redteam/M1-401-2026-06-19.md.

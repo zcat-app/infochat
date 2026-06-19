@@ -210,18 +210,25 @@ final class LlmHttpSupport {
         try {
             uri = new URI(baseUrl);
         } catch (URISyntaxException e) {
+            // Both echoes are userinfo-redacted: baseUrl directly, and
+            // e.getMessage() because URISyntaxException re-quotes the raw input
+            // verbatim ("...at index N: <input>"). The cause is dropped rather
+            // than chained — its own getMessage() carries the unredacted input,
+            // which Quarkus would print in the boot log's "Caused by:" chain,
+            // re-opening the M1-330 credential leak on this sibling branch.
             throw new IllegalArgumentException(
-                propertyKey + "='" + baseUrl + "' is not a valid URI: " + e.getMessage(), e);
+                propertyKey + "='" + redactUserInfo(baseUrl) + "' is not a valid URI: "
+                    + redactUserInfo(e.getMessage()));
         }
         String scheme = uri.getScheme();
         if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
             throw new IllegalArgumentException(
-                propertyKey + "='" + baseUrl + "' must use an http or https scheme");
+                propertyKey + "='" + redactUserInfo(baseUrl) + "' must use an http or https scheme");
         }
         String host = uri.getHost();
         if (host == null || host.isEmpty()) {
             throw new IllegalArgumentException(
-                propertyKey + "='" + baseUrl + "' must name a host");
+                propertyKey + "='" + redactUserInfo(baseUrl) + "' must name a host");
         }
         // Reject inline credentials (https://user:pass@host). The
         // OpenAI-compatible wire shape accepts userinfo in the URL, but the
@@ -234,6 +241,50 @@ final class LlmHttpSupport {
                 propertyKey + " must not embed credentials (userinfo) in the URL;"
                     + " supply the credential via the corresponding api-key property instead");
         }
+    }
+
+    /**
+     * Mask the userinfo span of any {@code scheme://USER:PASS@host...}
+     * substring before the value is echoed into a diagnostic message, so a
+     * credential-bearing base-url cannot leak verbatim (M1-330). This is a
+     * textual scrub, not a structural parse: it runs on the
+     * {@link #requireHttpBaseUrl} failure branches, including the one where
+     * {@code new URI(...)} already refused the input, so it cannot rely on a
+     * parsed authority. It masks the whole userinfo span (user AND password)
+     * rather than just the password — the safe over-redaction direction when
+     * the structure is untrusted.
+     *
+     * <p>Scope of the scrub: everything from {@code ://} up to the LAST
+     * {@code @} is treated as userinfo and replaced with {@code ***}. The mask
+     * deliberately does NOT first bound an "authority" at the first
+     * {@code /}/{@code ?}/{@code #} — on the malformed inputs that reach the
+     * parse-failure branch, a raw delimiter can sit INSIDE the userinfo (e.g.
+     * {@code https://us er:pa/ss@host/v1}, where the space forces the parse
+     * failure and the {@code /} would truncate an authority scan before the
+     * real {@code @}), which would leave the credential un-masked. Masking to
+     * the last {@code @} closes that gap; the only cost is over-masking a host
+     * in the rare case an {@code @} appears in the path of a credential-free
+     * URL, which is the safe direction for a diagnostic message. No {@code ://}
+     * or no {@code @} after it means no userinfo to mask (the common
+     * credential-free typo keeps its echo), and the value is returned
+     * unchanged. {@code value} is {@code @Nullable} because one caller is
+     * {@code URISyntaxException.getMessage()}, whose contract permits null; a
+     * null in yields a null out unchanged.
+     */
+    static @Nullable String redactUserInfo(@Nullable String value) {
+        if (value == null) {
+            return null;
+        }
+        int schemeEnd = value.indexOf("://");
+        if (schemeEnd < 0) {
+            return value;
+        }
+        int authorityStart = schemeEnd + 3;
+        int at = value.lastIndexOf('@');
+        if (at < authorityStart) {
+            return value;
+        }
+        return value.substring(0, authorityStart) + "***@" + value.substring(at + 1);
     }
 
     /**

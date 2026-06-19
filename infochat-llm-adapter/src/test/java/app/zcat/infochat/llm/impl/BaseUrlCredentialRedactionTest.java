@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -67,6 +68,61 @@ class BaseUrlCredentialRedactionTest {
             "the rejection must NOT echo the userinfo user; got: " + ex.getMessage());
         assertFalse(ex.getMessage().contains(credentialBearingUrl),
             "the rejection must NOT echo the credential-bearing base-url; got: " + ex.getMessage());
+    }
+
+    @Test
+    void requireHttpBaseUrlRedactsCredentialOnMalformedUrl() {
+        // A base-url that BOTH embeds userinfo AND fails new URI(...): a literal
+        // space in the password makes URISyntaxException fire on the parse branch
+        // BEFORE the userinfo-rejection branch can run. That branch echoes the
+        // value, and URISyntaxException.getMessage() re-quotes the raw input
+        // verbatim, so without redaction the credential lands in the thrown
+        // message and the boot log — the M1-330 leak class, on a sibling branch.
+        String property = "infochat.llm.security.base-url";
+        String secret = "s3c r3t";
+        String user = "apiuser";
+        String credentialBearingUrl = "https://" + user + ":" + secret + "@llm.example.com/v1";
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+            () -> LlmHttpSupport.requireHttpBaseUrl(credentialBearingUrl, property),
+            "a malformed credential-bearing base-url must be rejected at the config boundary");
+
+        assertTrue(ex.getMessage().contains(property),
+            "the rejection must name the offending property; got: " + ex.getMessage());
+        assertFalse(ex.getMessage().contains(secret),
+            "the rejection must NOT echo the userinfo credential; got: " + ex.getMessage());
+        assertFalse(ex.getMessage().contains(user),
+            "the rejection must NOT echo the userinfo user; got: " + ex.getMessage());
+        assertNull(ex.getCause(),
+            "the URISyntaxException cause is dropped — its getMessage() re-quotes the "
+                + "unredacted input, which Quarkus would print in the boot log's cause chain");
+    }
+
+    @Test
+    void requireHttpBaseUrlRedactsCredentialWhenUserinfoContainsPathDelimiter() {
+        // Hardening for the redaction edge case: a userinfo that contains a raw
+        // '/', '?', or '#' BEFORE the '@' (illegal in userinfo, so it only
+        // occurs on malformed input) must still be masked. Here a space forces
+        // the URISyntaxException parse-failure branch to fire, and the '/' in
+        // the password would truncate a first-delimiter authority scan before
+        // the real '@' — so masking must run to the LAST '@', not a bounded
+        // authority, or the credential echoes verbatim into the boot log.
+        String property = "infochat.llm.security.base-url";
+        String secret = "pa/ss";
+        String user = "us er";
+        String credentialBearingUrl = "https://" + user + ":" + secret + "@llm.example.com/v1";
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+            () -> LlmHttpSupport.requireHttpBaseUrl(credentialBearingUrl, property),
+            "a malformed credential-bearing base-url must be rejected at the config boundary");
+
+        assertTrue(ex.getMessage().contains(property),
+            "the rejection must name the offending property; got: " + ex.getMessage());
+        assertFalse(ex.getMessage().contains(secret),
+            "the rejection must NOT echo the userinfo credential even when it "
+                + "contains a path delimiter; got: " + ex.getMessage());
+        assertFalse(ex.getMessage().contains(user),
+            "the rejection must NOT echo the userinfo user; got: " + ex.getMessage());
     }
 
     @Test
