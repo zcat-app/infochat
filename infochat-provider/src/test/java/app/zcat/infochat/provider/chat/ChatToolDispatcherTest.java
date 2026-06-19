@@ -208,6 +208,47 @@ class ChatToolDispatcherTest {
                         + "share a cache key (a hit on the second dispatch)");
     }
 
+    // --- M1-375: the per-turn cache key is derived from the CLAMPED args, so two
+    // calls differing only in an over-cap value (limit=200 vs limit=500, both
+    // clamping to limitCap=200) resolve to one cache entry. The second is a hit
+    // and turn.callCount is charged exactly once. callCap=1 makes the "charged
+    // once" claim observable: if the second call missed the cache it would
+    // increment callCount to 2, exceed the cap, and return a "limit exceeded"
+    // ValidationError instead of the cached Success. ---
+
+    @Test
+    void overCapArgsClampToOneCacheEntryAndChargeCallCountOnce() {
+        ChatToolRegistry.ChatTool counter = new ChatToolRegistry.ChatTool() {
+            int calls;
+            @Override
+            public String execute(UUID u, String sk, UUID si, Map<String, Object> a) {
+                calls++;
+                return "[{\"call\":" + calls + "}]";
+            }
+        };
+        ChatToolDispatcher d = dispatcher(Map.of("searchPosts", counter), 500, 200);
+        ChatToolDispatcher.TurnContext turn = new ChatToolDispatcher.TurnContext(1);
+
+        Map<String, Object> firstArgs = new HashMap<>();
+        firstArgs.put("limit", 200);
+        Map<String, Object> secondArgs = new HashMap<>();
+        secondArgs.put("limit", 500);
+
+        ChatToolDispatcher.ToolResult first =
+                d.dispatch("searchPosts", firstArgs, USER_A, "dm", SCOPE_A, turn);
+        ChatToolDispatcher.ToolResult second =
+                d.dispatch("searchPosts", secondArgs, USER_A, "dm", SCOPE_A, turn);
+
+        assertInstanceOf(ChatToolDispatcher.ToolResult.Success.class, first);
+        assertInstanceOf(ChatToolDispatcher.ToolResult.Success.class, second,
+                "the over-cap duplicate must be a cache hit, not a cap-exceeded "
+                        + "ValidationError — proving callCount was charged once");
+        assertEquals(
+                ((ChatToolDispatcher.ToolResult.Success) first).content(),
+                ((ChatToolDispatcher.ToolResult.Success) second).content(),
+                "the second call must return the cached first result (one execution)");
+    }
+
     // --- Acceptance item 4: scope-filtered search ---
 
     @Test

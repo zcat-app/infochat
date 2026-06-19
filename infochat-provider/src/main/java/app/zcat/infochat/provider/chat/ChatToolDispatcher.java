@@ -138,9 +138,25 @@ public class ChatToolDispatcher {
             return new ToolResult.ValidationError("Unknown tool: " + toolName);
         }
 
-        // Per-turn cache: identical calls return the cached result
+        // Clamp before the cache key is built so two calls differing only in an
+        // over-cap value (e.g. limit=200 vs limit=500, both clamping to limitCap)
+        // canonicalize to one key, hit the cache, and charge turn.callCount once
+        // instead of each consuming a call-budget slot (M1-375). clampLimit's
+        // `(Number) args.get("limit")` cast throws ClassCastException when the
+        // model emits a non-numeric limit (e.g. {"limit":"ten"}); that must
+        // surface as a typed validation error the LLM can self-correct on, not
+        // escape the turn.
+        Map<String, Object> validatedArgs = new HashMap<>(args);
+        try {
+            clampLimit(validatedArgs);
+        } catch (ClassCastException e) {
+            return new ToolResult.ValidationError(
+                    "Invalid argument type or format for tool: " + toolName);
+        }
+
+        // Per-turn cache: calls identical after clamping return the cached result
         String cacheKey = toolName + "|" + userId + "|" + scopeKind
-                        + "|" + scopeId + "|" + canonicalArgs(args);
+                        + "|" + scopeId + "|" + canonicalArgs(validatedArgs);
         String cached = turn.cache.get(cacheKey);
         if (cached != null) {
             return new ToolResult.Success(cached);
@@ -156,17 +172,10 @@ public class ChatToolDispatcher {
         ToolResult lengthCheck = validateInputLengths(args);
         if (lengthCheck != null) return lengthCheck;
 
-        Map<String, Object> validatedArgs = new HashMap<>(args);
-
         // Non-null by construction: the constructor asserts tools covers every
         // registry tool name, and line above rejects names not in the registry.
         ChatToolRegistry.ChatTool tool = Objects.requireNonNull(tools.get(toolName));
         try {
-            // clampLimit runs inside the try: its `(Number) args.get("limit")`
-            // cast throws ClassCastException when the model emits a non-numeric
-            // limit (e.g. {"limit":"ten"}), and that must surface as a typed
-            // validation error the LLM can self-correct on, not escape the turn.
-            clampLimit(validatedArgs);
             String result = tool.execute(userId, scopeKind, scopeId, validatedArgs);
             turn.cache.put(cacheKey, result);
             return new ToolResult.Success(result);

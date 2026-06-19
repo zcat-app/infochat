@@ -1,9 +1,14 @@
 ---
 id: M1-375
 title: "provider: key the per-turn chat-tool cache on clamped args so over-cap duplicates do not double-charge the call budget"
-status: pending
+status: done
 created: 2026-06-14
-last_updated: 2026-06-14
+last_updated: 2026-06-19
+clarity_check:
+  date: 2026-06-19
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 3
 files_scope:
@@ -28,7 +33,20 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-19
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 70
+      removed: 17
 escalations: []
 revisions: []
 overrides: []
