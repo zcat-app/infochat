@@ -15,8 +15,8 @@
 | in-review | 0 |
 | escalated | 0 |
 | done | 423 |
-| deferred | 6 |
-| **total** | **435** |
+| deferred | 7 |
+| **total** | **436** |
 
 ---
 
@@ -24,12 +24,12 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-370 — collector: add a per-attempt re-eval cooldown so the fail-open backlog is not re-judged each tick (complexity: medium, risk: low)
 - M1-371 — collector: give stream dispatch keys a distinct type so they cannot collide with FetchScheduler source keys (complexity: medium, risk: low)
 - M1-373 — core+provider: reconcile internal null-handling with the null-marked contract (InfochatProfile, RateCapBucket.Key) (complexity: low, risk: low)
 - M1-375 — provider: key the per-turn chat-tool cache on clamped args so over-cap duplicates do not double-charge the call budget (complexity: low, risk: low)
 - M1-376 — messaging: deterministic SimpleX adapterMessageId fallback and shared decode-ladder helper (complexity: low, risk: low)
 - M1-377 — collector: replace the re-eval one-element-array transaction workaround and unify the two fail-closed test-seam idioms (complexity: low, risk: low)
+- M1-400 — test: de-rot the EntityExtractorWorkerIT scan-window fixture so the in-window post never ages out (complexity: low, risk: low)
 
 ---
 
@@ -79,6 +79,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 ---
 
 ## Deferred
+
+### blocked-on-new-ticket (1)
+- M1-370 → M1-400
 
 ### decomposed (2)
 - M1-034 → M1-034a
@@ -564,7 +567,6 @@ M1-366 (done)
 M1-367 (done)
 M1-368 (done)
 M1-369 (done)
-M1-370 (pending) ← runnable
 M1-371 (pending) ← runnable
 M1-373 (pending) ← runnable
 M1-374 (done)
@@ -603,4 +605,6 @@ M1-393 (done)
 M1-394 (done)
 M1-395 (done)
 M1-398 (done)
+M1-400 (pending) ← runnable
+  └── M1-370 (deferred)
 ```

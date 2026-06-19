@@ -1,9 +1,11 @@
 ---
 id: M1-370
 title: "collector: add a per-attempt re-eval cooldown so the fail-open backlog is not re-judged each tick"
-status: pending
+status: deferred
 created: 2026-06-14
 last_updated: 2026-06-19
+deferred_on: M1-400
+deferred_reason: blocked-on-new-ticket
 blocked_by: []
 files_budget: 5
 files_scope:
@@ -58,6 +60,17 @@ revisions:
       location; next free version V52). No other frontmatter changed;
       files_budget (5) still covers ReEvaluationJob.java + the migration +
       application.properties + the test.
+escalations_defer_note: |
+  2026-06-19 — DEFERRED on M1-400. M1-370's implementation is COMPLETE and
+  fully green (CooldownTest 2/2, FanOutIT 2/2, ReEvaluationJobTest 13/13,
+  WindowTest 1/1) and is preserved on branch m1/M1-370-collector-reeval-per-attempt-cooldown
+  (WIP commit acd67fa2, on top of refine 99cb1384). The full-suite gate is
+  blocked only by the pre-existing, unrelated EntityExtractorWorkerIT
+  time-bomb (M1-400). RESUME PATH: after M1-400 merges, reopen M1-370 and
+  continue ON THE EXISTING BRANCH — do NOT re-run /m1-tick start (the branch
+  already holds in-progress status, the clarity_check WARN, and the full
+  impl). Rebase the branch onto main, re-run mvn verify (now green), then
+  review → commit → merge.
 overrides: []
 aborted_attempts: []
 reopens: []
