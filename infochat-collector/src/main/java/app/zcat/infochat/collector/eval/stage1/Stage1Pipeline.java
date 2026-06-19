@@ -22,7 +22,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.function.UnaryOperator;
 import java.util.regex.Matcher;
 
 /**
@@ -226,20 +225,6 @@ public class Stage1Pipeline {
         Sanitizers.FORMATTING
             .and(Sanitizers.BLOCKS)
             .and(Sanitizers.LINKS);
-
-    /**
-     * Sanitizer-invocation seam. Production wires this to
-     * {@code OWASP_POLICY::sanitize}; tests in the same package
-     * temporarily replace it with a function that throws to verify
-     * the {@link #handleSanitizerException} fail-closed branch
-     * (per redteam Finding 2 — OWASP's own sanitize() is robust
-     * by design, so injecting a thrower is the only practical way
-     * to exercise the fail-closed path). Package-private and
-     * non-final by deliberate choice: writing to this field from
-     * outside the package is impossible, and the test contract is
-     * "swap, run one scenario, restore in @AfterEach".
-     */
-    static UnaryOperator<String> sanitizer = OWASP_POLICY::sanitize;
 
     @Inject
     DataSource dataSource;
@@ -546,12 +531,27 @@ public class Stage1Pipeline {
      * keeps the dispatcher in {@code process()} shape-parallel to the
      * watchdog-abort path.
      */
-    private static String safeSanitize(String input) {
+    private String safeSanitize(String input) {
         try {
-            return sanitizer.apply(input);
+            return sanitize(input);
         } catch (RuntimeException ex) {
             throw new SanitizerFailedException(ex);
         }
+    }
+
+    /**
+     * Sanitizer-invocation seam. Production delegates to {@code OWASP_POLICY}.
+     * Package-private and non-static (not {@code private static}) so a
+     * test-scoped subclass can override it to inject a thrower and exercise the
+     * {@link #handleSanitizerException} fail-closed branch (redteam Finding 2 —
+     * OWASP's own {@code sanitize()} is robust by design, so a thrower is the
+     * only practical way to reach the fail-closed path). Mirrors the
+     * test-subclass seam idiom on
+     * {@code EmbeddingWorker.formatVector}, replacing the prior risky
+     * static-mutable-field seam (M1-377).
+     */
+    String sanitize(String input) {
+        return OWASP_POLICY.sanitize(input);
     }
 
     /**

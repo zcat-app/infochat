@@ -271,16 +271,16 @@ public class ReEvaluationJob {
      * transition.
      */
     private void applyNonBenignReEval(ReEvalCandidate candidate, Stage2VerdictHandler.Verdict verdict) {
-        boolean[] reHidden = {false};
-        TransactionHelper.inTransaction(dataSource, "ReEvaluationJob.applyNonBenign", conn -> {
+        boolean reHidden = TransactionHelper.inTransactionReturning(dataSource, "ReEvaluationJob.applyNonBenign", conn -> {
             recordVerdictAndIncrementCounter(conn, candidate, verdict);
-            reHidden[0] = reHideToQuarantined(conn, candidate);
-            if (reHidden[0]) {
+            boolean hidden = reHideToQuarantined(conn, candidate);
+            if (hidden) {
                 reAnnouncePendingQuarantineRows(conn, candidate.postId());
             }
+            return hidden;
         });
         LOG.info("ReEvaluationJob: {} re-eval for post_id={} — verdict recorded, counter incremented{}",
-            verdict, candidate.postId(), reHidden[0] ? ", post re-hidden to QUARANTINED" : "");
+            verdict, candidate.postId(), reHidden ? ", post re-hidden to QUARANTINED" : "");
     }
 
     private static void recordVerdictAndIncrementCounter(Connection conn, ReEvalCandidate candidate,
