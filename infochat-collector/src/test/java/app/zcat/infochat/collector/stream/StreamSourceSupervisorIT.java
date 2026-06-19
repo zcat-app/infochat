@@ -30,7 +30,7 @@ class StreamSourceSupervisorIT {
     void supervisorIntegratesWithCollectorLifecycle() throws InterruptedException {
         assertTrue(supervisor.isReady(), "CDI-managed supervisor is ready after Collector startup");
 
-        long dispatchKey = 4242L;
+        StreamDispatchKey dispatchKey = new StreamDispatchKey(4242L);
         List<NormalizedPost> buffered = List.of(FakeStreamSource.samplePost("it-event"));
         FakeStreamSource source = FakeStreamSource.flushingOnStop(buffered);
         List<NormalizedPost> delivered = new CopyOnWriteArrayList<>();
@@ -39,7 +39,7 @@ class StreamSourceSupervisorIT {
         try {
             assertTrue(source.startEntered.await(2, TimeUnit.SECONDS), "worker started in-container");
 
-            Map<Long, Boolean> outcomes = supervisor.drainAll(Duration.ofSeconds(5));
+            Map<StreamDispatchKey, Boolean> outcomes = supervisor.drainAll(Duration.ofSeconds(5));
 
             assertEquals(Boolean.TRUE, outcomes.get(dispatchKey), "source flushed during drain");
             assertEquals(buffered.size(), delivered.size(), "buffered event flushed to the deliver callback");

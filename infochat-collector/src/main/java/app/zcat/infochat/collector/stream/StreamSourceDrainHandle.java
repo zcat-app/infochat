@@ -26,7 +26,7 @@ final class StreamSourceDrainHandle {
         this.stopFuture = stopFuture;
     }
 
-    long dispatchKey() {
+    StreamDispatchKey dispatchKey() {
         return registration.dispatchKey();
     }
 

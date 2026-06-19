@@ -3,6 +3,7 @@ package app.zcat.infochat.collector.stream.nostr;
 import app.zcat.infochat.collector.outbox.EvalQueueProducer;
 import app.zcat.infochat.collector.outbox.PostPersister;
 import app.zcat.infochat.collector.outbox.TestEvalQueueConsumer;
+import app.zcat.infochat.collector.stream.StreamDispatchKey;
 import app.zcat.infochat.collector.stream.StreamSourceSupervisor;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.ingest.NormalizedPost;
@@ -80,7 +81,7 @@ class NostrStreamSourceVerificationIT {
             3);
     private final NostrEventVerifier verifier = new NostrEventVerifier();
     private final NostrDedupFilter dedupFilter = new NostrDedupFilter();
-    private final Set<Long> registeredDispatchKeys = new HashSet<>();
+    private final Set<StreamDispatchKey> registeredDispatchKeys = new HashSet<>();
     private final List<FakeNostrRelay> relays = new ArrayList<>();
 
     @BeforeEach
@@ -90,7 +91,7 @@ class NostrStreamSourceVerificationIT {
 
     @AfterEach
     void teardown() {
-        for (Long key : registeredDispatchKeys) {
+        for (StreamDispatchKey key : registeredDispatchKeys) {
             supervisor.stop(key);
         }
         registeredDispatchKeys.clear();
@@ -106,7 +107,7 @@ class NostrStreamSourceVerificationIT {
         UUID sourceUuid = seedNostrSource("Nostr verify IT — bad sig");
         long preCount = countPostsForSource(sourceUuid);
 
-        NostrStreamSource worker = registerWorker(990097L, relay, sourceUuid);
+        NostrStreamSource worker = registerWorker(new StreamDispatchKey(990097L), relay, sourceUuid);
         assertTrue(relay.awaitFrameCount(1, FIVE_SECONDS), "relay received the subscriber's REQ");
 
         // Three events with well-formed-hex but cryptographically invalid sigs
@@ -131,7 +132,7 @@ class NostrStreamSourceVerificationIT {
         UUID sourceUuid = seedNostrSource("Nostr verify IT — disallowed kind");
         long preCount = countPostsForSource(sourceUuid);
 
-        NostrStreamSource worker = registerWorker(990098L, relay, sourceUuid);
+        NostrStreamSource worker = registerWorker(new StreamDispatchKey(990098L), relay, sourceUuid);
         assertTrue(relay.awaitFrameCount(1, FIVE_SECONDS), "relay received the subscriber's REQ");
 
         // Kind-7 (reaction): valid BIP-340 signature, disallowed kind. The
@@ -157,7 +158,7 @@ class NostrStreamSourceVerificationIT {
         UUID sourceUuid = seedNostrSource("Nostr verify IT — kind 1 + 6");
         long preCount = countPostsForSource(sourceUuid);
 
-        NostrStreamSource worker = registerWorker(990099L, relay, sourceUuid);
+        NostrStreamSource worker = registerWorker(new StreamDispatchKey(990099L), relay, sourceUuid);
         assertTrue(relay.awaitFrameCount(1, FIVE_SECONDS), "relay received the subscriber's REQ");
 
         relay.sendEvent(NostrSignedEventFixtures.VALID_KIND_1_EVENT);
@@ -181,7 +182,7 @@ class NostrStreamSourceVerificationIT {
         return relay;
     }
 
-    private NostrStreamSource registerWorker(long dispatchKey, FakeNostrRelay relay, UUID sourceUuid) {
+    private NostrStreamSource registerWorker(StreamDispatchKey dispatchKey, FakeNostrRelay relay, UUID sourceUuid) {
         List<URI> relayUris = List.of(relay.uri());
         NostrStreamSource worker = new NostrStreamSource(relayUris,
                 OptionalLong::empty, Duration.ofMillis(50), Duration.ofMillis(200),

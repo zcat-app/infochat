@@ -3,6 +3,7 @@ package app.zcat.infochat.collector.stream.nostr;
 import app.zcat.infochat.collector.outbox.EvalQueueProducer;
 import app.zcat.infochat.collector.outbox.PostPersister;
 import app.zcat.infochat.collector.outbox.TestEvalQueueConsumer;
+import app.zcat.infochat.collector.stream.StreamDispatchKey;
 import app.zcat.infochat.collector.stream.StreamSourceSupervisor;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.ingest.NormalizedPost;
@@ -46,7 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @QuarkusTest
 class NostrStreamSourceIT {
 
-    private static final long DISPATCH_KEY = 990096L;
+    private static final StreamDispatchKey DISPATCH_KEY = new StreamDispatchKey(990096L);
     private static final Duration FIVE_SECONDS = Duration.ofSeconds(5);
 
     @Inject

@@ -3,6 +3,7 @@ package app.zcat.infochat.collector.stream.nostr;
 import app.zcat.infochat.collector.eval.reeval.PerSourceUnknownTracker;
 import app.zcat.infochat.collector.outbox.EvalQueueProducer;
 import app.zcat.infochat.collector.outbox.PostPersister;
+import app.zcat.infochat.collector.stream.StreamDispatchKey;
 import app.zcat.infochat.collector.stream.StreamSourceSupervisor;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.core.ingest.StreamSource;
@@ -385,7 +386,7 @@ public final class NostrStreamSource implements StreamSource {
         // workers by, so it owns this map and the SourceDisabled observer.
         // Package-private (not private) so the wiring IT can populate it on a
         // directly-constructed Registrar without a CDI proxy.
-        final Map<UUID, Long> dispatchKeyBySource = new ConcurrentHashMap<>();
+        final Map<UUID, StreamDispatchKey> dispatchKeyBySource = new ConcurrentHashMap<>();
 
         @PostConstruct
         void registerNostrSources() {
@@ -404,7 +405,9 @@ public final class NostrStreamSource implements StreamSource {
                     continue;
                 }
                 final UUID sourceUuid = row.id();
-                final long dispatchKey = nextDispatchKey++;
+                // Mint the typed handle from the long counter; the supervisor
+                // surface is handle-keyed from here on (M1-371).
+                final StreamDispatchKey dispatchKey = new StreamDispatchKey(nextDispatchKey++);
                 RelayHealthTracker tracker = new RelayHealthTracker(
                         relays, relayFailureThreshold, cooldownDuration, allRelaysBadCycleCap,
                         clock, transition -> handleTransition(transition, sourceUuid, dispatchKey));
@@ -462,7 +465,7 @@ public final class NostrStreamSource implements StreamSource {
          * not internal defensive code between two trusted internal classes.
          */
         void onSourceDisabled(@Observes PerSourceUnknownTracker.SourceDisabled event) {
-            Long dispatchKey = dispatchKeyBySource.remove(event.sourceId());
+            StreamDispatchKey dispatchKey = dispatchKeyBySource.remove(event.sourceId());
             if (dispatchKey == null) {
                 LOG.debug("SourceDisabled for {} has no registered stream worker; no-op",
                         event.sourceId());
@@ -492,7 +495,7 @@ public final class NostrStreamSource implements StreamSource {
          * we spawn a fresh virtual thread for the terminal teardown.
          */
         void handleTransition(RelayHealthTracker.Transition transition,
-                              UUID sourceUuid, long dispatchKey) {
+                              UUID sourceUuid, StreamDispatchKey dispatchKey) {
             switch (transition) {
                 case ALL_RELAYS_BAD -> adminNotifier.notifyOnce(
                         "nostr-all-relays-bad:" + sourceUuid,
@@ -509,7 +512,7 @@ public final class NostrStreamSource implements StreamSource {
             }
         }
 
-        private void handleTerminal(UUID sourceUuid, long dispatchKey) {
+        private void handleTerminal(UUID sourceUuid, StreamDispatchKey dispatchKey) {
             try {
                 markSourceFailed(sourceUuid);
             } catch (SQLException e) {

@@ -31,7 +31,7 @@ class StreamSourceSupervisorTest {
         CountDownLatch release = new CountDownLatch(1);
         FakeStreamSource source = FakeStreamSource.blockingStart(release);
 
-        supervisor.register(7L, "spec", source, post -> { });
+        supervisor.register(new StreamDispatchKey(7L), "spec", source, post -> { });
 
         // start() entered the worker but is still blocked on the release
         // latch — proves register() returned without waiting for start().
@@ -49,14 +49,15 @@ class StreamSourceSupervisorTest {
         FakeStreamSource source = FakeStreamSource.flushingOnStop(buffered);
         List<NormalizedPost> delivered = new CopyOnWriteArrayList<>();
 
-        supervisor.register(3L, "spec", source, delivered::add);
+        StreamDispatchKey key = new StreamDispatchKey(3L);
+        supervisor.register(key, "spec", source, delivered::add);
         assertTrue(source.startEntered.await(2, TimeUnit.SECONDS), "deliver callback wired by start()");
 
-        Map<Long, Boolean> outcomes = supervisor.drainAll(Duration.ofSeconds(1));
+        Map<StreamDispatchKey, Boolean> outcomes = supervisor.drainAll(Duration.ofSeconds(1));
 
-        assertEquals(Boolean.TRUE, outcomes.get(3L), "source flushed within the budget");
+        assertEquals(Boolean.TRUE, outcomes.get(key), "source flushed within the budget");
         assertEquals(2, delivered.size(), "both buffered events flushed to the deliver callback");
-        assertEquals(0L, supervisor.eventsLostOnShutdown(3L), "clean drain loses no events");
+        assertEquals(0L, supervisor.eventsLostOnShutdown(key), "clean drain loses no events");
     }
 
     @Test
@@ -64,13 +65,14 @@ class StreamSourceSupervisorTest {
         StreamSourceSupervisor supervisor = new StreamSourceSupervisor(Duration.ofSeconds(1));
         FakeStreamSource source = FakeStreamSource.slowStop(10_000L);
 
-        supervisor.register(9L, "spec", source, post -> { });
+        StreamDispatchKey key = new StreamDispatchKey(9L);
+        supervisor.register(key, "spec", source, post -> { });
         assertTrue(source.startEntered.await(2, TimeUnit.SECONDS));
 
-        Map<Long, Boolean> outcomes = supervisor.drainAll(Duration.ofMillis(100));
+        Map<StreamDispatchKey, Boolean> outcomes = supervisor.drainAll(Duration.ofMillis(100));
 
-        assertEquals(Boolean.FALSE, outcomes.get(9L), "source did not flush within the budget");
-        assertEquals(1L, supervisor.eventsLostOnShutdown(9L), "lost-events counter incremented on drain timeout");
+        assertEquals(Boolean.FALSE, outcomes.get(key), "source did not flush within the budget");
+        assertEquals(1L, supervisor.eventsLostOnShutdown(key), "lost-events counter incremented on drain timeout");
     }
 
     @Test
@@ -79,15 +81,34 @@ class StreamSourceSupervisorTest {
         FakeStreamSource one = FakeStreamSource.inert();
         FakeStreamSource two = FakeStreamSource.inert();
 
-        supervisor.register(1L, "spec", one, post -> { });
-        supervisor.register(2L, "spec", two, post -> { });
+        StreamDispatchKey keyOne = new StreamDispatchKey(1L);
+        StreamDispatchKey keyTwo = new StreamDispatchKey(2L);
+        supervisor.register(keyOne, "spec", one, post -> { });
+        supervisor.register(keyTwo, "spec", two, post -> { });
         assertTrue(one.startEntered.await(2, TimeUnit.SECONDS));
         assertTrue(two.startEntered.await(2, TimeUnit.SECONDS));
 
-        supervisor.stop(1L);
+        supervisor.stop(keyOne);
 
         assertTrue(one.stopCalled(), "stopped source's stop() invoked");
         assertFalse(two.stopCalled(), "other source left running");
+    }
+
+    @Test
+    void typedHandleRoundTripsThroughRegisterStop() throws InterruptedException {
+        StreamSourceSupervisor supervisor = new StreamSourceSupervisor(Duration.ofSeconds(1));
+        FakeStreamSource source = FakeStreamSource.inert();
+
+        // The same StreamDispatchKey value registered must address the same
+        // worker on stop — proving the handle round-trips through the
+        // handle-keyed registrations map (M1-371).
+        StreamDispatchKey key = new StreamDispatchKey(42L);
+        supervisor.register(key, "spec", source, post -> { });
+        assertTrue(source.startEntered.await(2, TimeUnit.SECONDS));
+
+        supervisor.stop(new StreamDispatchKey(42L));
+
+        assertTrue(source.stopCalled(), "a fresh handle with the same value stops the registered worker");
     }
 }
 

@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.stream.nostr;
 
 import app.zcat.infochat.collector.eval.reeval.PerSourceUnknownTracker;
+import app.zcat.infochat.collector.stream.StreamDispatchKey;
 import app.zcat.infochat.collector.stream.StreamSourceSupervisor;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.core.ingest.StreamSource;
@@ -37,8 +38,8 @@ class NostrSourceDisabledStopsWorkerIT {
     // Dispatch keys well above any the startup Registrar mints (monotonic from
     // 1) so these test workers never collide with bootstrap-seeded nostr sources
     // registered with the same shared supervisor.
-    private static final long DISABLED_KEY = 9101L;
-    private static final long OTHER_KEY = 9102L;
+    private static final StreamDispatchKey DISABLED_KEY = new StreamDispatchKey(9101L);
+    private static final StreamDispatchKey OTHER_KEY = new StreamDispatchKey(9102L);
 
     @Inject
     StreamSourceSupervisor supervisor;

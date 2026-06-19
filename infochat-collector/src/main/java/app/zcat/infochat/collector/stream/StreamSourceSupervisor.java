@@ -60,7 +60,7 @@ public class StreamSourceSupervisor {
     @ConfigProperty(name = "infochat.stream.drain-timeout")
     Duration drainTimeout;
 
-    private final Map<Long, StreamSourceRegistration> registrations = new ConcurrentHashMap<>();
+    private final Map<StreamDispatchKey, StreamSourceRegistration> registrations = new ConcurrentHashMap<>();
 
     // One virtual-thread-per-task executor runs both the long-lived
     // start() workers and the transient stop() drain tasks. Created in
@@ -108,7 +108,7 @@ public class StreamSourceSupervisor {
      * SPI's {@code start} needs both: the caller owns the outbox-writing
      * delivery callback, the supervisor owns only the worker lifecycle.</p>
      */
-    public void register(long dispatchKey, String filterSpec,
+    public void register(StreamDispatchKey dispatchKey, String filterSpec,
                          StreamSource source, Consumer<NormalizedPost> deliver) {
         StreamSourceRegistration registration =
                 new StreamSourceRegistration(dispatchKey, filterSpec, source, deliver);
@@ -121,15 +121,15 @@ public class StreamSourceSupervisor {
      * transitions to {@code 'failed'} (operator {@code /source-disable} or
      * the UNKNOWN-rate auto-disable). Accepts
      * <strong>only a dispatch key registered with this same supervisor instance</strong>
-     * via {@link #register}. Stream dispatch keys and the polled
-     * FetchScheduler's source keys are both monotonic from 1, so a key minted
-     * in another keyspace must never be passed here: it would not be a harmless
-     * no-op — it would collide with, and stop, an unrelated stream this
-     * supervisor happens to hold under the same numeric key. For a key this
-     * supervisor did register, an absent one (never registered, or already
-     * stopped) is a genuine no-op.
+     * via {@link #register}. The {@link StreamDispatchKey} type makes that a
+     * compile-time guarantee: stream dispatch keys and the polled
+     * FetchScheduler's source keys are both monotonic from 1, but the
+     * FetchScheduler's keys are bare {@code long}s and can no longer be passed
+     * here — the keyspace collision that prose used to warn about is now a type
+     * error (M1-371). For a key this supervisor did register, an absent one
+     * (never registered, or already stopped) is a genuine no-op.
      */
-    public void stop(long dispatchKey) {
+    public void stop(StreamDispatchKey dispatchKey) {
         StreamSourceRegistration registration = registrations.remove(dispatchKey);
         if (registration == null) {
             return;
@@ -145,19 +145,19 @@ public class StreamSourceSupervisor {
      * counter incremented. Returns the per-source drain outcome
      * ({@code true} = flushed cleanly).
      */
-    public Map<Long, Boolean> drainAll(Duration timeout) {
+    public Map<StreamDispatchKey, Boolean> drainAll(Duration timeout) {
         Instant deadline = Instant.now().plus(timeout);
         List<StreamSourceDrainHandle> handles = new ArrayList<>();
         for (StreamSourceRegistration registration : registrations.values()) {
             handles.add(registration.beginDrain(workerExecutor));
         }
-        Map<Long, Boolean> outcomes = new HashMap<>();
+        Map<StreamDispatchKey, Boolean> outcomes = new HashMap<>();
         for (StreamSourceDrainHandle handle : handles) {
             boolean drained = handle.awaitUntil(deadline);
             outcomes.put(handle.dispatchKey(), drained);
             if (!drained) {
                 LOG.warnf("StreamSource %d did not flush within drain timeout %s; in-flight events dropped",
-                        handle.dispatchKey(), timeout);
+                        handle.dispatchKey().value(), timeout);
             }
         }
         return outcomes;
@@ -168,8 +168,14 @@ public class StreamSourceSupervisor {
         return accepting;
     }
 
-    /** Per-source "events lost on shutdown" counter for operator monitoring. */
-    public long eventsLostOnShutdown(long dispatchKey) {
+    /**
+     * Per-source "events lost on shutdown" counter for operator monitoring.
+     * Keyed on {@link StreamDispatchKey}, not a bare {@code long}: a bare long
+     * would still compile against the handle-keyed {@code registrations} map
+     * ({@code Map.get} takes {@code Object}) but always miss and report 0, so
+     * the type is what keeps the lookup correct (M1-371).
+     */
+    public long eventsLostOnShutdown(StreamDispatchKey dispatchKey) {
         StreamSourceRegistration registration = registrations.get(dispatchKey);
         return registration == null ? 0L : registration.eventsLostOnShutdown();
     }

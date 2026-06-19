@@ -22,7 +22,7 @@ import java.util.function.Consumer;
  */
 final class StreamSourceRegistration {
 
-    private final long dispatchKey;
+    private final StreamDispatchKey dispatchKey;
     private final String filterSpec;
     private final StreamSource source;
     private final Consumer<NormalizedPost> deliver;
@@ -34,7 +34,7 @@ final class StreamSourceRegistration {
     @SuppressWarnings("NullAway.Init")
     private volatile Future<?> startFuture;
 
-    StreamSourceRegistration(long dispatchKey, String filterSpec,
+    StreamSourceRegistration(StreamDispatchKey dispatchKey, String filterSpec,
                              StreamSource source, Consumer<NormalizedPost> deliver) {
         this.dispatchKey = dispatchKey;
         this.filterSpec = filterSpec;
@@ -42,7 +42,7 @@ final class StreamSourceRegistration {
         this.deliver = deliver;
     }
 
-    long dispatchKey() {
+    StreamDispatchKey dispatchKey() {
         return dispatchKey;
     }
 
@@ -58,7 +58,11 @@ final class StreamSourceRegistration {
      * means a relay unreachable at boot never blocks the caller.
      */
     void startOn(ExecutorService executor) {
-        startFuture = executor.submit(() -> source.start(dispatchKey, filterSpec, deliver));
+        // Unwrap the typed handle to the bare long at the StreamSource SPI
+        // boundary: start() stamps the key onto every delivered post and core
+        // persists it as a long. The handle is a supervisor-side wrapper only
+        // and must not cross into infochat-core (M1-371).
+        startFuture = executor.submit(() -> source.start(dispatchKey.value(), filterSpec, deliver));
     }
 
     /**
