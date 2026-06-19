@@ -3,13 +3,14 @@ id: M1-377
 title: "collector: replace the re-eval one-element-array transaction workaround and unify the two fail-closed test-seam idioms"
 status: pending
 created: 2026-06-14
-last_updated: 2026-06-14
+last_updated: 2026-06-19
 blocked_by: []
 files_budget: 6
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/reeval/ReEvaluationJob.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/stage1/Stage1Pipeline.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/embedding/EmbeddingWorker.java
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/TransactionHelper.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage1
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/embedding
 complexity: low
@@ -33,8 +34,25 @@ test_plan:
 spec_refs: []
 decision_refs: []
 reviews: []
-escalations: []
-revisions: []
+escalations:
+  - date: 2026-06-19
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      FILES-BUDGET-PLAUSIBLE: FAIL — files_scope omits
+      infochat-collector/src/main/java/app/zcat/infochat/collector/eval/TransactionHelper.java,
+      which acceptance item 1 requires modifying (only void inTransaction exists;
+      the value-returning form must be added, called in-scope by the Notes section).
+revisions:
+  - date: 2026-06-19
+    reason: clarity-fail rework — files_scope omitted TransactionHelper.java, which acceptance item 1 requires modifying (value-returning transaction form must be added)
+    prior_values: |
+      files_scope:
+        - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/reeval/ReEvaluationJob.java
+        - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/stage1/Stage1Pipeline.java
+        - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/embedding/EmbeddingWorker.java
+        - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage1
+        - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/embedding
+      (TransactionHelper.java absent)
 overrides: []
 aborted_attempts: []
 reopens: []
