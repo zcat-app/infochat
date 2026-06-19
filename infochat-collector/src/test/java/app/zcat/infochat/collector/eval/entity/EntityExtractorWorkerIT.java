@@ -33,7 +33,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @QuarkusTest
 class EntityExtractorWorkerIT {
 
-    private static final Instant FETCHED_AT = Instant.parse("2026-05-18T09:00:00Z");
+    // now()-relative so the seeded post always sits inside enumeratePending's
+    // fetched_at >= now() - (retention + slack) scan-window floor regardless of
+    // the wall-clock date the suite runs; a fixed date ages out below the floor
+    // and the pickup assertion starts failing (M1-400). Matches the in-window
+    // seed convention in ReEvaluationJobWindowTest.
+    private static final Instant FETCHED_AT = Instant.now();
     private static final String UID_PREFIX = "entity-it/";
 
     @Inject

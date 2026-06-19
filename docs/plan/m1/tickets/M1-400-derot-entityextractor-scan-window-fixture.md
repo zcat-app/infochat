@@ -1,9 +1,14 @@
 ---
 id: M1-400
 title: "test: de-rot the EntityExtractorWorkerIT scan-window fixture so the in-window post never ages out"
-status: pending
+status: done
 created: 2026-06-19
 last_updated: 2026-06-19
+clarity_check:
+  date: 2026-06-19
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 2
 files_scope:
@@ -27,7 +32,20 @@ test_plan:
     - all other tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-19
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 16
+      removed: 8
 escalations: []
 revisions: []
 overrides: []

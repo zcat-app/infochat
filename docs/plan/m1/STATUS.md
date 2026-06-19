@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 423 |
+| done | 424 |
 | deferred | 7 |
 | **total** | **436** |
 
@@ -29,7 +29,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-375 — provider: key the per-turn chat-tool cache on clamped args so over-cap duplicates do not double-charge the call budget (complexity: low, risk: low)
 - M1-376 — messaging: deterministic SimpleX adapterMessageId fallback and shared decode-ladder helper (complexity: low, risk: low)
 - M1-377 — collector: replace the re-eval one-element-array transaction workaround and unify the two fail-closed test-seam idioms (complexity: low, risk: low)
-- M1-400 — test: de-rot the EntityExtractorWorkerIT scan-window fixture so the in-window post never ages out (complexity: low, risk: low)
 
 ---
 
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-400 | test: de-rot the EntityExtractorWorkerIT scan-window fixture so the in-window post never ages out | 2026-06-19 | round 1 APPROVE |
 | M1-399 | wizard: route the two operator-typed adapter data-dir writes to secrets.env through dotenv_escape (6-adapter.sh), consistent with M1-397 | 2026-06-19 | round 1 APPROVE |
 | M1-397 | wizard: escape operator-pasted secret values so a literal quote / backslash / ${...} can't corrupt or interpolate the secrets.env entry | 2026-06-19 | round 1 APPROVE |
 | M1-374 | ssrf: seal IpBlocklist and drive the test loopback carve-out through an injected predicate instead of subclassing | 2026-06-19 | round 1 APPROVE |
@@ -74,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-394 | 4-llm.sh: verify GGUF download integrity (operator-supplied SHA-256) and strip query/fragment from the derived model filename | 2026-06-18 | round 1 APPROVE |
 | M1-393 | evaluate dropping SUPERUSER from the Postgres infochat owner role (the Collector holds owner creds for Flyway) | 2026-06-18 | round 1 APPROVE |
 | M1-392 | wizard: build the app images in an explicit phase before the step-7 readiness wait; raise the doctor disk floor for the build | 2026-06-17 | round 1 APPROVE |
-| M1-391 | wizard/compose: honor an operator-overridden adapter data-dir (the provider bind-mount is hardcoded to the default path) | 2026-06-17 | round 1 APPROVE |
 
 ---
 
@@ -605,6 +604,6 @@ M1-393 (done)
 M1-394 (done)
 M1-395 (done)
 M1-398 (done)
-M1-400 (pending) ← runnable
+M1-400 (done)
   └── M1-370 (deferred)
 ```
