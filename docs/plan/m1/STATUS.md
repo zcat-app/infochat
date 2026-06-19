@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 430 |
 | deferred | 6 |
-| **total** | **436** |
+| **total** | **442** |
 
 ---
 
@@ -24,7 +24,12 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-401 — llm: redact userinfo on requireHttpBaseUrl failure paths (complexity: low, risk: low)
+- M1-402 — messaging: clear reconnecting on SimpleX derivation failure (complexity: low, risk: low)
+- M1-403 — collector: read re-eval body from the candidate scan (complexity: low, risk: low)
+- M1-404 — collector: dedup the Stage 1 fail-closed whole-body write (complexity: low, risk: low)
+- M1-405 — provider: validate ChatToolDispatcher args before the call cap (complexity: low, risk: low)
+- M1-406 — cleanup: clarity and comment-policy drift sweep (3 files) (complexity: low, risk: low)
 
 ---
 
@@ -599,4 +604,10 @@ M1-394 (done)
 M1-395 (done)
 M1-398 (done)
 M1-400 (done)
+M1-401 (pending) ← runnable
+M1-402 (pending) ← runnable
+M1-403 (pending) ← runnable
+M1-404 (pending) ← runnable
+M1-405 (pending) ← runnable
+M1-406 (pending) ← runnable
 ```
