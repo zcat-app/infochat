@@ -6,7 +6,7 @@ import app.zcat.infochat.provider.source.FakeRelayServer;
 import app.zcat.infochat.provider.source.UrlProbe;
 import app.zcat.infochat.provider.source.UrlProbe.ProbeResult;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
-import app.zcat.infochat.ssrf.IpBlocklist;
+import app.zcat.infochat.ssrf.LoopbackPermittingBlocklist;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -20,7 +20,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
-import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.URI;
 import java.sql.Connection;
@@ -228,7 +227,7 @@ class AddSourceNostrProbeIT {
 
         public LoopbackRelayProbe() {
             super(new SsrfGuardedHttpClient(
-                    new LoopbackPermitting(),
+                    LoopbackPermittingBlocklist.create(),
                     Duration.ofSeconds(2),
                     Duration.ofSeconds(5),
                     Duration.ofSeconds(5),
@@ -243,22 +242,6 @@ class AddSourceNostrProbeIT {
             // exists so the @Alternative is picked up over the
             // production no-arg UrlProbe (mirrors AddSourceIT.LoopbackProbe).
             return super.probeRelay(relayUri);
-        }
-    }
-
-    /**
-     * Test-only {@link IpBlocklist} subclass — same as the inner
-     * classes in {@code UrlProbeTest} and {@code AddSourceIT}.
-     * Loopback is permitted so the in-process fixture can be dialed;
-     * every other range stays strict.
-     */
-    private static final class LoopbackPermitting extends IpBlocklist {
-        @Override
-        protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
-            if (addr.isLoopbackAddress()) {
-                return false;
-            }
-            return super.isBlockedAgainst(addr, hostInterfaces);
         }
     }
 

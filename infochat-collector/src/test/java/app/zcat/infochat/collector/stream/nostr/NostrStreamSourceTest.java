@@ -1,13 +1,12 @@
 package app.zcat.infochat.collector.stream.nostr;
 
 import app.zcat.infochat.core.ingest.NormalizedPost;
-import app.zcat.infochat.ssrf.IpBlocklist;
+import app.zcat.infochat.ssrf.LoopbackPermittingBlocklist;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Clock;
@@ -16,7 +15,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalLong;
-import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
@@ -48,7 +46,7 @@ class NostrStreamSourceTest {
     // fixture (RssFetcherTest, NitterFetcherTest, ...). Production wires
     // a default-strict SsrfGuardedHttpClient through Registrar.
     private final SsrfGuardedHttpClient ssrfClient = new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(5),
@@ -208,25 +206,6 @@ class NostrStreamSourceTest {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-        }
-    }
-
-    /**
-     * Test-only {@link IpBlocklist} subclass that permits loopback
-     * (127.0.0.0/8 + IPv6 ::1) so the in-process {@link FakeNostrRelay}
-     * fixture remains dialable. Every other range (private, link-local,
-     * CGNAT, cloud-metadata, multicast) is still refused via the strict
-     * super-implementation. Subclass-override is the explicit seam the
-     * Fetcher tests use against the same module.
-     */
-    private static final class LoopbackPermittingBlocklist extends IpBlocklist {
-
-        @Override
-        protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
-            if (addr.isLoopbackAddress()) {
-                return false;
-            }
-            return super.isBlockedAgainst(addr, hostInterfaces);
         }
     }
 }

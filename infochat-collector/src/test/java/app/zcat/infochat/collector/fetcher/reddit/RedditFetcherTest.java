@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.fetcher.reddit;
 
 import app.zcat.infochat.core.ingest.NormalizedPost;
+import app.zcat.infochat.ssrf.LoopbackPermittingBlocklist;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -257,7 +258,7 @@ class RedditFetcherTest {
 
     private static RedditFetcher testModeFetcher(int pageCap) {
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(30),

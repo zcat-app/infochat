@@ -6,7 +6,7 @@ import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.source.UrlProbe;
 import app.zcat.infochat.provider.source.UrlProbe.ProbeResult;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
-import app.zcat.infochat.ssrf.IpBlocklist;
+import app.zcat.infochat.ssrf.LoopbackPermittingBlocklist;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -22,7 +22,6 @@ import org.junit.jupiter.api.Test;
 import javax.sql.DataSource;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.sql.Array;
@@ -261,7 +260,7 @@ class AddSourceIT {
      * production {@link UrlProbe#UrlProbe() no-arg constructor}
      * builds a strict client that refuses 127.0.0.1; this test wants
      * the in-process HttpServer to be reachable. The
-     * {@link LoopbackPermitting} blocklist allows loopback while
+     * {@link LoopbackPermittingBlocklist} blocklist allows loopback while
      * leaving every other range strict.
      *
      * <p>No {@link Priority} annotation — activation is scoped via
@@ -277,7 +276,7 @@ class AddSourceIT {
 
         public LoopbackProbe() {
             super(new SsrfGuardedHttpClient(
-                    new LoopbackPermitting(),
+                    LoopbackPermittingBlocklist.create(),
                     Duration.ofSeconds(2),
                     Duration.ofSeconds(5),
                     Duration.ofSeconds(5),
@@ -292,22 +291,6 @@ class AddSourceIT {
             // exists so the @Alternative is picked up over the
             // production no-arg UrlProbe.
             return super.probe(url);
-        }
-    }
-
-    /**
-     * Test-only {@link IpBlocklist} subclass — same as the inner
-     * classes in {@code SsrfGuardedHttpClientTest} and
-     * {@code UrlProbeTest}. Loopback is permitted so the in-process
-     * fixture can be dialed; every other range stays strict.
-     */
-    private static final class LoopbackPermitting extends IpBlocklist {
-        @Override
-        protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
-            if (addr.isLoopbackAddress()) {
-                return false;
-            }
-            return super.isBlockedAgainst(addr, hostInterfaces);
         }
     }
 

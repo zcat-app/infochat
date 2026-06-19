@@ -168,7 +168,7 @@ class SsrfGuardedHttpClientConcurrencyTest {
     private static SsrfGuardedHttpClient loopbackClient(
             Function<String, List<InetAddress>> resolverSeam) {
         return new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(5),

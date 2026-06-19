@@ -59,6 +59,24 @@
             <groupId>app.zcat.infochat</groupId>
             <artifactId>infochat-ssrf</artifactId>
         </dependency>
+        <!--
+             Test-only dependency on infochat-ssrf's test-jar (M1-374): the
+             single shared loopback-permitting IpBlocklist factory
+             (LoopbackPermittingBlocklist), used by the source/command tests
+             (UrlProbe*, AddSource*) that must dial an in-process 127.0.0.1
+             server. Same mechanism and same inline-${project.version}
+             exception as the infochat-messaging-adapter test-jar dependency
+             above (see that comment for the M1-001 rationale): the parent's
+             <type>jar</type> management does not cover the <type>test-jar</type>
+             classifier, so the version is pinned inline here.
+        -->
+        <dependency>
+            <groupId>app.zcat.infochat</groupId>
+            <artifactId>infochat-ssrf</artifactId>
+            <version>${project.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-arc</artifactId>

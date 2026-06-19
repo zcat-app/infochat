@@ -2,7 +2,7 @@ package app.zcat.infochat.collector.fetcher.youtube;
 
 import com.sun.net.httpserver.HttpServer;
 import app.zcat.infochat.core.ingest.NormalizedPost;
-import app.zcat.infochat.ssrf.IpBlocklist;
+import app.zcat.infochat.ssrf.LoopbackPermittingBlocklist;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,7 +17,6 @@ import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -125,7 +123,7 @@ class YouTubeFetcherTest {
 
     private YouTubeFetcher testModeFetcher() {
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(30),
@@ -133,16 +131,5 @@ class YouTubeFetcherTest {
             10L * 1024 * 1024,
             3);
         return new YouTubeFetcher(client);
-    }
-
-    private static final class LoopbackPermittingBlocklist extends IpBlocklist {
-
-        @Override
-        protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
-            if (addr.isLoopbackAddress()) {
-                return false;
-            }
-            return super.isBlockedAgainst(addr, hostInterfaces);
-        }
     }
 }

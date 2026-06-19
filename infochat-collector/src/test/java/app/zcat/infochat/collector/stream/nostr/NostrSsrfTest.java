@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.stream.nostr;
 
 import app.zcat.infochat.ssrf.IpBlocklist;
+import app.zcat.infochat.ssrf.LoopbackPermittingBlocklist;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient.SsrfPolicyException;
 import org.junit.jupiter.api.Test;
@@ -13,7 +14,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.OptionalLong;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -95,7 +95,7 @@ class NostrSsrfTest {
             int n = seamCalls.incrementAndGet();
             return List.of(n == 1 ? loopback() : privateAddress());
         };
-        SsrfGuardedHttpClient ssrfClient = newSsrfClient(seam, new LoopbackPermittingBlocklist());
+        SsrfGuardedHttpClient ssrfClient = newSsrfClient(seam, LoopbackPermittingBlocklist.create());
         NostrRelayConnection connection = newConnection(ssrfClient);
 
         // First connect: SSRF check passes (loopback permitted), then
@@ -175,24 +175,6 @@ class NostrSsrfTest {
             return InetAddress.getByName("192.168.99.99");
         } catch (UnknownHostException e) {
             throw new IllegalStateException(e);
-        }
-    }
-
-    /**
-     * Test-only {@link IpBlocklist} subclass that permits loopback so
-     * the first connect attempt's SSRF check passes (mirroring the
-     * pattern used by Fetcher tests against the in-process
-     * {@code HttpServer} fixture). Every other blocklist range is
-     * still refused via the strict super-implementation.
-     */
-    private static final class LoopbackPermittingBlocklist extends IpBlocklist {
-
-        @Override
-        protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
-            if (addr.isLoopbackAddress()) {
-                return false;
-            }
-            return super.isBlockedAgainst(addr, hostInterfaces);
         }
     }
 }

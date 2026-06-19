@@ -6,7 +6,7 @@ import app.zcat.infochat.collector.outbox.TestEvalQueueConsumer;
 import app.zcat.infochat.collector.stream.StreamSourceSupervisor;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.ingest.NormalizedPost;
-import app.zcat.infochat.ssrf.IpBlocklist;
+import app.zcat.infochat.ssrf.LoopbackPermittingBlocklist;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -15,7 +15,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
-import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.sql.Connection;
@@ -25,7 +24,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.OptionalLong;
-import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -72,7 +70,7 @@ class NostrStreamSourceIT {
     // dialable; every other blocklist range still refuses. Production
     // Registrar wires a default-strict instance.
     private final SsrfGuardedHttpClient ssrfClient = new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(5),
@@ -185,23 +183,6 @@ class NostrStreamSourceIT {
         if (consumer.size() < expected) {
             throw new AssertionError("timeout: expected consumer size >= " + expected
                     + " but got " + consumer.size());
-        }
-    }
-
-    /**
-     * Loopback-permitting {@link IpBlocklist} so the in-process
-     * {@link FakeNostrRelay} (127.0.0.1) remains dialable while every
-     * other range stays refused. Same shape used by the Fetcher tests
-     * (RssFetcherTest, NitterFetcherTest, ...).
-     */
-    private static final class LoopbackPermittingBlocklist extends IpBlocklist {
-
-        @Override
-        protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
-            if (addr.isLoopbackAddress()) {
-                return false;
-            }
-            return super.isBlockedAgainst(addr, hostInterfaces);
         }
     }
 }

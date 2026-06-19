@@ -2,12 +2,10 @@ package app.zcat.infochat.provider.source;
 
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.source.UrlProbe.ProbeResult;
-import app.zcat.infochat.ssrf.IpBlocklist;
+import app.zcat.infochat.ssrf.LoopbackPermittingBlocklist;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import org.junit.jupiter.api.Test;
 
-import java.net.InetAddress;
-import java.util.Set;
 import java.net.ServerSocket;
 import java.net.URI;
 import java.time.Duration;
@@ -90,30 +88,12 @@ class UrlProbeRelayTest {
 
     private SsrfGuardedHttpClient loopbackPermittingClient() {
         return new SsrfGuardedHttpClient(
-                new LoopbackPermitting(),
+                LoopbackPermittingBlocklist.create(),
                 Duration.ofSeconds(2),
                 Duration.ofSeconds(2),
                 Duration.ofSeconds(5),
                 Duration.ofMinutes(2),
                 10L * 1024,
                 3);
-    }
-
-    /**
-     * Test-only blocklist subclass that permits loopback addresses so
-     * the in-process {@link FakeRelayServer} fixture can be dialed;
-     * every other range still routes through the strict
-     * {@link IpBlocklist}. Mirrors the same-named inner class in
-     * {@code UrlProbeTest}.
-     */
-    private static final class LoopbackPermitting extends IpBlocklist {
-
-        @Override
-        protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
-            if (addr.isLoopbackAddress()) {
-                return false;
-            }
-            return super.isBlockedAgainst(addr, hostInterfaces);
-        }
     }
 }

@@ -3,7 +3,7 @@ package app.zcat.infochat.provider.source;
 import com.sun.net.httpserver.HttpServer;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.source.UrlProbe.ProbeResult;
-import app.zcat.infochat.ssrf.IpBlocklist;
+import app.zcat.infochat.ssrf.LoopbackPermittingBlocklist;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,8 +11,6 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.net.InetAddress;
-import java.util.Set;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.time.Duration;
@@ -27,9 +25,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@link com.sun.net.httpserver.HttpServer com.sun.net.httpserver.HttpServer}
  * bound to {@code 127.0.0.1:0} with per-test contexts emitting the
  * status code and {@code Content-Type} each acceptance row pins. The
- * client uses a {@link LoopbackPermitting} blocklist so the localhost
- * fixture can be dialed; the SSRF-rejection test swaps in the strict
- * production blocklist to verify the wrapper still rejects loopback
+ * client uses a {@link LoopbackPermittingBlocklist} blocklist so the
+ * localhost fixture can be dialed; the SSRF-rejection test swaps in the
+ * strict production blocklist to verify the wrapper still rejects loopback
  * by default and the probe surfaces the
  * {@link BundleKeys#ERROR_ADD_SOURCE_URL_BLOCKED_SSRF} key.
  *
@@ -169,7 +167,7 @@ class UrlProbeTest {
         });
 
         SsrfGuardedHttpClient slowTimingClient = new SsrfGuardedHttpClient(
-                new LoopbackPermitting(),
+                LoopbackPermittingBlocklist.create(),
                 /* connectTimeout     */ Duration.ofMillis(500),
                 /* requestTimeout     */ Duration.ofMillis(300),
                 /* readTimeout        */ Duration.ofMillis(500),
@@ -208,7 +206,7 @@ class UrlProbeTest {
         });
 
         SsrfGuardedHttpClient stallTimingClient = new SsrfGuardedHttpClient(
-                new LoopbackPermitting(),
+                LoopbackPermittingBlocklist.create(),
                 /* connectTimeout     */ Duration.ofSeconds(2),
                 /* requestTimeout     */ Duration.ofSeconds(2),
                 /* readTimeout        */ Duration.ofMillis(300),
@@ -225,30 +223,12 @@ class UrlProbeTest {
 
     private SsrfGuardedHttpClient loopbackPermittingClient() {
         return new SsrfGuardedHttpClient(
-                new LoopbackPermitting(),
+                LoopbackPermittingBlocklist.create(),
                 Duration.ofSeconds(2),
                 Duration.ofSeconds(2),
                 Duration.ofSeconds(5),
                 Duration.ofMinutes(2),
                 10L * 1024,
                 3);
-    }
-
-    /**
-     * Test-only blocklist subclass that permits loopback addresses so
-     * the in-process {@link HttpServer} fixture can be dialed; every
-     * other range still routes through the strict
-     * {@link IpBlocklist}. Mirrors the same-named inner class in
-     * {@code SsrfGuardedHttpClientTest}.
-     */
-    private static final class LoopbackPermitting extends IpBlocklist {
-
-        @Override
-        protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
-            if (addr.isLoopbackAddress()) {
-                return false;
-            }
-            return super.isBlockedAgainst(addr, hostInterfaces);
-        }
     }
 }

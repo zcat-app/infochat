@@ -3,6 +3,7 @@ package app.zcat.infochat.collector.fetcher.rss;
 import com.sun.net.httpserver.HttpServer;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.ssrf.IpBlocklist;
+import app.zcat.infochat.ssrf.LoopbackPermittingBlocklist;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient.SsrfPolicyException;
 import org.junit.jupiter.api.AfterEach;
@@ -11,7 +12,6 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,7 +19,6 @@ import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -36,11 +35,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Because the strict production {@link IpBlocklist} refuses to dial
  * {@code 127.0.0.0/8}, every test that needs to reach the loopback
  * fixture constructs the {@link RssFetcher} with a test-mode
- * {@link SsrfGuardedHttpClient} configured with a
- * {@link LoopbackPermittingBlocklist}. The carve-out is a deliberate
- * API surface — passing a non-default {@link IpBlocklist} is the only
- * way to engage it, and accidentally enabling it in production
- * requires writing visibly non-default code.
+ * {@link SsrfGuardedHttpClient} configured with the loopback-permitting
+ * blocklist from {@link LoopbackPermittingBlocklist#create()}. That
+ * carve-out lives only in ssrf test sources (M1-374): {@link IpBlocklist}
+ * is {@code final} with a package-private carve-out constructor, so no
+ * production code in any module can construct a loopback-permitting
+ * blocklist.
  */
 class RssFetcherTest {
 
@@ -167,7 +167,7 @@ class RssFetcherTest {
         });
 
         RssFetcher fetcher = new RssFetcher(new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(30),
@@ -183,7 +183,7 @@ class RssFetcherTest {
 
     private RssFetcher testModeFetcher() {
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(30),
@@ -191,24 +191,5 @@ class RssFetcherTest {
             10L * 1024 * 1024,
             3);
         return new RssFetcher(client);
-    }
-
-    /**
-     * Test-only {@link IpBlocklist} subclass that permits loopback
-     * addresses so the in-process {@link HttpServer} fixture can be
-     * dialed, while still blocking every other range. Subclassing is
-     * the explicit override surface; the no-arg
-     * {@link SsrfGuardedHttpClient} constructor wires the strict
-     * production blocklist.
-     */
-    private static final class LoopbackPermittingBlocklist extends IpBlocklist {
-
-        @Override
-        protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
-            if (addr.isLoopbackAddress()) {
-                return false;
-            }
-            return super.isBlockedAgainst(addr, hostInterfaces);
-        }
     }
 }

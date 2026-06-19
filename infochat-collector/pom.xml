@@ -22,6 +22,32 @@
             <groupId>app.zcat.infochat</groupId>
             <artifactId>infochat-ssrf</artifactId>
         </dependency>
+        <!--
+             Test-only dependency on infochat-ssrf's test-jar (M1-374): the
+             single shared loopback-permitting IpBlocklist factory
+             (LoopbackPermittingBlocklist), used by the fetcher and
+             stream/nostr tests that must dial an in-process 127.0.0.1 server.
+             The plain compile-time infochat-ssrf dependency above exposes only
+             main-jar classes; the test-jar exposes the test factory across the
+             module boundary (Maven test-classpath convention).
+
+             Version pinned inline (the same one-off exception to the M1-001
+             BOM-managed-versions invariant taken for the messaging-adapter
+             test-jar in infochat-provider, M1-109): the parent's
+             dependencyManagement entry for infochat-ssrf covers the default
+             <type>jar</type> form only; Maven does NOT inherit that version
+             onto a <type>test-jar</type> request with the same
+             groupId+artifactId (the "tests" classifier makes it a distinct
+             artifact for management). Inline ${project.version} keeps the
+             change in this module's pom rather than touching the parent.
+        -->
+        <dependency>
+            <groupId>app.zcat.infochat</groupId>
+            <artifactId>infochat-ssrf</artifactId>
+            <version>${project.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>app.zcat.infochat</groupId>
             <artifactId>infochat-llm-adapter</artifactId>

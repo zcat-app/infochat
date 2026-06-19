@@ -86,13 +86,24 @@ import java.util.function.Supplier;
  * provider. Tests that need a deterministic host-IP set use the
  * package-private {@link Supplier} overload (M1-026; lets tests supply
  * a fixed set, or simulate post-startup interface changes via a
- * mutable supplier). Tests that also need to dial localhost supply a
- * SUBCLASS that overrides {@link #isBlocked} to carve out the loopback
- * range.
+ * mutable supplier). Tests that also need to dial localhost obtain a
+ * loopback-permitting instance from the shared test factory in this
+ * package's TEST sources, which calls the package-private
+ * {@code (boolean permitLoopback, Supplier)} carve-out constructor
+ * (M1-374). The class is {@code final} and that carve-out constructor is
+ * package-private with its only caller in test sources, so no production
+ * code in any module can build a loopback-permitting blocklist or re-open
+ * a blocked range by subclassing.
  */
-public class IpBlocklist {
+public final class IpBlocklist {
 
     private final Supplier<Set<InetAddress>> hostInterfacesProvider;
+
+    // M1-374: enables ONLY the loopback carve-out, and ONLY for test
+    // fixtures, via the package-private (boolean, Supplier) constructor.
+    // Every production construction path leaves this false (strict), so the
+    // carve-out is barred from production by visibility, not convention.
+    private final boolean permitLoopback;
 
     /**
      * Production constructor. The host's non-loopback interface
@@ -102,7 +113,7 @@ public class IpBlocklist {
      * call is cheap on hot paths.
      */
     public IpBlocklist() {
-        this((Supplier<Set<InetAddress>>) HostInterfaceSet::enumerate);
+        this(false, HostInterfaceSet::enumerate);
     }
 
     /**
@@ -110,9 +121,25 @@ public class IpBlocklist {
      * host-interface set source — typically an
      * {@link java.util.concurrent.atomic.AtomicReference} that is
      * mutated mid-test to simulate a network interface coming up
-     * after IpBlocklist construction.
+     * after IpBlocklist construction. Strict: loopback is NOT permitted.
      */
     IpBlocklist(Supplier<Set<InetAddress>> hostInterfacesProvider) {
+        this(false, hostInterfacesProvider);
+    }
+
+    /**
+     * M1-374 carve-out constructor. Package-private, so only this package
+     * can reach it; its sole caller is the loopback-permitting factory in
+     * the ssrf TEST sources (no production classpath can construct a
+     * permissive blocklist). {@code permitLoopback=true} makes
+     * {@link #isBlockedAgainst} treat loopback (127.0.0.0/8, ::1) as
+     * not-blocked so an in-process test server bound to localhost can be
+     * dialed; every other blocked range is unaffected. Replaces the former
+     * {@code protected isBlockedAgainst} override seam that the now-removed
+     * cross-module test subclasses relied on.
+     */
+    IpBlocklist(boolean permitLoopback, Supplier<Set<InetAddress>> hostInterfacesProvider) {
+        this.permitLoopback = permitLoopback;
         this.hostInterfacesProvider = hostInterfacesProvider;
     }
 
@@ -155,14 +182,21 @@ public class IpBlocklist {
     /**
      * Core range + host-interface match against a CALLER-SUPPLIED
      * host-interface snapshot. Both the single-address {@link #isBlocked}
-     * and the batch {@link #firstBlocked} funnel through here, so a
-     * test subclass that carves out a range (e.g. permitting loopback)
-     * overrides this one method and the carve-out applies to both
-     * paths. {@code protected} (not package-private) so the loopback-
-     * permitting doubles in the collector/provider test packages can
-     * override the seam from outside this package.
+     * and the batch {@link #firstBlocked} funnel through here, so the
+     * loopback carve-out applied here covers both paths. {@code private}:
+     * the class is {@code final}, so this is no longer an extension seam —
+     * the carve-out arrives via the {@code permitLoopback} constructor flag
+     * (M1-374) instead of a subclass override.
      */
-    protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
+    private boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
+        // M1-374: loopback carve-out, enabled only by the package-private
+        // (boolean, Supplier) constructor used by the test factory. Matches
+        // the former test-subclass behavior — permit 127.0.0.0/8 and ::1
+        // before any range / host-interface check. Production leaves
+        // permitLoopback false, so this branch is inert there.
+        if (permitLoopback && addr.isLoopbackAddress()) {
+            return false;
+        }
         if (hostInterfaces.contains(addr)) {
             return true;
         }

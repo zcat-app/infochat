@@ -1,6 +1,6 @@
 package app.zcat.infochat.collector.stream.nostr;
 
-import app.zcat.infochat.ssrf.IpBlocklist;
+import app.zcat.infochat.ssrf.LoopbackPermittingBlocklist;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,7 +13,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.OptionalLong;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
@@ -91,7 +90,7 @@ class NostrSsrfIT {
         };
 
         SsrfGuardedHttpClient ssrfClient = new SsrfGuardedHttpClient(
-                new LoopbackPermittingBlocklist(),
+                LoopbackPermittingBlocklist.create(),
                 Duration.ofSeconds(2),
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5),
@@ -181,25 +180,5 @@ class NostrSsrfIT {
     private static RelayHealthTracker noOpTracker(List<java.net.URI> relayUris) {
         return new RelayHealthTracker(relayUris, Integer.MAX_VALUE,
                 Duration.ofHours(1), Integer.MAX_VALUE, Clock.systemUTC(), t -> { });
-    }
-
-    /**
-     * Loopback-permitting {@link IpBlocklist} so the connect-time
-     * SSRF check passes against the FakeNostrRelay's 127.0.0.1
-     * binding. Every other range (including the link-local /
-     * cloud-metadata 169.254.0.0/16 used in the watcher arm) is
-     * still refused via the strict super-implementation — exactly
-     * the carve-out shape the Fetcher tests use against their own
-     * in-process HTTP fixture.
-     */
-    private static final class LoopbackPermittingBlocklist extends IpBlocklist {
-
-        @Override
-        protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
-            if (addr.isLoopbackAddress()) {
-                return false;
-            }
-            return super.isBlockedAgainst(addr, hostInterfaces);
-        }
     }
 }

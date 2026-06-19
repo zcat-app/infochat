@@ -42,9 +42,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@link com.sun.net.httpserver.HttpServer com.sun.net.httpserver.HttpServer}
  * fixture bound to {@code 127.0.0.1}. Because the strict
  * {@link IpBlocklist} blocks {@code 127.0.0.0/8}, every test that
- * needs to reach the loopback fixture constructs the wrapper via the
- * package-private constructor with a {@link LoopbackPermittingBlocklist}
- * blocklist. The strict-mode tests use the no-arg constructor.
+ * needs to reach the loopback fixture constructs the wrapper with the
+ * loopback-permitting blocklist from
+ * {@link LoopbackPermittingBlocklist#create()}. The strict-mode tests
+ * use the no-arg constructor.
  */
 class SsrfGuardedHttpClientTest {
 
@@ -98,7 +99,7 @@ class SsrfGuardedHttpClientTest {
         // real DNS lookup runs.
         InetAddress loopback = InetAddress.getByName("127.0.0.1");
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(5),
@@ -153,7 +154,7 @@ class SsrfGuardedHttpClientTest {
         });
 
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
@@ -319,7 +320,7 @@ class SsrfGuardedHttpClientTest {
         };
 
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(5),
@@ -392,7 +393,7 @@ class SsrfGuardedHttpClientTest {
         // hand-picked tolerance against scheduler jitter.
         Duration requestTimeout = Duration.ofSeconds(30);
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             requestTimeout,
             readTimeout,
@@ -460,7 +461,7 @@ class SsrfGuardedHttpClientTest {
         });
 
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             // Long request-timeout so the failure cannot be the
             // request-level timeout instead of the body-read deadline.
@@ -526,7 +527,7 @@ class SsrfGuardedHttpClientTest {
         };
 
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(5),
@@ -819,7 +820,7 @@ class SsrfGuardedHttpClientTest {
         });
 
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(5),
@@ -951,7 +952,7 @@ class SsrfGuardedHttpClientTest {
         // Long read timeout + deadline so neither the per-read watchdog
         // nor the total deadline can fire before the interrupt does.
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(30),
             Duration.ofSeconds(30),
@@ -1052,7 +1053,7 @@ class SsrfGuardedHttpClientTest {
         // reason instead of holding the fetcher thread — the slow-dribble
         // DoS the size cap alone does NOT close.
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofMillis(200),
@@ -1111,7 +1112,7 @@ class SsrfGuardedHttpClientTest {
         });
 
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
@@ -1202,7 +1203,7 @@ class SsrfGuardedHttpClientTest {
 
     private SsrfGuardedHttpClient testModeClient() {
         return new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(5),

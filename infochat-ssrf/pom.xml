@@ -97,6 +97,40 @@
                     </execution>
                 </executions>
             </plugin>
+            <!--
+                 Publish this module's test classes as a secondary test-jar
+                 artifact so infochat-collector and infochat-provider can
+                 consume the single shared loopback-permitting IpBlocklist
+                 factory (LoopbackPermittingBlocklist) in their own tests
+                 (M1-374). The factory must live in package
+                 app.zcat.infochat.ssrf to reach IpBlocklist's package-private
+                 carve-out constructor; the plain compile-time dependency on
+                 infochat-ssrf exposes only main-jar classes, so the test-jar
+                 is the mechanism that exposes the test factory across module
+                 boundaries (Maven test-classpath convention). Mirrors the
+                 proven infochat-messaging-adapter test-jar consumed by
+                 infochat-provider (M1-109).
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <!--
+                     Version pinned because no parent-level pluginManagement
+                     entry exists for maven-jar-plugin; without a version Maven
+                     warns and falls back to whatever the super-pom resolves at
+                     build time. 3.4.2 matches the pin in
+                     infochat-messaging-adapter's identical test-jar execution.
+                -->
+                <version>3.4.2</version>
+                <executions>
+                    <execution>
+                        <id>test-jar</id>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 </project>

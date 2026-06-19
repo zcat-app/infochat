@@ -6,7 +6,7 @@ import app.zcat.infochat.collector.outbox.TestEvalQueueConsumer;
 import app.zcat.infochat.collector.stream.StreamSourceSupervisor;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.ingest.NormalizedPost;
-import app.zcat.infochat.ssrf.IpBlocklist;
+import app.zcat.infochat.ssrf.LoopbackPermittingBlocklist;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -15,7 +15,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
-import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.sql.Connection;
@@ -72,7 +71,7 @@ class NostrStreamSourceVerificationIT {
     // Loopback-permitting SSRF guard so FakeNostrRelays (127.0.0.1) remain
     // dialable. Production Registrar wires a default-strict instance.
     private final SsrfGuardedHttpClient ssrfClient = new SsrfGuardedHttpClient(
-            new LoopbackPermittingBlocklist(),
+            LoopbackPermittingBlocklist.create(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(5),
@@ -292,22 +291,6 @@ class NostrStreamSourceVerificationIT {
                 return;
             }
             Thread.sleep(25);
-        }
-    }
-
-    /**
-     * Loopback-permitting {@link IpBlocklist} so the in-process
-     * {@link FakeNostrRelay} fixtures (127.0.0.1) remain dialable
-     * while every other range stays refused.
-     */
-    private static final class LoopbackPermittingBlocklist extends IpBlocklist {
-
-        @Override
-        protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
-            if (addr.isLoopbackAddress()) {
-                return false;
-            }
-            return super.isBlockedAgainst(addr, hostInterfaces);
         }
     }
 }
