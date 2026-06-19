@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 /**
@@ -343,41 +344,28 @@ final class SimpleXMessageCodec {
         if (itemBody == null) {
             return new Ignored("newChatItem-without-inner-chatItem");
         }
-        JsonNode content = itemBody.get("content");
-        if (content == null) {
-            return new Ignored("newChatItem-without-content");
-        }
-        JsonNode msgContent = content.get("msgContent");
-        if (msgContent == null) {
-            return new Ignored("newChatItem-without-msgContent");
-        }
-        String text = optText(msgContent, "text");
-        if (text == null) {
-            return new Ignored("newChatItem-without-text");
-        }
-        String adapterMessageId = optText(itemBody, "itemId");
-        if (adapterMessageId == null) {
-            adapterMessageId = "simplex-" + System.nanoTime();
-        }
-        // Enforce the SPI-declared inbound cap at the parse boundary so the
-        // Provider's downstream budgets (LLM tokens, Stage 1 watchdog) plan
-        // against a real ceiling rather than the 1 MiB WebSocket frame
-        // ceiling. UTF-8 byte length, not Java char length — the cap is a
-        // wire-level budget. Surfaced as OversizeDropped (not Ignored) so the
-        // consumer raises adapter.inbound.dropped{reason=oversize} + the
-        // §6.3.10 WARN with the sender and adapterMessageId in hand; the cap
-        // CHECK here is unchanged, only the drop's observability.
-        if (Utf8.exceedsByteLength(text, MAX_INBOUND_TEXT_BYTES)) {
-            return new OversizeDropped(new ScopeRef.Dm(contactId), contactId, adapterMessageId);
-        }
-        Identity sender = new Identity(contactId, displayName, Instant.now());
-        InboundMessage msg = new InboundMessage(
-                sender,
-                new ScopeRef.Dm(contactId),
-                text,
-                Instant.now(),
-                adapterMessageId);
-        return new Inbound(msg);
+        return decodeMsgContentText(itemBody, "newChatItem", text -> {
+            String adapterMessageId = adapterMessageId(itemBody, contactId, text);
+            // Enforce the SPI-declared inbound cap at the parse boundary so the
+            // Provider's downstream budgets (LLM tokens, Stage 1 watchdog) plan
+            // against a real ceiling rather than the 1 MiB WebSocket frame
+            // ceiling. UTF-8 byte length, not Java char length — the cap is a
+            // wire-level budget. Surfaced as OversizeDropped (not Ignored) so the
+            // consumer raises adapter.inbound.dropped{reason=oversize} + the
+            // §6.3.10 WARN with the sender and adapterMessageId in hand; the cap
+            // CHECK here is unchanged, only the drop's observability.
+            if (Utf8.exceedsByteLength(text, MAX_INBOUND_TEXT_BYTES)) {
+                return new OversizeDropped(new ScopeRef.Dm(contactId), contactId, adapterMessageId);
+            }
+            Identity sender = new Identity(contactId, displayName, Instant.now());
+            InboundMessage msg = new InboundMessage(
+                    sender,
+                    new ScopeRef.Dm(contactId),
+                    text,
+                    Instant.now(),
+                    adapterMessageId);
+            return new Inbound(msg);
+        });
     }
 
     /**
@@ -462,38 +450,26 @@ final class SimpleXMessageCodec {
             return new Ignored("newChatItem-group-invalid-sender");
         }
         String senderDisplayName = optText(groupMember, "localDisplayName");
-        JsonNode content = itemBody.get("content");
-        if (content == null) {
-            return new Ignored("newChatItem-group-without-content");
-        }
-        JsonNode msgContent = content.get("msgContent");
-        if (msgContent == null) {
-            return new Ignored("newChatItem-group-without-msgContent");
-        }
-        String text = optText(msgContent, "text");
-        if (text == null) {
-            return new Ignored("newChatItem-group-without-text");
-        }
-        String adapterMessageId = optText(itemBody, "itemId");
-        if (adapterMessageId == null) {
-            adapterMessageId = "simplex-" + System.nanoTime();
-        }
-        // Same transport cap as the DM path; surfaced as OversizeDropped
-        // (scope = group) so the consumer raises the §6.3.10 counter + WARN.
-        // The cap CHECK is unchanged — only the silent drop becomes observable.
-        if (Utf8.exceedsByteLength(text, MAX_INBOUND_TEXT_BYTES)) {
-            return new OversizeDropped(
-                    new ScopeRef.Group(adapterGroupId), senderContactId, adapterMessageId);
-        }
-        List<String> mentions = extractMentionQueueAddresses(itemBody.get("formattedText"));
-        return new GroupCandidate(
-                adapterGroupId,
-                senderContactId,
-                senderDisplayName,
-                text,
-                List.copyOf(mentions),
-                extractMentionSpans(itemBody.get("formattedText"), text),
-                adapterMessageId);
+        return decodeMsgContentText(itemBody, "newChatItem-group", text -> {
+            String adapterMessageId =
+                    adapterMessageId(itemBody, adapterGroupId, senderContactId, text);
+            // Same transport cap as the DM path; surfaced as OversizeDropped
+            // (scope = group) so the consumer raises the §6.3.10 counter + WARN.
+            // The cap CHECK is unchanged — only the silent drop becomes observable.
+            if (Utf8.exceedsByteLength(text, MAX_INBOUND_TEXT_BYTES)) {
+                return new OversizeDropped(
+                        new ScopeRef.Group(adapterGroupId), senderContactId, adapterMessageId);
+            }
+            List<String> mentions = extractMentionQueueAddresses(itemBody.get("formattedText"));
+            return new GroupCandidate(
+                    adapterGroupId,
+                    senderContactId,
+                    senderDisplayName,
+                    text,
+                    List.copyOf(mentions),
+                    extractMentionSpans(itemBody.get("formattedText"), text),
+                    adapterMessageId);
+        });
     }
 
     /**
@@ -571,6 +547,58 @@ final class SimpleXMessageCodec {
             return List.of();
         }
         return List.copyOf(spans);
+    }
+
+    /**
+     * Shared {@code chatItem → content → msgContent → text} guard ladder for
+     * both {@code newChatItem} decoders. Walks the three nested fields,
+     * returning the matching {@code Ignored} ({@code reasonPrefix + "-without-
+     * content" | "-without-msgContent" | "-without-text"}) for the first
+     * absent one, or handing the validated text to {@code onText} for the
+     * variant-specific tail (DM builds {@link Inbound}, group builds
+     * {@link GroupCandidate}). One ladder so the DM and group paths cannot
+     * drift independently; the {@code reasonPrefix} keeps each path's distinct
+     * Ignored reasons ({@code "newChatItem-"} vs {@code "newChatItem-group-"}).
+     */
+    private static DecodedFrame decodeMsgContentText(JsonNode itemBody, String reasonPrefix,
+            Function<String, DecodedFrame> onText) {
+        JsonNode content = itemBody.get("content");
+        if (content == null) {
+            return new Ignored(reasonPrefix + "-without-content");
+        }
+        JsonNode msgContent = content.get("msgContent");
+        if (msgContent == null) {
+            return new Ignored(reasonPrefix + "-without-msgContent");
+        }
+        String text = optText(msgContent, "text");
+        if (text == null) {
+            return new Ignored(reasonPrefix + "-without-text");
+        }
+        return onText.apply(text);
+    }
+
+    /**
+     * adapterMessageId for a {@code newChatItem} inner body: the wire
+     * {@code itemId} when present, else a deterministic fallback derived from
+     * the frame's stable identifying fields. Mirrors SignalMessageCodec
+     * deriving its id from the message timestamp — adapterMessageId is the
+     * stable correlation key ({@link InboundMessage} javadoc: retry
+     * correlation, audit cross-reference), so two decodes of the same
+     * itemId-less frame MUST yield the same id; {@code System.nanoTime()}
+     * defeated that. The fallback path is rare (simplex-chat supplies
+     * {@code itemId} on real frames) and the id is never persisted across
+     * instances, so a content hash that two itemId-less frames with identical
+     * stable fields could share is acceptable. The fields are joined with a
+     * space — absent from the queue-address charset that the leading
+     * contactId/groupId fields are validated against — so the boundary before
+     * the trailing free-text field stays unambiguous.
+     */
+    private static String adapterMessageId(JsonNode itemBody, String... stableFields) {
+        String itemId = optText(itemBody, "itemId");
+        if (itemId != null) {
+            return itemId;
+        }
+        return "simplex-" + Integer.toHexString(String.join(" ", stableFields).hashCode());
     }
 
     /**
