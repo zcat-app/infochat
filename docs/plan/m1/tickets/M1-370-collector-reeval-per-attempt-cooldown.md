@@ -3,12 +3,12 @@ id: M1-370
 title: "collector: add a per-attempt re-eval cooldown so the fail-open backlog is not re-judged each tick"
 status: pending
 created: 2026-06-14
-last_updated: 2026-06-14
+last_updated: 2026-06-19
 blocked_by: []
 files_budget: 5
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/reeval/ReEvaluationJob.java
-  - infochat-collector/src/main/resources/db/migration
+  - infochat-core/src/main/resources/db/migration
   - infochat-collector/src/main/resources/application.properties
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval
 complexity: medium
@@ -27,7 +27,7 @@ acceptance:
   - "mvn -B clean verify from the repo root exits 0."
 test_plan:
   adds:
-    - infochat-collector/src/main/resources/db/migration (one forward-only Vnn migration adding post.last_reeval_at)
+    - infochat-core/src/main/resources/db/migration (one forward-only Vnn migration adding post.last_reeval_at)
   modifies:
     - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval (cooldown enumeration test)
   preserves:
@@ -35,8 +35,29 @@ test_plan:
 spec_refs: []
 decision_refs: []
 reviews: []
-escalations: []
-revisions: []
+escalations:
+  - date: 2026-06-19
+    reason: scope-path-stale
+    reviewer_verdict_excerpt: |
+      N/A — surfaced at /m1-tick start grounding (start.md step 0): the
+      files_scope migration path infochat-collector/src/main/resources/db/migration
+      does not exist on disk. All Flyway migrations are centralized in
+      infochat-core/src/main/resources/db/migration (collector
+      application.properties comment: "migrations move to infochat-core
+      after M1-007a"). The post-table migration adding last_reeval_at must
+      land in infochat-core; the stale path would force a write outside
+      files_scope (an escalation trigger). User chose refine.
+revisions:
+  - date: 2026-06-19
+    reason: refine ticket spec (scope-path-stale rework) — migration path correction
+    prior_values: |
+      files_scope (line 11) and test_plan.adds (line 30) both pointed the
+      forward-only migration at infochat-collector/src/main/resources/db/migration,
+      which does not exist. Corrected both to
+      infochat-core/src/main/resources/db/migration (the centralized Flyway
+      location; next free version V52). No other frontmatter changed;
+      files_budget (5) still covers ReEvaluationJob.java + the migration +
+      application.properties + the test.
 overrides: []
 aborted_attempts: []
 reopens: []
