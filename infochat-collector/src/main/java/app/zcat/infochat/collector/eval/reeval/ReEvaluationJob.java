@@ -117,6 +117,16 @@ public class ReEvaluationJob {
     @ConfigProperty(name = "infochat.reeval.needs-review-depth-threshold")
     int needsReviewDepthThreshold;
 
+    // Minimum spacing between successive re-judges of the same fail-open
+    // (infra-failure) post. enumerateCandidates excludes a candidate whose
+    // last_reeval_at falls within this window, so the steady-recovery re-judge
+    // load tracks the RATE of new fail-open posts rather than the standing
+    // backlog (M1-370). Default is a multiple of poll-interval (see
+    // application.properties); the UNKNOWN second-opinion disjunct is
+    // deliberately left outside the window.
+    @ConfigProperty(name = "infochat.reeval.cooldown")
+    Duration reEvalCooldown;
+
     // The post partition retention horizon (live-data span). Reused as the
     // candidate-scan window so the fetched_at floor never excludes a live
     // post; no re-eval-specific knob is introduced. Same property
@@ -275,8 +285,11 @@ public class ReEvaluationJob {
 
     private static void recordVerdictAndIncrementCounter(Connection conn, ReEvalCandidate candidate,
                                                          Stage2VerdictHandler.Verdict verdict) throws SQLException {
+        // last_reeval_at rides the same UPDATE as the counter increment so the
+        // cooldown stamp and the re-eval progress record can never diverge (M1-370).
         final String sql =
-            "UPDATE post SET stage2_verdict = ?, re_eval_attempts = re_eval_attempts + 1 "
+            "UPDATE post SET stage2_verdict = ?, re_eval_attempts = re_eval_attempts + 1, "
+                + "last_reeval_at = now() "
                 + "WHERE id = ? AND fetched_at = ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, verdict.name());
@@ -348,7 +361,10 @@ public class ReEvaluationJob {
                 + "status = CASE WHEN status = 'QUARANTINED' THEN 'RAW' ELSE status END, "
                 + "status_changed_at = CASE WHEN status = 'QUARANTINED' THEN now() "
                 + "                         ELSE status_changed_at END, "
-                + "re_eval_attempts = re_eval_attempts + 1 "
+                + "re_eval_attempts = re_eval_attempts + 1, "
+                // Stamp with the counter increment so the cooldown cannot
+                // diverge from re-eval progress (M1-370).
+                + "last_reeval_at = now() "
                 + "WHERE id = ? AND fetched_at = ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setObject(1, candidate.postId());
@@ -374,7 +390,10 @@ public class ReEvaluationJob {
     private void requeueForPipeline(Connection conn, ReEvalCandidate candidate) throws SQLException {
         final String sql =
             "UPDATE post SET status = 'RAW', status_changed_at = now(), "
-                + "re_eval_attempts = re_eval_attempts + 1 "
+                + "re_eval_attempts = re_eval_attempts + 1, "
+                // Stamp with the counter increment so the cooldown cannot
+                // diverge from re-eval progress (M1-370).
+                + "last_reeval_at = now() "
                 + "WHERE id = ? AND fetched_at = ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setObject(1, candidate.postId());
@@ -540,6 +559,15 @@ public class ReEvaluationJob {
         // excludes the row from both branches on the next tick — so a
         // cap-exhausted row is enumerated exactly once more, then drops out.
         //
+        // The infra-failure disjunct additionally excludes a post re-judged
+        // within infochat.reeval.cooldown (last_reeval_at inside the window):
+        // a fail-open post is re-judged at most once per cooldown, so the
+        // re-judge load tracks the RATE of new fail-open posts rather than the
+        // standing backlog (M1-370). The IS NULL leg keeps a never-attempted
+        // post immediately eligible. The cooldown is scoped to the
+        // infra-failure disjunct only — the UNKNOWN second-opinion cadence is
+        // unchanged.
+        //
         // The fetched_at >= now() - (retention horizon + slack) bound is the
         // partition-pruning predicate: post is RANGE(fetched_at) partitioned,
         // so without a fetched_at floor the planner scans every live partition
@@ -551,7 +579,8 @@ public class ReEvaluationJob {
             "SELECT id, fetched_at, stage2_failed, re_eval_attempts, stage2_verdict FROM post "
                 + "WHERE fetched_at >= now() - ?::INTERVAL"
                 + "  AND ("
-                + "  (stage2_failed = TRUE AND status != 'NEEDS_REVIEW')"
+                + "  (stage2_failed = TRUE AND status != 'NEEDS_REVIEW'"
+                + "   AND (last_reeval_at IS NULL OR last_reeval_at < now() - ?::INTERVAL))"
                 + "  OR "
                 + "  (status = 'QUARANTINED' AND stage2_done = TRUE AND stage2_failed = FALSE"
                 + "   AND (stage2_verdict = 'UNKNOWN' OR re_eval_attempts > 0))"
@@ -560,7 +589,8 @@ public class ReEvaluationJob {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, partitionScanWindow());
-            ps.setInt(2, batchSize);
+            ps.setString(2, cooldownInterval());
+            ps.setInt(3, batchSize);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     candidates.add(new ReEvalCandidate(
@@ -619,6 +649,11 @@ public class ReEvaluationJob {
     /** The shared candidate/depth scan floor: retention horizon + slack, as a SQL INTERVAL string. */
     private String partitionScanWindow() {
         return (postRetentionDays + PARTITION_SCAN_SLACK.toDays()) + " days";
+    }
+
+    /** The infra-failure re-judge cooldown as a SQL INTERVAL string (M1-370). */
+    private String cooldownInterval() {
+        return reEvalCooldown.toSeconds() + " seconds";
     }
 
     /**

@@ -1,11 +1,9 @@
 ---
 id: M1-370
 title: "collector: add a per-attempt re-eval cooldown so the fail-open backlog is not re-judged each tick"
-status: deferred
+status: done
 created: 2026-06-14
 last_updated: 2026-06-19
-deferred_on: M1-400
-deferred_reason: blocked-on-new-ticket
 blocked_by: []
 files_budget: 5
 files_scope:
@@ -29,14 +27,29 @@ acceptance:
   - "mvn -B clean verify from the repo root exits 0."
 test_plan:
   adds:
-    - infochat-core/src/main/resources/db/migration (one forward-only Vnn migration adding post.last_reeval_at)
+    - infochat-core/src/main/resources/db/migration/V52__post_last_reeval_at.sql (forward-only migration adding nullable post.last_reeval_at)
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/ReEvaluationJobCooldownTest.java (new cooldown enumeration + stamp test; no existing test modified — resolves the clarity WARN)
   modifies:
-    - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval (cooldown enumeration test)
+    - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/reeval/ReEvaluationJob.java (cooldown predicate on the infra-failure disjunct + last_reeval_at stamp on the three counter-increment UPDATEs)
+    - infochat-collector/src/main/resources/application.properties (infochat.reeval.cooldown knob, base + four profile overrides)
   preserves:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-19
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 332
+      removed: 31
 escalations:
   - date: 2026-06-19
     reason: scope-path-stale
@@ -60,22 +73,27 @@ revisions:
       location; next free version V52). No other frontmatter changed;
       files_budget (5) still covers ReEvaluationJob.java + the migration +
       application.properties + the test.
-escalations_defer_note: |
-  2026-06-19 — DEFERRED on M1-400. M1-370's implementation is COMPLETE and
-  fully green (CooldownTest 2/2, FanOutIT 2/2, ReEvaluationJobTest 13/13,
-  WindowTest 1/1) and is preserved on branch m1/M1-370-collector-reeval-per-attempt-cooldown
-  (WIP commit acd67fa2, on top of refine 99cb1384). The full-suite gate is
-  blocked only by the pre-existing, unrelated EntityExtractorWorkerIT
-  time-bomb (M1-400). RESUME PATH: after M1-400 merges, reopen M1-370 and
-  continue ON THE EXISTING BRANCH — do NOT re-run /m1-tick start (the branch
-  already holds in-progress status, the clarity_check WARN, and the full
-  impl). Rebase the branch onto main, re-run mvn verify (now green), then
-  review → commit → merge.
 overrides: []
 aborted_attempts: []
-reopens: []
+reopens:
+  - date: 2026-06-19
+    prior_deferred_reason: blocked-on-new-ticket
+    prior_deferred_on: M1-400
+    reason: |
+      M1-400 (the EntityExtractorWorkerIT time-bomb that blocked only the
+      full-suite gate, not this ticket's own tests) merged to main as
+      bdfad69a. Resumed on the existing branch per the recorded defer path:
+      the branch already holds the complete impl (WIP acd67fa2), the clarity
+      check, and in-progress status, so it rebases onto fresh main and goes
+      straight to verify → review rather than re-running /m1-tick start.
 redteam_findings: []
 redteam_audits: []
+clarity_check:
+  date: 2026-06-19
+  verdict: WARN
+  warnings:
+    - "TEST-CHANGES-AUTHORIZED: test_plan.modifies lists the test directory but not the specific file being modified. Name the exact file (e.g., ReEvaluationJobTest.java or a new class in test_plan.adds) so the reviewer can confirm no existing assertion is silently changed."
+  blockers: []
 ---
 
 # M1-370: re-eval per-attempt cooldown

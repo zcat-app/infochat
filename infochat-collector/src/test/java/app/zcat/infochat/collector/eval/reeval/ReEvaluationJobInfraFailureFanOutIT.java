@@ -17,6 +17,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 
@@ -67,6 +68,9 @@ class ReEvaluationJobInfraFailureFanOutIT {
     @ConfigProperty(name = "infochat.reeval.needs-review-depth-threshold")
     int needsReviewDepthThreshold;
 
+    @ConfigProperty(name = "infochat.reeval.cooldown")
+    Duration reEvalCooldown;
+
     @ConfigProperty(name = "infochat.partitions.retention-days.post")
     int postRetentionDays;
 
@@ -87,6 +91,7 @@ class ReEvaluationJobInfraFailureFanOutIT {
         job.unknownCap = unknownCap;
         job.batchSize = batchSize;
         job.needsReviewDepthThreshold = needsReviewDepthThreshold;
+        job.reEvalCooldown = reEvalCooldown;
         job.postRetentionDays = postRetentionDays;
     }
 

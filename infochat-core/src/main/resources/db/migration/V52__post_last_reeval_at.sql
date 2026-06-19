@@ -1,0 +1,25 @@
+-- V52: add post.last_reeval_at — per-attempt re-eval cooldown timestamp (M1-370).
+--
+-- ReEvaluationJob re-judges fail-open posts (stage2_failed=TRUE) up to
+-- infra-failure-cap times. Without spacing, every poll tick re-selects the
+-- same standing backlog and issues a fresh Stage 2 LLM call per candidate,
+-- contending with live first-pass Stage 2 on the shared semaphore. This column
+-- records when a post was last re-judged; enumerateCandidates' infra-failure
+-- disjunct excludes a post whose last_reeval_at is within
+-- infochat.reeval.cooldown, so the steady-recovery re-judge load tracks the
+-- RATE of new fail-open posts rather than the standing backlog.
+--
+-- Nullable with no default: a post that has never been re-judged has
+-- last_reeval_at IS NULL and is immediately eligible (the disjunct's IS NULL
+-- leg). Every re-eval attempt stamps last_reeval_at = now() in the SAME
+-- transaction as the re_eval_attempts increment, so the cooldown and the
+-- progress counter can never diverge.
+--
+-- post is PARTITION BY RANGE (fetched_at); ALTER TABLE on the parent
+-- propagates the column to every child partition (same mechanism as V21's
+-- re_eval_attempts and V22's stage2_verdict). NOT added to the V47 candidate
+-- partial index: a partial-index predicate must be IMMUTABLE, and the cooldown
+-- test (last_reeval_at < now() - interval) is time-relative, so it stays a
+-- post-scan filter the planner applies to the index's candidate rows.
+
+ALTER TABLE post ADD COLUMN last_reeval_at TIMESTAMPTZ;
