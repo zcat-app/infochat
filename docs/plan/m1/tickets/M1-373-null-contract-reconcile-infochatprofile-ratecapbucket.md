@@ -1,9 +1,14 @@
 ---
 id: M1-373
 title: "core+provider: reconcile internal null-handling with the null-marked contract (InfochatProfile, RateCapBucket.Key)"
-status: pending
+status: done
 created: 2026-06-14
-last_updated: 2026-06-14
+last_updated: 2026-06-19
+clarity_check:
+  date: 2026-06-19
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 2
 files_scope:
@@ -26,7 +31,20 @@ test_plan:
     - all tests currently green on main (including the InfochatProfile null-input unit tests, which keep passing because the parameters become @Nullable rather than the null arm being removed)
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-19
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 14
+      removed: 15
 escalations: []
 revisions: []
 overrides: []

@@ -6,7 +6,6 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -470,10 +469,6 @@ public class RateCapBucket {
     }
 
     private record Key(String adapter, String contactId) {
-        Key {
-            Objects.requireNonNull(adapter, "adapter");
-            Objects.requireNonNull(contactId, "contactId");
-        }
     }
 
     private static final class Bucket {

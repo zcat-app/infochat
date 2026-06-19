@@ -7,6 +7,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 import java.util.Locale;
@@ -53,7 +54,7 @@ public enum InfochatProfile {
      * Returns empty for Quarkus-internal profiles ({@code test}, {@code dev},
      * {@code prod}) and for any unrecognised value.
      */
-    public static Optional<InfochatProfile> fromConfigName(String name) {
+    public static Optional<InfochatProfile> fromConfigName(@Nullable String name) {
         if (name == null) {
             return Optional.empty();
         }
@@ -78,7 +79,7 @@ public enum InfochatProfile {
      * names a known infochat profile. The message lists the full chain so
      * the operator can see exactly what the application resolved.
      */
-    public static InfochatProfile resolveOrThrow(List<String> profileChain) {
+    public static InfochatProfile resolveOrThrow(@Nullable List<String> profileChain) {
         if (profileChain == null || profileChain.isEmpty()) {
             throw new IllegalStateException(
                 "No active Quarkus profile detected; expected one of " +
