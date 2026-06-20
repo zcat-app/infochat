@@ -39,8 +39,8 @@ What this means in practice:
 | # | Deliverable | Kind | State |
 |---|---|---|---|
 | 1 | Suite baseline (`mvn verify`) | run | establishes the floor; see §Phase 0 |
-| 2 | Seed realistic test data | M1 ticket | proposed — §Code-ticket plan |
-| 3 | Dev terminal harness | M1 ticket | proposed — §Code-ticket plan |
+| 2 | Seed realistic test data | M1 ticket | delivered — M1-413 (`SeedFixture` + `seed-ready-posts.sql`) |
+| 3 | Dev terminal harness | M1 ticket | delivered — M1-414 (§Phase 3 — Usage) |
 | 4 | Golden-path E2E test | M1 ticket | proposed — §Code-ticket plan |
 | 5 | Collector ingest + NOTIFY smoke test | M1 ticket | proposed — §Code-ticket plan |
 | 6 | Observability runbook | doc | delivered — [observability-runbook.md](observability-runbook.md) |
@@ -102,6 +102,43 @@ digest. See [USER_GUIDE.md](../../USER_GUIDE.md).
 - **Yours:** judging real summary/tag *quality* and phone rendering — inherently
   human, and the point of the adversarial kit (#7) for the security paths.
 
+### Driving by hand — dev terminal harness (M1-414)
+
+The dev terminal harness lets you walk the real DM/group pipeline through the
+in-memory adapter from a terminal, with no SimpleX/Signal account. It is a
+dev-build-only tool that injects raw inbound (it bypasses the adapter's
+cryptographic identity, so you may claim any contact id) — but NOT the
+authorization pipeline: ban check, invite gate, probation, and per-(user,scope)
+isolation all still run. It is double-gated and cannot exist in a production
+build:
+
+- **Enable both gates.** Run with `infochat.dev.harness.enabled=true` AND
+  `infochat.adapters=inmemory`. The harness bean is excluded at build time from
+  any build that does not set the flag (`@IfBuildProperty`), so it can never
+  ship in production.
+- **Files (defaults shown).** `infochat.dev.harness.input-file=data/dev-harness-in.txt`,
+  `infochat.dev.harness.output-file=data/dev-harness-out.txt`,
+  `infochat.dev.harness.poll-interval=1s`. A scheduler tick tails the input file
+  for newly-appended lines and appends the captured replies to the output file.
+- **Drive it.** Append one directive per line; tail the output:
+
+  ```
+  echo 'dm alice <invite-code-uuid>' >> data/dev-harness-in.txt   # register alice
+  echo 'dm alice /summary -w 24h'    >> data/dev-harness-in.txt
+  echo 'group g1 alice /help'        >> data/dev-harness-in.txt
+  tail -f data/dev-harness-out.txt
+  ```
+
+  Directive grammar: `dm <contactId> <text>` and
+  `group <groupId> <senderContactId> <text>`. A contact must redeem an invite
+  code (issue one as admin first) before content commands work, exactly as a
+  real DM would.
+- **Data.** The harness does no seeding (inserting posts needs owner privilege,
+  which is test-only by design). For content commands to return rows, run the
+  collector against a live feed first, or load the M1-413 seed fixture
+  (`seed-ready-posts.sql`) into your dev database out of band — the same data
+  problem noted above and under Phase 1.
+
 ## Code-ticket plan (deliverables 2–5)
 
 These are code/tests, so each is an M1 ticket driven through `/m1-tick`
@@ -110,8 +147,9 @@ These are code/tests, so each is an M1 ticket driven through `/m1-tick`
 1. **Seed realistic test data** — a fixture (SQL/test resource) of pre-evaluated
    `READY` posts (+ a handful of tags/sources) so the provider has content to
    serve with no LLM or network. Foundational; unblocks #3 and the usage phase.
-2. **Dev terminal harness** — a dev-only inbound bridge (REST endpoint or
-   console REPL) over the in-memory adapter that prints outbound replies, so you
+2. **Dev terminal harness** — a dev-only inbound bridge (a file-driven poller on
+   the existing scheduler — no HTTP, keeping the provider deaf to inbound calls)
+   over the in-memory adapter that writes outbound replies to a file, so you
    drive the real pipeline from a terminal without SimpleX/Signal. Most useful
    once #2 exists. Net-new dev-only code.
 3. **Golden-path E2E test** — one IT chaining bootstrap→invite→register→
