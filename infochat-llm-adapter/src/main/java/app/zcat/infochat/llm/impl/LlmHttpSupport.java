@@ -244,6 +244,30 @@ final class LlmHttpSupport {
     }
 
     /**
+     * Config-boundary validation of an operator-supplied {@code timeout-ms}:
+     * the value must be strictly positive. The sibling of
+     * {@link #requireHttpBaseUrl} for the other property every HTTP provider
+     * reads at the startup resolvability scan — a non-positive value dies here,
+     * at startup, naming {@code propertyKey}, rather than reaching
+     * {@link HttpRequest.Builder#timeout(java.time.Duration)} on the first live
+     * call, where it throws {@link IllegalArgumentException} that the
+     * Stage 2 / EmbeddingWorker retry-then-fallback catch absorbs as a recurring
+     * transient outage — silently degrading a boot-time misconfiguration into a
+     * permanent fake "outage" (M1-409). The timeout is a plain integer, not a
+     * credential, so the message echoes the offending value directly.
+     *
+     * @throws IllegalArgumentException when {@code timeoutMs <= 0}; the message
+     *     names {@code propertyKey} so the operator can find the offending
+     *     property.
+     */
+    static void requirePositiveTimeoutMs(long timeoutMs, String propertyKey) {
+        if (timeoutMs <= 0) {
+            throw new IllegalArgumentException(
+                propertyKey + "=" + timeoutMs + " must be a positive duration in milliseconds");
+        }
+    }
+
+    /**
      * Mask the userinfo span of any {@code scheme://USER:PASS@host...}
      * substring before the value is echoed into a diagnostic message, so a
      * credential-bearing base-url cannot leak verbatim (M1-330). This is a

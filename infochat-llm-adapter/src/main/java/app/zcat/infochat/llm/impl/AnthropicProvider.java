@@ -133,6 +133,7 @@ public class AnthropicProvider implements LlmProvider {
             String apiKey = config.getOptionalValue(prefix + "api-key", String.class).orElse("");
             String model = config.getValue(prefix + "model", String.class);
             long timeoutMs = config.getOptionalValue(prefix + "timeout-ms", Long.class).orElse(30000L);
+            LlmHttpSupport.requirePositiveTimeoutMs(timeoutMs, prefix + "timeout-ms");
             int maxTokens = config.getValue(prefix + "max-tokens", Integer.class);
             return new TaskConfig(baseUrl, apiKey, model, timeoutMs, maxTokens);
         } catch (NoSuchElementException e) {

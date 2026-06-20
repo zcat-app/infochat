@@ -172,6 +172,39 @@ class HttpProviderSharedPipelineTest {
         }
     }
 
+    @Test
+    void bothProvidersFailStartupScanOnNonPositiveTimeoutNamingTheProperty() {
+        // M1-409: a non-positive per-task timeout-ms must fail the startup
+        // config scan (assertTaskConfigResolvable) for BOTH chat providers,
+        // naming the offending property — the sibling guard to the base-url
+        // check above. Without it the value reaches HttpRequest.Builder.timeout
+        // on the first live call, where the Stage 2 worker's catch absorbs the
+        // IllegalArgumentException as a recurring transient outage.
+        String seg = ModelTask.SUMMARIZER.keySegment();
+        String property = "infochat.llm." + seg + ".timeout-ms";
+        Map<String, String> values = new LinkedHashMap<>();
+        values.put("infochat.llm." + seg + ".base-url", "http://localhost:9");
+        values.put("infochat.llm." + seg + ".model", MODEL);
+        values.put(property, "0");
+        // Required by AnthropicProvider.configFor; ignored by the OpenAI sibling.
+        values.put("infochat.llm." + seg + ".max-tokens", "1024");
+        Config config = new StubConfig(values);
+
+        Map<String, LlmProvider> badTimeout = new LinkedHashMap<>();
+        badTimeout.put("AnthropicProvider", new AnthropicProvider(config));
+        badTimeout.put("OpenAiCompatibleProvider", new OpenAiCompatibleProvider(config));
+
+        for (Map.Entry<String, LlmProvider> entry : badTimeout.entrySet()) {
+            String name = entry.getKey();
+            LlmProvider provider = entry.getValue();
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> provider.assertTaskConfigResolvable(ModelTask.SUMMARIZER),
+                name + " must fail the startup scan on a non-positive timeout-ms");
+            assertTrue(ex.getMessage().contains(property),
+                name + " failure must name the offending property; got: " + ex.getMessage());
+        }
+    }
+
     /** Serve {@code (status, body)} on both providers' endpoints, then start. */
     private void respondToBothEndpoints(int status, byte[] body) {
         for (String path : List.of("/messages", "/chat/completions")) {

@@ -238,7 +238,7 @@ class OpenAiCompatibleEmbeddingProviderTest {
     }
 
     @Test
-    void validateBaseUrlFailsOnMalformedBaseUrlNamingTheProperty() {
+    void validateStartupConfigFailsOnMalformedBaseUrlNamingTheProperty() {
         // U-28: the @PostConstruct base-url check (run at Collector startup,
         // where the @Startup EmbeddingMetadataStartupGuard drives this bean)
         // must reject a malformed infochat.embeddings.base-url naming the
@@ -246,12 +246,33 @@ class OpenAiCompatibleEmbeddingProviderTest {
         // URI.create inside the EmbeddingWorker's batch-failure catch.
         OpenAiCompatibleEmbeddingProvider provider = new OpenAiCompatibleEmbeddingProvider();
         provider.baseUrl = "ftp://example.com";
+        // Isolate base-url as the only invalid field: validateStartupConfig now
+        // also validates timeout-ms, which is 0 on a bare instance (M1-409).
+        provider.timeoutMs = 30000L;
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-            provider::validateBaseUrl,
+            provider::validateStartupConfig,
             "a malformed embeddings base-url must fail the startup check");
         assertTrue(ex.getMessage().contains("infochat.embeddings.base-url"),
             "the failure must name the embeddings base-url property; got: " + ex.getMessage());
+    }
+
+    @Test
+    void validateStartupConfigFailsOnNonPositiveTimeoutNamingTheProperty() {
+        // M1-409: the @PostConstruct check must also reject a non-positive
+        // infochat.embeddings.timeout-ms naming the property — the sibling guard
+        // to the base-url check — rather than deferring the failure to the
+        // per-call HttpRequest.Builder.timeout inside the EmbeddingWorker's
+        // batch-failure catch, where it reads as a transient outage.
+        OpenAiCompatibleEmbeddingProvider provider = new OpenAiCompatibleEmbeddingProvider();
+        provider.baseUrl = "http://localhost:9";
+        provider.timeoutMs = 0L;
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+            provider::validateStartupConfig,
+            "a non-positive embeddings timeout-ms must fail the startup check");
+        assertTrue(ex.getMessage().contains("infochat.embeddings.timeout-ms"),
+            "the failure must name the embeddings timeout-ms property; got: " + ex.getMessage());
     }
 
     private void respondWith(String json) {

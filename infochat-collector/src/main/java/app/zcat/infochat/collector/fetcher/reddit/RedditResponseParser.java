@@ -29,6 +29,15 @@ final class RedditResponseParser {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    // Per-response item-count cap, parity with RssFeedParser.MAX_ITEMS
+    // (M1-409). A single listing page carries far fewer than 1000 children;
+    // the cap bounds the per-response allocation against a hostile listing
+    // serving an unbounded children array — defense in depth above the SSRF
+    // 5 MiB body cap, which already bounds it absolutely. Checked on the raw
+    // children count (before the per-entry skip) so a malformed-heavy reply
+    // is rejected on size, not silently shrunk to an empty post list.
+    private static final int MAX_ITEMS = 1000;
+
     /**
      * One page of a Reddit listing: the parsed posts plus the
      * pagination cursor for the next page (null = last page).
@@ -50,6 +59,10 @@ final class RedditResponseParser {
         // textValue() returns null for JSON null and for missing nodes
         String after = data.path("after").textValue();
         JsonNode children = data.path("children");
+
+        if (children.size() > MAX_ITEMS) {
+            throw new IOException("listing item count exceeded " + MAX_ITEMS);
+        }
 
         List<NormalizedPost> posts = new ArrayList<>(children.size());
         for (JsonNode child : children) {

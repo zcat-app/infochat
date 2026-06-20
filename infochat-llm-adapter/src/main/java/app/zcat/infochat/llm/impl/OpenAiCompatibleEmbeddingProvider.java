@@ -123,17 +123,22 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
     }
 
     /**
-     * Config-boundary validation that {@code infochat.embeddings.base-url} is
-     * well-formed, run at bean creation. In the Collector this fires at
-     * startup — the @Startup {@code EmbeddingMetadataStartupGuard} drives
-     * this bean — so a malformed base-url fails boot naming the property,
-     * rather than surfacing the per-call {@code URI.create} throw inside the
-     * EmbeddingWorker's batch-failure catch, where it would read as a
-     * transient outage. Package-private so the unit test can invoke it.
+     * Config-boundary validation of the operator-supplied embedding config,
+     * run at bean creation. In the Collector this fires at startup — the
+     * @Startup {@code EmbeddingMetadataStartupGuard} drives this bean — so a
+     * malformed {@code base-url} or a non-positive {@code timeout-ms} fails boot
+     * naming the property, rather than surfacing the per-call {@code URI.create}
+     * / {@code HttpRequest.Builder.timeout} throw inside the EmbeddingWorker's
+     * batch-failure catch, where it would read as a transient outage. Both
+     * checks share the validators the two chat providers run at their own
+     * startup scan ({@link LlmHttpSupport#requireHttpBaseUrl},
+     * {@link LlmHttpSupport#requirePositiveTimeoutMs}). Package-private so the
+     * unit test can invoke it.
      */
     @PostConstruct
-    void validateBaseUrl() {
+    void validateStartupConfig() {
         LlmHttpSupport.requireHttpBaseUrl(baseUrl, "infochat.embeddings.base-url");
+        LlmHttpSupport.requirePositiveTimeoutMs(timeoutMs, "infochat.embeddings.timeout-ms");
     }
 
     /** Test seam: exposes the shared client so tests can pin its construction. */

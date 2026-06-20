@@ -165,6 +165,7 @@ public class OpenAiCompatibleProvider implements LlmProvider {
             String apiKey = config.getOptionalValue(prefix + "api-key", String.class).orElse("");
             String model = config.getValue(prefix + "model", String.class);
             long timeoutMs = config.getOptionalValue(prefix + "timeout-ms", Long.class).orElse(30000L);
+            LlmHttpSupport.requirePositiveTimeoutMs(timeoutMs, prefix + "timeout-ms");
             return new TaskConfig(baseUrl, apiKey, model, timeoutMs);
         } catch (NoSuchElementException e) {
             throw new LlmProvider.TaskConfigUnresolvableException(

@@ -28,6 +28,15 @@ public final class BlueskyResponseParser {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    // Per-response item-count cap, parity with RssFeedParser.MAX_ITEMS
+    // (M1-409). A single getAuthorFeed page carries far fewer than 1000
+    // entries; the cap bounds the per-response allocation against a hostile
+    // feed serving an unbounded array — defense in depth above the SSRF
+    // 5 MiB body cap, which already bounds it absolutely. Checked on the
+    // JSON array size up front (the count is known before parsing): a
+    // response with exactly MAX_ITEMS entries parses, the cap+1-th raises.
+    private static final int MAX_ITEMS = 1000;
+
     private BlueskyResponseParser() {}
 
     /**
@@ -52,6 +61,10 @@ public final class BlueskyResponseParser {
         JsonNode feedNode = root.path("feed");
         if (feedNode.isMissingNode() || !feedNode.isArray()) {
             return new Page(Collections.emptyList(), null);
+        }
+
+        if (feedNode.size() > MAX_ITEMS) {
+            throw new BlueskyParseException("feed item count exceeded " + MAX_ITEMS);
         }
 
         List<NormalizedPost> posts = new ArrayList<>(feedNode.size());
