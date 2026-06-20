@@ -1,7 +1,7 @@
 ---
 id: M1-407
 title: "provider: bound GetReferencesTool result bytes like its sibling chat tools"
-status: pending
+status: done
 created: 2026-06-20
 last_updated: 2026-06-20
 blocked_by: []
@@ -31,12 +31,43 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-20
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 127
+      removed: 15
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-20
+    verdict: CLEAN
+    base: eb4838c6e21dce7b452726bc2f404046ff19598a
+    head: "working-tree (m1/M1-407 branch, uncommitted)"
+    verdict_file: docs/plan/m1/redteam/M1-407-2026-06-20.md
+    out_of_model_count: 0
+    note: |
+      Adversarial audit on the in-progress branch tip after round-1 APPROVE,
+      before /m1-tick commit. CLEAN — the change tightens the
+      GetReferencesTool chat-tool result against the prompt-context trust
+      boundary (aggregate byte budget + per-title truncation via the shared
+      GetPostTool.truncateUtf8), mirroring the four sibling tools. No new
+      attack surface; nothing feeds a future remediation ticket.
+clarity_check:
+  date: 2026-06-20
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-407: bound GetReferencesTool result bytes like its sibling chat tools

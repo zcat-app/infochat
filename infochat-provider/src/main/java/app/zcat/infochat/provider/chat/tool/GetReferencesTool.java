@@ -6,6 +6,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import javax.sql.DataSource;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -37,6 +38,26 @@ public class GetReferencesTool implements ChatToolRegistry.ChatTool {
     /** Default + ceiling on the response size; matches the SearchPostsTool surface. */
     private static final int LIMIT_DEFAULT = 25;
     private static final int LIMIT_MAX = 25;
+
+    /**
+     * Aggregate byte budget for the returned JSON array, measured in
+     * UTF-8 bytes. Tool results are reinjected verbatim into the chat
+     * prompt (LLM tool-call outputs are a trust boundary), so up to
+     * {@code LIMIT_MAX} rows of unbounded titles would otherwise consume
+     * the context window. Mirrors {@link SearchPostsTool#MAX_RESULT_BYTES}
+     * and {@link ListSavesTool#MAX_RESULT_BYTES}: entries past the budget
+     * are dropped, score-descending (the {@code ORDER BY}) ordering kept.
+     */
+    static final int MAX_RESULT_BYTES = 16 * 1024;
+
+    /**
+     * Per-title byte cap, measured in UTF-8 bytes. {@code to_title} is
+     * external post data, uncapped on the provider side, so one pathological
+     * title is truncated before the aggregate budget — otherwise a single
+     * oversized title could push one entry far past a reasonable size.
+     * Mirrors {@link ListSavesTool#MAX_TITLE_BYTES}.
+     */
+    static final int MAX_TITLE_BYTES = 2 * 1024;
 
     private final DataSource dataSource;
     private final CancellationService cancellationService;
@@ -91,16 +112,35 @@ public class GetReferencesTool implements ChatToolRegistry.ChatTool {
             ps.setInt(6, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 StringBuilder json = new StringBuilder("[");
+                // '[' + ']' — every appended entry adds its own bytes (plus a
+                // joining comma) against MAX_RESULT_BYTES. The result is
+                // reinjected verbatim into the chat prompt (LLM tool-call
+                // outputs are a trust boundary), so the aggregate is bounded
+                // here exactly as the sibling tools bound theirs; entries past
+                // the budget are dropped, score-descending ordering kept.
+                int budgetUsed = 2;
                 boolean first = true;
                 while (rs.next()) {
+                    // to_title is external post data, uncapped on the provider
+                    // side, so truncate per-entry before the aggregate budget
+                    // (mirrors ListSavesTool's snapshot_title handling).
+                    String title = rs.getString("to_title");
+                    StringBuilder entry = new StringBuilder();
+                    entry.append("{\"uid\":").append(jsonStr(rs.getString("to_uid")))
+                         .append(",\"title\":").append(jsonStr(
+                                 title == null ? null
+                                         : GetPostTool.truncateUtf8(title, MAX_TITLE_BYTES)))
+                         .append(",\"url\":").append(jsonStr(rs.getString("to_url")))
+                         .append(",\"link_type\":").append(jsonStr(rs.getString("link_type")))
+                         .append(",\"score\":").append(rs.getFloat("score"))
+                         .append('}');
+                    int entryBytes = entry.toString()
+                            .getBytes(StandardCharsets.UTF_8).length + (first ? 0 : 1);
+                    if (budgetUsed + entryBytes > MAX_RESULT_BYTES) break;
+                    budgetUsed += entryBytes;
                     if (!first) json.append(',');
                     first = false;
-                    json.append("{\"uid\":").append(jsonStr(rs.getString("to_uid")))
-                        .append(",\"title\":").append(jsonStr(rs.getString("to_title")))
-                        .append(",\"url\":").append(jsonStr(rs.getString("to_url")))
-                        .append(",\"link_type\":").append(jsonStr(rs.getString("link_type")))
-                        .append(",\"score\":").append(rs.getFloat("score"))
-                        .append('}');
+                    json.append(entry);
                 }
                 json.append(']');
                 return json.toString();

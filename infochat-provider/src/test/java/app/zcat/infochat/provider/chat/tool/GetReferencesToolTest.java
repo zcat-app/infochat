@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -154,7 +155,72 @@ class GetReferencesToolTest {
         }
     }
 
+    @Test
+    void budgetDropsEntriesBeyondMaxResultBytes() throws Exception {
+        UUID userId = seedUser("budget");
+        UUID sourceId = seedSource("budget-src", "Budget source");
+        seedSubscription("dm", userId, sourceId);
+        UUID from = seedReadyPost("budget-from", sourceId);
+        // Each destination title is ~1 KiB (under MAX_TITLE_BYTES, so no
+        // per-title truncation); LIMIT 25 such rows is ~25 KiB of JSON, well
+        // past the 16 KiB aggregate budget. Equal scores so ORDER BY falls to
+        // p2.uid ASC; zero-padded uids make the keep/drop split deterministic.
+        String title = "t".repeat(1024);
+        int rows = 25;
+        for (int i = 0; i < rows; i++) {
+            UUID to = seedReadyPostWithTitle(String.format("budget-to-%02d", i), sourceId, title);
+            seedReference(from, to, "entity", 1.0f);
+        }
+
+        String json = tool.execute(userId, "dm", userId,
+            Map.of("uid", PREFIX + "budget-from"));
+
+        int bytes = json.getBytes(StandardCharsets.UTF_8).length;
+        assertTrue(bytes <= GetReferencesTool.MAX_RESULT_BYTES,
+            "the aggregate tool output must not exceed MAX_RESULT_BYTES; got " + bytes + " bytes");
+        int returned = countEntries(json);
+        assertTrue(returned < rows,
+            "the byte cap must drop entries past the budget (returned " + returned
+                + " of " + rows + " linked rows)");
+        assertTrue(returned > 0, "at least one entry must fit under the budget; got " + returned);
+    }
+
+    @Test
+    void underBudgetResultIsByteIdenticalToPreChange() throws Exception {
+        UUID userId = seedUser("identical");
+        UUID sourceId = seedSource("identical-src", "Identical source");
+        seedSubscription("dm", userId, sourceId);
+        UUID from = seedReadyPost("identical-a", sourceId);
+        UUID to = seedReadyPost("identical-b", sourceId);
+        seedReference(from, to, "entity", 2.0f);
+
+        String json = tool.execute(userId, "dm", userId,
+            Map.of("uid", PREFIX + "identical-a"));
+
+        // A well-formed small result is unchanged by the budget/truncation:
+        // truncateUtf8 returns an under-budget title verbatim and no entry is
+        // dropped, so the bytes match the pre-change projection exactly.
+        String expected = "[{\"uid\":\"" + PREFIX + "identical-b\""
+            + ",\"title\":\"Title identical-b\""
+            + ",\"url\":\"https://example.com/identical-b\""
+            + ",\"link_type\":\"entity\""
+            + ",\"score\":2.0}]";
+        assertEquals(expected, json,
+            "an under-budget result must be byte-identical to the pre-change projection");
+    }
+
     // ---------- helpers ----------
+
+    /** Count emitted entries by the one {@code "link_type"} key each carries. */
+    private static int countEntries(String json) {
+        int count = 0;
+        int idx = 0;
+        while ((idx = json.indexOf("\"link_type\":", idx)) != -1) {
+            count++;
+            idx += "\"link_type\":".length();
+        }
+        return count;
+    }
 
     private UUID seedUser(String suffix) throws Exception {
         try (Connection conn = dataSource.getConnection();
@@ -197,6 +263,10 @@ class GetReferencesToolTest {
     }
 
     private UUID seedReadyPost(String slug, UUID sourceId) throws Exception {
+        return seedReadyPostWithTitle(slug, sourceId, "Title " + slug);
+    }
+
+    private UUID seedReadyPostWithTitle(String slug, UUID sourceId, String title) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "INSERT INTO post (uid, source_id, title, body, url, published_at, "
@@ -204,7 +274,7 @@ class GetReferencesToolTest {
                      + "VALUES (?, ?, ?, 'Body of ' || ?, ?, ?, ?, 'READY', ?, '{}') RETURNING id")) {
             ps.setString(1, PREFIX + slug);
             ps.setObject(2, sourceId);
-            ps.setString(3, "Title " + slug);
+            ps.setString(3, title);
             ps.setString(4, slug);
             ps.setString(5, "https://example.com/" + slug);
             ps.setTimestamp(6, Timestamp.from(FETCHED_AT));
