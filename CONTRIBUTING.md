@@ -116,12 +116,17 @@ start again.
 
 ### Step 4 — Implement (within the ticket's scope)
 
-This is where the code is written — guided by the acceptance criteria and the
-engineering rules, touching **at most `files_budget` files** and nothing in
-`out_of_scope`. For `/now` the implementation adds a new command handler in the
-provider, lets probation users run it, lists it in `/help`, localizes the reply,
-and adds a test. Staying inside the declared scope is what keeps the next step
-(the review) honest — don't free-hand changes the ticket didn't ask for.
+There is deliberately no `/m1-tick` command for this step — implementation is the
+work you (or Claude) do in the conversation between `start` and `review`, on the
+branch `start` created. This is the interactive part of the flow: you discuss the
+approach, watch the diff take shape, and **steer it** — ask for changes, point
+out a missed case, course-correct — before the formal review gate runs. This is
+where the code is written — guided by the acceptance criteria and the engineering
+rules, touching **at most `files_budget` files** and nothing in `out_of_scope`.
+For `/now` the implementation adds a new command handler in the provider, lets
+probation users run it, lists it in `/help`, localizes the reply, and adds a
+test. Staying inside the declared scope is what keeps the next step (the review)
+honest — don't free-hand changes the ticket didn't ask for.
 
 ### Step 5 — Run the full test suite
 
@@ -147,30 +152,38 @@ and whether **every** acceptance criterion is actually met. It returns:
   `/m1-tick review M1-900` again.
 - **MANUAL** → `/m1-tick escalate M1-900` (see below).
 
-### Step 7 — Red-team (the security gate, when it applies)
-
-For a change marked `security_relevant: true`, run an adversarial review:
+### Step 7 — Commit
 
 ```
-/redteam M1-900
+/m1-tick commit M1-900
 ```
+
+Only after an `APPROVE`. It makes one commit on the ticket branch with the
+`M1-900: …` subject and a `Reviewed-by:` trailer recording the verdict, and marks
+the ticket `done`. Nothing is on `main` yet — that happens at Step 9.
+
+### Step 8 — Red-team (the security gate, when it applies)
+
+For a change marked `security_relevant: true`, run an adversarial review on the
+committed branch, **before** you merge:
+
+```
+/redteam M1-900 --in-progress
+```
+
+The `--in-progress` flag is required here: the commit lives on the ticket branch
+but isn't on `main` yet, so red-team audits the branch tip (`main...branch`).
+Without the flag it searches `main` for the ticket's commit, doesn't find it, and
+refuses.
 
 A **threat-actor subagent** reads the project's threat model
 ([docs/spec/security.md](docs/spec/security.md)) plus the diff and flags gaps
 between what the model promises and what the diff delivers. `/now` is harmless,
 so here it's not required — but anything touching authorization, input parsing,
 or outbound network calls **must** go through it. This adversarial pass is the
-second advantage the flow gives you over coding by hand.
-
-### Step 8 — Commit
-
-```
-/m1-tick commit M1-900
-```
-
-Only after an `APPROVE`. It makes one commit on the branch with the
-`M1-900: …` subject and a `Reviewed-by:` trailer recording the verdict, and marks
-the ticket `done`.
+second advantage the flow gives you over coding by hand. If it surfaces a
+finding, fix it on the same branch (or `/m1-tick escalate M1-900 redteam-finding`)
+before merging.
 
 ### Step 9 — Merge
 
