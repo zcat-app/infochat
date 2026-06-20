@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 441 |
 | deferred | 6 |
-| **total** | **447** |
+| **total** | **448** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-412 — cleanup: deep-review low-severity parity, dedup, and comment-drift sweep (complexity: low, risk: low)
 
 ---
 
@@ -610,4 +610,5 @@ M1-408 (done)
 M1-409 (done)
 M1-410 (done)
 M1-411 (done)
+M1-412 (pending) ← runnable
 ```
