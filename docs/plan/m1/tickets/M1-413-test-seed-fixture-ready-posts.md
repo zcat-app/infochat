@@ -1,9 +1,28 @@
 ---
 id: M1-413
 title: "test: seed fixture of pre-evaluated READY posts for retrieval tests"
-status: pending
+status: done
 created: 2026-06-20
 last_updated: 2026-06-20
+clarity_check:
+  date: 2026-06-20
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-06-20
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 277
+      removed: 8
 blocked_by: []
 files_budget: 5
 files_scope:
