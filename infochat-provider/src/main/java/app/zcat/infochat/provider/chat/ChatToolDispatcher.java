@@ -154,6 +154,13 @@ public class ChatToolDispatcher {
                     "Invalid argument type or format for tool: " + toolName);
         }
 
+        // Validate lengths on validatedArgs (the same map cached and dispatched)
+        // and before the cache/cap block, so an over-length call is rejected
+        // without consuming a per-turn call-budget slot — the budget counts
+        // executions, and a length-rejected call never executes (M1-405).
+        ToolResult lengthCheck = validateInputLengths(validatedArgs);
+        if (lengthCheck != null) return lengthCheck;
+
         // Per-turn cache: calls identical after clamping return the cached result
         String cacheKey = toolName + "|" + userId + "|" + scopeKind
                         + "|" + scopeId + "|" + canonicalArgs(validatedArgs);
@@ -168,9 +175,6 @@ public class ChatToolDispatcher {
             return new ToolResult.ValidationError(
                     "Tool call limit exceeded for this turn");
         }
-
-        ToolResult lengthCheck = validateInputLengths(args);
-        if (lengthCheck != null) return lengthCheck;
 
         // Non-null by construction: the constructor asserts tools covers every
         // registry tool name, and line above rejects names not in the registry.

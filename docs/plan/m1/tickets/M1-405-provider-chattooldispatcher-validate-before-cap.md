@@ -1,9 +1,9 @@
 ---
 id: M1-405
 title: "provider: validate ChatToolDispatcher args before the call cap"
-status: pending
+status: done
 created: 2026-06-19
-last_updated: 2026-06-19
+last_updated: 2026-06-20
 blocked_by: []
 files_budget: 3
 files_scope:
@@ -31,12 +31,30 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-20
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 52
+      removed: 12
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-20
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: ChatToolDispatcher.dispatch is the LLM tool-call argument validation boundary; security_relevant: false is defensible because the change is a pure reordering that moves the length check earlier with no change to enforced limits, but worth confirming."
+  blockers: []
 ---
 
 # M1-405: validate ChatToolDispatcher args before the call cap

@@ -249,6 +249,39 @@ class ChatToolDispatcherTest {
                 "the second call must return the cached first result (one execution)");
     }
 
+    // --- M1-405: an over-length argument is rejected BEFORE the per-turn cap is
+    // charged, so a length-rejected call (which never executes any tool) does not
+    // consume a call-budget slot. callCap=1 makes "not charged" observable: the
+    // over-length call must leave callCount at 0, so the subsequent well-formed
+    // call increments to 1 (within the cap) and returns Success. If the rejected
+    // call had charged callCount, that second call would increment to 2, exceed
+    // the cap, and return a "limit exceeded" ValidationError instead. ---
+
+    @Test
+    void overLengthCallDoesNotChargeTheTurnCap() {
+        ChatToolDispatcher d = dispatcher(
+                Map.of("searchPosts", (u, sk, si, a) -> "[{\"ok\":1}]"), 10, 200);
+        ChatToolDispatcher.TurnContext turn = new ChatToolDispatcher.TurnContext(1);
+
+        Map<String, Object> overLength = new HashMap<>();
+        overLength.put("q", "a".repeat(11));
+        ChatToolDispatcher.ToolResult rejected =
+                d.dispatch("searchPosts", overLength, USER_A, "dm", SCOPE_A, turn);
+
+        assertInstanceOf(ChatToolDispatcher.ToolResult.ValidationError.class, rejected);
+        assertTrue(((ChatToolDispatcher.ToolResult.ValidationError) rejected)
+                .reason().contains("maximum length"));
+
+        Map<String, Object> wellFormed = new HashMap<>();
+        wellFormed.put("q", "short");
+        ChatToolDispatcher.ToolResult next =
+                d.dispatch("searchPosts", wellFormed, USER_A, "dm", SCOPE_A, turn);
+
+        assertInstanceOf(ChatToolDispatcher.ToolResult.Success.class, next,
+                "the well-formed call must succeed within callCap=1, proving the "
+                        + "prior over-length rejection did not charge the cap");
+    }
+
     // --- Acceptance item 4: scope-filtered search ---
 
     @Test
