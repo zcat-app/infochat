@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 431 |
+| done | 432 |
 | deferred | 6 |
 | **total** | **442** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-402 — messaging: clear reconnecting on SimpleX derivation failure (complexity: low, risk: low)
 - M1-403 — collector: read re-eval body from the candidate scan (complexity: low, risk: low)
 - M1-404 — collector: dedup the Stage 1 fail-closed whole-body write (complexity: low, risk: low)
 - M1-405 — provider: validate ChatToolDispatcher args before the call cap (complexity: low, risk: low)
@@ -64,6 +63,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-402 | messaging: clear reconnecting on SimpleX derivation failure | 2026-06-20 | round 1 APPROVE |
 | M1-401 | llm: redact userinfo on requireHttpBaseUrl failure paths | 2026-06-20 | round 2 APPROVE |
 | M1-400 | test: de-rot the EntityExtractorWorkerIT scan-window fixture so the in-window post never ages out | 2026-06-19 | round 1 APPROVE |
 | M1-399 | wizard: route the two operator-typed adapter data-dir writes to secrets.env through dotenv_escape (6-adapter.sh), consistent with M1-397 | 2026-06-19 | round 1 APPROVE |
@@ -73,7 +73,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-375 | provider: key the per-turn chat-tool cache on clamped args so over-cap duplicates do not double-charge the call budget | 2026-06-19 | round 1 APPROVE |
 | M1-374 | ssrf: seal IpBlocklist and drive the test loopback carve-out through an injected predicate instead of subclassing | 2026-06-19 | round 1 APPROVE |
 | M1-373 | core+provider: reconcile internal null-handling with the null-marked contract (InfochatProfile, RateCapBucket.Key) | 2026-06-19 | round 1 APPROVE |
-| M1-371 | collector: give stream dispatch keys a distinct type so they cannot collide with FetchScheduler source keys | 2026-06-19 | round 1 APPROVE |
 
 ---
 
@@ -604,7 +603,7 @@ M1-395 (done)
 M1-398 (done)
 M1-400 (done)
 M1-401 (done)
-M1-402 (pending) ← runnable
+M1-402 (done)
 M1-403 (pending) ← runnable
 M1-404 (pending) ← runnable
 M1-405 (pending) ← runnable

@@ -438,12 +438,23 @@ public final class SimpleXAdapter implements MessagingAdapter {
                     e.category());
         } catch (IllegalStateException e) {
             // Re-derivation adopted nothing: the restarted simplex-chat
-            // answered with a non-well-formed address. Same posture as the
-            // transport failure above — the outage continues until the next
-            // supervised restart. The prior anchor stays in place for any
-            // frames the dying connection already dispatched.
-            LOG.warn("SimpleX reconnect failed (identity re-derivation);"
-                    + " awaiting next supervised restart");
+            // answered with a non-well-formed address. This arm is reached only
+            // AFTER waitForWebSocketReady + rebuildWebSocket() already succeeded,
+            // so a fresh, connected client is live in this.webSocket — unlike the
+            // MessagingException arm above (genuine transport failure, subprocess
+            // still sick, next supervised restart resolves it). A healthy
+            // subprocess never fires another onRestart, so leaving reconnecting
+            // set here wedges the live transport with every send classified
+            // TRANSIENT-forever and no restart coming to clear it — the same trap
+            // the close-race branch above guards against. Clear it: the rebuilt
+            // transport serves DM and previously-anchored group traffic
+            // immediately; only fresh group-mention recognition is degraded until
+            // a genuine restart re-derives the anchor, which the prior anchor
+            // (left in place) keeps usable in the meantime. (M1-402)
+            reconnecting = false;
+            LOG.warn("SimpleX reconnect identity re-derivation rejected a"
+                    + " non-well-formed address; serving on the rebuilt transport"
+                    + " with the prior group anchor retained");
         } finally {
             reconnectInFlight.set(false);
         }
