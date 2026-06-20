@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 440 |
+| done | 441 |
 | deferred | 6 |
 | **total** | **447** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-411 — ssrf+messaging: two behavior-preserving simplifications (inline isIpv4Mapped, single-source chunker fence state) (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-411 | ssrf+messaging: two behavior-preserving simplifications (inline isIpv4Mapped, single-source chunker fence state) | 2026-06-20 | round 1 APPROVE |
 | M1-410 | core+provider: trust the declared SQL source of truth (audit-verb parity test, export by column type) | 2026-06-20 | round 1 APPROVE |
 | M1-409 | collector+llm: close two guard-asymmetry gaps (feed item caps, timeout-ms startup validation) | 2026-06-20 | round 1 APPROVE |
 | M1-408 | messaging: don't drop a co-delivered bot mention after a Signal group membership delta | 2026-06-20 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-404 | collector: dedup the Stage 1 fail-closed whole-body write | 2026-06-20 | round 1 APPROVE |
 | M1-403 | collector: read re-eval body from the candidate scan | 2026-06-20 | round 1 APPROVE |
 | M1-402 | messaging: clear reconnecting on SimpleX derivation failure | 2026-06-20 | round 1 APPROVE |
-| M1-401 | llm: redact userinfo on requireHttpBaseUrl failure paths | 2026-06-20 | round 2 APPROVE |
 
 ---
 
@@ -609,5 +609,5 @@ M1-407 (done)
 M1-408 (done)
 M1-409 (done)
 M1-410 (done)
-M1-411 (pending) ← runnable
+M1-411 (done)
 ```

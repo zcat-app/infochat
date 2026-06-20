@@ -1,7 +1,7 @@
 ---
 id: M1-411
 title: "ssrf+messaging: two behavior-preserving simplifications (inline isIpv4Mapped, single-source chunker fence state)"
-status: pending
+status: done
 created: 2026-06-20
 last_updated: 2026-06-20
 blocked_by: []
@@ -30,12 +30,30 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-20
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 40
+      removed: 26
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-20
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: IpBlocklist is SSRF-guard code; security_relevant: false means the reviewer will not apply heightened inspection to the inlined detection logic. The risk is low given pinned tests, but flipping to true is the conservative choice for any edit to a security-adjacent class."
+  blockers: []
 ---
 
 # M1-411: two behavior-preserving simplifications (inline isIpv4Mapped, single-source chunker fence state)

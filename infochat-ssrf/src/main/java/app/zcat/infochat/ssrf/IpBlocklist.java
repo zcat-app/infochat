@@ -387,15 +387,6 @@ public final class IpBlocklist {
         return allZero(raw, 0, 16);
     }
 
-    private static boolean isIpv4Mapped(byte[] raw) {
-        for (int i = 0; i < 10; i++) {
-            if (raw[i] != 0) {
-                return false;
-            }
-        }
-        return (raw[10] & 0xFF) == 0xFF && (raw[11] & 0xFF) == 0xFF;
-    }
-
     /**
      * Decode the IPv4 address embedded in an IPv6 transition / mapping
      * format, or {@code null} if {@code raw} is not one of them. The
@@ -406,7 +397,7 @@ public final class IpBlocklist {
      */
     private static byte @Nullable [] embeddedV4(byte[] raw) {
         // ::ffff:a.b.c.d — IPv4-mapped (bytes 0-9 zero, 10-11 == ffff).
-        if (isIpv4Mapped(raw)) {
+        if (allZero(raw, 0, 10) && (raw[10] & 0xFF) == 0xFF && (raw[11] & 0xFF) == 0xFF) {
             return new byte[] { raw[12], raw[13], raw[14], raw[15] };
         }
         // 2002:a.b.c.d::/48 — 6to4 (RFC 3056); IPv4 in bytes 2-5.

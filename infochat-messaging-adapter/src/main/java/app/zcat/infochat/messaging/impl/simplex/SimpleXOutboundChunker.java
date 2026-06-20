@@ -63,8 +63,10 @@ final class SimpleXOutboundChunker {
             lineStart = lineEnd;
             // A fence-marker line toggles the code-block state; the state
             // AFTER the line decides whether a cut right behind it must
-            // close-and-reopen, hence the reserve.
-            boolean fenceAfterLine = builder.fenceOpen ^ line.startsWith(FENCE);
+            // close-and-reopen, hence the reserve. The toggle itself is
+            // owned by the builder (fenceAfter); this read-only query does
+            // not mutate it.
+            boolean fenceAfterLine = builder.fenceAfter(line);
             int lineBytes = utf8Length(line);
             int reserve = fenceAfterLine ? FENCE_CLOSE_RESERVE : 0;
             if (builder.currentBytes + lineBytes + reserve > MAX_BYTES) {
@@ -72,11 +74,11 @@ final class SimpleXOutboundChunker {
                     builder.cut();
                 }
                 if (builder.currentBytes + lineBytes + reserve > MAX_BYTES) {
-                    hardSplitLine(builder, line, fenceAfterLine);
+                    hardSplitLine(builder, line);
                     continue;
                 }
             }
-            builder.append(line, lineBytes, fenceAfterLine);
+            builder.append(line, lineBytes);
         }
         builder.flushLast();
         return List.copyOf(builder.chunks);
@@ -92,7 +94,7 @@ final class SimpleXOutboundChunker {
      * a fence-marker line is never long enough to be hard-split in
      * non-degenerate input).
      */
-    private static void hardSplitLine(ChunkBuilder builder, String line, boolean fenceAfterLine) {
+    private static void hardSplitLine(ChunkBuilder builder, String line) {
         int i = 0;
         while (i < line.length()) {
             int codePoint = line.codePointAt(i);
@@ -106,7 +108,7 @@ final class SimpleXOutboundChunker {
             builder.currentBytes += codePointBytes;
             i += charCount;
         }
-        builder.fenceOpen = fenceAfterLine;
+        builder.toggleFence(line);
     }
 
     private static int utf8Length(String s) {
@@ -160,10 +162,27 @@ final class SimpleXOutboundChunker {
             }
         }
 
-        void append(String line, int lineBytes, boolean fenceAfterLine) {
+        void append(String line, int lineBytes) {
             current.append(line);
             currentBytes += lineBytes;
-            fenceOpen = fenceAfterLine;
+            toggleFence(line);
+        }
+
+        /**
+         * The code-fence state that WOULD hold after appending {@code line},
+         * computed without mutating {@link #fenceOpen}. The sole expression
+         * of the fence toggle: callers query it read-only to size the cut
+         * reserve, and the mutating paths ({@link #append},
+         * {@link #toggleFence}) apply it — so the open/closed property lives
+         * in one place rather than a field plus a caller-threaded local.
+         */
+        boolean fenceAfter(String line) {
+            return fenceOpen ^ line.startsWith(FENCE);
+        }
+
+        /** Advance the owned fence state past {@code line}. */
+        void toggleFence(String line) {
+            fenceOpen = fenceAfter(line);
         }
 
         /**
