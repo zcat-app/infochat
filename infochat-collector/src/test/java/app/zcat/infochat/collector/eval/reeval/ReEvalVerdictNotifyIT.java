@@ -227,11 +227,26 @@ class ReEvalVerdictNotifyIT {
     // ---------- helpers ----------
 
     private ReEvaluationJob.ReEvalCandidate candidateFor(SeededPost post, boolean stage2Failed,
-                                                         int attempts) {
+                                                         int attempts) throws Exception {
         // Mirrors the seeded state: infra-failure posts carry no recorded
         // verdict (the judge never ran), UNKNOWN-class posts carry 'UNKNOWN'.
+        // Carry the live post.body, as enumerateCandidates folds body into
+        // the candidate scan that reconstructOriginalBody reads from.
         return new ReEvaluationJob.ReEvalCandidate(post.id, post.fetchedAt, stage2Failed, attempts,
-            stage2Failed ? null : "UNKNOWN");
+            stage2Failed ? null : "UNKNOWN", currentBody(post));
+    }
+
+    private @Nullable String currentBody(SeededPost post) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT body FROM post WHERE id = ? AND fetched_at = ?")) {
+            ps.setObject(1, post.id);
+            ps.setTimestamp(2, Timestamp.from(post.fetchedAt));
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getString(1);
+            }
+        }
     }
 
     /**

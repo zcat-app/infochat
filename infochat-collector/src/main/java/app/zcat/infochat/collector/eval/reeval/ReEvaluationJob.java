@@ -455,8 +455,18 @@ public class ReEvaluationJob {
      * placeholder covering the whole content.
      */
     String reconstructOriginalBody(ReEvalCandidate candidate) {
+        String body = candidate.body();
+        if (body == null) {
+            // post.body is a nullable column; a re-eval candidate with no
+            // body cannot be spliced. The candidate scan carries the body,
+            // so this is the scan-boundary equivalent of the prior
+            // readPostBody NULL guard — reject per-candidate (onTick catches
+            // RuntimeException per candidate) rather than splicing an empty
+            // body or aborting the whole batch.
+            throw new IllegalStateException(
+                "ReEvaluationJob: post body is NULL: " + candidate.postId());
+        }
         try (Connection conn = dataSource.getConnection()) {
-            String body = readPostBody(conn, candidate);
             Map<String, String> originalsByPlaceholderId = new HashMap<>();
             final String sql =
                 "SELECT placeholder_id, original_html FROM quarantine "
@@ -520,29 +530,6 @@ public class ReEvaluationJob {
         return reconstructed.toString();
     }
 
-    private String readPostBody(Connection conn, ReEvalCandidate candidate) throws SQLException {
-        final String sql = "SELECT body FROM post WHERE id = ? AND fetched_at = ?";
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setObject(1, candidate.postId());
-            ps.setTimestamp(2, Timestamp.from(candidate.fetchedAt()));
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    // post.body is a nullable column; a re-eval candidate
-                    // with no body cannot be spliced — validate at the
-                    // SQL boundary so the non-null return contract holds.
-                    String body = rs.getString(1);
-                    if (body == null) {
-                        throw new IllegalStateException(
-                            "ReEvaluationJob: post body is NULL: " + candidate.postId());
-                    }
-                    return body;
-                }
-                throw new IllegalStateException(
-                    "ReEvaluationJob: post not found: " + candidate.postId());
-            }
-        }
-    }
-
     List<ReEvalCandidate> enumerateCandidates() throws SQLException {
         // Two classes: infra-failure (stage2_failed=true, any status that
         // isn't NEEDS_REVIEW) and UNKNOWN (QUARANTINED + stage2_done +
@@ -576,7 +563,7 @@ public class ReEvaluationJob {
         // the V47 migration carries the disjunction below so the planner can
         // use it inside the surviving partitions.
         final String sql =
-            "SELECT id, fetched_at, stage2_failed, re_eval_attempts, stage2_verdict FROM post "
+            "SELECT id, fetched_at, stage2_failed, re_eval_attempts, stage2_verdict, body FROM post "
                 + "WHERE fetched_at >= now() - ?::INTERVAL"
                 + "  AND ("
                 + "  (stage2_failed = TRUE AND status != 'NEEDS_REVIEW'"
@@ -598,7 +585,8 @@ public class ReEvaluationJob {
                         rs.getTimestamp(2).toInstant(),
                         rs.getBoolean(3),
                         rs.getInt(4),
-                        rs.getString(5)));
+                        rs.getString(5),
+                        rs.getString(6)));
                 }
             }
         }
@@ -663,6 +651,6 @@ public class ReEvaluationJob {
      * non-BENIGN re-eval rolls overwrite it).
      */
     record ReEvalCandidate(UUID postId, Instant fetchedAt, boolean stage2Failed, int reEvalAttempts,
-                           @Nullable String stage2Verdict) {
+                           @Nullable String stage2Verdict, @Nullable String body) {
     }
 }

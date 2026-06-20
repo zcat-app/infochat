@@ -256,6 +256,24 @@ class ReEvaluationJobTest {
     }
 
     @Test
+    void reconstructOriginalBody_usesCandidateCarriedBody_notASecondPostRead() throws Exception {
+        // The DB body and the candidate-carried body diverge on purpose: if
+        // reconstructOriginalBody still issued a second SELECT body FROM post
+        // it would splice into the STALE DB body and yield
+        // "STALE <original> STALE". Reading the candidate-carried body yields
+        // "live <original> body" — proving the second post read is gone.
+        SeededPost post = seedInfraFailurePost("candidate-carried-body");
+        setPostBody(post, "STALE [REDACTED:m] STALE");
+        seedQuarantineRow(post, "m", "<original>");
+
+        ReEvaluationJob.ReEvalCandidate candidate = new ReEvaluationJob.ReEvalCandidate(
+            post.id, post.fetchedAt, true, 0, null, "live [REDACTED:m] body");
+
+        assertEquals("live <original> body", reEvaluationJob.reconstructOriginalBody(candidate),
+            "reconstruct must splice into the candidate-carried body, not a second post read");
+    }
+
+    @Test
     void quarantineReviewNotify_emittedOnNeedsReviewTransition() throws Exception {
         SeededPost post = seedInfraFailurePost("notify-needs-review");
         setReEvalAttempts(post.id, post.fetchedAt, 3);
@@ -269,7 +287,7 @@ class ReEvaluationJobTest {
     // ---------- helpers ----------
 
     private ReEvaluationJob.ReEvalCandidate candidateFor(SeededPost post, boolean stage2Failed,
-                                                         int attempts) {
+                                                         int attempts) throws Exception {
         // Mirrors the seeded state: infra-failure posts carry no recorded
         // verdict (the judge never ran), UNKNOWN-class posts carry 'UNKNOWN'.
         return candidateFor(post, stage2Failed, attempts, stage2Failed ? null : "UNKNOWN");
@@ -277,9 +295,26 @@ class ReEvaluationJobTest {
 
     private ReEvaluationJob.ReEvalCandidate candidateFor(SeededPost post, boolean stage2Failed,
                                                          int attempts,
-                                                         @Nullable String stage2Verdict) {
+                                                         @Nullable String stage2Verdict)
+            throws Exception {
+        // Carry the live post.body, mirroring how enumerateCandidates folds
+        // body into the candidate scan — reconstructOriginalBody now reads
+        // the body from the candidate, not from a second post read.
         return new ReEvaluationJob.ReEvalCandidate(post.id, post.fetchedAt, stage2Failed, attempts,
-            stage2Verdict);
+            stage2Verdict, currentBody(post));
+    }
+
+    private @Nullable String currentBody(SeededPost post) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT body FROM post WHERE id = ? AND fetched_at = ?")) {
+            ps.setObject(1, post.id);
+            ps.setTimestamp(2, Timestamp.from(post.fetchedAt));
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getString(1);
+            }
+        }
     }
 
     private SeededPost seedInfraFailurePost(String slug) throws Exception {

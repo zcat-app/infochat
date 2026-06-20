@@ -123,8 +123,22 @@ class ReEvaluationJobCooldownTest {
 
     private ReEvaluationJob.ReEvalCandidate candidateFor(UUID postId) throws Exception {
         // Mirror enumerateCandidates' read for an infra-failure post: no
-        // recorded verdict (the judge never ran), the seeded fetched_at, 0 attempts.
-        return new ReEvaluationJob.ReEvalCandidate(postId, readFetchedAt(postId), true, 0, null);
+        // recorded verdict (the judge never ran), the seeded fetched_at, 0
+        // attempts, and the live post.body the candidate scan now carries.
+        return new ReEvaluationJob.ReEvalCandidate(postId, readFetchedAt(postId), true, 0, null,
+            readBody(postId));
+    }
+
+    private @Nullable String readBody(UUID postId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT body FROM post WHERE id = ?")) {
+            ps.setObject(1, postId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "expected seeded post " + postId);
+                return rs.getString(1);
+            }
+        }
     }
 
     private UUID seedInfraFailurePost(String slug, @Nullable Instant lastReEvalAt) throws Exception {
