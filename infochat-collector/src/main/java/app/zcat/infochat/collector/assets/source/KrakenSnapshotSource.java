@@ -98,10 +98,10 @@ public class KrakenSnapshotSource implements AssetDataSource {
         if (ticker == null) {
             throw new FetchException("KrakenSnapshotSource: unsupported asset '" + asset + "'");
         }
-        String vsUpper = vs.toUpperCase(Locale.ROOT);
         if (!SUPPORTED_VS.contains(vs.toLowerCase(Locale.ROOT))) {
             throw new FetchException("KrakenSnapshotSource: unsupported vs '" + vs + "'");
         }
+        String vsUpper = vs.toUpperCase(Locale.ROOT);
 
         String pair = ticker + vsUpper;
         String url = API_BASE + URLEncoder.encode(pair, StandardCharsets.UTF_8);

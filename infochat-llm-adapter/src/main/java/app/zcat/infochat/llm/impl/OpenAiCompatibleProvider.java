@@ -95,14 +95,6 @@ public class OpenAiCompatibleProvider implements LlmProvider {
      */
     public static final String PROVIDER_NAME = "openai-compatible";
 
-    /**
-     * java.net.http.HttpClient is thread-safe and the connection
-     * pool is bounded internally — one shared instance per bean is
-     * correct. Constructed WITH an explicit connect-timeout: the
-     * per-call request timeout caps the full exchange, but on
-     * HTTP/1.1 an unroutable endpoint would otherwise hang on the
-     * OS connect default before the request timeout can apply.
-     */
     private final HttpClient http;
 
     private final Config config;

@@ -1,9 +1,9 @@
 ---
 id: M1-406
 title: "cleanup: clarity and comment-policy drift sweep (3 files)"
-status: pending
+status: done
 created: 2026-06-19
-last_updated: 2026-06-19
+last_updated: 2026-06-20
 blocked_by: []
 files_budget: 4
 files_scope:
@@ -30,12 +30,29 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-20
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 18
+      removed: 18
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-20
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-406: clarity and comment-policy drift sweep

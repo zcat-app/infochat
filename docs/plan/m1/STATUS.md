@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 435 |
+| done | 436 |
 | deferred | 6 |
 | **total** | **442** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-406 — cleanup: clarity and comment-policy drift sweep (3 files) (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-406 | cleanup: clarity and comment-policy drift sweep (3 files) | 2026-06-20 | round 1 APPROVE |
 | M1-405 | provider: validate ChatToolDispatcher args before the call cap | 2026-06-20 | round 1 APPROVE |
 | M1-404 | collector: dedup the Stage 1 fail-closed whole-body write | 2026-06-20 | round 1 APPROVE |
 | M1-403 | collector: read re-eval body from the candidate scan | 2026-06-20 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-399 | wizard: route the two operator-typed adapter data-dir writes to secrets.env through dotenv_escape (6-adapter.sh), consistent with M1-397 | 2026-06-19 | round 1 APPROVE |
 | M1-397 | wizard: escape operator-pasted secret values so a literal quote / backslash / ${...} can't corrupt or interpolate the secrets.env entry | 2026-06-19 | round 1 APPROVE |
 | M1-377 | collector: replace the re-eval one-element-array transaction workaround and unify the two fail-closed test-seam idioms | 2026-06-19 | round 1 APPROVE |
-| M1-376 | messaging: deterministic SimpleX adapterMessageId fallback and shared decode-ladder helper | 2026-06-19 | round 1 APPROVE |
 
 ---
 
@@ -604,5 +604,5 @@ M1-402 (done)
 M1-403 (done)
 M1-404 (done)
 M1-405 (done)
-M1-406 (pending) ← runnable
+M1-406 (done)
 ```

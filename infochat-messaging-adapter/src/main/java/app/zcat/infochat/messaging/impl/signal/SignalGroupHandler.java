@@ -143,6 +143,11 @@ final class SignalGroupHandler {
         boolean dispatchedMembership =
                 dispatchMembership(groupId, arrayOrNull(groupV2, "memberJoined"), true)
                 | dispatchMembership(groupId, arrayOrNull(groupV2, "memberLeft"), false);
+        // Dispatching membership and returning (rather than falling through to
+        // the message branch) is safe only because signal-cli delivers a member
+        // delta and a chat `message` body on SEPARATE groupV2 notifications,
+        // never combined on one — so a notification carrying memberJoined/Left
+        // never also carries a bot-mention we would drop by returning early.
         if (dispatchedMembership) {
             return;
         }
