@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 437 |
+| done | 438 |
 | deferred | 6 |
 | **total** | **447** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-408 — messaging: don't drop a co-delivered bot mention after a Signal group membership delta (complexity: low, risk: low)
 - M1-409 — collector+llm: close two guard-asymmetry gaps (feed item caps, timeout-ms startup validation) (complexity: low, risk: low)
 - M1-410 — core+provider: trust the declared SQL source of truth (audit-verb parity test, export by column type) (complexity: low, risk: low)
 - M1-411 — ssrf+messaging: two behavior-preserving simplifications (inline isIpv4Mapped, single-source chunker fence state) (complexity: low, risk: low)
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-408 | messaging: don't drop a co-delivered bot mention after a Signal group membership delta | 2026-06-20 | round 1 APPROVE |
 | M1-407 | provider: bound GetReferencesTool result bytes like its sibling chat tools | 2026-06-20 | round 1 APPROVE |
 | M1-406 | cleanup: clarity and comment-policy drift sweep (3 files) | 2026-06-20 | round 1 APPROVE |
 | M1-405 | provider: validate ChatToolDispatcher args before the call cap | 2026-06-20 | round 1 APPROVE |
@@ -72,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-401 | llm: redact userinfo on requireHttpBaseUrl failure paths | 2026-06-20 | round 2 APPROVE |
 | M1-400 | test: de-rot the EntityExtractorWorkerIT scan-window fixture so the in-window post never ages out | 2026-06-19 | round 1 APPROVE |
 | M1-399 | wizard: route the two operator-typed adapter data-dir writes to secrets.env through dotenv_escape (6-adapter.sh), consistent with M1-397 | 2026-06-19 | round 1 APPROVE |
-| M1-397 | wizard: escape operator-pasted secret values so a literal quote / backslash / ${...} can't corrupt or interpolate the secrets.env entry | 2026-06-19 | round 1 APPROVE |
 
 ---
 
@@ -609,7 +608,7 @@ M1-404 (done)
 M1-405 (done)
 M1-406 (done)
 M1-407 (done)
-M1-408 (pending) ← runnable
+M1-408 (done)
 M1-409 (pending) ← runnable
 M1-410 (pending) ← runnable
 M1-411 (pending) ← runnable

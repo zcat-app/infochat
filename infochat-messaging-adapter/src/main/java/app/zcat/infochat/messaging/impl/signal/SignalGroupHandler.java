@@ -95,7 +95,7 @@ final class SignalGroupHandler {
      *   <li>{@code memberJoined} / {@code memberLeft} present →
      *       dispatched as {@link MembershipEvent.UserJoined} /
      *       {@link MembershipEvent.UserLeft}.</li>
-     *   <li>otherwise, dataMessage has a {@code message} body →
+     *   <li>independently, if dataMessage has a {@code message} body →
      *       mention-checked; if the bot is ACI-mentioned, dispatched
      *       as an {@link InboundMessage} with {@link ScopeRef.Group}.
      *       Group messages without a bot mention are silently dropped
@@ -140,17 +140,16 @@ final class SignalGroupHandler {
         // memberJoined / memberLeft arrays. Both arrays may be present
         // on the same update (a mod swap, an admin reshuffle); the spec
         // models them as independent per-user events.
-        boolean dispatchedMembership =
-                dispatchMembership(groupId, arrayOrNull(groupV2, "memberJoined"), true)
-                | dispatchMembership(groupId, arrayOrNull(groupV2, "memberLeft"), false);
-        // Dispatching membership and returning (rather than falling through to
-        // the message branch) is safe only because signal-cli delivers a member
-        // delta and a chat `message` body on SEPARATE groupV2 notifications,
-        // never combined on one — so a notification carrying memberJoined/Left
-        // never also carries a bot-mention we would drop by returning early.
-        if (dispatchedMembership) {
-            return;
-        }
+        dispatchMembership(groupId, arrayOrNull(groupV2, "memberJoined"), true);
+        dispatchMembership(groupId, arrayOrNull(groupV2, "memberLeft"), false);
+        // Fall through to the message branch rather than returning after a
+        // membership delta. memberJoined/Left and the chat `message` body are
+        // independent dataMessage fields, and nothing in this handler, the
+        // codec, or the protocol forces them to be mutually exclusive — at an
+        // untrusted-peer boundary, an early return would silently drop a
+        // bot-mention co-delivered with a delta. The message branch is a no-op
+        // for a delta-only notification (no `message` → early drop below), so
+        // well-behaved traffic is unaffected. (M1-408)
 
         // Inbound group-message branch — requires sender ACI + body +
         // bot-mention. Anything missing → silent drop per spec.

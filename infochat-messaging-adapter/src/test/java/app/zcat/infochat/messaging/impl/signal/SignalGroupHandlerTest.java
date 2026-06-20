@@ -433,6 +433,87 @@ class SignalGroupHandlerTest {
                 "group sender displayName must come from the envelope sourceName");
     }
 
+    @Test
+    void coDeliveredDeltaAndMention_bothDispatched() {
+        // M1-408: a single notification carrying BOTH a membership delta
+        // (memberJoined) AND a chat body that @mentions the bot. Before
+        // the fix, dispatching the membership delta early-returned and the
+        // bot mention was silently dropped. After removing the early
+        // return, the delta is dispatched AND the mention is handled.
+        RecordingInbound inbound = new RecordingInbound();
+        RecordingMembership membership = new RecordingMembership();
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership, AdapterMetrics.noop());
+
+        handler.handleReceive(parse("""
+                {
+                  "envelope": {
+                    "sourceUuid": "AABBCCDD-1111-2222-3333-444455556666",
+                    "timestamp": 1700000020000,
+                    "dataMessage": {
+                      "timestamp": 1700000020000,
+                      "message": "@bot summarise this",
+                      "groupV2": {
+                        "id": "Z3JvdXBJZEJhc2U2NEVuY29kZWQ=",
+                        "memberJoined": ["BBCCDDEE-2222-3333-4444-555566667777"]
+                      },
+                      "mentions": [
+                        {"uuid": "11112222-3333-4444-5555-666677778888", "start": 0, "length": 4}
+                      ]
+                    }
+                  }
+                }
+                """));
+
+        assertEquals(1, membership.events.size(),
+                "the co-delivered membership delta must still be dispatched");
+        MembershipEvent.UserJoined joined = assertInstanceOf(
+                MembershipEvent.UserJoined.class, membership.events.get(0),
+                "memberJoined ACI maps to MembershipEvent.UserJoined");
+        assertEquals("bbccddee-2222-3333-4444-555566667777", joined.contactId());
+
+        assertEquals(1, inbound.messages.size(),
+                "a bot mention co-delivered with a membership delta MUST NOT be dropped");
+        InboundMessage msg = inbound.messages.get(0);
+        assertInstanceOf(ScopeRef.Group.class, msg.scope());
+        assertEquals(GROUP_V2_ID, ((ScopeRef.Group) msg.scope()).adapterGroupId());
+        assertEquals("summarise this", msg.text(),
+                "the bot mention span must be stripped before delivery");
+    }
+
+    @Test
+    void memberDeltaOnly_noBody_messagePathIsNoOp() {
+        // M1-408: the complement of the co-delivered case. A
+        // membership-delta-only notification (no message body) must behave
+        // exactly as before the fall-through change — the delta is
+        // dispatched and the message/mention path is a no-op, with no
+        // spurious inbound dispatch.
+        RecordingInbound inbound = new RecordingInbound();
+        RecordingMembership membership = new RecordingMembership();
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership, AdapterMetrics.noop());
+
+        handler.handleReceive(parse("""
+                {
+                  "envelope": {
+                    "sourceUuid": "AABBCCDD-1111-2222-3333-444455556666",
+                    "timestamp": 1700000021000,
+                    "dataMessage": {
+                      "timestamp": 1700000021000,
+                      "groupV2": {
+                        "id": "Z3JvdXBJZEJhc2U2NEVuY29kZWQ=",
+                        "memberLeft": ["CCDDEEFF-3333-4444-5555-666677778888"]
+                      }
+                    }
+                  }
+                }
+                """));
+
+        assertEquals(1, membership.events.size(),
+                "the membership delta must be dispatched");
+        assertInstanceOf(MembershipEvent.UserLeft.class, membership.events.get(0));
+        assertEquals(0, inbound.messages.size(),
+                "a delta-only notification must not produce a spurious inbound dispatch");
+    }
+
     private static JsonObject parse(String json) {
         try (JsonReader r = Json.createReader(new StringReader(json))) {
             return r.readObject();
