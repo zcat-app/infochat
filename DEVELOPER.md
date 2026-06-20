@@ -147,8 +147,9 @@ repo root and report regressions:
 mvn verify
 ```
 
-Quarkus integration tests bind a fixed test port (`8081`), so don't run two full
-suites against the same machine concurrently.
+Quarkus integration tests bind an OS-assigned ephemeral port
+(`quarkus.http.test-port=0`), so two suites reaching their IT phase at the same
+moment won't collide.
 
 ---
 
@@ -209,16 +210,6 @@ If Dev Services fails to start a container, check, in order:
 - Docker is running and your user can reach the daemon (`docker ps` works).
 - The VPN issue above — Testcontainers connects to the container over loopback.
 - Nothing else is already bound to the ports the run needs (below).
-
-### Don't run two full suites on one machine at once
-
-Quarkus integration tests bind the **fixed test port `8081`**. Two concurrent
-`mvn verify` runs (e.g. from two worktrees) collide with a bind error. Before a
-full run, check for a suite already in flight:
-
-```bash
-pgrep -af "clean verify"
-```
 
 ### Known flaky integration tests
 

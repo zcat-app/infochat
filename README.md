@@ -56,7 +56,7 @@ is stored, so retrieval is fast, filterable, and reproducible.
 
 Separate from the news pipeline, infochat answers live price/market lookups
 such as `/zcash` and `/monero`, sourced from public market data
-(Kraken, Bitfinex). Every reply names its data source and links it.
+(CoinGecko, Kraken, Bitfinex). Every reply names its data source and links it.
 
 ### Messaging apps it supports
 

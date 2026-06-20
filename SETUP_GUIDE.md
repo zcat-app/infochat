@@ -68,7 +68,7 @@ account on that app, which you set up once, by hand, before running the wizard:
 You can use either one, or both. The wizard will later ask you where these
 programs live and what the bot's account is — so just note those down. Detailed
 account-creation steps for each are in the
-[deployment notes](docs/spec/deployment.md).
+[deployment design notes](docs/design/07-deployment.md) (§7.7.2 / §7.9).
 
 > **Honest note:** everything *about infochat itself* is automated by the
 > wizard. The only manual part is creating that messaging account, because it
