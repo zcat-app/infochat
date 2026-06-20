@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 441 |
+| done | 442 |
 | deferred | 6 |
-| **total** | **448** |
+| **total** | **452** |
 
 ---
 
@@ -24,7 +24,9 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-412 — cleanup: deep-review low-severity parity, dedup, and comment-drift sweep (complexity: low, risk: low)
+- M1-413 — test: seed fixture of pre-evaluated READY posts for retrieval tests (complexity: low, risk: low)
+- M1-415 — test: golden-path end-to-end journey IT (complexity: medium, risk: low)
+- M1-416 — test: collector ingest + NOTIFY smoke IT (complexity: medium, risk: low)
 
 ---
 
@@ -41,7 +43,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-414 — blocked_by: M1-413 (pending)
 
 ---
 
@@ -60,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-412 | cleanup: deep-review low-severity parity, dedup, and comment-drift sweep | 2026-06-20 | round 1 APPROVE |
 | M1-411 | ssrf+messaging: two behavior-preserving simplifications (inline isIpv4Mapped, single-source chunker fence state) | 2026-06-20 | round 1 APPROVE |
 | M1-410 | core+provider: trust the declared SQL source of truth (audit-verb parity test, export by column type) | 2026-06-20 | round 1 APPROVE |
 | M1-409 | collector+llm: close two guard-asymmetry gaps (feed item caps, timeout-ms startup validation) | 2026-06-20 | round 1 APPROVE |
@@ -69,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-405 | provider: validate ChatToolDispatcher args before the call cap | 2026-06-20 | round 1 APPROVE |
 | M1-404 | collector: dedup the Stage 1 fail-closed whole-body write | 2026-06-20 | round 1 APPROVE |
 | M1-403 | collector: read re-eval body from the candidate scan | 2026-06-20 | round 1 APPROVE |
-| M1-402 | messaging: clear reconnecting on SimpleX derivation failure | 2026-06-20 | round 1 APPROVE |
 
 ---
 
@@ -610,5 +612,9 @@ M1-408 (done)
 M1-409 (done)
 M1-410 (done)
 M1-411 (done)
-M1-412 (pending) ← runnable
+M1-412 (done)
+M1-413 (pending) ← runnable
+  └── M1-414 (pending)
+M1-415 (pending) ← runnable
+M1-416 (pending) ← runnable
 ```

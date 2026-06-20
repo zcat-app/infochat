@@ -268,6 +268,32 @@ final class LlmHttpSupport {
     }
 
     /**
+     * Config-boundary validation of an operator-supplied {@code max-tokens}:
+     * the value must be strictly positive. The sibling of
+     * {@link #requirePositiveTimeoutMs} for the other numeric property
+     * {@link AnthropicProvider} reads at the startup resolvability scan — a
+     * non-positive value dies here, at startup, naming {@code propertyKey},
+     * rather than reaching the Anthropic Messages API on the first live call,
+     * where it returns a non-2xx that the Stage 2 retry-then-fallback catch
+     * absorbs as a recurring transient outage — silently degrading a boot-time
+     * misconfiguration into a permanent fake "outage" (M1-412, sibling of
+     * M1-409's timeout-ms guard). Only {@link AnthropicProvider} reads
+     * {@code max-tokens}; the OpenAI-compatible providers do not, so this guard
+     * lives at that one call site. The token count is a plain integer, not a
+     * credential, so the message echoes the offending value directly.
+     *
+     * @throws IllegalArgumentException when {@code maxTokens <= 0}; the message
+     *     names {@code propertyKey} so the operator can find the offending
+     *     property.
+     */
+    static void requirePositiveMaxTokens(int maxTokens, String propertyKey) {
+        if (maxTokens <= 0) {
+            throw new IllegalArgumentException(
+                propertyKey + "=" + maxTokens + " must be a positive token count");
+        }
+    }
+
+    /**
      * Mask the userinfo span of any {@code scheme://USER:PASS@host...}
      * substring before the value is echoed into a diagnostic message, so a
      * credential-bearing base-url cannot leak verbatim (M1-330). This is a

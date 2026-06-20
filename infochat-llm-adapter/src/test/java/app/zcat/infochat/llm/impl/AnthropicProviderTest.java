@@ -366,6 +366,45 @@ class AnthropicProviderTest {
             "the resolved provider's TRANSLATOR config must not throw on missing keys");
     }
 
+    @Test
+    void failsStartupScanOnNonPositiveMaxTokensNamingTheProperty() {
+        // M1-412: a non-positive per-task max-tokens must fail the startup
+        // config scan (assertTaskConfigResolvable), naming the offending
+        // property — the sibling guard to the timeout-ms check (M1-409).
+        // Without it the value reaches the Anthropic Messages API on the first
+        // live call, which returns a non-2xx the Stage 2 worker's catch absorbs
+        // as a recurring transient outage. Only AnthropicProvider reads
+        // max-tokens, so this guard (and its test) is Anthropic-only.
+        String seg = ModelTask.SUMMARIZER.keySegment();
+        String property = "infochat.llm." + seg + ".max-tokens";
+        Config cfg = new StubConfig(Map.of(
+            "infochat.llm." + seg + ".base-url", "http://localhost:9",
+            "infochat.llm." + seg + ".model", MODEL,
+            property, "0"));
+        AnthropicProvider provider = new AnthropicProvider(cfg, HttpClient.newHttpClient());
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+            () -> provider.assertTaskConfigResolvable(ModelTask.SUMMARIZER),
+            "AnthropicProvider must fail the startup scan on a non-positive max-tokens");
+        assertTrue(ex.getMessage().contains(property),
+            "failure must name the offending property; got: " + ex.getMessage());
+    }
+
+    @Test
+    void positiveMaxTokensResolvesAtStartupScan() {
+        // The at-or-above-zero positive case still resolves: a valid max-tokens
+        // must not trip the new guard.
+        String seg = ModelTask.SUMMARIZER.keySegment();
+        Config cfg = new StubConfig(Map.of(
+            "infochat.llm." + seg + ".base-url", "http://localhost:9",
+            "infochat.llm." + seg + ".model", MODEL,
+            "infochat.llm." + seg + ".max-tokens", "1024"));
+        AnthropicProvider provider = new AnthropicProvider(cfg, HttpClient.newHttpClient());
+
+        assertDoesNotThrow(() -> provider.assertTaskConfigResolvable(ModelTask.SUMMARIZER),
+            "a positive max-tokens must resolve at the startup scan");
+    }
+
     private AnthropicProvider providerFor(ModelTask task, String apiKey) {
         String seg = task.keySegment();
         Config cfg = new StubConfig(Map.of(

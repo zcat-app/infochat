@@ -15,12 +15,12 @@ import java.time.Duration;
  *
  * <p>The window is the post retention horizon
  * ({@code infochat.partitions.retention-days.post}) widened by
- * {@link #PARTITION_SCAN_SLACK} — the same arithmetic
- * {@code ReEvaluationJob} and {@code PerSourceUnknownTracker} already use.
- * Those two scanners predate this helper and keep their own copy of the
- * constant (this ticket leaves them unchanged); the four eval-stage
- * pickup queries (Embedding, Tagger, Entity, ReadyPromoter) share THIS
- * one source rather than each inventing a knob.
+ * {@link #PARTITION_SCAN_SLACK}. This is the single declaration of that
+ * slack: the four eval-stage pickup queries (Embedding, Tagger, Entity,
+ * ReadyPromoter) and the three other partition-pruning scanners
+ * ({@code ReEvaluationJob}, {@code PerSourceUnknownTracker},
+ * {@code NostrStreamSource}) all reference it, so the value cannot drift
+ * across the scans (M1-412).
  *
  * <p>The semantic trade-off is the one those scanners already accept: a
  * post fetched longer ago than horizon+slack drops out of pickup, but
@@ -31,11 +31,11 @@ import java.time.Duration;
 public class PartitionScan {
 
     // Slack added past the exact retention horizon so the floor never
-    // excludes a post inside a live partition. Value mirrors the
-    // PARTITION_SCAN_SLACK that ReEvaluationJob and PerSourceUnknownTracker
-    // document — kept identical so all partition-pruning scans share one
-    // convention.
-    private static final Duration PARTITION_SCAN_SLACK = Duration.ofDays(2);
+    // excludes a post inside a live partition. The single source for every
+    // partition-pruning scan in the collector — ReEvaluationJob,
+    // PerSourceUnknownTracker, and NostrStreamSource reference this constant
+    // rather than redeclaring it, so the slack cannot drift (M1-412).
+    public static final Duration PARTITION_SCAN_SLACK = Duration.ofDays(2);
 
     @ConfigProperty(name = "infochat.partitions.retention-days.post")
     int postRetentionDays;

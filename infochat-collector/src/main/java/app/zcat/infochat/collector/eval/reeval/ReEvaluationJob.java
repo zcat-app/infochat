@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.eval.reeval;
 
+import app.zcat.infochat.collector.eval.PartitionScan;
 import app.zcat.infochat.collector.eval.TransactionHelper;
 import app.zcat.infochat.collector.eval.stage2.Stage2VerdictHandler;
 import app.zcat.infochat.collector.eval.stage2.Stage2Worker;
@@ -74,19 +75,6 @@ public class ReEvaluationJob {
     static final String ERROR_CLASS_REEVAL_CAP_EXHAUSTION = "re-eval-cap-exhaustion";
     static final String ERROR_CLASS_REEVAL_RELEASED = "re-eval-released";
     static final String ERROR_CLASS_NEEDS_REVIEW_DEPTH = "needs-review-depth";
-
-    // Slack added to the post retention horizon when bounding the partition
-    // key (fetched_at) on the candidate scan so the planner can prune
-    // partitions instead of scanning every live one each tick. fetched_at is
-    // the post partition key; the retention horizon
-    // (infochat.partitions.retention-days.post) is the live-data span. The
-    // floor is widened past the exact horizon by this slack — its value
-    // mirrors PerSourceUnknownTracker's documented PARTITION_SCAN_SLACK so the
-    // two re-eval scans share one partition-pruning convention rather than
-    // each inventing a knob. The semantic trade-off (a candidate fetched
-    // longer ago than horizon+slack drops out of the scan) is the same one
-    // PerSourceUnknownTracker accepts and is argued in the commit message.
-    private static final Duration PARTITION_SCAN_SLACK = Duration.ofDays(2);
 
     private static final Logger LOG = LoggerFactory.getLogger(ReEvaluationJob.class);
 
@@ -636,7 +624,7 @@ public class ReEvaluationJob {
 
     /** The shared candidate/depth scan floor: retention horizon + slack, as a SQL INTERVAL string. */
     private String partitionScanWindow() {
-        return (postRetentionDays + PARTITION_SCAN_SLACK.toDays()) + " days";
+        return (postRetentionDays + PartitionScan.PARTITION_SCAN_SLACK.toDays()) + " days";
     }
 
     /** The infra-failure re-judge cooldown as a SQL INTERVAL string (M1-370). */

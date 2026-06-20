@@ -339,10 +339,12 @@ public final class IpBlocklist {
         if (Arrays.equals(raw, AWS_IMDSV2_V6)) {
             return true;
         }
-        if (isAllZeroV6(raw)) {
+        // :: — unspecified address (all 16 bytes zero).
+        if (allZero(raw, 0, 16)) {
             return true;
         }
-        if (isLoopbackV6(raw)) {
+        // ::1 — loopback (first 15 bytes zero, last byte 1).
+        if (allZero(raw, 0, 15) && raw[15] == 1) {
             return true;
         }
         int b0 = raw[0] & 0xFF;
@@ -377,14 +379,6 @@ public final class IpBlocklist {
             return true;
         }
         return false;
-    }
-
-    private static boolean isLoopbackV6(byte[] raw) {
-        return allZero(raw, 0, 15) && raw[15] == 1;
-    }
-
-    private static boolean isAllZeroV6(byte[] raw) {
-        return allZero(raw, 0, 16);
     }
 
     /**

@@ -72,6 +72,22 @@ class SafeLogTest {
     }
 
     @Test
+    void formatSafeStripsControlCharactersInMsg() {
+        // M1-412: the caller msg is run through stripControls in addition to
+        // redact, so CR/LF/ANSI in the msg cannot forge a second log line.
+        var ex = new RuntimeException("boom");
+        String result = SafeLog.formatSafe("line one\r\nforged second line\u001b[31m", ex);
+
+        assertFalse(result.contains("\r"), "CR must be stripped from the msg");
+        assertFalse(result.contains("\n"), "LF must be stripped from the msg");
+        assertFalse(result.contains("\u001b"), "ESC must be stripped from the msg");
+        assertEquals(
+                "line one  forged second line [31m | exception=java.lang.RuntimeException",
+                result,
+                "control characters in the msg must each become a single space");
+    }
+
+    @Test
     void formatSafeDoesNotLeakExceptionMessageWithApiKey() {
         var ex = new RuntimeException(
                 "Auth failed: key=sk-ant-api0123456789abcdef01234567890");

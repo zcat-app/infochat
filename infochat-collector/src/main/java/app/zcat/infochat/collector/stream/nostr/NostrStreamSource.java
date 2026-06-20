@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.stream.nostr;
 
+import app.zcat.infochat.collector.eval.PartitionScan;
 import app.zcat.infochat.collector.eval.reeval.PerSourceUnknownTracker;
 import app.zcat.infochat.collector.outbox.EvalQueueProducer;
 import app.zcat.infochat.collector.outbox.PostPersister;
@@ -353,8 +354,8 @@ public final class NostrStreamSource implements StreamSource {
         // The post partition retention horizon — the same property the
         // PartitionPruner ages partitions out with — reused as the since-
         // cursor scan window so the fetched_at floor never excludes a live
-        // post. Widened by the same slack convention ReEvaluationJob and
-        // PerSourceUnknownTracker document for their re-eval scans.
+        // post. Widened by the shared PartitionScan.PARTITION_SCAN_SLACK,
+        // the single source every partition-pruning scan references.
         @ConfigProperty(name = "infochat.partitions.retention-days.post")
         int postRetentionDays;
 
@@ -580,11 +581,6 @@ public final class NostrStreamSource implements StreamSource {
             return relays;
         }
 
-        // Mirrors ReEvaluationJob/PerSourceUnknownTracker's documented
-        // PARTITION_SCAN_SLACK so the partition-pruned scans share one
-        // windowing convention rather than each inventing a knob.
-        private static final Duration PARTITION_SCAN_SLACK = Duration.ofDays(2);
-
         /**
          * Since-cursor for a relay reconnect. The fast path bounds
          * fetched_at at {@code now() - (retention horizon + slack)} so
@@ -615,7 +611,7 @@ public final class NostrStreamSource implements StreamSource {
                  PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setObject(1, sourceUuid);
                 if (boundedToScanWindow) {
-                    ps.setString(2, (postRetentionDays + PARTITION_SCAN_SLACK.toDays()) + " days");
+                    ps.setString(2, (postRetentionDays + PartitionScan.PARTITION_SCAN_SLACK.toDays()) + " days");
                 }
                 try (ResultSet rs = ps.executeQuery()) {
                     if (rs.next()) {

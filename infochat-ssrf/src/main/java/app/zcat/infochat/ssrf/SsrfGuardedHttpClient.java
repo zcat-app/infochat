@@ -506,8 +506,12 @@ public final class SsrfGuardedHttpClient {
 
     // A redirect crosses origin when the scheme, host, or effective port
     // differs. {@code from} is always validated (it was resolved this
-    // hop); {@code to} is an as-yet-unvalidated redirect target, so its
-    // scheme/host may be null. The host comparison runs through
+    // hop): callers pass an absolute URI, so from.getScheme() is non-null by
+    // precondition and is dereferenced directly with no runtime null-guard —
+    // adding one would be defensive code for a structurally impossible state
+    // (CLAUDE.md §No-defensive-code). {@code to} is an as-yet-unvalidated
+    // redirect target, so its scheme/host may be null. The host comparison
+    // runs through
     // canonicalizeHost (via sameCanonicalHost) so case / trailing-dot /
     // IDN variants of the SAME host are not misread as cross-origin —
     // the same canonicalization the pin map keys by, so the credential

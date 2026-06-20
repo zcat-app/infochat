@@ -164,19 +164,23 @@ final class SignalGroupHandler {
         if (body == null || body.isEmpty()) {
             return;
         }
+        // Computed once for the whole group inbound path: the daemon-supplied
+        // timestamp feeds both the oversize-drop diagnostic below and the
+        // accepted-frame id, and usableTimestamp is a pure function of the
+        // unchanging (envelope, dataMessage) pair.
+        Long timestamp = SignalMessageCodec.usableTimestamp(envelope, dataMessage);
         if (SignalMessageCodec.exceedsInboundByteCap(body)) {
             // §6.3.10 transport size-cap shed, mirroring the DM path and
             // SimpleX — the coarse envelope-line cap does not bound the
             // decoded body. Silent at the boundary (no reply) but observable:
             // count + WARN with the redacted sender (D37) and adapterMessageId.
             // The cap CHECK is unchanged; only the silent drop becomes visible.
-            Long oversizeTimestamp = SignalMessageCodec.usableTimestamp(envelope, dataMessage);
             metrics.inboundDropped(SignalConfig.ADAPTER_NAME,
                     new ScopeRef.Group(groupId), AdapterMetrics.DropReason.OVERSIZE);
             LOG.warnf("inbound dropped — exceeds %d-byte size cap; from %s adapterMessageId %s",
                     SignalMessageCodec.MAX_INBOUND_TEXT_BYTES,
                     SignalMessageCodec.redactContactId(sourceUuid.toLowerCase(Locale.ROOT)),
-                    oversizeTimestamp == null ? "signal-unknown" : "signal-" + oversizeTimestamp);
+                    timestamp == null ? "signal-unknown" : "signal-" + timestamp);
             return;
         }
         if (!SignalMentionParser.botMentioned(dataMessage, botAci)) {
@@ -189,7 +193,6 @@ final class SignalGroupHandler {
             LOG.debugf("inbound Signal group message dropped — no InboundHandler set");
             return;
         }
-        Long timestamp = SignalMessageCodec.usableTimestamp(envelope, dataMessage);
         if (timestamp == null) {
             // The daemon stream is a trust boundary: a present-but-null,
             // non-numeric, or fractional/out-of-range timestamp must drop

@@ -55,8 +55,9 @@ public final class SafeLog {
     }
 
     /**
-     * Build the sanitized log line: {@code redact(msg) + " | exception=" +
-     * className + suppressed? + (" > " + causeClassName + suppressed?)*}.
+     * Build the sanitized log line: {@code stripControls(redact(msg)) +
+     * " | exception=" + className + suppressed? +
+     * (" > " + causeClassName + suppressed?)*}.
      * Cause chain is depth-capped at {@value #MAX_CAUSE_DEPTH}; suppressed
      * exceptions are emitted as {@code [+suppressedClassName,+...]} after
      * each exception's class name. Only class names traverse — message
@@ -68,7 +69,13 @@ public final class SafeLog {
      * SLF4J {@code error(msg, t)} instead of this wrapper.
      */
     static String formatSafe(String msg, Throwable t) {
-        String redacted = Redactor.redact(msg);
+        // Strip controls in addition to redacting: the caller msg is the one
+        // segment of the line a caller can fill with CR/LF/ANSI to forge a
+        // second log line, exactly the surface the peer ThrottledAdminNotifier
+        // already sanitizes (security.md §"User content in exceptions"). Strip
+        // after redact so the emitted text carries neither an API key nor a
+        // control character.
+        String redacted = stripControls(Redactor.redact(msg));
         StringBuilder sb = new StringBuilder(redacted.length() + 80);
         sb.append(redacted)
                 .append(" | exception=")

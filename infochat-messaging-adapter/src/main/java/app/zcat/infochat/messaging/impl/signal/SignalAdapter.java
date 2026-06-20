@@ -613,7 +613,7 @@ public final class SignalAdapter implements MessagingAdapter {
         long sleepMs = ENDPOINT_PROBE_INTERVAL.toMillis();
         while (System.nanoTime() < deadline) {
             try (Socket probe = new Socket()) {
-                probe.connect(endpoint, (int) ENDPOINT_PROBE_INTERVAL.toMillis() * 2);
+                probe.connect(endpoint, (int) (ENDPOINT_PROBE_INTERVAL.toMillis() * 2));
                 return true;
             } catch (IOException e) {
                 long remainingMs = Math.max(0, (deadline - System.nanoTime()) / 1_000_000);

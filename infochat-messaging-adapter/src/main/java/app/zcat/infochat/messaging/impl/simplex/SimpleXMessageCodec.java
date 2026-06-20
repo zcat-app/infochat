@@ -734,7 +734,7 @@ final class SimpleXMessageCodec {
                 resp.get("errorType"),
                 resp.get("error"));
         FailureCategory category = classifyError(errorTag == null ? "" : errorTag);
-        // Fixed sentinel when no recognized error tag is found — the prior
+        // An UNRECOGNIZED envelope is reduced to a fixed sentinel — the prior
         // resp.toString() fallback dumped the whole error envelope (which
         // simplex-chat may populate with bytes echoed back from the
         // offending inbound, e.g. user message body fragments) into
@@ -742,11 +742,17 @@ final class SimpleXMessageCodec {
         // WS-client DEBUG log at failPending() and the MessagingException
         // message text returned to the adapter caller. security.md
         // §User-content logging is "at any log level"; §User content
-        // in exceptions covers the MessagingException path. The
-        // structural fix is to keep envelope bytes out of CommandError
-        // in the first place. The dropped envelope content is not
-        // needed by the Provider — the FailureCategory is the routing
-        // signal and the corrId is the correlation key.
+        // in exceptions covers the MessagingException path.
+        //
+        // A RECOGNIZED errorTag is still forwarded verbatim into
+        // CommandError.detail(): this is safe ONLY on the assumption that
+        // simplex-chat error tags are a bounded, enum-like discriminator
+        // vocabulary, not free-form user prose. If a future tag carries
+        // echoed inbound bytes, that assumption breaks and the recognized
+        // branch becomes a leak path — narrow or sanitize it then. The
+        // dropped envelope content is not needed by the Provider: the
+        // FailureCategory is the routing signal and the corrId is the
+        // correlation key.
         return new CommandError(corrId == null ? "" : corrId,
                 category,
                 errorTag == null ? "unrecognized-error-envelope" : errorTag);

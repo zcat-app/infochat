@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.eval.reeval;
 
+import app.zcat.infochat.collector.eval.PartitionScan;
 import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import io.quarkus.scheduler.Scheduled;
@@ -34,20 +35,6 @@ import java.util.UUID;
 public class PerSourceUnknownTracker {
 
     static final String ERROR_CLASS_SOURCE_UNKNOWN_AUTO_DISABLE = "source-unknown-auto-disable";
-
-    // Slack added to the rolling window when bounding the partition key
-    // (post.fetched_at) so partition pruning applies. fetched_at is the post
-    // partition key; status_changed_at (the recency-of-verdict signal the rate
-    // is actually computed over) is not — so bounding only status_changed_at
-    // forced every tick to scan all partitions. The fetched_at bound must never
-    // exclude a post that is inside the status_changed_at window, so it is
-    // widened by this slack, which must exceed the worst-case lag between a
-    // post's fetched_at and its stage-2 verdict (the eval-pipeline drain time).
-    // Two days is generous: the pipeline drains in seconds/minutes normally and
-    // this still tolerates a long sustained backlog. The trade-off (a post
-    // evaluated now but fetched longer ago than window+slack drops out of the
-    // rate) is argued in the commit message's semantic-delta note.
-    private static final Duration PARTITION_SCAN_SLACK = Duration.ofDays(2);
 
     private static final Logger LOG = LoggerFactory.getLogger(PerSourceUnknownTracker.class);
 
@@ -94,9 +81,11 @@ public class PerSourceUnknownTracker {
         // The p.fetched_at lower bound is the partition-pruning predicate:
         // fetched_at is the post partition key, status_changed_at is not, so
         // bounding only status_changed_at made every tick scan all partitions.
-        // fetched_at is widened by PARTITION_SCAN_SLACK so it never excludes a
-        // post inside the status_changed_at window; status_changed_at stays the
-        // precise recency-of-verdict signal the rate is computed over.
+        // fetched_at is widened by the shared PartitionScan.PARTITION_SCAN_SLACK
+        // so it never excludes a post inside the status_changed_at window — the
+        // slack must exceed the worst-case lag between a post's fetched_at and
+        // its stage-2 verdict; status_changed_at stays the precise
+        // recency-of-verdict signal the rate is computed over.
         final String sql =
             "SELECT s.id, "
                 + "  COUNT(*) FILTER (WHERE p.stage2_verdict = 'UNKNOWN') AS unknown_count, "
@@ -113,7 +102,7 @@ public class PerSourceUnknownTracker {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             long windowSeconds = unknownRateWindow.toSeconds();
-            ps.setString(1, (windowSeconds + PARTITION_SCAN_SLACK.toSeconds()) + " seconds");
+            ps.setString(1, (windowSeconds + PartitionScan.PARTITION_SCAN_SLACK.toSeconds()) + " seconds");
             ps.setString(2, windowSeconds + " seconds");
             ps.setInt(3, minSampleSize);
             try (ResultSet rs = ps.executeQuery()) {

@@ -177,6 +177,14 @@ public final class PinnedDnsResolver {
          * because the pin is installed happens-before the send that
          * needs it. Has no production caller; the live
          * {@link ForwardingResolver} probes {@link #PINS} directly.
+         *
+         * <p>Kept in MAIN sources (not pushed to test sources like the
+         * {@code LoopbackPermittingBlocklist} carve-out) on purpose:
+         * {@code PINS} is private to {@code Provider}, and the
+         * cross-module concurrency tests that consume the ssrf test-jar
+         * need a read window onto it. This is NOT dead code despite
+         * having no production caller — do not remove it as part of a
+         * surgical-changes cleanup (M1-412, deep-review F2).
          */
         static Map<String, List<InetAddress>> activePinsSnapshot() {
             Map<String, List<InetAddress>> snapshot = new HashMap<>();

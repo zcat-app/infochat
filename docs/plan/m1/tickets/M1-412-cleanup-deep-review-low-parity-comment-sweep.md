@@ -1,7 +1,7 @@
 ---
 id: M1-412
 title: "cleanup: deep-review low-severity parity, dedup, and comment-drift sweep"
-status: pending
+status: done
 created: 2026-06-20
 last_updated: 2026-06-20
 blocked_by: []
@@ -58,12 +58,43 @@ spec_refs:
   - docs/spec/security.md §SSRF and outbound connections
   - docs/spec/security.md §User content in exceptions
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-20
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 16
+      added: 156
+      removed: 79
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-20
+    verdict: CLEAN
+    base: main
+    head: m1/M1-412-cleanup-deep-review-low-parity-comment-sweep
+    verdict_file: docs/plan/m1/redteam/M1-412-2026-06-20.md
+    out_of_model_count: 0
+    note: |
+      Pre-commit redteam (between review APPROVE and commit) on this
+      security_relevant ticket. CLEAN — no gaps between docs/spec/security.md
+      and the diff (max-tokens guard, SafeLog control-strip, isCrossOrigin
+      precondition comment, SimpleX/decodeError comment corrections all
+      reviewed against the threat model). No remediation needed.
+clarity_check:
+  date: 2026-06-20
+  verdict: WARN
+  warnings:
+    - "Acceptance items 5, 8, and 10 are comment-only acceptance items (verify by reading the diff that the comment is present and correct); weakest runnable form, but each correctly declares itself comment-only and names the exact site."
+  blockers: []
 ---
 
 # M1-412: deep-review low-severity parity, dedup, and comment-drift sweep
