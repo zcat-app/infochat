@@ -56,6 +56,8 @@ class ExportDataCollectorTest {
                     + "SELECT id FROM users WHERE contact_id LIKE ?)", PREFIX + "%");
             exec(conn, "DELETE FROM chat_memory WHERE user_id IN ("
                     + "SELECT id FROM users WHERE contact_id LIKE ?)", PREFIX + "%");
+            exec(conn, "DELETE FROM summary_anchor WHERE user_id IN ("
+                    + "SELECT id FROM users WHERE contact_id LIKE ?)", PREFIX + "%");
 
             exec(conn, "ALTER TABLE audit_log DISABLE TRIGGER trg_audit_log_no_delete");
             try {
@@ -306,6 +308,42 @@ class ExportDataCollectorTest {
     }
 
     /**
+     * Acceptance pin (M1-410): {@code Types.OTHER} columns are
+     * classified inline-vs-quote by their DECLARED SQL type, not by the
+     * value's first character. JSONB columns ({@code cluster_map},
+     * {@code details_json}) are emitted as raw inline JSON; UUID columns
+     * — also {@code Types.OTHER} — are quoted strings. Exercising both
+     * in one export proves the OTHER branch keys on the column type, not
+     * the byte shape (UUID and JSONB share the same int type code).
+     */
+    @Test
+    void otherColumnsClassifiedByDeclaredSqlType() throws Exception {
+        String contactId = PREFIX + "othertype-actor";
+        UUID userId = seedUser(contactId);
+
+        seedSummaryAnchor(userId, "dm", userId, "{\"a\": 1}");
+        seedAuditRowWithDetails(userId, contactId, "EXPORT", "user",
+                userId.toString(), "{\"k\": \"v\"}");
+
+        ExportDataCollector.ExportResult result =
+                collector.collect(userId, "dm", userId);
+
+        String anchorRow = result.tables().get("summary_anchor").getFirst();
+        assertTrue(anchorRow.contains("\"cluster_map\":{"),
+                "JSONB cluster_map must be inlined as raw JSON; got: " + anchorRow);
+        assertFalse(anchorRow.contains("\"cluster_map\":\""),
+                "JSONB cluster_map must NOT be quoted as a string; got: " + anchorRow);
+
+        String auditRow = result.tables().get("audit_log_view").getFirst();
+        assertTrue(auditRow.contains("\"details_json\":{"),
+                "JSONB details_json must be inlined as raw JSON; got: " + auditRow);
+        // actor_user_id is a UUID — also Types.OTHER, but must be quoted,
+        // proving classification keys on the declared type, not the bytes.
+        assertTrue(auditRow.contains("\"actor_user_id\":\"" + userId + "\""),
+                "UUID actor_user_id must be a quoted string; got: " + auditRow);
+    }
+
+    /**
      * Acceptance pin: the export connection applies the standard
      * statement timeout before the first collection query, so a
      * pathological table cannot hold the connection unbounded.
@@ -468,6 +506,45 @@ class ExportDataCollectorTest {
             ps.setString(2, scopeKind);
             ps.setObject(3, scopeId);
             ps.setString(4, summary);
+            ps.executeUpdate();
+        }
+    }
+
+    private void seedSummaryAnchor(UUID userId, String scopeKind, UUID scopeId,
+                                   String clusterMapJson) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO summary_anchor (user_id, scope_kind, scope_id,"
+                             + " command_kind, command_name, arg_hash, post_uids,"
+                             + " cluster_map)"
+                             + " VALUES (?, ?, ?, 'personal', 'summary', 'h', '{}',"
+                             + " ?::jsonb)")) {
+            ps.setObject(1, userId);
+            ps.setString(2, scopeKind);
+            ps.setObject(3, scopeId);
+            ps.setString(4, clusterMapJson);
+            ps.executeUpdate();
+        }
+    }
+
+    private void seedAuditRowWithDetails(UUID actorUserId, String actorContactId,
+                                         String action, String targetKind,
+                                         String targetId, String detailsJson)
+            throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO audit_log (actor_user_id, actor_contact_id,"
+                             + " actor_adapter, action, target_kind, target_id,"
+                             + " request_id, details_json)"
+                             + " VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb)")) {
+            ps.setObject(1, actorUserId);
+            ps.setString(2, actorContactId);
+            ps.setString(3, ADAPTER);
+            ps.setString(4, action);
+            ps.setString(5, targetKind);
+            ps.setString(6, targetId);
+            ps.setString(7, UUID.randomUUID().toString());
+            ps.setString(8, detailsJson);
             ps.executeUpdate();
         }
     }

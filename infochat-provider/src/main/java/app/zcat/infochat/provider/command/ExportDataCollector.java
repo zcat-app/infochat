@@ -311,33 +311,39 @@ public class ExportDataCollector {
             int columnCount = rs.getMetaData().getColumnCount();
             String[] names = new String[columnCount];
             int[] types = new int[columnCount];
+            // Declared SQL type name (e.g. "jsonb", "uuid") for the
+            // Types.OTHER classification — PostgreSQL collapses several
+            // distinct types onto Types.OTHER, so the int code alone
+            // cannot tell JSONB from UUID.
+            String[] typeNames = new String[columnCount];
             for (int i = 0; i < columnCount; i++) {
                 names[i] = rs.getMetaData().getColumnLabel(i + 1);
                 types[i] = rs.getMetaData().getColumnType(i + 1);
+                typeNames[i] = rs.getMetaData().getColumnTypeName(i + 1);
             }
             while (rs.next()) {
-                rows.add(renderRow(rs, names, types, columnCount));
+                rows.add(renderRow(rs, names, types, typeNames, columnCount));
             }
         }
         return rows;
     }
 
     private static String renderRow(
-            ResultSet rs, String[] names, int[] types, int count)
+            ResultSet rs, String[] names, int[] types, String[] typeNames, int count)
             throws SQLException {
         StringBuilder sb = new StringBuilder(128);
         sb.append('{');
         for (int i = 0; i < count; i++) {
             if (i > 0) sb.append(',');
             sb.append('"').append(names[i]).append("\":");
-            appendValue(sb, rs, i + 1, types[i]);
+            appendValue(sb, rs, i + 1, types[i], typeNames[i]);
         }
         sb.append('}');
         return sb.toString();
     }
 
     private static void appendValue(
-            StringBuilder sb, ResultSet rs, int col, int sqlType)
+            StringBuilder sb, ResultSet rs, int col, int sqlType, String sqlTypeName)
             throws SQLException {
         Object val = rs.getObject(col);
         if (val == null) {
@@ -361,10 +367,14 @@ public class ExportDataCollector {
                 arr.free();
             }
             case Types.OTHER -> {
-                // PostgreSQL-specific: UUID, JSONB, etc. Render as
-                // string for UUID; inline for JSONB.
+                // PostgreSQL collapses several distinct types onto
+                // Types.OTHER (UUID, JSONB, ...). Classify by the
+                // DECLARED column type, not the value's first character:
+                // a future non-JSON OTHER column whose text happens to
+                // start with { or [ must still be quoted and escaped,
+                // never emitted as raw JSON bytes. (M1-410)
                 String text = rs.getString(col);
-                if (isJsonLike(text)) {
+                if (isJsonColumn(sqlTypeName)) {
                     sb.append(text);
                 } else {
                     appendJsonString(sb, text);
@@ -391,9 +401,11 @@ public class ExportDataCollector {
         sb.append('"').append(JsonEscaper.escape(s)).append('"');
     }
 
-    private static boolean isJsonLike(String text) {
-        if (text == null || text.isEmpty()) return false;
-        char first = text.charAt(0);
-        return first == '{' || first == '[';
+    // PostgreSQL JDBC reports the declared type name for a Types.OTHER
+    // column: "jsonb"/"json" for the JSON types, "uuid" for UUID, etc.
+    // Only the JSON types are emitted inline; everything else is quoted.
+    private static boolean isJsonColumn(String sqlTypeName) {
+        return sqlTypeName.equalsIgnoreCase("jsonb")
+                || sqlTypeName.equalsIgnoreCase("json");
     }
 }
