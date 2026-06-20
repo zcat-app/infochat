@@ -737,7 +737,7 @@ A SQL-injection bug in the Provider cannot:
 
 - **End-to-end encryption of post bodies in DB** — the messaging adapter handles wire encryption; at-rest DB encryption is operator's responsibility (Postgres TDE, disk encryption).                                                                 
 - **Per-group bans** — only bot-wide ban in v1. v2 may add `/kick` for group admins.
-- **User-controllable retention** — TTL is fixed by [02-schema.md §2.9](02-schema.md). Future `/forget` command will let users delete their own `chat_memory`.                                                                                        
+- **User-tunable retention horizon** — the `chat_memory` TTL is fixed in v1 ([02-schema.md §2.9](02-schema.md)) and is not user-configurable. The v1 privacy lever is the `/forget` command (immediate purge), not an adjustable TTL (decision D40).                                                                                        
 - **Two-factor confirmation for ban** — single-step confirm-within-30s is enough for v1.                                                                                                                                                              
 - **CAPTCHAs / human-verification on registration** — relies on adapter-level identity (SimpleX requires invite link, which is friction enough).                                                                                                      
 - **Anomaly detection on user behavior** — no heuristic banning. Admin acts manually.
