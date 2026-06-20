@@ -287,19 +287,11 @@ wizard activates the right ones per step.
 
 ### Developer mode (run from source, no containers)
 
-For active development you can skip the wizard and run each service directly,
-as in the project [README](README.md):
-
-```bash
-mvn clean install
-mvn -pl infochat-collector quarkus:dev
-mvn -pl infochat-provider quarkus:dev
-```
-
-The `docker-compose.yml` `dev` profile provides PostgreSQL + Ollama for this.
-Full developer and operational detail is in
-[docs/spec/deployment.md](docs/spec/deployment.md) and
-[docs/design/07-deployment.md](docs/design/07-deployment.md).
+If you are working on the code rather than running a deployment, skip the wizard
+and build from source — the `dev` Compose profile provides PostgreSQL + Ollama
+and you run each service with `quarkus:dev`. The full walkthrough (prerequisites,
+DB passwords, build, run order, tests, module layout) is in
+**[DEVELOPER.md](DEVELOPER.md)**.
 
 ---
 

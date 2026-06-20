@@ -88,7 +88,9 @@ Start with the abstract above, then jump to the guide for your role:
 | **Setting it up** | [SETUP_GUIDE.md](SETUP_GUIDE.md) | Install, configure, and run both services; recommended settings per hardware scenario, with examples |
 | **Running / moderating it** | [ADMIN_GUIDE.md](ADMIN_GUIDE.md) | Bootstrap the admin account, invite and moderate users, admin commands, and worked moderation scenarios |
 | **Using the bot** | [USER_GUIDE.md](USER_GUIDE.md) | Getting invited, talking to the bot, managing news sources and tags, and example conversations |
-| **Working on the code** | [docs/SPEC.md](docs/SPEC.md) | The technical map — architecture, data model, command catalogue, security model, and design notes |
+| **Running it from source** | [DEVELOPER.md](DEVELOPER.md) | Build from source and run both services in dev mode; module layout and ports |
+| **Contributing a change** | [CONTRIBUTING.md](CONTRIBUTING.md) | The ticket-driven workflow, engineering conventions, and a worked example of adding a command |
+| **The technical reference** | [docs/SPEC.md](docs/SPEC.md) | The technical map — architecture, data model, command catalogue, security model, and design notes |
 
 > The four guides above are written for a general audience and stay
 > deliberately practical. The deep technical reference lives under
@@ -135,22 +137,12 @@ The full threat model and trust boundaries are in
 
 ## Quick start
 
-See **[SETUP_GUIDE.md](SETUP_GUIDE.md)** for the full walkthrough. The short
-version, for local development:
+Pick the path that matches what you want to do:
 
-```bash
-# build all modules
-mvn clean install
-
-# run the collector (ingest + evaluation)
-mvn -pl infochat-collector quarkus:dev
-
-# run the provider (messaging + commands)
-mvn -pl infochat-provider quarkus:dev
-```
-
-A `docker-compose.yml` brings up PostgreSQL + pgvector and a local Ollama for
-development.
+- **Run a deployment** → **[SETUP_GUIDE.md](SETUP_GUIDE.md)**. An interactive
+  wizard builds and configures the containers for you; no Maven required.
+- **Work on the code** → **[DEVELOPER.md](DEVELOPER.md)**. Build from source and
+  run both services in Quarkus dev mode against a local PostgreSQL + Ollama.
 
 ## License
 

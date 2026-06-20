@@ -111,7 +111,7 @@ By default you get **everything** from your subscribed sources. The moment you
 
 | Command | What it does |
 |---|---|
-| `/lang <code>` | Set your reply language (English and Czech in v1) |
+| `/lang <code>` | Set the language the bot answers you in — its summaries and chat replies (English and Czech in v1; original posts aren't translated) |
 | `/stop` | Cancel whatever the bot is currently working on for you |
 | `/retry` | Re-generate the last summary's wording (same posts) |
 | `/clear` | Clear the current conversation's short-term context |
@@ -274,7 +274,7 @@ infochat gives you direct control:
   first.
 - **`/export`** sends you a copy of your own data, right in the chat.
 - **Heads up:** the web addresses of news sources are **global** and visible to
-  admins (via the admin source list). Don't add a feed you'd consider secret.
+  admins (via the admin source list). **Don't add a feed you'd consider secret.**
 
 What `/forget` does **not** touch: your account's ban/admin status, your group
 memberships, and the system's tamper-proof audit log (which records *that*
