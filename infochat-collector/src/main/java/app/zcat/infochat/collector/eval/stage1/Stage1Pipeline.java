@@ -466,18 +466,7 @@ public class Stage1Pipeline {
                                              String normalized) {
         LOG.warn("Stage 1 watchdog fired on post_id={} (rule_id={}, error_class={}, cap_ms={})",
             postId, REGEX_TIMEOUT_RULE_ID, ERROR_CLASS_REGEX_TIMEOUT, regexTimeoutMs);
-
-        String placeholderId = PlaceholderIds.next();
-        String placeholderMarker = PlaceholderIds.marker(placeholderId);
-
-        TransactionHelper.inTransaction(dataSource, "Stage1Pipeline", conn -> {
-            quarantineDao.insert(conn, new QuarantineDao.QuarantineRow(
-                postId, postUid, postFetchedAt,
-                REGEX_TIMEOUT_RULE_ID, 0, normalized.length(),
-                normalized, placeholderId));
-            updatePostQuarantined(conn, postId, postFetchedAt, placeholderMarker);
-        });
-        return new Stage1Result(normalized, placeholderMarker, true, true);
+        return quarantineWholeBody(postId, postUid, postFetchedAt, normalized, REGEX_TIMEOUT_RULE_ID);
     }
 
     /**
@@ -502,14 +491,30 @@ public class Stage1Pipeline {
                                              String normalized) {
         LOG.warn("Stage 1 match-count cap exceeded on post_id={} (rule_id={}, error_class={}, cap={})",
             postId, MATCH_OVERFLOW_RULE_ID, ERROR_CLASS_MATCH_OVERFLOW, maxMatches);
+        return quarantineWholeBody(postId, postUid, postFetchedAt, normalized, MATCH_OVERFLOW_RULE_ID);
+    }
 
+    /**
+     * Shared Stage 1 fail-closed whole-body quarantine write, parameterized only
+     * by {@code ruleId} (the sole per-handler distinguisher). Per
+     * {@code docs/spec/security.md} §Failure handling: insert one quarantine row
+     * spanning {@code [0, normalized.length())}, then UPDATE
+     * {@code post.status='QUARANTINED'} with the body overwritten by a single
+     * whole-body placeholder — both writes in one transaction so a partial commit
+     * cannot leave a QUARANTINED post without its audit row, and any future render
+     * of {@code post.body} cannot leak the unredacted content. NO auto-release.
+     * Callers ({@link #handleWatchdogAbort}, {@link #handleMatchOverflow}) emit
+     * their own distinguishing WARN line before delegating here.
+     */
+    private Stage1Result quarantineWholeBody(UUID postId, String postUid, Instant postFetchedAt,
+                                             String normalized, String ruleId) {
         String placeholderId = PlaceholderIds.next();
         String placeholderMarker = PlaceholderIds.marker(placeholderId);
 
         TransactionHelper.inTransaction(dataSource, "Stage1Pipeline", conn -> {
             quarantineDao.insert(conn, new QuarantineDao.QuarantineRow(
                 postId, postUid, postFetchedAt,
-                MATCH_OVERFLOW_RULE_ID, 0, normalized.length(),
+                ruleId, 0, normalized.length(),
                 normalized, placeholderId));
             updatePostQuarantined(conn, postId, postFetchedAt, placeholderMarker);
         });

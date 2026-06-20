@@ -1,9 +1,9 @@
 ---
 id: M1-404
 title: "collector: dedup the Stage 1 fail-closed whole-body write"
-status: pending
+status: done
 created: 2026-06-19
-last_updated: 2026-06-19
+last_updated: 2026-06-20
 blocked_by: []
 files_budget: 3
 files_scope:
@@ -29,12 +29,41 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §Failure handling
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-20
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 29
+      removed: 22
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-20
+    verdict: CLEAN
+    base: 1679de85682aa9d01b89c168d319c35f5e78da57
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-404-2026-06-20.md
+    out_of_model_count: 0
+    note: |
+      In-progress audit on the branch tip between review-APPROVE and commit.
+      Pure mechanical extraction of the Stage 1 fail-closed whole-body quarantine
+      write into a shared helper parameterized only by rule-id; threat-actor
+      confirmed no quarantine property shifted. CLEAN, no remediation.
+clarity_check:
+  date: 2026-06-20
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-404: dedup the Stage 1 fail-closed whole-body write

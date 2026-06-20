@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 433 |
+| done | 434 |
 | deferred | 6 |
 | **total** | **442** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-404 — collector: dedup the Stage 1 fail-closed whole-body write (complexity: low, risk: low)
 - M1-405 — provider: validate ChatToolDispatcher args before the call cap (complexity: low, risk: low)
 - M1-406 — cleanup: clarity and comment-policy drift sweep (3 files) (complexity: low, risk: low)
 
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-404 | collector: dedup the Stage 1 fail-closed whole-body write | 2026-06-20 | round 1 APPROVE |
 | M1-403 | collector: read re-eval body from the candidate scan | 2026-06-20 | round 1 APPROVE |
 | M1-402 | messaging: clear reconnecting on SimpleX derivation failure | 2026-06-20 | round 1 APPROVE |
 | M1-401 | llm: redact userinfo on requireHttpBaseUrl failure paths | 2026-06-20 | round 2 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-377 | collector: replace the re-eval one-element-array transaction workaround and unify the two fail-closed test-seam idioms | 2026-06-19 | round 1 APPROVE |
 | M1-376 | messaging: deterministic SimpleX adapterMessageId fallback and shared decode-ladder helper | 2026-06-19 | round 1 APPROVE |
 | M1-375 | provider: key the per-turn chat-tool cache on clamped args so over-cap duplicates do not double-charge the call budget | 2026-06-19 | round 1 APPROVE |
-| M1-374 | ssrf: seal IpBlocklist and drive the test loopback carve-out through an injected predicate instead of subclassing | 2026-06-19 | round 1 APPROVE |
 
 ---
 
@@ -604,7 +603,7 @@ M1-400 (done)
 M1-401 (done)
 M1-402 (done)
 M1-403 (done)
-M1-404 (pending) ← runnable
+M1-404 (done)
 M1-405 (pending) ← runnable
 M1-406 (pending) ← runnable
 ```
