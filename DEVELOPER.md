@@ -151,6 +151,11 @@ Quarkus integration tests bind an OS-assigned ephemeral port
 (`quarkus.http.test-port=0`), so two suites reaching their IT phase at the same
 moment won't collide.
 
+The suite is the floor, not the whole story. For the end-to-end testing plan —
+what's automatable vs. manual, plus the observability runbook and the
+adversarial input kit — see
+**[docs/testing/USER_TEST_PLAN.md](docs/testing/USER_TEST_PLAN.md)**.
+
 ---
 
 ## Module layout
@@ -237,3 +242,6 @@ failure against unchanged code:
   developer and operational detail, profiles, and config wiring.
 - **[CLAUDE.md](CLAUDE.md)** — engineering rules, coding style, and the M1
   ticket workflow that govern changes to this repo.
+- **[docs/testing/USER_TEST_PLAN.md](docs/testing/USER_TEST_PLAN.md)** — the
+  end-to-end test plan (setup → admin → usage), the observability runbook, and
+  the adversarial input kit.

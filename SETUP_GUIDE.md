@@ -300,3 +300,6 @@ DB passwords, build, run order, tests, module layout) is in
 - **[Admin Guide](ADMIN_GUIDE.md)** — become the admin, invite users, moderate.
 - **[User Guide](USER_GUIDE.md)** — talk to the bot, manage sources, run commands.
 - **[Technical map (docs/SPEC.md)](docs/SPEC.md)** — architecture and design.
+- **[End-to-end test plan (docs/testing/USER_TEST_PLAN.md)](docs/testing/USER_TEST_PLAN.md)**
+  — how to verify a deployment from setup through usage, including copy-paste
+  `psql` health-check queries (the observability runbook).
