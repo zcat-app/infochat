@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 445 |
+| done | 446 |
 | deferred | 6 |
 | **total** | **452** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-416 — test: collector ingest + NOTIFY smoke IT (complexity: medium, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-416 | test: collector ingest + NOTIFY smoke IT | 2026-06-21 | round 1 APPROVE |
 | M1-415 | test: golden-path end-to-end journey IT | 2026-06-21 | round 1 APPROVE |
 | M1-414 | test: dev-only in-memory adapter terminal harness | 2026-06-21 | round 2 APPROVE |
 | M1-413 | test: seed fixture of pre-evaluated READY posts for retrieval tests | 2026-06-20 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-409 | collector+llm: close two guard-asymmetry gaps (feed item caps, timeout-ms startup validation) | 2026-06-20 | round 1 APPROVE |
 | M1-408 | messaging: don't drop a co-delivered bot mention after a Signal group membership delta | 2026-06-20 | round 1 APPROVE |
 | M1-407 | provider: bound GetReferencesTool result bytes like its sibling chat tools | 2026-06-20 | round 1 APPROVE |
-| M1-406 | cleanup: clarity and comment-policy drift sweep (3 files) | 2026-06-20 | round 1 APPROVE |
 
 ---
 
@@ -614,5 +614,5 @@ M1-412 (done)
 M1-413 (done)
   └── M1-414 (done)
 M1-415 (done)
-M1-416 (pending) ← runnable
+M1-416 (done)
 ```

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  M1-416 collector ingest+NOTIFY smoke fixture: one malformed RSS item.
+
+  The single <item> has neither <guid> nor <link>, so RssFeedParser cannot
+  derive an upstream_identifier and raises RssFeedParseException at the
+  Fetcher boundary (per docs/spec/schema.md §UID derivation). The whole
+  parse aborts and FetchScheduler.tickOnce swallows the failure, so NO post
+  row is ever persisted for this source — the boundary-rejection assertion.
+-->
+<rss version="2.0">
+  <channel>
+    <title>M1-416 smoke malformed feed</title>
+    <item>
+      <title>Item with no usable upstream identifier</title>
+      <description>This item carries neither guid nor link, so the Fetcher rejects it.</description>
+    </item>
+  </channel>
+</rss>

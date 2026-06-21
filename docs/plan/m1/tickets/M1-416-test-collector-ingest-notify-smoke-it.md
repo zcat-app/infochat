@@ -1,10 +1,15 @@
 ---
 id: M1-416
 title: "test: collector ingest + NOTIFY smoke IT"
-status: pending
+status: done
 created: 2026-06-20
-last_updated: 2026-06-20
+last_updated: 2026-06-21
 blocked_by: []
+clarity_check:
+  date: 2026-06-21
+  verdict: PASS
+  warnings: []
+  blockers: []
 files_budget: 5
 files_scope:
   - infochat-collector/src/test/java/app/zcat/infochat/collector/smoke
@@ -37,6 +42,20 @@ spec_refs:
 decision_refs:
   - D20
   - D38
+reviews:
+  - round: 1
+    date: 2026-06-21
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 509
+      removed: 0
 ---
 
 # M1-416: collector ingest + NOTIFY smoke IT

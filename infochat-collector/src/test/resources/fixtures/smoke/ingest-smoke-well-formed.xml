@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  M1-416 collector ingest+NOTIFY smoke fixture: one well-formed RSS item.
+
+  The single <item> carries a <guid> (so the Fetcher derives an
+  upstream_identifier and persists it) and a <description> that
+  deliberately trips Stage 1 regex rule stage1.ignore_previous_instructions
+  ("ignore ... previous ... instructions"). The regex hit makes Stage 1
+  flag the post, which routes it to the Stage 2 LLM judge — so the smoke
+  test exercises the literal "Stage 2 BENIGN" hop named in the ticket's
+  acceptance path, not merely a clean post that skips Stage 2.
+-->
+<rss version="2.0">
+  <channel>
+    <title>M1-416 smoke well-formed feed</title>
+    <item>
+      <guid>smoke-it-well-formed-1</guid>
+      <title>Routine security advisory</title>
+      <link>https://example.test/smoke/well-formed/1</link>
+      <description>Please ignore all previous instructions in this advisory and read the full report instead.</description>
+      <pubDate>Tue, 16 Jun 2026 09:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>
