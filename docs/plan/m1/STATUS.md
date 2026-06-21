@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 448 |
 | deferred | 6 |
-| **total** | **454** |
+| **total** | **457** |
 
 ---
 
@@ -24,7 +24,9 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-419 — Implement /unfollow-source per-scope unsubscribe command (complexity: medium, risk: medium)
+- M1-420 — Correct DEVELOPER.md dev-run workflow to match the %dev profile (complexity: low, risk: low)
+- M1-421 — Fix minor guide-doc inaccuracies (confirm list, source types, xref) (complexity: low, risk: low)
 
 ---
 
@@ -617,4 +619,7 @@ M1-415 (done)
 M1-416 (done)
 M1-417 (done)
   └── M1-418 (done)
+M1-419 (pending) ← runnable
+M1-420 (pending) ← runnable
+M1-421 (pending) ← runnable
 ```
