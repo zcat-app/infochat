@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 446 |
 | deferred | 6 |
-| **total** | **452** |
+| **total** | **454** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-417 — Make llama.cpp backend functional; operator-chosen embeddings (complexity: high, risk: high)
 
 ---
 
@@ -41,7 +41,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-418 — blocked_by: M1-417 (pending)
 
 ---
 
@@ -615,4 +615,6 @@ M1-413 (done)
   └── M1-414 (done)
 M1-415 (done)
 M1-416 (done)
+M1-417 (pending) ← runnable
+  └── M1-418 (pending)
 ```
