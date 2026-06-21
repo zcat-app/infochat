@@ -219,10 +219,11 @@ public class AssetSnapshotFetcher {
         // complex than either concrete method and would couple assets to fetch.
         //
         // Step 1: bump the per-pair counter, capture the post-bump
-        // value via RETURNING. The atomic increment guarantees N
-        // concurrent ticks (shouldn't happen — single scheduler — but
-        // defensive in case of operator-side concurrent runs) produce
-        // exactly N increments.
+        // value via RETURNING. The atomic UPDATE ... RETURNING is simply
+        // the correct SQL form for a read-after-increment; it is not a
+        // guard against concurrent writers. Concurrent ticks do not occur
+        // (D41 single-instance invariant; each @Scheduled poll above uses
+        // ConcurrentExecution.SKIP), so the increment runs single-writer.
         final String bumpSql =
             "UPDATE asset_config "
             + "   SET consecutive_failures = consecutive_failures + 1, "

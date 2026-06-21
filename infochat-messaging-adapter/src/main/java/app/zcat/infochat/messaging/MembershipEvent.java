@@ -7,15 +7,17 @@ package app.zcat.infochat.messaging;
  * consumes them to update {@code group_membership} rows and trigger
  * cleanup (e.g. setting {@code removed_at} on UserLeft / BotRemoved).
  *
- * <p>Sealed with four permits covering the lifecycle signals defined in
- * {@code docs/spec/messaging.md} §Failure handling: user joins, user
- * leaves, bot removed from group, group deleted entirely.</p>
+ * <p>Sealed with three lifecycle permits: user joins, user leaves, bot
+ * removed from group. Group-deleted-upstream is not a distinct permit: in
+ * v1 it is handled via the permanent-send-failure threshold path, with no
+ * adapter&rarr;Provider carrier for that failure sub-class (deferred to v2).
+ * See {@code docs/spec/messaging.md} §Failure handling and
+ * {@code docs/design/06-messaging.md} §Permanent-delivery-failure cleanup.</p>
  */
 public sealed interface MembershipEvent
         permits MembershipEvent.UserJoined,
                 MembershipEvent.UserLeft,
-                MembershipEvent.BotRemoved,
-                MembershipEvent.GroupDeleted {
+                MembershipEvent.BotRemoved {
 
     /** The adapter-defined stable group identifier this event pertains to. */
     String adapterGroupId();
@@ -30,9 +32,5 @@ public sealed interface MembershipEvent
 
     /** The bot itself was removed from the group. */
     record BotRemoved(String adapterGroupId)
-            implements MembershipEvent {}
-
-    /** The group was deleted entirely by the platform or group owner. */
-    record GroupDeleted(String adapterGroupId)
             implements MembershipEvent {}
 }

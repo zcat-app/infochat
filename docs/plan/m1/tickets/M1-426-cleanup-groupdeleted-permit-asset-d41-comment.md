@@ -1,9 +1,9 @@
 ---
 id: M1-426
 title: "cleanup: drop speculative GroupDeleted permit; fix asset D41 comment"
-status: pending
+status: done
 created: 2026-06-21
-last_updated: 2026-06-21
+last_updated: 2026-06-22
 blocked_by: []
 files_budget: 2
 files_scope:
@@ -32,12 +32,30 @@ spec_refs:
   - docs/spec/messaging.md §Failure handling
 decision_refs:
   - D41
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-22
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 25
+      removed: 22
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-22
+  verdict: WARN
+  warnings:
+    - 'Acceptance item 2 cites "docs/design/06-messaging.md §6.x" as a javadoc target; "§6.x" is an undefined placeholder, not a real anchor. Context section supplies the operative prose, so implementation is not blocked; use the real subsection heading when writing the javadoc.'
+  blockers: []
 ---
 
 # M1-426: drop speculative GroupDeleted permit; fix asset D41 comment
