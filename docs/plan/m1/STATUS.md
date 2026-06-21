@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 451 |
 | deferred | 6 |
-| **total** | **457** |
+| **total** | **458** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-422 — Show the source UUID in /list-sources output (complexity: low, risk: low)
 
 ---
 
@@ -620,4 +620,5 @@ M1-417 (done)
 M1-419 (done)
 M1-420 (done)
 M1-421 (done)
+M1-422 (pending) ← runnable
 ```
