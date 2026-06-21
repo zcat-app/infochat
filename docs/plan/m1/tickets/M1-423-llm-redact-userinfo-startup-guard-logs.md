@@ -1,7 +1,7 @@
 ---
 id: M1-423
 title: "llm: redact userinfo in LlmRouterStartupGuard base-url logs"
-status: pending
+status: done
 created: 2026-06-21
 last_updated: 2026-06-21
 blocked_by: []
@@ -36,12 +36,41 @@ spec_refs:
   - docs/spec/security.md §SSRF and outbound connections
   - docs/spec/llm.md §Per-task routing rules
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-21
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 158
+      removed: 13
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-21
+    verdict: CLEAN
+    base: f46db8c5f5a3676ec098c31a62ae5e5c03729d9a
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-423-2026-06-21.md
+    out_of_model_count: 0
+    note: |
+      Pre-commit adversarial review of the credential-redaction diff on the
+      in-progress branch. CLEAN — all base-url echoes routed through
+      LlmHttpSupport.redactUserInfo; M1-330 leak class closed on the
+      startup-guard surface. No findings, no out-of-model observations.
+clarity_check:
+  date: 2026-06-21
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-423: redact userinfo in LlmRouterStartupGuard base-url logs

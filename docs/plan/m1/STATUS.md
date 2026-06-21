@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 452 |
+| done | 453 |
 | deferred | 6 |
 | **total** | **462** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-423 — llm: redact userinfo in LlmRouterStartupGuard base-url logs (complexity: low, risk: low)
 - M1-424 — provider: honor profile-driven chat-memory retention (pi=30d) (complexity: low, risk: medium)
 - M1-425 — collector: drop over-matching bare function in Stage 1 tool-call regex (complexity: low, risk: low)
 - M1-426 — cleanup: drop speculative GroupDeleted permit; fix asset D41 comment (complexity: low, risk: low)
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-423 | llm: redact userinfo in LlmRouterStartupGuard base-url logs | 2026-06-21 | round 1 APPROVE |
 | M1-422 | Show the source UUID in /list-sources output | 2026-06-21 | round 1 APPROVE |
 | M1-421 | Fix minor guide-doc inaccuracies (confirm list, source types, xref) | 2026-06-21 | round 1 APPROVE |
 | M1-420 | Correct DEVELOPER.md dev-run workflow to match the %dev profile | 2026-06-21 | round 1 APPROVE |
@@ -72,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-416 | test: collector ingest + NOTIFY smoke IT | 2026-06-21 | round 1 APPROVE |
 | M1-415 | test: golden-path end-to-end journey IT | 2026-06-21 | round 1 APPROVE |
 | M1-414 | test: dev-only in-memory adapter terminal harness | 2026-06-21 | round 2 APPROVE |
-| M1-413 | test: seed fixture of pre-evaluated READY posts for retrieval tests | 2026-06-20 | round 1 APPROVE |
 
 ---
 
@@ -624,7 +623,7 @@ M1-419 (done)
 M1-420 (done)
 M1-421 (done)
 M1-422 (done)
-M1-423 (pending) ← runnable
+M1-423 (done)
 M1-424 (pending) ← runnable
 M1-425 (pending) ← runnable
 M1-426 (pending) ← runnable

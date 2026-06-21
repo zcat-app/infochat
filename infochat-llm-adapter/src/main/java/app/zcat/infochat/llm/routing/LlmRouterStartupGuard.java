@@ -4,6 +4,7 @@ import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.llm.ModelTask;
 import app.zcat.infochat.llm.impl.AnthropicProvider;
+import app.zcat.infochat.llm.impl.LlmHttpSupport;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Priority;
@@ -202,7 +203,7 @@ public class LlmRouterStartupGuard {
             if (embeddingRemote) {
                 LOG.warnf("LlmRouterStartupGuard: embedding provider is remote (%s=%s); "
                         + "post title+summary will leave the host for embedding generation.",
-                    CONFIG_KEY_EMBEDDINGS_BASE_URL, embeddingBaseUrl);
+                    CONFIG_KEY_EMBEDDINGS_BASE_URL, LlmHttpSupport.redactUserInfo(embeddingBaseUrl));
             }
             warnRemoteLlmTaskRoutes(snapshot);
             return;
@@ -221,7 +222,8 @@ public class LlmRouterStartupGuard {
         for (PerTaskRoute route : perTaskRoutes(snapshot)) {
             if (route.offHostBaseUrl() != null) {
                 offenders.add("task=" + route.task().name()
-                    + " key=" + baseUrlKeyFor(route.task()) + " base-url=" + route.offHostBaseUrl());
+                    + " key=" + baseUrlKeyFor(route.task())
+                    + " base-url=" + LlmHttpSupport.redactUserInfo(route.offHostBaseUrl()));
             }
             // A per-task provider override naming a cloud-only provider is
             // a conflict regardless of that task's base-url (the operator
@@ -247,7 +249,7 @@ public class LlmRouterStartupGuard {
         }
         if (embeddingRemote) {
             offenders.add("embedding key=" + CONFIG_KEY_EMBEDDINGS_BASE_URL
-                + " base-url=" + embeddingBaseUrl);
+                + " base-url=" + LlmHttpSupport.redactUserInfo(embeddingBaseUrl));
         }
 
         if (offenders.isEmpty()) {
@@ -305,7 +307,7 @@ public class LlmRouterStartupGuard {
                 line.append(" provider=").append(effectiveProvider);
             }
             if (route.offHostBaseUrl() != null) {
-                line.append(" base-url=").append(route.offHostBaseUrl());
+                line.append(" base-url=").append(LlmHttpSupport.redactUserInfo(route.offHostBaseUrl()));
             }
             line.append("; post bodies will leave the host.");
             LOG.warn(line.toString());
@@ -393,8 +395,12 @@ public class LlmRouterStartupGuard {
         try {
             uri = new URI(baseUrl);
         } catch (URISyntaxException e) {
+            // Both echoes are userinfo-redacted: baseUrl directly, and
+            // e.getMessage() because URISyntaxException re-quotes the raw input
+            // verbatim ("...at index N: <input>") — the same leak M1-401 closed
+            // on LlmHttpSupport.requireHttpBaseUrl's sibling parse-failure branch.
             LOG.warnf("LlmRouterStartupGuard: malformed base-url '%s' (treated as non-loopback): %s",
-                baseUrl, e.getMessage());
+                LlmHttpSupport.redactUserInfo(baseUrl), LlmHttpSupport.redactUserInfo(e.getMessage()));
             return false;
         }
         String host = uri.getHost();

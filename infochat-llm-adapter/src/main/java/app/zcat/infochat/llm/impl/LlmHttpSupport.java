@@ -33,11 +33,15 @@ import java.util.concurrent.Flow;
  * the {@link #JSON} mapper, the {@link #requireHttpBaseUrl} config-boundary
  * validator, and {@link #joinPath}.
  *
- * <p>Package-private: the three providers ({@link OpenAiCompatibleProvider},
- * {@link AnthropicProvider}, {@link OpenAiCompatibleEmbeddingProvider})
- * are its only callers and share its package.
+ * <p>The class is {@code public} only so the one shared redactor
+ * {@link #redactUserInfo} is reachable from the sibling {@code routing}
+ * package's {@code LlmRouterStartupGuard} (M1-423) — duplicating the redactor
+ * there would let the two copies drift. Every other member stays
+ * package-private, so the three providers ({@link OpenAiCompatibleProvider},
+ * {@link AnthropicProvider}, {@link OpenAiCompatibleEmbeddingProvider}) in this
+ * package remain the only callers of the HTTP machinery.
  */
-final class LlmHttpSupport {
+public final class LlmHttpSupport {
 
     private static final Logger LOG = Logger.getLogger(LlmHttpSupport.class);
 
@@ -298,9 +302,10 @@ final class LlmHttpSupport {
      * substring before the value is echoed into a diagnostic message, so a
      * credential-bearing base-url cannot leak verbatim (M1-330). This is a
      * textual scrub, not a structural parse: it runs on the
-     * {@link #requireHttpBaseUrl} failure branches, including the one where
-     * {@code new URI(...)} already refused the input, so it cannot rely on a
-     * parsed authority. It masks the whole userinfo span (user AND password)
+     * {@link #requireHttpBaseUrl} failure branches and on
+     * {@code LlmRouterStartupGuard}'s base-url log / exception lines (M1-423),
+     * including ones where {@code new URI(...)} already refused the input, so it
+     * cannot rely on a parsed authority. It masks the whole userinfo span (user AND password)
      * rather than just the password — the safe over-redaction direction when
      * the structure is untrusted.
      *
@@ -321,7 +326,7 @@ final class LlmHttpSupport {
      * {@code URISyntaxException.getMessage()}, whose contract permits null; a
      * null in yields a null out unchanged.
      */
-    static @Nullable String redactUserInfo(@Nullable String value) {
+    public static @Nullable String redactUserInfo(@Nullable String value) {
         if (value == null) {
             return null;
         }
