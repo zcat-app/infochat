@@ -69,6 +69,23 @@ notes. The spec-level commitments below cover all of them.
    off-loopback or forwarding the port — is an explicit operator action,
    never a default, and voids the property: any host that reaches the
    port can then drive the bot's SimpleX identity with no credential.
+8. **Local LLM backend → network.** When the operator runs a local
+   generative or embeddings backend (Ollama, or the llama.cpp
+   `llama-server` instances introduced by D49 — one per model, plus a
+   second instance for the llama.cpp embeddings shape), those servers
+   expose an unauthenticated OpenAI-compatible / inference HTTP API:
+   there is no token, session, or credential, because the backend trusts
+   anything that can reach its port. That "no authentication" property is
+   sound only while the ports stay off the host network. The shipped
+   compose default keeps them there — the llama.cpp generative and
+   embeddings services publish no host port (reachable only as
+   `llamacpp:8080` / the embeddings service over the compose network),
+   and Ollama publishes to loopback only (`127.0.0.1:11434`). Exposing
+   any of them beyond the host — adding a host port mapping, binding
+   off-loopback, or forwarding the port — is an explicit operator action,
+   never a default, and voids the property: any host that reaches the
+   port can then run inference against, and read embeddings from, the
+   deployment's models with no credential.
 
 ## Ingest pipeline (security side)
 
