@@ -386,6 +386,20 @@ Operator picks one of:
 - **Remote LLM.** Local DB and services, remote LLM provider. Default                                                                                                                                                                                 
   profile: `remote-llm`.
 
+For the local-LLM scenarios the operator additionally picks a **local
+backend shape** (orthogonal to the host profile), per **D49**. Ollama
+serves generation and embeddings from one service. **llama.cpp is a
+real standalone backend served by one `llama-server` instance per
+model**: it serves the chosen generative model, and embeddings run on a
+separate backend — either a *second* llama.cpp instance (nomic-class,
+768-dim, embedding mode) or the Ollama nomic embedder running
+**alongside** the generative llama.cpp service. That Ollama-embeddings
+shape **relaxes "operator picks ONE local backend"**: the two local LLM
+services MAY run together, because one llama.cpp server cannot be both
+the generative model and a second fixed-dimension embedder. Embeddings
+stay 768-dim nomic-class in both shapes and never point at the
+generative model.
+
 The set of supported profiles is the spec-level commitment; the values                                                                                                                                                                                
 behind each profile are tuning.
 

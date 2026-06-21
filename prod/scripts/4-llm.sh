@@ -7,9 +7,10 @@
 #              profile's security / chat / embedding models (§5.7), then point
 #              every infochat.llm.* + infochat.embeddings.* base-url at the
 #              ollama service over the compose network.
-#   llamacpp — start the llama.cpp compose service, fetch the operator-supplied
-#              GGUF into the model volume, and point the OpenAI-compatible
-#              base-url at llamacpp:8080 (§7.4).
+#   llamacpp — fetch the chosen generative GGUF into the model volume and serve
+#              it from the llama.cpp instance at llamacpp:8080 (§7.4); embeddings
+#              run on a SEPARATE backend (a second llama.cpp instance or the
+#              co-running Ollama nomic embedder), never the generative GGUF (D49).
 #   remote   — collect a remote OpenAI-compatible base-url + API key (the key
 #              minted into secrets.env, §7.3); no local model pull.
 # Model names follow the active profile recorded by 1-profile.sh, never a
@@ -34,11 +35,32 @@ VALID_BACKENDS="ollama llamacpp remote"
 # localhost:11434 is the host-dev value, wrong inside a container).
 OLLAMA_URL="http://ollama:11434/v1"
 LLAMACPP_URL="http://llamacpp:8080/v1"
+# The pure-llama.cpp embeddings shape serves the nomic embedder from a SECOND
+# llama.cpp instance (D49); the apps reach it by its compose service name.
+LLAMACPP_EMBED_URL="http://llamacpp-embeddings:8080/v1"
 WAIT_TIMEOUT=120
 # One-shot image used to populate the llama.cpp model volume; pinned per the
 # M1-004 tag-pinning precedent. Writing into a Docker named volume requires a
 # container that mounts it, so the GGUF download runs in this throwaway.
 CURL_IMAGE="curlimages/curl:8.11.1"
+
+# Curated, checksum-pinned GGUFs the llamacpp branch defaults to (M1-417). Enter
+# accepts each with its SHA-256 ENFORCED (not skippable); a custom URL overrides
+# and falls back to the optional-SHA prompt (operator-trusted TLS fetch, M1-394).
+# Generative is gemma QAT-Q4 (quant-aware-trained, so Q4 size keeps near-BF16
+# quality); embeddings is the 768-dim nomic-embed-text-v1.5 (same family as the
+# Ollama nomic the fleet uses, so vectors are cross-deployment compatible).
+LLAMACPP_GEN_GGUF_URL="https://huggingface.co/unsloth/gemma-4-E4B-it-qat-GGUF/resolve/main/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf"
+LLAMACPP_GEN_GGUF_FILE="gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf"
+LLAMACPP_GEN_GGUF_SHA="b3052f962d6449b4eb2075733c068bdec1c51eadb7b237e6c3157bfbb7b1dae0"
+LLAMACPP_EMB_GGUF_URL="https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.f16.gguf"
+LLAMACPP_EMB_GGUF_FILE="nomic-embed-text-v1.5.f16.gguf"
+LLAMACPP_EMB_GGUF_SHA="f7af6f66802f4df86eda10fe9bbcfc75c39562bed48ef6ace719a251cf1c2fdb"
+# The Ollama-embeddings shape points embeddings at the nomic model on the
+# co-running ollama service — always nomic-class + 768-dim, independent of the
+# profile's generative model table (§5.7).
+NOMIC_OLLAMA_MODEL="nomic-embed-text"
+EMBEDDINGS_DIMENSION=768
 
 # The six per-task LLM config families share one endpoint; only the model
 # differs (security vs chat vs embedding) per §5.7. embeddings is handled
@@ -93,6 +115,66 @@ dotenv_escape() {
   value="${value//\"/\\\"}"
   value="${value//\$/\\\$}"
   printf '%s' "$value"
+}
+
+# Idempotent secrets.env write (M1-417): drop any existing line for KEY, then
+# append the value double-quoted + dotenv-escaped so compose's --env-file parser
+# reads it back byte-for-byte (M1-389/M1-397). The operator-chosen GGUF filenames
+# flow to compose through this channel exactly like the adapter data-dirs (M1-391);
+# compose builds the in-container LLAMA_ARG_MODEL path from them.
+set_secret() {
+  local key="$1" value="$2"
+  touch "$SECRETS_FILE"
+  chmod 600 "$SECRETS_FILE"
+  sed -i "/^${key}=/d" "$SECRETS_FILE"
+  printf '%s="%s"\n' "$key" "$(dotenv_escape "$value")" >> "$SECRETS_FILE"
+}
+
+# Point only the six LLM tasks (not embeddings) at one endpoint. The llamacpp
+# branch wires embeddings to a SEPARATE backend (a second llama.cpp instance or
+# Ollama), so unlike set_all_base_urls it leaves infochat.embeddings.base-url for
+# the caller to set (M1-417).
+set_llm_base_urls() {
+  local url="$1" task
+  for task in $LLM_TASKS; do
+    set_prop "infochat.llm.${task}.base-url" "$url"
+  done
+}
+
+# Derive a clean GGUF filename from a URL: strip #fragment then ?query (a signed
+# URL like model.gguf?token=x must not carry the token into the model id), then
+# basename. In a well-formed URL the fragment is last (path?query#fragment).
+gguf_basename() {
+  local url="$1" path
+  path="${url%%#*}"
+  path="${path%%\?*}"
+  basename "$path"
+}
+
+# Fetch a GGUF into the llama.cpp model volume and verify its SHA-256. Presence
+# probe, download, digest, and removal all run in no-shell argv-only containers so
+# the operator-supplied filename/URL cannot inject (M1-394). A non-empty expected
+# checksum is enforced — a mismatch removes the file and fails the wizard; an
+# empty expected (a custom override that skipped the optional prompt) downloads
+# without verification. $1 url, $2 filename, $3 expected-sha256 ("" to skip).
+fetch_gguf() {
+  local url="$1" file="$2" expected="$3" actual
+  if docker run --rm -v infochat-llamacpp-models:/models --entrypoint ls "$CURL_IMAGE" "/models/$file" >/dev/null 2>&1; then
+    echo "skip GGUF download ($file already present)"
+  else
+    echo "+ download $url -> volume infochat-llamacpp-models/$file"
+    docker run --rm -v infochat-llamacpp-models:/models "$CURL_IMAGE" -fL -o "/models/$file" "$url"
+  fi
+  if [[ -n "$expected" ]]; then
+    actual="$(docker run --rm -v infochat-llamacpp-models:/models --entrypoint sha256sum "$CURL_IMAGE" "/models/$file" | awk '{print $1}')"
+    expected="$(printf '%s' "$expected" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$actual" != "$expected" ]]; then
+      echo "FAIL: GGUF checksum mismatch (expected $expected, got $actual); removing $file." >&2
+      docker run --rm -v infochat-llamacpp-models:/models --entrypoint rm "$CURL_IMAGE" -f "/models/$file"
+      exit 1
+    fi
+    echo "GGUF checksum verified ($expected)"
+  fi
 }
 
 umask 077
@@ -173,60 +255,112 @@ case "$backend" in
     echo "ollama backend ready: models pulled, endpoint $OLLAMA_URL"
     ;;
   llamacpp)
+    # llama.cpp serves ONE model per instance, so the generative model and the
+    # fixed 768-dim nomic embedder need separate servers (D49). This branch wires
+    # the generative GGUF and offers two embeddings shapes: a second llama.cpp
+    # instance (pure-llama.cpp) or the Ollama nomic embedder running alongside.
     if [[ "$defaults" -eq 1 ]]; then
-      echo "FAIL: --defaults cannot pick a GGUF for the llamacpp backend; run interactively." >&2
+      echo "FAIL: --defaults cannot drive the interactive llamacpp wizard (embeddings-backend choice + GGUF overrides); run interactively." >&2
       exit 1
     fi
-    read -rp "GGUF model URL to download into the llama.cpp model volume: " gguf_url
-    if [[ -z "$gguf_url" ]]; then
-      echo "FAIL: a GGUF URL is required for the llamacpp backend." >&2
-      exit 1
+
+    # --- Generative GGUF: pinned default (Enter) or custom override URL. ---
+    read -rp "Generative GGUF URL (Enter = pinned $LLAMACPP_GEN_GGUF_FILE): " gen_override
+    if [[ -n "$gen_override" ]]; then
+      gen_url="$gen_override"
+      gen_file="$(gguf_basename "$gen_override")"
+      # Custom override keeps the optional-SHA prompt (operator-trusted TLS fetch).
+      read -rp "Generative GGUF SHA-256 (blank to skip integrity check): " gen_sha
+    else
+      gen_url="$LLAMACPP_GEN_GGUF_URL"
+      gen_file="$LLAMACPP_GEN_GGUF_FILE"
+      gen_sha="$LLAMACPP_GEN_GGUF_SHA"   # pinned: enforced, not skippable
+      echo "using pinned generative GGUF: $gen_file"
     fi
-    # Strip any ?query or #fragment before the basename so the derived model id
-    # is a clean filename — a signed URL like model.gguf?token=x must not carry
-    # the token into infochat.llm.*.model. Fragment first, then query: in a
-    # well-formed URL the fragment is last (path?query#fragment).
-    gguf_path="${gguf_url%%#*}"
-    gguf_path="${gguf_path%%\?*}"
-    gguf_file="$(basename "$gguf_path")"
-    # Optional integrity check: blank skips. The URL is operator-trusted and
-    # fetched over TLS, so a checksum is hardening that closes the tamper window
-    # (M1-394).
-    read -rp "GGUF SHA-256 checksum (blank to skip integrity check): " gguf_sha256
+
+    # --- Embeddings backend: a second llama.cpp instance or co-running Ollama. ---
+    read -rp "Embeddings backend (llamacpp|ollama) [llamacpp]: " emb_backend
+    emb_backend="${emb_backend:-llamacpp}"
+    case " llamacpp ollama " in
+      *" $emb_backend "*) ;;
+      *) echo "FAIL: unknown embeddings backend '$emb_backend' (expected: llamacpp|ollama)" >&2; exit 1 ;;
+    esac
+
+    if [[ "$emb_backend" == "llamacpp" ]]; then
+      # Pinned nomic default, or a custom override that MUST stay 768-dim. The
+      # wizard cannot read a GGUF's true dimension without loading it, so a custom
+      # override is gated on an explicit operator confirmation — the real backstop
+      # is EmbeddingMetadataStartupGuard, which refuses Collector startup on a
+      # (model,dimension) mismatch (allow-model-change=false). Acceptance item 7.
+      read -rp "Embeddings GGUF URL (Enter = pinned $LLAMACPP_EMB_GGUF_FILE, 768-dim): " emb_override
+      if [[ -n "$emb_override" ]]; then
+        echo "WARNING: a custom embeddings model MUST produce ${EMBEDDINGS_DIMENSION}-dimensional vectors" >&2
+        echo "         (infochat.embeddings.dimension=$EMBEDDINGS_DIMENSION, allow-model-change=false)." >&2
+        echo "         A different dimension is rejected at Collector startup and cannot" >&2
+        echo "         be silently accepted." >&2
+        read -rp "Type 'yes' to confirm the override embedder is ${EMBEDDINGS_DIMENSION}-dim: " emb_confirm
+        if [[ "$emb_confirm" != "yes" ]]; then
+          echo "FAIL: embeddings override not confirmed ${EMBEDDINGS_DIMENSION}-dim; aborting." >&2
+          exit 1
+        fi
+        emb_url="$emb_override"
+        emb_file="$(gguf_basename "$emb_override")"
+        read -rp "Embeddings GGUF SHA-256 (blank to skip integrity check): " emb_sha
+      else
+        emb_url="$LLAMACPP_EMB_GGUF_URL"
+        emb_file="$LLAMACPP_EMB_GGUF_FILE"
+        emb_sha="$LLAMACPP_EMB_GGUF_SHA"   # pinned: enforced, not skippable
+        echo "using pinned embeddings GGUF: $emb_file"
+      fi
+    fi
+
+    # --- Provision. Download GGUFs + mint the secrets.env filenames BEFORE
+    # compose up, so the --env-file interpolation of INFOCHAT_LLAMACPP_*_GGUF
+    # (the LLAMA_ARG_MODEL paths) resolves at container start (M1-389). ---
+    fetch_gguf "$gen_url" "$gen_file" "$gen_sha"
+    set_secret INFOCHAT_LLAMACPP_GGUF "$gen_file"
     echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod --profile llamacpp up -d llamacpp"
     docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile llamacpp up -d llamacpp
-    # Populate the named model volume via a one-shot container that mounts it.
-    # The presence probe runs `ls` as the entrypoint (argv, no shell) so the
-    # operator-supplied filename cannot inject; skip the download when present.
-    if docker run --rm -v infochat-llamacpp-models:/models --entrypoint ls "$CURL_IMAGE" "/models/$gguf_file" >/dev/null 2>&1; then
-      echo "skip GGUF download ($gguf_file already present)"
+
+    if [[ "$emb_backend" == "llamacpp" ]]; then
+      fetch_gguf "$emb_url" "$emb_file" "$emb_sha"
+      set_secret INFOCHAT_LLAMACPP_EMBED_GGUF "$emb_file"
+      echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod --profile llamacpp-embeddings up -d llamacpp-embeddings"
+      docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile llamacpp-embeddings up -d llamacpp-embeddings
+      emb_base_url="$LLAMACPP_EMBED_URL"
+      emb_model="$emb_file"
     else
-      echo "+ download $gguf_url -> volume infochat-llamacpp-models/$gguf_file"
-      docker run --rm -v infochat-llamacpp-models:/models "$CURL_IMAGE" -fL -o "/models/$gguf_file" "$gguf_url"
+      # Minimal Ollama-embeddings hook (D49): start ollama alongside llamacpp and
+      # pull only the nomic embedder. The full ollama backend (model table, every
+      # task) is the `ollama)` branch; here Ollama serves embeddings only.
+      echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod --profile ollama up -d ollama"
+      docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile ollama up -d ollama
+      echo "+ wait for ollama daemon (up to ${WAIT_TIMEOUT}s)"
+      deadline=$(( SECONDS + WAIT_TIMEOUT ))
+      until docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile ollama exec -T ollama ollama list >/dev/null 2>&1; do
+        if (( SECONDS >= deadline )); then
+          echo "FAIL: ollama daemon not ready after ${WAIT_TIMEOUT}s." >&2
+          exit 1
+        fi
+        sleep 2
+      done
+      echo "+ ollama pull $NOMIC_OLLAMA_MODEL"
+      docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile ollama exec -T ollama ollama pull "$NOMIC_OLLAMA_MODEL"
+      emb_base_url="$OLLAMA_URL"
+      emb_model="$NOMIC_OLLAMA_MODEL"
     fi
-    # Verify the GGUF against the operator-supplied checksum before the backend
-    # is configured; a tampered or truncated download must not become the active
-    # model. Compute the digest in a no-shell container (argv only) and compare
-    # in bash, so the operator value is never interpolated into a shell string
-    # (same injection-avoidance posture as the ls presence probe above).
-    if [[ -n "$gguf_sha256" ]]; then
-      actual_sha256="$(docker run --rm -v infochat-llamacpp-models:/models --entrypoint sha256sum "$CURL_IMAGE" "/models/$gguf_file" | awk '{print $1}')"
-      expected_sha256="$(printf '%s' "$gguf_sha256" | tr '[:upper:]' '[:lower:]')"
-      if [[ "$actual_sha256" != "$expected_sha256" ]]; then
-        echo "FAIL: GGUF checksum mismatch (expected $expected_sha256, got $actual_sha256); removing $gguf_file." >&2
-        docker run --rm -v infochat-llamacpp-models:/models --entrypoint rm "$CURL_IMAGE" -f "/models/$gguf_file"
-        exit 1
-      fi
-      echo "GGUF checksum verified ($expected_sha256)"
-    fi
-    set_all_base_urls "$LLAMACPP_URL"
-    # llama.cpp serves one GGUF; record its filename as the model id for every
-    # task so the adapter's model field is populated (§7.4).
+
+    # --- Config. Generative GGUF on every LLM task; embeddings on its own
+    # backend, NEVER the generative GGUF (acceptance 6). dimension pinned 768 so
+    # the generated config is self-describing and matches allow-model-change=false. ---
+    set_llm_base_urls "$LLAMACPP_URL"
     for task in $LLM_TASKS; do
-      set_prop "infochat.llm.${task}.model" "$gguf_file"
+      set_prop "infochat.llm.${task}.model" "$gen_file"
     done
-    set_prop infochat.embeddings.model "$gguf_file"
-    echo "llamacpp backend ready: $gguf_file fetched, endpoint $LLAMACPP_URL"
+    set_prop infochat.embeddings.base-url "$emb_base_url"
+    set_prop infochat.embeddings.model "$emb_model"
+    set_prop infochat.embeddings.dimension "$EMBEDDINGS_DIMENSION"
+    echo "llamacpp backend ready: generative $gen_file via $LLAMACPP_URL; embeddings $emb_model via $emb_base_url"
     ;;
   remote)
     if [[ "$defaults" -eq 1 ]]; then

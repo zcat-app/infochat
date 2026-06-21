@@ -148,16 +148,24 @@ services:
       postgres:
         condition: service_healthy
 
-  # --- LLM backend services (M1-380) -----------------------------------------
-  # The operator picks ONE local LLM backend; the §7.7.2 wizard starts the
-  # chosen one alongside `--profile prod` via its Compose profile —
-  # `--profile prod --profile ollama` OR `--profile prod --profile llamacpp`.
-  # Each backend is profile-gated, so a bare `--profile prod` starts NEITHER and
-  # the two never run together (a service starts iff ANY enabled profile
-  # matches). Ollama additionally carries `dev` because the developer inner loop
-  # (quarkus:dev on the host) uses it (07-deployment.md §7.7). The remote-LLM
-  # path needs no service here — the app calls the remote API directly and the
-  # wizard collects only the base-url/key.
+  # --- LLM backend services (M1-380, M1-417) ---------------------------------
+  # The operator picks a local LLM backend shape; the §7.7.2 wizard starts the
+  # matching services alongside `--profile prod` via Compose profiles. Per D49,
+  # llama.cpp is a real standalone backend served by ONE instance per model
+  # (unlike Ollama, which serves many models dynamically by name), so the shapes
+  # are:
+  #   - Ollama (generative + embeddings):  --profile prod --profile ollama
+  #   - llama.cpp + llama.cpp embeddings:  --profile prod --profile llamacpp --profile llamacpp-embeddings
+  #   - llama.cpp + Ollama embeddings:     --profile prod --profile llamacpp --profile ollama
+  # The last shape runs two LLM services together (generative llama.cpp + the
+  # 768-dim nomic embedder on Ollama): D49 relaxes the earlier "operator picks
+  # ONE local backend" rule for exactly this case, because one llama-server
+  # cannot be both the generative model and a second fixed-dimension embedder.
+  # A bare `--profile prod` starts none of them (a service starts iff ANY enabled
+  # profile matches). Ollama additionally carries `dev` because the developer
+  # inner loop (quarkus:dev on the host) uses it (07-deployment.md §7.7). The
+  # remote-LLM path needs no service here — the app calls the remote API directly
+  # and the wizard collects only the base-url/key.
   #
   # Model provisioning (ollama pull / GGUF download) is the wizard's job
   # (M1-383): these stanzas declare the containers and their model-cache volumes
@@ -181,8 +189,56 @@ services:
     # only — the containerized apps reach it over the compose network as
     # llamacpp:8080, so it needs no host port publish.
     image: ghcr.io/ggml-org/llama.cpp:server-b5350
+    environment:
+      # The operator-chosen generative GGUF *filename* is minted by the §7.3
+      # wizard (4-llm.sh) into secrets.env and fed to compose via --env-file;
+      # compose builds the in-container model path from it. HOST/PORT are fixed
+      # serve wiring (reachable as llamacpp:8080 over the compose network), not
+      # operator data, so they stay here rather than in secrets.env. ${VAR:-}
+      # keeps `docker compose config` renderable when unset (postgres/provider
+      # pass-through precedent). llama-server reads these LLAMA_ARG_* env knobs as
+      # -m / --host / --port; without them the image gets no model and exits, and
+      # would bind container-loopback instead of being reachable as llamacpp:8080
+      # (D49, M1-417).
+      LLAMA_ARG_MODEL: /models/${INFOCHAT_LLAMACPP_GGUF:-}
+      LLAMA_ARG_HOST: 0.0.0.0
+      LLAMA_ARG_PORT: "8080"
     volumes:
       - infochat-llamacpp-models:/models
+    healthcheck:
+      # llama-server exposes GET /health (200 once the model is loaded and ready);
+      # curl ships in the image. Loopback probe — the server binds 0.0.0.0 so
+      # 127.0.0.1 inside the container resolves to it (collector precedent above).
+      # Generous start_period: loading a multi-GB GGUF into memory is slow.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  # Second llama.cpp instance for the pure-llama.cpp embeddings shape (M1-417,
+  # D49): one llama-server serves exactly one model, so the fixed 768-dim nomic
+  # embedder cannot share the generative server. LLAMA_ARG_EMBEDDINGS (--embeddings)
+  # puts this instance in embedding mode; infochat.embeddings.* points at
+  # llamacpp-embeddings:8080. Only started in the pure-llama.cpp shape (its own
+  # profile); the Ollama-embeddings shape runs the `ollama` service instead.
+  # Shares the model-cache volume — 4-llm.sh downloads both GGUFs into it.
+  llamacpp-embeddings:
+    profiles: [llamacpp-embeddings]
+    image: ghcr.io/ggml-org/llama.cpp:server-b5350
+    environment:
+      LLAMA_ARG_MODEL: /models/${INFOCHAT_LLAMACPP_EMBED_GGUF:-}
+      LLAMA_ARG_EMBEDDINGS: "1"
+      LLAMA_ARG_HOST: 0.0.0.0
+      LLAMA_ARG_PORT: "8080"
+    volumes:
+      - infochat-llamacpp-models:/models
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
 
 volumes:
   infochat-pgdata:

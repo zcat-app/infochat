@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 446 |
+| done | 447 |
 | deferred | 6 |
 | **total** | **454** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-417 — Make llama.cpp backend functional; operator-chosen embeddings (complexity: high, risk: high)
+- M1-418 — Per-task LLM backend switcher (remote/ollama/llamacpp) (complexity: high, risk: medium)
 
 ---
 
@@ -41,7 +41,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-418 — blocked_by: M1-417 (pending)
+_(none)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-417 | Make llama.cpp backend functional; operator-chosen embeddings | 2026-06-21 | round 1 APPROVE |
 | M1-416 | test: collector ingest + NOTIFY smoke IT | 2026-06-21 | round 1 APPROVE |
 | M1-415 | test: golden-path end-to-end journey IT | 2026-06-21 | round 1 APPROVE |
 | M1-414 | test: dev-only in-memory adapter terminal harness | 2026-06-21 | round 2 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-410 | core+provider: trust the declared SQL source of truth (audit-verb parity test, export by column type) | 2026-06-20 | round 1 APPROVE |
 | M1-409 | collector+llm: close two guard-asymmetry gaps (feed item caps, timeout-ms startup validation) | 2026-06-20 | round 1 APPROVE |
 | M1-408 | messaging: don't drop a co-delivered bot mention after a Signal group membership delta | 2026-06-20 | round 1 APPROVE |
-| M1-407 | provider: bound GetReferencesTool result bytes like its sibling chat tools | 2026-06-20 | round 1 APPROVE |
 
 ---
 
@@ -615,6 +615,6 @@ M1-413 (done)
   └── M1-414 (done)
 M1-415 (done)
 M1-416 (done)
-M1-417 (pending) ← runnable
-  └── M1-418 (pending)
+M1-417 (done)
+  └── M1-418 (pending) ← runnable
 ```

@@ -155,12 +155,21 @@ one:
 | Pick this | Best for | What you need | Cost & privacy |
 |---|---|---|---|
 | **ollama** *(default, easiest)* | Most people | Nothing — it downloads a model for you (~5 GB) | Free, fully private (runs on your machine) |
-| **llamacpp** | Advanced users who want a specific model | A download link to a model file (a "GGUF" URL) | Free, fully private |
+| **llamacpp** | Advanced users who want a specific model | Nothing for the defaults — it uses pinned, checksum-verified models (~4.5 GB); advanced users can paste their own model ("GGUF") URLs | Free, fully private |
 | **remote** | Best quality / weak hardware | A cloud AI account and key (any OpenAI-compatible API) | Costs money; your prompts go to that provider |
 
 Not sure? Choose **ollama** — it just works and keeps everything on your
 machine. (Note: if you picked the **remote-llm** profile in step 1, you must
 choose **remote** here.)
+
+If you pick **llamacpp**, the wizard offers pinned, checksum-verified default
+models — a gemma chat model and a nomic embeddings model. Press Enter to accept
+each, or paste your own "GGUF" URL to override (a custom chat model is
+unrestricted; a custom embeddings model must produce 768-dimensional vectors, so
+the wizard asks you to confirm). It then asks how to run **embeddings** (the part
+that lets the bot match posts by meaning): a second llama.cpp model (`llamacpp`,
+the default) or Ollama running alongside (`ollama`). Either way, embeddings
+always run separately from the chat model.
 
 ### Step 6 — Which messaging app?
 
@@ -228,7 +237,7 @@ summary, you're done.
 | **The local AI model won't download (ollama)** | The download needs internet access to Ollama's model registry. Check your connection / proxy and re-run step 4. |
 | **You chose a "remote" AI but it fails to connect** | Double-check the API address and key. Remote and `llamacpp` setups can't be done with `--defaults` — they need you to type the values in. |
 | **Wizard refuses to finish: "no bootstrap admin contact id"** | You must give at least one admin contact id in step 6 (see [the admin question](#the-one-question-you-must-not-skip-whos-the-admin)). Re-run and provide it. |
-| **You provided your own model file (llamacpp) and it's rejected** | If you also entered a checksum, the file must match it. Re-check the download URL and checksum. |
+| **You provided your own model file (llamacpp) and it's rejected** | The pinned default models are checksum-verified automatically. For a custom URL: if you entered a checksum the file must match it (re-check the URL and checksum), and a custom *embeddings* model must be 768-dimensional. |
 | **Step 8 says a service is "DEGRADED"** | Often harmless — usually one messaging adapter hasn't finished connecting yet. Give it a minute; if it stays down, check that the bot's messaging account (step 6 paths) is correct. |
 
 ---
@@ -281,9 +290,26 @@ with no network port of their own — the trust boundary is the local machine.
 ### Compose profiles
 
 The stack is gated behind Docker Compose profiles: `prod` (Collector +
-Provider), `ollama` and `llamacpp` (the two local LLM backends), and `dev`
-(database + Ollama for running the apps in Quarkus dev mode on the host). The
-wizard activates the right ones per step.
+Provider); `ollama`, `llamacpp`, and `llamacpp-embeddings` (the local LLM
+backends — `llamacpp-embeddings` is the second llama.cpp instance used when you
+run embeddings on llama.cpp rather than Ollama); and `dev` (database + Ollama for
+running the apps in Quarkus dev mode on the host). The wizard activates the right
+ones per step.
+
+### Checking the local AI model is serving (llama.cpp)
+
+The automated tests pin the generated wiring, but they do not start a real model
+server. After a **llamacpp** setup finishes, you can confirm the model is
+actually answering from inside the compose network:
+
+```bash
+docker compose --env-file prod/runtime/secrets.env --profile prod --profile llamacpp \
+  exec llamacpp curl -fsS http://127.0.0.1:8080/v1/models
+```
+
+A JSON response naming the loaded model means llama.cpp is serving. If you chose
+llama.cpp for embeddings, repeat with `--profile llamacpp-embeddings` against the
+`llamacpp-embeddings` service.
 
 ### Developer mode (run from source, no containers)
 

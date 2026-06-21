@@ -1,7 +1,7 @@
 ---
 id: M1-417
 title: Make llama.cpp backend functional; operator-chosen embeddings
-status: pending
+status: done
 created: 2026-06-21
 last_updated: 2026-06-21
 blocked_by: []
@@ -20,6 +20,7 @@ risk: high
 round_cap: 3
 security_relevant: true
 migration_touch: false
+outline_file: target/m1-tick-outline-M1-417.md
 out_of_scope:
   # The per-task LLM switcher is M1-418 (depends on this ticket); do NOT build
   # any task-routing CLI here. This ticket only makes the llama.cpp BACKEND
@@ -75,12 +76,43 @@ decision_refs:
   # - D<NN> minted by this ticket (llama.cpp standalone backend; per-model
   #   instances; Ollama-embeddings co-run allowance)
 
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-21
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 558
+      removed: 74
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-21
+    verdict: CLEAN
+    base: c865c3af4ab391cd04355c39b2cb6e54a68d1746
+    head: working-tree (in-progress, uncommitted)
+    verdict_file: docs/plan/m1/redteam/M1-417-2026-06-21.md
+    out_of_model_count: 2
+    note: |
+      Audited the in-progress branch (--in-progress) between review APPROVE and
+      commit. CLEAN — 0 findings across all severities. Two advisory
+      out-of-model observations in the verdict file; advisory only, no
+      remediation required to merge.
+clarity_check:
+  date: 2026-06-21
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 3: the 'prompts for an embeddings backend' part is verifiable only by reading the interactive wizard script, not by running a test; verified by script review."
+    - "ACCEPTANCE-RUNNABLE item 8: the new automated test's path is commented out as 'TBD by plan-writer' in test_plan.adds; plan-writer/implementer must finalize a concrete path."
+  blockers: []
 ---
 
 # M1-417: Make llama.cpp backend functional; operator-chosen embeddings
