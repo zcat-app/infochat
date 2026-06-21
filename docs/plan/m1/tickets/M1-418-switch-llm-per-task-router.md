@@ -1,7 +1,7 @@
 ---
 id: M1-418
 title: Per-task LLM backend switcher (remote/ollama/llamacpp)
-status: pending
+status: done
 created: 2026-06-21
 last_updated: 2026-06-21
 blocked_by: [M1-417]
@@ -11,6 +11,10 @@ files_scope:
   - SETUP_GUIDE.md
   - docs/spec/security.md
   - prod/scripts/**
+  # Refine (budget-breach, 2026-06-21): the only mvn-verify-integrated test for
+  # the switcher is a JUnit/ProcessBuilder harness mirroring LlamacppWiringTest;
+  # the module test tree is the sole path the verification gate runs.
+  - infochat-llm-adapter/src/test/java/**
 complexity: high
 risk: medium
 round_cap: 3
@@ -65,17 +69,77 @@ test_plan:
   preserves:
     - all tests currently green on main
 spec_refs:
-  - docs/spec/security.md §Prompt-injection defenses
+  - docs/spec/security.md §Secrets handling
   - docs/spec/deployment.md §Operator inputs
 decision_refs:
   # - carries the locked-embeddings (768-dim) + privacy-disclosure decisions
 
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-21
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 745
+      removed: 9
+revisions:
+  - date: 2026-06-21
+    reason: budget-breach refine — add module test tree to files_scope; swap tangential spec_ref
+    snapshot:
+      files_scope:
+        - prod/switch-llm.sh
+        - SETUP_GUIDE.md
+        - docs/spec/security.md
+        - prod/scripts/**
+      spec_refs:
+        - docs/spec/security.md §Prompt-injection defenses
+        - docs/spec/deployment.md §Operator inputs
+escalations:
+  - date: 2026-06-21
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (escalation from start-time outline). The plan-writer outline and the
+      clarity WARN both establish that the only mvn verify-integrated,
+      mechanically-checkable test for prod/switch-llm.sh is a JUnit/ProcessBuilder
+      harness mirroring infochat-llm-adapter/.../wiring/LlamacppWiringTest.java,
+      which MUST live under infochat-llm-adapter/src/test/java/** — a path outside
+      this ticket's files_scope. No bats harness, no prod/scripts/test/, and no CI
+      workflow exist, so an in-scope prod/scripts/test/**.bats file would never run
+      in the verification gate. Touching the module test tree is a files_scope
+      breach; recommended resolution: refine to add
+      infochat-llm-adapter/src/test/java/** to files_scope.
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-21
+    verdict: CLEAN
+    base: f6f913bf
+    head: working-tree (M1-418 pre-commit, APPROVED round 1)
+    verdict_file: docs/plan/m1/redteam/M1-418-2026-06-21.md
+    out_of_model_count: 1
+    note: |
+      Pre-commit adversarial audit of prod/switch-llm.sh + SwitchLlmWiringTest +
+      docs. CLEAN, no findings. One out-of-model advisory: timestamped secrets.env
+      backups accumulate plaintext API keys in prod/runtime/ (host fs is trusted
+      in the v1 threat model, so not a finding). The backup is mandated by
+      acceptance item 5; backups inherit mode 600 via umask 077. No remediation
+      required for v1.
+outline_file: target/m1-tick-outline-M1-418.md
+clarity_check:
+  date: 2026-06-21
+  verdict: WARN
+  warnings:
+    - "test_plan.adds is effectively empty; test approach deferred to plan-writer, no test file in files_scope/budget — files_budget of 6 may need revisiting if 2+ test files are added."
+    - "spec_ref docs/spec/security.md §Prompt-injection defenses is tangential to a config-generation shell script; may have been intended as a decision_ref."
+  blockers: []
 ---
 
 # M1-418: Per-task LLM backend switcher (remote/ollama/llamacpp)

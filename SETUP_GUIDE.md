@@ -219,6 +219,75 @@ summary, you're done.
 - **To re-run setup** (e.g. to add Signal later), just run `./prod/setup.sh`
   again.
 
+### Switching your AI backend later
+
+Already set up, but want to change where the AI runs — for example, move to a
+cloud (remote) API because your machine is too small for a good local model?
+Use the switcher (you don't re-run the whole wizard):
+
+```bash
+./prod/switch-llm.sh
+```
+
+It asks, for each AI task, which backend to use — `remote` (a cloud API),
+`ollama`, or `llamacpp` — defaulting to whatever that task uses now. Press Enter
+to keep a task as-is; pressing Enter for everything changes nothing. It never
+touches **embeddings** (the "match posts by meaning" model stays local and fixed,
+because changing it would break your stored posts).
+
+A sample session moving just the chat task to a cloud API:
+
+```text
+Backend for security (remote|ollama|llamacpp) [ollama]:    ⏎  (keep local)
+Backend for tagger (remote|ollama|llamacpp) [ollama]:      ⏎
+Backend for entity (remote|ollama|llamacpp) [ollama]:      ⏎
+Backend for summarizer (remote|ollama|llamacpp) [ollama]:  ⏎
+Backend for chat (remote|ollama|llamacpp) [ollama]:        remote
+  chat remote base-url (e.g. https://nano-gpt.com/api/v1): https://nano-gpt.com/api/v1
+  chat model [llama3.1:8b]:                                gpt-4o-mini
+Backend for translator (remote|ollama|llamacpp) [ollama]:  ⏎
+Remote LLM API key:                                        (paste, hidden)
+```
+
+Before writing anything it backs up your config and prints a **rollback**
+command, then prints a **privacy disclosure** naming exactly which tasks now go
+to the remote provider and what each one exposes — for the run above:
+
+```text
+Backed up before writing:
+  .../runtime/application.properties.bak.20260621-120000
+Rollback (undo this run):
+  cp '.../application.properties.bak.20260621-120000' '.../application.properties'
+
+PRIVACY DISCLOSURE — these tasks now call a REMOTE provider:
+  !! chat — YOUR PRIVATE MESSAGES to the bot are sent to the remote provider.
+           This is the most sensitive exposure: your direct conversations.
+```
+
+The disclosure is honest about the difference: **chat** sends your private
+messages to the provider (the loudest warning), while the ingest tasks
+(`security`/`tagger`/`entity`) only ever see the **public** posts infochat
+fetches — they expose your topic interests and source list, not private data.
+Finally it prints the command to apply the change (recreating the containers, so
+the new key takes effect):
+
+```bash
+docker compose -f docker-compose.yml --env-file prod/runtime/secrets.env --profile prod up -d collector provider
+```
+
+**Two worked examples:**
+
+- **All generative tasks remote, embeddings stay local.** Choose `remote` for
+  every prompt (`security` through `translator`), giving the same base-url, model,
+  and API key each time. Embeddings keep running on your machine — the switcher
+  doesn't ask about them. Best when you want top-quality summaries and chat but
+  are happy to keep the lightweight embedding model local.
+- **Raspberry Pi: everything remote except embeddings.** A Pi is too weak for a
+  good chat model, so route all six generative tasks to a cloud API as above. The
+  small 768-dimensional embedder still runs locally on the Pi (it's cheap), so
+  your stored posts and "match by meaning" search never leave the device, while
+  the heavy generation happens in the cloud.
+
 ---
 
 ## Troubleshooting

@@ -1133,6 +1133,12 @@ sources). Application code uses the soft-delete column.
 ## Secrets handling
 
 - LLM API keys are read from environment variables, not the DB.
+- The post-setup `prod/switch-llm.sh` backend switcher records the LLM API key in
+  `secrets.env` through the same dotenv-escaped channel and prints a per-task
+  privacy disclosure naming exactly which generative tasks now call a remote
+  provider and what each exposes — `chat` (private user messages) flagged loudest,
+  the ingest tasks (`security`/`tagger`/`entity`) as topic-interest exposure over
+  public posts — see `SETUP_GUIDE.md` §"Switching your AI backend later".
 - Audit-log writes pass through a redaction hook that masks values
   matching a **closed catalogue of API-key shapes**. The catalogue's
   v1 baseline (spec-level commitment) is:
