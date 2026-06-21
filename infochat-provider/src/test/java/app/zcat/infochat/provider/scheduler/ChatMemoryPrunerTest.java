@@ -1,12 +1,17 @@
 package app.zcat.infochat.provider.scheduler;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.smallrye.config.PropertiesConfigSource;
+import io.smallrye.config.SmallRyeConfig;
+import io.smallrye.config.SmallRyeConfigBuilder;
 import jakarta.inject.Inject;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
+import java.net.URL;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -117,6 +122,43 @@ class ChatMemoryPrunerTest {
             assertEquals(1, count(conn, "chat_message"));
             assertEquals(1, count(conn, "summary_anchor"));
         }
+    }
+
+    /**
+     * Pins the profile-driven retention horizon in the provider's <em>main</em>
+     * application.properties: pi keeps 30 days (PT720H); laptop/vps/remote-llm
+     * keep 90 days (PT2160H) via the unprefixed base value (Invariant 9, D40,
+     * docs/design/02-schema.md §2.10). Reads the main config off the filesystem
+     * with each profile active rather than the injected bean, because a
+     * {@code @QuarkusTest} resolves the test-classpath application.properties,
+     * which would shadow main and could not prove the production key exists —
+     * the same masking the sibling ReevalConfigKeysResolutionTest guards against.
+     */
+    @Test
+    void retentionResolvesProfileDriven() throws Exception {
+        assertEquals(Duration.ofHours(720),
+            mainConfigFor("pi").getValue("infochat.chat.retention", Duration.class));
+        assertEquals(Duration.ofHours(2160),
+            mainConfigFor("laptop").getValue("infochat.chat.retention", Duration.class));
+        assertEquals(Duration.ofHours(2160),
+            mainConfigFor("vps").getValue("infochat.chat.retention", Duration.class));
+        assertEquals(Duration.ofHours(2160),
+            mainConfigFor("remote-llm").getValue("infochat.chat.retention", Duration.class));
+    }
+
+    /**
+     * Builds a config view over ONLY the provider's main application.properties
+     * with the given infochat profile active, so the test-classpath config
+     * (which would otherwise shadow main) never participates. Path is relative
+     * to the surefire CWD (the module basedir).
+     */
+    private static SmallRyeConfig mainConfigFor(String profile) throws Exception {
+        URL url = Path.of("src/main/resources/application.properties").toUri().toURL();
+        return new SmallRyeConfigBuilder()
+            .addDiscoveredConverters()
+            .withProfile(profile)
+            .withSources(new PropertiesConfigSource(url))
+            .build();
     }
 
     private void insertUser(Connection conn, UUID id) throws SQLException {

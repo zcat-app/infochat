@@ -1,7 +1,7 @@
 ---
 id: M1-424
 title: "provider: honor profile-driven chat-memory retention (pi=30d)"
-status: pending
+status: done
 created: 2026-06-21
 last_updated: 2026-06-21
 blocked_by: []
@@ -38,12 +38,30 @@ spec_refs:
 decision_refs:
   - D40
   - D37
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-21
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 72
+      removed: 12
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-21
+  verdict: WARN
+  warnings:
+    - "TEST-CHANGES-AUTHORIZED: ChatMemoryPrunerTest.java is a pre-existing file being modified, but test_plan lists it under adds rather than modifies. Authorized by acceptance item #3; frontmatter classification inconsistency only."
+  blockers: []
 ---
 
 # M1-424: honor profile-driven chat-memory retention (pi=30d)

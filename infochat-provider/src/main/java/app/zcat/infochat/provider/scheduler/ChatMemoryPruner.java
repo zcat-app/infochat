@@ -15,7 +15,8 @@ import java.time.Duration;
 /**
  * Removes chat_memory, chat_session (cascades to chat_message), and
  * summary_anchor rows older than the profile-driven retention horizon
- * (Invariant 9, D37/D40).
+ * (Invariant 9, D37/D40): 90 days on laptop/vps/remote-llm, 30 days on pi
+ * (docs/design/02-schema.md §2.10).
  */
 @ApplicationScoped
 public class ChatMemoryPruner {
@@ -25,8 +26,12 @@ public class ChatMemoryPruner {
     @Inject
     DataSource dataSource;
 
-    // 90 days default (laptop/vps/remote-llm); Pi overrides to 720h (30 days).
-    @ConfigProperty(name = "infochat.chat.retention", defaultValue = "PT2160H")
+    // Resolved from application.properties per profile: 90 days
+    // (laptop/vps/remote-llm), 30 days (pi). No inline defaultValue per the
+    // profile-driven-key convention (AssetSnapshotFetcher §"Profile-driven
+    // cadence") — a missing key must fail startup loudly, not silently apply
+    // 90 days to every profile (the defect this key existing fixes).
+    @ConfigProperty(name = "infochat.chat.retention")
     Duration retention;
 
     @Scheduled(every = "{infochat.chat.pruner.interval:24h}")

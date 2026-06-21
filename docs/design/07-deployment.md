@@ -91,7 +91,7 @@ Values that other design files forward-reference. The spec commits to the existe
 | Periodic-digest morning slot — center hour (24h, group-local) | 08:00 | 08:00 | 08:00 | 08:00 | [../spec/deployment.md](../spec/deployment.md) §Configuration surface — Groups |
 | Periodic-digest evening slot — center hour (24h, group-local) | 19:00 | 19:00 | 19:00 | 19:00 | [../spec/deployment.md](../spec/deployment.md) §Configuration surface — Groups |
 | Periodic-digest slot-window width | ±15 min | ±15 min | ±30 min | ±15 min | [../spec/deployment.md](../spec/deployment.md) §Configuration surface — Groups |
-| `chat_memory` TTL (D40) | 30 d | 30 d | 14 d | 30 d | [../spec/llm.md](../spec/llm.md), [02-schema.md](02-schema.md) |
+| `chat_memory` TTL (D40) | 90 d | 90 d | 30 d | 90 d | [../spec/llm.md](../spec/llm.md), [02-schema.md](02-schema.md) |
 | `post` partition retention (`infochat.partitions.retention-days.post`) | 30 d | 30 d | 14 d | 30 d | [02-schema.md §2.4.4](02-schema.md) |
 
 These are the values bound at startup unless an operator override fires. Forward references from other design files (e.g., 06-messaging.md §6.2.2 / §6.3.6) point here.
