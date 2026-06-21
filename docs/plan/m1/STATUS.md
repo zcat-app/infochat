@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 449 |
+| done | 450 |
 | deferred | 6 |
 | **total** | **457** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-420 — Correct DEVELOPER.md dev-run workflow to match the %dev profile (complexity: low, risk: low)
-- M1-421 — Fix minor guide-doc inaccuracies (confirm list, source types, xref) (complexity: low, risk: low)
 
 ---
 
@@ -61,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-421 | Fix minor guide-doc inaccuracies (confirm list, source types, xref) | 2026-06-21 | round 1 APPROVE |
 | M1-419 | Implement /unfollow-source per-scope unsubscribe command | 2026-06-21 | round 1 APPROVE |
 | M1-418 | Per-task LLM backend switcher (remote/ollama/llamacpp) | 2026-06-21 | round 1 APPROVE |
 | M1-417 | Make llama.cpp backend functional; operator-chosen embeddings | 2026-06-21 | round 1 APPROVE |
@@ -70,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-413 | test: seed fixture of pre-evaluated READY posts for retrieval tests | 2026-06-20 | round 1 APPROVE |
 | M1-412 | cleanup: deep-review low-severity parity, dedup, and comment-drift sweep | 2026-06-20 | round 1 APPROVE |
 | M1-411 | ssrf+messaging: two behavior-preserving simplifications (inline isIpv4Mapped, single-source chunker fence state) | 2026-06-20 | round 1 APPROVE |
-| M1-410 | core+provider: trust the declared SQL source of truth (audit-verb parity test, export by column type) | 2026-06-20 | round 1 APPROVE |
 
 ---
 
@@ -620,5 +619,5 @@ M1-417 (done)
   └── M1-418 (done)
 M1-419 (done)
 M1-420 (pending) ← runnable
-M1-421 (pending) ← runnable
+M1-421 (done)
 ```

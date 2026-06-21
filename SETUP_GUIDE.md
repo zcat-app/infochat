@@ -60,15 +60,26 @@ infochat talks to you through a messaging app. The bot needs its **own**
 account on that app, which you set up once, by hand, before running the wizard:
 
 - **SimpleX (recommended, no phone number):** install the `simplex-chat`
-  program and create a messaging address for the bot. SimpleX is the most
-  private option — it doesn't need a phone number or any personal detail.
+  program and run it once to create the bot's own chat profile (it asks you for
+  a display name on first start). SimpleX is the most private option — it
+  doesn't need a phone number or any personal detail. Install and first-run
+  steps are in the official SimpleX terminal-CLI guide:
+  https://simplex.chat/docs/cli.html
 - **Signal:** install `signal-cli` and register a **phone number** for the bot
-  (a spare number or one you control). Signal requires a phone number.
+  (a spare number or one you control — Signal requires a phone number).
+  Registration is two commands, and Signal may ask you to solve a captcha:
 
-You can use either one, or both. The wizard will later ask you where these
-programs live and what the bot's account is — so just note those down. Detailed
-account-creation steps for each are in the
-[deployment design notes](docs/design/07-deployment.md) (§7.7.2 / §7.9).
+  ```bash
+  signal-cli -a +<bot-number> register       # follow the captcha link it prints
+  signal-cli -a +<bot-number> verify <code>  # <code> arrives by SMS
+  ```
+
+  The full procedure, including the captcha step, is in the signal-cli
+  Quickstart: https://github.com/AsamK/signal-cli/wiki/Quickstart
+
+You can use either one, or both. Once the bot's account exists, the wizard takes
+over: it only asks where the program lives, where its data directory is, and
+which account to use — so jot those three things down as you go.
 
 > **Honest note:** everything *about infochat itself* is automated by the
 > wizard. The only manual part is creating that messaging account, because it

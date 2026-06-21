@@ -210,9 +210,11 @@ can still be sorted even if automatic tagging misses):
 /add-source https://huggingface.co/blog/feed.xml --tags ai,ml
 ```
 
-The bot figures out the source type from the address (RSS, Bluesky, Reddit,
-YouTube, Odysee, X-via-Nitter, Nostr). When you add a brand-new source, the bot
-also reminds you that **source web addresses are visible to admins** — worth
+The bot figures out the source type from the address — RSS, Bluesky, Reddit,
+YouTube, Odysee, or Nostr. (Nitter/X feeds work too; the bot treats them as
+ordinary RSS feeds rather than a separate type.) When you add a brand-new
+source, the bot also reminds you that **source web addresses are visible to
+admins** — worth
 knowing before you add a private feed.
 
 ### 4. Fix the topics you see

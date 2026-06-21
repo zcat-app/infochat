@@ -269,9 +269,12 @@ exist somewhere across all adapters after any `/revoke-admin`.
 
 ### Commands that require confirmation
 
-The broader-blast-radius actions prompt before taking effect — notably
-`/invite create --open`, `/invite revoke`, and `/reject-group`. Targeted,
-constructive actions (`/invite create --contact`, `/approve-group`) don't.
+Destructive or broad-blast-radius actions prompt before taking effect — notably
+`/ban`, `/invite create --open`, `/invite revoke`, `/reject-group`,
+`/remove-source`, and reviving a soft-deleted source via `/source-enable`.
+Routine constructive actions that only add or approve (`/invite create
+--contact`, `/approve-group`) don't — but being aimed at a single target is not
+what exempts a command: `/ban` is targeted and still prompts.
 
 ### The closed privileged-command set
 
