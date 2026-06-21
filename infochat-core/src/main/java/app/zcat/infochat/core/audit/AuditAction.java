@@ -157,6 +157,14 @@ public enum AuditAction implements AuditVerb {
     SOURCE_ENABLE,
     SOURCE_ENABLE_INTENT,
     SOURCE_DISABLE,
+    // UNFOLLOW_SOURCE (M1-419) records a per-scope source unsubscribe:
+    // the caller scope's source_subscription row is deleted while the
+    // global source row is untouched (contrast REMOVE_SOURCE's
+    // soft-delete + cascade). Written only on a real deletion — a
+    // not-subscribed no-op writes no row. No _INTENT counterpart:
+    // /unfollow-source is not confirm-gated (a per-scope unsubscribe is
+    // not a deployment-wide destructive act).
+    UNFOLLOW_SOURCE,
     LIST_SOURCES_ALL,
     AUDIT_READ,
     QUARANTINE_LIST,

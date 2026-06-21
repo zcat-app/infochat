@@ -1,9 +1,15 @@
 ---
 id: M1-419
 title: Implement /unfollow-source per-scope unsubscribe command
-status: pending
+status: done
 created: 2026-06-21
 last_updated: 2026-06-21
+clarity_check:
+  date: 2026-06-21
+  verdict: WARN
+  warnings:
+    - "test_plan is missing the modifies: sub-key for HelpCommandHandlerTest.java (a pre-existing test file in files_scope modified by acceptance item 9); new behavior IS stated in acceptance, so structural-only."
+  blockers: []
 blocked_by: []
 files_budget: 11
 files_scope:
@@ -16,6 +22,11 @@ files_scope:
   - infochat-provider/src/main/resources/bundles/cs.properties
   - infochat-core/src/main/java/app/zcat/infochat/core/audit/AuditAction.java
   - USER_GUIDE.md
+  # Added by budget-breach refine (2026-06-21): this IT hand-mirrors the cs
+  # /help catalogue (lines 114-134) as an explicit ordered key list, so the
+  # new /unfollow-source catalogue entry (acceptance item 9) forces one line
+  # in its golden string between ADD_SOURCE and FOLLOW_TAG.
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/LangCommandIT.java
 complexity: medium
 risk: medium
 round_cap: 2
@@ -59,6 +70,11 @@ acceptance:
 test_plan:
   adds:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/UnfollowSourceCommandHandlerTest.java
+  modifies:
+    # Pre-existing test files this ticket updates in lockstep with the new
+    # /unfollow-source catalogue entry (acceptance item 9).
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/HelpCommandHandlerTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/LangCommandIT.java
   preserves:
     - all tests currently green on main
 spec_refs:
@@ -66,14 +82,62 @@ spec_refs:
   - docs/spec/schema.md §Per-scope state
   - docs/spec/security.md §Slow-start tier
 decision_refs:
-reviews: []
-revisions: []
-escalations: []
+reviews:
+  - round: 1
+    date: 2026-06-21
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 12
+      added: 778
+      removed: 12
+revisions:
+  - date: 2026-06-21
+    reason: |
+      budget-breach refine (user chose refine). Added LangCommandIT.java to
+      files_scope — its hand-mirrored cs /help golden string must gain the new
+      HELP_CMD_UNFOLLOW_SOURCE_SHORT line that acceptance item 9 authorizes.
+      Recorded LangCommandIT.java + HelpCommandHandlerTest.java under
+      test_plan.modifies (the latter also resolves the clarity WARN).
+      files_budget unchanged at 11 (files_scope now lists 10 paths).
+escalations:
+  - date: 2026-06-21
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (files_scope breach, not a reviewer verdict).
+      Full mvn verify is green except ONE provider test:
+      LangCommandIT.langCsRoundtripThroughInMemoryAdapter. That IT hand-mirrors
+      the cs /help catalogue as an explicit ordered list of HELP_CMD_*_SHORT
+      keys (LangCommandIT.java lines 114-134). Acceptance item 9 authorizes the
+      new HELP_CMD_UNFOLLOW_SOURCE_SHORT catalogue entry, so the IT's golden
+      string is now stale and must gain one line (HELP_CMD_UNFOLLOW_SOURCE_SHORT,
+      "cs") between ADD_SOURCE and FOLLOW_TAG. LangCommandIT.java is NOT in
+      files_scope (it would be the 10th path of files_budget 11). Clarity did
+      not flag this catalogue-mirror test. All other M1-419 work passes
+      (UnfollowSourceCommandHandlerTest 9/9, HelpCommandHandlerTest 10/10,
+      provider surefire 921/0, collector green after a back-pressure-flake
+      retry).
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-06-21
+    verdict: CLEAN
+    base: 6ff8c5c7519a22f7123c77c04c4c398cd41f52ef
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-419-2026-06-21.md
+    out_of_model_count: 1
+    note: |
+      In-progress audit (--in-progress) between review APPROVE and commit.
+      Diff captured working-tree-vs-fork-point (implementation uncommitted on
+      branch). CLEAN — 0 critical/high/medium/low. One advisory out-of-model
+      observation; no remediation required before commit/merge.
 ---
 
 # M1-419: Implement /unfollow-source per-scope unsubscribe command

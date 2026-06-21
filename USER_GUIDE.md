@@ -231,11 +231,12 @@ Got the wrong topics in your digest? Tune **your own view** with tags:
 ### 5. Stop following a source
 
 ```text
-/unfollow-source 12
+/unfollow-source 3f9a8b2c-1d4e-4a6f-9c0b-7e2d5a8f1b3c
 ```
 
-This only unsubscribes *you*; the source still exists for others. (Deleting a
-source entirely is an admin action — ask an admin if a shared source should go.)
+The `<id>` is the source's UUID. This only unsubscribes *you*; the source still
+exists for others. (Deleting a source entirely is an admin action — ask an admin
+if a shared source should go.)
 
 ### 6. Read it in another language
 

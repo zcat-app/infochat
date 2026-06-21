@@ -167,6 +167,21 @@ class HelpCommandHandlerTest {
     }
 
     @Test
+    void unfollowSourceShownToDmUserAndGroupAdminButNotPlainGroupMember() {
+        // USER_OR_GROUP_ADMIN tier (M1-419): open to any user in DM,
+        // group-admin-gated in a group.
+        assertContainsLine(handlerFor(dm(false, false, false), productionBundleLoader)
+                        .handle(new ScopeRef.Dm("alice"), "/help").text(),
+                BundleKeys.HELP_CMD_UNFOLLOW_SOURCE_SHORT);
+        assertContainsLine(handlerFor(group(false, true, false), productionBundleLoader)
+                        .handle(new ScopeRef.Group("g1"), "/help").text(),
+                BundleKeys.HELP_CMD_UNFOLLOW_SOURCE_SHORT);
+        assertOmitsLine(handlerFor(group(false, false, false), productionBundleLoader)
+                        .handle(new ScopeRef.Group("g1"), "/help").text(),
+                BundleKeys.HELP_CMD_UNFOLLOW_SOURCE_SHORT);
+    }
+
+    @Test
     void missingBundleKeyCausesHandlerToFailInsteadOfShippingIncompleteReply() {
         // Spy permits no keys — every BundleLoader.get(...) throws as the
         // real BundleLoader would for a missing entry. Handler must

@@ -132,6 +132,9 @@ public final class BundleKeys {
     /** Short-help line for {@code /remove-source} (bot-admin tier). */
     public static final String HELP_CMD_REMOVE_SOURCE_SHORT = "help.cmd.remove-source.short";
 
+    /** Short-help line for {@code /unfollow-source} (user-or-group-admin tier). */
+    public static final String HELP_CMD_UNFOLLOW_SOURCE_SHORT = "help.cmd.unfollow-source.short";
+
     /** Short-help line for {@code /source-enable} (bot-admin tier). */
     public static final String HELP_CMD_SOURCE_ENABLE_SHORT = "help.cmd.source-enable.short";
 
@@ -654,6 +657,18 @@ public final class BundleKeys {
      * source display name, {@code {1}} = cascade-deleted subscription count.
      */
     public static final String REPLY_REMOVE_SOURCE_SUCCESS = "reply.remove_source.success";
+
+    /** {@code /unfollow-source <id>}: parse failure on the positional {@code <id>}, or no source row with that id (mirrors {@code /remove-source}'s unknown-id case). */
+    public static final String ERROR_UNFOLLOW_SOURCE_UNKNOWN_ID = "error.unfollow_source.unknown_id";
+
+    /** {@code /unfollow-source <id>} in a group: caller is neither group admin nor bot admin (v1 has no per-contributor unfollow). */
+    public static final String ERROR_UNFOLLOW_SOURCE_GROUP_ADMIN_ONLY = "error.unfollow_source.group_admin_only";
+
+    /** {@code /unfollow-source <id>}: caller scope holds no subscription to that source — friendly no-op, no audit row written. */
+    public static final String REPLY_UNFOLLOW_SOURCE_NOT_SUBSCRIBED = "reply.unfollow_source.not_subscribed";
+
+    /** {@code /unfollow-source <id>} success reply. Token: {@code {0}} = source display name. */
+    public static final String REPLY_UNFOLLOW_SOURCE_SUCCESS = "reply.unfollow_source.success";
 
     /** {@code /source-enable <id>}: parse failure on the positional {@code <id>} (not a UUID literal). */
     public static final String ERROR_SOURCE_ENABLE_UNKNOWN_ID = "error.source_enable.unknown_id";
