@@ -140,12 +140,24 @@ class Stage1RegexSetTest {
     void toolCallSimulationRulePositiveAndNegative() {
         Pattern p = findRule(Stage1RegexSet.RULE_TOOL_CALL_SIMULATION);
 
+        // Injection-relevant forms still match: the *_call alternatives and the
+        // design-pinned bare `tool`.
         assertTrue(p.matcher("function_call: dangerous()").find(),
             "must match 'function_call:'");
+        assertTrue(p.matcher("function-call(arg)").find(),
+            "must match 'function-call('");
+        assertTrue(p.matcher("tool_call: shell_exec").find(),
+            "must match 'tool_call:'");
         assertTrue(p.matcher("tool: shell_exec").find(),
             "must match 'tool:'");
-        assertTrue(p.matcher("function(arg)").find(),
-            "must match 'function(' (tool-call shape)");
+
+        // M1-425: bare `function` was dropped from the pattern — ordinary
+        // code-bearing prose must no longer match (was a false-positive source
+        // that scrubbed `function(` spans and recorded spurious quarantine rows).
+        assertFalse(p.matcher("function(arg)").find(),
+            "must NOT match bare 'function(' (ordinary code, not a tool-call)");
+        assertFalse(p.matcher("function foo() { return 1; }").find(),
+            "must NOT match 'function foo()' (ordinary code, not a tool-call)");
 
         assertFalse(p.matcher("the tools shed is locked").find(),
             "must NOT match 'tools' without the call-shape suffix");

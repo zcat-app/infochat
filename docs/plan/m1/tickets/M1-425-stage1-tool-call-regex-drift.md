@@ -1,9 +1,9 @@
 ---
 id: M1-425
 title: "collector: drop over-matching bare function in Stage 1 tool-call regex"
-status: pending
+status: done
 created: 2026-06-21
-last_updated: 2026-06-21
+last_updated: 2026-06-22
 blocked_by: []
 files_budget: 3
 files_scope:
@@ -33,12 +33,42 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §Ingest pipeline
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-21
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 26
+      removed: 12
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-21
+    verdict: CLEAN
+    base: 72d1f0280009a7de603811f2b3cabcb1afcc486c
+    head: WORKING-TREE
+    verdict_file: docs/plan/m1/redteam/M1-425-2026-06-21.md
+    out_of_model_count: 0
+    note: |
+      Pre-commit --in-progress audit. CLEAN, no findings, no out-of-model
+      observations. The change narrows the Stage 1 tool-call-simulation regex
+      (removes the over-broad bare `function` alternative) and reconciles the
+      design note; it removes match coverage rather than widening attack surface,
+      and leaves the scrub+quarantine+RAW Stage 1 semantics untouched.
+clarity_check:
+  date: 2026-06-21
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-425: drop over-matching bare `function` in Stage 1 tool-call regex

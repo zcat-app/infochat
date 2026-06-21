@@ -148,7 +148,7 @@ public final class Stage1RegexSet {
         new Rule(
             RULE_TOOL_CALL_SIMULATION,
             Pattern.compile(
-                "\\b(?:function[_-]?call|tool[_-]?call|tool|function)\\s*[:(]",
+                "\\b(?:function[_-]?call|tool[_-]?call|tool)\\s*[:(]",
                 Pattern.CASE_INSENSITIVE)));
 
     private Stage1RegexSet() {
