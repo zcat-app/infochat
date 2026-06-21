@@ -41,8 +41,8 @@ What this means in practice:
 | 1 | Suite baseline (`mvn verify`) | run | establishes the floor; see §Phase 0 |
 | 2 | Seed realistic test data | M1 ticket | delivered — M1-413 (`SeedFixture` + `seed-ready-posts.sql`) |
 | 3 | Dev terminal harness | M1 ticket | delivered — M1-414 (§Phase 3 — Usage) |
-| 4 | Golden-path E2E test | M1 ticket | proposed — §Code-ticket plan |
-| 5 | Collector ingest + NOTIFY smoke test | M1 ticket | proposed — §Code-ticket plan |
+| 4 | Golden-path E2E test | M1 ticket | delivered — M1-415 (`GoldenPathJourneyIT`) |
+| 5 | Collector ingest + NOTIFY smoke test | M1 ticket | delivered — M1-416 (`IngestNotifySmokeIT`) |
 | 6 | Observability runbook | doc | delivered — [observability-runbook.md](observability-runbook.md) |
 | 7 | Adversarial input kit | doc | delivered — [adversarial-input-kit.md](adversarial-input-kit.md) |
 
@@ -141,23 +141,24 @@ build:
 
 ## Code-ticket plan (deliverables 2–5)
 
-These are code/tests, so each is an M1 ticket driven through `/m1-tick`
-(clarity → implement → reviewer → `mvn verify` → commit). Recommended order:
+These are code/tests, so each was an M1 ticket driven through `/m1-tick`
+(clarity → implement → reviewer → `mvn verify` → commit). All four are now
+delivered; the order they were built in:
 
-1. **Seed realistic test data** — a fixture (SQL/test resource) of pre-evaluated
-   `READY` posts (+ a handful of tags/sources) so the provider has content to
-   serve with no LLM or network. Foundational; unblocks #3 and the usage phase.
-2. **Dev terminal harness** — a dev-only inbound bridge (a file-driven poller on
-   the existing scheduler — no HTTP, keeping the provider deaf to inbound calls)
-   over the in-memory adapter that writes outbound replies to a file, so you
-   drive the real pipeline from a terminal without SimpleX/Signal. Most useful
-   once #2 exists. Net-new dev-only code.
-3. **Golden-path E2E test** — one IT chaining bootstrap→invite→register→
+1. **Seed realistic test data** (M1-413) — a fixture (SQL/test resource) of
+   pre-evaluated `READY` posts (+ a handful of tags/sources) so the provider has
+   content to serve with no LLM or network. Foundational; unblocked #2 and the
+   usage phase. Shipped `SeedFixture` + `seed-ready-posts.sql`.
+2. **Dev terminal harness** (M1-414) — a dev-only inbound bridge (a file-driven
+   poller on the existing scheduler — no HTTP, keeping the provider deaf to
+   inbound calls) over the in-memory adapter that writes outbound replies to a
+   file, so you drive the real pipeline from a terminal without SimpleX/Signal.
+   Net-new dev-only code (`DevTerminalHarness`); see §Phase 3 — Usage.
+3. **Golden-path E2E test** (M1-415) — one IT chaining bootstrap→invite→register→
    probation→command→chat→group→digest→asset→ban in a single narrative.
-   Durable regression artifact; can reuse #2's fixtures.
-4. **Collector ingest + NOTIFY smoke test** — proves the *other* service: fetch
-   → eval pipeline → store → `LISTEN/NOTIFY` → provider reacts. Independent of
-   1–3; collector-side.
+   Durable regression artifact (`GoldenPathJourneyIT`); reuses #1's fixtures.
+4. **Collector ingest + NOTIFY smoke test** (M1-416) — proves the *other*
+   service: fetch → eval pipeline → store → `LISTEN/NOTIFY` → provider reacts.
+   Independent of 1–3; collector-side (`IngestNotifySmokeIT`).
 
-#1 and #2 give hands-on testing; #3 and #4 give regression/coverage and can run
-in either order. Ticket IDs are assigned at `/m1-tick` time.
+#1 and #2 give hands-on testing; #3 and #4 give regression/coverage.

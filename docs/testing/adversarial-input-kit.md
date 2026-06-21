@@ -83,7 +83,7 @@ being `saved_post` (per-user-global, by design).
   you control (or a local file feed) containing the crafted item, run the
   collector, and inspect `post` / `quarantine` / `source`.
 - **B / C / E (provider-side):** fastest via the **dev terminal harness**
-  (USER_TEST_PLAN.md deliverable #3) once built — it drives the in-memory
-  adapter so you can paste these inputs from a terminal. Until then, the
+  (USER_TEST_PLAN.md deliverable #3, M1-414) — it drives the in-memory
+  adapter so you can paste these inputs from a terminal. The
   `*RoundtripIT` / `InboundRouter*IT` tests are the closest automated proxy, and
   a real deployment needs a real adapter + account.
