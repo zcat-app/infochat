@@ -1,10 +1,30 @@
 ---
 id: M1-415
 title: "test: golden-path end-to-end journey IT"
-status: pending
+status: done
 created: 2026-06-20
-last_updated: 2026-06-20
+last_updated: 2026-06-21
 blocked_by: []
+clarity_check:
+  date: 2026-06-21
+  verdict: WARN
+  warnings:
+    - 'Acceptance item 2 ("asserts the observable outcome at each step") is a reviewer-inspected quality gate, not a machine-checkable criterion; as written it weakens the acceptance contract but is not a blocker.'
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-06-21
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 691
+      removed: 8
 files_budget: 3
 files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/journey
