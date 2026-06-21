@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 452 |
 | deferred | 6 |
-| **total** | **458** |
+| **total** | **462** |
 
 ---
 
@@ -24,7 +24,10 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-423 — llm: redact userinfo in LlmRouterStartupGuard base-url logs (complexity: low, risk: low)
+- M1-424 — provider: honor profile-driven chat-memory retention (pi=30d) (complexity: low, risk: medium)
+- M1-425 — collector: drop over-matching bare function in Stage 1 tool-call regex (complexity: low, risk: low)
+- M1-426 — cleanup: drop speculative GroupDeleted permit; fix asset D41 comment (complexity: low, risk: low)
 
 ---
 
@@ -621,4 +624,8 @@ M1-419 (done)
 M1-420 (done)
 M1-421 (done)
 M1-422 (done)
+M1-423 (pending) ← runnable
+M1-424 (pending) ← runnable
+M1-425 (pending) ← runnable
+M1-426 (pending) ← runnable
 ```
