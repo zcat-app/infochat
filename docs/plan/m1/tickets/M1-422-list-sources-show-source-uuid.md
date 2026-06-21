@@ -1,10 +1,15 @@
 ---
 id: M1-422
 title: Show the source UUID in /list-sources output
-status: pending
+status: done
 created: 2026-06-21
 last_updated: 2026-06-21
 blocked_by: []
+clarity_check:
+  date: 2026-06-21
+  verdict: PASS
+  warnings: []
+  blockers: []
 files_budget: 5
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/ListSourcesCommandHandler.java
@@ -50,7 +55,20 @@ test_plan:
 spec_refs:
   - docs/spec/commands.md §Source management
 decision_refs:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-21
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 39
+      removed: 15
 revisions: []
 escalations: []
 overrides: []

@@ -77,7 +77,7 @@ public class ListSourcesCommandHandler implements CommandHandler {
                     + "AND removed_at IS NULL";
 
     private static final String SELECT_SCOPED_SOURCES_SQL =
-            "SELECT s.display_name, s.identifier, s.kind, s.status, s.deleted_at "
+            "SELECT s.id, s.display_name, s.identifier, s.kind, s.status, s.deleted_at "
                     + "FROM source s "
                     + "JOIN source_subscription ss ON ss.source_id = s.id "
                     + "WHERE ss.scope_kind = ? AND ss.scope_id = ? "
@@ -86,12 +86,12 @@ public class ListSourcesCommandHandler implements CommandHandler {
                     + "LIMIT ? OFFSET ?";
 
     private static final String SELECT_ALL_NON_DELETED_SOURCES_SQL =
-            "SELECT display_name, identifier, kind, status, deleted_at "
+            "SELECT id, display_name, identifier, kind, status, deleted_at "
                     + "FROM source WHERE deleted_at IS NULL "
                     + "ORDER BY display_name LIMIT ? OFFSET ?";
 
     private static final String SELECT_ALL_INCLUDING_DELETED_SOURCES_SQL =
-            "SELECT display_name, identifier, kind, status, deleted_at "
+            "SELECT id, display_name, identifier, kind, status, deleted_at "
                     + "FROM source "
                     + "ORDER BY display_name LIMIT ? OFFSET ?";
 
@@ -246,7 +246,7 @@ public class ListSourcesCommandHandler implements CommandHandler {
             sb.append('\n');
             sb.append(MessageFormat.format(
                     bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_LINE, inboundContext.effectiveLanguage()),
-                    row.displayName, row.identifier, row.kind, statusLabel(row)));
+                    row.displayName, row.identifier, row.kind, statusLabel(row), row.id));
         }
         return sb.toString();
     }
@@ -329,6 +329,7 @@ public class ListSourcesCommandHandler implements CommandHandler {
         try (ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
                 rows.add(new SourceRow(
+                        (UUID) rs.getObject("id"),
                         rs.getString("display_name"),
                         rs.getString("identifier"),
                         rs.getString("kind"),
@@ -351,7 +352,7 @@ public class ListSourcesCommandHandler implements CommandHandler {
 
     private record UserRow(UUID id, boolean isAdmin) {}
 
-    private record SourceRow(String displayName, String identifier, String kind,
+    private record SourceRow(UUID id, String displayName, String identifier, String kind,
                              String status, @Nullable Instant deletedAt) {}
 
     /**

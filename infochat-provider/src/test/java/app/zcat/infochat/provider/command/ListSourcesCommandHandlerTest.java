@@ -175,6 +175,25 @@ class ListSourcesCommandHandlerTest {
     }
 
     @Test
+    void listSourcesLineIncludesSourceUuid() throws Exception {
+        // M1-422: each /list-sources row carries the source UUID (rendered
+        // as inline code) so a user can copy it into /unfollow-source <id>
+        // or /remove-source <id> — the only in-band way to discover the id
+        // those commands require.
+        String actor = PREFIX + "uuidCaller";
+        UUID actorId = seedUser(actor, false);
+        UUID srcId = seedSource("uuidSrc", "active", false);
+        seedSubscription("dm", actorId, srcId);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor), "/list-sources");
+        String body = reply.text();
+
+        assertTrue(body.contains(srcId.toString()),
+                "list-sources line must include the source UUID for copy into "
+                        + "/unfollow-source <id> — got: " + body);
+    }
+
+    @Test
     void listSourcesGroupReturnsGroupSubscriptionsForEveryMember() throws Exception {
         // Decision D7: group subscriptions are visible to every group
         // member. The handler keys on group scope (not caller id), so
