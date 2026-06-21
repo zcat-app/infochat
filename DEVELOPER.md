@@ -292,9 +292,6 @@ failure against unchanged code:
   in the in-memory reactive-messaging emitter.
 - `Stage1WatchdogIT` — a marginal timing assertion that can trip under load.
 
-<!-- TODO: document the unresolved Testcontainers issue here once its exact
-     symptom/trigger is confirmed (see DEVELOPER.md follow-up). -->
-
 ---
 
 ## Where to go next
