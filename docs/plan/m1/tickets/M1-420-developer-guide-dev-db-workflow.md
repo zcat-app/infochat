@@ -1,9 +1,14 @@
 ---
 id: M1-420
 title: Correct DEVELOPER.md dev-run workflow to match the %dev profile
-status: pending
+status: done
 created: 2026-06-21
 last_updated: 2026-06-21
+clarity_check:
+  date: 2026-06-21
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 3
 files_scope:
@@ -52,7 +57,20 @@ test_plan:
 spec_refs:
   - docs/spec/deployment.md §Local development
 decision_refs:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-21
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 101
+      removed: 28
 revisions: []
 escalations: []
 overrides: []

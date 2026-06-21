@@ -499,13 +499,16 @@ Per-adapter admin threat profiles (Signal SIM-swap exposure vs. SimpleX cryptogr
 
 A single `docker-compose.yml` ships at the repo root and serves **both** audiences through Compose **profiles** — one file, two shapes, so the Postgres / pgvector / LLM service definitions stay a single source of truth and cannot drift apart:
 
-- **`dev` profile** (`docker compose --profile dev up -d`) — Postgres+pgvector and Ollama only. The developer runs the two Quarkus services on the host via `quarkus:dev` (live reload, source on disk). The *developer inner loop*; see the `dev/scripts/` wrappers in §7.7.1.
+- **`dev` profile** (`docker compose --profile dev up -d`) — Postgres+pgvector and Ollama only. The developer runs the Quarkus services on the host via `quarkus:dev` (live reload, source on disk). The *developer inner loop*; see the `dev/scripts/` wrappers in §7.7.1. Note that a **bare** per-module `quarkus:dev` runs under `%dev`, which declares no JDBC URL and so uses a throwaway **Dev Services** database (one per module), *not* this Compose Postgres; a two-service run that shares this Postgres passes the datasource URL explicitly (the exact recipe lives in [DEVELOPER.md](../../DEVELOPER.md) §3).
 - **`prod` profile** (`docker compose --profile prod up -d`) — Postgres+pgvector, the chosen LLM service(s) (Ollama, **or** llama.cpp with a separate embeddings backend per D49 — see §below), and the Collector and Provider as **built container images**. This is what the §7.7.2 wizard drives and what a public-test or simple single-host install runs.
 
 The Postgres service carries no `profiles:` key, so it starts under both; every other service is tagged `dev` or `prod` and starts only under its profile. For tests/CI, set `infochat.adapters=inmemory` to bypass SimpleX and Signal; production deployments MUST NOT mix `inmemory` with `simplex` or `signal` ([06-messaging.md §6.6, §6.7](06-messaging.md)).
 
 ```bash
-# Developer inner loop: infra in containers, apps on the host via quarkus:dev
+# Developer inner loop: infra in containers, apps on the host via quarkus:dev.
+# Bare quarkus:dev uses a throwaway Dev Services DB per module; to share THIS
+# Compose Postgres across both services, pass the datasource URL explicitly
+# (see DEVELOPER.md §3 for the full two-service recipe).
 docker compose --profile dev up -d
 mvn -pl infochat-collector quarkus:dev
 mvn -pl infochat-provider  quarkus:dev
@@ -548,7 +551,7 @@ The committed set:
 | Script | Wraps | Notes |
 |---|---|---|
 | `dev/scripts/build.sh` | `mvn clean install` from the repo root | Validates that JDK 25 is on `PATH` (§7.8.1) before invoking Maven; fails fast with a friendly message naming the required JDK version if not. |
-| `dev/scripts/dev.sh` | `docker compose --profile dev up -d`, then both `quarkus:dev` services in backgrounded panes (e.g. `tmux` windows, or two `&`-backgrounded shells with PIDs printed for `down.sh` to reap). | Brings up Postgres+pgvector and Ollama, then both Quarkus services in dev mode against them. Idempotent: re-running while the stack is up only restarts the services. |
+| `dev/scripts/dev.sh` | `docker compose --profile dev up -d`, then both `quarkus:dev` services in backgrounded panes (e.g. `tmux` windows, or two `&`-backgrounded shells with PIDs printed for `down.sh` to reap). | Brings up Postgres+pgvector and Ollama, then both Quarkus services in dev mode pointed at the shared Compose Postgres via explicit `-Dquarkus.datasource.jdbc.url` overrides (without them, bare `quarkus:dev` would give each service its own throwaway Dev Services DB — see DEVELOPER.md §3). Idempotent: re-running while the stack is up only restarts the services. |
 | `dev/scripts/run-collector.sh` | `mvn -pl infochat-collector quarkus:dev` | Assumes the dev stack is already up; iterate on the Collector alone. |
 | `dev/scripts/run-provider.sh` | `mvn -pl infochat-provider quarkus:dev` | Same shape, Provider side. |
 | `dev/scripts/down.sh` | `docker compose --profile dev down`, plus killing any background `quarkus:dev` PIDs that `dev.sh` recorded. | Cleanup. Developer-only — the wizard's own reset is plain `docker compose down` (§7.7.2). |

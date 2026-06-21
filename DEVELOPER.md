@@ -28,8 +28,23 @@ need them when exercising a real messaging adapter — see
 
 ## 1. Start the backing services
 
-Dev mode runs the two services **on your host** and talks to PostgreSQL and
-Ollama in containers. The `dev` Compose profile brings both up:
+There are two ways to run infochat from source in dev, and they need different
+backing services:
+
+- **Inner loop — one service at a time (no Compose DB needed).** Bare
+  `mvn -pl <module> quarkus:dev` runs under the `%dev` profile, which declares
+  **no** JDBC URL. Quarkus reacts to that by starting a throwaway **Dev
+  Services** pgvector container automatically — a fresh, random-port database
+  per run. Zero DB setup, nothing to configure; ideal for editing one module
+  with live reload. Each module gets its **own** ephemeral DB, so this is not a
+  full two-service bot (see step 3).
+- **Full two-service bot — collector + provider sharing one DB.** Here you point
+  both host services at the loopback Compose PostgreSQL so the provider sees the
+  schema the collector migrates. This is the mode that needs the `dev` Compose
+  profile and a repo-root `.env`.
+
+Bring up the backing containers for the full run (and for any feature that calls
+the LLM, in either mode):
 
 ```bash
 docker compose --profile dev up -d
@@ -39,21 +54,30 @@ This starts PostgreSQL + pgvector (port `5432`, loopback only) and Ollama
 (port `11434`, loopback only). The application services themselves stay off in
 this profile — you run them from source in step 3.
 
-### 1a. The database
+### 1a. The database (only for the full two-service run)
 
-**DB passwords must match the dev defaults.** In the `%dev` profile the services
-connect with the password `infochat-dev` (hardcoded in each
-`application.properties`). The Compose Postgres init script
-(`docker/postgres-init.sh`) creates the roles from environment variables and
-**fails loudly if they are unset** rather than baking in a known secret. So
-*before the first `up`*, create a repo-root `.env` (Compose reads it
-automatically — do **not** commit it):
+The inner loop needs nothing here — Dev Services owns its throwaway DB. The
+Compose PostgreSQL and the `.env` below matter only for the **full two-service
+run** (step 3b).
+
+**Where the passwords are consumed.** The Compose Postgres init script
+(`docker/postgres-init.sh`) reads the role passwords from environment variables
+**at container init** and creates the roles, **failing loudly if any are unset**
+rather than baking in a known secret. So *before the first `up`*, create a
+repo-root `.env` (Compose reads it automatically — do **not** commit it):
 
 ```dotenv
 INFOCHAT_DB_PASSWORD=infochat-dev
 INFOCHAT_COLLECTOR_PASSWORD=infochat-dev
 INFOCHAT_PROVIDER_PASSWORD=infochat-dev
 ```
+
+The values are `infochat-dev` to match the `%dev` profile's hardcoded datasource
+passwords (each `application.properties`): in the full two-service run the host
+JVMs connect to the Compose Postgres with those `%dev` passwords, so they must
+equal what the init script set. In the inner loop the host JVM instead talks to
+its own Dev Services container under trust auth and consumes neither the Compose
+Postgres nor these passwords.
 
 On first start that init script (run once, before any app connects) creates:
 
@@ -122,19 +146,61 @@ passed the full suite — see step 4).
 
 ## 3. Run the services from source
 
-Each service runs under Quarkus dev mode (live reload on code changes). Start
-the **collector first** — it owns the Flyway database migrations; the provider
-expects the schema to already exist:
+Each service runs under Quarkus dev mode (live reload on code changes). How you
+run depends on which of the two modes from step 1 you want.
+
+### 3a. Inner loop — one service, throwaway DB
+
+For iterating on a single module:
 
 ```bash
-# terminal 1 — collector (ingest + LLM evaluation pipeline, runs migrations)
-mvn -pl infochat-collector quarkus:dev
-
-# terminal 2 — provider (messaging + slash commands + chat)
-mvn -pl infochat-provider quarkus:dev
+mvn -pl infochat-collector quarkus:dev   # or infochat-provider
 ```
 
-Both pick up the `%dev` profile automatically under `quarkus:dev`.
+This activates `%dev`, which declares no JDBC URL, so Quarkus spins a throwaway
+Dev Services pgvector container — no Compose Postgres or `.env` needed. Two
+consequences: each module gets its **own** ephemeral DB (so the provider does
+**not** see the collector's schema — this is not a full bot), and the provider
+additionally needs an adapter (see 3b) because `infochat.adapters` is
+`%test`-only and `%dev` leaves it empty.
+
+### 3b. Full two-service bot — shared Compose DB
+
+To run both services against the **one** Compose PostgreSQL (step 1), pass the
+datasource URL explicitly so they bypass Dev Services and share the schema. The
+`%dev` profile already supplies the matching passwords (`infochat-dev`), so you
+override only the URLs. Start the **collector first** — it owns the Flyway
+migrations; the provider expects the schema to already exist.
+
+```bash
+# terminal 1 — collector: migrates the shared DB, then runs the ingest pipeline.
+# The bootstrap-sources path MUST be absolute — quarkus:dev's working directory
+# is the module dir, not the repo root.
+mvn -pl infochat-collector quarkus:dev \
+  -Dquarkus.datasource.jdbc.url=jdbc:postgresql://localhost:5432/infochat \
+  -Dquarkus.datasource.owner.jdbc.url=jdbc:postgresql://localhost:5432/infochat \
+  -Dinfochat.bootstrap.sources-file=$PWD/prod/config/bootstrap-sources.json
+
+# terminal 2 — provider: same shared DB; supply an adapter (the in-memory one
+# here) because %dev configures none. --admin seeds the bootstrap bot admin.
+mvn -pl infochat-provider quarkus:dev \
+  -Dquarkus.datasource.jdbc.url=jdbc:postgresql://localhost:5432/infochat \
+  -Dinfochat.adapters=inmemory \
+  -Dinfochat.adapters.inmemory.allow-low-trust=true \
+  -Dinfochat.adapters.inmemory.admin=admin
+```
+
+Collector comes up on `http://127.0.0.1:8080`, provider on `:8081`; confirm each
+with `curl localhost:8080/q/health` and `:8081/q/health` (both report
+`"status":"UP"`). To drive the in-memory adapter from a terminal, enable the dev
+terminal harness with `-Dinfochat.dev.harness.enabled=true` plus
+`-Dinfochat.dev.harness.input-file=...` / `-Dinfochat.dev.harness.output-file=...`
+(append messages to the input file, read replies from the output file).
+
+> **Heads-up:** these per-module `quarkus:dev` runs resolve the sibling modules
+> (e.g. `infochat-core`) from `~/.m2`, **not** the reactor (`-am` does not work
+> with the `quarkus:dev` goal). If another worktree has installed a stale
+> SNAPSHOT, run `mvn -q install -DskipTests` once at the repo root first.
 
 ---
 
