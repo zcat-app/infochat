@@ -126,6 +126,13 @@ or any **OpenAI-compatible** or **Anthropic** API endpoint.
   admin; new users start in a slow-start probation period.
 - **Private by construction.** Per-user, per-scope isolation; the collector has
   no user-facing API; source post bodies are never sent to a translator.
+- **You choose where the AI runs.** With the default local model, no post or
+  message content leaves your machine. Opting into a remote LLM (the
+  `remote-llm` profile, or routing any task to a cloud API) is an explicit choice
+  that sends the content being processed to that third-party provider — public
+  post bodies for the ingest tasks, and your private chat messages if you route
+  chat — and the setup wizard spells out exactly what each task exposes before
+  you enable it.
 - **Hardened egress.** Outbound fetches run behind an SSRF guard
   (IP-range blocklist, DNS-rebind protection, redirect and header scrubbing).
 - **Deterministic authorization.** Admin operations run in plain Java and are
@@ -133,6 +140,9 @@ or any **OpenAI-compatible** or **Anthropic** API endpoint.
 
 The full threat model and trust boundaries are in
 [docs/spec/security.md](docs/spec/security.md).
+
+Found a security problem? Please report it privately — see
+[SECURITY.md](SECURITY.md). Don't open a public issue for vulnerabilities.
 
 ---
 

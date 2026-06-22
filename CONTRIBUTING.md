@@ -6,6 +6,9 @@ here** — the conventions, the workflow, and a worked example.
 You'll need a working development environment first (build from source, run the
 services, run the tests) — that's in **[DEVELOPER.md](DEVELOPER.md)**.
 
+> **Found a security vulnerability?** Don't open a public issue or PR. Report it
+> privately as described in **[SECURITY.md](SECURITY.md)**.
+
 ---
 
 ## Before you start

@@ -255,6 +255,26 @@ summary, you're done.
 - **To re-run setup** (e.g. to add Signal later), just run `./prod/setup.sh`
   again.
 
+### Back up your data
+
+infochat keeps real state on your machine — back it up regularly, and keep the
+copies **encrypted at rest**. Three things matter:
+
+- **The database** — your posts, users, saved items, settings, and the audit
+  log. It lives in the Docker volume `infochat-pgdata`.
+- **The bot's messaging identity** — the SimpleX / Signal data directories you
+  chose in step 6. **If you lose these you lose the bot's account for good**: a
+  SimpleX queue keypair cannot be regenerated for the same address, and Signal
+  re-registration is an external, out-of-band process.
+- **Your configuration and secrets** — `prod/runtime/application.properties` and
+  `prod/runtime/secrets.env` (database passwords, any LLM API key, admin contact
+  ids).
+
+The full operator runbook — the exact `pg_dump` / `tar` commands, the restore
+procedure, recommended backup frequency, and recovery scenarios — is in
+[docs/design/07-deployment.md §7.10 Backups](docs/design/07-deployment.md) and
+§7.15 Disaster scenarios.
+
 ### Switching your AI backend later
 
 Already set up, but want to change where the AI runs — for example, move to a
@@ -344,6 +364,7 @@ docker compose -f docker-compose.yml --env-file prod/runtime/secrets.env --profi
 | **Wizard refuses to finish: "no bootstrap admin contact id"** | You must give at least one admin contact id in step 6 (see [the admin question](#the-one-question-you-must-not-skip-whos-the-admin)). Re-run and provide it. |
 | **You provided your own model file (llamacpp) and it's rejected** | The pinned default models are checksum-verified automatically. For a custom URL: if you entered a checksum the file must match it (re-check the URL and checksum), and a custom *embeddings* model must be 768-dimensional. |
 | **Step 8 says a service is "DEGRADED"** | Often harmless — usually one messaging adapter hasn't finished connecting yet. Give it a minute; if it stays down, check that the bot's messaging account (step 6 paths) is correct. |
+| **A service exits right away saying another instance is "already running"** | You started a second Collector or Provider against the same database. infochat allows only one of each — stop the extra copy. See [Run only one copy of each service](#run-only-one-copy-of-each-service). |
 
 ---
 
@@ -391,6 +412,19 @@ Nothing is exposed to your network by default — this is deliberate.
 
 The messaging programs (`simplex-chat`, `signal-cli`) run as local subprocesses
 with no network port of their own — the trust boundary is the local machine.
+
+### Run only one copy of each service
+
+infochat v1 is designed for **exactly one Collector and exactly one Provider**
+against a single database. Running a second copy of either — for example, trying
+to scale out for more throughput — would cause duplicate fetches, duplicate
+digests, and database contention, so the services don't allow it: each takes a
+PostgreSQL advisory lock at startup, and a second instance **exits immediately
+with a fatal "another instance is already running" message** that names the live
+one. To handle more load, pick a heavier hardware `profile` rather than adding
+replicas. The rationale and the rolling-upgrade caveat are in
+[docs/spec/architecture.md](docs/spec/architecture.md) §Deployment topology and
+[docs/design/07-deployment.md §7.11](docs/design/07-deployment.md).
 
 ### Compose profiles
 
