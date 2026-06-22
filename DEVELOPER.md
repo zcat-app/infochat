@@ -50,9 +50,11 @@ the LLM, in either mode):
 docker compose --profile dev up -d
 ```
 
-This starts PostgreSQL + pgvector (port `5432`, loopback only) and Ollama
-(port `11434`, loopback only). The application services themselves stay off in
-this profile — you run them from source in step 3.
+This starts PostgreSQL + pgvector (port `5432`, loopback only), which has no
+Compose profile and so comes up on any `docker compose up`, plus Ollama
+(port `11434`, loopback only), which the `dev` profile adds. The application
+services themselves stay off — they belong to the `prod` profile, so you run
+them from source in step 3.
 
 ### 1a. The database (only for the full two-service run)
 
@@ -121,8 +123,9 @@ stubs the LLM — but actually running the services in dev mode does.
 
 **Alternatives to Ollama:**
 
-- **llama.cpp** — the `llamacpp` Compose profile runs llama.cpp's server, which
-  also speaks the OpenAI-compatible API. Point the `infochat.llm.*.base-url`
+- **llama.cpp** — the `llamacpp` and `llamacpp-embeddings` Compose profiles run
+  llama.cpp's servers (one for generation, one for embeddings), which also speak
+  the OpenAI-compatible API. Point the `infochat.llm.*.base-url`
   properties at it and supply a GGUF model file. See the wizard's model setup in
   [SETUP_GUIDE.md](SETUP_GUIDE.md#step-4--which-ai-model) and
   [docs/design/05-llm-and-embeddings.md](docs/design/05-llm-and-embeddings.md).

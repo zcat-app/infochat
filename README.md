@@ -115,8 +115,9 @@ The full architecture, data model, and design rationale are in
 [docs/SPEC.md](docs/SPEC.md).
 
 **Stack:** Quarkus 3.33 LTS · Java 25 · PostgreSQL + `pgvector` ·
-quarkus-langchain4j. The LLM is pluggable: a local **Ollama** model by default,
-or any **OpenAI-compatible** or **Anthropic** API endpoint.
+quarkus-langchain4j. The LLM is pluggable: a local model via **Ollama** (the
+default) or **llama.cpp**, or a remote **OpenAI-compatible** or **Anthropic** API
+endpoint.
 
 ## Security & privacy posture
 

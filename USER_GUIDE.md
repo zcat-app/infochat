@@ -83,9 +83,11 @@ optional. Run `/help` to see the ones available to *you* right now.
 | `/saved [topic]` | List your saved posts |
 | `/unsave <id>` | Remove a bookmark |
 
-> Each post the bot shows you has a short **id** — that's what you pass to
-> `/save` and `/unsave`. Your library is **yours alone** and follows you
-> everywhere (a post saved in a group shows up when you list saves in a DM).
+> Each post the bot shows you has an **id** — a long hexadecimal string shown in
+> the `covered by:` line of a summary. That's what you pass to `/save` and
+> `/unsave` (your messaging app lets you tap-and-hold to copy it). Your library
+> is **yours alone** and follows you everywhere (a post saved in a group shows up
+> when you list saves in a DM).
 
 ### News sources
 
@@ -152,24 +154,24 @@ The bot groups recent posts by topic and replies with something like:
 ```text
 News (last 24h)
 
-[topic_id=t-9e02]
+[topic_id=t-3f8b2c1d]
 Anthropic releases Fable 5, a Mythos-class model
-covered by: TechCrunch (uid p-d31), @anthropic on Bluesky (uid p-e07)
+covered by: TechCrunch (uid 9d4e1ac0f23b7e8516a0c4d9f7b2e3018a5c6d7e0f1928374655a4b3c2d1e0f9), @anthropic on Bluesky (uid 3f8b2c1d0e9a7654b1c2d3e4f5061728394a5b6c7d8e9f001122334455667788)
 score: high (2 sources, news+social)
 summary: Anthropic announced Fable 5, its new Mythos-class model, claiming...
 tags: ai, ml
 
-[topic_id=t-4c11]
+[topic_id=t-c0ffee11]
 DeepSeek proposes a transformer-replacement architecture
-covered by: VentureBeat (uid p-f02)
+covered by: VentureBeat (uid c0ffee11223344556677889900aabbccddeeff00112233445566778899aabbcc)
 summary: A new architecture aims to replace the transformer for...
 tags: ai
 ```
 
 The **`covered by:`** line is the useful part: it lists the **exact posts**
-behind each topic, each with its source and a short **id** (`p-d31`,
-`p-e07`, …). Those ids are what you use to open a post in full or save it (next
-example).
+behind each topic, each with its source and its **id** — the long hex string in
+parentheses after `uid`. Those ids are what you use to open a post in full or
+save it (next example).
 
 Want just one topic?
 
@@ -198,7 +200,7 @@ Keep asking follow-ups to go deeper, and bookmark anything worth keeping using
 the id from the summary's `covered by:` line:
 
 ```text
-/save p-d31
+/save 9d4e1ac0f23b7e8516a0c4d9f7b2e3018a5c6d7e0f1928374655a4b3c2d1e0f9
 ```
 
 ### 3. Add a news source

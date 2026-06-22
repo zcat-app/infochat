@@ -173,14 +173,15 @@ Not sure? Choose **ollama** — it just works and keeps everything on your
 machine. (Note: if you picked the **remote-llm** profile in step 1, you must
 choose **remote** here.)
 
-If you pick **llamacpp**, the wizard offers pinned, checksum-verified default
-models — a gemma chat model and a nomic embeddings model. Press Enter to accept
-each, or paste your own "GGUF" URL to override (a custom chat model is
-unrestricted; a custom embeddings model must produce 768-dimensional vectors, so
-the wizard asks you to confirm). It then asks how to run **embeddings** (the part
-that lets the bot match posts by meaning): a second llama.cpp model (`llamacpp`,
-the default) or Ollama running alongside (`ollama`). Either way, embeddings
-always run separately from the chat model.
+If you pick **llamacpp**, the wizard first offers a pinned, checksum-verified
+default chat model — a gemma "GGUF". Press Enter to accept it, or paste your own
+GGUF URL to override (a custom chat model is unrestricted). It then asks how to
+run **embeddings** (the part that lets the bot match posts by meaning): a second
+llama.cpp model (`llamacpp`, the default) or Ollama running alongside (`ollama`).
+If you keep `llamacpp`, it offers a pinned nomic embeddings model the same way (a
+custom embeddings model must produce 768-dimensional vectors, so the wizard asks
+you to confirm); if you pick `ollama`, there is no model prompt. Either way,
+embeddings always run separately from the chat model.
 
 ### Step 5 — Your sources (optional customization)
 

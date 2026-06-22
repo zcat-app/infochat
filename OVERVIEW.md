@@ -37,7 +37,7 @@ flowchart LR
     db[("PostgreSQL<br/>+ pgvector")]
     provider["<b>Provider</b><br/>(user-facing)"]
     apps["Messaging apps<br/>(SimpleX, Signal)"]
-    llm["LLM / embeddings<br/>(Ollama, OpenAI, …)"]
+    llm["LLM / embeddings<br/>(Ollama, OpenAI, Anthropic)"]
 
     ext -->|fetch| collector
     collector -->|writes posts| db
@@ -116,7 +116,7 @@ flowchart TD
 |---|---|---|
 | **infochat-core** | • Shared DTOs, Panache entities, repositories<br>• Flyway database migrations (the schema lives here)<br>• Audit logging, redaction/`SafeLog`, throttled admin notifier<br>• Shared utilities and profile config | both services |
 | **infochat-ssrf** | • The single SSRF-gated outbound HTTP/WS client<br>• IP-range blocklist, DNS-rebind defense, redirect cap, scheme allowlist, body-size caps<br>• Every outbound fetch in the system goes through it | Collector (feed/stream fetch), Provider (`/add-source` URL probe) |
-| **infochat-llm-adapter** | • `LlmProvider` / `EmbeddingProvider` SPI<br>• Task-based router (per-`ModelTask` model + config)<br>• OpenAI-compatible implementation + startup guards | both services |
+| **infochat-llm-adapter** | • `LlmProvider` / `EmbeddingProvider` SPI<br>• Task-based router (per-`ModelTask` model + config)<br>• OpenAI-compatible and Anthropic implementations + startup guards | both services |
 | **infochat-messaging-adapter** | • `MessagingAdapter` SPI (wire-anchored identity, capability flags)<br>• `TranslationProvider`, `ProgressNotifier` SPIs<br>• Concrete adapters: SimpleX, Signal, and an in-memory test adapter | **Provider only** |
 | **infochat-collector** | • Schedulers and fetchers (RSS, Bluesky, Reddit, Nitter, YouTube, Odysee, Nostr)<br>• The eval pipeline (Stage 1, Stage 2, tagger, entities, embeddings)<br>• Outbox rehydrator, linking job, asset price fetch, `NOTIFY` emitters | runnable service |
 | **infochat-provider** | • Messaging-adapter registry and inbound dispatch<br>• Command router, chat agent, summarizer, group digests<br>• User/group management, ban & admin guards<br>• `NOTIFY` listeners + high-water-mark reconcilers | runnable service |

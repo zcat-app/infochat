@@ -223,9 +223,9 @@ A few guarantees worth understanding — they're why the bot is safe to run:
    DM first — the bot is invisible in a group with no registered members).
 2. Add the bot to the group. When a registered member uses it, you get a
    pending-group notice.
-3. `/approve-group <group_id>`. The bot greets the group, digests begin, and the
-   first eligible member becomes the group admin (you can override with
-   `/promote` / `/demote`).
+3. `/approve-group <group_id>`. The bot posts an activation notice to the group
+   and digests begin. The first eligible member is auto-promoted to group admin
+   on the next group interaction (you can override with `/promote` / `/demote`).
 
 ### Dealing with a problem user
 
