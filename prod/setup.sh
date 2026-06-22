@@ -13,6 +13,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUNTIME_DIR="${INFOCHAT_RUNTIME_DIR:-$SCRIPT_DIR/runtime}"
 STATE_FILE="$RUNTIME_DIR/.setup-state"
 SECRETS_FILE="$RUNTIME_DIR/secrets.env"
+CONFIG_FILE="$RUNTIME_DIR/application.properties"
 COMPOSE_FILE="$REPO_ROOT/docker-compose.yml"
 
 # Full wizard step sequence (§7.7.2 "Structure"): the orchestrator is the single
@@ -61,6 +62,53 @@ print_menu() {
 
 mark_done() { printf '%s\n' "$1" >> "$STATE_FILE"; }
 is_done()   { [[ -f "$STATE_FILE" ]] && grep -qxF "$1" "$STATE_FILE"; }
+
+# Closing handoff (§7.7.2): the wizard creates the bot's admin record on Provider
+# startup (AdminBootstrap @Startup, from the step-6 bootstrap-admin contact id),
+# but it cannot connect the operator's PERSONAL app to the bot — that step happens
+# in SimpleX/Signal, off-machine. So the unified setup finishes by telling the
+# now-admin exactly how to reach the bot and issue the first invite. Reads the
+# committed adapter selection (and the Signal number, which is non-secret) from
+# application.properties; never sources secrets.env.
+print_handoff() {
+  local adapters_line signal_account a
+  local -a _adapters
+  adapters_line="$(grep -E '^infochat\.adapters=' "$CONFIG_FILE" 2>/dev/null | head -n1 | cut -d= -f2-)"
+  echo
+  echo "=============================================================="
+  echo " infochat is set up — and YOU are the bootstrap admin."
+  echo "=============================================================="
+  echo
+  echo "You do NOT need an invite code. Connect from your personal app,"
+  echo "message the bot, then invite other people right from your phone."
+  echo
+  echo "Connect to the bot:"
+  IFS=',' read -ra _adapters <<< "$adapters_line"
+  for a in "${_adapters[@]}"; do
+    case "$a" in
+      simplex)
+        echo "  SimpleX: from your personal SimpleX app, tap Connect and paste the"
+        echo "           bot's address (the link you copied with /ad while creating"
+        echo "           the bot's profile); in the CLI: /c <bot-address>. The bot"
+        echo "           auto-accepts the connection."
+        ;;
+      signal)
+        signal_account="$(grep -E '^infochat\.adapters\.signal\.account=' "$CONFIG_FILE" 2>/dev/null | head -n1 | cut -d= -f2-)"
+        echo "  Signal:  from your personal Signal app, send a direct message to the"
+        echo "           bot's number: ${signal_account:-<the number you registered>}"
+        ;;
+    esac
+  done
+  echo
+  echo "First moves once connected:"
+  echo "  1. Send  /help   — confirms the bot answers you."
+  echo "  2. Invite someone:"
+  echo "       /invite create --adapter <app> --contact <their id>"
+  echo "     The bot replies with a one-time code. Send it to them; they connect"
+  echo "     to the bot and send the code on its own as their first DM to register."
+  echo
+  echo "Full admin walkthrough: ADMIN_GUIDE.md   ·   Using the bot: USER_GUIDE.md"
+}
 
 do_reset() {
   # Feed secrets to compose via its own dotenv parser (--env-file), never a shell
@@ -124,3 +172,4 @@ for entry in "${STEPS[@]}"; do
 done
 
 echo "wizard complete."
+print_handoff

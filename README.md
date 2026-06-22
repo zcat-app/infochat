@@ -147,14 +147,76 @@ Found a security problem? Please report it privately — see
 
 ---
 
-## Quick start
+## Quick setup
 
-Pick the path that matches what you want to do:
+The whole thing is **one script and a few chat messages**. End to end on a
+laptop is about 30 minutes — most of it the computer downloading and building
+while you wait. No Maven, no Java, no programming.
 
-- **Run a deployment** → **[SETUP_GUIDE.md](SETUP_GUIDE.md)**. An interactive
-  wizard builds and configures the containers for you; no Maven required.
-- **Work on the code** → **[DEVELOPER.md](DEVELOPER.md)**. Build from source and
-  run both services in Quarkus dev mode against a local PostgreSQL + Ollama.
+**1 · Set up the server.** From the project folder, run the wizard and answer a
+handful of plain questions (press **Enter** for the sensible default on almost
+all of them):
+
+```bash
+./prod/setup.sh
+```
+
+It checks your machine, generates database secrets, downloads a local AI model,
+wires up your messaging app, and starts both services. When it finishes it
+prints exactly how to reach your bot. (The prerequisites — Docker, and the one
+manual step of creating the bot's own SimpleX/Signal account — are in the
+**[Setup Guide](SETUP_GUIDE.md)**.)
+
+**2 · Say hello — you're the admin.** Connect to the bot from your personal
+SimpleX (or Signal) app. **You don't need an invite code** — you're the
+bootstrap admin. Send `/help` and it answers. You're in.
+
+**3 · Invite a friend.** DM the bot for a one-time code (it asks you to confirm,
+since an open code can be claimed by anyone on that app):
+
+```text
+You:  /invite create --adapter simplex --open
+Bot:  (confirm prompt — resend the command with "confirm" on the end)
+You:  /invite create --adapter simplex --open confirm
+Bot:  Invite code: `7f3c8e9a-…` (single use).
+```
+
+(If you already know the person's id — e.g. a Signal number — you can target
+them directly instead: `/invite create --adapter signal --contact +15551234567`,
+no confirm needed.)
+
+**4 · Your friend joins.** Send them that code. They connect to the bot and send
+**the code on its own** as their first message:
+
+```text
+Friend:  7f3c8e9a-…
+Bot:     Welcome! You're registered. I aggregate news and social posts.
+         Your account is in the probation period for the next ~24h…
+```
+
+**4b · (optional) Skip their probation.** Trust them already? As the admin,
+`/vouch` them and free-form chat unlocks immediately — no ~24h wait:
+
+```text
+You:  /vouch <your friend's id>
+Bot:  User vouched. Probation cleared.
+```
+
+**5 · Read the news.** Right away they can pull a digest; ask in plain language
+once the short probation lifts (or instantly if you `/vouch` them):
+
+```text
+Friend:  /summary -w 24h
+Friend:  what's new on privacy tech today?     ← chat mode, after probation
+```
+
+That's the whole happy path: **one script, one invite, one code.** For
+moderating, groups, adding sources, or moving the AI to the cloud, see the
+guides above.
+
+> **Working on the code instead?** Skip the wizard and build from source —
+> **[DEVELOPER.md](DEVELOPER.md)** runs both services in Quarkus dev mode against
+> a local PostgreSQL + Ollama.
 
 ## License
 

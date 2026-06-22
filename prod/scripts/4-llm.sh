@@ -367,6 +367,26 @@ case "$backend" in
       echo "FAIL: --defaults cannot configure the remote backend; run interactively." >&2
       exit 1
     fi
+    # Privacy disclosure BEFORE the operator commits to a remote endpoint: the
+    # operator must see what leaves the machine before typing the URL/key, not
+    # after. At setup the remote backend routes EVERY generative task — chat
+    # included — plus embeddings to one endpoint (set_all_base_urls below), so
+    # every item below applies; switch-llm.sh can later move tasks back to local
+    # one at a time.
+    echo
+    echo "PRIVACY DISCLOSURE — choosing 'remote' sends ALL of the following to the"
+    echo "remote provider (every generative task and embeddings go to one endpoint):"
+    echo "  !! chat — YOUR PRIVATE MESSAGES to the bot are sent to the remote provider."
+    echo "           This is the most sensitive exposure: your direct conversations."
+    echo "  -  security / tagger / entity — moderation, tagging and entity extraction"
+    echo "     over fetched PUBLIC posts; exposes your source list / topic interests,"
+    echo "     not private user data."
+    echo "  -  summarizer — summaries of the posts you query; exposes which topics / posts you read."
+    echo "  -  translator — translation of the bot's replies; exposes the bot-reply text (can echo your queries)."
+    echo "  -  embeddings — the PUBLIC post content infochat fetches, sent for vectorization."
+    echo "To keep chat (and any task) local, pick 'ollama'/'llamacpp' now, or route"
+    echo "tasks individually later with ./prod/switch-llm.sh."
+    echo
     read -rp "Remote OpenAI-compatible base-url (e.g. https://nano-gpt.com/api/v1): " base_url
     if [[ -z "$base_url" ]]; then
       echo "FAIL: a base-url is required for the remote backend." >&2

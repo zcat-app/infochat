@@ -100,8 +100,8 @@ the deployment private.
 /invite create --adapter signal --contact +15551234567
 ```
 
-The bot replies with a code (shown only once). Give it to that person; their
-first DM to the bot, containing the code, registers them.
+The bot replies with a code (shown only once). Give it to that person; they send
+the code **on its own** as their first DM to the bot, and that registers them.
 
 > **Inviting works across apps.** Unlike other admin commands, `/invite create`
 > takes an explicit `--adapter` so a SimpleX admin can invite a Signal user. The
