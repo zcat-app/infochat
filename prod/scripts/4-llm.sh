@@ -163,14 +163,19 @@ fetch_gguf() {
     echo "skip GGUF download ($file already present)"
   else
     echo "+ download $url -> volume infochat-llamacpp-models/$file"
-    docker run --rm -v infochat-llamacpp-models:/models "$CURL_IMAGE" -fL -o "/models/$file" "$url"
+    # -u 0:0: curlimages/curl runs as a non-root user, but a freshly-created
+    # named volume's root dir is owned by root — a non-root write to /models
+    # is denied. Run the write (and the mismatch-rm below) as root; curl -o
+    # leaves the GGUF world-readable, so the non-root llama.cpp server still
+    # reads it. The presence/checksum probes stay non-root (reads only).
+    docker run --rm -u 0:0 -v infochat-llamacpp-models:/models "$CURL_IMAGE" -fL -o "/models/$file" "$url"
   fi
   if [[ -n "$expected" ]]; then
     actual="$(docker run --rm -v infochat-llamacpp-models:/models --entrypoint sha256sum "$CURL_IMAGE" "/models/$file" | awk '{print $1}')"
     expected="$(printf '%s' "$expected" | tr '[:upper:]' '[:lower:]')"
     if [[ "$actual" != "$expected" ]]; then
       echo "FAIL: GGUF checksum mismatch (expected $expected, got $actual); removing $file." >&2
-      docker run --rm -v infochat-llamacpp-models:/models --entrypoint rm "$CURL_IMAGE" -f "/models/$file"
+      docker run --rm -u 0:0 -v infochat-llamacpp-models:/models --entrypoint rm "$CURL_IMAGE" -f "/models/$file"
       exit 1
     fi
     echo "GGUF checksum verified ($expected)"
