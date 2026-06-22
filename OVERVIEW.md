@@ -30,20 +30,23 @@ database and never talk to each other directly over the network.
 
 ## 2. The big picture
 
-```
-   External sources                                       Messaging apps
-   (RSS, Bluesky, Nostr,                                  (SimpleX, Signal)
-    Reddit, YouTube, …)                                          ▲
-          │                                                      │
-          │ fetch                                                │ send / receive
-          ▼                                                      ▼
-   ┌─────────────────┐    writes posts   ┌────────────┐  reads  ┌─────────────────┐
-   │    Collector    │ ────────────────▶ │ PostgreSQL │ ◀─────▶ │    Provider     │
-   │   (headless)    │ ──── NOTIFY ────▶ │ + pgvector │ LISTEN  │  (user-facing)  │
-   └────────┬────────┘                   └────────────┘         └────────┬────────┘
-            │                                                            │
-            └────────────▶  LLM / embeddings (Ollama, OpenAI, …)  ◀──────┘
-                           ingest evaluation      summaries, chat
+```mermaid
+flowchart LR
+    ext["External sources<br/>(RSS, Bluesky, Nostr,<br/>Reddit, YouTube, …)"]
+    collector["<b>Collector</b><br/>(headless)"]
+    db[("PostgreSQL<br/>+ pgvector")]
+    provider["<b>Provider</b><br/>(user-facing)"]
+    apps["Messaging apps<br/>(SimpleX, Signal)"]
+    llm["LLM / embeddings<br/>(Ollama, OpenAI, …)"]
+
+    ext -->|fetch| collector
+    collector -->|writes posts| db
+    collector -.->|NOTIFY new_post / quarantine_review| db
+    db -.->|LISTEN| provider
+    provider <-->|reads / writes| db
+    provider <-->|send / receive| apps
+    collector -->|ingest evaluation| llm
+    provider -->|summaries, chat| llm
 ```
 
 - The **Collector** fetches sources, evaluates each post, and writes results to
@@ -91,16 +94,22 @@ database and never talk to each other directly over the network.
 
 Six Maven modules: two runnable services on top of four shared libraries.
 
-```
-   ┌────────────────────┐                 ┌────────────────────┐
-   │ infochat-collector │                 │ infochat-provider  │   ← runnable apps
-   └─────────┬──────────┘                 └─────────┬──────────┘
-             │ depends on                           │ depends on
-   ┌─────────┴───────────┬─────────────────┬────────┴──────────────────┐
-   ▼                     ▼                 ▼                            ▼
- infochat-core    infochat-ssrf    infochat-llm-adapter    infochat-messaging-adapter
- (shared by all)  (collector +     (collector +            (PROVIDER ONLY)
-                   provider)        provider)
+```mermaid
+flowchart TD
+    collector["infochat-collector<br/><i>runnable app</i>"]
+    provider["infochat-provider<br/><i>runnable app</i>"]
+    core["infochat-core<br/>entities · repos · Flyway · audit"]
+    ssrf["infochat-ssrf<br/>SSRF-gated HTTP/WS"]
+    llm["infochat-llm-adapter<br/>LLM / embedding SPI"]
+    msg["infochat-messaging-adapter<br/>MessagingAdapter SPI<br/>+ SimpleX / Signal / in-mem"]
+
+    collector --> core
+    collector --> ssrf
+    collector --> llm
+    provider --> core
+    provider --> ssrf
+    provider --> llm
+    provider --> msg
 ```
 
 | Module | Responsibilities | Used by |
@@ -127,17 +136,20 @@ ingest code has no business holding a handle to a user-facing transport.
 A post is fetched, persisted as `RAW`, then walked through evaluation stages
 before it becomes visible to users.
 
-```
-Source ──▶ Fetcher / StreamSource ──▶ persist RAW ──▶ [eval queue]
-                                                          │
-   Stage 1 — deterministic security check ◀───────────────┘
-   (HTML sanitize + prompt-injection regex; suspicious spans quarantined)
-        │
-        ▼  Stage 2 — LLM judge (only on Stage 1 hits)
-   Tagger ──▶ { Entity extraction  ‖  Embedding }   ← run in parallel
-        │
-        ▼
-   mark READY ──▶ NOTIFY new_post
+```mermaid
+flowchart TD
+    src["Source"] --> fetch["Fetcher / StreamSource"]
+    fetch --> raw["persist RAW<br/><i>(the outbox)</i>"]
+    raw --> queue(["eval queue"])
+    queue --> s1["<b>Stage 1</b> — deterministic security check<br/>HTML sanitize + injection regex<br/>suspicious spans quarantined"]
+    s1 -->|only on a Stage 1 hit| s2["<b>Stage 2</b> — LLM judge"]
+    s1 --> tag["Tagger"]
+    s2 --> tag
+    tag --> ent["Entity extraction"]
+    tag --> emb["Embedding"]
+    ent --> ready["mark READY"]
+    emb --> ready
+    ready --> notify["NOTIFY new_post"]
 ```
 
 - **Persist-before-enqueue is the outbox.** A startup rehydrator re-enqueues
@@ -156,15 +168,19 @@ Source ──▶ Fetcher / StreamSource ──▶ persist RAW ──▶ [eval qu
 The only inter-service channel is the database. The closed v1 channel list is
 `new_post` and `quarantine_review` (adding one is a spec amendment).
 
-```
-Collector:  post → READY ──▶ NOTIFY new_post   (payload = cursor key only)
-                                   │  best-effort wake-up signal
-                                   ▼
-Provider:   LISTEN new_post ──▶ read the row from the post table
-                            ──▶ advance high-water mark (compare-and-swap)
+```mermaid
+sequenceDiagram
+    participant C as Collector
+    participant DB as PostgreSQL
+    participant P as Provider
 
-  on restart: a catch-up query replays everything past the mark
-              (NOTIFY is the latency optimization; the mark is correctness)
+    C->>DB: post → READY
+    C-)DB: NOTIFY new_post (cursor key only)
+    Note over DB,P: NOTIFY is a best-effort wake-up signal
+    DB-)P: LISTEN delivers new_post
+    P->>DB: read the row from the post table
+    P->>DB: advance high-water mark (compare-and-swap)
+    Note over P: On restart, a catch-up query replays<br/>everything past the mark — NOTIFY is the<br/>latency optimization, the mark is correctness
 ```
 
 - The payload is **only the cursor key**, never the data — the receiver reads
@@ -180,23 +196,20 @@ communication · [docs/design/01-architecture.md](docs/design/01-architecture.md
 Every inbound message passes the deterministic trust gates *before* any LLM or
 SQL runs.
 
-```
-message in ─▶ identity resolve ─▶ ban check ─▶ parse
-                                                  │
-              ┌───────────────────────────────────┴───────────────────────┐
-              ▼ slash command                                  ▼ no slash → chat
-        permission check                                 probation check
-              │                                                 │
-        deterministic SQL                                 ChatAgent
-        (reproducible post set)                           (read-only tool surface)
-              │                                                 │
-              └──────────────▶ optional summarizer / chat LLM ◀─┘
-                                       │
-                                       ▼
-                          format (plain text) ─▶ optional translation
-                                       │
-                                       ▼
-                               send via messaging adapter
+```mermaid
+flowchart TD
+    msg["message in"] --> id["identity resolve"]
+    id --> ban["ban check"]
+    ban --> parse["parse"]
+    parse -->|slash command| perm["permission check"]
+    parse -->|no slash → chat| prob["probation check"]
+    perm --> sql["deterministic SQL<br/><i>(reproducible post set)</i>"]
+    prob --> agent["ChatAgent<br/><i>(read-only tool surface)</i>"]
+    sql --> llm["optional summarizer / chat LLM"]
+    agent --> llm
+    llm --> fmt["format (plain text)"]
+    fmt --> tr["optional translation"]
+    tr --> send["send via messaging adapter"]
 ```
 
 - **Retrieval is always SQL; the LLM only writes prose.** The set of posts a
