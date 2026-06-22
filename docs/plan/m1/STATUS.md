@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 459 |
 | deferred | 6 |
-| **total** | **465** |
+| **total** | **466** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-430 — Fail-fast if simplex-chat ws-port binds non-loopback (complexity: medium, risk: medium)
 
 ---
 
@@ -628,4 +628,5 @@ M1-426 (done)
 M1-427 (done)
 M1-428 (done)
 M1-429 (done)
+M1-430 (pending) ← runnable
 ```
