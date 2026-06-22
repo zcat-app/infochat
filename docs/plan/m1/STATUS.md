@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 458 |
 | deferred | 6 |
-| **total** | **464** |
+| **total** | **465** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-429 — Fix SimpleX subprocess launch: -p port + in-dir db prefix (complexity: low, risk: medium)
 
 ---
 
@@ -627,4 +627,5 @@ M1-425 (done)
 M1-426 (done)
 M1-427 (done)
 M1-428 (done)
+M1-429 (pending) ← runnable
 ```
