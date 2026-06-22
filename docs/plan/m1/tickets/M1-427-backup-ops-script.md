@@ -1,7 +1,7 @@
 ---
 id: M1-427
 title: Operator backup ops script (prod/scripts/backup.sh)
-status: pending
+status: done
 created: 2026-06-22
 last_updated: 2026-06-22
 blocked_by: []
@@ -79,6 +79,41 @@ spec_refs:
 decision_refs:
   - D34
   - D46
+clarity_check:
+  date: 2026-06-22
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 1: shellcheck is author-run, not CI-gated (ticket acknowledges this; reviewer runs shellcheck on the diff)."
+    - "SECURITY-FLAG-CONSISTENT: script handles sensitive backup material (identity keypairs, audit-log DB dump); security_relevant:true would be more accurate. Acceptance item 3 (mode-preserving tar) + encrypted-at-rest pointer address the practical risks; /redteam to run on the diff before merge."
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-06-22
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 172
+      removed: 16
+redteam_findings: []
+redteam_audits:
+  - date: 2026-06-22
+    verdict: CLEAN
+    base: 039a5df21d22946261ad75bc5e2c470588fdad59
+    head: WORKING-TREE (in-review, pre-commit; --in-progress)
+    verdict_file: docs/plan/m1/redteam/M1-427-2026-06-22.md
+    out_of_model_count: 0
+    note: |
+      Pre-commit adversarial pass triggered by the clarity SECURITY-FLAG-CONSISTENT
+      WARN (script handles identity keypairs + audit-log DB dump). CLEAN — no gap
+      between the threat model and the diff; the secrets-handling surface
+      (container-env DB password, never-sourced secrets.env, mode-preserving
+      identity tar, operator-owned encryption-at-rest) holds. No remediation.
 ---
 
 # M1-427: Operator backup ops script (prod/scripts/backup.sh)

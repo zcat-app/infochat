@@ -869,20 +869,22 @@ Typical RPO: 24 hours (one nightly backup). RTO: 30 minutes for a small DB.
 
 Backup script (cron):
 
-The recommended entry point is `prod/scripts/backup.sh` (§7.7.1) so the operator's crontab calls one named wrapper rather than inlining `pg_dump` / `tar` invocations. The wrapper's contents are exactly the two commands shown below; the retention `find` lines are independent of the backup script and stay in the crontab directly.
+The recommended entry point is `prod/scripts/backup.sh` (§7.7.1) so the operator's crontab calls one named wrapper rather than inlining `pg_dump` / `tar` invocations. The script targets the shipped docker-compose deployment; the retention `find` lines are independent of it and stay in the crontab directly.
 
 ```
-0 3 * * * /opt/infochat/current/scripts/backup.sh
+# Run by absolute path — backup.sh locates docker-compose.yml and
+# prod/runtime/secrets.env relative to its own location, so cwd does not matter.
+0 3 * * * /srv/infochat/prod/scripts/backup.sh
 0 4 * * * find /backups -name 'infochat-*.pgc' -mtime +14 -delete
 0 4 * * * find /backups -name 'adapters-*.tgz' -mtime +14 -delete
 ```
 
-`prod/scripts/backup.sh` wraps:
+`prod/scripts/backup.sh` writes two date-stamped artifacts into the backup directory (default `/backups`; override with a positional argument or `$INFOCHAT_BACKUP_DIR`):
 
-```
-pg_dump -U infochat -F c -f /backups/infochat-$(date +%Y%m%d).pgc infochat
-tar -C /opt/infochat -czf /backups/adapters-$(date +%Y%m%d).tgz adapters/
-```
+- **`infochat-YYYYMMDD.pgc`** — `pg_dump -F c infochat` run *inside* the `postgres` compose service (`docker compose exec`), so it needs no host-side Postgres client and reads the `infochat` owner password from the container environment, never the host.
+- **`adapters-YYYYMMDD.tgz`** — a tar of every *configured* adapter identity data-dir (`INFOCHAT_SIMPLEX_DATA_DIR` / `INFOCHAT_SIGNAL_DATA_DIR`, read from `prod/runtime/secrets.env`), stored relative to `/` with modes preserved so the restore step above reconstructs each dir in place. An enabled adapter whose data-dir is missing fails the run loudly rather than producing an empty archive.
+
+The artifact names are exactly what the retention `find` patterns above match.
 
 ---
 

@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 456 |
+| done | 457 |
 | deferred | 6 |
-| **total** | **462** |
+| **total** | **464** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-428 — Reconcile embedding-dimension docs to v1 768-fixed reality (drop phantom reembed.sh) (complexity: low, risk: low)
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-427 | Operator backup ops script (prod/scripts/backup.sh) | 2026-06-22 | round 1 APPROVE |
 | M1-426 | cleanup: drop speculative GroupDeleted permit; fix asset D41 comment | 2026-06-22 | round 1 APPROVE |
 | M1-425 | collector: drop over-matching bare function in Stage 1 tool-call regex | 2026-06-22 | round 1 APPROVE |
 | M1-424 | provider: honor profile-driven chat-memory retention (pi=30d) | 2026-06-21 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-420 | Correct DEVELOPER.md dev-run workflow to match the %dev profile | 2026-06-21 | round 1 APPROVE |
 | M1-419 | Implement /unfollow-source per-scope unsubscribe command | 2026-06-21 | round 1 APPROVE |
 | M1-418 | Per-task LLM backend switcher (remote/ollama/llamacpp) | 2026-06-21 | round 1 APPROVE |
-| M1-417 | Make llama.cpp backend functional; operator-chosen embeddings | 2026-06-21 | round 1 APPROVE |
 
 ---
 
@@ -625,4 +625,6 @@ M1-423 (done)
 M1-424 (done)
 M1-425 (done)
 M1-426 (done)
+M1-427 (done)
+M1-428 (pending) ← runnable
 ```

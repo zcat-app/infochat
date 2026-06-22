@@ -270,8 +270,21 @@ copies **encrypted at rest**. Three things matter:
   `prod/runtime/secrets.env` (database passwords, any LLM API key, admin contact
   ids).
 
-The full operator runbook — the exact `pg_dump` / `tar` commands, the restore
-procedure, recommended backup frequency, and recovery scenarios — is in
+infochat ships a backup script that captures all three for you —
+`prod/scripts/backup.sh`. It writes a database dump plus a tar of the bot's
+messaging-identity directories into a backup folder (default `/backups`).
+Schedule it from cron, with two independent lines that delete backups older than
+two weeks:
+
+```
+0 3 * * * /srv/infochat/prod/scripts/backup.sh
+0 4 * * * find /backups -name 'infochat-*.pgc' -mtime +14 -delete
+0 4 * * * find /backups -name 'adapters-*.tgz' -mtime +14 -delete
+```
+
+Keep the backup folder **encrypted at rest** — it holds the audit log and the
+irreplaceable identity keys. The full operator runbook — the restore procedure,
+recommended frequency, and recovery scenarios — is in
 [docs/design/07-deployment.md §7.10 Backups](docs/design/07-deployment.md) and
 §7.15 Disaster scenarios.
 
