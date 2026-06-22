@@ -1,7 +1,7 @@
 ---
 id: M1-428
 title: Reconcile embedding-dimension docs to v1 768-fixed reality (drop phantom reembed.sh)
-status: pending
+status: done
 created: 2026-06-22
 last_updated: 2026-06-22
 blocked_by: []
@@ -80,6 +80,25 @@ spec_refs:
   - docs/spec/llm.md §Embedding pipeline
 decision_refs:
   - D49
+clarity_check:
+  date: 2026-06-22
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-06-22
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 52
+      removed: 26
 ---
 
 # M1-428: Reconcile embedding-dimension docs to v1 768-fixed reality

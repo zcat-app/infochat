@@ -68,7 +68,7 @@ The active Quarkus profile (`QUARKUS_PROFILE` / `quarkus.profile=laptop|vps|pi|r
 |---|---|---|---|
 | `laptop` | 16–32 GB RAM, decent CPU/GPU, dev workstation | yes | Development default. |
 | `vps` | 8–16 GB RAM, CPU only, cloud VPS | yes | Production-grade for moderate load. |
-| `pi` | Raspberry Pi 5 (8 GB) | yes (1B param model) | Best-effort. Czech translation quality limited. Embedding via `all-minilm:33m` (384-d). |
+| `pi` | Raspberry Pi 5 (8 GB) | yes (1B param model) | Best-effort. Czech translation quality limited. Embedding is 768-d `nomic-embed-text` — same as every profile in v1; the per-profile `all-minilm` 384-d embedder is deferred beyond v1 ([05-llm-and-embeddings.md §5.5](05-llm-and-embeddings.md)). |
 | `remote-llm` | Provider runs anywhere; LLM is OpenAI/Anthropic/NanoGPT/etc. | no | Operator-explicit opt-in for sending post bodies to remote APIs. Local DB and services, remote LLM API ([../spec/architecture.md](../spec/architecture.md) §Hardware profiles). |
 
 ### 7.2.1 Per-profile cross-cutting values
@@ -102,8 +102,9 @@ Profile is read once at startup. To switch:
 
 1. Stop both services.
 2. Set the active profile: `quarkus.profile=...` in `application.properties` (or `QUARKUS_PROFILE=...` in the environment).
-3. If embedding dimension changes (e.g., laptop→pi), run the embedding migration: `prod/scripts/reembed.sh`.
-4. Start collector, then provider.
+3. Start collector, then provider.
+
+There is **no embedding-migration step in v1**: the embedding dimension is fixed at 768-d on every profile, so switching profiles never changes it. Per-profile embedding dimensions — and the dimension-change migration that would accompany them — are deferred beyond v1; see [05-llm-and-embeddings.md §5.5](05-llm-and-embeddings.md) and [02-schema.md §2.8](02-schema.md).
 
 The collector logs the active profile and any individual overrides at INFO on boot:
 
@@ -532,7 +533,7 @@ docker/
   postgres-init.sh        # service-role password bootstrap (below)
 prod/
   setup.sh                # the first-run wizard (§7.7.2) — the one command an operator runs
-  scripts/                # wizard subscripts + ops scripts (backup.sh, reembed.sh)
+  scripts/                # wizard subscripts + ops script (backup.sh; reembed.sh deferred beyond v1, §2.8)
   config/                 # COMMITTED TEMPLATES only:
                           #   application.properties.example, secrets.env.example,
                           #   bootstrap-sources.json
@@ -556,12 +557,12 @@ The committed set:
 | `dev/scripts/run-provider.sh` | `mvn -pl infochat-provider quarkus:dev` | Same shape, Provider side. |
 | `dev/scripts/down.sh` | `docker compose --profile dev down`, plus killing any background `quarkus:dev` PIDs that `dev.sh` recorded. | Cleanup. Developer-only — the wizard's own reset is plain `docker compose down` (§7.7.2). |
 
-The two **operator** ops scripts live under `prod/scripts/`, not here (they are production upkeep, not the dev inner loop):
+The **operator** ops scripts live under `prod/scripts/`, not here (they are production upkeep, not the dev inner loop):
 
 | Script | Wraps | Notes |
 |---|---|---|
-| `prod/scripts/reembed.sh` | The embedding migration described in §7.2.1 / §7.15. | Named in §7.2.1 ("Switching profiles") and §7.15 ("Disaster scenarios"). |
-| `prod/scripts/backup.sh` | The cron commands in §7.10 (`pg_dump` + per-adapter data-dir tarball). | Wraps the two-line cron pair so an operator's crontab can call one script. |
+| `prod/scripts/backup.sh` | The §7.10 backup commands (`pg_dump` of the compose DB + per-adapter identity-dir tarball). | The cron entry point so an operator's crontab calls one named wrapper. |
+| `prod/scripts/reembed.sh` *(deferred beyond v1)* | The embedding-dimension migration of [02-schema.md §2.8](02-schema.md). | Not shipped in v1 — the embedding dimension is fixed at 768-d on every profile, so there is no migration to run. Listed as the intended post-v1 tool. |
 
 Every script in both sets obeys the same shape:
 
@@ -712,7 +713,7 @@ A modest Linux box (4 vCPU, 8–16 GB RAM, 50 GB disk) runs everything. Recommen
   │       ├── infochat-collector.jar
   │       ├── infochat-provider.jar
   │       ├── application.properties
-  │       └── scripts/               # ops scripts: backup.sh, reembed.sh (from prod/scripts/, §7.7.1)
+  │       └── scripts/               # ops script: backup.sh (from prod/scripts/, §7.7.1; reembed.sh deferred beyond v1)
   ├── data/
   │   └── postgres/                  # Postgres data directory (bind mount)
   ├── models/                        # Ollama model cache (bind mount)
@@ -1116,7 +1117,7 @@ See §7.8.5. Likely causes: a previous Provider crashed without releasing its ad
 | LLM outage > 1 day | Eval pipeline degrades; user-facing summaries become "raw post lists". Restore Ollama / switch provider; the eval queue auto-drains via outbox rehydrator. |
 | One adapter wedged, others fine | Per-adapter resilience ([06-messaging.md §6.7](06-messaging.md)): Provider stays ready, remaining adapters continue serving. Diagnose the failing adapter via §7.14 (SimpleX subprocess/connection check, `signal-cli` re-registration); cycle Provider once the underlying client is healthy again. |
 | All adapters wedged | Bot appears offline. Fix at least one adapter; on reconnect, queued outbounds (if any, in-memory only — see §7.16) flush. No DB state loss. |
-| Profile mistake (e.g., switched embedding dimension) | Run `prod/scripts/reembed.sh`. 4-day window self-heals. |
+| Profile mistake (a misset profile or overridden tuning value) | Stop services, correct `quarkus.profile` / the offending key, restart (§7.2.1). The embedding dimension is fixed at 768-d in v1, so a profile switch never changes it — there is no embedding migration to run. |
 | Compromised LLM API key | Rotate the env var. Restart Provider. Add an audit row noting rotation reason. |
 | Lost SimpleX bootstrap admin | Edit `application.properties` to point `infochat.adapters.simplex.bootstrap-admin-contact-id` at a different SimpleX contact. Restart Provider (bootstrap admin drift, §7.6.3). The new contact becomes admin; the old admin keeps `is_admin=true` until `/revoke-admin`. |
 | Lost Signal bootstrap admin | Same shape on the Signal adapter: rotate `infochat.adapters.signal.bootstrap-admin-contact-id`, restart, `/revoke-admin` the prior. |

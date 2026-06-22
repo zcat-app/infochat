@@ -800,9 +800,13 @@ CREATE INDEX idx_post_entity_text ON post_entity(entity_text, entity_type);
 
 ### 2.4.2 `post_embedding`
 
-Dimension is fixed per profile. The migration creates the column matching
-the active profile's embedding model dimension. Switching profiles requires
-a manual migration that adds a new column or table (see §2.8 below).
+In v1 the embedding dimension is **fixed at 768-d on every profile**: the
+baseline migration creates a `vector(768)` column with an HNSW index
+regardless of `infochat.profile`, and `infochat.embeddings.allow-model-change=false`
+keeps it that way. The per-profile dimensions shown below (pi `vector(384)`)
+are the *intended* design and are **deferred beyond v1** — switching profiles
+in v1 does not change the column dimension, and the dimension-change migration
+that would do so (§2.8) is not shipped.
 
 ```sql
 -- For laptop / vps / remote-llm profile (768-d):
@@ -824,7 +828,8 @@ CREATE INDEX ON post_embedding USING hnsw (embedding vector_cosine_ops)
 --   WITH (lists = 100);
 ```
 
-For the `pi` profile the column is `vector(384)` (matching `all-minilm`).
+In the deferred per-profile design (§2.8) the `pi` profile's column would be
+`vector(384)` (matching `all-minilm`); v1 ships `vector(768)` on every profile.
 **Embeddings are optional** — a post may reach `READY` with no embedding
 row when the embedding stage exhausted retries and was released per D22
 (spec §Posts and derivatives). Semantic-similarity queries MUST tolerate
@@ -1473,6 +1478,13 @@ and no in-process cache for asset snapshots.
 
 ## 2.8 Embedding model migration
 
+**Deferred beyond v1.** v1 ships a single embedding model at one dimension
+(768-d `nomic-embed-text`) on every profile and locks it with
+`infochat.embeddings.allow-model-change=false` (§2.4.2), so this migration has
+no trigger in v1. The procedure below — and the `reembed.sh` that would drive
+it — are the *intended* post-v1 design for the day per-profile embedding
+dimensions are enabled; neither is shipped today.
+
 When `infochat.embeddings.model` (or the `infochat.profile` value that
 selects it) changes:
 
@@ -1483,8 +1495,9 @@ selects it) changes:
 3. Switch the LinkingJob to read `embedding_v2`.
 4. After 4 days, drop the old column and rename `embedding_v2 → embedding`.
 
-A migration script `scripts/reembed.sh` automates steps 1–3. The migration
-is profile-driven (laptop / vps / remote-llm share 768-d; pi is 384-d).
+A migration script `prod/scripts/reembed.sh` would automate steps 1–3 (it is
+not shipped in v1 — see the deferral note above). The migration is
+profile-driven (laptop / vps / remote-llm share 768-d; pi is 384-d).
 
 ---
 

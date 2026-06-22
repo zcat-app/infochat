@@ -629,15 +629,21 @@ override.
 | Setting | laptop | vps | pi | remote-llm |
 |---|---|---|---|---|
 | Chat model | `llama3.1:8b` Q4 | `llama3.2:3b` | `llama3.2:1b` | per provider |
-| Embedding model | `nomic-embed-text` (768-d) | `nomic-embed-text` | `all-minilm:33m` (384-d) | provider default |
+| Embedding model | `nomic-embed-text` (768-d) | `nomic-embed-text` (768-d) | `nomic-embed-text` (768-d) | `nomic-embed-text` (768-d) |
 | Context window | 16K | 8K | 4K | 32K |
 | Auto-compress at | 12K (75%) | 6K (75%) | 3K (75%) | 24K (75%) |
 | Hard limit | 15K (94%) | 7.5K (94%) | 3.8K (94%) | 30K (94%) |
 | LLM concurrency | 4 | 2 | 1 | 8 |
-| Vector index | `hnsw` | `hnsw` | `ivfflat` | `hnsw` |
+| Vector index | `hnsw` | `hnsw` | `hnsw` | `hnsw` |
 | Eval queue size | 1024 | 256 | 64 | 4096 |
 | Periodic-digest workers | 4 | 2 | 1 | 8 |
 | Stage 2 LLM | small judge model | small judge | tiny judge | provider judge |
+
+Embeddings in v1 are 768-d `nomic-embed-text` with an HNSW index on **every**
+profile (`infochat.embeddings.allow-model-change=false` keeps it fixed). The
+per-profile embedding model / dimension / index design (pi `all-minilm` 384-d
+/ IVFFlat, remote-llm 1536-d) is deferred beyond v1 — see
+[05-llm-and-embeddings.md §5.5](05-llm-and-embeddings.md).
 
 `remote-llm` means "local DB and local services, remote LLM API (OpenAI,
 Anthropic, OpenRouter, etc.)" — distinct from `vps`, which means "everything
