@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Random;
@@ -23,6 +24,37 @@ class SimpleXSubprocessTest {
     private static final String SLEEP = pickBinary("/bin/sleep", "/usr/bin/sleep");
     private static final String TRUE = pickBinary("/bin/true", "/usr/bin/true");
     private static final String SH = pickBinary("/bin/sh", "/usr/bin/sh");
+
+    @Test
+    void commandForUsesPortFlagAndInDirDbPrefix() {
+        // M1-429 regression guard (the missing test that hid both blockers):
+        // the launch must pass the port via `-p <port>` because the pinned
+        // simplex-chat v6.5.4 rejects `--network`, and the `-d` db prefix must
+        // sit INSIDE the data-dir so identity files land in the bind-mount
+        // rather than as siblings outside it. commandFor reads only the config
+        // accessors, so a fake config built via the public ctor suffices.
+        String dataDir = "/srv/simplex-data";
+        int wsPort = 5225;
+        SimpleXConfig config = new SimpleXConfig("/opt/simplex-chat", dataDir, wsPort);
+
+        List<String> command = SimpleXSubprocess.commandFor(config);
+
+        assertFalse(command.contains("--network"),
+                "v6.5.4 rejects --network; it must not be emitted: " + command);
+
+        int portFlagIndex = command.indexOf("-p");
+        assertTrue(portFlagIndex >= 0, "expected -p flag in: " + command);
+        assertEquals(Integer.toString(wsPort), command.get(portFlagIndex + 1),
+                "-p must be followed by the bare configured port");
+
+        int dirFlagIndex = command.indexOf("-d");
+        assertTrue(dirFlagIndex >= 0, "expected -d flag in: " + command);
+        Path dbPrefix = Path.of(command.get(dirFlagIndex + 1));
+        Path dataDirPath = Path.of(dataDir);
+        assertTrue(dbPrefix.startsWith(dataDirPath) && !dbPrefix.equals(dataDirPath),
+                "-d must be a strict descendant of the data-dir so identity files stay in the "
+                        + "bind-mount; was " + dbPrefix);
+    }
 
     @Test
     void startsAndStopsProcess() throws Exception {

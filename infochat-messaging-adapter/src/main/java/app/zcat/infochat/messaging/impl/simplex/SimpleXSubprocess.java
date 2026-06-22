@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
@@ -138,16 +139,40 @@ final class SimpleXSubprocess {
     }
 
     /**
-     * Build the simplex-chat invocation from a {@link SimpleXConfig}. The
-     * flag spelling is verified against a live simplex-chat in M1-105's
-     * integration ticket; the shape here matches the documented CLI surface
-     * (data-dir via {@code -d}, WebSocket port via {@code --network}).
+     * Default basename for the {@code -d} db prefix; matches simplex-chat's
+     * own default basename ({@code ~/.simplex/simplex_v1}).
+     */
+    static final String DB_PREFIX_BASENAME = "simplex_v1";
+
+    /**
+     * Build the simplex-chat invocation from a {@link SimpleXConfig}. Flags
+     * verified against the pinned simplex-chat v6.5.4 binary (M1-429 spike).
+     *
+     * <p>{@code -d} takes a path PREFIX, not a directory: simplex-chat writes
+     * its identity files as {@code <prefix>_chat.db} / {@code <prefix>_agent.db}.
+     * The prefix is placed INSIDE the configured data-dir
+     * ({@code <data-dir>/simplex_v1}) so those files land within the
+     * bind-mounted directory; a bare directory prefix would write them as
+     * siblings OUTSIDE the mount, making the bot's SimpleX identity (the D10
+     * trust anchor) ephemeral across container recreation.</p>
+     *
+     * <p>{@code -p} runs the chat server — the WebSocket the adapter connects
+     * to — on the configured port (v6.5.4 has no {@code --network} option).
+     * The pinned v6.5.4 binary binds that server to {@code 127.0.0.1} only
+     * (verified against the SHA-pinned binary, M1-429 spike: {@code ss} showed
+     * a single {@code LISTEN 127.0.0.1:<port>} socket and no {@code 0.0.0.0} /
+     * {@code ::} listener), so the loopback guarantee of {@code docs/spec/security.md}
+     * trust boundary #7 — the unauthenticated bot WebSocket is safe only while
+     * it stays loopback — rests on this default. {@code -p}'s syntax carries no
+     * host argument to make the bind explicit, so a change to this launch flag
+     * MUST re-verify the bind interface is still loopback.</p>
      */
     static List<String> commandFor(SimpleXConfig config) {
+        String dbPrefix = Path.of(config.dataDir()).resolve(DB_PREFIX_BASENAME).toString();
         return List.of(
                 config.binary(),
-                "-d", config.dataDir(),
-                "--network", "ws://127.0.0.1:" + config.wsPort());
+                "-d", dbPrefix,
+                "-p", Integer.toString(config.wsPort()));
     }
 
     /**

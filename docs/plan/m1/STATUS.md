@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 458 |
+| done | 459 |
 | deferred | 6 |
 | **total** | **465** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-429 — Fix SimpleX subprocess launch: -p port + in-dir db prefix (complexity: low, risk: medium)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-429 | Fix SimpleX subprocess launch: -p port + in-dir db prefix | 2026-06-22 | round 2 APPROVE |
 | M1-428 | Reconcile embedding-dimension docs to v1 768-fixed reality (drop phantom reembed.sh) | 2026-06-22 | round 1 APPROVE |
 | M1-427 | Operator backup ops script (prod/scripts/backup.sh) | 2026-06-22 | round 1 APPROVE |
 | M1-426 | cleanup: drop speculative GroupDeleted permit; fix asset D41 comment | 2026-06-22 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-422 | Show the source UUID in /list-sources output | 2026-06-21 | round 1 APPROVE |
 | M1-421 | Fix minor guide-doc inaccuracies (confirm list, source types, xref) | 2026-06-21 | round 1 APPROVE |
 | M1-420 | Correct DEVELOPER.md dev-run workflow to match the %dev profile | 2026-06-21 | round 1 APPROVE |
-| M1-419 | Implement /unfollow-source per-scope unsubscribe command | 2026-06-21 | round 1 APPROVE |
 
 ---
 
@@ -627,5 +627,5 @@ M1-425 (done)
 M1-426 (done)
 M1-427 (done)
 M1-428 (done)
-M1-429 (pending) ← runnable
+M1-429 (done)
 ```
