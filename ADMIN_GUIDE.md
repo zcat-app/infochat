@@ -47,6 +47,11 @@ automatically.
 
 - Your "contact id" is simply your identity on the messaging app — your SimpleX
   address, or your Signal number/ID. It's the same value you gave the wizard.
+- **You don't need an invite code.** The bootstrap admin is registered
+  automatically and skips new-user probation, so you can talk to the bot as soon
+  as you've connected to it (Signal: message its number; SimpleX: connect to its
+  address — see
+  [Connecting to the bot](SETUP_GUIDE.md#connecting-to-the-bot-for-the-first-time)).
 - At least one admin must always exist; the deployment refuses to start with
   nobody in charge.
 - You can add more admins later with `/grant-admin` (below).

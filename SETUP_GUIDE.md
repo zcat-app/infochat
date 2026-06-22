@@ -60,11 +60,33 @@ infochat talks to you through a messaging app. The bot needs its **own**
 account on that app, which you set up once, by hand, before running the wizard:
 
 - **SimpleX (recommended, no phone number):** install the `simplex-chat`
-  program and run it once to create the bot's own chat profile (it asks you for
-  a display name on first start). SimpleX is the most private option — it
-  doesn't need a phone number or any personal detail. Install and first-run
-  steps are in the official SimpleX terminal-CLI guide:
+  program and set up the bot's profile **once**, by hand, using the **same data
+  path you'll give the wizard in step 6** (so infochat reuses this profile):
+
+  ```bash
+  simplex-chat -d /path/to/bot-data    # same value you'll enter in step 6
+  ```
+
+  On first start it asks for a display name. Then, at the `simplex-chat` prompt,
+  do two things:
+
+  1. **Create the bot's address** — type `/ad` (short for `/address`). It prints
+     the bot's contact address as a long link; **copy it.** This is what people
+     (and you, as admin) use to connect to the bot.
+  2. **Enable automatic acceptance of connection requests**, so the bot accepts
+     new contacts while running unattended — type `/auto_accept on`. (If your
+     build reports an unknown command, run `/help` for the exact auto-accept
+     form.)
+
+  Type `/quit` to exit. SimpleX is the most private option — no phone number or
+  personal detail. Full details are in the official SimpleX terminal-CLI guide:
   https://simplex.chat/docs/cli.html
+
+  > **Why both matter:** infochat runs `simplex-chat` headlessly and does not
+  > accept contact requests itself, so without an address there is nothing to
+  > connect to, and without auto-accept connection requests are never answered.
+  > Auto-accept only opens the chat connection — it does **not** bypass invite
+  > gating; an un-invited contact still gets the "you need an invite" reply.
 - **Signal:** install `signal-cli` and register a **phone number** for the bot
   (a spare number or one you control — Signal requires a phone number).
   Registration is two commands, and Signal may ask you to solve a captcha:
@@ -243,8 +265,10 @@ summary, you're done.
 
 ## After setup
 
-- **It's running!** infochat is now live in the background. Message the bot from
-  your messaging app to try it — start with the [User Guide](USER_GUIDE.md).
+- **It's running!** infochat is now live in the background. To try it, first
+  connect to the bot (see
+  [below](#connecting-to-the-bot-for-the-first-time)), then start with the
+  [User Guide](USER_GUIDE.md).
 - **To stop or restart everything**, or to wipe it and start fresh, run:
 
   ```bash
@@ -255,6 +279,22 @@ summary, you're done.
   that unless you really want a clean slate.
 - **To re-run setup** (e.g. to add Signal later), just run `./prod/setup.sh`
   again.
+
+### Connecting to the bot for the first time
+
+How you reach the bot depends on your app:
+
+- **Signal:** send a direct message to the bot's phone number from your own
+  Signal app. No connection step is needed.
+- **SimpleX:** connect to the bot's address once — the contact link you copied
+  with `/ad` when setting up the bot's profile. From your **personal** SimpleX
+  app or CLI, make a contact request to it: in the CLI that's
+  `/c <bot-address>`; in the mobile/desktop app, tap "Connect" and paste the
+  link. The bot auto-accepts and you're connected.
+
+You are the **bootstrap admin**, so you do **not** need an invite code — once
+connected, just message the bot (try `/help`). Everyone else needs an invite you
+issue with `/invite` (see the [Admin Guide](ADMIN_GUIDE.md)).
 
 ### Back up your data
 
