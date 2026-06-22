@@ -7,37 +7,37 @@
     "tags": ["AI", "Development"]
   },
   {
-    "kind": "rss",
-    "identifier": "https://huggingface.co/blog/feed.xml",
-    "name": "Hugging Face",
-    "category": "blog",
-    "tags": ["AI", "Research"]
-  },
-  {
-    "kind": "nitter",
-    "identifier": "https://rss.xcancel.com/aisearchio/rss",
-    "name": "AI Search",
+    "kind": "reddit",
+    "identifier": "https://www.reddit.com/r/aipromptprogramming/hot",
+    "name": "aipromptprogramming (Reddit)",
     "category": "social",
     "tags": ["AI"]
   },
   {
+    "kind": "nitter",
+    "identifier": "https://rss.xcancel.com/ClaudeDevs/rss",
+    "name": "ClaudeDevs (Twitter)",
+    "category": "social",
+    "tags": ["AI", "Claude", "Development"]
+  },
+  {
     "kind": "odysee",
     "identifier": "https://www.odysee.com/$/rss/@NullSecurityX:0",
-    "name": "NullSecX",
+    "name": "NullSecX (Odysee)",
     "category": "social",
     "tags": ["Security"]
   },
   {
     "kind": "youtube",
     "identifier": "https://youtube.com/feeds/videos.xml?channel_id=UCCBVCTuk6uJrN3iFV_3vurg",
-    "name": "Devoxx",
+    "name": "Devoxx (Youtube)",
     "category": "social",
-    "tags": ["Development", "Java", "Video"]
+    "tags": ["AI", "Development", "Java", "Video"]
   },
   {
     "kind": "bluesky",
     "identifier": "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=langchain4j.dev",
-    "name": "LangChain4j",
+    "name": "LangChain4j (BlueSky)",
     "category": "social",
     "tags": ["Java", "Development", "AI"]
   },
