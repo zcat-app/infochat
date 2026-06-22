@@ -182,6 +182,31 @@ that lets the bot match posts by meaning): a second llama.cpp model (`llamacpp`,
 the default) or Ollama running alongside (`ollama`). Either way, embeddings
 always run separately from the chat model.
 
+### Step 5 — Your sources (optional customization)
+
+infochat comes with a starter list of news and social feeds, and the wizard
+installs it for you — by default there's nothing to do here. Two things you
+*can* customize:
+
+**Your own feeds.** To start with your feeds instead of (or alongside) the
+defaults, edit `prod/config/bootstrap-sources.json` **before** you run the
+wizard. Each entry is one feed — its kind (RSS, Bluesky, Reddit, YouTube, and
+more), its URL or handle, a name, a category, and one or more tags. The full
+format, with a worked example for each kind, is in
+[docs/design/07-deployment.md §7.6.1](docs/design/07-deployment.md). The wizard
+copies this file into place once and never overwrites it, so your edits stick.
+(You can also add feeds one at a time later with `/add-source` — see the
+[User Guide](USER_GUIDE.md).)
+
+**Price commands (off by default).** Step 5 also asks for an optional
+*bootstrap-assets* file path. Leave it blank to skip the price commands
+(`/zcash`, `/monero`, …) — they stay disabled and `/help` won't list them. To
+turn them on, you write a small JSON file listing the assets and price sources
+you want; there's no ready-made one. Copy the worked example from
+[docs/design/10-asset-commands.md §10.6](docs/design/10-asset-commands.md), save
+it (e.g. as `prod/config/bootstrap-assets.json`), and give the wizard that path.
+You can add the file and re-run the wizard later if you skip it now.
+
 ### Step 6 — Which messaging app?
 
 Choose **simplex**, **signal**, or both (type them comma-separated, e.g.

@@ -168,8 +168,12 @@ You review these:
 
 ### Managing news sources
 
-Anyone (with permission) can *add* sources — that's in the
-[User Guide](USER_GUIDE.md). Admins control removal and visibility:
+Anyone (with permission) can *add* sources one at a time with `/add-source` —
+that's in the [User Guide](USER_GUIDE.md). To seed feeds **in bulk** — at first
+install, or when rolling out a new set — edit the deployment's
+`bootstrap-sources.json` and restart, rather than adding them one by one; see
+[Setup Guide](SETUP_GUIDE.md) step 5 for the file and its format. Admins control
+removal and visibility:
 
 | Command | What it does |
 |---|---|
