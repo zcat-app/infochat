@@ -90,6 +90,7 @@ Start with the abstract above, then jump to the guide for your role:
 | **Using the bot** | [USER_GUIDE.md](USER_GUIDE.md) | Getting invited, talking to the bot, managing news sources and tags, and example conversations |
 | **Running it from source** | [DEVELOPER.md](DEVELOPER.md) | Build from source and run both services in dev mode; module layout and ports |
 | **Contributing a change** | [CONTRIBUTING.md](CONTRIBUTING.md) | The ticket-driven workflow, engineering conventions, and a worked example of adding a command |
+| **Understanding the architecture** | [OVERVIEW.md](OVERVIEW.md) | A high-level 5-minute map — the two services, the modules, and how data flows; links into the spec for depth |
 | **The technical reference** | [docs/SPEC.md](docs/SPEC.md) | The technical map — architecture, data model, command catalogue, security model, and design notes |
 
 > The four guides above are written for a general audience and stay
