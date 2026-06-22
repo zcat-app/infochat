@@ -270,7 +270,7 @@ case "$backend" in
     fi
 
     # --- Generative GGUF: pinned default (Enter) or custom override URL. ---
-    read -rp "Generative GGUF URL (Enter = pinned $LLAMACPP_GEN_GGUF_FILE): " gen_override
+    read -rp "Generative GGUF — paste a full download URL, or press Enter for the pinned default ($LLAMACPP_GEN_GGUF_FILE): " gen_override
     if [[ -n "$gen_override" ]]; then
       gen_url="$gen_override"
       gen_file="$(gguf_basename "$gen_override")"
@@ -297,7 +297,7 @@ case "$backend" in
       # override is gated on an explicit operator confirmation — the real backstop
       # is EmbeddingMetadataStartupGuard, which refuses Collector startup on a
       # (model,dimension) mismatch (allow-model-change=false). Acceptance item 7.
-      read -rp "Embeddings GGUF URL (Enter = pinned $LLAMACPP_EMB_GGUF_FILE, 768-dim): " emb_override
+      read -rp "Embeddings GGUF — paste a full download URL, or press Enter for the pinned default ($LLAMACPP_EMB_GGUF_FILE, 768-dim): " emb_override
       if [[ -n "$emb_override" ]]; then
         echo "WARNING: a custom embeddings model MUST produce ${EMBEDDINGS_DIMENSION}-dimensional vectors" >&2
         echo "         (infochat.embeddings.dimension=$EMBEDDINGS_DIMENSION, allow-model-change=false)." >&2
