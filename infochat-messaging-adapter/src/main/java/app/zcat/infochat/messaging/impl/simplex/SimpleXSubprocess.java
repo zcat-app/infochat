@@ -13,6 +13,7 @@ import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
@@ -105,6 +106,16 @@ final class SimpleXSubprocess {
     private volatile boolean stopping = false;
     // Seeded to a no-op so the fire site never needs a null check.
     private volatile Runnable restartListener = () -> { };
+    // Off-loopback bind guard (M1-430, trust boundary #7): evaluated once on the
+    // supervisor thread immediately after the FIRST launch reaches RUNNING.
+    // Returns true when the chat-server port is reachable on a non-loopback
+    // interface, which fails the subprocess fast (kill child + admin notify +
+    // FAILED) rather than serving the credential-free WebSocket off loopback.
+    // Seeded to a no-op (loopback-only) so the capability-only path and the
+    // process-lifecycle tests never trip it; production wiring (SimpleXAdapter)
+    // binds the real probe via onStartupBindCheck() BEFORE start(), so the
+    // volatile write happens-before the supervisor thread's read.
+    private volatile BooleanSupplier offLoopbackBindCheck = () -> false;
 
     SimpleXSubprocess(List<String> command,
                       Duration backoffBase,
@@ -199,6 +210,27 @@ final class SimpleXSubprocess {
             return;
         }
         stopping = true;
+        destroyCurrentProcess();
+        Thread t = supervisor;
+        if (t != null) {
+            t.interrupt();
+            try {
+                t.join(SHUTDOWN_GRACE.toMillis());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        state.compareAndSet(State.RUNNING, State.STOPPED);
+        state.compareAndSet(State.RESTARTING, State.STOPPED);
+    }
+
+    /**
+     * SIGTERM the live child, wait up to {@link #SHUTDOWN_GRACE}, then SIGKILL
+     * if it is still alive. No-op when no process is running. Shared by
+     * {@link #stop()} (operator teardown) and the off-loopback bind fail path
+     * (M1-430), which must close the exposed socket before latching FAILED.
+     */
+    private void destroyCurrentProcess() {
         Process p = currentProcess;
         if (p != null && p.isAlive()) {
             p.destroy();
@@ -212,17 +244,6 @@ final class SimpleXSubprocess {
                 p.destroyForcibly();
             }
         }
-        Thread t = supervisor;
-        if (t != null) {
-            t.interrupt();
-            try {
-                t.join(SHUTDOWN_GRACE.toMillis());
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
-        state.compareAndSet(State.RUNNING, State.STOPPED);
-        state.compareAndSet(State.RESTARTING, State.STOPPED);
     }
 
     State state() {
@@ -281,6 +302,19 @@ final class SimpleXSubprocess {
             state.set(State.RUNNING);
             if (restartIteration) {
                 notifyRestartListener();
+            } else if (offLoopbackBindCheck.getAsBoolean()) {
+                // First launch only (M1-430): an off-loopback bind voids trust
+                // boundary #7 — the credential-free WebSocket must stay loopback.
+                // Kill the child so the exposed socket is actually closed (not
+                // merely left unattached), then fail on the same terminal path
+                // as crash-cap exhaustion. Re-checking on restarts is pointless:
+                // the bind interface is fixed by the binary's -p default, which
+                // restarting the same binary cannot change.
+                destroyCurrentProcess();
+                failToAdmin("simplex-chat chat-server port is reachable on a"
+                        + " non-loopback interface; refusing to serve the"
+                        + " credential-free WebSocket off loopback");
+                return;
             }
             restartIteration = true;
             supervise(process);
@@ -301,6 +335,20 @@ final class SimpleXSubprocess {
      */
     void onRestart(Runnable listener) {
         this.restartListener = listener;
+    }
+
+    /**
+     * Register the startup off-loopback bind check (M1-430). MUST be called
+     * before {@link #start()} so the registration is visible to the supervisor
+     * thread: the supervisor evaluates it exactly once, immediately after the
+     * first launch reaches {@link State#RUNNING}, and a {@code true} result
+     * fails the subprocess on the same terminal path as crash-cap exhaustion
+     * ({@link State#FAILED} + one throttled {@code adminNotifier} call). The
+     * check owns its own readiness timing — the bind interface is only
+     * observable once the port is bound. Last registration wins.
+     */
+    void onStartupBindCheck(BooleanSupplier check) {
+        this.offLoopbackBindCheck = check;
     }
 
     private void notifyRestartListener() {
@@ -367,25 +415,34 @@ final class SimpleXSubprocess {
         // resolves to a single notify at the FAILED transition — the
         // supervisor stops looping after this, so a subsequent flood is
         // structurally impossible.
-        //
-        // Notify (and bump the counter) BEFORE the FAILED flip: the State.FAILED
-        // javadoc promises "admin notified", so an observer of FAILED must see
-        // the notification already delivered. state.set is a volatile write and
-        // state() a volatile read, so everything sequenced here is visible to any
-        // thread that observes FAILED. The message is a fixed string independent
-        // of state, so the ordering does not change what the notifier receives.
+        failToAdmin("simplex-chat subprocess crashed " + consecutiveCrashes
+                + " consecutive times; supervisor giving up");
+        return true;
+    }
+
+    /**
+     * Shared terminal fail path: fire the throttled {@code adminNotifier} and
+     * latch {@link State#FAILED}. Used by both crash-cap exhaustion
+     * ({@link #handleCrashCap}) and the off-loopback bind guard (M1-430) so the
+     * two failures reach the admin over one channel.
+     *
+     * <p>Notify (and bump the counter) BEFORE the FAILED flip: the
+     * {@link State#FAILED} javadoc promises "admin notified", so an observer of
+     * FAILED must see the notification already delivered. {@code state.set} is a
+     * volatile write and {@link #state()} a volatile read, so everything
+     * sequenced here is visible to any thread that observes FAILED. The message
+     * is independent of state, so the ordering does not change what the notifier
+     * receives. A buggy notifier (operator-side wiring, M1-105) must not leak
+     * past the supervisor.</p>
+     */
+    private void failToAdmin(String message) {
         adminNotifications.incrementAndGet();
         try {
-            adminNotifier.accept(
-                    "simplex-chat subprocess crashed " + consecutiveCrashes
-                            + " consecutive times; supervisor giving up");
+            adminNotifier.accept(message);
         } catch (RuntimeException e) {
-            // Notifier is operator-side wiring (M1-105); a buggy notifier
-            // must not leak past the supervisor.
             LOG.warn("admin notifier threw: {}", e.getClass().getSimpleName());
         }
         state.set(State.FAILED);
-        return true;
     }
 
     private boolean sleepForBackoff(int consecutiveCrashes) {

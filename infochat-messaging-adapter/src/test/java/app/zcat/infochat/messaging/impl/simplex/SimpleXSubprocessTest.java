@@ -134,6 +134,74 @@ class SimpleXSubprocessTest {
     }
 
     @Test
+    void offLoopbackBindCheckDrivesFailedAndNotifiesOnce() throws Exception {
+        // M1-430 acceptance item 2: when the startup bind check reports the
+        // chat-server port reachable off loopback, the subprocess fails fast on
+        // the crash-cap terminal path — FAILED + exactly one admin notification
+        // — instead of serving the credential-free WebSocket. The check is
+        // injected (() -> true) so the WIRING is exercised deterministically
+        // without a real socket; the real probe is covered by
+        // SimpleXLoopbackProbeTest. A long-lived /bin/sleep stands in for a
+        // simplex-chat that DID launch successfully (the guard, not a crash, is
+        // what fails it), so restartCount must stay zero.
+        CopyOnWriteArrayList<String> notifications = new CopyOnWriteArrayList<>();
+        SimpleXSubprocess sub = new SimpleXSubprocess(
+                List.of(SLEEP, "30"),
+                Duration.ofMillis(5),
+                Duration.ofMillis(20),
+                /* crashCap */ 5,
+                notifications::add,
+                new Random(0L));
+        sub.onStartupBindCheck(() -> true);
+        sub.start();
+        try {
+            awaitState(sub, SimpleXSubprocess.State.FAILED, Duration.ofSeconds(2));
+            assertEquals(SimpleXSubprocess.State.FAILED, sub.state(),
+                    "an off-loopback bind must fail the subprocess fast");
+            assertEquals(1, sub.adminNotifications(),
+                    "exactly one admin notification at the off-loopback FAILED transition");
+            assertEquals(1, notifications.size());
+            assertTrue(notifications.get(0).contains("non-loopback"),
+                    "the notification must name the off-loopback exposure: "
+                            + notifications.get(0));
+            assertEquals(0, sub.restartCount(),
+                    "the bind guard must not enter the crash-restart loop");
+        } finally {
+            sub.stop();
+        }
+    }
+
+    @Test
+    void loopbackOnlyBindCheckLeavesSubprocessRunning() throws Exception {
+        // M1-430 acceptance item 2 (negative case): a loopback-only bind check
+        // (() -> false) leaves the subprocess RUNNING with no admin
+        // notification — the default serve path is unchanged when the port is
+        // not exposed off loopback.
+        CopyOnWriteArrayList<String> notifications = new CopyOnWriteArrayList<>();
+        SimpleXSubprocess sub = new SimpleXSubprocess(
+                List.of(SLEEP, "30"),
+                Duration.ofMillis(5),
+                Duration.ofMillis(20),
+                /* crashCap */ 5,
+                notifications::add,
+                new Random(0L));
+        sub.onStartupBindCheck(() -> false);
+        sub.start();
+        try {
+            awaitState(sub, SimpleXSubprocess.State.RUNNING, Duration.ofSeconds(2));
+            // Settle window: a wrongly-firing guard would have flipped FAILED
+            // by now.
+            Thread.sleep(300);
+            assertEquals(SimpleXSubprocess.State.RUNNING, sub.state(),
+                    "a loopback-only bind must not fail the subprocess");
+            assertEquals(0, sub.adminNotifications(),
+                    "no admin notification when the bind is loopback-only");
+        } finally {
+            sub.stop();
+        }
+    }
+
+    @Test
     void consecutiveCrashCounterResetsAfterHealthyUptime() throws Exception {
         // opus-47 F2 (design §6.4.6): a process that runs past the
         // healthy-uptime threshold before exiting breaks the "consecutive"

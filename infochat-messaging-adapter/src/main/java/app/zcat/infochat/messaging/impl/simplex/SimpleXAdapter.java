@@ -243,12 +243,31 @@ public final class SimpleXAdapter implements MessagingAdapter {
                 SimpleXSubprocess.DEFAULT_CRASH_CAP,
                 notify,
                 new Random());
+        // M1-430: arm the off-loopback bind guard before start() so the
+        // supervisor thread sees the registration. After the child reaches
+        // RUNNING the supervisor waits for the chat-server port to bind, then
+        // probes whether it is reachable off loopback; a true result fails the
+        // subprocess (FAILED + admin notify), which the post-readiness check
+        // below turns into a start() failure so the adapter never serves the
+        // exposed credential-free WebSocket (trust boundary #7).
+        sub.onStartupBindCheck(() -> awaitBindThenProbe(cfg.wsPort()));
         sub.start();
         attachSubprocess(sub);
         try {
             waitForWebSocketReady(cfg.wsPort());
             rebuildWebSocket();
             deriveAndAdoptIdentity();
+            if (sub.state() == SimpleXSubprocess.State.FAILED) {
+                // The concurrent bind guard latched FAILED: the chat-server port
+                // is exposed off loopback. Refuse the start; the catch tears the
+                // just-built WebSocket down and stops the (already killed)
+                // subprocess. Checked after the WS round-trips, by which point
+                // the guard's single non-loopback connect has long completed,
+                // so a healthy loopback-only start reliably reads RUNNING here.
+                throw new MessagingException(FailureCategory.PERMANENT,
+                        "simplex-chat chat-server port is exposed on a"
+                                + " non-loopback interface; refusing to serve");
+            }
         } catch (MessagingException | IllegalStateException e) {
             // The identity derivation runs after the WS client is up, so a
             // failed start() must tear BOTH halves down or the subprocess
@@ -868,6 +887,24 @@ public final class SimpleXAdapter implements MessagingAdapter {
      * additionally capped at the time remaining to the deadline so the
      * loop never oversleeps past it.</p>
      */
+    /**
+     * Off-loopback bind check run on the {@link SimpleXSubprocess} supervisor
+     * thread after the child reaches RUNNING (M1-430). The bind interface is
+     * only observable once the port is bound, so this first waits for readiness
+     * (reusing {@link #waitForWebSocketReady}); a port that never binds is
+     * reported not-exposed — the adapter's own readiness wait then fails the
+     * start. Once bound, a single-shot {@link SimpleXLoopbackProbe} reports
+     * whether the port is reachable on a non-loopback interface.
+     */
+    private boolean awaitBindThenProbe(int port) {
+        try {
+            waitForWebSocketReady(port);
+        } catch (MessagingException e) {
+            return false;
+        }
+        return SimpleXLoopbackProbe.isExposedOffLoopback(port);
+    }
+
     private void waitForWebSocketReady(int port) throws MessagingException {
         long deadline = System.nanoTime() + WS_READY_TIMEOUT.toNanos();
         long sleepMs = 50;

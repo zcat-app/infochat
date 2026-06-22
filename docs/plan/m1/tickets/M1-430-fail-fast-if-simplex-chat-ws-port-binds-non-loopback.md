@@ -1,9 +1,42 @@
 ---
 id: M1-430
 title: "Fail-fast if simplex-chat ws-port binds non-loopback"
-status: pending
+status: done
 created: 2026-06-22
 last_updated: 2026-06-22
+clarity_check:
+  date: 2026-06-22
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-06-22
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 356
+      removed: 24
+redteam_findings: []
+redteam_audits:
+  - date: 2026-06-22
+    verdict: CLEAN
+    base: 6a842b3553e003c42abb7ee277b33531bfaa8b70
+    head: working-tree (uncommitted, in-review)
+    verdict_file: docs/plan/m1/redteam/M1-430-2026-06-22.md
+    out_of_model_count: 2
+    note: |
+      Pre-commit --in-progress audit of the off-loopback bind guard. CLEAN: 0
+      findings. The diff faithfully enforces security.md trust boundary #7 (the
+      credential-free WebSocket must stay loopback). Two out-of-model advisory
+      observations recorded in the verdict file; neither is a gap in this diff's
+      promise.
 blocked_by: []
 remediates: M1-429
 files_budget: 5
