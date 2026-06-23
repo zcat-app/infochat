@@ -39,6 +39,15 @@ public class TestLlmProvider implements LlmProvider {
     private final AtomicInteger callCount = new AtomicInteger();
     private final AtomicReference<String> responseText =
             new AtomicReference<>("default test summary");
+    // Optional per-TRANSLATOR-task override. Null (the default) means "fall
+    // through to responseText", so every existing caller keeps its single-
+    // response behavior. A test that exercises the translation pipeline sets
+    // this so the translator's output differs from the summarizer prose fed
+    // into it — otherwise the two collapse to one sentinel and the pipeline's
+    // byte-identical-output sanity check (M1-437 condition b) treats the
+    // result as a fallback.
+    private final AtomicReference<String> translatorResponseText =
+            new AtomicReference<>(null);
     private final AtomicBoolean throwOnCall = new AtomicBoolean(false);
 
     @Override
@@ -46,6 +55,12 @@ public class TestLlmProvider implements LlmProvider {
         callCount.incrementAndGet();
         if (throwOnCall.get()) {
             throw new RuntimeException("LLM unreachable (TestLlmProvider stub)");
+        }
+        if (task == ModelTask.TRANSLATOR) {
+            String translatorOverride = translatorResponseText.get();
+            if (translatorOverride != null) {
+                return new LlmResponse(translatorOverride);
+            }
         }
         return new LlmResponse(responseText.get());
     }
@@ -58,6 +73,16 @@ public class TestLlmProvider implements LlmProvider {
         responseText.set(text);
     }
 
+    /**
+     * Set the response returned for {@link ModelTask#TRANSLATOR} calls only.
+     * Leaving it unset (the reset default) makes translator calls fall
+     * through to {@link #setResponseText(String)}, preserving the single-
+     * response behavior every other caller relies on.
+     */
+    public void setTranslatorResponseText(String text) {
+        translatorResponseText.set(text);
+    }
+
     public void setThrowOnCall(boolean shouldThrow) {
         throwOnCall.set(shouldThrow);
     }
@@ -65,6 +90,7 @@ public class TestLlmProvider implements LlmProvider {
     public void reset() {
         callCount.set(0);
         responseText.set("default test summary");
+        translatorResponseText.set(null);
         throwOnCall.set(false);
     }
 }

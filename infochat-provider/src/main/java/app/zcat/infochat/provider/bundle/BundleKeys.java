@@ -1343,6 +1343,18 @@ public final class BundleKeys {
     /** {@code /export --page N} beyond a multi-page export. Token {0} = requested page, {1} = total pages. */
     public static final String ERROR_EXPORT_PAGE_OUT_OF_RANGE_MANY = "error.export.page_out_of_range_many";
 
+    // ----- Translation fallback note (M1-437) --------------------------------
+    // Per docs/spec/llm.md §Failure handling (recap) + decision D43. When the
+    // delivery-direction translation pipeline cannot produce usable target-
+    // language output (provider error, blank output, or output identical to
+    // the English input), TranslationPipeline returns the post-sanitizer-1
+    // English text plus this one-line note, resolved in the scope language so
+    // the user is told why the reply is in English rather than seeing a hung
+    // or garbled response.
+
+    /** One-line note appended to the English text on any translation fallback. No tokens; resolved via the 2-arg accessor in the scope language. */
+    public static final String REPLY_TRANSLATION_UNAVAILABLE = "reply.translation.unavailable";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }

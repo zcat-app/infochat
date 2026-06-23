@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -81,10 +82,15 @@ class TranslationPipelineIT {
     }
 
     /**
-     * cs-scope: summarizer call (1) + translator call (2) = callCount 2.
-     * The outbound body contains the TestLlmProvider's fixed response
-     * (the same sentinel text serves both tasks since TestLlmProvider
-     * returns one responseText for all ModelTask values).
+     * cs-scope happy path: summarizer prose is translated into a DISTINCT
+     * cs sentinel, so the full pipeline runs (translator -> sanitizer-2 ->
+     * cache write) and the second identical cluster hits the translation
+     * cache. The summarizer and translator responses must differ: an
+     * echoed translation (output byte-identical to input) is now treated
+     * as a fallback by {@code TranslationPipeline} (M1-437 condition b),
+     * which would skip sanitizer-2 and the cache. The translator response
+     * is set via {@code setTranslatorResponseText} so it is distinct from
+     * the summarizer prose returned by {@code setResponseText}.
      */
     @Test
     void summaryInCsScopeRunsThroughFullTranslationPipeline() throws Exception {
@@ -106,7 +112,12 @@ class TranslationPipelineIT {
         setScopeLanguage(userId, "cs");
 
         mockLlm.reset();
-        mockLlm.setResponseText("<cs-translation>");
+        // Distinct responses per task: the summarizer produces English prose,
+        // the translator produces a distinct cs sentinel. They MUST differ so
+        // the translator output is not byte-identical to its input (which the
+        // pipeline's M1-437 condition (b) would treat as a fallback).
+        mockLlm.setResponseText("<en-summary-prose>");
+        mockLlm.setTranslatorResponseText("<cs-translation>");
 
         adapter.deliverDm(USER_CONTACT_ID, "/summary -w 24h");
 
@@ -117,6 +128,9 @@ class TranslationPipelineIT {
 
         assertTrue(body.contains("<cs-translation>"),
                 "cs-scope outbound must contain the translated text. Got: " + body);
+        assertFalse(body.contains("<en-summary-prose>"),
+                "happy-path translation must REPLACE the English prose, not fall "
+                        + "back to it. Got: " + body);
 
         assertPostBodyUnchanged(postUid1, "Body for Translation headline 1");
         assertPostBodyUnchanged(postUid2, "Body for Translation headline 2");
