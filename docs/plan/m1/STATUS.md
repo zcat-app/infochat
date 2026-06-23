@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 463 |
 | deferred | 6 |
-| **total** | **470** |
+| **total** | **471** |
 
 ---
 
@@ -25,6 +25,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-434 — cleanup: deep-review low-severity sweep — cache-token metric, embedding providerName, connected() gauge, SQL seam (complexity: low, risk: low)
+- M1-435 — Strip U+2028/U+2029 line/paragraph separators in the metadata-field strip (complexity: low, risk: low)
 
 ---
 
@@ -633,4 +634,5 @@ M1-431 (done)
 M1-432 (done)
 M1-433 (done)
 M1-434 (pending) ← runnable
+M1-435 (pending) ← runnable
 ```
