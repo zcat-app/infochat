@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.eval.stage1;
 
 import app.zcat.infochat.collector.eval.TransactionHelper;
+import app.zcat.infochat.core.ingest.IngestTextNormalizer;
 import app.zcat.infochat.core.log.SafeLog;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -295,30 +296,13 @@ public class Stage1Pipeline {
      */
     private static String unicodeNormalize(String body) {
         String nfkc = Normalizer.normalize(body, Normalizer.Form.NFKC);
-        StringBuilder out = new StringBuilder(nfkc.length());
-        for (int i = 0; i < nfkc.length(); i++) {
-            char c = nfkc.charAt(i);
-            // implicit directional marks U+061C (ALM), U+200E/U+200F
-            // (LRM, RLM) — bidi controls NFKC does NOT remove
-            if (c == '\u061C' || c == '\u200E' || c == '\u200F') {
-                continue;
-            }
-            // bidi controls U+202A..U+202E (LRE, RLE, PDF, LRO, RLO)
-            if (c >= '\u202A' && c <= '\u202E') {
-                continue;
-            }
-            // bidi isolates U+2066..U+2069 (LRI, RLI, FSI, PDI)
-            if (c >= '\u2066' && c <= '\u2069') {
-                continue;
-            }
-            // zero-width: U+200B (ZWSP), U+200C (ZWNJ), U+200D (ZWJ),
-            // U+FEFF (BOM / ZWNBSP)
-            if (c == '\u200B' || c == '\u200C' || c == '\u200D' || c == '\uFEFF') {
-                continue;
-            }
-            out.append(c);
-        }
-        return out.toString();
+        // The bidi/zero-width strip is shared with the title/url
+        // normalization (IngestTextNormalizer is the single declaration
+        // of that codepoint loop). Control characters are intentionally
+        // NOT stripped here — the body legitimately carries
+        // newlines/tabs; only the single-line title/url fields get the
+        // additional control strip.
+        return IngestTextNormalizer.stripBidiAndZeroWidth(nfkc);
     }
 
     /**

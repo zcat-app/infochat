@@ -1,7 +1,7 @@
 ---
 id: M1-433
 title: "Strip bidi/zero-width/control characters from post title and url at the ingest convergence point"
-status: pending
+status: done
 created: 2026-06-23
 last_updated: 2026-06-23
 blocked_by: []
@@ -43,12 +43,48 @@ spec_refs:
   - docs/spec/security.md §Ingest pipeline (security side)
   - docs/spec/security.md §Prompt-injection defenses (LLM call sites)
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-23
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 359
+      removed: 27
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-23
+    verdict: CLEAN
+    base: 327ee0e19265f1f3a3aef9424772529c6243fb65
+    head: "working-tree (m1/M1-433-normalize-post-title-url-at-ingest, uncommitted)"
+    verdict_file: docs/plan/m1/redteam/M1-433-2026-06-23.md
+    out_of_model_count: 1
+    note: |
+      Pre-commit in-progress audit of the title/url ingest-normalization
+      diff. CLEAN — no findings against the threat model. One advisory
+      out-of-model item: U+2028/U+2029 (Zl/Zp line/paragraph separators)
+      survive stripMetadataField (Character.isISOControl covers only
+      U+0000..001F / U+007F..009F), so the newline-injection class the diff
+      targets is only partially closed for those two codepoints. Advisory,
+      not a failure: the threat model promises normalization only on the
+      post body, not the title/url metadata fields (which are net-new
+      hardening here). Candidate for a follow-up ticket to widen the strip
+      to Zl/Zp separators; not folded in here to avoid scope drift on the
+      APPROVED codepoint set.
+clarity_check:
+  date: 2026-06-23
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-433: Strip bidi/zero-width/control characters from post title and url at ingest

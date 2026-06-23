@@ -1,11 +1,15 @@
 package app.zcat.infochat.collector.outbox;
 
+import app.zcat.infochat.core.ingest.IngestTextNormalizer;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.core.util.Sha256;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -158,11 +162,21 @@ public class PostPersister {
             ps.setString(1, uid);
             ps.setObject(2, sourceUuid);
             ps.setString(3, upstreamIdentifier);
-            ps.setString(4, normalized.url());
+            // title and url are upstream-controlled untrusted content
+            // that reaches user-facing surfaces (title in searchPosts /
+            // summaries, url emitted bare per the plain-text formatting
+            // rule). Apply the same bidi/zero-width strip Stage 1 runs
+            // on the body, plus a control-character strip, so an
+            // embedded U+202E override or a newline cannot inject a
+            // misleading apparent line into a bot reply. See M1-433 /
+            // docs/spec/security.md §Ingest pipeline (security side).
+            ps.setString(4, normalizeUrlForStorage(normalized.url()));
             // post.title is NOT NULL per V7 schema; the SPI marks title
             // nullable. Coerce null -> "" so a malformed feed item
-            // missing a title does not abort the whole batch.
-            ps.setString(5, normalized.title() == null ? "" : normalized.title());
+            // missing a title does not abort the whole batch, then strip.
+            String rawTitle = normalized.title();
+            String title = rawTitle == null ? "" : rawTitle;
+            ps.setString(5, IngestTextNormalizer.stripMetadataField(title));
             ps.setString(6, normalized.body());
             // NormalizedPost v1 has no author field; the column is
             // nullable per V7.
@@ -214,6 +228,32 @@ public class PostPersister {
     static String deriveUid(UUID sourceUuid, String upstreamIdentifier) {
         String preimage = sourceUuid.toString() + "|" + upstreamIdentifier;
         return Sha256.hex(preimage.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Strip obfuscation codepoints (bidi-control, zero-width, control
+     * characters) from a post url, then bind the result only if it
+     * still parses as a valid {@code http}/{@code https} URI. A null
+     * url binds as SQL NULL unchanged. Stripping a control character
+     * can leave a string that no longer parses as a URL; per M1-433 a
+     * mangled-after-strip url is bound as NULL rather than stored,
+     * because the url is emitted bare per the plain-text formatting
+     * rule and a broken bare url is worse than no url.
+     */
+    private static @Nullable String normalizeUrlForStorage(@Nullable String url) {
+        if (url == null) {
+            return null;
+        }
+        String stripped = IngestTextNormalizer.stripMetadataField(url);
+        try {
+            String scheme = new URI(stripped).getScheme();
+            if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) {
+                return stripped;
+            }
+            return null;
+        } catch (URISyntaxException e) {
+            return null;
+        }
     }
 
     /**
