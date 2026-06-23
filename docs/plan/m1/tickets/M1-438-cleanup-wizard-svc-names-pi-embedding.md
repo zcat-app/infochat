@@ -1,15 +1,16 @@
 ---
 id: M1-438
 title: "cleanup: fix switch-llm recreate service names + pi-profile embedding model in the wizard"
-status: pending
+status: done
 created: 2026-06-23
 last_updated: 2026-06-23
 blocked_by: []
-files_budget: 3
+files_budget: 4
 files_scope:
   - prod/switch-llm.sh
   - prod/scripts/4-llm.sh
   - SETUP_GUIDE.md
+  - infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/wiring/SwitchLlmWiringTest.java
 complexity: low
 risk: low
 round_cap: 2
@@ -19,13 +20,14 @@ out_of_scope:
   - "Per-profile embedding dimensions / the all-minilm:33m 384-d embedder remain deferred beyond v1 (design §5.5, D49). This ticket only removes the pi mismatch by aligning the wizard to the shipped 768-d nomic config; it does NOT introduce profile-specific dimensions."
   - "The up-command shape stays a single combined `up -d infochat-collector infochat-provider`: the provider depends_on the collector with condition service_healthy (docker-compose.yml:142-145), so compose preserves Flyway-first ordering without splitting into two commands."
   - "scope_preferences.digest_enabled is NOT touched — the previously-suspected dead column was already dropped in V50 (V50__banned_admin_actor_checks.sql:195); no migration is needed and none is added."
-  - "No automated test: prod/ shell scripts are not under mvn verify and there is no bats harness (precedent M1-418). Verification is by reading the emitted command string and the written property key/value."
+  - "There is no bats harness for prod/ shell scripts, but the switch-llm.sh recreate hint IS pinned by a JUnit test: SwitchLlmWiringTest.recreateCommandUsesUpNotRestart (infochat-llm-adapter) drives the real prod/switch-llm.sh with a fake docker on PATH and asserts the printed command string. This ticket updates that one positive assertion (item 6) to the corrected service names; the two restart-form negative assertions are unaffected and stay as-is. The pi embedding-model change (4-llm.sh) is pinned by NO test (verified: 'all-minilm' appears in no Java source) and is verified by reading the emitted property value."
 acceptance:
   - "prod/switch-llm.sh:304 prints the recreate hint with the real compose service names `infochat-collector infochat-provider` (replacing `collector provider`), matching docker-compose.yml:57,103 and the names used in prod/scripts/7-apps.sh:68,72."
   - "SETUP_GUIDE.md:372 (the post-switch apply command) uses `infochat-collector infochat-provider`."
   - "prod/scripts/4-llm.sh pi profile sets embedding_model=\"nomic-embed-text\" (line ~206), matching the laptop/vps rows and the shipped infochat.embeddings.model=nomic-embed-text / dimension=768 / allow-model-change=false, so the wizard no longer writes a model that trips EmbeddingMetadataStartupGuard on a pi install."
   - "No other property writes change: the profile branch still writes only infochat.embeddings.model (4-llm.sh:259), leaving dimension at the global 768 (EMBEDDINGS_DIMENSION, 4-llm.sh:63)."
-  - "mvn -B clean verify from the repo root exits 0 (no Java/migration change; confirms no regression)."
+  - "SwitchLlmWiringTest.recreateCommandUsesUpNotRestart (SwitchLlmWiringTest.java:241-242) updates its expected string and message from `up -d collector provider` to `up -d infochat-collector infochat-provider`, matching the corrected switch-llm.sh:304 output. The two restart-form negative assertions (`restart collector`, `compose restart`) are unchanged; no other test in the file is touched."
+  - "mvn -B clean verify from the repo root exits 0 (confirms the test-string update lands green and no regression)."
 test_plan:
   adds: []
   preserves:
@@ -34,14 +36,50 @@ spec_refs:
   - docs/design/07-deployment.md §Switching profiles
 decision_refs:
   - D49
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-23
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 41
+      removed: 17
+escalations:
+  - date: 2026-06-23
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      N/A (premise-fail). The out_of_scope premise "No automated test:
+      prod/ shell scripts are not under mvn verify" is false:
+      infochat-llm-adapter/.../SwitchLlmWiringTest.recreateCommandUsesUpNotRestart
+      (line 241) drives the real prod/switch-llm.sh and asserts
+      r.output.contains("up -d collector provider"). The acceptance-item-1
+      fix reverses that string, so mvn verify fails (Tests run: 9,
+      Failures: 1). Fixing the test requires editing a path outside
+      files_scope and pushes files-touched to 4 > files_budget 3.
+revisions:
+  - date: 2026-06-23
+    reason: "premise-fail refine (round 1): out_of_scope wrongly claimed no automated test pins switch-llm.sh; SwitchLlmWiringTest pins the recreate string. Widened files_scope (+SwitchLlmWiringTest.java) and files_budget (3->4); added acceptance item to update the test assertion."
+    snapshot:
+      files_budget: 3
+      files_scope:
+        - prod/switch-llm.sh
+        - prod/scripts/4-llm.sh
+        - SETUP_GUIDE.md
+      out_of_scope_test_premise: "No automated test: prod/ shell scripts are not under mvn verify and there is no bats harness (precedent M1-418). Verification is by reading the emitted command string and the written property key/value."
+      acceptance_count: 5
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
 clarity_check:
-  date:
-  verdict:
+  date: 2026-06-23
+  verdict: PASS
   warnings: []
   blockers: []
 ---

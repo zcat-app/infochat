@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 467 |
+| done | 468 |
 | deferred | 6 |
 | **total** | **474** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-438 — cleanup: fix switch-llm recreate service names + pi-profile embedding model in the wizard (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-438 | cleanup: fix switch-llm recreate service names + pi-profile embedding model in the wizard | 2026-06-23 | round 1 APPROVE |
 | M1-437 | Translation pipeline must sanity-check output and fall back to English with a one-line note | 2026-06-23 | round 1 APPROVE |
 | M1-436 | /source-enable must re-enable all HTTP-shaped source kinds, not just rss | 2026-06-23 | round 1 APPROVE |
 | M1-435 | Strip U+2028/U+2029 line/paragraph separators in the metadata-field strip | 2026-06-23 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-431 | Wizard auto-provisions the SimpleX bot identity (profile + address + auto-accept) | 2026-06-23 | round 1 APPROVE |
 | M1-430 | Fail-fast if simplex-chat ws-port binds non-loopback | 2026-06-22 | round 1 APPROVE |
 | M1-429 | Fix SimpleX subprocess launch: -p port + in-dir db prefix | 2026-06-22 | round 2 APPROVE |
-| M1-428 | Reconcile embedding-dimension docs to v1 768-fixed reality (drop phantom reembed.sh) | 2026-06-22 | round 1 APPROVE |
 
 ---
 
@@ -636,5 +636,5 @@ M1-434 (done)
 M1-435 (done)
 M1-436 (done)
 M1-437 (done)
-M1-438 (pending) ← runnable
+M1-438 (done)
 ```

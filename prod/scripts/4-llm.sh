@@ -203,7 +203,7 @@ fi
 case "$profile" in
   laptop) security_model="llama3.2:3b"; chat_model="llama3.1:8b"; embedding_model="nomic-embed-text" ;;
   vps)    security_model="llama3.2:3b"; chat_model="llama3.2:3b"; embedding_model="nomic-embed-text" ;;
-  pi)     security_model="llama3.2:1b"; chat_model="llama3.2:1b"; embedding_model="all-minilm:33m" ;;
+  pi)     security_model="llama3.2:1b"; chat_model="llama3.2:1b"; embedding_model="nomic-embed-text" ;;
   remote-llm) security_model=""; chat_model=""; embedding_model="" ;;
   *) echo "FAIL: unknown profile '$profile' in $CONFIG_FILE" >&2; exit 1 ;;
 esac

@@ -301,4 +301,4 @@ done
 echo
 echo "Apply the change by RECREATING the app containers (not 'restart' — the API key"
 echo "reaches the container via --env-file only at container-create time):"
-echo "  docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod up -d collector provider"
+echo "  docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod up -d infochat-collector infochat-provider"

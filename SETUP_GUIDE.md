@@ -369,7 +369,7 @@ Finally it prints the command to apply the change (recreating the containers, so
 the new key takes effect):
 
 ```bash
-docker compose -f docker-compose.yml --env-file prod/runtime/secrets.env --profile prod up -d collector provider
+docker compose -f docker-compose.yml --env-file prod/runtime/secrets.env --profile prod up -d infochat-collector infochat-provider
 ```
 
 **Two worked examples:**

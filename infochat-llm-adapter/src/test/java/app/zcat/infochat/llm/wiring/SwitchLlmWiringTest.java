@@ -238,8 +238,8 @@ class SwitchLlmWiringTest {
         RunResult r = runSwitch(tmp, BASELINE_OLLAMA, null,
                 "\n\n\n\nremote\nhttps://api.example.com/v1\ngpt-test\n\nsk-test-key\n");
 
-        assertTrue(r.output.contains("up -d collector provider"),
-                "the recreate command must use `up -d collector provider`:\n" + r.output);
+        assertTrue(r.output.contains("up -d infochat-collector infochat-provider"),
+                "the recreate command must use `up -d infochat-collector infochat-provider`:\n" + r.output);
         // The script's prose deliberately names `restart` to warn against it, so
         // assert the absence of the wrong COMMAND form, not the bare word.
         assertFalse(r.output.contains("restart collector"),
