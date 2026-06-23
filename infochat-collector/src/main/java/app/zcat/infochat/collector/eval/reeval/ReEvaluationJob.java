@@ -552,7 +552,7 @@ public class ReEvaluationJob {
         // use it inside the surviving partitions.
         final String sql =
             "SELECT id, fetched_at, stage2_failed, re_eval_attempts, stage2_verdict, body FROM post "
-                + "WHERE fetched_at >= now() - ?::INTERVAL"
+                + "WHERE fetched_at >= now() - ?::INTERVAL "
                 + "  AND ("
                 + "  (stage2_failed = TRUE AND status != 'NEEDS_REVIEW'"
                 + "   AND (last_reeval_at IS NULL OR last_reeval_at < now() - ?::INTERVAL))"

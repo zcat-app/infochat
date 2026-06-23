@@ -228,8 +228,15 @@ public class AnthropicProvider implements LlmProvider {
         LlmResponse.TokenUsage tokenUsage = null;
         if (usage.path("input_tokens").canConvertToLong()
                 && usage.path("output_tokens").canConvertToLong()) {
+            // The provider enables cache_control: ephemeral, so a cached prompt
+            // prefix is counted under cache_read_input_tokens (or, on the write,
+            // cache_creation_input_tokens) instead of input_tokens. Folding both
+            // into the reported input keeps llm.tokens.in from undercounting on a
+            // cache hit; asLong(0L) leaves a no-cache response byte-identical.
             tokenUsage = new LlmResponse.TokenUsage(
-                usage.path("input_tokens").asLong(),
+                usage.path("input_tokens").asLong()
+                    + usage.path("cache_read_input_tokens").asLong(0L)
+                    + usage.path("cache_creation_input_tokens").asLong(0L),
                 usage.path("output_tokens").asLong());
         }
         return new LlmResponse(text.toString(), model, tokenUsage);

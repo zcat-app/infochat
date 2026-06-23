@@ -1,7 +1,7 @@
 ---
 id: M1-434
 title: "cleanup: deep-review low-severity sweep — cache-token metric, embedding providerName, connected() gauge, SQL seam"
-status: pending
+status: done
 created: 2026-06-23
 last_updated: 2026-06-23
 blocked_by: []
@@ -43,12 +43,29 @@ spec_refs:
   - docs/spec/llm.md §Per-task routing rules
   - docs/spec/messaging.md §Capability flags (minimum set)
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-23
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 141
+      removed: 4
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-23
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-434: deep-review low-severity sweep

@@ -143,6 +143,16 @@ class LlmObservabilityTest {
     }
 
     @Test
+    void embeddingProviderNameForwardsDelegateStableNameNotDecoratorName() {
+        // The delegate's stable constant ("stub-embed") differs from both
+        // stub and decorator class names; without the override the interface
+        // default would walk getClass() on MeteredEmbeddingProvider and return
+        // "MeteredEmbeddingProvider", mislabelling the provider metric tag.
+        assertEquals("stub-embed", meteredEmbedding.providerName());
+        assertNotEquals("MeteredEmbeddingProvider", meteredEmbedding.providerName());
+    }
+
+    @Test
     void queueWaitRecordsTimerUnderCatalogueName() {
         metrics.recordQueueWait(ModelTask.SECURITY_JUDGE, "stub", Duration.ofMillis(5));
 

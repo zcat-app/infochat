@@ -540,11 +540,15 @@ public final class SimpleXAdapter implements MessagingAdapter {
      * Live transport state for the {@code adapter.connection.status}
      * gauge: a wired WebSocket client that is neither mid-reconnect nor
      * terminally closed. Mirrors {@link #requireConnected()}'s guard
-     * order without its exception classification.
+     * order without its exception classification. Also consults the
+     * client's own {@link SimpleXWebSocketClient#isClosed()} so a
+     * peer-closed socket reads as disconnected before the supervisor
+     * notices and flips {@code reconnecting}.
      */
     @Override
     public boolean connected() {
-        return !closedForGood && !reconnecting && webSocket != null;
+        SimpleXWebSocketClient ws = webSocket;
+        return !closedForGood && !reconnecting && ws != null && !ws.isClosed();
     }
 
     /** Dispatch-queue depth, read through the live WebSocket client. */

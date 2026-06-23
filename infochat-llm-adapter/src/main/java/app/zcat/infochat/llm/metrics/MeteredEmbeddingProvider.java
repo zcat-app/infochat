@@ -74,4 +74,16 @@ public class MeteredEmbeddingProvider implements EmbeddingProvider {
             throw e;
         }
     }
+
+    /**
+     * Must forward: the interface default walks {@code getClass()},
+     * which on this CDI decorator subclass would yield the decorator's
+     * own simple name rather than the delegate's stable constant —
+     * mislabelling the {@code provider} tag on every {@code embedding.*}
+     * metric. Symmetric with {@link MeteredLlmProvider#providerName()}.
+     */
+    @Override
+    public String providerName() {
+        return delegate.providerName();
+    }
 }
