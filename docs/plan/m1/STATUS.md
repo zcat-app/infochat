@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 468 |
 | deferred | 6 |
-| **total** | **474** |
+| **total** | **476** |
 
 ---
 
@@ -24,7 +24,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-439 — Aggregate, self-remediating preflight: report all unmet checks at once (complexity: medium, risk: low)
+- M1-440 — Default adapter identity data-dir to the wizard-owned runtime dir (complexity: low, risk: low)
 
 ---
 
@@ -637,4 +638,6 @@ M1-435 (done)
 M1-436 (done)
 M1-437 (done)
 M1-438 (done)
+M1-439 (pending) ← runnable
+M1-440 (pending) ← runnable
 ```
