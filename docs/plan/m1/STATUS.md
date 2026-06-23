@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 461 |
 | deferred | 6 |
-| **total** | **467** |
+| **total** | **470** |
 
 ---
 
@@ -24,7 +24,9 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-432 — LlmRouterStartupGuard remote-disclosure WARN must cover the language-capability route (complexity: low, risk: low)
+- M1-433 — Strip bidi/zero-width/control characters from post title and url at the ingest convergence point (complexity: medium, risk: medium)
+- M1-434 — cleanup: deep-review low-severity sweep — cache-token metric, embedding providerName, connected() gauge, SQL seam (complexity: low, risk: low)
 
 ---
 
@@ -630,4 +632,7 @@ M1-428 (done)
 M1-429 (done)
 M1-430 (done)
 M1-431 (done)
+M1-432 (pending) ← runnable
+M1-433 (pending) ← runnable
+M1-434 (pending) ← runnable
 ```
