@@ -112,9 +112,14 @@ Every adapter implements:
 ## Capability flags (minimum set)
 
 - `trustLevel` — `HIGH` for cryptographically anchored ids, `LOW`
-  otherwise. Provider rejects a `LOW`-trust adapter at registration
-  (startup), before any message is processed, unless the operator
-  explicitly opts in via `infochat.adapters.<name>.allow-low-trust`.
+  otherwise. Exposed as an adapter-*instance* property (a
+  `trustLevel()` accessor on the adapter), not a member of the
+  capability-flags structure, so a single adapter class can present
+  two trust postures from different instances (e.g. the in-memory
+  test double). Provider rejects a `LOW`-trust adapter at
+  registration (startup), before any message is processed, unless
+  the operator explicitly opts in via
+  `infochat.adapters.<name>.allow-low-trust`.
 - `supportsCodeFormatting` — when true, code spans render as
   monospace. When false, the user sees backticks (still readable,
   decision D30). **Renamed from `supportsMarkdownCode`** because the

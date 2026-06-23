@@ -364,13 +364,13 @@ Invariants (also enforced in `schema.md`):
 - **One group admin per group at any time.** Enforced by partial unique
   index. The auto-promote path applies whenever the group has **zero**
   `is_group_admin` rows — covering both newly-approved groups and
-  groups left without an admin due to demotion or ban. The
-  `activated_by` user has priority: if they are the @mentioning
-  user AND they are non-probation AND non-banned, they win the
-  slot. If the `activated_by` user is ineligible (in probation,
-  banned, or not the current sender), the standard "first
-  registered, non-probation, non-banned `@mention` wins" rule
-  applies. Banned and probation users are ineligible (probation
+  groups left without an admin due to demotion or ban. The first
+  eligible @mentioning user — registered, non-probation, and
+  non-banned — wins the slot (the "first registered,
+  non-probation, non-banned `@mention` wins" rule). The
+  `activated_by` column records which user activated the group for
+  accountability only (D47); it confers no auto-promote priority.
+  Banned and probation users are ineligible (probation
   users cannot run admin commands by D45; promoting one would be a
   footgun). The promote is `INSERT … ON CONFLICT DO NOTHING`
   against the partial unique index; the row that loses a race

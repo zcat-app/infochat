@@ -220,7 +220,7 @@ Every tool argument is type-checked and bound to enums, validated ranges, or len
 | Tier | Field | Scope | Granted by |                                                                                                                                                                                                                 
 |---|---|---|---|
 | Bot admin | `users.is_admin` | Global | Bootstrap from config; `/grant-admin` by another bot admin |                                                                                                                                                
-| Group admin | `group_membership.is_group_admin` | One group only | `activated_by` priority in approved group (D47); first eligible registered, non-probation `@mention` otherwise; `/promote` by bot admin |
+| Group admin | `group_membership.is_group_admin` | One group only | First eligible registered, non-probation, non-banned `@mention` in approved group; `activated_by` is accountability-only, no promote priority (D47); `/promote` by bot admin |
                                                                                                                                                                                                                                                       
 ### Bot-admin bootstrap                                                                                                                                                                                                                               
                                                                                                                                                                                                                                                       
@@ -248,10 +248,10 @@ Auto-promote fires only after the group is approved:
 
 on first @mention in approved group G by registered user U:
   group_membership.upsert(group=G, user=U)
-  if no group_membership has is_group_admin=true for G:
-    // activated_by priority: if U == groups[G].activated_by
-    // AND U is non-probation AND non-banned, U wins
-    candidate = (groups[G].activated_by == U && eligible(U)) ? U : U
+  if no group_membership has is_group_admin=true for G AND eligible(U):
+    // First eligible sender wins. activated_by is recorded for
+    // accountability only (D47); it confers no promote priority.
+    candidate = U  // U is eligible: registered, non-probation, non-banned
     group_membership[G, candidate].is_group_admin = true
     audit_log("AUTO_PROMOTE_GROUP_ADMIN", target=candidate, scope=G)
     notify(candidate, "You're the admin for this group's bot interactions.")

@@ -136,8 +136,8 @@ text, and output structure are in `docs/design/03-commands.md`.
   `llm.md` §Translation flow), and that the header / footer keys
   exist. This commitment fixes the bundle structure so adding a
   third language is a deterministic drop-in.
-- `/status` — runtime status (active profile, uptime, scope-specific
-  counts; admin sees more). DM and group; any non-banned user. Bot
+- `/status` — runtime status (active profile and uptime; admin sees
+  more). DM and group; any non-banned user. Bot
   admin view includes a count of pending groups
   (`approval_status = 'pending'`) so the admin has passive discovery
   of groups awaiting approval without running `/list-groups`.
@@ -1042,6 +1042,14 @@ lives in `docs/design/03-commands.md`. The spec-level commitment:
   and runs the un-flagged variant. Silent flag-strip would mask the
   caller's intent and produce a result they did not ask for; the
   spec commits to the explicit-error behavior.
+- **Exception — the `/get-sources` discovery alias.** `/get-sources`
+  is defined (§Discovery) as a non-admin alias of `/list-sources`
+  that accepts the same flags *except* the admin-only ones. Because
+  those flags are not part of `/get-sources`'s own identity, it
+  drops them rather than erroring — the only command that does so.
+  The explicit-error rule above governs the admin commands that own
+  the flags (`/list-sources`, `/quarantine list`), which is where a
+  non-admin would actually attempt to escalate.
 
 **Closed list of privileged-tier commands (spec level).** The
 following enumeration is the load-bearing closed set used by the
