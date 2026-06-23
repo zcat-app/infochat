@@ -43,6 +43,7 @@ class PostPersisterNormalizationIT {
 
     private static final char BIDI_OVERRIDE = (char) 0x202E;   // RIGHT-TO-LEFT OVERRIDE
     private static final char CONTROL_BEL = (char) 0x0007;     // BELL (C0 control)
+    private static final char LINE_SEP = (char) 0x2028;        // LINE SEPARATOR (Zl)
 
     private static final Instant FETCHED_AT =
         Instant.parse("2026-05-15T12:00:00Z");
@@ -108,6 +109,33 @@ class PostPersisterNormalizationIT {
         assertNull(readUrl(key.get().id()),
             "a url that no longer parses as a valid http/https URI after "
             + "stripping must be bound as NULL");
+    }
+
+    @Test
+    void persistStripsLineSeparatorFromTitle() throws Exception {
+        UUID sourceUuid = seedRssSource(
+            "https://norm-it.example.test/feed-linesep.xml",
+            "Normalization IT source line-sep");
+
+        // U+2028 LINE SEPARATOR is a UAX #14 mandatory line break but not
+        // an ISO control character, so it survived the prior strip and
+        // could inject an apparent extra line into a bare-emitted title.
+        NormalizedPost normalized = new NormalizedPost(
+            1L,
+            "urn:norm-it:post:line-sep-title",
+            /* title */ "Legit" + LINE_SEP + "Title",
+            /* body */ "body",
+            /* url */ "https://norm-it.example.test/linesep",
+            /* publishedAt */ null,
+            FETCHED_AT,
+            Map.of());
+
+        Optional<PostPersister.PersistedPostKey> key =
+            postPersister.persist(sourceUuid, normalized);
+        assertTrue(key.isPresent(), "persist must INSERT");
+
+        assertEquals("LegitTitle", readTitle(key.get().id()),
+            "the U+2028 line separator must be stripped from the stored title");
     }
 
     private @Nullable String readTitle(UUID id) throws Exception {

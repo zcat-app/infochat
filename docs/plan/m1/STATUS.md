@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 463 |
+| done | 464 |
 | deferred | 6 |
 | **total** | **471** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-434 — cleanup: deep-review low-severity sweep — cache-token metric, embedding providerName, connected() gauge, SQL seam (complexity: low, risk: low)
-- M1-435 — Strip U+2028/U+2029 line/paragraph separators in the metadata-field strip (complexity: low, risk: low)
 
 ---
 
@@ -61,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-435 | Strip U+2028/U+2029 line/paragraph separators in the metadata-field strip | 2026-06-23 | round 1 APPROVE |
 | M1-433 | Strip bidi/zero-width/control characters from post title and url at the ingest convergence point | 2026-06-23 | round 1 APPROVE |
 | M1-432 | LlmRouterStartupGuard remote-disclosure WARN must cover the language-capability route | 2026-06-23 | round 1 APPROVE |
 | M1-431 | Wizard auto-provisions the SimpleX bot identity (profile + address + auto-accept) | 2026-06-23 | round 1 APPROVE |
@@ -70,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-427 | Operator backup ops script (prod/scripts/backup.sh) | 2026-06-22 | round 1 APPROVE |
 | M1-426 | cleanup: drop speculative GroupDeleted permit; fix asset D41 comment | 2026-06-22 | round 1 APPROVE |
 | M1-425 | collector: drop over-matching bare function in Stage 1 tool-call regex | 2026-06-22 | round 1 APPROVE |
-| M1-424 | provider: honor profile-driven chat-memory retention (pi=30d) | 2026-06-21 | round 1 APPROVE |
 
 ---
 
@@ -634,5 +633,5 @@ M1-431 (done)
 M1-432 (done)
 M1-433 (done)
 M1-434 (pending) ← runnable
-M1-435 (pending) ← runnable
+M1-435 (done)
 ```

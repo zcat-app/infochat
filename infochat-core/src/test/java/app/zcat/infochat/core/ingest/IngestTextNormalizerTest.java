@@ -25,6 +25,8 @@ class IngestTextNormalizerTest {
     private static final char ZERO_WIDTH = (char) 0x200B;      // ZERO WIDTH SPACE
     private static final char CONTROL_BEL = (char) 0x0007;     // BELL (C0 control)
     private static final char NEWLINE = (char) 0x000A;         // LINE FEED (control)
+    private static final char LINE_SEP = (char) 0x2028;        // LINE SEPARATOR (Zl)
+    private static final char PARA_SEP = (char) 0x2029;        // PARAGRAPH SEPARATOR (Zp)
 
     @Test
     void stripMetadataFieldRemovesBidiZeroWidthAndControlCharacters() {
@@ -43,6 +45,16 @@ class IngestTextNormalizerTest {
     }
 
     @Test
+    void stripMetadataFieldRemovesLineAndParagraphSeparators() {
+        // U+2028/U+2029 are UAX #14 mandatory line breaks but are not ISO
+        // control characters, so they escaped the prior strip and could
+        // inject an apparent extra line into a bare-emitted title.
+        String input = "before" + LINE_SEP + "mid" + PARA_SEP + "after";
+        assertEquals("beforemidafter", IngestTextNormalizer.stripMetadataField(input),
+            "U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR must be stripped");
+    }
+
+    @Test
     void stripMetadataFieldLeavesOrdinaryTextUnchanged() {
         String ordinary = "Ordinary title — with em-dash, digits 123 and /path?q=1";
         assertEquals(ordinary, IngestTextNormalizer.stripMetadataField(ordinary),
@@ -57,6 +69,18 @@ class IngestTextNormalizerTest {
         assertEquals("abc" + CONTROL_BEL + NEWLINE + "d",
             IngestTextNormalizer.stripBidiAndZeroWidth(input),
             "bidi/zero-width stripped; control characters preserved");
+    }
+
+    @Test
+    void stripBidiAndZeroWidthPreservesLineAndParagraphSeparators() {
+        // The body path reuses this method and legitimately spans lines;
+        // U+2028/U+2029 must survive here. Pins the body-path contract so
+        // a future edit cannot silently extend the separator strip to the
+        // body. (M1-435)
+        String input = "a" + LINE_SEP + "b" + PARA_SEP + "c";
+        assertEquals("a" + LINE_SEP + "b" + PARA_SEP + "c",
+            IngestTextNormalizer.stripBidiAndZeroWidth(input),
+            "line/paragraph separators must be preserved on the body path");
     }
 
     @Test

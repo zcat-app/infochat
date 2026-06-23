@@ -73,11 +73,12 @@ public final class IngestTextNormalizer {
     }
 
     /**
-     * Strip bidi-control, zero-width, AND ISO control characters from a
-     * single-line metadata field (post title / url). Composes
-     * {@link #stripBidiAndZeroWidth} with an ISO-control pass
-     * ({@link Character#isISOControl}, covering U+0000..U+001F and
-     * U+007F..U+009F) so the bidi/zero-width loop stays singly declared.
+     * Strip bidi-control, zero-width, ISO control characters AND the two
+     * Unicode line/paragraph separators from a single-line metadata field
+     * (post title / url). Composes {@link #stripBidiAndZeroWidth} with an
+     * ISO-control pass ({@link Character#isISOControl}, covering
+     * U+0000..U+001F and U+007F..U+009F) so the bidi/zero-width loop stays
+     * singly declared.
      */
     public static String stripMetadataField(String text) {
         String stripped = stripBidiAndZeroWidth(text);
@@ -85,6 +86,16 @@ public final class IngestTextNormalizer {
         for (int i = 0; i < stripped.length(); i++) {
             char c = stripped.charAt(i);
             if (Character.isISOControl(c)) {
+                continue;
+            }
+            // U+2028 (LINE SEPARATOR, Zl) and U+2029 (PARAGRAPH SEPARATOR,
+            // Zp): UAX #14 mandatory line breaks that are NOT ISO control
+            // characters, so the pass above misses them. A single-line
+            // title/url never legitimately carries either, so removing them
+            // closes the same extra-apparent-line obfuscation the control
+            // strip covers. Deliberately NOT added to stripBidiAndZeroWidth
+            // — the body legitimately spans lines and must keep them. (M1-435)
+            if (c == 0x2028 || c == 0x2029) {
                 continue;
             }
             out.append(c);

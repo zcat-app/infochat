@@ -1,7 +1,7 @@
 ---
 id: M1-435
 title: "Strip U+2028/U+2029 line/paragraph separators in the metadata-field strip"
-status: pending
+status: done
 created: 2026-06-23
 last_updated: 2026-06-23
 blocked_by: []
@@ -40,12 +40,41 @@ spec_refs:
   - docs/spec/security.md §Ingest pipeline (security side)
   - docs/spec/security.md §Prompt-injection defenses (LLM call sites)
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-23
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 78
+      removed: 13
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-23
+    verdict: CLEAN
+    base: e38bd1e80ac233293105c4a24f6bea3b601fafaf
+    head: "(working tree — m1/M1-435 branch, uncommitted, --in-progress)"
+    verdict_file: docs/plan/m1/redteam/M1-435-2026-06-23.md
+    findings_count: 0
+    out_of_model_count: 2
+    note: |
+      Pre-commit --in-progress audit. CLEAN, zero findings. Two OUT-OF-MODEL
+      advisories recorded in the verdict file; advisory only, no remediation
+      required for this ticket.
+clarity_check:
+  date: 2026-06-23
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-435: Strip U+2028/U+2029 line/paragraph separators in the metadata-field strip
