@@ -88,9 +88,9 @@ print_handoff() {
     case "$a" in
       simplex)
         echo "  SimpleX: from your personal SimpleX app, tap Connect and paste the"
-        echo "           bot's address (the link you copied with /ad while creating"
-        echo "           the bot's profile); in the CLI: /c <bot-address>. The bot"
-        echo "           auto-accepts the connection."
+        echo "           bot's contact address — the link the wizard printed during"
+        echo "           setup (step 7, SimpleX provisioning); in the CLI:"
+        echo "           /c <bot-address>. The bot auto-accepts the connection."
         ;;
       signal)
         signal_account="$(grep -E '^infochat\.adapters\.signal\.account=' "$CONFIG_FILE" 2>/dev/null | head -n1 | cut -d= -f2-)"

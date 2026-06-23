@@ -163,9 +163,10 @@ all of them):
 
 It checks your machine, generates database secrets, downloads a local AI model,
 wires up your messaging app, and starts both services. When it finishes it
-prints exactly how to reach your bot. (The prerequisites — Docker, and the one
-manual step of creating the bot's own SimpleX/Signal account — are in the
-**[Setup Guide](SETUP_GUIDE.md)**.)
+prints exactly how to reach your bot. (The only prerequisite is Docker — on the
+SimpleX happy path the wizard sets up the bot's account for you, so there's no
+manual identity step before it; Signal needs a phone number you register first.
+Details in the **[Setup Guide](SETUP_GUIDE.md)**.)
 
 **2 · Say hello — you're the admin.** Connect to the bot from your personal
 SimpleX (or Signal) app. **You don't need an invite code** — you're the

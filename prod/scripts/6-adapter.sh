@@ -157,6 +157,7 @@ admin_union=0
 simplex_binary=""
 simplex_data_dir=""
 simplex_ws_port=""
+simplex_display_name=""
 signal_binary=""
 signal_data_dir=""
 signal_account=""
@@ -166,14 +167,21 @@ for adapter in "${chosen[@]}"; do
     simplex)
       echo
       echo "== SimpleX adapter =="
-      echo "Create the bot's SimpleX messaging queue out-of-band with simplex-cli"
-      echo "(§7.7 operator note, 06-messaging.md §6.5.1), then point the wizard at"
-      echo "the simplex-chat binary and the resulting on-disk data directory. The"
-      echo "Provider spawns simplex-chat as a subprocess and talks to it over the"
-      echo "loopback WebSocket port (no session token — bot identity is in data-dir)."
+      echo "The wizard provisions the bot's SimpleX identity for you in step 7"
+      echo "(profile, contact address, auto-accept) using the simplex-chat binary"
+      echo "baked into the Provider image — you do not create a queue by hand. Just"
+      echo "point it at the on-disk data directory for the bot's state and the"
+      echo "loopback WebSocket port, and choose the bot's display name. The Provider"
+      echo "spawns simplex-chat as a subprocess and talks to it over the loopback"
+      echo "WebSocket port (no session token — bot identity is in data-dir)."
       simplex_binary="$(prompt_with_default "  simplex-chat binary path" "$DEFAULT_SIMPLEX_BINARY")"
       simplex_data_dir="$(prompt_with_default "  SimpleX data-dir (bot state directory)" "$DEFAULT_SIMPLEX_DATA_DIR")"
       simplex_ws_port="$(prompt_with_default "  simplex-chat WebSocket port (loopback)" "$DEFAULT_SIMPLEX_WS_PORT")"
+      # Operator-typed bot profile name consumed by 6b-simplex-provision.sh (step
+      # 7) to create the profile via `--create-bot-display-name`. This is wizard
+      # provisioning input, NOT runtime identity: the running adapter still derives
+      # the bot contact id from simplex-chat at startup (§7.5) and never reads this.
+      simplex_display_name="$(prompt_with_default "  SimpleX bot display name (the bot's profile name)" "infochat-bot")"
       if collect_admin INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID simplex; then
         admin_union=$((admin_union + 1))
       fi
@@ -245,6 +253,13 @@ done
         printf 'infochat.adapters.simplex.binary=%s\n' "$simplex_binary"
         printf 'infochat.adapters.simplex.data-dir=%s\n' "$simplex_data_dir"
         printf 'infochat.adapters.simplex.ws-port=%s\n' "$simplex_ws_port"
+        # Wizard-provisioning input only: 6b-simplex-provision.sh reads this to
+        # create the bot profile (--create-bot-display-name) before the Provider
+        # starts. SimpleXConfig reads binary/data-dir/ws-port/bootstrap-admin via
+        # explicit @ConfigProperty and never this key, so the runtime adapter
+        # ignores it — the bot contact id stays derived from the identity material
+        # at startup (§7.5), not from an operator-typed name.
+        printf 'infochat.adapters.simplex.display-name=%s\n' "$simplex_display_name"
         if grep -qE '^INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID=.+' "$SECRETS_FILE"; then
           printf 'infochat.adapters.simplex.bootstrap-admin-contact-id=%s\n' '${INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID}'
         fi

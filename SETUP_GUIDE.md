@@ -54,42 +54,26 @@ missing if any are. Install them before you begin:
 > Desktop** (or Docker Engine + the Compose plugin) covers the first two rows.
 > See https://docs.docker.com/get-docker/
 
-### One thing the wizard can't do for you: a chat account for the bot
+### Setting up the bot's chat account
 
-infochat talks to you through a messaging app. The bot needs its **own**
-account on that app, which you set up once, by hand, before running the wizard:
+infochat talks to you through a messaging app, and the bot needs its **own**
+account on that app. How much you do by hand depends on which app you choose:
 
-- **SimpleX (recommended, no phone number):** install the `simplex-chat`
-  program and set up the bot's profile **once**, by hand, using the **same data
-  path you'll give the wizard in step 6** (so infochat reuses this profile):
+- **SimpleX (recommended, no phone number):** nothing to do by hand. The
+  `simplex-chat` program ships baked into infochat's container image, and the
+  wizard provisions the bot's profile, contact address, and auto-accept of
+  incoming connections **for you** (step 7). All you do is pick a **display
+  name** for the bot when the wizard asks in step 6, and press Enter to accept
+  the default data directory. SimpleX is the most private option — no phone
+  number or personal detail. When provisioning finishes, the wizard prints the
+  bot's contact link so you can connect to it.
 
-  ```bash
-  simplex-chat -d /path/to/bot-data    # same value you'll enter in step 6
-  ```
-
-  On first start it asks for a display name. Then, at the `simplex-chat` prompt,
-  do two things:
-
-  1. **Create the bot's address** — type `/ad` (short for `/address`). It prints
-     the bot's contact address as a long link; **copy it.** This is what people
-     (and you, as admin) use to connect to the bot.
-  2. **Enable automatic acceptance of connection requests**, so the bot accepts
-     new contacts while running unattended — type `/auto_accept on`. (If your
-     build reports an unknown command, run `/help` for the exact auto-accept
-     form.)
-
-  Type `/quit` to exit. SimpleX is the most private option — no phone number or
-  personal detail. Full details are in the official SimpleX terminal-CLI guide:
-  https://simplex.chat/docs/cli.html
-
-  > **Why both matter:** infochat runs `simplex-chat` headlessly and does not
-  > accept contact requests itself, so without an address there is nothing to
-  > connect to, and without auto-accept connection requests are never answered.
-  > Auto-accept only opens the chat connection — it does **not** bypass invite
-  > gating; an un-invited contact still gets the "you need an invite" reply.
+  > **Why auto-accept is safe:** it only opens the chat connection — it does
+  > **not** bypass invite gating; an un-invited contact still gets the "you need
+  > an invite" reply.
 - **Signal:** install `signal-cli` and register a **phone number** for the bot
-  (a spare number or one you control — Signal requires a phone number).
-  Registration is two commands, and Signal may ask you to solve a captcha:
+  (a spare number or one you control — Signal requires a phone number). This part
+  the wizard can't automate, because Signal may ask you to solve a captcha:
 
   ```bash
   signal-cli -a +<bot-number> register       # follow the captcha link it prints
@@ -99,13 +83,13 @@ account on that app, which you set up once, by hand, before running the wizard:
   The full procedure, including the captcha step, is in the signal-cli
   Quickstart: https://github.com/AsamK/signal-cli/wiki/Quickstart
 
-You can use either one, or both. Once the bot's account exists, the wizard takes
-over: it only asks where the program lives, where its data directory is, and
-which account to use — so jot those three things down as you go.
+You can use either one, or both. For SimpleX you need nothing in advance; for
+Signal, register the number first and jot down where `signal-cli` lives, its data
+directory, and the bot's number, since the wizard asks for those in step 6.
 
-> **Honest note:** everything *about infochat itself* is automated by the
-> wizard. The only manual part is creating that messaging account, because it
-> belongs to SimpleX/Signal, not to us.
+> **Honest note:** for SimpleX, everything is automated by the wizard. The only
+> remaining manual step is registering a Signal phone number, because that
+> account belongs to Signal (and its captcha), not to us.
 
 ---
 
@@ -237,6 +221,8 @@ Choose **simplex**, **signal**, or both (type them comma-separated, e.g.
 
 - where the program (`simplex-chat` / `signal-cli`) is installed,
 - where the bot's account data lives,
+- for SimpleX, a **display name** for the bot (the wizard then provisions the
+  SimpleX profile, address, and auto-accept for you in step 7),
 - for Signal, the bot's **phone number**,
 - and the **admin contact id** that makes you the administrator.
 
@@ -252,9 +238,10 @@ Remote LLM API key [blank]:           ⏎  (Enter — we're using local AI)
 LLM backend [ollama]:                 ⏎  (Enter — downloads a local model)
 Optional bootstrap-assets path:       ⏎  (Enter — skip price commands for now)
 Enable which adapters [simplex]:      ⏎  (Enter — SimpleX)
-simplex-chat binary path [...]:       ⏎  (Enter if it's in the default place)
+simplex-chat binary path [...]:       ⏎  (Enter — the image bakes it)
 SimpleX data-dir [...]:               ⏎
 SimpleX WebSocket port [5225]:        ⏎
+SimpleX bot display name [infochat-bot]: ⏎  (or type a name for the bot)
 Bootstrap admin contact id:           <paste your SimpleX address here>
 ```
 
@@ -286,9 +273,9 @@ How you reach the bot depends on your app:
 
 - **Signal:** send a direct message to the bot's phone number from your own
   Signal app. No connection step is needed.
-- **SimpleX:** connect to the bot's address once — the contact link you copied
-  with `/ad` when setting up the bot's profile. From your **personal** SimpleX
-  app or CLI, make a contact request to it: in the CLI that's
+- **SimpleX:** connect to the bot's address once — the contact link the wizard
+  printed during setup (step 7, SimpleX provisioning). From your **personal**
+  SimpleX app or CLI, make a contact request to it: in the CLI that's
   `/c <bot-address>`; in the mobile/desktop app, tap "Connect" and paste the
   link. The bot auto-accepts and you're connected.
 

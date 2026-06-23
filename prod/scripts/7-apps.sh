@@ -54,6 +54,16 @@ echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod 
 docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod build infochat-collector infochat-provider
 echo "images: built."
 
+# Provision the SimpleX bot identity (profile + address + auto-accept) AFTER the
+# Provider image is built and BEFORE any app container starts: it runs the baked
+# simplex-chat against the mounted data-dir, which only exists once the image is
+# built, and the Provider would fail to start on a missing identity if it came up
+# first. 6b self-gates — it is a no-op when simplex is not an enabled adapter —
+# and aborts the wizard (exit non-zero) on a provisioning failure, so a failed
+# provision stops here and never starts the apps.
+echo "+ $SCRIPT_DIR/6b-simplex-provision.sh"
+"$SCRIPT_DIR/6b-simplex-provision.sh"
+
 echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod up -d --wait --wait-timeout $WAIT_TIMEOUT infochat-collector"
 docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod up -d --wait --wait-timeout "$WAIT_TIMEOUT" infochat-collector
 echo "collector: healthy (migrations applied)."

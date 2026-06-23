@@ -145,6 +145,26 @@ An operator must provide:
    restart. The exact property keys (and the multi-adapter list
    shape) live in design notes.
 
+   **Operator-run provisioning is distinct from runtime synthesis.**
+   The "Provider does not synthesize bot identity" rule above governs
+   the *running* Provider: each adapter reads its identity material at
+   startup and fails if it is absent, never creating it. It does
+   **not** preclude operator-run provisioning tooling — executed by
+   the operator, with the operator's own inputs, before the Provider
+   container starts — from creating that material in the
+   operator-owned data-dir. For SimpleX that provisioning may create
+   the bot profile from an operator-supplied display name, create the
+   contact address, and enable auto-accept of incoming contact
+   requests, using the same client binary the running adapter uses.
+   This is the operator acting with their own inputs, not the Provider
+   synthesizing identity for itself, so the runtime invariant (read at
+   startup, fail if absent) is preserved unchanged. Auto-accept opens
+   only the messaging transport connection; the invite/registration
+   gate (decision D44) still rejects any un-invited contact, so
+   transport-accepting a connection never grants application access.
+   Signal account registration remains a manual operator step (phone
+   number + captcha), which cannot be one-shot scripted.
+
 Everything else has a profile default.
 
 ## Bootstrap behavior on startup
