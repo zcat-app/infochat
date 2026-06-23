@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 469 |
+| done | 470 |
 | deferred | 6 |
 | **total** | **476** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-440 — Default adapter identity data-dir to the wizard-owned runtime dir (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-440 | Default adapter identity data-dir to the wizard-owned runtime dir | 2026-06-24 | round 1 APPROVE |
 | M1-439 | Aggregate, self-remediating preflight: report all unmet checks at once | 2026-06-24 | round 1 APPROVE |
 | M1-438 | cleanup: fix switch-llm recreate service names + pi-profile embedding model in the wizard | 2026-06-23 | round 1 APPROVE |
 | M1-437 | Translation pipeline must sanity-check output and fall back to English with a one-line note | 2026-06-23 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-433 | Strip bidi/zero-width/control characters from post title and url at the ingest convergence point | 2026-06-23 | round 1 APPROVE |
 | M1-432 | LlmRouterStartupGuard remote-disclosure WARN must cover the language-capability route | 2026-06-23 | round 1 APPROVE |
 | M1-431 | Wizard auto-provisions the SimpleX bot identity (profile + address + auto-accept) | 2026-06-23 | round 1 APPROVE |
-| M1-430 | Fail-fast if simplex-chat ws-port binds non-loopback | 2026-06-22 | round 1 APPROVE |
 
 ---
 
@@ -638,5 +638,5 @@ M1-436 (done)
 M1-437 (done)
 M1-438 (done)
 M1-439 (done)
-M1-440 (pending) ← runnable
+M1-440 (done)
 ```

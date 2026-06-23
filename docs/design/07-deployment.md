@@ -186,9 +186,13 @@ infochat.adapters=simplex,signal
 
 # SimpleX — the Provider spawns simplex-chat as a subprocess and speaks its
 # loopback WebSocket bot API; bot identity lives in the data-dir (no session
-# token). Keys read by SimpleXConfig / ProductionAdapterBeans.
+# token). Keys read by SimpleXConfig / ProductionAdapterBeans. The wizard
+# defaults this to the operator-owned runtime dir (prod/runtime/simplex,
+# resolved absolute on $PROD_DIR), not /var/lib, so 6b's own mkdir -p succeeds
+# as the non-root operator; container-root still writes root-owned files there
+# (pre-existing ownership wrinkle, uid-mapping deferred — M1-440).
 infochat.adapters.simplex.binary=/usr/local/bin/simplex-chat
-infochat.adapters.simplex.data-dir=/var/lib/infochat/simplex
+infochat.adapters.simplex.data-dir=prod/runtime/simplex
 infochat.adapters.simplex.ws-port=5225
 # Optional bootstrap admin contact id for SimpleX. Per-adapter optional;
 # only the union across enabled adapters MUST be non-empty (§7.6.3).
@@ -199,7 +203,7 @@ infochat.adapters.simplex.bootstrap-admin-contact-id=${INFOCHAT_SIMPLEX_ADMIN_CO
 # read by SignalConfig / ProductionAdapterBeans; .account is the registered
 # phone number, .endpoint defaults to the loopback signal-cli daemon.
 infochat.adapters.signal.binary=/usr/local/bin/signal-cli
-infochat.adapters.signal.data-dir=/var/lib/infochat/signal-cli
+infochat.adapters.signal.data-dir=prod/runtime/signal-cli
 infochat.adapters.signal.account=+15551234567
 # infochat.adapters.signal.endpoint=127.0.0.1:7654  # default (loopback daemon)
 infochat.adapters.signal.bootstrap-admin-contact-id=${INFOCHAT_SIGNAL_ADMIN_CONTACT_ID}

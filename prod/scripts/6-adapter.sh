@@ -21,11 +21,16 @@ DEFAULT_ADAPTERS="simplex"
 # Default binary paths follow the adapters' documentary config reference
 # (06-messaging.md §6.4 / §6.5); the bot identity lives under the data-dir,
 # which is the same on-disk state directory the operator registered out-of-band.
+# The data-dir defaults live under the wizard-owned runtime dir (created as the
+# operator in step 2) — anchored on $PROD_DIR so they stay absolute (PROD_DIR is
+# resolved via cd+pwd at line 12), which the docker-compose bind mount requires.
+# A /var/lib default would be root-owned 0755, so 6b's `mkdir -p "$data_dir"`
+# would abort the wizard for the non-root operator it targets (M1-440).
 DEFAULT_SIMPLEX_BINARY="/usr/local/bin/simplex-chat"
-DEFAULT_SIMPLEX_DATA_DIR="/var/lib/infochat/simplex"
+DEFAULT_SIMPLEX_DATA_DIR="$PROD_DIR/runtime/simplex"
 DEFAULT_SIMPLEX_WS_PORT="5225"
 DEFAULT_SIGNAL_BINARY="/usr/local/bin/signal-cli"
-DEFAULT_SIGNAL_DATA_DIR="/var/lib/infochat/signal-cli"
+DEFAULT_SIGNAL_DATA_DIR="$PROD_DIR/runtime/signal-cli"
 
 usage() {
   echo "Usage: 6-adapter.sh [--defaults] [-h|--help]"

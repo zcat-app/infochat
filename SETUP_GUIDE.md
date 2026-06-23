@@ -66,7 +66,8 @@ account on that app. How much you do by hand depends on which app you choose:
   wizard provisions the bot's profile, contact address, and auto-accept of
   incoming connections **for you** (step 7). All you do is pick a **display
   name** for the bot when the wizard asks in step 6, and press Enter to accept
-  the default data directory. SimpleX is the most private option — no phone
+  the default data directory (the wizard creates it under `prod/runtime`, so
+  there is nothing to set up by hand). SimpleX is the most private option — no phone
   number or personal detail. When provisioning finishes, the wizard prints the
   bot's contact link so you can connect to it.
 
@@ -241,7 +242,7 @@ LLM backend [ollama]:                 ⏎  (Enter — downloads a local model)
 Optional bootstrap-assets path:       ⏎  (Enter — skip price commands for now)
 Enable which adapters [simplex]:      ⏎  (Enter — SimpleX)
 simplex-chat binary path [...]:       ⏎  (Enter — the image bakes it)
-SimpleX data-dir [...]:               ⏎
+SimpleX data-dir [prod/runtime/simplex]: ⏎
 SimpleX WebSocket port [5225]:        ⏎
 SimpleX bot display name [infochat-bot]: ⏎  (or type a name for the bot)
 Bootstrap admin contact id:           <paste your SimpleX address here>
