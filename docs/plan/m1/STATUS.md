@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 461 |
+| done | 462 |
 | deferred | 6 |
 | **total** | **470** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-432 — LlmRouterStartupGuard remote-disclosure WARN must cover the language-capability route (complexity: low, risk: low)
 - M1-433 — Strip bidi/zero-width/control characters from post title and url at the ingest convergence point (complexity: medium, risk: medium)
 - M1-434 — cleanup: deep-review low-severity sweep — cache-token metric, embedding providerName, connected() gauge, SQL seam (complexity: low, risk: low)
 
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-432 | LlmRouterStartupGuard remote-disclosure WARN must cover the language-capability route | 2026-06-23 | round 1 APPROVE |
 | M1-431 | Wizard auto-provisions the SimpleX bot identity (profile + address + auto-accept) | 2026-06-23 | round 1 APPROVE |
 | M1-430 | Fail-fast if simplex-chat ws-port binds non-loopback | 2026-06-22 | round 1 APPROVE |
 | M1-429 | Fix SimpleX subprocess launch: -p port + in-dir db prefix | 2026-06-22 | round 2 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-425 | collector: drop over-matching bare function in Stage 1 tool-call regex | 2026-06-22 | round 1 APPROVE |
 | M1-424 | provider: honor profile-driven chat-memory retention (pi=30d) | 2026-06-21 | round 1 APPROVE |
 | M1-423 | llm: redact userinfo in LlmRouterStartupGuard base-url logs | 2026-06-21 | round 1 APPROVE |
-| M1-422 | Show the source UUID in /list-sources output | 2026-06-21 | round 1 APPROVE |
 
 ---
 
@@ -632,7 +631,7 @@ M1-428 (done)
 M1-429 (done)
 M1-430 (done)
 M1-431 (done)
-M1-432 (pending) ← runnable
+M1-432 (done)
 M1-433 (pending) ← runnable
 M1-434 (pending) ← runnable
 ```

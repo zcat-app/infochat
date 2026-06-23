@@ -1,7 +1,7 @@
 ---
 id: M1-432
 title: "LlmRouterStartupGuard remote-disclosure WARN must cover the language-capability route"
-status: pending
+status: done
 created: 2026-06-23
 last_updated: 2026-06-23
 blocked_by: []
@@ -34,12 +34,43 @@ test_plan:
 spec_refs:
   - docs/spec/llm.md §Per-task routing rules
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-23
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 150
+      removed: 10
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-23
+    verdict: CLEAN
+    base: main
+    head: working-tree (m1/M1-432 branch, uncommitted, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-432-2026-06-23.md
+    out_of_model_count: 0
+    note: |
+      Pre-commit redteam (between review APPROVE and commit) on this
+      security_relevant ticket. CLEAN — the diff adds a startup disclosure
+      WARN for the language-capability privacy route, reusing the
+      nonEnglishLanguages primitive the local-only fatal branch already
+      computes. No data-flow change; no auth/authz/ban/audit/input surface
+      touched. No remediation needed.
+clarity_check:
+  date: 2026-06-23
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-432: LlmRouterStartupGuard remote-disclosure WARN must cover the language-capability route

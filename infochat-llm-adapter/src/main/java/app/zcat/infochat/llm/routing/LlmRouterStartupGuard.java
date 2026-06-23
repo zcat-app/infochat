@@ -285,8 +285,13 @@ public class LlmRouterStartupGuard {
      * default) is a cloud-only provider; the off-host base-url and
      * override-cloud detection is the same {@link #perTaskRoutes} the
      * local-only fatal branch consumes, so the two postures cannot drift on
-     * what "remote" means. The symmetric remote-embedding WARN is emitted by
-     * the caller before this runs.
+     * what "remote" means. A cloud-only provider made reachable ONLY via its
+     * non-English {@code languages} capability key (the router's priority-2
+     * branch, with no override or default naming it) gets its own disclosure
+     * WARN here too, mirroring the languages axis the local-only fatal branch
+     * already checks — so both postures decide "off-host" on the same three
+     * axes (base-url, effective provider, languages key). The symmetric
+     * remote-embedding WARN is emitted by the caller before this runs.
      */
     private static void warnRemoteLlmTaskRoutes(Map<String, String> snapshot) {
         String defaultProvider = stripOrEmpty(snapshot.get(LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER))
@@ -311,6 +316,21 @@ public class LlmRouterStartupGuard {
             }
             line.append("; post bodies will leave the host.");
             LOG.warn(line.toString());
+        }
+        // A cloud-only provider reachable ONLY via its non-English languages
+        // declaration leaves post-derived output on the wire even when no
+        // per-task override or default names it — the router's priority-2
+        // branch selects it. The local-only fatal branch already treats this
+        // exact route as an offender (see validateLocalOnlyConfiguration), so
+        // the disclosure WARN must cover the same languages axis or the two
+        // postures drift on what counts as off-host (M1-432).
+        for (String remoteProvider : REMOTE_PROVIDER_NAMES) {
+            String reachableLanguages = nonEnglishLanguages(snapshot.get(languagesKeyFor(remoteProvider)));
+            if (!reachableLanguages.isEmpty()) {
+                LOG.warnf("LlmRouterStartupGuard: remote LLM provider=%s reachable via languages=%s;"
+                        + " non-English summarizer/translator output will leave the host.",
+                    remoteProvider, reachableLanguages);
+            }
         }
     }
 
