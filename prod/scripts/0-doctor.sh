@@ -1,7 +1,9 @@
 #!/bin/bash
 # prod/scripts/0-doctor.sh — wizard step 0: host preflight (§7.7.2 step 0).
-# Verifies, in order, that the host can run the containerized prod stack and
-# exits non-zero naming the FIRST unmet check.
+# Runs EVERY check, accumulates every unmet one, and prints a consolidated report
+# carrying an actionable remedy per failure — so an operator fixes all of them in
+# one pass instead of the fix-one/re-run/hit-the-next round-trip. Exits non-zero
+# iff at least one check failed (M1-439).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,7 +30,8 @@ MIN_FREE_DISK_GB=15
 usage() {
   echo "Usage: 0-doctor.sh [--defaults] [-h|--help]"
   echo "  Preflight: Linux host, Docker daemon, Docker Compose v2, free TCP ports"
-  echo "  ($REQUIRED_PORTS), and at least ${MIN_FREE_DISK_GB} GB free disk."
+  echo "  ($REQUIRED_PORTS), and at least ${MIN_FREE_DISK_GB} GB free disk. Reports"
+  echo "  every unmet check at once, each with its remedy."
   echo "  --defaults  accepted no-op (doctor has no prompts; lets the orchestrator"
   echo "              pass --defaults uniformly to every step)."
 }
@@ -40,57 +43,109 @@ case "${1:-}" in
   *) usage >&2; exit 2 ;;
 esac
 
+# Accumulated failures. Each entry is a one-line symptom followed by indented
+# `-> remedy:` lines; the final report prints them verbatim. Collecting rather
+# than exiting at the first FAIL is the whole point of this script (M1-439).
+FAILURES=()
+record_failure() { FAILURES+=("$1"); }
+
 # A listening socket bound to the port means it is in use; any ss line is a hit.
 port_in_use() {
   ss -ltnH "( sport = :$1 )" 2>/dev/null | grep -q .
 }
 
+have() { command -v "$1" >/dev/null 2>&1; }
+
 echo "+ check: Linux host"
 if [[ "$(uname -s)" != "Linux" ]]; then
-  echo "FAIL: host OS is $(uname -s); the wizard supports Linux only (§7.7.2)." >&2
-  exit 1
+  record_failure "host OS is $(uname -s); the wizard supports Linux only (§7.7.2).
+    -> remedy: run the wizard on a Linux host (x86-64 or arm64)."
 fi
 
 echo "+ check: Docker daemon reachable"
-if ! docker info >/dev/null 2>&1; then
-  echo "FAIL: Docker daemon not reachable (is Docker installed and running?)." >&2
-  exit 1
+# Captured once and reused by the disk check below: an unreachable daemon cannot
+# report its data-root, so the disk check must fall back to / rather than pass.
+docker_reachable=0
+if docker info >/dev/null 2>&1; then
+  docker_reachable=1
+else
+  record_failure "Docker daemon not reachable (is Docker installed and running?).
+    -> remedy: install Docker Engine (https://docs.docker.com/engine/install/),
+       start it (e.g. sudo systemctl start docker), and if running docker still
+       needs sudo, add yourself to the docker group
+       (sudo usermod -aG docker \$USER, then log out and back in)."
 fi
 
 echo "+ check: Docker Compose v2"
 if ! docker compose version >/dev/null 2>&1; then
-  echo "FAIL: Docker Compose v2 not available ('docker compose version' failed)." >&2
-  exit 1
+  record_failure "Docker Compose v2 not available ('docker compose version' failed).
+    -> remedy: install the Compose v2 plugin
+       (e.g. sudo apt-get install docker-compose-plugin); the legacy v1
+       'docker-compose' (hyphen) form is insufficient."
 fi
 
 echo "+ check: required tools present ($REQUIRED_TOOLS)"
-# Must run before the port loop: port_in_use relies on ss, which it greps with
-# 2>/dev/null, so an absent ss would read as "all ports free" (a false pass).
 for tool in $REQUIRED_TOOLS; do
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "FAIL: required tool '$tool' not found on PATH." >&2
-    exit 1
+  if ! have "$tool"; then
+    record_failure "required tool '$tool' not found on PATH.
+    -> remedy: install it with your package manager
+       (e.g. sudo apt-get install $tool)."
   fi
 done
 
 echo "+ check: TCP ports free ($REQUIRED_PORTS)"
-for port in $REQUIRED_PORTS; do
-  if port_in_use "$port"; then
-    echo "FAIL: TCP port $port is already in use." >&2
-    exit 1
-  fi
-done
-
-echo "+ check: at least ${MIN_FREE_DISK_GB} GB free disk"
-# Check the filesystem Docker stores images/volumes on (falls back to / if the
-# daemon does not report a root dir).
-docker_root="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /)"
-docker_root="${docker_root:-/}"
-avail_kb="$(df -Pk "$docker_root" | awk 'NR==2 {print $4}')"
-avail_gb=$(( avail_kb / 1024 / 1024 ))
-if [[ "$avail_gb" -lt "$MIN_FREE_DISK_GB" ]]; then
-  echo "FAIL: only ${avail_gb} GB free on ${docker_root}; need ${MIN_FREE_DISK_GB} GB." >&2
-  exit 1
+# Depends on ss: port_in_use greps ss with 2>/dev/null, so an absent ss would read
+# as "all ports free" (the 0-doctor.sh:67 false-pass hazard). In aggregate mode we
+# report the check as UNVERIFIABLE rather than silently passing it.
+if ! have ss; then
+  record_failure "TCP port check could not be verified: 'ss' is not installed, so
+    port availability was NOT confirmed (and is NOT assumed free).
+    -> remedy: install ss (e.g. sudo apt-get install iproute2), then re-run."
+else
+  for port in $REQUIRED_PORTS; do
+    if port_in_use "$port"; then
+      record_failure "TCP port $port is already in use.
+    -> remedy: stop whatever is bound to it (e.g. a host Postgres:
+       sudo systemctl stop postgresql) or otherwise free port $port, then re-run."
+    fi
+  done
 fi
 
-echo "doctor: all preflight checks passed."
+echo "+ check: at least ${MIN_FREE_DISK_GB} GB free disk"
+# Depends on df; and on the daemon for the filesystem to measure. With the daemon
+# unreachable we cannot learn its data-root, so we measure / and say the Docker
+# root is unknown rather than skip the check (a silent pass).
+if ! have df; then
+  record_failure "free-disk check could not be verified: 'df' is not installed.
+    -> remedy: install coreutils (provides df), then re-run."
+else
+  if [[ "$docker_reachable" -eq 1 ]]; then
+    docker_root="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /)"
+    docker_root="${docker_root:-/}"
+  else
+    docker_root="/"
+    echo "  note: Docker daemon unreachable; measuring / (Docker data-root unknown)."
+  fi
+  avail_kb="$(df -Pk "$docker_root" | awk 'NR==2 {print $4}')"
+  avail_gb=$(( avail_kb / 1024 / 1024 ))
+  if [[ "$avail_gb" -lt "$MIN_FREE_DISK_GB" ]]; then
+    record_failure "only ${avail_gb} GB free on ${docker_root}; need ${MIN_FREE_DISK_GB} GB.
+    -> remedy: free disk space, or move the Docker data-root to a larger
+       filesystem, then re-run."
+  fi
+fi
+
+if [[ ${#FAILURES[@]} -eq 0 ]]; then
+  echo "doctor: all preflight checks passed."
+  exit 0
+fi
+
+{
+  echo ""
+  echo "doctor: ${#FAILURES[@]} preflight check(s) failed; fix all of the below and re-run:"
+  for failure in "${FAILURES[@]}"; do
+    echo ""
+    echo "FAIL: $failure"
+  done
+} >&2
+exit 1

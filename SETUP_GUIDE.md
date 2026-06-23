@@ -41,8 +41,10 @@ or a rented cloud server all work). You'll need:
 
 ### Software you must install first
 
-The wizard checks for these at the start and tells you exactly which one is
-missing if any are. Install them before you begin:
+The wizard checks for these at the start and, in a single pass, lists every one
+that is missing or misconfigured — each with the command to fix it — so you can
+resolve them all at once rather than one re-run at a time. Install them before
+you begin:
 
 | You need | What it is | How to check it's installed |
 |---|---|---|

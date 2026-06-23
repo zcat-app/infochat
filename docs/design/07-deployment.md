@@ -654,7 +654,7 @@ The right-hand column maps each step to the operator inputs enumerated in [../sp
 
 | Step | Subscript | Does | Operator input |
 |---|---|---|---|
-| 0 | `0-doctor.sh` | Preflight: Linux host; Docker daemon reachable; Compose v2; TCP ports 5432 / 8080 / 8081 (and 11434 for Ollama) free; minimum free disk. Fails fast naming the unmet check. | — |
+| 0 | `0-doctor.sh` | Preflight: Linux host; Docker daemon reachable; Compose v2; TCP ports 5432 / 8080 / 8081 (and 11434 for Ollama) free; minimum free disk. Runs every check and reports all unmet ones at once, each with an actionable remedy (a check it cannot verify — e.g. the port check when `ss` is absent — is reported unverifiable, never silently passed). Exits non-zero iff any check failed. | — |
 | 1 | `1-profile.sh` | Pick `laptop`\|`vps`\|`pi`\|`remote-llm` (§7.2). Default `laptop`. Writes `quarkus.profile`. | 1 (profile) |
 | 2 | `2-secrets.sh` | `openssl rand` the three DB-role passwords; prompt for any LLM API key. Writes the runtime `secrets.env` mode 0600 (§7.3 — secrets never enter a committed file). Skips any value already present. | 5 (DB creds), 6 (API key) |
 | 3 | `3-postgres.sh` | `docker compose --profile prod up -d postgres`; the service-role password bootstrap runs from `docker/postgres-init.sh` (§7.7) on first container init. | 5 (DB creds) |

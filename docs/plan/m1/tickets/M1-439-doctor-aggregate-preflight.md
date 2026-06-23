@@ -1,9 +1,9 @@
 ---
 id: M1-439
 title: "Aggregate, self-remediating preflight: report all unmet checks at once"
-status: pending
+status: done
 created: 2026-06-23
-last_updated: 2026-06-23
+last_updated: 2026-06-24
 blocked_by: []
 files_budget: 5
 files_scope:
@@ -39,14 +39,27 @@ test_plan:
 spec_refs:
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-24
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 320
+      removed: 43
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
 clarity_check:
-  date:
-  verdict:
+  date: 2026-06-23
+  verdict: PASS
   warnings: []
   blockers: []
 ---
