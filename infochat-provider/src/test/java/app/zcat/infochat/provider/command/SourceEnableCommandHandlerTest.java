@@ -226,6 +226,37 @@ class SourceEnableCommandHandlerTest {
     }
 
     @Test
+    void sourceEnableFromFailedReEnablesNonRssHttpKinds() throws Exception {
+        // M1-436: every HTTP-shaped kind (not just rss) must re-enable
+        // from 'failed' after a passing probe, mirroring the rss path
+        // in sourceEnableFromFailedRunsProbeNoConfirm. Exercises bluesky
+        // (named in acceptance) plus reddit (a second non-rss kind).
+        for (String kind : new String[] {"bluesky", "reddit"}) {
+            String actor = PREFIX + kind + "-actor";
+            seedUser(actor, true);
+            UUID sourceId = seedSource(kind, kind, "failed", false);
+            ((StubUrlProbe) urlProbe).resetCallCount();
+
+            OutboundMessage reply = handler.handle(
+                    new ScopeRef.Dm(actor),
+                    "/source-enable " + sourceId);
+
+            assertTrue(reply.text().contains(PREFIX + kind + "-name"),
+                    "/source-enable success must name the kind=" + kind
+                            + " source — got: " + reply.text());
+            assertEquals("active", readStatus(sourceId),
+                    "/source-enable from failed must transition kind=" + kind
+                            + " to 'active'");
+            assertEquals(1, ((StubUrlProbe) urlProbe).callCount(),
+                    "/source-enable from failed must invoke the probe exactly once for kind="
+                            + kind);
+            assertEquals(1L, countAuditByActionForTarget("SOURCE_ENABLE", sourceId),
+                    "/source-enable from failed must write one SOURCE_ENABLE audit row for kind="
+                            + kind);
+        }
+    }
+
+    @Test
     void sourceEnableFromFailedWithFailingProbeLeavesRowFailed() throws Exception {
         String actor = PREFIX + "probeFail-actor";
         seedUser(actor, true);

@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 465 |
+| done | 466 |
 | deferred | 6 |
-| **total** | **471** |
+| **total** | **474** |
 
 ---
 
@@ -24,7 +24,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-437 — Translation pipeline must sanity-check output and fall back to English with a one-line note (complexity: low, risk: low)
+- M1-438 — cleanup: fix switch-llm recreate service names + pi-profile embedding model in the wizard (complexity: low, risk: low)
 
 ---
 
@@ -60,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-436 | /source-enable must re-enable all HTTP-shaped source kinds, not just rss | 2026-06-23 | round 1 APPROVE |
 | M1-435 | Strip U+2028/U+2029 line/paragraph separators in the metadata-field strip | 2026-06-23 | round 1 APPROVE |
 | M1-434 | cleanup: deep-review low-severity sweep — cache-token metric, embedding providerName, connected() gauge, SQL seam | 2026-06-23 | round 1 APPROVE |
 | M1-433 | Strip bidi/zero-width/control characters from post title and url at the ingest convergence point | 2026-06-23 | round 1 APPROVE |
@@ -69,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-429 | Fix SimpleX subprocess launch: -p port + in-dir db prefix | 2026-06-22 | round 2 APPROVE |
 | M1-428 | Reconcile embedding-dimension docs to v1 768-fixed reality (drop phantom reembed.sh) | 2026-06-22 | round 1 APPROVE |
 | M1-427 | Operator backup ops script (prod/scripts/backup.sh) | 2026-06-22 | round 1 APPROVE |
-| M1-426 | cleanup: drop speculative GroupDeleted permit; fix asset D41 comment | 2026-06-22 | round 1 APPROVE |
 
 ---
 
@@ -634,4 +635,7 @@ M1-432 (done)
 M1-433 (done)
 M1-434 (done)
 M1-435 (done)
+M1-436 (done)
+M1-437 (pending) ← runnable
+M1-438 (pending) ← runnable
 ```

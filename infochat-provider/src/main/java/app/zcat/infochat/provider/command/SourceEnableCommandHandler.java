@@ -28,6 +28,7 @@ import java.sql.SQLException;
 import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -38,13 +39,15 @@ import java.util.UUID;
  * <p>Three-branch admin mutator with a kind gate:</p>
  * <ol>
  *   <li><b>Kind gate</b> — runs BEFORE state-branching, AFTER the
- *       admin gate and source-id resolution. Only {@code kind='rss'}
- *       qualifies in v1; non-rss kinds return
- *       {@code error.source_enable.kind_not_supported_in_v1}. This
- *       bounds the handler to the v1 HTTP-shaped probe surface
- *       (per {@code FetchScheduler} which schedules only
- *       {@code kind='rss'} rows). The relay-probe primitive for
- *       Nostr/Bluesky/etc. lands in a later ticket alongside
+ *       admin gate and source-id resolution. Every HTTP-shaped kind
+ *       (rss, reddit, bluesky, youtube, odysee, nitter — all actively
+ *       fetched by the Collector) qualifies; only stream-shaped kinds
+ *       ({@link #STREAM_KINDS}, the v1 set is {@code {nostr}}) return
+ *       {@code error.source_enable.kind_not_supported_in_v1}. Stream
+ *       kinds are excluded because {@link UrlProbe} issues a HEAD on
+ *       {@code source.identifier}, which for a stream kind is a filter
+ *       spec rather than a URL; the relay-probe primitive for stream
+ *       sources lands in a later ticket alongside
  *       {@code StreamSourceSupervisor}.</li>
  *   <li><b>State branch: {@code active AND deleted_at IS NULL}</b>
  *       → {@code error.source_enable.already_active}, no probe,
@@ -78,6 +81,15 @@ import java.util.UUID;
  */
 @ApplicationScoped
 public class SourceEnableCommandHandler implements CommandHandler {
+
+    // v1 stream-shaped source kinds. /source-enable's probe issues a
+    // HEAD on source.identifier, which for a stream kind is a filter
+    // spec, not a URL — so stream kinds cannot be re-enabled until the
+    // spec'd single-relay connection probe lands. Every other
+    // (HTTP-shaped) kind shares the URL identifier and flows through the
+    // existing probe-and-reactivate path. Kept local because provider
+    // cannot depend on the Collector's FetchScheduler.
+    private static final Set<String> STREAM_KINDS = Set.of("nostr");
 
     private static final String SELECT_GROUP_ID_SQL =
             "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ?";
@@ -169,11 +181,12 @@ public class SourceEnableCommandHandler implements CommandHandler {
         }
         SourceRow source = sourceOpt.get();
 
-        // Kind gate: v1 only re-enables kind='rss' rows because the
-        // Collector's FetchScheduler only schedules rss rows. Allowing
-        // /source-enable on a stream-shaped kind would silently
-        // activate a row no fetcher will read.
-        if (!"rss".equals(source.kind)) {
+        // Kind gate: reject only stream-shaped kinds. Every HTTP-shaped
+        // kind is actively fetched by the Collector and shares the URL
+        // identifier the probe runs against, so it flows through the
+        // existing probe-and-reactivate path; only a stream kind has no
+        // probeable URL (see STREAM_KINDS).
+        if (STREAM_KINDS.contains(source.kind)) {
             return reply(scope,
                     bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_KIND_NOT_SUPPORTED_IN_V1, inboundContext.effectiveLanguage()));
         }
@@ -205,7 +218,7 @@ public class SourceEnableCommandHandler implements CommandHandler {
                 // than silently activating something we did not see.
                 LockedRow locked = selectSourceForUpdate(conn, sourceId);
                 if (locked == null
-                        || !"rss".equals(locked.kind)
+                        || STREAM_KINDS.contains(locked.kind)
                         || locked.deletedAt != null
                         || "active".equals(locked.status)) {
                     conn.rollback();

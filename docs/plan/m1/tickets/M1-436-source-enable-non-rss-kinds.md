@@ -1,7 +1,7 @@
 ---
 id: M1-436
 title: "/source-enable must re-enable all HTTP-shaped source kinds, not just rss"
-status: pending
+status: done
 created: 2026-06-23
 last_updated: 2026-06-23
 blocked_by: []
@@ -36,14 +36,27 @@ spec_refs:
   - docs/spec/commands.md §Source management
   - docs/design/00-mvp.md §Fetchers
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-23
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 71
+      removed: 24
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
 clarity_check:
-  date:
-  verdict:
+  date: 2026-06-23
+  verdict: PASS
   warnings: []
   blockers: []
 ---
