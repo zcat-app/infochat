@@ -419,7 +419,7 @@ understand the internals.*
 ### Non-interactive and reset modes
 
 ```bash
-./prod/setup.sh --defaults   # take every default, no prompts (CI / scripted installs)
+./prod/setup.sh --defaults   # take every default; still prompts for the mandatory admin contact id (CI / scripted installs)
 ./prod/setup.sh --reset      # docker compose down + clear wizard state
 ./prod/setup.sh --help       # list all steps and options
 ```

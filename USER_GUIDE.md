@@ -65,7 +65,7 @@ optional. Run `/help` to see the ones available to *you* right now.
 | Command | What it does |
 |---|---|
 | `/help` | Lists the commands you're allowed to use |
-| `/status` | Shows the bot's status and your activity counts |
+| `/status` | Shows the bot's status (active profile and uptime; admins also see the pending-group count) |
 
 ### Getting the news
 
