@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 470 |
 | deferred | 6 |
-| **total** | **476** |
+| **total** | **477** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-441 — Wizard bootstrap-admin prompt must not say 'optional' when it is the only adapter (complexity: low, risk: low)
 
 ---
 
@@ -639,4 +639,5 @@ M1-437 (done)
 M1-438 (done)
 M1-439 (done)
 M1-440 (done)
+M1-441 (pending) ← runnable
 ```
