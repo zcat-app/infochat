@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 470 |
+| done | 471 |
 | deferred | 7 |
 | **total** | **482** |
 
@@ -26,7 +26,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-442 — llama.cpp setup: GGUFs must land in the Compose-mounted volume and the pinned image must load the pinned model (complexity: low, risk: low)
 - M1-443 — Embedding identity guard must adopt the configured model on first boot (no embeddings yet) instead of refusing (complexity: medium, risk: medium)
-- M1-444 — test: de-rot the ReEvaluationJobScheduledPathIT scan-window fixture so the in-window post never ages out (complexity: low, risk: low)
+- M1-445 — build: pin maven-surefire-plugin so the JUnit 5 unit suite actually runs (super-pom default 2.12.4 silently skips it) (complexity: low, risk: medium)
 
 ---
 
@@ -43,7 +43,6 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-445 — blocked_by: M1-444 (pending)
 - M1-446 — blocked_by: M1-445 (pending)
 
 ---
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-444 | fix: make ReEvaluationJob's tick time an injectable Clock so the candidate-scan window (and its IT) are deterministic instead of wall-clock-dependent | 2026-06-24 | round 1 APPROVE |
 | M1-440 | Default adapter identity data-dir to the wizard-owned runtime dir | 2026-06-24 | round 1 APPROVE |
 | M1-439 | Aggregate, self-remediating preflight: report all unmet checks at once | 2026-06-24 | round 1 APPROVE |
 | M1-438 | cleanup: fix switch-llm recreate service names + pi-profile embedding model in the wizard | 2026-06-23 | round 1 APPROVE |
@@ -72,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-434 | cleanup: deep-review low-severity sweep — cache-token metric, embedding providerName, connected() gauge, SQL seam | 2026-06-23 | round 1 APPROVE |
 | M1-433 | Strip bidi/zero-width/control characters from post title and url at the ingest convergence point | 2026-06-23 | round 1 APPROVE |
 | M1-432 | LlmRouterStartupGuard remote-disclosure WARN must cover the language-capability route | 2026-06-23 | round 1 APPROVE |
-| M1-431 | Wizard auto-provisions the SimpleX bot identity (profile + address + auto-accept) | 2026-06-23 | round 1 APPROVE |
 
 ---
 
@@ -647,8 +646,8 @@ M1-439 (done)
 M1-440 (done)
 M1-442 (pending) ← runnable
 M1-443 (pending) ← runnable
-M1-444 (pending) ← runnable
-  └── M1-445 (pending)
+M1-444 (done)
+  └── M1-445 (pending) ← runnable
         ├── M1-441 (deferred)
         └── M1-446 (pending)
 ```

@@ -25,6 +25,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -92,6 +93,20 @@ public class ReEvaluationJob {
 
     @Inject
     AuditLogWriter auditLogWriter;
+
+    // Current time comes from the injected Clock, never SQL now() or
+    // Instant.now(), so the candidate-scan window and every transition are
+    // deterministic under a fixed test clock (QuarkusMock-installed in the IT)
+    // and the job is never split across two clocks (app vs DB). Each query and
+    // each write transaction samples the clock once and binds that instant; a
+    // statement writing two timestamps binds the one sample to both, preserving
+    // the equality SQL transaction_timestamp() gave them. The systemUTC()
+    // initializer is exactly what the CDI producer supplies; injection
+    // overrides it in the managed bean, so it only takes effect for
+    // hand-constructed instances (the fan-out IT builds the job directly),
+    // mirroring RateCapBucket's Clock seam. (M1-444)
+    @Inject
+    Clock clock = Clock.systemUTC();
 
     @ConfigProperty(name = "infochat.reeval.infra-failure-cap")
     int infraFailureCap;
@@ -200,17 +215,18 @@ public class ReEvaluationJob {
         // the infra-failure entry state.
         String priorVerdict = candidate.stage2Verdict() != null
             ? candidate.stage2Verdict() : "INFRA_FAILURE";
+        Instant now = clock.instant();
         TransactionHelper.inTransaction(dataSource, "ReEvaluationJob.applyBenign", conn -> {
             if (candidate.stage2Failed()) {
                 // Infra-failure: clear stage2_failed; a QUARANTINED
                 // post is requeued to RAW, a RAW/READY one keeps its
                 // status. Quarantine rows close below either way.
-                clearStage2FailedAndRequeueIfQuarantined(conn, candidate);
+                clearStage2FailedAndRequeueIfQuarantined(conn, candidate, now);
             } else {
                 // UNKNOWN: requeue QUARANTINED→RAW, close quarantine.
-                requeueForPipeline(conn, candidate);
+                requeueForPipeline(conn, candidate, now);
             }
-            closeQuarantineRows(conn, candidate.postId());
+            closeQuarantineRows(conn, candidate.postId(), now);
             writeReEvalReleasedAudit(conn, candidate, priorVerdict, candidate.reEvalAttempts() + 1);
         });
         throttledAdminNotifier.notifyOnce(
@@ -223,13 +239,15 @@ public class ReEvaluationJob {
     }
 
     private void transitionToNeedsReview(ReEvalCandidate candidate) {
+        Instant now = clock.instant();
         TransactionHelper.inTransaction(dataSource, "ReEvaluationJob.needsReview", conn -> {
             final String sql =
-                "UPDATE post SET status = 'NEEDS_REVIEW', status_changed_at = now() "
+                "UPDATE post SET status = 'NEEDS_REVIEW', status_changed_at = ? "
                     + "WHERE id = ? AND fetched_at = ?";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setObject(1, candidate.postId());
-                ps.setTimestamp(2, Timestamp.from(candidate.fetchedAt()));
+                ps.setTimestamp(1, Timestamp.from(now));
+                ps.setObject(2, candidate.postId());
+                ps.setTimestamp(3, Timestamp.from(candidate.fetchedAt()));
                 ps.executeUpdate();
             }
             quarantineNotifyEmitter.emit(conn, QuarantineNotifyEmitter.TargetKind.POST,
@@ -259,11 +277,12 @@ public class ReEvaluationJob {
      * transition.
      */
     private void applyNonBenignReEval(ReEvalCandidate candidate, Stage2VerdictHandler.Verdict verdict) {
+        Instant now = clock.instant();
         boolean reHidden = TransactionHelper.inTransactionReturning(dataSource, "ReEvaluationJob.applyNonBenign", conn -> {
-            recordVerdictAndIncrementCounter(conn, candidate, verdict);
-            boolean hidden = reHideToQuarantined(conn, candidate);
+            recordVerdictAndIncrementCounter(conn, candidate, verdict, now);
+            boolean hidden = reHideToQuarantined(conn, candidate, now);
             if (hidden) {
-                reAnnouncePendingQuarantineRows(conn, candidate.postId());
+                reAnnouncePendingQuarantineRows(conn, candidate.postId(), now);
             }
             return hidden;
         });
@@ -272,17 +291,18 @@ public class ReEvaluationJob {
     }
 
     private static void recordVerdictAndIncrementCounter(Connection conn, ReEvalCandidate candidate,
-                                                         Stage2VerdictHandler.Verdict verdict) throws SQLException {
+                                                         Stage2VerdictHandler.Verdict verdict, Instant now) throws SQLException {
         // last_reeval_at rides the same UPDATE as the counter increment so the
         // cooldown stamp and the re-eval progress record can never diverge (M1-370).
         final String sql =
             "UPDATE post SET stage2_verdict = ?, re_eval_attempts = re_eval_attempts + 1, "
-                + "last_reeval_at = now() "
+                + "last_reeval_at = ? "
                 + "WHERE id = ? AND fetched_at = ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, verdict.name());
-            ps.setObject(2, candidate.postId());
-            ps.setTimestamp(3, Timestamp.from(candidate.fetchedAt()));
+            ps.setTimestamp(2, Timestamp.from(now));
+            ps.setObject(3, candidate.postId());
+            ps.setTimestamp(4, Timestamp.from(candidate.fetchedAt()));
             ps.executeUpdate();
         }
     }
@@ -294,13 +314,14 @@ public class ReEvaluationJob {
      * tick) a no-op, so the PENDING re-announce below fires only on
      * an actual visibility transition — not on every re-eval attempt.
      */
-    private static boolean reHideToQuarantined(Connection conn, ReEvalCandidate candidate) throws SQLException {
+    private static boolean reHideToQuarantined(Connection conn, ReEvalCandidate candidate, Instant now) throws SQLException {
         final String sql =
-            "UPDATE post SET status = 'QUARANTINED', status_changed_at = now() "
+            "UPDATE post SET status = 'QUARANTINED', status_changed_at = ? "
                 + "WHERE id = ? AND fetched_at = ? AND status <> 'QUARANTINED'";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setObject(1, candidate.postId());
-            ps.setTimestamp(2, Timestamp.from(candidate.fetchedAt()));
+            ps.setTimestamp(1, Timestamp.from(now));
+            ps.setObject(2, candidate.postId());
+            ps.setTimestamp(3, Timestamp.from(candidate.fetchedAt()));
             return ps.executeUpdate() > 0;
         }
     }
@@ -314,12 +335,13 @@ public class ReEvaluationJob {
      * Provider catch-up scan cursors on {@code quarantine.updated_at},
      * so without it a missed NOTIFY could never be recovered.
      */
-    private void reAnnouncePendingQuarantineRows(Connection conn, UUID postId) throws SQLException {
+    private void reAnnouncePendingQuarantineRows(Connection conn, UUID postId, Instant now) throws SQLException {
         final String sql =
-            "UPDATE quarantine SET updated_at = now() "
+            "UPDATE quarantine SET updated_at = ? "
                 + "WHERE post_id = ? AND status = 'PENDING' RETURNING id";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setObject(1, postId);
+            ps.setTimestamp(1, Timestamp.from(now));
+            ps.setObject(2, postId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     UUID quarantineId = (UUID) rs.getObject(1);
@@ -342,21 +364,25 @@ public class ReEvaluationJob {
      * row written by the caller records an actual release — never a
      * release-that-never-happened for a post left QUARANTINED.
      */
-    private void clearStage2FailedAndRequeueIfQuarantined(Connection conn, ReEvalCandidate candidate)
+    private void clearStage2FailedAndRequeueIfQuarantined(Connection conn, ReEvalCandidate candidate, Instant now)
             throws SQLException {
         final String sql =
             "UPDATE post SET stage2_failed = FALSE, "
                 + "status = CASE WHEN status = 'QUARANTINED' THEN 'RAW' ELSE status END, "
-                + "status_changed_at = CASE WHEN status = 'QUARANTINED' THEN now() "
+                + "status_changed_at = CASE WHEN status = 'QUARANTINED' THEN ? "
                 + "                         ELSE status_changed_at END, "
                 + "re_eval_attempts = re_eval_attempts + 1, "
                 // Stamp with the counter increment so the cooldown cannot
-                // diverge from re-eval progress (M1-370).
-                + "last_reeval_at = now() "
+                // diverge from re-eval progress (M1-370). The same captured
+                // instant binds the CASE and last_reeval_at so they cannot
+                // diverge from each other either (M1-444).
+                + "last_reeval_at = ? "
                 + "WHERE id = ? AND fetched_at = ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setObject(1, candidate.postId());
-            ps.setTimestamp(2, Timestamp.from(candidate.fetchedAt()));
+            ps.setTimestamp(1, Timestamp.from(now));
+            ps.setTimestamp(2, Timestamp.from(now));
+            ps.setObject(3, candidate.postId());
+            ps.setTimestamp(4, Timestamp.from(candidate.fetchedAt()));
             ps.executeUpdate();
         }
     }
@@ -375,17 +401,19 @@ public class ReEvaluationJob {
      * counter increment stays here: {@code writeReEvalReleasedAudit}'s
      * {@code attempt = reEvalAttempts()+1} math depends on it.
      */
-    private void requeueForPipeline(Connection conn, ReEvalCandidate candidate) throws SQLException {
+    private void requeueForPipeline(Connection conn, ReEvalCandidate candidate, Instant now) throws SQLException {
         final String sql =
-            "UPDATE post SET status = 'RAW', status_changed_at = now(), "
+            "UPDATE post SET status = 'RAW', status_changed_at = ?, "
                 + "re_eval_attempts = re_eval_attempts + 1, "
                 // Stamp with the counter increment so the cooldown cannot
                 // diverge from re-eval progress (M1-370).
-                + "last_reeval_at = now() "
+                + "last_reeval_at = ? "
                 + "WHERE id = ? AND fetched_at = ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setObject(1, candidate.postId());
-            ps.setTimestamp(2, Timestamp.from(candidate.fetchedAt()));
+            ps.setTimestamp(1, Timestamp.from(now));
+            ps.setTimestamp(2, Timestamp.from(now));
+            ps.setObject(3, candidate.postId());
+            ps.setTimestamp(4, Timestamp.from(candidate.fetchedAt()));
             ps.executeUpdate();
         }
     }
@@ -403,12 +431,13 @@ public class ReEvaluationJob {
      * future non-stage1 quarantine writer (none in M1) must not be
      * auto-closed by a re-eval BENIGN release.
      */
-    private void closeQuarantineRows(Connection conn, UUID postId) throws SQLException {
+    private void closeQuarantineRows(Connection conn, UUID postId, Instant now) throws SQLException {
         final String sql =
-            "UPDATE quarantine SET status = 'BENIGN_CLOSED', updated_at = now() "
+            "UPDATE quarantine SET status = 'BENIGN_CLOSED', updated_at = ? "
                 + "WHERE post_id = ? AND flagged_by = 'stage1' AND status = 'PENDING' RETURNING id";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setObject(1, postId);
+            ps.setTimestamp(1, Timestamp.from(now));
+            ps.setObject(2, postId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     UUID quarantineId = (UUID) rs.getObject(1);
@@ -543,19 +572,25 @@ public class ReEvaluationJob {
         // infra-failure disjunct only — the UNKNOWN second-opinion cadence is
         // unchanged.
         //
-        // The fetched_at >= now() - (retention horizon + slack) bound is the
-        // partition-pruning predicate: post is RANGE(fetched_at) partitioned,
-        // so without a fetched_at floor the planner scans every live partition
-        // each tick. The window spans the full retention horizon so no live
-        // candidate is excluded; the partial index paired with this scan in
-        // the V47 migration carries the disjunction below so the planner can
-        // use it inside the surviving partitions.
+        // The fetched_at >= ? bound (floor = tick instant − (retention horizon
+        // + slack), computed in Java from the injected Clock — see
+        // scanWindowFloor) is the partition-pruning predicate: post is
+        // RANGE(fetched_at) partitioned, so without a fetched_at floor the
+        // planner scans every live partition each tick. A bound timestamp
+        // constant prunes at execution exactly as now() − INTERVAL did. The
+        // window spans the full retention horizon so no live candidate is
+        // excluded; the partial index paired with this scan in the V47
+        // migration carries the disjunction below so the planner can use it
+        // inside the surviving partitions.
+        Instant now = clock.instant();
+        Instant scanFloor = scanWindowFloor(now);
+        Instant cooldownFloor = now.minus(Duration.ofSeconds(reEvalCooldown.toSeconds()));
         final String sql =
             "SELECT id, fetched_at, stage2_failed, re_eval_attempts, stage2_verdict, body FROM post "
-                + "WHERE fetched_at >= now() - ?::INTERVAL "
+                + "WHERE fetched_at >= ? "
                 + "  AND ("
                 + "  (stage2_failed = TRUE AND status != 'NEEDS_REVIEW'"
-                + "   AND (last_reeval_at IS NULL OR last_reeval_at < now() - ?::INTERVAL))"
+                + "   AND (last_reeval_at IS NULL OR last_reeval_at < ?))"
                 + "  OR "
                 + "  (status = 'QUARANTINED' AND stage2_done = TRUE AND stage2_failed = FALSE"
                 + "   AND (stage2_verdict = 'UNKNOWN' OR re_eval_attempts > 0))"
@@ -563,8 +598,8 @@ public class ReEvaluationJob {
         List<ReEvalCandidate> candidates = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, partitionScanWindow());
-            ps.setString(2, cooldownInterval());
+            ps.setTimestamp(1, Timestamp.from(scanFloor));
+            ps.setTimestamp(2, Timestamp.from(cooldownFloor));
             ps.setInt(3, batchSize);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
@@ -610,11 +645,12 @@ public class ReEvaluationJob {
      * alert, the same window trade-off the candidate scan accepts.
      */
     long countNeedsReviewWithinScanWindow() throws SQLException {
+        Instant scanFloor = scanWindowFloor(clock.instant());
         final String sql = "SELECT COUNT(*) FROM post WHERE status = 'NEEDS_REVIEW' "
-            + "AND fetched_at >= now() - ?::INTERVAL";
+            + "AND fetched_at >= ?";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, partitionScanWindow());
+            ps.setTimestamp(1, Timestamp.from(scanFloor));
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getLong(1);
@@ -622,14 +658,14 @@ public class ReEvaluationJob {
         }
     }
 
-    /** The shared candidate/depth scan floor: retention horizon + slack, as a SQL INTERVAL string. */
-    private String partitionScanWindow() {
-        return (postRetentionDays + PartitionScan.PARTITION_SCAN_SLACK.toDays()) + " days";
-    }
-
-    /** The infra-failure re-judge cooldown as a SQL INTERVAL string (M1-370). */
-    private String cooldownInterval() {
-        return reEvalCooldown.toSeconds() + " seconds";
+    /**
+     * The shared candidate/depth scan floor instant: {@code now} minus the
+     * retention horizon plus the partition slack. Whole-day arithmetic
+     * (matching the prior {@code (retention + slack) days} SQL INTERVAL) keeps
+     * the floor aligned to the partition-pruning boundary.
+     */
+    private Instant scanWindowFloor(Instant now) {
+        return now.minus(Duration.ofDays(postRetentionDays + PartitionScan.PARTITION_SCAN_SLACK.toDays()));
     }
 
     /**

@@ -2,9 +2,11 @@ package app.zcat.infochat.collector.eval.reeval;
 
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -12,7 +14,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -45,6 +49,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @QuarkusTest
 class ReEvaluationJobScheduledPathIT {
 
+    // A FIXED fetched_at paired with a FIXED clock (PINNED_NOW, installed in
+    // pinClock()): the seed sits two days inside the now − (retention + slack)
+    // = now − 32d candidate-scan window, so enumeration is deterministic on any
+    // wall-clock run date. The job reads time from the injected Clock, not SQL
+    // now(), so pinning the clock — not relative-dating the fixture — is what
+    // makes this stable (M1-444).
+    private static final Instant PINNED_NOW = Instant.parse("2026-05-25T09:00:00Z");
     private static final Instant FETCHED_AT = Instant.parse("2026-05-23T09:00:00Z");
 
     @Inject
@@ -59,6 +70,14 @@ class ReEvaluationJobScheduledPathIT {
 
     @ConfigProperty(name = "infochat.reeval.unknown-cap")
     int unknownCap;
+
+    @BeforeEach
+    void pinClock() {
+        // Pin the injected Clock the job reads so FETCHED_AT stays inside the
+        // candidate-scan window deterministically; the QuarkusMock.installMockForType
+        // seam is the same one ThrottledAdminNotifier's Clock producer documents (M1-444).
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
+    }
 
     @Test
     void capExhaustedRowReachesNeedsReviewThroughScheduledTick() throws Exception {
