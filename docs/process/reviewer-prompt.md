@@ -38,10 +38,14 @@ Branch: {{BRANCH}}
    and the test summary.
 4. Engineering rules of record: `docs/process/engineering-rules-verbatim.md`
    Use the Read tool. That file is the rule-text-of-record and you
-   MUST apply every rule it carries (§1–§8, the stack-specific
+   MUST apply every rule it carries (§1–§9, the stack-specific
    subsection, and the round-N must-shrink subsection), not just the
    ones you find convenient. Do NOT infer "the spirit" of any rule —
-   apply the text as written.
+   apply the text as written. §9 (injectable time in decision logic)
+   is applied narrowly and only to NEW inline `now()` / `Instant.now()`
+   the diff introduces into decision/comparison logic — audit-only
+   timestamp writes and DDL `DEFAULT now()` are exempt; a §9 violation
+   is a REWORK item.
 5. Verdict file (Write the full structured verdict here using the
    Write tool BEFORE returning your short chat reply):
    {{VERDICT_FILE_PATH}}

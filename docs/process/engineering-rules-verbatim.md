@@ -92,6 +92,13 @@ The reviewer's `TEST-INTEGRITY-CHECK` fails if the diff introduces any of the fo
 
 A `FAIL` on `TEST-INTEGRITY-CHECK` is never `REWORK`-able by the developer alone; the reviewer must escalate to `MANUAL` if the developer's stated rationale is "this is fine because ...". The user is the only one who can override test-integrity violations.
 
+## §9 Injectable time in decision logic
+
+- Time that drives a **decision** — any comparison or gate whose outcome depends on "now": scan/retention windows, cooldowns, TTL/expiry checks, rate-limit windows, probation/ban/invite-expiry timing — MUST be read from an injected `java.time.Clock`, never from an inline `now()` (SQL) or `Instant.now()` (Java) embedded in that logic. The injected Clock is the app-wide `@Produces @ApplicationScoped Clock` (`ThrottledAdminNotifier.systemUtcClock()`); tests pin it with `QuarkusMock.installMockForType(Clock.fixed(...), Clock.class)`. The reason: ambient `now()` is a hidden input — it cannot be pinned in a test without a wall-clock-relative fixture hack, which rots into a date-boundary time-bomb (the failure M1-398, M1-400, and M1-444 each fixed one instance of). M1-444 (`ReEvaluationJob`) is the reference implementation.
+- **Pure audit/record writes are exempt.** A timestamp that only *records* when something happened and is never read back to gate a decision — `created_at` / `updated_at` / `status_changed_at` column writes and Flyway `DEFAULT now()` — MAY stay on the database clock (the system-of-record convention). The rule targets time *read for a comparison*, not time *written for the record*.
+- **Never split one component across two clocks.** If a component reads back its own time-write to make a decision (e.g. a cooldown gate comparing a `last_*_at` it stamped), the write and the read MUST use the same clock — moving only the read to the injected Clock while the write stays on SQL `now()` creates an app-vs-DB skew bug. Either both move to the injected Clock or both stay on the DB clock; never one of each.
+- The reviewer applies this rule **narrowly and to NEW code the diff introduces** (mirroring §7's narrow application): a new inline `now()` / `Instant.now()` in decision logic is a violation; an audit-only write is not; pre-existing inline time the diff does not touch is the migration backlog (M1-447), not this diff's fault. A violation is a REWORK item citing the file:line and the injected-Clock pattern.
+
 ---
 
 ## When to update this file
