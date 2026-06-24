@@ -1,10 +1,13 @@
 ---
 id: M1-441
 title: "Wizard bootstrap-admin prompt must not say 'optional' when it is the only adapter"
-status: pending
+status: deferred
 created: 2026-06-24
 last_updated: 2026-06-24
-blocked_by: []
+blocked_by:
+  - M1-445
+deferred_on: M1-445
+deferred_reason: blocked-on-new-ticket
 files_budget: 3
 files_scope:
   - prod/scripts/6-adapter.sh
@@ -41,14 +44,35 @@ spec_refs:
   - docs/spec/deployment.md §Operator inputs
 decision_refs: []
 reviews: []
+escalations:
+  - date: 2026-06-24
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      N/A (developer-raised premise-fail; no reviewer round reached). Two
+      pre-existing blockers, neither caused by M1-441, prevent honest completion
+      as written:
+      (A) Root `mvn verify` is RED on main — collector ReEvaluationJobScheduledPathIT
+          time-bomb (fixed-date seed aged past the 32d scan window on 2026-06-24).
+          Filed as M1-444. Blocks acceptance item 6 (mvn verify exits 0).
+      (B) The mandated *Test wiring test would never execute: nothing pins
+          maven-surefire-plugin, so it defaults to super-pom 2.12.4 (Maven 3.8.7),
+          which discovers 0 JUnit 5 tests. The whole unit suite (~1000 tests,
+          incl. M1-439's DoctorWiringTest) is silently dormant. Filed as M1-445.
+          Without it the *Test compiles but never runs (a fake green).
+      The wizard code fix is complete and manually verified, and the wiring test
+      passes 3/3 once surefire is pinned (verified under 3.5.4). Parked on branch
+      parked/M1-441-wizard-fix @ d7f9fe59. Deferred behind M1-445 (which is itself
+      blocked_by M1-444); reopen and cherry-pick the parked commit once both land.
+revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
 clarity_check:
-  date:
-  verdict:
-  warnings: []
+  date: 2026-06-24
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 5 (SETUP_GUIDE.md check): criterion delegates pass/fail to the implementer's reading of whether existing wording implies the admin id is skippable. Resolved during the parked implementation: SETUP_GUIDE.md already presents the admin id as required-on-the-happy-path (line ~145 'You must provide at least one'; line ~248 a value to paste), so it is left unchanged per the criterion's own branch."
   blockers: []
 ---
 
