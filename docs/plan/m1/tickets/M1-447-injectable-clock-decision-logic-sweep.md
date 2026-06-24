@@ -1,6 +1,6 @@
 ---
 id: M1-447
-title: "Make decision-logic time injectable (sweep now() sites)"
+title: "Make decision-logic time injectable: classify all now() sites + convert security-timing trio"
 status: pending
 created: 2026-06-24
 last_updated: 2026-06-24
@@ -16,15 +16,18 @@ out_of_scope:
   - "(B) pure audit/record writes and Flyway DDL `DEFAULT now()` — left on the DB clock (the system-of-record convention). Converting them would diverge timestamp authorship from the rest of the schema for no testability gain. See acceptance item 3."
   - "ReEvaluationJob — already converted by M1-444 (the reference implementation). Do not re-touch it."
   - "Any behavioural change to a time window / threshold / cadence. This is a determinism refactor: with the real production Clock, behaviour is byte-for-byte preserved. Changing a window's size is a separate ticket."
+  - "The other 8 unconverted (A) decision-logic components found by the classification audit are DEFERRED to follow-up tickets, NOT converted here: the 5 partition-scan workers (EmbeddingWorker, EntityExtractorWorker, TaggerWorker, ReadyPromoter, PerSourceUnknownTracker — SQL `now() - interval` → bound cutoff; EmbeddingWorker and EntityExtractorWorker additionally have existing ITs that a conversion would have to MODIFY), plus PartitionPruner (retention cutoff), DigestRetryService (retry cooldown), and FetchScheduler (kind-tick interval). This ticket converts ONLY the security-timing trio so the diff stays small and independently reviewable (ticket-body §Notes 'expect decomposition'). The committed audit doc enumerates these as the follow-up backlog."
 acceptance:
-  - "Every production `now()` / `Instant.now()` site (Java SQL-string literals, `Instant.now()`, and Flyway `DEFAULT now()`) is classified in the diff (a brief `docs/plan/m1/now-clock-audit.md` or equivalent) into: (A) decision-logic time source — a comparison/gate that determines behaviour (scan windows, cooldowns, TTL/expiry checks, rate-limit windows, probation/ban/invite-expiry timing) — vs (B) pure audit/record write — created_at/updated_at/status_changed_at stamps and DDL defaults never read back to gate a decision. The classification is explicit and reviewable, and is what scopes the conversion."
-  - "Every (A) decision-logic site reads its current instant from an injected `java.time.Clock` (the app-wide `@Produces @ApplicationScoped Clock` in `ThrottledAdminNotifier.systemUtcClock()`; test seam `QuarkusMock.installMockForType(Clock.fixed(...), Clock.class)`), never inline `now()` / `Instant.now()`. Per the M1-444 rule, a component that reads back its own time-write for a decision moves wholesale to the one clock — no two-clock split (a value written by one clock and compared against another)."
-  - "(B) pure audit/record writes and DDL `DEFAULT now()` are LEFT on the DB clock and explicitly NOT converted."
-  - "Each converted component gains or extends a test that pins the Clock to a fixed instant and asserts the time-gated behaviour deterministically (named per component in the diff), so the suite no longer depends on the wall-clock date — the time-bomb class M1-398 / M1-400 / M1-444 each fixed one instance of."
+  - "A committed classification audit at EXACTLY `docs/plan/m1/now-clock-audit.md` classifies every production current-time site (Java `Instant.now()` / `LocalDate.now()` / `OffsetDateTime.now()` / etc. and SQL `now()` / `current_timestamp` inside Java query strings, plus any Flyway DDL `DEFAULT now()`) into: (A) decision-logic time source — a comparison/gate that determines behaviour (scan windows, cooldowns, TTL/expiry checks, rate-limit windows, probation/ban/invite-expiry timing, retry/retention cutoffs) — vs (B) pure audit/record write — created_at/updated_at/status_changed_at stamps and DDL defaults never read back to gate a decision — vs (C) display/formatting. The audit lists every unconverted (A) component and marks each CONVERTED-IN-THIS-TICKET (the security-timing trio in the next item) vs DEFERRED-TO-FOLLOWUP. The classification is explicit and reviewable."
+  - "The three in-scope security-timing components — InviteCodeConsumer (invite-expiry SQL gate, brute-force-attempt window, probation-window timing), GroupAutoPromoteService (probation-eligibility gate), AdminReviewTtlJob (quarantine-review TTL expiry gate) — each read their current instant from the injected `java.time.Clock` (the app-wide `@Produces @ApplicationScoped Clock` in `ThrottledAdminNotifier.systemUtcClock()`; test seam `QuarkusMock.installMockForType(Clock.fixed(...), Clock.class)`), never inline `now()` / `Instant.now()`. Per the M1-444 rule, a component that reads back its own time-write for a decision moves wholesale to the one clock — no two-clock split (a value written by one clock and compared against another). Behaviour is byte-for-byte preserved under the real production Clock (`Clock.systemUTC()`)."
+  - "(B) pure audit/record writes and DDL `DEFAULT now()` are LEFT on the DB clock and explicitly NOT converted. The other 8 unconverted (A) components (see out_of_scope) are NOT converted in this ticket."
+  - "Each of the three converted components gains a NEW deterministic test that pins the Clock via `QuarkusMock.installMockForType(Clock.fixed(...), Clock.class)` and asserts the time-gated behaviour at a fixed instant (named in `test_plan.adds`). All such tests are ADDITIVE — this ticket modifies the assertions of NO pre-existing test (there is no `test_plan.modifies`). The suite no longer depends on the wall-clock date for these three components — the time-bomb class M1-398 / M1-400 / M1-444 each fixed one instance of."
   - "mvn -B clean verify from the repo root exits 0."
 test_plan:
   adds:
-    - "per-component fixed-Clock tests (named at implementation time, one per converted (A) component)"
+    - "InviteCodeConsumerClockIT — pins Clock.fixed(...) and asserts invite-expiry (expires_at gate), brute-force-attempt window counting, and probation-window timing are all decided against the injected instant (final IT/unit suffix settled at implementation per whether a DB is needed)."
+    - "GroupAutoPromoteServiceClockIT — pins Clock.fixed(...) and asserts the probation-eligibility gate (probation_until vs the injected now) deterministically."
+    - "AdminReviewTtlJobClockIT — pins Clock.fixed(...) and asserts the quarantine-review TTL auto-reject boundary against the injected instant."
   preserves:
     - all tests currently green on main
 spec_refs: []
@@ -34,6 +37,40 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+revisions:
+  - date: 2026-06-24
+    reason: |
+      clarity-fail refine. (1) Fixed the TEST-CHANGES-AUTHORIZED blocker: item-4
+      tests are now ADDITIVE-only ("gains" a new test, never "extends" a
+      pre-existing one), so no test_plan.modifies is needed. (2) Scoped the
+      conversion to the security-timing trio (InviteCodeConsumer,
+      GroupAutoPromoteService, AdminReviewTtlJob) after a classification recon
+      found 11 unconverted (A) components (~23 files) — over files_budget:16 and
+      too large for one reviewable diff; the trio has no existing time-tests, so
+      the conversion is clean adds. The other 8 (A) components are now named in
+      out_of_scope as follow-up backlog. (3) Named the audit artifact exactly
+      (docs/plan/m1/now-clock-audit.md, dropped "or equivalent") and named the
+      converted components + their new test classes (clearing both clarity
+      WARNINGs).
+    prior_acceptance_item_4: |
+      "Each converted component gains or extends a test that pins the Clock to a
+      fixed instant and asserts the time-gated behaviour deterministically
+      (named per component in the diff), so the suite no longer depends on the
+      wall-clock date — the time-bomb class M1-398 / M1-400 / M1-444 each fixed
+      one instance of."
+escalations:
+  - date: 2026-06-24
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      TEST-CHANGES-AUTHORIZED: FAIL — Acceptance item 4 says each converted
+      component "gains or extends a test." The word "extends" contemplates
+      modifying a pre-existing test, but test_plan has no `modifies:` key and
+      all test names are deferred to "implementation time," so no pre-existing
+      test is listed with its new expected behaviour. If "extends" is exercised,
+      the modification is not authorized by the ticket. Fix: (a) add a
+      test_plan.modifies: list enumerating which existing tests are extended and
+      the new assertion, or (b) replace "gains or extends" with "gains" (new
+      tests only) and capture any required extension as a modifies: entry.
 clarity_check: {}
 ---
 
@@ -51,28 +88,42 @@ discussion concluded the root cause is general: **time used in decision logic
 must be an injectable parameter**, not ambient `now()` / `Instant.now()`, so it
 can be pinned in tests and is never split across two clocks (app vs DB).
 
-This ticket sweeps the remaining production sites onto the injectable-`Clock`
-pattern M1-444 established. The surface is large (~100 `now()` / `Instant.now()`
-matches across both services) but the *convertible* set is much smaller: most
-matches are pure audit-timestamp writes and DDL defaults that legitimately stay
-on the DB clock. The work is therefore **classify first, then convert only the
-decision-logic (A) sites** — which is why this is `complexity: high` and will be
-scoped (and likely decomposed per-component) by the plan-writer at `start`.
+This ticket moves the *security-timing* production sites onto the
+injectable-`Clock` pattern M1-444 established, after a classification recon
+(2026-06-24) that sized the surface concretely. The raw surface is large (~90
+Java `*.now()` matches + ~21 SQL `now()` files across both services) but the
+**unconverted (A) decision-logic set is 11 components**; most other matches are
+pure audit-timestamp writes / display formatting that legitimately stay on the
+DB clock. 11 components (~23 files) exceeds `files_budget: 16` and is too large
+for one reviewable diff, so this ticket is **scoped to the security-timing
+trio** — `InviteCodeConsumer`, `GroupAutoPromoteService`, `AdminReviewTtlJob`
+(invite-expiry / probation / quarantine-TTL gates; all `security_relevant`, and
+none has an existing time-test, so the conversion is clean test *additions*).
+The remaining 8 (A) components are named in `out_of_scope` as follow-up backlog.
+The committed classification audit still covers the **whole** surface; only the
+*conversion* is scoped. `complexity: high` reflects the full-surface audit plus
+the cross-cutting trio conversion.
 
 ## Acceptance
 
-See the YAML `acceptance:` list. In short: classify every production `now()` /
-`Instant.now()` into (A) decision-logic vs (B) pure-audit; convert the (A) sites
-to an injected `Clock` (whole-component, no two-clock split); leave (B) on the
-DB clock; add a fixed-Clock test per converted component; full suite green.
+See the YAML `acceptance:` list. In short: classify every production current-time
+site (Java `*.now()` and SQL `now()` in query strings) into (A) decision-logic /
+(B) pure-audit / (C) display in a committed `docs/plan/m1/now-clock-audit.md`;
+convert ONLY the security-timing trio to an injected `Clock` (whole-component, no
+two-clock split); leave (B) on the DB clock and the other 8 (A) components for
+follow-up tickets; add a NEW fixed-Clock test per converted component (additive,
+no pre-existing test modified); full suite green.
 
 ## Out-of-scope
 
 See the YAML `out_of_scope:` list. The coding-style **rule** and the
 **reviewer-prompt** check (items 3–4 of the plan) are pure-doc `process:`
-commits done separately and SHOULD land first; this ticket is the code sweep.
-(B) audit writes and DDL `DEFAULT now()` stay on the DB clock. `ReEvaluationJob`
-is already done. No time-window behaviour changes.
+commits done separately and have already landed (`§9`, commit 7521a279); this
+ticket is the code sweep. (B) audit writes and DDL `DEFAULT now()` stay on the DB
+clock. The other 8 unconverted (A) components (5 partition-scan workers,
+`PartitionPruner`, `DigestRetryService`, `FetchScheduler`) are deferred to
+follow-up tickets. `ReEvaluationJob` is already done. No time-window behaviour
+changes.
 
 ## Notes
 

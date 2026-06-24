@@ -27,7 +27,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-442 — llama.cpp setup: GGUFs must land in the Compose-mounted volume and the pinned image must load the pinned model (complexity: low, risk: low)
 - M1-443 — Embedding identity guard must adopt the configured model on first boot (no embeddings yet) instead of refusing (complexity: medium, risk: medium)
 - M1-445 — build: pin maven-surefire-plugin so the JUnit 5 unit suite actually runs (super-pom default 2.12.4 silently skips it) (complexity: low, risk: medium)
-- M1-447 — Make decision-logic time injectable (sweep now() sites) (complexity: high, risk: medium)
+- M1-447 — Make decision-logic time injectable: classify all now() sites + convert security-timing trio (complexity: high, risk: medium)
 
 ---
 
