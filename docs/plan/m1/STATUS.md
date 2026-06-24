@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 470 |
 | deferred | 6 |
-| **total** | **477** |
+| **total** | **479** |
 
 ---
 
@@ -25,6 +25,8 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-441 — Wizard bootstrap-admin prompt must not say 'optional' when it is the only adapter (complexity: low, risk: low)
+- M1-442 — llama.cpp setup: GGUFs must land in the Compose-mounted volume and the pinned image must load the pinned model (complexity: low, risk: low)
+- M1-443 — Embedding identity guard must adopt the configured model on first boot (no embeddings yet) instead of refusing (complexity: medium, risk: medium)
 
 ---
 
@@ -640,4 +642,6 @@ M1-438 (done)
 M1-439 (done)
 M1-440 (done)
 M1-441 (pending) ← runnable
+M1-442 (pending) ← runnable
+M1-443 (pending) ← runnable
 ```
