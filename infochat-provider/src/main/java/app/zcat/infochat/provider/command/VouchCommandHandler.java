@@ -22,6 +22,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.text.MessageFormat;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -135,6 +136,16 @@ public class VouchCommandHandler implements CommandHandler {
     @Inject
     UserRepository userRepository;
 
+    // The /vouch past-probation permission pre-check reads 'now' from the
+    // injected Clock so the no-op decision is pinnable in tests and shares one
+    // clock with the app-side probation_until writers — closing the app/DB skew
+    // engineering-rules §9 forbids on this authorization path. Initialised
+    // = Clock.systemUTC(); CDI overrides it (producer ThrottledAdminNotifier
+    // .systemUtcClock()). Behaviour byte-for-byte preserved under systemUTC().
+    // (M1-451, pattern from M1-450 ProbationCheck)
+    @Inject
+    Clock clock = Clock.systemUTC();
+
     @Override
     public String name() {
         return "vouch";
@@ -232,7 +243,7 @@ public class VouchCommandHandler implements CommandHandler {
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_VOUCH_BANNED_TARGET, inboundContext.effectiveLanguage()));
                 }
 
-                if (isAlreadyPastProbation(target)) {
+                if (isAlreadyPastProbation(target, clock.instant())) {
                     conn.rollback();
                     return reply(scope, bundleLoader.get(BundleKeys.REPLY_VOUCH_NOOP, inboundContext.effectiveLanguage()));
                 }
@@ -267,11 +278,11 @@ public class VouchCommandHandler implements CommandHandler {
      * by the spec's permission predicate
      * {@code probation_until IS NULL OR probation_until < NOW()}).
      */
-    private static boolean isAlreadyPastProbation(TargetRow row) {
+    private static boolean isAlreadyPastProbation(TargetRow row, Instant now) {
         if (row.probationUntil == null) {
             return true;
         }
-        return !row.probationUntil.isAfter(Instant.now());
+        return !row.probationUntil.isAfter(now);
     }
 
     /**

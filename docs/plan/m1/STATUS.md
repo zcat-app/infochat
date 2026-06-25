@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 480 |
+| done | 481 |
 | deferred | 6 |
 | **total** | **490** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-451 — Move probation-timing decision gates onto the injected Clock in InboundRouter / PromoteCommandHandler / VouchCommandHandler (close the audit-missed probation_until split) (complexity: medium, risk: medium)
 - M1-452 — Complete the collector's injectable-Clock migration: LinkingJob window cutoffs + NostrStreamSource since-cursor SQL floor (audit-missed sites) (complexity: medium, risk: low)
 - M1-453 — cleanup: single-pass SimpleX group-mention decode + drop redundant InMemoryAdapter finalized map + fix stale @NonNull pom comment (complexity: medium, risk: low)
 - M1-454 — Make provider retrieval/freshness-window decision time injectable: convert six audit-missed inline Instant.now() gates (SearchPostsTool, ListSavesTool, EligiblePostQuery, SavedCommandHandler, DigestWorker, AssetSnapshotReader) (complexity: medium, risk: low)
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-451 | Move probation-timing decision gates onto the injected Clock in InboundRouter / PromoteCommandHandler / VouchCommandHandler (close the audit-missed probation_until split) | 2026-06-25 | round 1 APPROVE |
 | M1-450 | Move ProbationCheck onto the injected Clock (close the probation_until app/DB split) | 2026-06-25 | round 1 APPROVE |
 | M1-449 | Make scheduler/pruner decision time injectable (PartitionPruner, DigestRetryService, FetchScheduler) | 2026-06-25 | round 1 APPROVE |
 | M1-448 | Make partition-scan worker time injectable (5 scan-window workers) | 2026-06-25 | round 1 APPROVE |
@@ -72,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-443 | Embedding identity guard must adopt the configured model on first boot (no embeddings yet) instead of refusing | 2026-06-25 | round 1 APPROVE |
 | M1-442 | llama.cpp setup: GGUFs must land in the Compose-mounted volume and the pinned image must load the pinned model | 2026-06-25 | round 1 APPROVE |
 | M1-441 | Wizard bootstrap-admin prompt must not say 'optional' when it is the only adapter | 2026-06-25 | round 1 APPROVE |
-| M1-444 | fix: make ReEvaluationJob's tick time an injectable Clock so the candidate-scan window (and its IT) are deterministic instead of wall-clock-dependent | 2026-06-24 | round 1 APPROVE |
 
 ---
 
@@ -652,7 +651,7 @@ M1-447 (done)
 M1-448 (done)
 M1-449 (done)
 M1-450 (done)
-M1-451 (pending) ← runnable
+M1-451 (done)
 M1-452 (pending) ← runnable
 M1-453 (pending) ← runnable
 M1-454 (pending) ← runnable

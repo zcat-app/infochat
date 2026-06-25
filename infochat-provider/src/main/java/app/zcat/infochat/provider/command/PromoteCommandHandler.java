@@ -24,6 +24,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.text.MessageFormat;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -75,6 +76,15 @@ public class PromoteCommandHandler implements CommandHandler {
     @Inject InboundContext inboundContext;
     @Inject AuditLogWriter auditLogWriter;
     @Inject UserRepository userRepository;
+
+    // The promote-target probation gate reads 'now' from the injected Clock so
+    // the in-probation decision is pinnable in tests and shares one clock with
+    // the app-side probation_until writers — closing the app/DB skew
+    // engineering-rules §9 forbids on this authorization path. Initialised
+    // = Clock.systemUTC(); CDI overrides it (producer ThrottledAdminNotifier
+    // .systemUtcClock()). Behaviour byte-for-byte preserved under systemUTC().
+    // (M1-451, pattern from M1-450 ProbationCheck)
+    @Inject Clock clock = Clock.systemUTC();
 
     @Override
     public String name() {
@@ -143,7 +153,7 @@ public class PromoteCommandHandler implements CommandHandler {
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROMOTE_TARGET_BANNED, inboundContext.effectiveLanguage()));
                 }
 
-                if (target.inProbation()) {
+                if (target.inProbation(clock.instant())) {
                     conn.rollback();
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROMOTE_TARGET_PROBATION, inboundContext.effectiveLanguage()));
                 }
@@ -318,8 +328,8 @@ public class PromoteCommandHandler implements CommandHandler {
     }
 
     private record TargetRow(UUID id, String contactId, boolean isBanned, @Nullable Instant probationUntil) {
-        boolean inProbation() {
-            return probationUntil != null && probationUntil.isAfter(Instant.now());
+        boolean inProbation(Instant now) {
+            return probationUntil != null && probationUntil.isAfter(now);
         }
     }
 }

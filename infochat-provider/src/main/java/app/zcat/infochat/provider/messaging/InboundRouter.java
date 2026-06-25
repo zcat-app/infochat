@@ -37,6 +37,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.text.MessageFormat;
 import java.text.Normalizer;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
@@ -283,6 +284,18 @@ public class InboundRouter {
 
     @Inject
     ProbationCheck probationCheck;
+
+    // The step-5 probation gate samples 'now' from the injected Clock, never
+    // inline Instant.now(), so the block/allow decision is pinnable in tests
+    // (InboundRouterProbationClockTest) and shares one clock with the app-side
+    // probation_until writers — closing the app/DB skew engineering-rules §9
+    // forbids on this authorization path. Field-initialised = Clock.systemUTC()
+    // so the many hand-constructed router tests stay non-null; CDI injection
+    // overrides it in the managed bean (producer ThrottledAdminNotifier
+    // .systemUtcClock()). Production behaviour is byte-for-byte preserved under
+    // Clock.systemUTC(). (M1-451, pattern from M1-450 ProbationCheck)
+    @Inject
+    Clock clock = Clock.systemUTC();
 
     @Inject
     app.zcat.infochat.provider.chat.ChatAgent chatAgent;
@@ -663,7 +676,7 @@ public class InboundRouter {
             // with no row (or 'preban') were silently dropped at step 3.
             // The defensive isPresent guard removed by M1-045 redteam-fix.
             UserSnapshot probationActor = snapshot.get();
-            Instant probationNow = Instant.now();
+            Instant probationNow = clock.instant();
             String commandName = commandNameOf(normalized);
             if (probationActor.inProbation(probationNow)) {
                 if (!commandPermissions.allowedDuringProbation(commandName)) {

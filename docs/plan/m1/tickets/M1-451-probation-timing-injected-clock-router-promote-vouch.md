@@ -1,7 +1,7 @@
 ---
 id: M1-451
 title: "Move probation-timing decision gates onto the injected Clock in InboundRouter / PromoteCommandHandler / VouchCommandHandler (close the audit-missed probation_until split)"
-status: pending
+status: done
 created: 2026-06-25
 last_updated: 2026-06-25
 blocked_by: []
@@ -39,14 +39,40 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 518
+      removed: 14
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-06-25
+    verdict: CLEAN
+    base: main
+    head: m1/M1-451-probation-timing-injected-clock-router-promote-vouch
+    verdict_file: docs/plan/m1/redteam/M1-451-2026-06-25.md
+    out_of_model_count: 2
+    note: |
+      CLEAN — no threat-model gaps. Two OUT-OF-MODEL items, both pre-existing and
+      unchanged by this diff (it only swaps Instant.now() for the injected clock):
+      ProbationCheck.clearIfPromoted's housekeeping UPDATE still uses SQL NOW()
+      (pure null-write, not a gate; out-of-scope file, M1-447 backlog), and
+      isAlreadyPastProbation's equality-at-boundary semantics (pre-existing isAfter,
+      harmless). Neither warrants a follow-up ticket here.
 clarity_check:
   date: 2026-06-25
   verdict: PASS
