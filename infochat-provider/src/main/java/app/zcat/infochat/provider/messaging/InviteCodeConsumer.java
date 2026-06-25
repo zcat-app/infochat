@@ -17,9 +17,11 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -134,6 +136,19 @@ public class InviteCodeConsumer {
     @Inject
     RegisteredContactSet registeredContactSet;
 
+    // All Java-side decision-time reads (brute-force window count, breach-sweep
+    // gate/cutoff, breach mark, probation_until write) come from this injected
+    // Clock, sampled once per consume() so the in-memory breach mark and the
+    // sweep that reads it back share one instant — never split across two clocks
+    // (M1-444 rule). The systemUTC() initializer keeps the field non-null for
+    // hand-constructed instances (newLocalConsumer() in the eviction tests,
+    // which never goes through CDI); injection overrides it in the managed bean.
+    // The SQL expires_at > NOW() invite-expiry gate intentionally stays on the
+    // DB clock (intra-statement comparison) — see docs/plan/m1/now-clock-audit.md.
+    // (M1-447, pattern from M1-444 ReEvaluationJob)
+    @Inject
+    Clock clock = Clock.systemUTC();
+
     /**
      * Backs {@code invite_drop_total} (see the class javadoc's Drop
      * counter paragraph). The throwaway-registry initializer keeps the
@@ -175,11 +190,15 @@ public class InviteCodeConsumer {
         // invite?" so a non-UUID probe also increments the brute-force
         // counter (closes the AUDIT-EVASION redteam finding).
         UUID candidateCode = parseUuid(body);
-        evictStaleBreachAudited();
+        // Sample the injected Clock once and thread it through every Java-side
+        // decision read below, so the breach mark and the sweep that reads it
+        // back use the same instant (no two-clock split, M1-444 rule).
+        Instant now = clock.instant();
+        evictStaleBreachAudited(now);
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                long attempts = countAttempts(conn, adapter, contactId);
+                long attempts = countAttempts(conn, adapter, contactId, now);
                 Key key = new Key(adapter, contactId);
 
                 if (attempts >= bruteForceThreshold) {
@@ -216,7 +235,7 @@ public class InviteCodeConsumer {
                         // no DB row to make durable.
                         conn.commit();
                     }
-                    breachAudited.put(key, Instant.now());
+                    breachAudited.put(key, now);
                     recordInviteDrop();
                     return new BruteForceThresholdBreached();
                 }
@@ -240,7 +259,7 @@ public class InviteCodeConsumer {
                     return new Rejected();
                 }
 
-                UUID userId = insertOrSelectUser(conn, adapter, contactId);
+                UUID userId = insertOrSelectUser(conn, adapter, contactId, now);
                 insertAudit(conn, contactId, adapter,
                         AuditAction.INVITE_CONSUME, userId.toString(), contactId);
                 conn.commit();
@@ -282,8 +301,7 @@ public class InviteCodeConsumer {
     // the breach event ends. The check-then-set on the volatile is
     // deliberately not atomic: two racing consumes may both sweep,
     // which is benign (removeIf is idempotent) and cheaper than a CAS.
-    private void evictStaleBreachAudited() {
-        Instant now = Instant.now();
+    private void evictStaleBreachAudited(Instant now) {
         if (now.isBefore(lastSweep.plus(bruteForceWindow))) {
             return;
         }
@@ -306,12 +324,12 @@ public class InviteCodeConsumer {
         }
     }
 
-    private long countAttempts(Connection conn, String adapter, String contactId)
+    private long countAttempts(Connection conn, String adapter, String contactId, Instant now)
             throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(COUNT_ATTEMPTS_SQL)) {
             ps.setString(1, adapter);
             ps.setString(2, contactId);
-            ps.setObject(3, OffsetDateTime.now().minus(bruteForceWindow));
+            ps.setObject(3, OffsetDateTime.ofInstant(now, ZoneOffset.UTC).minus(bruteForceWindow));
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getLong(1);
@@ -335,12 +353,12 @@ public class InviteCodeConsumer {
         }
     }
 
-    private UUID insertOrSelectUser(Connection conn, String adapter, String contactId)
+    private UUID insertOrSelectUser(Connection conn, String adapter, String contactId, Instant now)
             throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(INSERT_USER_SQL)) {
             ps.setString(1, adapter);
             ps.setString(2, contactId);
-            ps.setObject(3, OffsetDateTime.now().plus(probationDuration));
+            ps.setObject(3, OffsetDateTime.ofInstant(now, ZoneOffset.UTC).plus(probationDuration));
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     return rs.getObject(1, UUID.class);

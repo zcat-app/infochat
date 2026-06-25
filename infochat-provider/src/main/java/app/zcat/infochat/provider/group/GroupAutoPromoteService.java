@@ -13,7 +13,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
-import java.time.Instant;
+import java.time.Clock;
 import java.util.UUID;
 
 /**
@@ -62,6 +62,19 @@ public class GroupAutoPromoteService {
 
     private final DataSource dataSource;
     private final AuditLogWriter auditLogWriter;
+
+    // Probation-eligibility is gated on the injected Clock, never Instant.now(),
+    // so the gate is deterministic under a fixed test clock
+    // (GroupAutoPromoteServiceClockIT) rather than depending on the wall-clock
+    // run date. Field-injected (not constructor) with a systemUTC() initializer
+    // so the field stays non-null for hand-constructed instances (the
+    // InboundRouter tests build this service directly, bypassing CDI); injection
+    // overrides it in the managed bean. The CDI producer is
+    // ThrottledAdminNotifier.systemUtcClock(); production behaviour is
+    // byte-for-byte preserved under Clock.systemUTC().
+    // (M1-447, pattern from M1-444 ReEvaluationJob)
+    @Inject
+    Clock clock = Clock.systemUTC();
 
     @Inject
     public GroupAutoPromoteService(DataSource dataSource,
@@ -153,7 +166,7 @@ public class GroupAutoPromoteService {
                     return false;
                 }
                 Timestamp ts = rs.getTimestamp("probation_until");
-                return ts == null || !ts.toInstant().isAfter(Instant.now());
+                return ts == null || !ts.toInstant().isAfter(clock.instant());
             }
         }
     }

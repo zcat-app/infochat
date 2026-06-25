@@ -1,9 +1,9 @@
 ---
 id: M1-447
 title: "Make decision-logic time injectable: classify all now() sites + convert security-timing trio"
-status: pending
+status: done
 created: 2026-06-24
-last_updated: 2026-06-24
+last_updated: 2026-06-25
 blocked_by: []
 files_budget: 16
 complexity: high
@@ -11,6 +11,7 @@ risk: medium
 round_cap: 3
 security_relevant: true
 migration_touch: false
+outline_file: target/m1-tick-outline-M1-447.md
 out_of_scope:
   - "The coding-style RULE text (docs/process/engineering-rules-verbatim.md, CLAUDE.md §Coding style) and the docs/process/reviewer-prompt.md check that enforces it. Those companion process changes (items 3–4 of the 2026-06-24 design discussion) land as separate `process:` commits — they are pure-doc and bypass the ticket flow — not in this code ticket. This ticket should be started AFTER the rule lands so the implementer converts against an agreed standard."
   - "(B) pure audit/record writes and Flyway DDL `DEFAULT now()` — left on the DB clock (the system-of-record convention). Converting them would diverge timestamp authorship from the rest of the schema for no testability gain. See acceptance item 3."
@@ -32,11 +33,36 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 589
+      removed: 21
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-25
+    verdict: CLEAN
+    base: f7c886cc7db0301d665e58ab0ed2ecfc2aed0660
+    head: "working-tree (uncommitted on m1/M1-447-make-decision-logic-time-injec)"
+    verdict_file: docs/plan/m1/redteam/M1-447-2026-06-25.md
+    out_of_model_count: 0
+    note: |
+      In-progress audit after code-reviewer APPROVE, before commit. CLEAN — the
+      injectable-Clock conversion preserves behaviour byte-for-byte under the
+      production Clock.systemUTC(); no security promise weakened. Nothing feeds
+      a remediation ticket.
 revisions:
   - date: 2026-06-24
     reason: |
@@ -71,7 +97,11 @@ escalations:
       test_plan.modifies: list enumerating which existing tests are extended and
       the new assertion, or (b) replace "gains or extends" with "gains" (new
       tests only) and capture any required extension as a modifies: entry.
-clarity_check: {}
+clarity_check:
+  date: 2026-06-24
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-447: Make decision-logic time injectable (sweep now() sites)

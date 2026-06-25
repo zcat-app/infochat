@@ -20,6 +20,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -57,6 +58,15 @@ public class AdminReviewTtlJob {
     @ConfigProperty(name = "infochat.reeval.ttl-batch-size", defaultValue = "32")
     int batchSize;
 
+    // The TTL cutoff comes from the injected Clock, never Instant.now(), so the
+    // auto-reject window is deterministic under a fixed test clock
+    // (QuarkusMock-installed in AdminReviewTtlJobClockIT) instead of depending
+    // on the wall-clock run date. The systemUTC() initializer matches the CDI
+    // producer (ThrottledAdminNotifier.systemUtcClock()); injection overrides it
+    // in the managed bean. (M1-447, pattern from M1-444 ReEvaluationJob)
+    @Inject
+    Clock clock = Clock.systemUTC();
+
     @Scheduled(every = "{infochat.reeval.ttl-poll-interval}",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void onTick() {
@@ -80,7 +90,7 @@ public class AdminReviewTtlJob {
     }
 
     List<TtlCandidate> enumerateExpired() throws SQLException {
-        Instant cutoff = Instant.now().minus(adminReviewTtl);
+        Instant cutoff = clock.instant().minus(adminReviewTtl);
         // No join on post: q.post_fetched_at is the denormalized copy of
         // p.fetched_at carried so TTL processing survives post-partition
         // drops — joining would silently exempt a dropped partition's
