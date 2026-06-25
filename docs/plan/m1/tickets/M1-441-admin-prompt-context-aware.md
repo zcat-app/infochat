@@ -1,7 +1,7 @@
 ---
 id: M1-441
 title: "Wizard bootstrap-admin prompt must not say 'optional' when it is the only adapter"
-status: pending
+status: done
 created: 2026-06-24
 last_updated: 2026-06-25
 blocked_by:
@@ -41,7 +41,20 @@ spec_refs:
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
   - docs/spec/deployment.md §Operator inputs
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 177
+      removed: 25
 escalations:
   - date: 2026-06-24
     reason: premise-fail
@@ -70,11 +83,27 @@ reopens:
     prior_deferred_on: M1-445
     reason: "Blockers M1-444 and M1-445 both landed (done); parked fix d7f9fe59 ready to cherry-pick."
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-25
+    verdict: CLEAN
+    base: main
+    head: m1/M1-441-admin-prompt-context-aware
+    verdict_file: docs/plan/m1/redteam/M1-441-2026-06-25.md
+    out_of_model_count: 2
+    note: |
+      In-progress audit (branch tip vs merge-base) between review APPROVE and
+      commit. CLEAN — no findings. The change only moves the single-adapter
+      bootstrap-admin requirement to prompt time with local feedback; the
+      load-bearing non-empty-union gate (6-adapter.sh:247) is unchanged and the
+      multi-adapter all-blank backstop test confirms it still fires. Two
+      out-of-model advisory notes (operator-facing tooling is outside the
+      adversary model; the union security property is strengthened not weakened)
+      — neither is a threat-model gap, neither warrants a follow-up ticket.
 clarity_check:
-  date: 2026-06-24
+  date: 2026-06-25
   verdict: WARN
   warnings:
-    - "ACCEPTANCE-RUNNABLE item 5 (SETUP_GUIDE.md check): criterion delegates pass/fail to the implementer's reading of whether existing wording implies the admin id is skippable. Resolved during the parked implementation: SETUP_GUIDE.md already presents the admin id as required-on-the-happy-path (line ~145 'You must provide at least one'; line ~248 a value to paste), so it is left unchanged per the criterion's own branch."
+    - "ACCEPTANCE-RUNNABLE item 5 (SETUP_GUIDE.md check): criterion's pass/fail is the implementer's reading of whether existing wording implies the admin id is skippable; it is opinion-gated rather than string-testable. Prior clarity_check (2026-06-24) already resolved this: SETUP_GUIDE.md already presents the admin id as required-on-the-happy-path (line ~145 'You must provide at least one'; line ~248 a value to paste), so it is left unchanged per the criterion's own branch."
   blockers: []
 ---
 

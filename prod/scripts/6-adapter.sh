@@ -102,26 +102,52 @@ dotenv_escape() {
   printf '%s' "$value"
 }
 
-# Collect an OPTIONAL per-adapter bootstrap-admin contact id into secrets.env.
-# Returns 0 when a contact ends up set for this adapter (whether captured now or
-# on a prior run), 1 when none is set — the caller tallies the union (§7.6.3).
+# Collect a per-adapter bootstrap-admin contact id into secrets.env. The third
+# arg is 1 when this is the ONLY enabled adapter: then a blank is guaranteed to
+# trip the union gate (below) seconds later, so the prompt is REQUIRED and a
+# blank re-prompts with the reason rather than being accepted as 'none' (M1-441).
+# With 2+ adapters the property stays optional per adapter (§7.6.3) — a blank is
+# legal here because another enabled adapter may supply the admin, and the union
+# gate is the backstop for the all-blank case. Returns 0 when a contact ends up
+# set for this adapter (captured now or on a prior run), 1 when none is set — the
+# caller tallies the union (§7.6.3).
 collect_admin() {
-  local key="$1" adapter="$2" val
+  local key="$1" adapter="$2" only_adapter="$3" val read_ok prompt
   if grep -qE "^${key}=.+" "$SECRETS_FILE"; then
     echo "skip ${key} (already set)"
     return 0
   fi
-  read -rp "Bootstrap admin contact id for ${adapter} (optional; blank for none): " val || true
-  if [[ -n "$val" ]]; then
-    # Quote the value: a SimpleX queue address carries '#' / '&' / '?' / '+' /
-    # '=' — unquoted, compose's --env-file dotenv parse would truncate it at '#'
-    # (M1-389), so the bootstrap-admin id reaching the Provider would be wrong.
-    printf '%s="%s"\n' "$key" "$(dotenv_escape "$val")" >> "$SECRETS_FILE"
-    echo "+ recorded ${key}"
-    return 0
+  if [[ "$only_adapter" -eq 1 ]]; then
+    prompt="Bootstrap admin contact id for ${adapter} (required — the only enabled adapter, so its admin is the deployment's sole admin; last-admin protection needs it)"
+  else
+    prompt="Bootstrap admin contact id for ${adapter} (at least one across enabled adapters is required; blank only if another enabled adapter supplies one)"
   fi
-  echo "  no bootstrap admin set for ${adapter}"
-  return 1
+  while true; do
+    if read -rp "$prompt: " val; then read_ok=1; else read_ok=0; fi
+    if [[ -n "$val" ]]; then
+      # Quote the value: a SimpleX queue address carries '#' / '&' / '?' / '+' /
+      # '=' — unquoted, compose's --env-file dotenv parse would truncate it at '#'
+      # (M1-389), so the bootstrap-admin id reaching the Provider would be wrong.
+      printf '%s="%s"\n' "$key" "$(dotenv_escape "$val")" >> "$SECRETS_FILE"
+      echo "+ recorded ${key}"
+      return 0
+    fi
+    if [[ "$only_adapter" -eq 1 ]]; then
+      # Required for the sole adapter. A blank with input still to come
+      # re-prompts; a blank because stdin hit EOF (Ctrl-D / exhausted) cannot
+      # re-prompt productively, so fail closed rather than spin — interactive
+      # input is a system boundary, so this guard belongs here.
+      if [[ "$read_ok" -eq 0 ]]; then
+        echo "FAIL: a bootstrap admin contact id is required for the only enabled adapter (${adapter})." >&2
+        exit 1
+      fi
+      echo "  Required: this is the only enabled adapter, so its bootstrap admin" >&2
+      echo "  is the deployment's sole admin (last-admin protection)." >&2
+      continue
+    fi
+    echo "  no bootstrap admin set for ${adapter}"
+    return 1
+  done
 }
 
 # ── Adapter selection ──────────────────────────────────────────────────
@@ -159,6 +185,11 @@ fi
 # gate passes (the keys the Provider actually reads — 06-messaging.md §6.4/§6.5,
 # ProductionAdapterBeans / SimpleXConfig / SignalConfig).
 admin_union=0
+# Required-vs-optional bootstrap-admin prompt keys off the enabled-adapter count:
+# with a single adapter its admin is the deployment's sole admin, so collect_admin
+# prompts it as required (M1-441); with 2+ it stays per-adapter optional (§7.6.3).
+only_adapter=0
+[[ "${#chosen[@]}" -eq 1 ]] && only_adapter=1
 simplex_binary=""
 simplex_data_dir=""
 simplex_ws_port=""
@@ -187,7 +218,7 @@ for adapter in "${chosen[@]}"; do
       # provisioning input, NOT runtime identity: the running adapter still derives
       # the bot contact id from simplex-chat at startup (§7.5) and never reads this.
       simplex_display_name="$(prompt_with_default "  SimpleX bot display name (the bot's profile name)" "infochat-bot")"
-      if collect_admin INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID simplex; then
+      if collect_admin INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID simplex "$only_adapter"; then
         admin_union=$((admin_union + 1))
       fi
       ;;
@@ -201,7 +232,7 @@ for adapter in "${chosen[@]}"; do
       signal_binary="$(prompt_with_default "  signal-cli binary path" "$DEFAULT_SIGNAL_BINARY")"
       signal_data_dir="$(prompt_with_default "  Signal data-dir (signal-cli account directory)" "$DEFAULT_SIGNAL_DATA_DIR")"
       signal_account="$(prompt_required "  Signal account (registered phone number, e.g. +15551234567)")"
-      if collect_admin INFOCHAT_SIGNAL_ADMIN_CONTACT_ID signal; then
+      if collect_admin INFOCHAT_SIGNAL_ADMIN_CONTACT_ID signal "$only_adapter"; then
         admin_union=$((admin_union + 1))
       fi
       ;;
