@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 483 |
 | deferred | 6 |
-| **total** | **490** |
+| **total** | **491** |
 
 ---
 
@@ -25,6 +25,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-454 — Make provider retrieval/freshness-window decision time injectable: convert six audit-missed inline Instant.now() gates (SearchPostsTool, ListSavesTool, EligiblePostQuery, SavedCommandHandler, DigestWorker, AssetSnapshotReader) (complexity: medium, risk: low)
+- M1-455 — Replace stray NUL-byte delimiter in adapterMessageId (complexity: low, risk: low)
 
 ---
 
@@ -653,4 +654,5 @@ M1-451 (done)
 M1-452 (done)
 M1-453 (done)
 M1-454 (pending) ← runnable
+M1-455 (pending) ← runnable
 ```
