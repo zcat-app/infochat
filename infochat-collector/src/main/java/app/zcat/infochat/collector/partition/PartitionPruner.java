@@ -13,6 +13,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
@@ -45,6 +46,14 @@ public class PartitionPruner {
     @io.quarkus.agroal.DataSource("owner")
     DataSource dataSource;
 
+    // The prune decision (retention cutoff + active-month floor guard) reads
+    // its instant from the injected Clock, not ambient Instant.now() /
+    // YearMonth.now(), so onTick is pinnable in tests (QuarkusMock-installed
+    // Clock.fixed). Production gets Clock.systemUTC() from the CDI producer;
+    // the initializer only covers hand-constructed instances. (M1-449, ref M1-444)
+    @Inject
+    Clock clock = Clock.systemUTC();
+
     @ConfigProperty(name = "infochat.partitions.retention-days.post")
     int postRetentionDays;
 
@@ -62,7 +71,13 @@ public class PartitionPruner {
 
     @Scheduled(every = "{infochat.partitions.prune-interval}")
     void onTick() {
-        pruneOnce(YearMonth.now(ZoneOffset.UTC), Instant.now());
+        // One Clock sample feeds both the active-month floor guard and the
+        // retention cutoff; deriving the UTC YearMonth from that same instant
+        // preserves the prior YearMonth.now(ZoneOffset.UTC) under the
+        // production systemUTC clock and cannot straddle a month boundary
+        // between two reads.
+        Instant now = clock.instant();
+        pruneOnce(YearMonth.from(now.atZone(ZoneOffset.UTC)), now);
     }
 
     // Clock-parameterized so tests can pin the active month and instant; the

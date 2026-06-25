@@ -10,6 +10,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -45,6 +46,14 @@ public class DigestRetryService {
     @Inject
     DigestWorker digestWorker;
 
+    // Per-group cooldown decision time comes from the injected Clock, not
+    // Instant.now(), so the retry-cooldown gate is pinnable in tests. The
+    // lastRetryAt write and the cooldown read both sample this one Clock — the
+    // M1-444 no-two-clock-split rule for a value the component reads back to
+    // gate a decision. (M1-449)
+    @Inject
+    Clock clock = Clock.systemUTC();
+
     @ConfigProperty(name = "infochat.digest.retry-cooldown", defaultValue = "PT2M")
     Duration retryCooldown;
 
@@ -61,7 +70,7 @@ public class DigestRetryService {
      */
     public RetryResult retryDigest(UUID groupId) {
         Instant last = lastRetryAt.get(groupId);
-        if (last != null && Instant.now().isBefore(last.plus(retryCooldown))) {
+        if (last != null && clock.instant().isBefore(last.plus(retryCooldown))) {
             return RetryResult.RATE_LIMITED;
         }
         if (inFlight.putIfAbsent(groupId, Boolean.TRUE) != null) {
@@ -84,7 +93,7 @@ public class DigestRetryService {
                 // intact (we never deleted it) and untouched by this retry.
                 return RetryResult.ALREADY_IN_PROGRESS;
             }
-            lastRetryAt.put(groupId, Instant.now());
+            lastRetryAt.put(groupId, clock.instant());
             return RetryResult.SUCCESS;
         } finally {
             inFlight.remove(groupId);

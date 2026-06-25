@@ -25,6 +25,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -133,6 +134,14 @@ public class FetchScheduler {
     @Inject
     DataSource dataSource;
 
+    // The per-kind tick-interval gate reads its instant from the injected
+    // Clock, not Instant.now(), so onTick is pinnable in tests. The single
+    // per-tick sample feeds both shouldTick's Duration.between gate and the
+    // lastTickByKind stamp, so the gate read and the stamp write never split
+    // across two clocks (M1-444). (M1-449)
+    @Inject
+    Clock clock = Clock.systemUTC();
+
     @Inject
     PostPersister postPersister;
 
@@ -201,7 +210,7 @@ public class FetchScheduler {
     @Scheduled(every = "{infochat.fetch.heartbeat-interval}",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void onTick() {
-        Instant now = Instant.now();
+        Instant now = clock.instant();
 
         // Which registered (bound) kinds are due this heartbeat? Built
         // from the in-memory fetcher map, so a fully-idle heartbeat issues

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 478 |
+| done | 479 |
 | deferred | 6 |
 | **total** | **486** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-448 — Make partition-scan worker time injectable (5 scan-window workers) (complexity: high, risk: medium)
-- M1-449 — Make scheduler/pruner decision time injectable (PartitionPruner, DigestRetryService, FetchScheduler) (complexity: medium, risk: medium)
 
 ---
 
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-450 | Move ProbationCheck onto the injected Clock (close the probation_until app/DB split) | 2026-06-25 | round 1 APPROVE |
+| M1-449 | Make scheduler/pruner decision time injectable (PartitionPruner, DigestRetryService, FetchScheduler) | 2026-06-25 | round 1 APPROVE |
 | M1-447 | Make decision-logic time injectable: classify all now() sites + convert security-timing trio | 2026-06-25 | round 1 APPROVE |
 | M1-446 | build: pin the Maven toolchain (wrapper) and add a non-empty-unit-suite tripwire so a silent test-skip can never recur | 2026-06-25 | round 1 APPROVE |
 | M1-445 | build: pin maven-surefire-plugin so the JUnit 5 unit suite actually runs (super-pom default 2.12.4 silently skips it) | 2026-06-25 | round 1 APPROVE |
@@ -70,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-441 | Wizard bootstrap-admin prompt must not say 'optional' when it is the only adapter | 2026-06-25 | round 1 APPROVE |
 | M1-444 | fix: make ReEvaluationJob's tick time an injectable Clock so the candidate-scan window (and its IT) are deterministic instead of wall-clock-dependent | 2026-06-24 | round 1 APPROVE |
 | M1-440 | Default adapter identity data-dir to the wizard-owned runtime dir | 2026-06-24 | round 1 APPROVE |
-| M1-439 | Aggregate, self-remediating preflight: report all unmet checks at once | 2026-06-24 | round 1 APPROVE |
 
 ---
 
@@ -648,6 +647,6 @@ M1-444 (done)
         └── M1-446 (done)
 M1-447 (done)
 M1-448 (pending) ← runnable
-M1-449 (pending) ← runnable
+M1-449 (done)
 M1-450 (done)
 ```
