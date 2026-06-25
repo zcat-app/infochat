@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 482 |
+| done | 483 |
 | deferred | 6 |
 | **total** | **490** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-453 — cleanup: single-pass SimpleX group-mention decode + drop redundant InMemoryAdapter finalized map + fix stale @NonNull pom comment (complexity: medium, risk: low)
 - M1-454 — Make provider retrieval/freshness-window decision time injectable: convert six audit-missed inline Instant.now() gates (SearchPostsTool, ListSavesTool, EligiblePostQuery, SavedCommandHandler, DigestWorker, AssetSnapshotReader) (complexity: medium, risk: low)
 
 ---
@@ -61,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-453 | cleanup: single-pass SimpleX group-mention decode + drop redundant InMemoryAdapter finalized map + fix stale @NonNull pom comment | 2026-06-25 | round 1 APPROVE |
 | M1-452 | Complete the collector's injectable-Clock migration: LinkingJob window cutoffs + NostrStreamSource since-cursor SQL floor (audit-missed sites) | 2026-06-25 | round 1 APPROVE |
 | M1-451 | Move probation-timing decision gates onto the injected Clock in InboundRouter / PromoteCommandHandler / VouchCommandHandler (close the audit-missed probation_until split) | 2026-06-25 | round 1 APPROVE |
 | M1-450 | Move ProbationCheck onto the injected Clock (close the probation_until app/DB split) | 2026-06-25 | round 1 APPROVE |
@@ -70,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-446 | build: pin the Maven toolchain (wrapper) and add a non-empty-unit-suite tripwire so a silent test-skip can never recur | 2026-06-25 | round 1 APPROVE |
 | M1-445 | build: pin maven-surefire-plugin so the JUnit 5 unit suite actually runs (super-pom default 2.12.4 silently skips it) | 2026-06-25 | round 1 APPROVE |
 | M1-443 | Embedding identity guard must adopt the configured model on first boot (no embeddings yet) instead of refusing | 2026-06-25 | round 1 APPROVE |
-| M1-442 | llama.cpp setup: GGUFs must land in the Compose-mounted volume and the pinned image must load the pinned model | 2026-06-25 | round 1 APPROVE |
 
 ---
 
@@ -652,6 +651,6 @@ M1-449 (done)
 M1-450 (done)
 M1-451 (done)
 M1-452 (done)
-M1-453 (pending) ← runnable
+M1-453 (done)
 M1-454 (pending) ← runnable
 ```

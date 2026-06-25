@@ -1,7 +1,7 @@
 ---
 id: M1-453
 title: "cleanup: single-pass SimpleX group-mention decode + drop redundant InMemoryAdapter finalized map + fix stale @NonNull pom comment"
-status: pending
+status: done
 created: 2026-06-25
 last_updated: 2026-06-25
 blocked_by: []
@@ -35,7 +35,20 @@ test_plan:
     - all tests currently green on main (notably the existing InMemoryAdapter finalize / double-finalize tests, unchanged)
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 188
+      removed: 78
 escalations: []
 revisions: []
 overrides: []

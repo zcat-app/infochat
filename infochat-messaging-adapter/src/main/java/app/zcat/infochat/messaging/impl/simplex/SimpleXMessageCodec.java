@@ -460,93 +460,95 @@ final class SimpleXMessageCodec {
                 return new OversizeDropped(
                         new ScopeRef.Group(adapterGroupId), senderContactId, adapterMessageId);
             }
-            List<String> mentions = extractMentionQueueAddresses(itemBody.get("formattedText"));
+            GroupMentions groupMentions = extractGroupMentions(itemBody.get("formattedText"), text);
             return new GroupCandidate(
                     adapterGroupId,
                     senderContactId,
                     senderDisplayName,
                     text,
-                    List.copyOf(mentions),
-                    extractMentionSpans(itemBody.get("formattedText"), text),
+                    groupMentions.addresses(),
+                    groupMentions.spans(),
                     adapterMessageId);
         });
     }
 
     /**
-     * Walk the {@code formattedText} array and collect every entry whose
-     * {@code format.type} is {@code "mention"}, returning the entries'
-     * {@code format.memberRef} queue address strings. Entries whose
-     * memberRef fails the queue-address validator are skipped (a peer
+     * Walk the untrusted {@code formattedText} array ONCE and produce both
+     * mention products the group path needs: the mention queue addresses
+     * (every entry whose {@code format.type} is {@code "mention"} and whose
+     * {@code format.memberRef} passes the queue-address validator) and the
+     * mention spans (each mention segment's [start, length) offset into
+     * {@code text}, so {@link SimpleXGroupHandler} can strip the bot's own
+     * mention before delivery). A null or non-array input yields both lists
+     * empty — the spec rule "no mentions → cannot mention the bot" is honored
+     * downstream. memberRef values failing the validator are skipped (a peer
      * cannot smuggle a forged command verb through the mention list).
-     * A null or non-array input returns the empty list — the spec rule
-     * "no mentions → cannot mention the bot" is honored downstream.
+     *
+     * <p><strong>Addresses and spans have independent fates.</strong>
+     * simplex-chat's {@code formattedText} decomposes {@code msgContent.text}:
+     * on real frames the concatenation of the segments' {@code text} fields
+     * equals the full text, which makes each segment's cumulative offset a
+     * valid index into it. The spans are trusted only when that reconstruction
+     * holds — every segment matches {@code text} at its computed position AND
+     * the segments cover the text exactly. A frame that fails the guard
+     * (degenerate or hostile — the wire is untrusted) yields an empty span
+     * list: no protocol span can be located and the handler delivers the text
+     * unstripped. Addresses are collected REGARDLESS of the span guard, so D10
+     * recognition survives a failed span reconstruction (the
+     * {@code SimpleXMessageCodec.java} address-survives-failed-span invariant,
+     * design §6.4.4). {@code spansValid} latches false on the first divergence
+     * and stops both span collection and the offset advance, while address
+     * collection ignores it and continues to the end of the array.</p>
      */
-    private static List<String> extractMentionQueueAddresses(@Nullable JsonNode formattedText) {
+    private static GroupMentions extractGroupMentions(@Nullable JsonNode formattedText,
+                                                      String text) {
         if (formattedText == null || !formattedText.isArray()) {
-            return List.of();
+            return new GroupMentions(List.of(), List.of());
         }
         List<String> mentions = new ArrayList<>();
-        for (JsonNode element : formattedText) {
-            JsonNode format = element.get("format");
-            if (format == null || !format.isObject()) {
-                continue;
-            }
-            if (!"mention".equals(optText(format, "type"))) {
-                continue;
-            }
-            String memberRef = optText(format, "memberRef");
-            if (memberRef == null || !isValidQueueAddressId(memberRef)) {
-                continue;
-            }
-            mentions.add(memberRef);
-        }
-        return mentions;
-    }
-
-    /**
-     * Compute the [start, length) span of every mention segment as an
-     * offset into {@code text}, so {@link SimpleXGroupHandler} can strip
-     * the bot's own mention before delivery. simplex-chat's
-     * {@code formattedText} decomposes {@code msgContent.text}: on real
-     * frames the concatenation of the segments' {@code text} fields
-     * equals the full text, which makes each segment's cumulative offset
-     * a valid index into it.
-     *
-     * <p>Reconstruction guard: the offsets are trusted only when every
-     * segment matches {@code text} at its computed position AND the
-     * segments cover the text exactly. A frame that fails the guard
-     * (degenerate or hostile — the wire is untrusted) yields the empty
-     * list: no protocol span can be located, the handler delivers the
-     * text unstripped, and D10 recognition (which reads the separate
-     * {@link #extractMentionQueueAddresses} list) is unaffected.</p>
-     */
-    private static List<MentionSpan> extractMentionSpans(@Nullable JsonNode formattedText,
-                                                         String text) {
-        if (formattedText == null || !formattedText.isArray()) {
-            return List.of();
-        }
         List<MentionSpan> spans = new ArrayList<>();
+        boolean spansValid = true;
         int offset = 0;
         for (JsonNode element : formattedText) {
             String segmentText = optText(element, "text");
-            if (segmentText == null
-                    || !text.regionMatches(offset, segmentText, 0, segmentText.length())) {
-                return List.of();
+            // First divergence between the segment concatenation and text voids
+            // every span (the guard latches), but NOT the addresses below.
+            if (spansValid && (segmentText == null
+                    || !text.regionMatches(offset, segmentText, 0, segmentText.length()))) {
+                spansValid = false;
             }
             JsonNode format = element.get("format");
             if (format != null && format.isObject()
                     && "mention".equals(optText(format, "type"))) {
                 String memberRef = optText(format, "memberRef");
                 if (memberRef != null && isValidQueueAddressId(memberRef)) {
-                    spans.add(new MentionSpan(memberRef, offset, segmentText.length()));
+                    mentions.add(memberRef);
+                    // segmentText is non-null whenever spansValid still holds
+                    // (the guard above latches false on a null segment); the
+                    // explicit re-check satisfies the nullness contract.
+                    if (spansValid && segmentText != null) {
+                        spans.add(new MentionSpan(memberRef, offset, segmentText.length()));
+                    }
                 }
             }
-            offset += segmentText.length();
+            if (spansValid && segmentText != null) {
+                offset += segmentText.length();
+            }
         }
         if (offset != text.length()) {
-            return List.of();
+            spansValid = false;
         }
-        return List.copyOf(spans);
+        return new GroupMentions(List.copyOf(mentions),
+                spansValid ? List.copyOf(spans) : List.of());
+    }
+
+    /**
+     * The two independent products of a single {@link #extractGroupMentions}
+     * walk: the mention queue {@code addresses} (collected for every valid
+     * mention) and the mention {@code spans} (populated only when the
+     * reconstruction guard holds). Both lists are already immutable copies.
+     */
+    private record GroupMentions(List<String> addresses, List<MentionSpan> spans) {
     }
 
     /**
@@ -838,7 +840,7 @@ final class SimpleXMessageCodec {
      * format, validated through {@link #isValidQueueAddressId}.
      *
      * <p>{@code mentionSpans} carries each mention segment's position
-     * inside {@code text} (see {@link #extractMentionSpans} for the
+     * inside {@code text} (see {@link #extractGroupMentions} for the
      * reconstruction guard) so the handler can strip the bot's own
      * mention before delivery. It may be empty even when
      * {@code mentionQueueAddresses} is not — recognition and stripping

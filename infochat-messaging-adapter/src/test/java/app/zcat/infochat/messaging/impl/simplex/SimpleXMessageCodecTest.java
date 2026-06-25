@@ -18,6 +18,7 @@ import app.zcat.infochat.messaging.ScopeRef;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 class SimpleXMessageCodecTest {
 
@@ -484,6 +485,114 @@ class SimpleXMessageCodecTest {
                 SimpleXMessageCodec.decode(frame),
                 "inbound text at exactly the cap must still be accepted");
         assertEquals(exact, inbound.message().text().getBytes(StandardCharsets.UTF_8).length);
+    }
+
+    // --- M1-453: single-pass group-mention decode preserves address/span independence ---
+
+    @Test
+    void groupMentionDecodeKeepsAddressesWhenSpanReconstructionSucceeds() {
+        // A group newChatItem whose formattedText segments concatenate to the
+        // full text exactly: span reconstruction SUCCEEDS, so the single-pass
+        // decode must yield BOTH the mention queue address AND its span. The
+        // mention segment "@alice" occupies [0, 6); " hello" is a plain
+        // non-mention tail that completes the coverage.
+        String frame = """
+                {
+                  "resp": {
+                    "type": "newChatItem",
+                    "chatItem": {
+                      "chatInfo": {
+                        "chatType": "group",
+                        "groupInfo": {"groupId": "group-1"}
+                      },
+                      "chatItem": {
+                        "itemId": "g-msg-1",
+                        "chatDir": {
+                          "groupMember": {
+                            "memberContactId": "sender-qaddr",
+                            "localDisplayName": "Sender"
+                          }
+                        },
+                        "content": {
+                          "msgContent": {
+                            "type": "text",
+                            "text": "@alice hello"
+                          }
+                        },
+                        "formattedText": [
+                          {"text": "@alice",
+                           "format": {"type": "mention", "memberRef": "alice-qaddr"}},
+                          {"text": " hello"}
+                        ]
+                      }
+                    }
+                  }
+                }
+                """;
+        var candidate = assertInstanceOf(
+                SimpleXMessageCodec.GroupCandidate.class,
+                SimpleXMessageCodec.decode(frame),
+                "a group newChatItem decodes as GroupCandidate");
+        assertEquals(List.of("alice-qaddr"), candidate.mentionQueueAddresses(),
+                "the mention queue address is collected");
+        assertEquals(1, candidate.mentionSpans().size(),
+                "span reconstruction succeeded, so the mention span is present");
+        SimpleXMessageCodec.MentionSpan span = candidate.mentionSpans().get(0);
+        assertEquals("alice-qaddr", span.queueAddress());
+        assertEquals(0, span.start(), "@alice begins at offset 0");
+        assertEquals(6, span.length(), "@alice is 6 chars long");
+    }
+
+    @Test
+    void groupMentionDecodeKeepsAddressesWhenSpanReconstructionFails() {
+        // Same mention element, but the formattedText segments do NOT cover the
+        // full text ("@alice hello" vs the longer "@alice hello world"): the
+        // coverage guard fails, so the spans are voided. The single-pass merge
+        // must STILL return the mention queue address — addresses and spans
+        // have independent fates (the address-survives-failed-span invariant,
+        // design §6.4.4). A pre-merge regression would have coupled the address
+        // list to the span guard and dropped the address here.
+        String frame = """
+                {
+                  "resp": {
+                    "type": "newChatItem",
+                    "chatItem": {
+                      "chatInfo": {
+                        "chatType": "group",
+                        "groupInfo": {"groupId": "group-1"}
+                      },
+                      "chatItem": {
+                        "itemId": "g-msg-2",
+                        "chatDir": {
+                          "groupMember": {
+                            "memberContactId": "sender-qaddr",
+                            "localDisplayName": "Sender"
+                          }
+                        },
+                        "content": {
+                          "msgContent": {
+                            "type": "text",
+                            "text": "@alice hello world"
+                          }
+                        },
+                        "formattedText": [
+                          {"text": "@alice",
+                           "format": {"type": "mention", "memberRef": "alice-qaddr"}},
+                          {"text": " hello"}
+                        ]
+                      }
+                    }
+                  }
+                }
+                """;
+        var candidate = assertInstanceOf(
+                SimpleXMessageCodec.GroupCandidate.class,
+                SimpleXMessageCodec.decode(frame),
+                "a group newChatItem decodes as GroupCandidate even with a failed span guard");
+        assertEquals(List.of("alice-qaddr"), candidate.mentionQueueAddresses(),
+                "the mention queue address survives the failed span reconstruction");
+        assertTrue(candidate.mentionSpans().isEmpty(),
+                "the coverage guard failed, so no spans are surfaced");
     }
 
     /** Render a Java String as a JSON string literal (with surrounding quotes). */

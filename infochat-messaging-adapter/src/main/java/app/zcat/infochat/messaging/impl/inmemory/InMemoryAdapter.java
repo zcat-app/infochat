@@ -20,7 +20,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -75,7 +74,6 @@ public final class InMemoryAdapter implements MessagingAdapter {
     private final List<OutboundMessage> sent = new CopyOnWriteArrayList<>();
     private final List<TypingEvent> typingEvents = new CopyOnWriteArrayList<>();
     private final Map<String, List<UpdateEvent>> history = new ConcurrentHashMap<>();
-    private final Map<String, Boolean> finalized = new ConcurrentHashMap<>();
     private final Map<String, Identity> knownIdentities = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> groups = new ConcurrentHashMap<>();
     private final List<MembershipEvent> membershipEvents = new CopyOnWriteArrayList<>();
@@ -145,7 +143,6 @@ public final class InMemoryAdapter implements MessagingAdapter {
     @Override
     public void finalizeMessage(MessageHandle handle, String body) throws MessagingException {
         requireKnownAndOpen(handle).add(new UpdateEvent(body, true));
-        finalized.put(handle.opaqueValue(), Boolean.TRUE);
     }
 
     @Override
@@ -338,7 +335,6 @@ public final class InMemoryAdapter implements MessagingAdapter {
         sent.clear();
         typingEvents.clear();
         history.clear();
-        finalized.clear();
         knownIdentities.clear();
         groups.clear();
         membershipEvents.clear();
@@ -351,19 +347,24 @@ public final class InMemoryAdapter implements MessagingAdapter {
         // the type system). Surface the misuse as a PERMANENT
         // MessagingException so the failure mode lines up with what
         // production adapters would raise for the same misuse.
-        if (!history.containsKey(handle.opaqueValue())) {
+        List<UpdateEvent> events = history.get(handle.opaqueValue());
+        if (events == null) {
             throw new MessagingException(
                     FailureCategory.PERMANENT,
                     "Unknown handle: " + handle.opaqueValue());
         }
-        if (Boolean.TRUE.equals(finalized.get(handle.opaqueValue()))) {
-            throw new MessagingException(
-                    FailureCategory.PERMANENT,
-                    "Handle already finalized: " + handle.opaqueValue());
+        // Finality is derived from the history list itself: finalizeMessage
+        // records its terminal edit as an isFinal=true UpdateEvent, so the
+        // list is the single source of truth for whether the handle is closed
+        // — no parallel finalized map to keep in step.
+        for (UpdateEvent event : events) {
+            if (event.isFinal()) {
+                throw new MessagingException(
+                        FailureCategory.PERMANENT,
+                        "Handle already finalized: " + handle.opaqueValue());
+            }
         }
-        // The containsKey check above guarantees a present history list, and
-        // the map never stores null values, so the get is non-null.
-        return Objects.requireNonNull(history.get(handle.opaqueValue()));
+        return events;
     }
 
     /** Update / finalize event recorded per handle in the order applied. */
