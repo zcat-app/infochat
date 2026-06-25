@@ -193,9 +193,9 @@
                  phases. The M1-007 umbrella IT (AllSpisLoadIT) lives here
                  because Provider transitively depends on all three new SPI
                  modules and is the right place to assert their cross-module
-                 visibility; surefire (which runs *Test) is unchanged.
-                 Version pinned to match the surefire pin from the Maven
-                 super POM so the two test phases stay aligned.
+                 visibility; surefire (which runs *Test) is unchanged here.
+                 Version pinned to match the surefire pin in the parent pom
+                 (M1-445) so the two test phases stay aligned.
             -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

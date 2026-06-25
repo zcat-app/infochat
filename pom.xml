@@ -189,6 +189,26 @@
                         </compilerArgs>
                     </configuration>
                 </plugin>
+                <!--
+                     maven-surefire-plugin: version pinned (M1-445) so the
+                     lifecycle-bound surefire:test execution in every module
+                     uses a JUnit-5-aware provider. WHY this must be pinned and
+                     not left to default: with no version supplied, surefire
+                     resolves to the Maven super-pom default, which on Maven
+                     3.8.x is 2.12.4 — a 2012 release predating the JUnit
+                     Platform. It discovers 0 @org.junit.jupiter.api.Test tests,
+                     prints `Tests run: 0`, and the build stays GREEN having run
+                     nothing — so the entire *Test unit suite was silently
+                     skipped. (failsafe is already pinned to a 3.x, so the *IT
+                     suite ran and masked the gap.) 3.5.4 matches the
+                     provider failsafe pin. Build-time plugin — no effect on
+                     shipped runtime artifacts.
+                -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.5.4</version>
+                </plugin>
             </plugins>
         </pluginManagement>
     </build>

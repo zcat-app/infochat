@@ -270,8 +270,10 @@
                  default lifecycle does not bind failsafe; without this
                  execution the integration-test/verify phases would skip
                  every IT and the file would be dead code on disk.
-                 Surefire (test phase) remains bound by the super-pom
-                 default and picks up *Test.java automatically.
+                 Surefire (test phase) runs *Test.java automatically; its
+                 version is pinned in the parent pom (M1-445) because the
+                 super-pom default on Maven 3.8.x is 2.12.4, which silently
+                 discovers 0 JUnit 5 tests.
                  systemPropertyVariables: same vertx.disableWebsockets
                  pin as the surefire stanza above — the Nostr ITs spin
                  up FakeNostrRelay next to a booted @QuarkusTest

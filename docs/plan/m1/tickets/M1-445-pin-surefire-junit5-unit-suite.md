@@ -1,12 +1,12 @@
 ---
 id: M1-445
 title: "build: pin maven-surefire-plugin so the JUnit 5 unit suite actually runs (super-pom default 2.12.4 silently skips it)"
-status: pending
+status: done
 created: 2026-06-24
-last_updated: 2026-06-24
+last_updated: 2026-06-25
 clarity_check:
-  date:
-  verdict:
+  date: 2026-06-25
+  verdict: PASS
   warnings: []
   blockers: []
 blocked_by:
@@ -38,7 +38,20 @@ test_plan:
     - "the ~1000 JUnit 5 unit tests that this pin ACTIVATES must all pass (verified 0 failures on 2026-06-24); if any fail, escalate — do not weaken them"
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 36
+      removed: 16
 escalations: []
 revisions: []
 overrides: []
