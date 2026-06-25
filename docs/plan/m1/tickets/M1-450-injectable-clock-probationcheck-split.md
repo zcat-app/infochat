@@ -1,7 +1,7 @@
 ---
 id: M1-450
 title: "Move ProbationCheck onto the injected Clock (close the probation_until app/DB split)"
-status: pending
+status: done
 created: 2026-06-25
 last_updated: 2026-06-25
 blocked_by: []
@@ -28,12 +28,47 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 150
+      removed: 18
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-25
+    verdict: CLEAN
+    base: main
+    head: m1/M1-450-injectable-clock-probationcheck-split
+    verdict_file: docs/plan/m1/redteam/M1-450-2026-06-25.md
+    out_of_model_count: 2
+    note: |
+      In-progress audit between review APPROVE and commit. No findings. Two
+      advisory out-of-model items: (1) ProbationCheck.clearIfPromoted's lazy-sweep
+      UPDATE still gates on SQL NOW() while inProbation now reads the injected
+      Clock — pre-existing §9 inline time, not introduced by this diff; (2)
+      InboundRouter step-5's hot-path probation gate still reads ambient
+      Instant.now() (InboundRouter.java ~666) — separate pre-existing §9 site in
+      the M1-447 migration backlog, correctly outside this ticket's read-only
+      scope. Both are engineering-rule (§9) determinism observations, not
+      threat-model gaps; neither blocks commit. Candidate follow-ups for the §9
+      migration backlog.
+clarity_check:
+  date: 2026-06-25
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-450: Move ProbationCheck onto the injected Clock (close the probation_until app/DB split)
