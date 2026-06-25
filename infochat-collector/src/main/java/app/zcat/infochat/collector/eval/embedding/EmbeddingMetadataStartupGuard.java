@@ -15,8 +15,10 @@ import java.util.Optional;
  * identity guard per {@code docs/spec/llm.md} §Embedding pipeline:
  * "On every startup the EmbeddingProvider reports its current
  * identifier and dimensionality; if either differs from the stored
- * row, startup is refused with a descriptive error referencing the
- * re-embed procedure."
+ * row <em>and embeddings already exist</em>, startup is refused with a
+ * descriptive error referencing the re-embed procedure." With no
+ * embeddings yet the guard adopts the configured identity instead — see
+ * {@link #evaluate} for the adopt-vs-enforce split.
  *
  * <h2>Why this guard exists</h2>
  * <p>Dimensionality mismatch silently corrupts cosine similarity
@@ -92,45 +94,72 @@ public class EmbeddingMetadataStartupGuard {
 
     @PostConstruct
     void onStartup() {
-        evaluate(dao.readSingleton(), configuredModel, configuredDimension, allowModelChange);
+        evaluate(dao.readSingleton(), configuredModel, configuredDimension, allowModelChange,
+            dao.hasEmbeddings());
     }
 
     /**
      * Apply the model-identity guard against a hand-supplied stored
-     * row + configured values. Package-private so {@code
-     * ReadyPromoterIT} can exercise both the fail-fast and the
-     * allow-model-change paths from a single @QuarkusTest @Test method
-     * without re-bootstrapping Quarkus. Production calls flow through
+     * row + configured values + the post_embedding-emptiness signal.
+     * Package-visible so {@code ReadyPromoterIT} can exercise the
+     * adopt-on-first-boot, fail-fast, allow-model-change, and no-op
+     * paths from a single @QuarkusTest @Test method without
+     * re-bootstrapping Quarkus. Production calls flow through
      * {@link #onStartup()} which delegates here after reading from
      * {@link EmbeddingMetadataDao} and {@link ConfigProperty}.
      *
-     * <p>Side effect on the allow-model-change path: this method
-     * invokes {@link EmbeddingMetadataDao#updateSingleton(String, int)}
-     * to rotate the singleton row. The test must read the stored row
-     * before AND after to assert the rotation actually fired.
+     * <p><strong>Adopt-vs-enforce (M1-443).</strong> The guard exists to
+     * stop a <em>mid-deployment</em> model change from mixing
+     * incompatible vectors in the fixed-width pgvector column. That
+     * hazard only exists once vectors are stored, so {@code hasEmbeddings}
+     * splits the behaviour: with <em>no</em> embeddings a model-identity
+     * mismatch is harmless — there is nothing to be incompatible with —
+     * so the guard ADOPTS the configured identity (rotates the singleton,
+     * no re-embed required) and starts. This is what makes the spec's
+     * "stored … on first use" ({@code docs/spec/llm.md} §Embedding
+     * pipeline) true for backends whose configured identifier differs
+     * from V11's seeded Ollama default (e.g. a llama.cpp deployment whose
+     * GGUF filename is its model identity). Once embeddings exist the
+     * original fatal refusal stands unless {@code allow-model-change=true}.
      *
-     * <p>Public so the cross-package test
-     * {@code ReadyPromoterIT} (in {@code app.zcat.infochat.collector.eval.ready})
-     * can drive both paths without re-bootstrapping Quarkus.
+     * <p>Side effect on the adopt and allow-model-change paths: this
+     * method invokes {@link EmbeddingMetadataDao#updateSingleton(String,
+     * int)} to rotate the singleton row. The test must read the stored
+     * row before AND after to assert the rotation actually fired.
      */
     public void evaluate(Optional<EmbeddingMetadataDao.Metadata> stored,
                          String configuredModelValue,
                          int configuredDimensionValue,
-                         boolean allowModelChangeValue) {
+                         boolean allowModelChangeValue,
+                         boolean hasEmbeddings) {
         if (stored.isEmpty()) {
-            // V11's seed INSERT should guarantee a row by the time
-            // this @Priority(125) guard runs (Flyway @Priority is
-            // earlier). An empty result here means a hand-cleaned
-            // DB or a future migration that removed the seed —
-            // either way the guard cannot make a safety
-            // determination, so refuse startup with a descriptive
-            // error.
-            String fatal = "EmbeddingMetadataStartupGuard: embedding_metadata is empty. "
-                + "V11 should seed one row at first Flyway run; ensure the migration "
-                + "has applied. Re-embed procedure: " + REEMBED_PROCEDURE_PATH
-                + ". Refusing Collector startup.";
-            LOG.fatal(fatal);
-            throw new EmbeddingModelMismatchException(fatal);
+            if (hasEmbeddings) {
+                // Embeddings exist but the identity row is gone — a
+                // hand-cleaned DB or a seed-removing migration. The
+                // model that produced the stored vectors is now
+                // unknowable, so the guard cannot prove the configured
+                // model matches them. This is the dangerous case the
+                // empty-singleton fatal branch always covered; it stays
+                // fatal, now gated on vectors actually existing.
+                String fatal = "EmbeddingMetadataStartupGuard: embedding_metadata is empty but "
+                    + "post_embedding is non-empty. The model identity of the already-stored "
+                    + "vectors is unknown, so the configured model cannot be proven compatible. "
+                    + "Re-embed procedure: " + REEMBED_PROCEDURE_PATH
+                    + ". Refusing Collector startup.";
+                LOG.fatal(fatal);
+                throw new EmbeddingModelMismatchException(fatal);
+            }
+            // No identity row and no vectors. V11 seeds a row at first
+            // Flyway run, so this state is reachable only via a
+            // hand-cleaned DB; with zero vectors there is nothing to
+            // protect, so permit startup. The identity is recorded on
+            // first use by the embedding pipeline.
+            LOG.warnf(
+                "EmbeddingMetadataStartupGuard: embedding_metadata is empty and post_embedding "
+                    + "has no rows — permitting startup; the configured identity "
+                    + "(model=%s dimension=%d) is recorded on first use.",
+                configuredModelValue, configuredDimensionValue);
+            return;
         }
 
         EmbeddingMetadataDao.Metadata storedMeta = stored.get();
@@ -140,6 +169,24 @@ public class EmbeddingMetadataStartupGuard {
             LOG.infof(
                 "EmbeddingMetadataStartupGuard: model identity OK (model=%s dimension=%d)",
                 storedMeta.modelIdentifier(), storedMeta.dimension());
+            return;
+        }
+
+        if (!hasEmbeddings) {
+            // First-boot adopt: the singleton holds V11's seeded default
+            // but the configured backend reports a different identity,
+            // and no vectors exist yet. Rotate the singleton to the
+            // configured identity and start — nothing was embedded, so
+            // no re-embed is required. WARN (not INFO) so the recorded
+            // identity is visible in the operator log.
+            LOG.warnf(
+                "EmbeddingMetadataStartupGuard: recording embedding model identity on first use — "
+                    + "rotating embedding_metadata: old=(model=%s dimension=%d) → "
+                    + "new=(model=%s dimension=%d). post_embedding is empty, so no re-embed "
+                    + "is required.",
+                storedMeta.modelIdentifier(), storedMeta.dimension(),
+                configuredModelValue, configuredDimensionValue);
+            dao.updateSingleton(configuredModelValue, configuredDimensionValue);
             return;
         }
 

@@ -24,9 +24,10 @@ import java.util.Optional;
  *       so the row exists before this Dao runs).</li>
  *   <li>{@link #updateSingleton(String, int)} rotates the row to a
  *       new {@code (model_identifier, dimension)} pair AND advances
- *       {@code updated_at} via {@code now()}. Used ONLY by the
- *       operator-override path in {@link EmbeddingMetadataStartupGuard};
- *       the steady-state production path is read-only.</li>
+ *       {@code updated_at} via {@code now()}. Used by the
+ *       first-boot adopt and operator-override paths in
+ *       {@link EmbeddingMetadataStartupGuard}; the steady-state
+ *       production path is read-only.</li>
  * </ul>
  *
  * <p>V11's seed INSERT is the only other write — it lives in a
@@ -92,6 +93,27 @@ public class EmbeddingMetadataDao {
         } catch (SQLException e) {
             throw new IllegalStateException(
                 "EmbeddingMetadataDao: update of embedding_metadata failed", e);
+        }
+    }
+
+    /**
+     * Whether any embedding vector has been stored yet. The startup
+     * guard uses this to choose adopt-vs-enforce: with zero stored
+     * vectors a model-identity mismatch is harmless (there is nothing
+     * to be incompatible with), so the guard adopts the configured
+     * identity instead of refusing startup. Read at the same SQL
+     * deserialization boundary as {@link #readSingleton()}.
+     */
+    public boolean hasEmbeddings() {
+        final String sql = "SELECT EXISTS (SELECT 1 FROM post_embedding)";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            rs.next();
+            return rs.getBoolean(1);
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                "EmbeddingMetadataDao: read of post_embedding emptiness failed", e);
         }
     }
 

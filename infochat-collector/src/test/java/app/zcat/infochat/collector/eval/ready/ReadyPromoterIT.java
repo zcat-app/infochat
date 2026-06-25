@@ -52,14 +52,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <h2>Startup model identity guard</h2>
  *
- * <p>The fifth scenario exercises both the fail-fast and the
- * allow-model-change paths of {@link EmbeddingMetadataStartupGuard}
- * by invoking the package-private {@link
- * EmbeddingMetadataStartupGuard#evaluate} method directly with
- * hand-crafted stored vs configured pairs. The production
- * @PostConstruct delegates to the same method, so the contract under
- * test is identical; the IT avoids needing a separate Quarkus boot
- * per scenario.
+ * <p>The fifth scenario exercises the adopt-on-first-boot,
+ * fail-fast-with-vectors, allow-model-change, and identity-match paths
+ * of {@link EmbeddingMetadataStartupGuard} by invoking the
+ * package-visible {@link EmbeddingMetadataStartupGuard#evaluate} method
+ * directly with hand-crafted stored vs configured pairs and an explicit
+ * post_embedding-emptiness signal. The production @PostConstruct
+ * delegates to the same method, so the contract under test is
+ * identical; the IT avoids needing a separate Quarkus boot per
+ * scenario.
  */
 @QuarkusTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -217,11 +218,11 @@ class ReadyPromoterIT {
         assertNotNull(snap.readyAt);
     }
 
-    // ---------- 5. startup model identity guard — fail-fast AND allow-model-change paths ----------
+    // ---------- 5. startup model identity guard — adopt-on-first-boot, refuse-with-vectors, override-rotate, match-noop ----------
 
     @Test
     @Order(5)
-    void startupModelIdentityGuardFailsOnMismatchAndRotatesOnOverride() throws Exception {
+    void startupModelIdentityGuardAdoptsOnFirstBootButRefusesOnceVectorsExist() throws Exception {
         // Capture the seed row so we can restore it after the test
         // (other ITs depend on the canonical 'nomic-embed-text'/768
         // singleton).
@@ -231,14 +232,32 @@ class ReadyPromoterIT {
             metadataDao.updateSingleton("alpha", 768);
             Optional<EmbeddingMetadataDao.Metadata> storedAlpha = metadataDao.readSingleton();
 
-            // Fail-fast path: configured=(beta, 768), allow=false.
-            // Exception message MUST mention both 'alpha' and 'beta'
-            // per the spec's "descriptive error referencing the
-            // re-embed procedure".
+            // (a) First boot — post_embedding empty + mismatch → ADOPT.
+            // The guard rotates the singleton to the configured identity
+            // and returns normally (no re-embed required; nothing is
+            // embedded yet). This is the M1-443 fix: a llama.cpp / remote
+            // backend whose configured identity differs from V11's seeded
+            // Ollama default can now start a fresh DB.
+            startupGuard.evaluate(storedAlpha, "beta", 768, false, /* hasEmbeddings */ false);
+            EmbeddingMetadataDao.Metadata afterAdopt = metadataDao.readSingleton().orElseThrow();
+            assertEquals("beta", afterAdopt.modelIdentifier(),
+                "first-boot adopt must rotate model_identifier to the configured value");
+            assertEquals(768, afterAdopt.dimension(),
+                "first-boot adopt must apply the configured dimension");
+
+            // Reset the singleton to 'alpha' for the with-vectors cases.
+            metadataDao.updateSingleton("alpha", 768);
+            Optional<EmbeddingMetadataDao.Metadata> storedAlphaAgain = metadataDao.readSingleton();
+
+            // (b) Vectors exist + mismatch + allow=false → fatal. The
+            // exception message MUST name both 'alpha' and 'beta' per the
+            // spec's "descriptive error referencing the re-embed
+            // procedure". This is the original protection, now scoped to
+            // the case real vectors exist.
             EmbeddingMetadataStartupGuard.EmbeddingModelMismatchException ex = assertThrows(
                 EmbeddingMetadataStartupGuard.EmbeddingModelMismatchException.class,
-                () -> startupGuard.evaluate(storedAlpha, "beta", 768, false),
-                "mismatch with allow=false must throw");
+                () -> startupGuard.evaluate(storedAlphaAgain, "beta", 768, false, /* hasEmbeddings */ true),
+                "mismatch with existing vectors and allow=false must throw");
             assertTrue(ex.getMessage().contains("alpha"),
                 "error must name the stored model 'alpha': " + ex.getMessage());
             assertTrue(ex.getMessage().contains("beta"),
@@ -249,14 +268,37 @@ class ReadyPromoterIT {
             assertEquals("alpha", afterFail.modelIdentifier(),
                 "fail-fast path must NOT rotate embedding_metadata");
 
-            // Allow-model-change path: same mismatch, allow=true.
+            // (c) Vectors exist + mismatch + allow=true → rotate + WARN.
             // The guard rotates the singleton AND returns normally.
-            startupGuard.evaluate(storedAlpha, "beta", 768, true);
+            startupGuard.evaluate(storedAlphaAgain, "beta", 768, true, /* hasEmbeddings */ true);
             EmbeddingMetadataDao.Metadata afterOverride = metadataDao.readSingleton().orElseThrow();
             assertEquals("beta", afterOverride.modelIdentifier(),
                 "allow-model-change path must rotate model_identifier");
             assertEquals(768, afterOverride.dimension(),
                 "allow-model-change path must apply the configured dimension");
+
+            // (d) Identity match → no-op (no throw, no rotation), whether
+            // or not vectors exist.
+            Optional<EmbeddingMetadataDao.Metadata> storedBeta = metadataDao.readSingleton();
+            startupGuard.evaluate(storedBeta, "beta", 768, false, /* hasEmbeddings */ true);
+            EmbeddingMetadataDao.Metadata afterNoop = metadataDao.readSingleton().orElseThrow();
+            assertEquals("beta", afterNoop.modelIdentifier(),
+                "identity match must be a no-op (no rotation)");
+            assertEquals(768, afterNoop.dimension(),
+                "identity match must leave the dimension unchanged");
+
+            // Empty-singleton gating (acceptance item 2 parenthetical):
+            // the absent-row fatal branch is now gated on vectors
+            // existing. Pass Optional.empty() directly — no fixture
+            // teardown needed since neither sub-case rotates the row.
+            //   - no vectors → permit startup (the row is recorded on
+            //     first use; nothing to protect).
+            startupGuard.evaluate(Optional.empty(), "beta", 768, false, /* hasEmbeddings */ false);
+            //   - vectors exist → fatal (hand-cleaned DB: stored vectors
+            //     of unknown identity).
+            assertThrows(EmbeddingMetadataStartupGuard.EmbeddingModelMismatchException.class,
+                () -> startupGuard.evaluate(Optional.empty(), "beta", 768, false, /* hasEmbeddings */ true),
+                "empty singleton with existing vectors must stay fatal");
         } finally {
             metadataDao.updateSingleton(original.modelIdentifier(), original.dimension());
         }

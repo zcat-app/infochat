@@ -202,11 +202,17 @@ Adding a fallback chain is a v2 candidate.
 - **Model identity guard.** The active embedding model's identifier and
   vector dimensionality are stored in a singleton metadata row on first
   use. On every startup the `EmbeddingProvider` reports its current
-  identifier and dimensionality; if either differs from the stored row,
-  startup is refused with a descriptive error referencing the re-embed
-  procedure. An explicit operator override flag bypasses the check for
-  intentional migration runs; its property key and semantics are in design
-  notes.
+  identifier and dimensionality; if either differs from the stored row
+  **and embeddings already exist**, startup is refused with a descriptive
+  error referencing the re-embed procedure. With **no embeddings stored
+  yet** there is nothing incompatible to protect, so on a mismatch the
+  guard instead **adopts** the configured identity — it records it in the
+  singleton row and starts, no re-embed required. This is what makes
+  "stored … on first use" true for a backend whose configured identifier
+  differs from the seeded default (e.g. a llama.cpp deployment whose GGUF
+  filename is its model identity). An explicit operator override flag
+  bypasses the with-embeddings refusal for intentional migration runs; its
+  property key and semantics are in design notes.
 - **Dimensionality mismatch at runtime is fatal.** Storing vectors of mixed
   dimensions in the same pgvector column silently corrupts cosine similarity
   scores. The only safe recovery is a full re-embed.

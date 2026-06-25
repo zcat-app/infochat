@@ -1,9 +1,9 @@
 ---
 id: M1-443
 title: "Embedding identity guard must adopt the configured model on first boot (no embeddings yet) instead of refusing"
-status: pending
+status: done
 created: 2026-06-24
-last_updated: 2026-06-24
+last_updated: 2026-06-25
 blocked_by: []
 files_budget: 5
 files_scope:
@@ -39,15 +39,29 @@ spec_refs:
   - docs/spec/llm.md §Embedding pipeline
   - docs/design/02-schema.md §2.8 Embedding model migration
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 181
+      removed: 65
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
 clarity_check:
-  date:
-  verdict:
-  warnings: []
+  date: 2026-06-25
+  verdict: WARN
+  warnings:
+    - "TEST-CHANGES-AUTHORIZED: existing ReadyPromoterIT call sites change when evaluate() gains a boolean hasEmbeddings parameter; recommend a test_plan.modifies: entry. Info already present in acceptance item 4 — structural-location-only, non-blocking."
   blockers: []
 ---
 
