@@ -605,13 +605,21 @@ public final class NostrStreamSource implements StreamSource {
 
         private OptionalLong maxPublishedAtEpochSeconds(UUID sourceUuid, boolean boundedToScanWindow) {
             final String sql = boundedToScanWindow
-                ? "SELECT MAX(published_at) FROM post WHERE source_id = ? AND fetched_at >= now() - ?::INTERVAL"
+                ? "SELECT MAX(published_at) FROM post WHERE source_id = ? AND fetched_at >= ?"
                 : "SELECT MAX(published_at) FROM post WHERE source_id = ?";
             try (Connection conn = dataSource.getConnection();
                  PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setObject(1, sourceUuid);
                 if (boundedToScanWindow) {
-                    ps.setString(2, (postRetentionDays + PartitionScan.PARTITION_SCAN_SLACK.toDays()) + " days");
+                    // App-clock floor bound from the injected Clock instead of an
+                    // in-SQL time read: this scanner already injects the Clock for
+                    // every other time read, so binding the partition-pruning floor
+                    // from clock.instant() keeps the whole component on one clock
+                    // (no app-vs-DB split, §9 / M1-452). Same whole-day (retention +
+                    // slack) arithmetic the INTERVAL expressed, so the floor is
+                    // byte-for-byte preserved under Clock.systemUTC().
+                    ps.setTimestamp(2, Timestamp.from(clock.instant().minus(
+                        Duration.ofDays(postRetentionDays + PartitionScan.PARTITION_SCAN_SLACK.toDays()))));
                 }
                 try (ResultSet rs = ps.executeQuery()) {
                     if (rs.next()) {

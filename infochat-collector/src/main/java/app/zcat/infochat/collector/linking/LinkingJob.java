@@ -16,6 +16,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -119,6 +120,18 @@ public class LinkingJob {
     @Inject
     DataSource dataSource;
 
+    // All four decision-gating window cutoffs (driving-set scan, entity-candidate
+    // window + dedup, semantic lookback + semantic-window) read this injected
+    // Clock rather than an ambient wall-clock or in-SQL time source, so the windows
+    // are pinnable under a fixed test clock and the job is never split across two
+    // clocks (§9 / M1-452). onTick() samples the instant ONCE and threads it into all
+    // four cutoffs so a single tick cannot straddle two instants. The systemUTC()
+    // initializer is what the CDI producer supplies; injection overrides it in the
+    // managed bean and it only takes effect for hand-constructed instances. Mirrors
+    // ReEvaluationJob (M1-444).
+    @Inject
+    Clock clock = Clock.systemUTC();
+
     @ConfigProperty(name = "infochat.linking.lookback-days")
     int lookbackDays;
 
@@ -139,16 +152,20 @@ public class LinkingJob {
     @Scheduled(every = "{infochat.linking.interval}",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void onTick() {
+        // Sample the tick instant once; every window cutoff this pass evaluates
+        // is decided against it, so the driving-set scan and each post's
+        // entity/semantic windows cannot straddle two instants.
+        Instant now = clock.instant();
         List<DrivingPost> driving;
         try {
-            driving = enumerateDriving(DRIVING_BATCH_SIZE);
+            driving = enumerateDriving(DRIVING_BATCH_SIZE, now);
         } catch (SQLException e) {
             SafeLog.warn(LOG, "LinkingJob: failed to enumerate driving posts; skipping tick", e);
             return;
         }
         for (DrivingPost d : driving) {
             try {
-                processOne(d);
+                processOne(d, now);
             } catch (RuntimeException e) {
                 SafeLog.warn(LOG,
                     "LinkingJob: processing failed for post_id=" + d.id() + "; will retry next tick",
@@ -167,7 +184,17 @@ public class LinkingJob {
      * capping the work one revived tick processes.
      */
     List<DrivingPost> enumerateDriving(int limit) throws SQLException {
-        Instant cutoff = Instant.now().minus(Duration.ofDays(lookbackDays));
+        return enumerateDriving(limit, clock.instant());
+    }
+
+    /**
+     * Driving-set query against an explicit instant. {@link #onTick} threads
+     * the once-sampled tick instant here so the scan window cannot straddle the
+     * per-post entity/semantic windows; the {@code (int)} overload above samples
+     * the injected {@code Clock} for callers (tests) that drive this path directly.
+     */
+    List<DrivingPost> enumerateDriving(int limit, Instant now) throws SQLException {
+        Instant cutoff = now.minus(Duration.ofDays(lookbackDays));
         final String sql =
             "SELECT id, fetched_at "
                 + "  FROM post "
@@ -199,9 +226,19 @@ public class LinkingJob {
      * without waiting on the scheduler.
      */
     void processOne(DrivingPost driving) {
+        processOne(driving, clock.instant());
+    }
+
+    /**
+     * Process one driving post against an explicit instant. {@link #onTick}
+     * passes the once-sampled tick instant so the entity and semantic windows
+     * are decided against the same instant; the {@code (DrivingPost)} overload
+     * above samples the injected {@code Clock} for tests driving this path directly.
+     */
+    void processOne(DrivingPost driving, Instant now) {
         TransactionHelper.inTransaction(dataSource, "LinkingJob", conn -> {
-            List<Candidate> entityCandidates = findEntityCandidates(conn, driving);
-            List<Candidate> semanticCandidates = findSemanticCandidates(conn, driving);
+            List<Candidate> entityCandidates = findEntityCandidates(conn, driving, now);
+            List<Candidate> semanticCandidates = findSemanticCandidates(conn, driving, now);
             insertBidirectional(conn, driving, "entity", entityCandidates);
             insertBidirectional(conn, driving, "semantic", semanticCandidates);
             advanceLastLinkedAt(conn, driving);
@@ -216,8 +253,8 @@ public class LinkingJob {
      * lookback window do not write duplicate logical edges. The LIMIT
      * applies the per-link-type outbound cap.
      */
-    List<Candidate> findEntityCandidates(Connection conn, DrivingPost driving) throws SQLException {
-        Instant cutoff = Instant.now().minus(Duration.ofDays(lookbackDays));
+    List<Candidate> findEntityCandidates(Connection conn, DrivingPost driving, Instant now) throws SQLException {
+        Instant cutoff = now.minus(Duration.ofDays(lookbackDays));
         final String sql =
             "SELECT pe2.post_id, COUNT(*) AS shared_count "
                 + "  FROM post_entity pe1 "
@@ -282,12 +319,24 @@ public class LinkingJob {
      * LinkingJobTest.noEmbedding_semanticSkipped_entityStillWorks.
      */
     List<Candidate> findSemanticCandidates(Connection conn, DrivingPost driving) throws SQLException {
+        return findSemanticCandidates(conn, driving, clock.instant());
+    }
+
+    /**
+     * Semantic-match candidate query against an explicit instant. Both the
+     * lookback-dedup cutoff and the semantic-window cutoff derive from the one
+     * {@code now} {@link #onTick} sampled, so the two cutoffs cannot straddle two
+     * instants (the intra-method skew the prior pair of ambient wall-clock reads
+     * carried — M1-452). The {@code (Connection, DrivingPost)} overload above
+     * samples the injected {@code Clock} for tests driving this path directly.
+     */
+    List<Candidate> findSemanticCandidates(Connection conn, DrivingPost driving, Instant now) throws SQLException {
         String drivingVector = readDrivingEmbedding(conn, driving);
         if (drivingVector == null) {
             return List.of();
         }
-        Instant lookbackCutoff = Instant.now().minus(Duration.ofDays(lookbackDays));
-        Instant semanticCutoff = Instant.now().minus(Duration.ofHours(semanticWindowHours));
+        Instant lookbackCutoff = now.minus(Duration.ofDays(lookbackDays));
+        Instant semanticCutoff = now.minus(Duration.ofHours(semanticWindowHours));
         final String sql =
             "SELECT post_id, distance "
                 + "  FROM ( "
