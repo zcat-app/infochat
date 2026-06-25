@@ -1,6 +1,6 @@
 ---
 name: m1-tick
-description: Drive the M1 ticket workflow — pick the next runnable ticket, start work on a branch, run review via the code-reviewer subagent, commit on approval, or surface the five-way escalation menu when a round cap or trigger fires. Use when the user invokes `/m1-tick <subcommand>` (next | start <id> | review <id> | commit <id> | merge <id> | escalate <id> | abort <id> | show <id> | reopen <id> | status). For adversarial security review, see the separate `/redteam` skill.
+description: Drive the M1 ticket workflow — pick the next runnable ticket, start work on a branch, run review via the code-reviewer subagent, commit on approval, or surface the five-way escalation menu when a round cap or trigger fires. Use when the user invokes `/m1-tick <subcommand>` (run [id] | next | start <id> | review <id> | commit <id> | merge <id> | escalate <id> | abort <id> | show <id> | reopen <id> | status). `run` drives one ticket through the whole cycle unattended, stopping only at human-owned gates. For adversarial security review, see the separate `/redteam` skill.
 ---
 
 # /m1-tick — M1 ticket workflow
@@ -23,6 +23,7 @@ Dispatch table:
 
 | User invocation | Procedure file |
 |---|---|
+| `/m1-tick run [id]` | [`.claude/skills/m1-tick/subcommands/run.md`](subcommands/run.md) — drive one ticket through the full cycle (start → implement → review → redteam → commit → merge), stopping only at human-owned gates; orchestrates the other subcommands |
 | `/m1-tick next` (or empty) | [`.claude/skills/m1-tick/subcommands/next.md`](subcommands/next.md) — list runnable tickets |
 | `/m1-tick start <id>` | [`.claude/skills/m1-tick/subcommands/start.md`](subcommands/start.md) — begin work on a ticket |
 | `/m1-tick start <id> --parallel` | [`.claude/skills/m1-tick/subcommands/start.md`](subcommands/start.md) — start in a worktree |
