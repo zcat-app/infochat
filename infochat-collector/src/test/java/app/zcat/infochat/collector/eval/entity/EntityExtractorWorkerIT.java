@@ -1,10 +1,13 @@
 package app.zcat.infochat.collector.eval.entity;
 
+import app.zcat.infochat.collector.eval.PartitionScan;
 import app.zcat.infochat.collector.eval.testing.StubLlmProvider;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.llm.LlmProvider;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -13,12 +16,16 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -33,12 +40,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @QuarkusTest
 class EntityExtractorWorkerIT {
 
-    // now()-relative so the seeded post always sits inside enumeratePending's
-    // fetched_at >= now() - (retention + slack) scan-window floor regardless of
-    // the wall-clock date the suite runs; a fixed date ages out below the floor
-    // and the pickup assertion starts failing (M1-400). Matches the in-window
-    // seed convention in ReEvaluationJobWindowTest.
-    private static final Instant FETCHED_AT = Instant.now();
+    // A FIXED instant the scan-window pickup reads via the injected Clock
+    // (pinned in reset()). Replaces the former Instant.now() pin (M1-400): the
+    // injected Clock now makes the pickup-floor boundary deterministic, so a
+    // fixed in-window fetched_at can no longer age out below the floor.
+    private static final Instant PINNED_NOW = Instant.parse("2026-06-20T12:00:00Z");
+    // In-window fetched_at: above the PINNED_NOW − (retention + slack) floor and
+    // inside the June 2026 post partition.
+    private static final Instant FETCHED_AT = Instant.parse("2026-06-19T10:00:00Z");
     private static final String UID_PREFIX = "entity-it/";
 
     @Inject
@@ -51,12 +60,22 @@ class EntityExtractorWorkerIT {
     @Inject
     LlmProvider llmProvider;
 
+    // The post retention horizon driving the scan window
+    // (retention + PARTITION_SCAN_SLACK); read so the below-floor seed is
+    // computed exactly as the production floor is.
+    @ConfigProperty(name = "infochat.partitions.retention-days.post")
+    int postRetentionDays;
+
     private StubLlmProvider stub() {
         return (StubLlmProvider) llmProvider;
     }
 
     @BeforeEach
     void reset() throws Exception {
+        // Pin the injected Clock the scan-window pickup reads so the boundary is
+        // deterministic; same QuarkusMock seam ThrottledAdminNotifier's Clock
+        // producer documents (M1-444).
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
         stub().reset();
         clearItData();
     }
@@ -66,15 +85,27 @@ class EntityExtractorWorkerIT {
         stub().setNextResponse(
             "[{\"text\":\"Log4Shell\",\"type\":\"product\"},"
                 + "{\"text\":\"CVE-2021-44228\",\"type\":\"cve\"}]");
-        UUID postId = seedPickupReadyPost("e2e");
+        UUID postId = seedPickupReadyPost("e2e", FETCHED_AT);
+        // A pickup-ready post one day BELOW the scan-window floor
+        // (PINNED_NOW − (retention + slack)) must be excluded — the
+        // deterministic boundary assertion against the injected instant.
+        Instant floor = PINNED_NOW.minus(
+            Duration.ofDays(postRetentionDays + PartitionScan.PARTITION_SCAN_SLACK.toDays()));
+        UUID belowFloorId = seedPickupReadyPost("below-floor", floor.minus(Duration.ofDays(1)));
 
-        // Exercise the real pickup filter: the seeded post must be
+        // Exercise the real pickup filter: the in-window post must be
         // enumerated (status='RAW' AND tagger_done=TRUE AND
-        // entity_done=FALSE), then processed end-to-end.
-        EntityExtractorWorker.PostRow row = entityExtractorWorker.enumeratePending(64).stream()
+        // entity_done=FALSE) and the below-floor post excluded, then the
+        // in-window post processed end-to-end.
+        List<EntityExtractorWorker.PostRow> pending = entityExtractorWorker.enumeratePending(64);
+        assertFalse(pending.stream().anyMatch(r -> r.id().equals(belowFloorId)),
+            "post fetched below PINNED_NOW − (retention + slack) must NOT be picked up — the "
+                + "scan-window floor reads the injected Clock, so a fixed clock makes the boundary "
+                + "deterministic");
+        EntityExtractorWorker.PostRow row = pending.stream()
             .filter(r -> r.id().equals(postId))
             .findFirst()
-            .orElseThrow(() -> new AssertionError("seeded post must be picked up by enumeratePending"));
+            .orElseThrow(() -> new AssertionError("seeded in-window post must be picked up by enumeratePending"));
 
         entityExtractorWorker.processOne(row);
 
@@ -96,7 +127,7 @@ class EntityExtractorWorkerIT {
 
     // ---------- helpers ----------
 
-    private UUID seedPickupReadyPost(String slug) throws Exception {
+    private UUID seedPickupReadyPost(String slug, Instant fetchedAt) throws Exception {
         UUID sourceId = seedSource(slug);
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -114,7 +145,7 @@ class EntityExtractorWorkerIT {
             ps.setString(1, UID_PREFIX + slug);
             ps.setObject(2, sourceId);
             ps.setString(3, "entity-it-upstream-" + slug);
-            ps.setTimestamp(4, Timestamp.from(FETCHED_AT));
+            ps.setTimestamp(4, Timestamp.from(fetchedAt));
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return (UUID) rs.getObject(1);

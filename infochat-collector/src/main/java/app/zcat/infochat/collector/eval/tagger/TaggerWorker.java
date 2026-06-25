@@ -30,6 +30,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -181,6 +182,15 @@ public class TaggerWorker {
 
     @Inject
     PartitionScan partitionScan;
+
+    // The scan-window floor is computed in Java from the injected Clock and
+    // bound as a Timestamp (see enumeratePending), never SQL now(), so the
+    // pickup window can be pinned under a fixed test clock instead of a
+    // wall-clock-relative fixture that ages out (M1-448). The systemUTC()
+    // initializer is what the CDI producer supplies; injection overrides it in
+    // the managed bean, so it only takes effect for hand-constructed instances.
+    @Inject
+    Clock clock = Clock.systemUTC();
 
     @ConfigProperty(name = "infochat.llm.tagger.max-concurrency")
     int maxConcurrency;
@@ -500,9 +510,10 @@ public class TaggerWorker {
      * excludes quarantined posts ({@code status='RAW'} is the
      * load-bearing column) and posts already-processed
      * ({@code tagger_done=false}). The {@code fetched_at} floor
-     * ({@link PartitionScan#scanWindow()}) lets the planner prune
-     * partitions of the RANGE(fetched_at) post table. The ORDER BY
-     * makes the pickup deterministic against test fixtures.
+     * ({@link PartitionScan#scanWindowFloor(Instant)}, sampled from the
+     * injected Clock) lets the planner prune partitions of the
+     * RANGE(fetched_at) post table. The ORDER BY makes the pickup
+     * deterministic against test fixtures.
      */
     List<PostRow> enumeratePending(int limit) throws SQLException {
         final String sql =
@@ -514,13 +525,13 @@ public class TaggerWorker {
                 + "   AND p.stage1_done = TRUE "
                 + "   AND (p.stage1_flagged = FALSE OR p.stage2_done = TRUE) "
                 + "   AND p.tagger_done = FALSE "
-                + "   AND p.fetched_at >= now() - ?::INTERVAL "
+                + "   AND p.fetched_at >= ? "
                 + " ORDER BY p.fetched_at, p.id "
                 + " LIMIT ?";
         List<PostRow> rows = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, partitionScan.scanWindow());
+            ps.setTimestamp(1, Timestamp.from(partitionScan.scanWindowFloor(clock.instant())));
             ps.setInt(2, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {

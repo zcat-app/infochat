@@ -16,7 +16,10 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -52,6 +55,15 @@ public class PerSourceUnknownTracker {
     @Inject
     Event<SourceDisabled> sourceDisabledEvent;
 
+    // Both scan-window floors are computed in Java from one sample of the
+    // injected Clock and bound as Timestamps (see checkAllSources), never SQL
+    // now(), so the window can be pinned under a fixed test clock (M1-448). One
+    // sample feeds both the fetched_at and status_changed_at floors so they can
+    // never diverge (the no-split rule). The systemUTC() initializer is what
+    // the CDI producer supplies; injection overrides it in the managed bean.
+    @Inject
+    Clock clock = Clock.systemUTC();
+
     @ConfigProperty(name = "infochat.reeval.unknown-rate-threshold")
     double unknownRateThreshold;
 
@@ -86,6 +98,13 @@ public class PerSourceUnknownTracker {
         // slack must exceed the worst-case lag between a post's fetched_at and
         // its stage-2 verdict; status_changed_at stays the precise
         // recency-of-verdict signal the rate is computed over.
+        //
+        // Both floors are Java-computed from ONE sample of the injected Clock
+        // and bound as Timestamps (M1-448): a single sample feeds both so they
+        // share an instant, preserving the equality the two in-SQL now() calls
+        // gave them, and the window is pinnable under a fixed test clock.
+        // Seconds granularity matches the prior ?::INTERVAL seconds strings so
+        // the floors stay byte-for-byte under Clock.systemUTC().
         final String sql =
             "SELECT s.id, "
                 + "  COUNT(*) FILTER (WHERE p.stage2_verdict = 'UNKNOWN') AS unknown_count, "
@@ -95,15 +114,19 @@ public class PerSourceUnknownTracker {
                 + "WHERE s.status = 'active' "
                 + "  AND p.stage2_done = TRUE "
                 + "  AND p.stage2_failed = FALSE "
-                + "  AND p.fetched_at >= now() - ?::INTERVAL "
-                + "  AND p.status_changed_at >= now() - ?::INTERVAL "
+                + "  AND p.fetched_at >= ? "
+                + "  AND p.status_changed_at >= ? "
                 + "GROUP BY s.id "
                 + "HAVING COUNT(*) >= ?";
+        Instant now = clock.instant();
+        long windowSeconds = unknownRateWindow.toSeconds();
+        Instant fetchedFloor =
+            now.minus(Duration.ofSeconds(windowSeconds + PartitionScan.PARTITION_SCAN_SLACK.toSeconds()));
+        Instant statusChangedFloor = now.minus(Duration.ofSeconds(windowSeconds));
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            long windowSeconds = unknownRateWindow.toSeconds();
-            ps.setString(1, (windowSeconds + PartitionScan.PARTITION_SCAN_SLACK.toSeconds()) + " seconds");
-            ps.setString(2, windowSeconds + " seconds");
+            ps.setTimestamp(1, Timestamp.from(fetchedFloor));
+            ps.setTimestamp(2, Timestamp.from(statusChangedFloor));
             ps.setInt(3, minSampleSize);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {

@@ -4,6 +4,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.time.Duration;
+import java.time.Instant;
 
 /**
  * Shared source of the {@code fetched_at} partition-scan floor for the
@@ -46,5 +47,22 @@ public class PartitionScan {
      */
     public String scanWindow() {
         return (postRetentionDays + PARTITION_SCAN_SLACK.toDays()) + " days";
+    }
+
+    /**
+     * The pickup-query floor as an absolute instant: {@code now} minus the
+     * retention horizon widened by {@link #PARTITION_SCAN_SLACK}. The
+     * eval-stage pickup queries bind {@code fetched_at >= ?} to
+     * {@code Timestamp.from(scanWindowFloor(clock.instant()))} — the instant
+     * sampled from the injected {@code Clock} — instead of the in-SQL
+     * {@code now() - ?::INTERVAL}, so the scan instant can be pinned in tests
+     * (M1-448). Whole-day arithmetic (the same {@code (retention + slack) days}
+     * the {@link #scanWindow()} INTERVAL expresses) keeps the floor
+     * byte-for-byte aligned to the partition-pruning boundary under the
+     * production {@code Clock.systemUTC()}. Mirrors
+     * {@code ReEvaluationJob.scanWindowFloor} (M1-444).
+     */
+    public Instant scanWindowFloor(Instant now) {
+        return now.minus(Duration.ofDays(postRetentionDays + PARTITION_SCAN_SLACK.toDays()));
     }
 }

@@ -14,6 +14,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -102,6 +103,19 @@ public class ReadyPromoter {
 
     @Inject
     PartitionScan partitionScan;
+
+    // The pickup scan-window floor is computed in Java from the injected Clock
+    // and bound as a Timestamp (see enumeratePending), never SQL now(), so the
+    // window can be pinned under a fixed test clock (M1-448). This is ONLY the
+    // SELECT cutoff: the ready_at / status_changed_at writes in promoteOne stay
+    // on the DB clock (now() RETURNING) — they are audit/record stamps the
+    // Provider's (ready_at, id) cursor orders against the DB transaction
+    // timeline, so they must NOT move to the injected Clock (the no-split rule:
+    // promoteOne never reads its own ready_at write back for a decision). The
+    // systemUTC() initializer is what the CDI producer supplies; injection
+    // overrides it in the managed bean.
+    @Inject
+    Clock clock = Clock.systemUTC();
 
     /**
      * Test-only seam: invoked with the in-transaction connection AFTER
@@ -249,9 +263,9 @@ public class ReadyPromoter {
      * {@code tagger_done}, and the two independent parallel stages
      * {@code entity_done} and {@code embedding_done}. The
      * {@code status='RAW'} filter excludes quarantined posts. The
-     * {@code fetched_at} floor ({@link PartitionScan#scanWindow()})
-     * lets the planner prune partitions of the RANGE(fetched_at) post
-     * table.
+     * {@code fetched_at} floor ({@link PartitionScan#scanWindowFloor(Instant)},
+     * sampled from the injected Clock) lets the planner prune partitions of
+     * the RANGE(fetched_at) post table.
      */
     List<PromotionCandidate> enumeratePending(int limit) throws SQLException {
         final String sql =
@@ -263,13 +277,13 @@ public class ReadyPromoter {
                 + "   AND tagger_done = TRUE "
                 + "   AND entity_done = TRUE "
                 + "   AND embedding_done = TRUE "
-                + "   AND fetched_at >= now() - ?::INTERVAL "
+                + "   AND fetched_at >= ? "
                 + " ORDER BY fetched_at, id "
                 + " LIMIT ?";
         List<PromotionCandidate> rows = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, partitionScan.scanWindow());
+            ps.setTimestamp(1, Timestamp.from(partitionScan.scanWindowFloor(clock.instant())));
             ps.setInt(2, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {

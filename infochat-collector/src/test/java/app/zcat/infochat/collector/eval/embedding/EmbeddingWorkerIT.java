@@ -1,11 +1,14 @@
 package app.zcat.infochat.collector.eval.embedding;
 
+import app.zcat.infochat.collector.eval.PartitionScan;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.annotation.Priority;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.Nullable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Alternative;
@@ -23,8 +26,10 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
@@ -76,6 +81,16 @@ class EmbeddingWorkerIT {
      */
     private static final Instant FETCHED_AT = Instant.parse("2026-05-16T10:00:00Z");
 
+    /**
+     * A FIXED instant the scan-window pickup reads via the injected Clock
+     * (pinned in {@link #reset()}). The @Order(5) boundary seeds are computed
+     * relative to this constant and the configured scan window, so the
+     * pickup-floor boundary is exercised deterministically regardless of the
+     * wall-clock run date — replacing the {@code Instant.now()}-relative
+     * fixture that ages out below the floor (the M1-398 time-bomb). (M1-448)
+     */
+    private static final Instant PINNED_NOW = Instant.parse("2026-06-20T12:00:00Z");
+
     @Inject
     @SeedDataSource
     DataSource dataSource;
@@ -92,12 +107,23 @@ class EmbeddingWorkerIT {
     @Inject
     UserTransaction userTransaction;
 
+    // The post retention horizon driving the scan window
+    // (retention + PARTITION_SCAN_SLACK); read so the @Order(5) boundary
+    // straddle is computed exactly as the production floor is.
+    @ConfigProperty(name = "infochat.partitions.retention-days.post")
+    int postRetentionDays;
+
     private StubEmbeddingProvider stub() {
         return (StubEmbeddingProvider) embeddingProvider;
     }
 
     @BeforeEach
     void reset() throws Exception {
+        // Pin the injected Clock the scan-window pickup reads so the @Order(5)
+        // boundary is deterministic; the QuarkusMock.installMockForType seam is
+        // the same one ThrottledAdminNotifier's Clock producer documents
+        // (M1-444). Inert for the processBatch scenarios, which read no clock.
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
         stub().reset();
         clearItPosts();
     }
@@ -222,21 +248,28 @@ class EmbeddingWorkerIT {
         // of EmbeddingWorker's responsibility — the ReadyPromoter is
         // the next stage. EmbeddingWorker.enumeratePending must not
         // return it.
-        // enumeratePending applies a rolling floor: fetched_at >= now() -
-        // scanWindow (= retention-days.post + 2d slack = "32 days"). Seed inside
-        // that window so the SUT does not legitimately filter `fresh` out: the
-        // shared FETCHED_AT constant is pinned to May 2026 and, once now() - 32d
-        // passes it, the post falls outside the window and the test rots into a
-        // daily time-bomb (the M1-398 failure). @Order(5) writes no
-        // post_embedding row, so it is NOT bound by V11's May-2026
-        // post_embedding partition that pins FETCHED_AT for the
-        // embedding-writing scenarios — use a near-now timestamp instead. (M1-398)
-        Instant withinScanWindow = Instant.now().minus(Duration.ofDays(1));
-        SeededPost already = seedAlreadyEmbeddedPost("embed-it-already", withinScanWindow);
-        // Sanity: a fresh pickup-ready post IS returned, so the
-        // negative assertion is meaningful (not a coincidence of an
+        //
+        // enumeratePending applies a rolling floor: fetched_at >=
+        // scanWindowFloor(clock.instant()) (= PINNED_NOW − (retention + 2d
+        // slack)). The Clock is pinned (reset()), so the boundary is fixed and
+        // the seeds straddle it deterministically — no longer a wall-clock-
+        // relative fixture that ages out below the floor (the M1-398 time-bomb,
+        // now killed by the injected Clock). @Order(5) writes no post_embedding
+        // row, so it is NOT bound by V11's May-2026 post_embedding partition. (M1-448)
+        Instant floor = PINNED_NOW.minus(
+            Duration.ofDays(postRetentionDays + PartitionScan.PARTITION_SCAN_SLACK.toDays()));
+        Instant inWindow = floor.plus(Duration.ofDays(1));
+        Instant belowFloor = floor.minus(Duration.ofDays(1));
+
+        SeededPost already = seedAlreadyEmbeddedPost("embed-it-already", inWindow);
+        // Sanity: a fresh in-window pickup-ready post IS returned, so the
+        // negative assertions are meaningful (not a coincidence of an
         // empty pending list).
-        SeededPost fresh = seedPickupReadyPost("embed-it-fresh", withinScanWindow);
+        SeededPost fresh = seedPickupReadyPost("embed-it-fresh", inWindow);
+        // A pickup-ready post one day BELOW the floor must be excluded by the
+        // scan window — the deterministic boundary assertion against the
+        // injected instant.
+        SeededPost belowFloorPost = seedPickupReadyPost("embed-it-below", belowFloor);
 
         // Enumerate the FULL in-window pending set rather than a fixed LIMIT 10
         // top slice: other collector ITs (e.g. EmbeddingWorkerPickupFloorIT)
@@ -252,6 +285,11 @@ class EmbeddingWorkerIT {
         boolean foundFresh = pending.stream().anyMatch(r -> r.id().equals(fresh.id));
         assertTrue(foundFresh,
             "fresh tagger_done=true / embedding_done=false post MUST appear in pickup");
+        boolean foundBelowFloor = pending.stream().anyMatch(r -> r.id().equals(belowFloorPost.id));
+        assertFalse(foundBelowFloor,
+            "post fetched below PINNED_NOW − (retention + slack) must NOT appear in pickup — "
+                + "the scan-window floor reads the injected Clock, so a fixed clock makes the "
+                + "boundary deterministic");
         assertEquals(0, stub().callCount(),
             "enumeratePending must not invoke the provider");
     }
