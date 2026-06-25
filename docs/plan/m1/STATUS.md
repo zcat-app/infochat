@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 480 |
 | deferred | 6 |
-| **total** | **489** |
+| **total** | **490** |
 
 ---
 
@@ -27,6 +27,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-451 — Move probation-timing decision gates onto the injected Clock in InboundRouter / PromoteCommandHandler / VouchCommandHandler (close the audit-missed probation_until split) (complexity: medium, risk: medium)
 - M1-452 — Complete the collector's injectable-Clock migration: LinkingJob window cutoffs + NostrStreamSource since-cursor SQL floor (audit-missed sites) (complexity: medium, risk: low)
 - M1-453 — cleanup: single-pass SimpleX group-mention decode + drop redundant InMemoryAdapter finalized map + fix stale @NonNull pom comment (complexity: medium, risk: low)
+- M1-454 — Make provider retrieval/freshness-window decision time injectable: convert six audit-missed inline Instant.now() gates (SearchPostsTool, ListSavesTool, EligiblePostQuery, SavedCommandHandler, DigestWorker, AssetSnapshotReader) (complexity: medium, risk: low)
 
 ---
 
@@ -654,4 +655,5 @@ M1-450 (done)
 M1-451 (pending) ← runnable
 M1-452 (pending) ← runnable
 M1-453 (pending) ← runnable
+M1-454 (pending) ← runnable
 ```
