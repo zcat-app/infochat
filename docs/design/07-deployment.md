@@ -515,8 +515,8 @@ The Postgres service carries no `profiles:` key, so it starts under both; every 
 # Compose Postgres across both services, pass the datasource URL explicitly
 # (see DEVELOPER.md §3 for the full two-service recipe).
 docker compose --profile dev up -d
-mvn -pl infochat-collector quarkus:dev
-mvn -pl infochat-provider  quarkus:dev
+./mvnw -pl infochat-collector quarkus:dev
+./mvnw -pl infochat-provider  quarkus:dev
 
 # Full containerized stack (what the §7.7.2 wizard drives)
 docker compose --profile prod up -d
@@ -549,16 +549,16 @@ dev/
 
 ### 7.7.1 Developer inner-loop scripts (`dev/scripts/`)
 
-`dev/scripts/` holds thin wrappers around the raw `mvn` and `docker compose` invocations a **developer** uses for the `quarkus:dev` inner loop. These are **not** for operators or testers — anyone standing up a real deployment uses the §7.7.2 wizard, which runs built containers, never `quarkus:dev`. Keeping the dev wrappers under `dev/` is what stops them from being mistaken for the operator entry point.
+`dev/scripts/` holds thin wrappers around the raw `./mvnw` and `docker compose` invocations a **developer** uses for the `quarkus:dev` inner loop. These are **not** for operators or testers — anyone standing up a real deployment uses the §7.7.2 wizard, which runs built containers, never `quarkus:dev`. Keeping the dev wrappers under `dev/` is what stops them from being mistaken for the operator entry point.
 
 The committed set:
 
 | Script | Wraps | Notes |
 |---|---|---|
-| `dev/scripts/build.sh` | `mvn clean install` from the repo root | Validates that JDK 25 is on `PATH` (§7.8.1) before invoking Maven; fails fast with a friendly message naming the required JDK version if not. |
+| `dev/scripts/build.sh` | `./mvnw clean install` from the repo root | Validates that JDK 25 is on `PATH` (§7.8.1) before invoking Maven; fails fast with a friendly message naming the required JDK version if not. |
 | `dev/scripts/dev.sh` | `docker compose --profile dev up -d`, then both `quarkus:dev` services in backgrounded panes (e.g. `tmux` windows, or two `&`-backgrounded shells with PIDs printed for `down.sh` to reap). | Brings up Postgres+pgvector and Ollama, then both Quarkus services in dev mode pointed at the shared Compose Postgres via explicit `-Dquarkus.datasource.jdbc.url` overrides (without them, bare `quarkus:dev` would give each service its own throwaway Dev Services DB — see DEVELOPER.md §3). Idempotent: re-running while the stack is up only restarts the services. |
-| `dev/scripts/run-collector.sh` | `mvn -pl infochat-collector quarkus:dev` | Assumes the dev stack is already up; iterate on the Collector alone. |
-| `dev/scripts/run-provider.sh` | `mvn -pl infochat-provider quarkus:dev` | Same shape, Provider side. |
+| `dev/scripts/run-collector.sh` | `./mvnw -pl infochat-collector quarkus:dev` | Assumes the dev stack is already up; iterate on the Collector alone. |
+| `dev/scripts/run-provider.sh` | `./mvnw -pl infochat-provider quarkus:dev` | Same shape, Provider side. |
 | `dev/scripts/down.sh` | `docker compose --profile dev down`, plus killing any background `quarkus:dev` PIDs that `dev.sh` recorded. | Cleanup. Developer-only — the wizard's own reset is plain `docker compose down` (§7.7.2). |
 
 The **operator** ops scripts live under `prod/scripts/`, not here (they are production upkeep, not the dev inner loop):
@@ -846,8 +846,8 @@ The same shape applies to messaging-adapter startup ([06-messaging.md §6.7](06-
 6. For each adapter in the list, complete out-of-band bot-account registration (SimpleX queue creation; `signal-cli register --captcha …` followed by `verify`) and place the resulting identity material under `/opt/infochat/adapters/<name>/`.
 7. Place `bootstrap-sources.json` next to the jars. If asset commands are wanted, also place `bootstrap-assets.json` and set `infochat.bootstrap.assets-file` (§7.6.2 — file-state semantics).
 8. Set the per-adapter bootstrap admin contact ids (`INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID`, `INFOCHAT_SIGNAL_ADMIN_CONTACT_ID`). At least one MUST be set (the union-non-empty rule, §7.6.3).
-9. Start Collector via `scripts/run-collector.sh` (or directly with `mvn -pl infochat-collector quarkus:dev` in dev, or `systemctl start infochat-collector` in prod). It runs Flyway, loads bootstrap files, and idles until Provider starts. The Collector's `pg_advisory_lock` and heartbeat row are taken at this step (§7.8.5).
-10. Start Provider via `scripts/run-provider.sh` (or directly with `mvn -pl infochat-provider quarkus:dev` / `systemctl start infochat-provider`). It runs Flyway again (idempotent), takes its own advisory lock, and bootstraps the per-adapter admin rows from the configured `bootstrap-admin-contact-id` properties; then it attaches each enabled messaging adapter (per-adapter resilience — one failing adapter does not block the others).
+9. Start Collector via `scripts/run-collector.sh` (or directly with `./mvnw -pl infochat-collector quarkus:dev` in dev, or `systemctl start infochat-collector` in prod). It runs Flyway, loads bootstrap files, and idles until Provider starts. The Collector's `pg_advisory_lock` and heartbeat row are taken at this step (§7.8.5).
+10. Start Provider via `scripts/run-provider.sh` (or directly with `./mvnw -pl infochat-provider quarkus:dev` / `systemctl start infochat-provider`). It runs Flyway again (idempotent), takes its own advisory lock, and bootstraps the per-adapter admin rows from the configured `bootstrap-admin-contact-id` properties; then it attaches each enabled messaging adapter (per-adapter resilience — one failing adapter does not block the others).
 11. From any configured admin's chat client (on the adapter where they are admin), send `/help` to the bot. Verify response.
 12. Add a personal source: `/add-source --kind rss --identifier ... --tags ai`.
 13. Wait one fetch interval; run `/summary -w 1h`. If posts arrive, system is up.

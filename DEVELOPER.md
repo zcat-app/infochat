@@ -32,7 +32,7 @@ There are two ways to run infochat from source in dev, and they need different
 backing services:
 
 - **Inner loop — one service at a time (no Compose DB needed).** Bare
-  `mvn -pl <module> quarkus:dev` runs under the `%dev` profile, which declares
+  `./mvnw -pl <module> quarkus:dev` runs under the `%dev` profile, which declares
   **no** JDBC URL. Quarkus reacts to that by starting a throwaway **Dev
   Services** pgvector container automatically — a fresh, random-port database
   per run. Zero DB setup, nothing to configure; ideal for editing one module
@@ -118,7 +118,7 @@ docker compose exec ollama ollama pull nomic-embed-text   # vector embeddings
 ```
 
 The pull is a one-time download (several GB total) cached in the
-`infochat-ollama` volume. `mvn verify` does **not** need these — the test suite
+`infochat-ollama` volume. `./mvnw verify` does **not** need these — the test suite
 stubs the LLM — but actually running the services in dev mode does.
 
 **Alternatives to Ollama:**
@@ -138,11 +138,11 @@ stubs the LLM — but actually running the services in dev mode does.
 ## 2. Build
 
 ```bash
-mvn clean install
+./mvnw clean install
 ```
 
 Builds and tests every module. To skip the slower integration tests during an
-iteration loop, use `mvn install -DskipITs` (never commit code that hasn't
+iteration loop, use `./mvnw install -DskipITs` (never commit code that hasn't
 passed the full suite — see step 4).
 
 ---
@@ -157,7 +157,7 @@ run depends on which of the two modes from step 1 you want.
 For iterating on a single module:
 
 ```bash
-mvn -pl infochat-collector quarkus:dev   # or infochat-provider
+./mvnw -pl infochat-collector quarkus:dev   # or infochat-provider
 ```
 
 This activates `%dev`, which declares no JDBC URL, so Quarkus spins a throwaway
@@ -179,14 +179,14 @@ migrations; the provider expects the schema to already exist.
 # terminal 1 — collector: migrates the shared DB, then runs the ingest pipeline.
 # The bootstrap-sources path MUST be absolute — quarkus:dev's working directory
 # is the module dir, not the repo root.
-mvn -pl infochat-collector quarkus:dev \
+./mvnw -pl infochat-collector quarkus:dev \
   -Dquarkus.datasource.jdbc.url=jdbc:postgresql://localhost:5432/infochat \
   -Dquarkus.datasource.owner.jdbc.url=jdbc:postgresql://localhost:5432/infochat \
   -Dinfochat.bootstrap.sources-file=$PWD/prod/config/bootstrap-sources.json
 
 # terminal 2 — provider: same shared DB; supply an adapter (the in-memory one
 # here) because %dev configures none. --admin seeds the bootstrap bot admin.
-mvn -pl infochat-provider quarkus:dev \
+./mvnw -pl infochat-provider quarkus:dev \
   -Dquarkus.datasource.jdbc.url=jdbc:postgresql://localhost:5432/infochat \
   -Dinfochat.adapters=inmemory \
   -Dinfochat.adapters.inmemory.allow-low-trust=true \
@@ -203,7 +203,7 @@ terminal harness with `-Dinfochat.dev.harness.enabled=true` plus
 > **Heads-up:** these per-module `quarkus:dev` runs resolve the sibling modules
 > (e.g. `infochat-core`) from `~/.m2`, **not** the reactor (`-am` does not work
 > with the `quarkus:dev` goal). If another worktree has installed a stale
-> SNAPSHOT, run `mvn -q install -DskipTests` once at the repo root first.
+> SNAPSHOT, run `./mvnw -q install -DskipTests` once at the repo root first.
 
 ---
 
@@ -213,7 +213,7 @@ A change is not done when its own new tests pass — run the whole suite from th
 repo root and report regressions:
 
 ```bash
-mvn verify
+./mvnw verify
 ```
 
 Quarkus integration tests bind an OS-assigned ephemeral port

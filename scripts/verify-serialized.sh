@@ -12,7 +12,15 @@
 # descriptor closes — on ANY exit, normal or error — and the script's
 # exit status is mvn's (mvn is the last command, and under `set -e` an
 # mvn failure terminates the script with that same status).
+#
+# Invokes the repo's Maven wrapper (./mvnw, pinned to 3.9.x via
+# .mvn/wrapper/maven-wrapper.properties — M1-446), not a bare `mvn`, so
+# the verify gate runs the pinned toolchain rather than whatever ambient
+# `mvn` the host happens to have. Resolved against this script's own
+# directory so the gate works regardless of the caller's CWD.
 set -eu
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 lockfile="$(git rev-parse --path-format=absolute --git-common-dir)/m1-verify.lock"
 
@@ -25,4 +33,4 @@ if ! flock --nonblock 9; then
     flock 9
 fi
 
-mvn -B clean verify "$@"
+"$repo_root/mvnw" -B clean verify "$@"

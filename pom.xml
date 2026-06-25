@@ -208,6 +208,31 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>
                     <version>3.5.4</version>
+                    <!--
+                         Non-empty-unit-suite tripwire (M1-446). failIfNoTests
+                         turns surefire's "Tests run: 0, BUILD SUCCESS" — the
+                         exact silent-skip that hid the M1-445 JUnit-5 provider
+                         regression — into a hard failure: if surefire is ever
+                         again downgraded to a JUnit-4-only provider (or the
+                         version pin above is dropped), it discovers 0 tests and
+                         the build now FAILS instead of staying green having run
+                         nothing.
+                         WHY at the reactor parent, not per-module: every one of
+                         the six modules ships *Test unit sources today, so a
+                         blanket assertion has no false positives. Declaring it
+                         here makes the tripwire fail-CLOSED — a NEW module
+                         inherits it automatically, so "a module forgetting to
+                         turn the check on" (the failure class this ticket
+                         closes) cannot happen. A module that legitimately has
+                         only *IT tests or no tests must opt out EXPLICITLY with
+                         <failIfNoTests>false</failIfNoTests> in its own pom: a
+                         single visible, reviewable line, never a silent gap.
+                         pom-packaging modules (the parent) bind no surefire:test
+                         execution, so they never trip.
+                    -->
+                    <configuration>
+                        <failIfNoTests>true</failIfNoTests>
+                    </configuration>
                 </plugin>
             </plugins>
         </pluginManagement>

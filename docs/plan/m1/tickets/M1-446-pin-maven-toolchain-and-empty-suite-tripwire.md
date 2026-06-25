@@ -1,13 +1,15 @@
 ---
 id: M1-446
 title: "build: pin the Maven toolchain (wrapper) and add a non-empty-unit-suite tripwire so a silent test-skip can never recur"
-status: pending
+status: done
 created: 2026-06-24
-last_updated: 2026-06-24
+last_updated: 2026-06-25
 clarity_check:
-  date:
-  verdict:
-  warnings: []
+  date: 2026-06-25
+  verdict: WARN
+  warnings:
+    - "Acceptance item 2 names dev/scripts/build.sh as a path to update, but that file does not exist; the confirm-before-editing clause means it is skipped at implement time."
+    - "Acceptance item 4's tripwire-trip proof is an uncommitted scratch experiment; record the exact command and observed output in the commit message so the reviewer has an audit trail rather than attestation."
   blockers: []
 blocked_by:
   - M1-445
@@ -33,7 +35,20 @@ test_plan:
     - all tests currently green on main (including the unit suite activated by M1-445)
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 489
+      removed: 29
 escalations: []
 revisions: []
 overrides: []
