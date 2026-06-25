@@ -57,6 +57,16 @@ class LlamacppWiringTest {
     private static final String EMB_SHA =
             "f7af6f66802f4df86eda10fe9bbcfc75c39562bed48ef6ace719a251cf1c2fdb";
 
+    // Pinned in lock-step with docker-compose.yml (mirrors GEN_SHA/EMB_SHA): the
+    // image both llama.cpp services must run. server-b5350 predates the gemma4
+    // architecture and cannot load GEN_GGUF (M1-442); a downgrade fails the build.
+    private static final String LLAMACPP_IMAGE = "ghcr.io/ggml-org/llama.cpp:server-b9776";
+
+    // The model volume the wizard's fetch_gguf writes to and the compose services
+    // mount; must resolve to the same real Docker volume regardless of compose
+    // project name (M1-442).
+    private static final String MODEL_VOLUME = "infochat-llamacpp-models";
+
     private static final String LLAMACPP_URL = "http://llamacpp:8080/v1";
     private static final String LLAMACPP_EMBED_URL = "http://llamacpp-embeddings:8080/v1";
     private static final String OLLAMA_URL = "http://ollama:11434/v1";
@@ -99,6 +109,16 @@ class LlamacppWiringTest {
                 "generative llamacpp service must not publish a host port");
         assertFalse(composeServiceBlock("llamacpp-embeddings").contains("ports:"),
                 "embeddings llamacpp service must not publish a host port");
+    }
+
+    @Test
+    void bothLlamacppServicesPinTheGemma4CapableImage() throws IOException {
+        // An accidental downgrade to server-b5350 (or any pre-gemma4 build) cannot
+        // load the pinned generative GGUF and must fail the build (M1-442).
+        assertTrue(composeServiceBlock("llamacpp").contains("image: " + LLAMACPP_IMAGE),
+                "generative llamacpp service must pin " + LLAMACPP_IMAGE);
+        assertTrue(composeServiceBlock("llamacpp-embeddings").contains("image: " + LLAMACPP_IMAGE),
+                "embeddings llamacpp service must pin " + LLAMACPP_IMAGE);
     }
 
     // --- Generated config (drive the real wizard) -------------------------------
@@ -146,6 +166,23 @@ class LlamacppWiringTest {
                 "embeddings must NEVER resolve to the generative GGUF");
     }
 
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void fetchGgufWritesToTheVolumeComposeMounts(@TempDir Path tmp) throws Exception {
+        // The drive layer no longer no-ops the `-v` argument: it captures the real
+        // model volume fetch_gguf passes and asserts it equals the project-independent
+        // real name the compose services mount. This is the assertion that would have
+        // caught the M1-442 volume-name mismatch (the GGUFs landing in a volume the
+        // servers never mount).
+        runWizard(tmp, "llamacpp\n\n\n\n");
+
+        String scriptVolume = modelVolumeFromDockerArgv(Files.readString(tmp.resolve("docker-argv.log")));
+        assertEquals(MODEL_VOLUME, scriptVolume,
+                "fetch_gguf must write/probe the GGUFs in volume " + MODEL_VOLUME);
+        assertEquals(scriptVolume, composeModelVolumeRealName(),
+                "the wizard's model volume must equal the project-independent real name compose pins");
+    }
+
     // --- helpers ----------------------------------------------------------------
 
     /** Run prod/scripts/4-llm.sh with a fake docker on PATH; return generated props. */
@@ -165,6 +202,9 @@ class LlamacppWiringTest {
         Map<String, String> env = pb.environment();
         env.put("INFOCHAT_RUNTIME_DIR", runtime.toString());
         env.put("PATH", bin + ":" + env.getOrDefault("PATH", ""));
+        // The fake docker appends each invocation's argv here so the test can read
+        // back the `-v <volume>:/models` argument fetch_gguf passes (M1-442).
+        env.put("FAKE_DOCKER_ARGV", tmp.resolve("docker-argv.log").toString());
 
         Process p = pb.start();
         p.getOutputStream().write(stdin.getBytes(StandardCharsets.UTF_8));
@@ -177,12 +217,14 @@ class LlamacppWiringTest {
     }
 
     /**
-     * Minimal fake docker: no-op the compose up / exec and the volume download/run,
-     * answer the sha256sum probe with the pinned digests so the enforced-checksum
-     * path passes. No real container ever runs.
+     * Minimal fake docker: record argv (so the test can assert the `-v` model-volume
+     * argument fetch_gguf passes), no-op the compose up / exec and the volume
+     * download/run, answer the sha256sum probe with the pinned digests so the
+     * enforced-checksum path passes. No real container ever runs.
      */
     private String fakeDockerScript() {
         return "#!/usr/bin/env bash\n"
+                + "printf '%s\\n' \"$*\" >> \"$FAKE_DOCKER_ARGV\"\n"
                 + "sub=\"$1\"\n"
                 + "if [ \"$sub\" = \"compose\" ]; then exit 0; fi\n"
                 + "if [ \"$sub\" = \"run\" ]; then\n"
@@ -221,6 +263,43 @@ class LlamacppWiringTest {
             break;
         }
         return compose.substring(start, end);
+    }
+
+    /** The volume name from the first `-v <volume>:/models` argument the fake docker recorded. */
+    private String modelVolumeFromDockerArgv(String argv) {
+        Matcher m = Pattern.compile("-v (\\S+):/models").matcher(argv);
+        assertTrue(m.find(), "fetch_gguf must pass a `-v <volume>:/models` argument:\n" + argv);
+        return m.group(1);
+    }
+
+    /** The volume alias a compose service mounts at /models. */
+    private String mountedModelVolumeAlias(String service) throws IOException {
+        String block = composeServiceBlock(service);
+        Matcher m = Pattern.compile("(?m)^\\s*-\\s*(\\S+):/models\\s*$").matcher(block);
+        assertTrue(m.find(), service + " service must mount a volume at /models:\n" + block);
+        return m.group(1);
+    }
+
+    /**
+     * The project-independent real Docker volume name the compose services mount.
+     * Both llama.cpp services must mount the same alias, and the top-level volume
+     * declaration must pin an explicit {@code name:} — without it compose namespaces
+     * the alias to {@code <project>_<alias>} (project = working-dir basename), which
+     * the wizard's literal {@code -v} never matches (the M1-442 volume-name bug).
+     */
+    private String composeModelVolumeRealName() throws IOException {
+        String genAlias = mountedModelVolumeAlias("llamacpp");
+        String embAlias = mountedModelVolumeAlias("llamacpp-embeddings");
+        assertEquals(genAlias, embAlias, "both llama.cpp services must mount the same model volume");
+
+        String compose = Files.readString(repoRoot().resolve("docker-compose.yml"));
+        Matcher decl = Pattern.compile(
+                "(?m)^  " + Pattern.quote(genAlias) + ":[ \\t]*\\r?\\n[ \\t]+name:[ \\t]*(\\S+)")
+                .matcher(compose);
+        assertTrue(decl.find(),
+                "top-level volume '" + genAlias + "' must pin an explicit name: (project-independent):\n"
+                        + compose);
+        return decl.group(1);
     }
 
     private Map<String, String> parseProps(Path file) throws IOException {

@@ -188,7 +188,7 @@ services:
     # already supports (infochat.llm.*.provider=openai-compatible, §7.4). prod
     # only — the containerized apps reach it over the compose network as
     # llamacpp:8080, so it needs no host port publish.
-    image: ghcr.io/ggml-org/llama.cpp:server-b5350
+    image: ghcr.io/ggml-org/llama.cpp:server-b9776
     environment:
       # The operator-chosen generative GGUF *filename* is minted by the §7.3
       # wizard (4-llm.sh) into secrets.env and fed to compose via --env-file;
@@ -225,7 +225,7 @@ services:
   # Shares the model-cache volume — 4-llm.sh downloads both GGUFs into it.
   llamacpp-embeddings:
     profiles: [llamacpp-embeddings]
-    image: ghcr.io/ggml-org/llama.cpp:server-b5350
+    image: ghcr.io/ggml-org/llama.cpp:server-b9776
     environment:
       LLAMA_ARG_MODEL: /models/${INFOCHAT_LLAMACPP_EMBED_GGUF:-}
       LLAMA_ARG_EMBEDDINGS: "1"
@@ -243,4 +243,11 @@ services:
 volumes:
   infochat-pgdata:
   infochat-ollama:
+  # Pin the real Docker volume name so it is independent of the compose project
+  # (which defaults to the working-dir basename). Without `name:`, compose
+  # namespaces this to <project>_infochat-llamacpp-models, which the wizard's
+  # `fetch_gguf` literal `-v infochat-llamacpp-models:/models` (4-llm.sh) never
+  # matches — the GGUFs download into a volume the servers never mount, and both
+  # llama.cpp services exit(1) on a missing model (M1-442).
   infochat-llamacpp-models:
+    name: infochat-llamacpp-models

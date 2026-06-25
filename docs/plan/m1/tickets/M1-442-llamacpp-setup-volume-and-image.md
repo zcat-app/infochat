@@ -1,9 +1,9 @@
 ---
 id: M1-442
 title: "llama.cpp setup: GGUFs must land in the Compose-mounted volume and the pinned image must load the pinned model"
-status: pending
+status: done
 created: 2026-06-24
-last_updated: 2026-06-24
+last_updated: 2026-06-25
 blocked_by: []
 files_budget: 3
 files_scope:
@@ -39,14 +39,27 @@ spec_refs:
   - docs/spec/deployment.md §Deployment scenarios
 decision_refs:
   - D49
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 99
+      removed: 15
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
 clarity_check:
-  date:
-  verdict:
+  date: 2026-06-25
+  verdict: PASS
   warnings: []
   blockers: []
 ---

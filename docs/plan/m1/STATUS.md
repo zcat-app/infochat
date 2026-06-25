@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 476 |
+| done | 477 |
 | deferred | 6 |
 | **total** | **486** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-442 — llama.cpp setup: GGUFs must land in the Compose-mounted volume and the pinned image must load the pinned model (complexity: low, risk: low)
 - M1-448 — Make partition-scan worker time injectable (5 scan-window workers) (complexity: high, risk: medium)
 - M1-449 — Make scheduler/pruner decision time injectable (PartitionPruner, DigestRetryService, FetchScheduler) (complexity: medium, risk: medium)
 - M1-450 — Move ProbationCheck onto the injected Clock (close the probation_until app/DB split) (complexity: low, risk: medium)
@@ -67,12 +66,12 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-446 | build: pin the Maven toolchain (wrapper) and add a non-empty-unit-suite tripwire so a silent test-skip can never recur | 2026-06-25 | round 1 APPROVE |
 | M1-445 | build: pin maven-surefire-plugin so the JUnit 5 unit suite actually runs (super-pom default 2.12.4 silently skips it) | 2026-06-25 | round 1 APPROVE |
 | M1-443 | Embedding identity guard must adopt the configured model on first boot (no embeddings yet) instead of refusing | 2026-06-25 | round 1 APPROVE |
+| M1-442 | llama.cpp setup: GGUFs must land in the Compose-mounted volume and the pinned image must load the pinned model | 2026-06-25 | round 1 APPROVE |
 | M1-441 | Wizard bootstrap-admin prompt must not say 'optional' when it is the only adapter | 2026-06-25 | round 1 APPROVE |
 | M1-444 | fix: make ReEvaluationJob's tick time an injectable Clock so the candidate-scan window (and its IT) are deterministic instead of wall-clock-dependent | 2026-06-24 | round 1 APPROVE |
 | M1-440 | Default adapter identity data-dir to the wizard-owned runtime dir | 2026-06-24 | round 1 APPROVE |
 | M1-439 | Aggregate, self-remediating preflight: report all unmet checks at once | 2026-06-24 | round 1 APPROVE |
 | M1-438 | cleanup: fix switch-llm recreate service names + pi-profile embedding model in the wizard | 2026-06-23 | round 1 APPROVE |
-| M1-437 | Translation pipeline must sanity-check output and fall back to English with a one-line note | 2026-06-23 | round 1 APPROVE |
 
 ---
 
@@ -642,7 +641,7 @@ M1-437 (done)
 M1-438 (done)
 M1-439 (done)
 M1-440 (done)
-M1-442 (pending) ← runnable
+M1-442 (done)
 M1-443 (done)
 M1-444 (done)
   └── M1-445 (done)
