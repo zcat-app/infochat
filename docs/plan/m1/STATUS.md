@@ -10,12 +10,12 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 474 |
-| deferred | 7 |
+| deferred | 6 |
 | **total** | **486** |
 
 ---
@@ -24,6 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
+- M1-441 — Wizard bootstrap-admin prompt must not say 'optional' when it is the only adapter (complexity: low, risk: low)
 - M1-442 — llama.cpp setup: GGUFs must land in the Compose-mounted volume and the pinned image must load the pinned model (complexity: low, risk: low)
 - M1-443 — Embedding identity guard must adopt the configured model on first boot (no embeddings yet) instead of refusing (complexity: medium, risk: medium)
 - M1-448 — Make partition-scan worker time injectable (5 scan-window workers) (complexity: high, risk: medium)
@@ -78,9 +79,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 ---
 
 ## Deferred
-
-### blocked-on-new-ticket (1)
-- M1-441 → M1-445
 
 ### decomposed (2)
 - M1-034 → M1-034a
@@ -650,7 +648,7 @@ M1-442 (pending) ← runnable
 M1-443 (pending) ← runnable
 M1-444 (done)
   └── M1-445 (done)
-        ├── M1-441 (deferred)
+        ├── M1-441 (pending) ← runnable
         └── M1-446 (done)
 M1-447 (done)
 M1-448 (pending) ← runnable

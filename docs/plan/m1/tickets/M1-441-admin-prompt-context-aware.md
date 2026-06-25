@@ -1,13 +1,11 @@
 ---
 id: M1-441
 title: "Wizard bootstrap-admin prompt must not say 'optional' when it is the only adapter"
-status: deferred
+status: pending
 created: 2026-06-24
-last_updated: 2026-06-24
+last_updated: 2026-06-25
 blocked_by:
   - M1-445
-deferred_on: M1-445
-deferred_reason: blocked-on-new-ticket
 files_budget: 3
 files_scope:
   - prod/scripts/6-adapter.sh
@@ -66,7 +64,11 @@ escalations:
 revisions: []
 overrides: []
 aborted_attempts: []
-reopens: []
+reopens:
+  - date: 2026-06-25
+    prior_deferred_reason: blocked-on-new-ticket
+    prior_deferred_on: M1-445
+    reason: "Blockers M1-444 and M1-445 both landed (done); parked fix d7f9fe59 ready to cherry-pick."
 redteam_findings: []
 clarity_check:
   date: 2026-06-24
