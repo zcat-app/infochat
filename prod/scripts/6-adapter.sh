@@ -153,9 +153,9 @@ collect_admin() {
 # ── Adapter selection ──────────────────────────────────────────────────
 adapters="$DEFAULT_ADAPTERS"
 if [[ "$defaults" -eq 0 ]]; then
-  echo "Available adapters: ${VALID_ADAPTERS// /, } (the in-memory adapter is"
-  echo "test-only and is never offered here — production must not mix it, §7.7)."
-  read -rp "Enable which adapters? (comma-separated) [${DEFAULT_ADAPTERS}]: " answer || true
+  echo "(The in-memory adapter is test-only and is never offered here —"
+  echo "production must not mix it, §7.7.)"
+  read -rp "Adapters to enable — comma-separated for multiple (options: ${VALID_ADAPTERS// /, }) [${DEFAULT_ADAPTERS}]: " answer || true
   adapters="${answer:-$DEFAULT_ADAPTERS}"
 fi
 
