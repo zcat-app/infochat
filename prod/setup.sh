@@ -118,16 +118,21 @@ do_reset() {
   # yet, and compose's ${INFOCHAT_*:-} defaults let `down` run without it.
   local env_file_args=()
   [[ -f "$SECRETS_FILE" ]] && env_file_args=(--env-file "$SECRETS_FILE")
-  # Include the ollama / llamacpp profiles so a reset stops every service the
-  # wizard may have started: those backends are gated under their own compose
-  # profiles ([dev, ollama] and [llamacpp]), which a bare --profile prod down
-  # does not match, leaving the LLM container + model-cache volume behind (M1-395).
-  echo "+ docker compose -f $COMPOSE_FILE --profile prod --profile ollama --profile llamacpp down"
-  docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" --profile prod --profile ollama --profile llamacpp down
+  # Include the ollama / llamacpp / llamacpp-embeddings profiles so a reset stops
+  # every service the wizard may have started: those backends are gated under their
+  # own compose profiles ([dev, ollama], [llamacpp], and [llamacpp-embeddings]),
+  # which a bare --profile prod down does not match, leaving the LLM container +
+  # model-cache volume behind (M1-395). [llamacpp-embeddings] is the M1-417
+  # pure-llama.cpp embeddings shape (D49) — a SECOND llama.cpp instance under its
+  # own profile, NOT covered by --profile llamacpp; omitting it here leaves that
+  # container running and holding infochat_default open after the down, and pinning
+  # the shared infochat-llamacpp-models volume so even the -v drop cannot remove it.
+  echo "+ docker compose -f $COMPOSE_FILE --profile prod --profile ollama --profile llamacpp --profile llamacpp-embeddings down"
+  docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" --profile prod --profile ollama --profile llamacpp --profile llamacpp-embeddings down
   read -rp "Also drop data volumes (-v)? This deletes all DB data. [y/N]: " ans
   if [[ "$ans" == "y" || "$ans" == "Y" ]]; then
-    echo "+ docker compose -f $COMPOSE_FILE --profile prod --profile ollama --profile llamacpp down -v"
-    docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" --profile prod --profile ollama --profile llamacpp down -v
+    echo "+ docker compose -f $COMPOSE_FILE --profile prod --profile ollama --profile llamacpp --profile llamacpp-embeddings down -v"
+    docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" --profile prod --profile ollama --profile llamacpp --profile llamacpp-embeddings down -v
   fi
   if [[ -f "$STATE_FILE" ]]; then
     echo "+ rm $STATE_FILE"

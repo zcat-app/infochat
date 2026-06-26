@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 492 |
+| done | 493 |
 | deferred | 6 |
-| **total** | **498** |
+| **total** | **499** |
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-463 | setup.sh --reset: also tear down the llamacpp-embeddings service (its own compose profile is untouched by the current --profile prod/ollama/llamacpp down, leaving the container holding infochat_default open) | 2026-06-26 | round 1 APPROVE |
 | M1-462 | Deep-review low-severity cleanup sweep: dead scanWindow(), brittle quarantine error mapping, Reddit bare permalink, two SSRF doc/dedup nits | 2026-06-26 | round 2 APPROVE |
 | M1-461 | Close the audit details_json fail-closed guard's gaps: NUL escape and balanced-but-invalid JSON that ?::jsonb rejects | 2026-06-26 | round 1 APPROVE |
 | M1-460 | Move LlmRateCap's per-user rate-limit window onto the injected Clock (audit-missed §9 site) | 2026-06-26 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-456 | Accept nitter kind in /add-source via operator host-config | 2026-06-26 | round 1 APPROVE |
 | M1-455 | Replace stray NUL-byte delimiter in adapterMessageId | 2026-06-26 | round 1 APPROVE |
 | M1-454 | Make provider retrieval/freshness-window decision time injectable: convert six audit-missed inline Instant.now() gates (SearchPostsTool, ListSavesTool, EligiblePostQuery, SavedCommandHandler, DigestWorker, AssetSnapshotReader) | 2026-06-26 | round 1 APPROVE |
-| M1-453 | cleanup: single-pass SimpleX group-mention decode + drop redundant InMemoryAdapter finalized map + fix stale @NonNull pom comment | 2026-06-25 | round 1 APPROVE |
 
 ---
 
@@ -661,4 +661,5 @@ M1-459 (done)
 M1-460 (done)
 M1-461 (done)
 M1-462 (done)
+M1-463 (done)
 ```

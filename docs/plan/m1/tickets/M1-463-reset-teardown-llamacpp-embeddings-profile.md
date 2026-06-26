@@ -1,7 +1,7 @@
 ---
 id: M1-463
 title: "setup.sh --reset: also tear down the llamacpp-embeddings service (its own compose profile is untouched by the current --profile prod/ollama/llamacpp down, leaving the container holding infochat_default open)"
-status: pending
+status: done
 created: 2026-06-26
 last_updated: 2026-06-26
 blocked_by: []
@@ -30,6 +30,25 @@ spec_refs:
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
 decision_refs:
   - D49
+reviews:
+  - round: 1
+    date: 2026-06-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 23
+      removed: 13
+clarity_check:
+  date: 2026-06-26
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-463: --reset must also tear down the llamacpp-embeddings service
