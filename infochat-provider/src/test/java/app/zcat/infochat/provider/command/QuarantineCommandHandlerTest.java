@@ -42,6 +42,7 @@ class QuarantineCommandHandlerTest {
     @Inject BundleLoader bundleLoader;
     @Inject InboundContext inboundContext;
     @Inject RateCapBucket rateCapBucket;
+    @Inject ConfirmStateService confirmStateService;
 
     private UUID sourceId;
 
@@ -217,21 +218,86 @@ class QuarantineCommandHandlerTest {
                 "quarantine row must transition to REJECTED");
     }
 
+    // M1-458: the forensic (BENIGN_CLOSED) reject path is confirm-gated.
+    // These four tests replace the pre-M1-458 reject_benignClosedToRejected
+    // (which asserted a single call transitioned directly) — the single
+    // call now returns a confirm prompt and writes an intent-only audit row.
+
     @Test
-    void reject_benignClosedToRejected() throws Exception {
-        String admin = PREFIX + "rejbc-admin";
+    void rejectBenignClosedFirstCallPromptsAndWritesIntentOnly() throws Exception {
+        String admin = PREFIX + "rejbc-first-admin";
+        UUID adminId = seedUser(admin, true, false, "vouched");
+        UUID qId = seedQuarantineRow("BENIGN_CLOSED", PREFIX + "rejbc-first-p1");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(admin), "/quarantine reject " + qId);
+
+        String expectedPrompt = MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_QUARANTINE_REJECT),
+                Long.toString(confirmStateService.timeoutSeconds()));
+        assertEquals(expectedPrompt, reply.text(),
+                "first forensic reject must return the confirm prompt, not execute");
+        assertEquals("BENIGN_CLOSED", quarantineStatus(qId),
+                "first call must NOT transition the row (reject_quarantine not called)");
+        assertEquals(1, countAuditRows("QUARANTINE_REJECT_INTENT", qId, adminId),
+                "first call must write exactly one QUARANTINE_REJECT_INTENT row");
+        assertEquals(0, countAuditRows("REJECT_QUARANTINE", qId, adminId),
+                "first call must NOT write the in-proc REJECT_QUARANTINE execute row");
+    }
+
+    @Test
+    void rejectBenignClosedConfirmTransitionsToRejected() throws Exception {
+        String admin = PREFIX + "rejbc-confirm-admin";
+        UUID adminId = seedUser(admin, true, false, "vouched");
+        UUID qId = seedQuarantineRow("BENIGN_CLOSED", PREFIX + "rejbc-confirm-p1");
+        ScopeRef scope = new ScopeRef.Dm(admin);
+
+        // First call arms the pending intent; confirm executes the reject.
+        handler.handle(scope, "/quarantine reject " + qId);
+        OutboundMessage reply = handler.handle(scope, "/quarantine reject " + qId + " confirm");
+
+        assertEquals(MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_QUARANTINE_REJECT_SUCCESS),
+                qId.toString()), reply.text());
+        assertEquals("REJECTED", quarantineStatus(qId),
+                "confirm must transition the forensic row to REJECTED");
+        assertEquals(1, countAuditRows("QUARANTINE_REJECT_INTENT", qId, adminId),
+                "the intent row written on the first call persists after confirm");
+    }
+
+    @Test
+    void rejectBenignClosedConfirmWithoutPendingReturnsNoPending() throws Exception {
+        String admin = PREFIX + "rejbc-nopending-admin";
         seedUser(admin, true, false, "vouched");
-        UUID qId = seedQuarantineRow("BENIGN_CLOSED", PREFIX + "rejbc-p1");
+        UUID qId = seedQuarantineRow("BENIGN_CLOSED", PREFIX + "rejbc-nopending-p1");
+
+        // Confirm with no prior first call — no armed pending.
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(admin), "/quarantine reject " + qId + " confirm");
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING), reply.text(),
+                "confirm with no armed pending must surface error.confirm.no_pending");
+        assertEquals("BENIGN_CLOSED", quarantineStatus(qId),
+                "no pending means no transition");
+    }
+
+    @Test
+    void rejectPendingStillTransitionsDirectlyNoConfirm() throws Exception {
+        String admin = PREFIX + "rejp-direct-admin";
+        UUID adminId = seedUser(admin, true, false, "vouched");
+        UUID qId = seedQuarantineRow("PENDING", PREFIX + "rejp-direct-p1");
 
         OutboundMessage reply = handler.handle(
                 new ScopeRef.Dm(admin), "/quarantine reject " + qId);
 
         assertEquals(MessageFormat.format(
                 bundleLoader.get(BundleKeys.REPLY_QUARANTINE_REJECT_SUCCESS),
-                qId.toString()), reply.text());
-
+                qId.toString()), reply.text(),
+                "routine PENDING reject must return success in ONE call, no confirm prompt");
         assertEquals("REJECTED", quarantineStatus(qId),
-                "BENIGN_CLOSED must transition to REJECTED");
+                "PENDING reject transitions directly to REJECTED");
+        assertEquals(0, countAuditRows("QUARANTINE_REJECT_INTENT", qId, adminId),
+                "the routine PENDING path writes no intent row");
     }
 
     // ---- Rate limiting ----
@@ -397,6 +463,21 @@ class QuarantineCommandHandlerTest {
                     rs.next();
                     return (UUID) rs.getObject("id");
                 }
+            }
+        }
+    }
+
+    private int countAuditRows(String action, UUID targetId, UUID actorId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT count(*) FROM audit_log "
+                             + "WHERE action = ? AND target_id = ? AND actor_user_id = ?")) {
+            ps.setString(1, action);
+            ps.setString(2, targetId.toString());
+            ps.setObject(3, actorId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getInt(1);
             }
         }
     }

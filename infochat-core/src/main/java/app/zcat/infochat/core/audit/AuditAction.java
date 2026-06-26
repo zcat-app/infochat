@@ -168,6 +168,16 @@ public enum AuditAction implements AuditVerb {
     LIST_SOURCES_ALL,
     AUDIT_READ,
     QUARANTINE_LIST,
+    // QUARANTINE_REJECT_INTENT is the audit-on-intent row written on the
+    // first-call (un-confirmed) leg of the forensic /quarantine reject
+    // path — overriding the system's own BENIGN_CLOSED all-clear to
+    // re-hide a post permanently (M1-458). Mirrors the BAN_INTENT /
+    // INVITE_*_INTENT confirm-gate precedent (M1-051): it is its own
+    // atomic INSERT, separate from the REJECT_QUARANTINE completion row
+    // the reject_quarantine procedure writes on the step-9 execute path,
+    // so an admin who prompts and abandons still leaves a trace. The
+    // routine PENDING reject is not confirm-gated and writes no intent row.
+    QUARANTINE_REJECT_INTENT,
     EXPORT,
     FORGET,
     CHAT_MODE,

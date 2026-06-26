@@ -1,7 +1,7 @@
 ---
 id: M1-458
 title: Confirm-gate /quarantine reject on the forensic (BENIGN_CLOSED) path
-status: pending
+status: done
 created: 2026-06-26
 last_updated: 2026-06-26
 blocked_by: []
@@ -9,7 +9,7 @@ files_budget: 12
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineRejectConfirm.java
-  - infochat-provider/src/main/java/app/zcat/infochat/provider/command/BundleKeys.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-core/src/main/java/app/zcat/infochat/core/audit/AuditAction.java
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/bundles/cs.properties
@@ -50,6 +50,44 @@ spec_refs:
   - docs/spec/commands.md §Admin (bot admin)
   - docs/spec/commands.md §Surface conventions
 decision_refs: []
+clarity_check:
+  date: 2026-06-26
+  verdict: WARN
+  warnings:
+    - 'Acceptance item [10] ("docs/design/03-commands.md §3.10 is verified consistent") uses inspection language with no runnable pass/fail criterion.'
+    - 'risk: low is underclaimed for a security_relevant ticket modifying an admin destructive-action gate on the quarantine surface.'
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-06-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 291
+      removed: 21
+redteam_findings: []
+redteam_audits:
+  - date: 2026-06-26
+    verdict: CLEAN
+    base: main
+    head: working-tree (pre-commit --in-progress)
+    verdict_file: docs/plan/m1/redteam/M1-458-2026-06-26.md
+    out_of_model_count: 2
+    note: |
+      CLEAN, no threat-model gaps. Two advisory out-of-model items, neither
+      warranting a follow-up ticket: (1) confirm-gate TOCTOU between the
+      status pre-read and the reject proc — admin-vs-admin, outside the
+      adversary catalogue, and reject_quarantine re-checks under FOR UPDATE
+      so at worst the executing admin's own confirm prompt is skipped on a
+      vanishingly rare race; (2) hyphenated commandName "quarantine-reject"
+      matches the SourceEnableConfirm precedent (colon form is for handlers
+      with multiple confirmable subcommands), so no change.
 ---
 
 # M1-458: Confirm-gate /quarantine reject on the forensic (BENIGN_CLOSED) path

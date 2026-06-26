@@ -1140,6 +1140,14 @@ public final class BundleKeys {
     public static final String REPLY_QUARANTINE_REJECT_SUCCESS =
             "reply.quarantine.reject.success";
 
+    /**
+     * Confirm prompt for the forensic ({@code BENIGN_CLOSED}) leg of
+     * {@code /quarantine reject} (M1-458). Token {@code {0}} = timeout
+     * seconds. The routine {@code PENDING} reject is not confirm-gated.
+     */
+    public static final String REPLY_CONFIRM_PROMPT_QUARANTINE_REJECT =
+            "reply.confirm.prompt.quarantine_reject";
+
     // ----- /audit (M1-081b) --------------------------------------------------
     // Per docs/spec/commands.md §Admin (bot admin) + docs/spec/security.md
     // §DB roles. Reads audit_log_view (V5 redacted view). Filters by

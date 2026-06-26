@@ -280,10 +280,16 @@ exist somewhere across all adapters after any `/revoke-admin`.
 
 Destructive or broad-blast-radius actions prompt before taking effect — notably
 `/ban`, `/invite create --open`, `/invite revoke`, `/reject-group`,
-`/remove-source`, and reviving a soft-deleted source via `/source-enable`.
-Routine constructive actions that only add or approve (`/invite create
---contact`, `/approve-group`) don't — but being aimed at a single target is not
-what exempts a command: `/ban` is targeted and still prompts.
+`/remove-source`, reviving a soft-deleted source via `/source-enable`, and
+rejecting a system-cleared post via `/quarantine reject` (the forensic /
+`BENIGN_CLOSED` path only). Routine constructive actions that only add or
+approve (`/invite create --contact`, `/approve-group`) don't — but being aimed
+at a single target is not what exempts a command: `/ban` is targeted and still
+prompts. A few prompts are **state-dependent**: `/source-enable` and
+`/quarantine reject` confirm only on their surprising path (reviving a removed
+source, overriding the system's all-clear) and run directly otherwise (the
+routine `/quarantine reject` of a `PENDING` post is the expected review outcome
+and is not gated).
 
 ### The closed privileged-command set
 

@@ -65,6 +65,13 @@ public class QuarantineCommandHandler implements CommandHandler {
     private static final String COUNT_ALL_SQL =
             "SELECT count(*) FROM quarantine_review_view";
 
+    // Read via quarantine_review_view, not the raw quarantine table: the
+    // infochat_provider role has NO grant on quarantine (the original_html
+    // confidentiality boundary, V10) — only SELECT on this view, which omits
+    // original_html and exposes status. Same view handleList reads.
+    private static final String SELECT_QUARANTINE_STATUS_SQL =
+            "SELECT status FROM quarantine_review_view WHERE id = ?";
+
     private static final String RATE_LIMIT_KEY = "error.quarantine.rate_limit";
 
     @Inject BundleLoader bundleLoader;
@@ -72,6 +79,7 @@ public class QuarantineCommandHandler implements CommandHandler {
     @Inject InboundContext inboundContext;
     @Inject RateCapBucket rateCapBucket;
     @Inject AuditLogWriter auditLogWriter;
+    @Inject ConfirmStateService confirmStateService;
 
     @Override
     public String name() {
@@ -240,7 +248,27 @@ public class QuarantineCommandHandler implements CommandHandler {
             return reply(scope, bundleLoader.get(RATE_LIMIT_KEY, inboundContext.effectiveLanguage()));
         }
 
-        String idStr = remainder.trim().split("\\s+")[0];
+        // Confirm leg of the forensic (BENIGN_CLOSED) path. The pending is
+        // keyed by (actor, scope) and its remembered quarantine id is
+        // authoritative, so the retyped body id is NOT re-parsed here
+        // (mirrors SourceEnableCommandHandler). Both the canonical
+        // `/quarantine reject confirm` and the args-retyped
+        // `/quarantine reject <id> confirm` forms reach here — the router's
+        // step 4.5 sweep recognizes both against sweepPrefix "quarantine
+        // reject", so the trimmed remainder is either "confirm" or
+        // "<id> confirm". (M1-458)
+        String trimmed = remainder.trim();
+        if (trimmed.equals("confirm") || trimmed.endsWith(" confirm")) {
+            Optional<ConfirmStateService.PendingConfirm> taken =
+                    confirmStateService.takeMatching(actor.id, scope, "quarantine-reject");
+            if (taken.isEmpty()) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING, inboundContext.effectiveLanguage()));
+            }
+            QuarantineRejectConfirm pending = (QuarantineRejectConfirm) taken.get();
+            return executeReject(scope, actor, pending.quarantineId());
+        }
+
+        String idStr = trimmed.split("\\s+")[0];
         if (idStr.isEmpty()) {
             return reply(scope, MessageFormat.format(
                     bundleLoader.get(BundleKeys.ERROR_QUARANTINE_MISSING_ID, inboundContext.effectiveLanguage()), "reject"));
@@ -254,6 +282,72 @@ public class QuarantineCommandHandler implements CommandHandler {
                     bundleLoader.get(BundleKeys.ERROR_QUARANTINE_INVALID_ID, inboundContext.effectiveLanguage()), idStr));
         }
 
+        // State-dependent confirm gate (M1-458): the forensic
+        // BENIGN_CLOSED -> REJECTED override (re-hiding a post the system
+        // already cleared, with no bot command to undo it) is a lasting,
+        // surprising admin action and is confirm-gated; the routine PENDING
+        // reject is the expected review decision and stays direct. Read the
+        // row's status to pick the path. The proc re-checks status under
+        // FOR UPDATE, so a status change between this read and executeReject
+        // surfaces as the same invalid-state error.
+        String status = lookupQuarantineStatus(quarantineId);
+        if (status == null) {
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_NOT_FOUND, inboundContext.effectiveLanguage()),
+                    quarantineId.toString()));
+        }
+        return switch (status) {
+            case "BENIGN_CLOSED" -> promptReject(scope, actor, adapter, quarantineId);
+            case "PENDING" -> executeReject(scope, actor, quarantineId);
+            // APPROVED / REJECTED are terminal — surface the same
+            // invalid-state message the stored-proc error mapping would,
+            // just earlier (the proc would otherwise raise it).
+            default -> reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_INVALID_STATE, inboundContext.effectiveLanguage()),
+                    quarantineId.toString()));
+        };
+    }
+
+    /**
+     * Forensic-path first call: write the audit-on-intent
+     * {@link AuditAction#QUARANTINE_REJECT_INTENT} row BEFORE registering
+     * the pending and prompting, so a probe-and-abandon still leaves a
+     * trace (M1-051 rationale). Single auto-committed INSERT — the audit
+     * write does not need {@code infochat.actor_id} (that GUC gates the
+     * users last-admin trigger, not the audit_log insert). Does NOT call
+     * {@code reject_quarantine}.
+     */
+    private OutboundMessage promptReject(ScopeRef scope, ActorRow actor,
+                                         String adapter, UUID quarantineId) {
+        try (Connection conn = dataSource.getConnection()) {
+            RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
+                    .actorUserId(actor.id)
+                    .actorContactId(actor.contactId)
+                    .actorAdapter(adapter)
+                    .action(AuditAction.QUARANTINE_REJECT_INTENT)
+                    .targetKind(TargetKind.QUARANTINE)
+                    .targetId(quarantineId.toString())
+                    .requestId(UUID.randomUUID().toString())
+                    .build();
+            auditLogWriter.write(conn, row);
+        } catch (SQLException e) {
+            LOG.errorf(e, "/quarantine reject intent audit failed for id=%s", quarantineId);
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
+        }
+        confirmStateService.remember(actor.id, scope, new QuarantineRejectConfirm(quarantineId));
+        String prompt = MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_QUARANTINE_REJECT, inboundContext.effectiveLanguage()),
+                Long.toString(confirmStateService.timeoutSeconds()));
+        return reply(scope, prompt);
+    }
+
+    /**
+     * Execute the reject: the {@code reject_quarantine} SECURITY DEFINER
+     * procedure transitions the row to REJECTED and writes the in-proc
+     * {@code REJECT_QUARANTINE} audit row. Used by the routine PENDING path
+     * directly and by the forensic path after confirm.
+     */
+    private OutboundMessage executeReject(ScopeRef scope, ActorRow actor, UUID quarantineId) {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try (PreparedStatement ps = conn.prepareStatement(
@@ -273,6 +367,22 @@ public class QuarantineCommandHandler implements CommandHandler {
                     quarantineId.toString()));
         } catch (SQLException e) {
             return mapStoredProcError(scope, e, quarantineId);
+        }
+    }
+
+    private @Nullable String lookupQuarantineStatus(UUID quarantineId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_QUARANTINE_STATUS_SQL)) {
+            ps.setObject(1, quarantineId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                return rs.getString("status");
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "QuarantineCommandHandler.lookupQuarantineStatus failed for id=" + quarantineId, e);
         }
     }
 

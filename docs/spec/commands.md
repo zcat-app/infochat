@@ -45,8 +45,14 @@ live in `docs/design/03-commands.md`.
   friendly errors with fuzzy suggestions over the controlled
   vocabulary.
 - **Confirmation for destructive commands.** Destructive actions
-  (e.g. `/clear`, `/remove-source`, `/ban`) require a follow-up
-  `<command> confirm` within a **fixed, profile-tunable timeout**.
+  (e.g. `/clear`, `/remove-source`, `/ban`, and the forensic
+  `/quarantine reject` path — `BENIGN_CLOSED → REJECTED`) require a
+  follow-up `<command> confirm` within a **fixed, profile-tunable
+  timeout**. A confirm gate may be **state-dependent**: the same
+  command can require `confirm` on one path and not another (e.g.
+  `/source-enable` confirms only the soft-deleted revival, and
+  `/quarantine reject` confirms only the forensic `BENIGN_CLOSED`
+  path, never the routine `PENDING` reject).
   The timeout is the same for every confirmable command in a given
   deployment (no per-command bespoke values); the exact duration is
   a profile-driven value (design notes). A late `confirm` past the
@@ -1019,7 +1025,16 @@ contacts and contradict the registration-state model
   `architecture.md` §Inter-service communication); reject
   transitions to `REJECTED` (from `PENDING` for the routine path,
   from `BENIGN_CLOSED` for the forensic path) and leaves the
-  placeholder permanently.
+  placeholder permanently. The **forensic reject path
+  (`BENIGN_CLOSED → REJECTED`) requires `confirm`**: overriding the
+  system's own all-clear to keep a post permanently redacted is a
+  lasting, surprising admin action with no bot command to undo it
+  (`reject_quarantine` accepts only `PENDING`/`BENIGN_CLOSED`), so it
+  follows the standard two-call `confirm` flow. The **routine reject
+  path (`PENDING → REJECTED`) is not confirm-gated** — it is the
+  expected outcome of admin review, not a surprise. `/quarantine
+  approve` is never confirm-gated (it restores content; the
+  constructive direction needs no guard).
 - `/audit [-w …] [--actor <contact>] [--action <verb>] [--page N]`
   — bot-admin only (closed list below). Reads `audit_log_view`
   (the redacted view; `security.md` §DB roles) with filters. The
