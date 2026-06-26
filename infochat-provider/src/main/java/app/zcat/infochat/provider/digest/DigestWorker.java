@@ -4,6 +4,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Set;
@@ -75,6 +76,15 @@ public class DigestWorker {
 
     @Inject
     DataSource dataSource;
+
+    // The now-vs-windowEnd deadline that drives the degrade-vs-render +
+    // timeout-budget decision is a decision-gate "now", so it reads from the
+    // injected Clock to stay pinnable in tests (M1-454, engineering-rules §9).
+    // The OutboundMessage send-timestamp below stays on Instant.now() — it
+    // records, it gates nothing (§9 display/record exemption). CDI overrides
+    // the systemUTC() default at runtime (M1-444 reference).
+    @Inject
+    Clock clock = Clock.systemUTC();
 
     // How long the cache row stays findable (non-expired) past the slot
     // window for /retry --digest. Reuses DigestRetryService's cooldown
@@ -154,7 +164,7 @@ public class DigestWorker {
         if (collection.posts().isEmpty()) {
             content = bundleLoader.get(BundleKeys.REPLY_SUMMARY_NO_POSTS_YET, meta.language());
         } else {
-            Duration remaining = Duration.between(Instant.now(), slot.windowEnd());
+            Duration remaining = Duration.between(clock.instant(), slot.windowEnd());
             if (remaining.isNegative() || remaining.isZero()) {
                 content = degradedRenderer.render(collection.posts());
                 isDegraded = true;

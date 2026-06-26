@@ -15,6 +15,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -44,6 +45,13 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
 
     private final DataSource dataSource;
     private final CancellationService cancellationService;
+
+    // The published_at retrieval-window cutoff is a decision-gate "now", so it
+    // reads from the injected Clock to stay pinnable in tests (M1-454,
+    // engineering-rules §9). Field initialiser keeps the constructor-built
+    // test instances non-null; CDI overrides it at runtime (M1-444 reference).
+    @Inject
+    Clock clock = Clock.systemUTC();
 
     @Inject
     public SearchPostsTool(DataSource dataSource, CancellationService cancellationService) {
@@ -79,7 +87,7 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
             TagMode tagMode = readTagMode(conn, scopeKind, scopeId);
             EffectiveTags effectiveTags =
                     computeEffectiveTags(conn, tags, tagMode, scopeKind, scopeId);
-            Instant cutoff = Instant.now().minus(window);
+            Instant cutoff = clock.instant().minus(window);
 
             return queryPosts(conn, scopeKind, scopeId, effectiveTags, cutoff, limit);
         }

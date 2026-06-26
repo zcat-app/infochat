@@ -19,6 +19,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.text.MessageFormat;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -87,6 +88,14 @@ public class SavedCommandHandler implements CommandHandler {
 
     @Inject
     InboundContext inboundContext;
+
+    // The /saved -w window cutoff in bindFilters is a decision-gate "now", so
+    // it reads from the injected Clock to stay pinnable in tests (M1-454,
+    // engineering-rules §9). bindFilters is therefore an instance method.
+    // The relativeAge / reply timestamps below stay on Instant.now(): they
+    // render/record, they gate nothing (§9 display/record exemption).
+    @Inject
+    Clock clock = Clock.systemUTC();
 
     @Override
     public String name() {
@@ -191,8 +200,8 @@ public class SavedCommandHandler implements CommandHandler {
         }
     }
 
-    private static void bindFilters(PreparedStatement ps, Connection conn, UUID userId,
-                                    ParsedArgs args) throws SQLException {
+    private void bindFilters(PreparedStatement ps, Connection conn, UUID userId,
+                             ParsedArgs args) throws SQLException {
         int idx = 1;
         ps.setObject(idx++, userId);
         if (args.tag != null) {
@@ -201,7 +210,7 @@ public class SavedCommandHandler implements CommandHandler {
         }
         if (args.window != null) {
             ps.setObject(idx++, OffsetDateTime.ofInstant(
-                    Instant.now().minus(args.window), java.time.ZoneOffset.UTC));
+                    clock.instant().minus(args.window), java.time.ZoneOffset.UTC));
         }
     }
 

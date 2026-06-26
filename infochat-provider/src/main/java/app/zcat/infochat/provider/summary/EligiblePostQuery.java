@@ -12,6 +12,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -64,6 +65,14 @@ public class EligiblePostQuery {
 
     @Inject
     CancellationService cancellationService;
+
+    // The /summary published_at window cutoff is a decision-gate "now", so it
+    // reads from the injected Clock to stay pinnable in tests (M1-454,
+    // engineering-rules §9). Sampled once below and threaded to both
+    // selectPosts and topActiveFollowedTags so the two queries share one
+    // instant. CDI overrides the systemUTC() default at runtime (M1-444 reference).
+    @Inject
+    Clock clock = Clock.systemUTC();
 
     @ConfigProperty(name = "infochat.summary.cluster-cap", defaultValue = "200")
     int clusterCap;
@@ -122,7 +131,7 @@ public class EligiblePostQuery {
      */
     public Result fetch(String scopeKind, UUID scopeId,
                         Optional<String> positionalTag, Duration window) {
-        Instant cutoff = Instant.now().minus(window);
+        Instant cutoff = clock.instant().minus(window);
         Optional<TopTagRestriction> restriction = Optional.empty();
         List<String> restrictedTags = List.of();
 

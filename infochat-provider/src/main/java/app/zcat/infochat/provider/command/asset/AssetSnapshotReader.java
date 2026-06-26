@@ -14,6 +14,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 
@@ -59,6 +60,15 @@ public class AssetSnapshotReader {
 
     @Inject
     DataSource dataSource;
+
+    // The "now" fed into the isStale freshness/TTL comparison is a decision-
+    // gate read, so it comes from the injected Clock to stay pinnable in tests
+    // (M1-454, engineering-rules §9). The isStale static keeps taking `now` as
+    // a parameter (still pure-function unit-testable); only this caller's now
+    // source moves. CDI overrides the systemUTC() default at runtime, and the
+    // initialiser keeps the test-constructor instances non-null (M1-444 reference).
+    @Inject
+    Clock clock = Clock.systemUTC();
 
     // Provider-owned, profile-driven staleness threshold (commands.md
     // §Asset commands): a snapshot older than this window renders the stale
@@ -160,7 +170,7 @@ public class AssetSnapshotReader {
                     return null;
                 }
                 Snapshot snapshot = mapRow(rs);
-                boolean stale = isStale(snapshot.capturedAt, Instant.now(), freshnessWindow);
+                boolean stale = isStale(snapshot.capturedAt, clock.instant(), freshnessWindow);
                 return new SnapshotResult(snapshot, stale, freshnessWindow);
             }
         } catch (SQLException e) {

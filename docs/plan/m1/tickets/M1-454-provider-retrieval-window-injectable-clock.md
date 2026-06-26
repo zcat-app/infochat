@@ -1,9 +1,9 @@
 ---
 id: M1-454
 title: "Make provider retrieval/freshness-window decision time injectable: convert six audit-missed inline Instant.now() gates (SearchPostsTool, ListSavesTool, EligiblePostQuery, SavedCommandHandler, DigestWorker, AssetSnapshotReader)"
-status: pending
+status: done
 created: 2026-06-25
-last_updated: 2026-06-25
+last_updated: 2026-06-26
 blocked_by: []
 files_budget: 14
 files_scope:
@@ -53,7 +53,20 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 14
+      added: 874
+      removed: 20
 escalations: []
 revisions: []
 overrides: []
@@ -62,9 +75,10 @@ reopens: []
 redteam_findings: []
 redteam_audits: []
 clarity_check:
-  date: 2026-06-25
-  verdict: PASS
-  warnings: []
+  date: 2026-06-26
+  verdict: WARN
+  warnings:
+    - "Acceptance item 9 says 'All seven new tests are ADDITIVE' but test_plan.adds and files_scope both enumerate exactly six test files; 'seven' is a count typo — the real scope is six new tests for six classes."
   blockers: []
 ---
 
