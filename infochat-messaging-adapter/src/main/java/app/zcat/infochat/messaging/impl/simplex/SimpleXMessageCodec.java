@@ -600,7 +600,7 @@ final class SimpleXMessageCodec {
         if (itemId != null) {
             return itemId;
         }
-        return "simplex-" + Integer.toHexString(String.join(" ", stableFields).hashCode());
+        return "simplex-" + Integer.toHexString(String.join(" ", stableFields).hashCode());
     }
 
     /**
