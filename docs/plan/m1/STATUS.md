@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 489 |
+| done | 490 |
 | deferred | 6 |
-| **total** | **495** |
+| **total** | **498** |
 
 ---
 
@@ -24,7 +24,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-461 — Close the audit details_json fail-closed guard's gaps: NUL escape and balanced-but-invalid JSON that ?::jsonb rejects (complexity: low, risk: medium)
+- M1-462 — Deep-review low-severity cleanup sweep: dead scanWindow(), brittle quarantine error mapping, Reddit bare permalink, two SSRF doc/dedup nits (complexity: low, risk: low)
 
 ---
 
@@ -60,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-460 | Move LlmRateCap's per-user rate-limit window onto the injected Clock (audit-missed §9 site) | 2026-06-26 | round 1 APPROVE |
 | M1-459 | Note the confirm prompt for /clear and /unfollow-tag --all in USER_GUIDE | 2026-06-26 | round 1 APPROVE |
 | M1-458 | Confirm-gate /quarantine reject on the forensic (BENIGN_CLOSED) path | 2026-06-26 | round 1 APPROVE |
 | M1-457 | Fix /source-enable revive to allow all HTTP-shaped kinds | 2026-06-26 | round 1 APPROVE |
@@ -69,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-453 | cleanup: single-pass SimpleX group-mention decode + drop redundant InMemoryAdapter finalized map + fix stale @NonNull pom comment | 2026-06-25 | round 1 APPROVE |
 | M1-452 | Complete the collector's injectable-Clock migration: LinkingJob window cutoffs + NostrStreamSource since-cursor SQL floor (audit-missed sites) | 2026-06-25 | round 1 APPROVE |
 | M1-451 | Move probation-timing decision gates onto the injected Clock in InboundRouter / PromoteCommandHandler / VouchCommandHandler (close the audit-missed probation_until split) | 2026-06-25 | round 1 APPROVE |
-| M1-450 | Move ProbationCheck onto the injected Clock (close the probation_until app/DB split) | 2026-06-25 | round 1 APPROVE |
 
 ---
 
@@ -658,4 +659,7 @@ M1-456 (done)
 M1-457 (done)
 M1-458 (done)
 M1-459 (done)
+M1-460 (done)
+M1-461 (pending) ← runnable
+M1-462 (pending) ← runnable
 ```

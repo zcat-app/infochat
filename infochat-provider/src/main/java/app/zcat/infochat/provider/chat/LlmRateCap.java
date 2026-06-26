@@ -5,6 +5,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import java.time.Clock;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.UUID;
@@ -34,6 +35,16 @@ public class LlmRateCap {
     private final ConcurrentHashMap<UUID, Deque<Long>> llmCallTimestamps =
             new ConcurrentHashMap<>();
 
+    // The sliding-window decision (windowStart, prune, cap comparison)
+    // and the eviction sweep both read time here, so the cap is pinnable
+    // under a fixed test clock and the component never splits across two
+    // clocks (CLAUDE.md §9 / M1-447 single-clock rule). Field-injected
+    // from ThrottledAdminNotifier.systemUtcClock(); the default
+    // initializer keeps hand-constructed (non-CDI) test instances
+    // non-null, mirroring RateCapBucket's and ReEvaluationJob's seam.
+    @Inject
+    Clock clock = Clock.systemUTC();
+
     @Inject
     public LlmRateCap(
             @ConfigProperty(name = "infochat.chat.llm-rate-cap-per-minute", defaultValue = "10")
@@ -50,7 +61,7 @@ public class LlmRateCap {
     public boolean tryAcquire(UUID userId) {
         Deque<Long> timestamps = llmCallTimestamps.computeIfAbsent(
                 userId, k -> new ArrayDeque<>());
-        long now = System.currentTimeMillis();
+        long now = clock.millis();
         long windowStart = now - 60_000;
         synchronized (timestamps) {
             while (!timestamps.isEmpty() && timestamps.peekFirst() < windowStart) {
@@ -85,7 +96,7 @@ public class LlmRateCap {
 
     @Scheduled(every = "{infochat.chat.llm-rate-cap-sweep-interval:5m}")
     void evictIdleEntries() {
-        evictIdleEntries(System.currentTimeMillis());
+        evictIdleEntries(clock.millis());
     }
 
     // 2x the 60 s rate-cap window: timestamps older than this are pruned;

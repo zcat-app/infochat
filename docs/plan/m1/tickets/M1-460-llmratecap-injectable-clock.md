@@ -1,9 +1,45 @@
 ---
 id: M1-460
 title: "Move LlmRateCap's per-user rate-limit window onto the injected Clock (audit-missed §9 site)"
-status: pending
+status: done
 created: 2026-06-26
 last_updated: 2026-06-26
+clarity_check:
+  date: 2026-06-26
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-06-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 118
+      removed: 9
+redteam_findings: []
+redteam_audits:
+  - date: 2026-06-26
+    verdict: CLEAN
+    base: main
+    head: m1/M1-460-llmratecap-injectable-clock
+    verdict_file: docs/plan/m1/redteam/M1-460-2026-06-26.md
+    out_of_model_count: 1
+    note: |
+      Clean audit of the clock-seam refactor (--in-progress, branch tip before
+      commit). Pure time-source swap (System.currentTimeMillis -> injected
+      clock.millis) at the tryAcquire window decision and the scheduled
+      eviction; production behaviour byte-for-byte preserved. One advisory
+      out-of-model item only asks the user to confirm the package-private
+      field-injected Clock seam stays the accepted project-wide pattern (it
+      mirrors RateCapBucket and ~18 other provider components) — no follow-up
+      ticket warranted.
 blocked_by: []
 files_budget: 2
 files_scope:
