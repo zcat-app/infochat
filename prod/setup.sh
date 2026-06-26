@@ -28,7 +28,7 @@ STEPS=(
   "2-secrets.sh:Generate DB-role secrets"
   "3-postgres.sh:Start Postgres + bootstrap roles"
   "4-llm.sh:Configure the LLM backend"
-  "5-bootstrap.sh:Install bootstrap sources"
+  "5-bootstrap.sh:Install bootstrap sources and asset defaults"
   "6-adapter.sh:Register messaging adapters"
   "7-apps.sh:Start Collector then Provider"
   "8-verify.sh:Health-check the deployment"
