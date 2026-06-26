@@ -106,12 +106,28 @@ final class RedditResponseParser {
                 dispatchKey);
             publishedAt = fetchedAt;
         }
+        // Missing/empty permalink: the post still carries title + selftext, so
+        // the content-free bare-domain fallback is tolerated rather than
+        // skipping the item — a skip would drop that content permanently, since
+        // a re-fetch sees the same malformed item again (the created_utc
+        // reasoning above). Logged so the bare-domain URL is a deliberate,
+        // observable substitution, not a silent one. Only dispatchKey in the
+        // log — the item's fields are upstream-controlled text.
+        String permalink = data.path("permalink").asText();
+        final String url;
+        if (permalink.isEmpty()) {
+            LOG.warn("Reddit item missing permalink for source_id={}; using bare-domain URL",
+                dispatchKey);
+            url = "https://www.reddit.com";
+        } else {
+            url = "https://www.reddit.com" + permalink;
+        }
         return new NormalizedPost(
             dispatchKey,
             name,
             data.path("title").asText(),
             data.path("selftext").asText(""),
-            "https://www.reddit.com" + data.path("permalink").asText(),
+            url,
             publishedAt,
             fetchedAt,
             buildRawMetadata(data)

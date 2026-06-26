@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Pins the {@code fetched_at} partition-scan floor on
  * {@link EmbeddingWorker#enumeratePending}. The pickup query bounds
- * {@code fetched_at >= now() - PartitionScan.scanWindow()} so the planner
+ * {@code fetched_at >= PartitionScan.scanWindowFloor(now)} so the planner
  * can prune partitions of the RANGE(fetched_at) post table; a post fetched
  * longer ago than the retention horizon + slack drops out of pickup (it is
  * about to be partition-dropped anyway). This is the representative pickup

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 491 |
+| done | 492 |
 | deferred | 6 |
 | **total** | **498** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-462 — Deep-review low-severity cleanup sweep: dead scanWindow(), brittle quarantine error mapping, Reddit bare permalink, two SSRF doc/dedup nits (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-462 | Deep-review low-severity cleanup sweep: dead scanWindow(), brittle quarantine error mapping, Reddit bare permalink, two SSRF doc/dedup nits | 2026-06-26 | round 2 APPROVE |
 | M1-461 | Close the audit details_json fail-closed guard's gaps: NUL escape and balanced-but-invalid JSON that ?::jsonb rejects | 2026-06-26 | round 1 APPROVE |
 | M1-460 | Move LlmRateCap's per-user rate-limit window onto the injected Clock (audit-missed §9 site) | 2026-06-26 | round 1 APPROVE |
 | M1-459 | Note the confirm prompt for /clear and /unfollow-tag --all in USER_GUIDE | 2026-06-26 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-455 | Replace stray NUL-byte delimiter in adapterMessageId | 2026-06-26 | round 1 APPROVE |
 | M1-454 | Make provider retrieval/freshness-window decision time injectable: convert six audit-missed inline Instant.now() gates (SearchPostsTool, ListSavesTool, EligiblePostQuery, SavedCommandHandler, DigestWorker, AssetSnapshotReader) | 2026-06-26 | round 1 APPROVE |
 | M1-453 | cleanup: single-pass SimpleX group-mention decode + drop redundant InMemoryAdapter finalized map + fix stale @NonNull pom comment | 2026-06-25 | round 1 APPROVE |
-| M1-452 | Complete the collector's injectable-Clock migration: LinkingJob window cutoffs + NostrStreamSource since-cursor SQL floor (audit-missed sites) | 2026-06-25 | round 1 APPROVE |
 
 ---
 
@@ -660,5 +660,5 @@ M1-458 (done)
 M1-459 (done)
 M1-460 (done)
 M1-461 (done)
-M1-462 (pending) ← runnable
+M1-462 (done)
 ```

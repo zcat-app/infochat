@@ -603,6 +603,16 @@ public final class SsrfGuardedHttpClient {
             throw new SsrfPolicyException(
                 SsrfPolicyException.Reason.INVALID_HOST, "invalid host: " + rawHost, e);
         }
+        // Resolver-seam contract: the PRODUCTION seam (defaultResolve) never
+        // returns null or empty — InetAddress.getAllByName either yields a
+        // non-empty array or throws UnknownHostException, which defaultResolve
+        // wraps as UNKNOWN_HOST. So on the production path this branch is
+        // unreachable and the throw below is dead. It is retained to defend the
+        // ALTERNATE seam: the resolver-seam constructor lets sibling-module
+        // tests inject an arbitrary Function that may model an empty resolution,
+        // and a null/empty result there must fail closed as UNKNOWN_HOST rather
+        // than flow on to an empty blocklist check. The duplicated reason keeps
+        // both seams' "host did not resolve" outcome identical.
         List<InetAddress> addresses = resolverSeam.apply(canonicalHost);
         if (addresses == null || addresses.isEmpty()) {
             throw new SsrfPolicyException(
@@ -990,6 +1000,12 @@ public final class SsrfGuardedHttpClient {
 
         @Override
         public Optional<HttpResponse<byte[]>> previousResponse() {
+            // Always empty by design, even when the wrapper followed redirect
+            // hops to reach this terminal response. The wrapper drives the
+            // redirect loop itself (Redirect.NEVER on the JDK client) and
+            // discards each intermediate hop's response after draining it, so
+            // it holds no prior-hop HttpResponse to expose here. Callers needing
+            // the final landing URI read uri(); the per-hop chain is internal.
             return Optional.empty();
         }
 

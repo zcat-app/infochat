@@ -7,10 +7,8 @@ import app.zcat.infochat.collector.eval.tagger.TaggerWorker;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -42,15 +40,6 @@ class PartitionScanSharedSourceTest {
 
     @Inject
     ReadyPromoter readyPromoter;
-
-    @ConfigProperty(name = "infochat.partitions.retention-days.post")
-    int postRetentionDays;
-
-    @Test
-    void scanWindowIsRetentionHorizonWidenedBySlack() {
-        // Same arithmetic ReEvaluationJob already uses: horizon + 2-day slack.
-        assertEquals((postRetentionDays + 2) + " days", partitionScan.scanWindow());
-    }
 
     @Test
     void allFourPickupWorkersShareTheSinglePartitionScanBean() {

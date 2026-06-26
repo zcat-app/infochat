@@ -22,6 +22,7 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -197,6 +198,54 @@ class QuarantineCommandHandlerTest {
 
         assertEquals(bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY), reply.text(),
                 "non-admin /quarantine approve must surface error.admin_only");
+    }
+
+    // ---- Stored-procedure error mapping (M1-462 F3) ----
+    // mapStoredProcError() distinguishes the two RAISE EXCEPTION shapes of the
+    // approve/reject SECURITY DEFINER functions by substring match on the
+    // message text ("not found" / "expected PENDING or BENIGN_CLOSED"). These
+    // tests drive both real proc error paths and assert each maps to its
+    // SPECIFIC bundle reply, never the generic ERROR_INTERNAL fallback — so a
+    // future edit to the procedure's RAISE wording fails here loudly instead of
+    // silently degrading the user-visible reply. approve is the driving command
+    // because handleApprove calls the proc directly with no handler-side
+    // status pre-check (handleReject short-circuits terminal states before the
+    // proc), so the proc itself raises both errors.
+
+    @Test
+    void approve_nonexistentId_mapsToNotFoundNotInternal() throws Exception {
+        String admin = PREFIX + "errmap-notfound-admin";
+        seedUser(admin, true, false, "vouched");
+        UUID missingId = UUID.randomUUID();
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(admin), "/quarantine approve " + missingId);
+
+        assertEquals(MessageFormat.format(
+                bundleLoader.get(BundleKeys.ERROR_QUARANTINE_NOT_FOUND),
+                missingId.toString()), reply.text(),
+                "a non-existent quarantine id must map to ERROR_QUARANTINE_NOT_FOUND");
+        assertNotEquals(bundleLoader.get(BundleKeys.ERROR_INTERNAL), reply.text(),
+                "the not-found proc error must NOT collapse to the generic ERROR_INTERNAL fallback");
+    }
+
+    @Test
+    void approve_terminalStateRow_mapsToInvalidStateNotInternal() throws Exception {
+        String admin = PREFIX + "errmap-invstate-admin";
+        seedUser(admin, true, false, "vouched");
+        // A REJECTED row is neither PENDING nor BENIGN_CLOSED, so approve_quarantine
+        // raises "has status REJECTED; expected PENDING or BENIGN_CLOSED".
+        UUID qId = seedQuarantineRow("REJECTED", PREFIX + "errmap-invstate-p1");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(admin), "/quarantine approve " + qId);
+
+        assertEquals(MessageFormat.format(
+                bundleLoader.get(BundleKeys.ERROR_QUARANTINE_INVALID_STATE),
+                qId.toString()), reply.text(),
+                "a non-PENDING/BENIGN_CLOSED row must map to ERROR_QUARANTINE_INVALID_STATE");
+        assertNotEquals(bundleLoader.get(BundleKeys.ERROR_INTERNAL), reply.text(),
+                "the invalid-state proc error must NOT collapse to the generic ERROR_INTERNAL fallback");
     }
 
     // ---- /quarantine reject ----

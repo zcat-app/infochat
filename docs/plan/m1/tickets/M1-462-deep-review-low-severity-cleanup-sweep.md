@@ -1,17 +1,54 @@
 ---
 id: M1-462
 title: "Deep-review low-severity cleanup sweep: dead scanWindow(), brittle quarantine error mapping, Reddit bare permalink, two SSRF doc/dedup nits"
-status: pending
+status: done
 created: 2026-06-26
 last_updated: 2026-06-26
 blocked_by: []
+clarity_check:
+  date: 2026-06-26
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE F4: acceptance item 4 (F4) is verified by inspection only — could be sharpened to name the specific comment text or location."
+    - "ACCEPTANCE-RUNNABLE F5: acceptance item 5 (F5) is verified by inspection only with an OR branch — same sharpening opportunity as F4."
+    - "TEST-CHANGES-AUTHORIZED: EmbeddingWorkerPickupFloorIT is modified (comment-only per F1) but not listed in test_plan.modifies."
+    - "SECURITY-FLAG-CONSISTENT: SsrfGuardedHttpClient is a security enforcement file; security_relevant: false is acceptable here because F4/F5 are comment-only with no functional change."
+reviews:
+  - round: 1
+    date: 2026-06-26
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 178
+      removed: 33
+  - round: 2
+    date: 2026-06-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 216
+      removed: 33
 files_budget: 9
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/PartitionScan.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/PartitionScanSharedSourceTest.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/embedding/EmbeddingWorkerPickupFloorIT.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/reddit/RedditResponseParser.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/reddit/RedditResponseParserPermalinkTest.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/QuarantineCommandHandlerTest.java
   - infochat-ssrf/src/main/java/app/zcat/infochat/ssrf/SsrfGuardedHttpClient.java
 complexity: low
 risk: low
@@ -127,3 +164,25 @@ migration, and the two dropped findings.
 ```bash
 python3 scripts/lint-ticket.py docs/plan/m1/tickets/M1-462-deep-review-low-severity-cleanup-sweep.md
 ```
+
+## Round 1 rework
+
+Reviewer verdict round 1: REWORK (1 item). Only SCOPE-DRIFT-CHECK failed; all
+other checks (test-integrity, out-of-scope, negative-space, acceptance,
+spec-conformance) PASS, and the implementation code is confirmed correct.
+
+1. `files_scope` is non-empty but omits the two test files the diff touches, so
+   under the strict files_scope membership rule both count as out-of-scope.
+   Both are already authorized by `test_plan.adds` (the QuarantineCommandHandler
+   error-mapping test) and the natural home of the Reddit empty-permalink test;
+   the total stays at the same file count, within `files_budget: 9`. The fix is
+   a frontmatter scope correction — add these two paths to `files_scope`:
+     - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/reddit/RedditResponseParserPermalinkTest.java
+     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/QuarantineCommandHandlerTest.java
+   No source/test code change is required. Because this is a `files_scope`
+   change, it is routed through `escalate → refine` per the cross-cutting rule
+   rather than edited silently in-band.
+
+   **Resolution (user-approved refine, 2026-06-26):** both test paths added to
+   `files_scope` (now 8 paths, within `files_budget: 9`). No code change. Re-review
+   as round 2.
