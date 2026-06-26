@@ -1,7 +1,7 @@
 ---
 id: M1-464
 title: "setup.sh --reset: only tear down when resources exist (no removal noise on a clean host), then fall through into setup; keep data by default, add --reset --hard to wipe data volumes"
-status: pending
+status: done
 created: 2026-06-26
 last_updated: 2026-06-26
 blocked_by: []
@@ -39,6 +39,25 @@ test_plan:
 spec_refs:
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
 decision_refs: []
+reviews:
+  - round: 1
+    date: 2026-06-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 98
+      removed: 29
+clarity_check:
+  date: 2026-06-26
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-464: --reset becomes detect-then-clean-then-setup; data wipe moves to an explicit --hard flag

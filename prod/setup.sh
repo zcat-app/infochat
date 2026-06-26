@@ -35,7 +35,7 @@ STEPS=(
 )
 
 usage() {
-  echo "Usage: setup.sh [--defaults] [--reset] [-h|--help]"
+  echo "Usage: setup.sh [--defaults] [--reset [--hard]] [-h|--help]"
   echo
   echo "First-run setup wizard. Runs each step in order, resuming from the first"
   echo "incomplete step on re-run (state recorded in $STATE_FILE)."
@@ -48,7 +48,12 @@ usage() {
   echo
   echo "Options:"
   echo "  --defaults  Run non-interactively, taking every default."
-  echo "  --reset     docker compose down (offers -v to drop volumes) and clear state."
+  echo "  --reset     Tear down any existing deployment (keeping your data), clear"
+  echo "              wizard state, then run setup. Prints nothing if there is"
+  echo "              nothing to remove. Combine with --defaults to re-setup"
+  echo "              non-interactively."
+  echo "  --hard      Only with --reset: ALSO drop data volumes (deletes the"
+  echo "              database). Without it, your data is kept."
   echo "  -h, --help  Show this help and exit."
 }
 
@@ -110,12 +115,22 @@ print_handoff() {
   echo "Full admin walkthrough: ADMIN_GUIDE.md   ·   Using the bot: USER_GUIDE.md"
 }
 
+# Tear down an existing deployment so the wizard that follows starts clean, then
+# RETURN to the caller (the orchestrator continues into the step loop — a reset is
+# "clean up if needed, then set up", M1-464). The first argument is the literal
+# "hard" when the operator passed --reset --hard, which additionally drops data
+# volumes; absent it, the database is always kept. Crucially, do_reset is SILENT on
+# a clean host: it probes for each kind of leftover before issuing any compose
+# command or printing any line, so a reset with nothing to remove neither prints a
+# removal message nor asks anything (the reported annoyance: removal noise + a [y/N]
+# volume prompt on every run regardless of state).
 do_reset() {
+  local hard="${1:-}"
   # Feed secrets to compose via its own dotenv parser (--env-file), never a shell
   # `source` of secrets.env: operator-pasted values (SimpleX queue addresses with
   # '#' / '&', API keys) would otherwise truncate at '#' or execute as shell
   # (M1-389). Guarded — a --reset before the wizard minted secrets.env has no file
-  # yet, and compose's ${INFOCHAT_*:-} defaults let `down` run without it.
+  # yet, and compose's ${INFOCHAT_*:-} defaults let the probes/down run without it.
   local env_file_args=()
   [[ -f "$SECRETS_FILE" ]] && env_file_args=(--env-file "$SECRETS_FILE")
   # Include the ollama / llamacpp / llamacpp-embeddings profiles so a reset stops
@@ -127,31 +142,71 @@ do_reset() {
   # own profile, NOT covered by --profile llamacpp; omitting it here leaves that
   # container running and holding infochat_default open after the down, and pinning
   # the shared infochat-llamacpp-models volume so even the -v drop cannot remove it.
-  echo "+ docker compose -f $COMPOSE_FILE --profile prod --profile ollama --profile llamacpp --profile llamacpp-embeddings down"
-  docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" --profile prod --profile ollama --profile llamacpp --profile llamacpp-embeddings down
-  read -rp "Also drop data volumes (-v)? This deletes all DB data. [y/N]: " ans
-  if [[ "$ans" == "y" || "$ans" == "Y" ]]; then
-    echo "+ docker compose -f $COMPOSE_FILE --profile prod --profile ollama --profile llamacpp --profile llamacpp-embeddings down -v"
-    docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" --profile prod --profile ollama --profile llamacpp --profile llamacpp-embeddings down -v
+  local profiles=(--profile prod --profile ollama --profile llamacpp --profile llamacpp-embeddings)
+
+  # Probe before acting (M1-464). `compose ps -aq` over the four profiles lists this
+  # project's containers — exactly the set `down` would remove; the network probe
+  # catches a leftover network with no container still attached.
+  local container_ids
+  container_ids="$(docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" "${profiles[@]}" ps -aq 2>/dev/null || true)"
+  local network_name="${COMPOSE_PROJECT_NAME:-$(basename "$REPO_ROOT")}_default"
+  local has_runtime=0
+  if [[ -n "$container_ids" ]] || docker network inspect "$network_name" >/dev/null 2>&1; then
+    has_runtime=1
   fi
+  # --hard drops data volumes too — but only when some exist, so a clean host gets
+  # no `-v` noise. Substring match covers both the project-prefixed volumes
+  # (infochat_infochat-pgdata, …) and the explicitly-named infochat-llamacpp-models.
+  local has_volumes=0
+  if [[ "$hard" == "hard" ]] && [[ -n "$(docker volume ls -q --filter name=infochat 2>/dev/null)" ]]; then
+    has_volumes=1
+  fi
+
+  if [[ "$has_volumes" -eq 1 ]]; then
+    echo "+ docker compose -f $COMPOSE_FILE ${profiles[*]} down -v"
+    docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" "${profiles[@]}" down -v
+  elif [[ "$has_runtime" -eq 1 ]]; then
+    echo "+ docker compose -f $COMPOSE_FILE ${profiles[*]} down"
+    docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" "${profiles[@]}" down
+  fi
+
+  # Clear resume state so the wizard below runs from the first step; silent when
+  # there is nothing to clear.
   if [[ -f "$STATE_FILE" ]]; then
     echo "+ rm $STATE_FILE"
     rm -f "$STATE_FILE"
   fi
-  echo "reset complete."
 }
 
 defaults=0
-case "${1:-}" in
-  -h|--help) usage; exit 0 ;;
-  --reset) do_reset; exit 0 ;;
-  --defaults) defaults=1 ;;
-  "") ;;
-  *) usage >&2; exit 2 ;;
-esac
+reset=0
+hard=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --reset) reset=1 ;;
+    --hard) hard=1 ;;
+    --defaults) defaults=1 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+  shift
+done
+# --hard only makes sense as a modifier of --reset; alone it would imply silently
+# wiping data volumes outside any reset, which the no-accidental-wipe invariant
+# forbids. Reject it loudly rather than ignore it.
+if [[ "$hard" -eq 1 && "$reset" -eq 0 ]]; then
+  echo "--hard is only valid together with --reset (it wipes data volumes during a reset)." >&2
+  exit 2
+fi
 
 umask 077
 mkdir -p "$RUNTIME_DIR"
+
+# A reset cleans up any existing deployment first, then falls through into the
+# wizard below (M1-464) — so `--reset` is one command that tears down and sets up.
+if [[ "$reset" -eq 1 ]]; then
+  if [[ "$hard" -eq 1 ]]; then do_reset hard; else do_reset; fi
+fi
 
 print_menu
 echo

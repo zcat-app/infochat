@@ -259,14 +259,22 @@ summary, you're done.
   connect to the bot (see
   [below](#connecting-to-the-bot-for-the-first-time)), then start with the
   [User Guide](USER_GUIDE.md).
-- **To stop or restart everything**, or to wipe it and start fresh, run:
+- **To tear everything down and set up again from scratch**, run:
 
   ```bash
   ./prod/setup.sh --reset
   ```
 
-  It will offer to also delete the database (your stored posts). Say **no** to
-  that unless you really want a clean slate.
+  This stops and removes any running infochat containers — **keeping your
+  database** (your stored posts) — and then runs setup again from the start. If
+  there's nothing to tear down, it just goes straight into setup; it won't print
+  removal messages or ask you anything about a deployment that isn't there.
+
+  To **also** wipe the database for a truly clean slate, add `--hard`:
+
+  ```bash
+  ./prod/setup.sh --reset --hard   # ALSO deletes all stored posts
+  ```
 - **To re-run setup** (e.g. to add Signal later), just run `./prod/setup.sh`
   again.
 
@@ -422,9 +430,10 @@ understand the internals.*
 ### Non-interactive and reset modes
 
 ```bash
-./prod/setup.sh --defaults   # take every default; still prompts for the mandatory admin contact id (CI / scripted installs)
-./prod/setup.sh --reset      # docker compose down + clear wizard state
-./prod/setup.sh --help       # list all steps and options
+./prod/setup.sh --defaults      # take every default; still prompts for the mandatory admin contact id (CI / scripted installs)
+./prod/setup.sh --reset         # tear down (keeping data) + clear wizard state, then run setup; no output if nothing to remove
+./prod/setup.sh --reset --hard  # same, but ALSO drop data volumes (deletes the database)
+./prod/setup.sh --help          # list all steps and options
 ```
 
 `--defaults` cannot pick a custom model file or a remote API endpoint (those
