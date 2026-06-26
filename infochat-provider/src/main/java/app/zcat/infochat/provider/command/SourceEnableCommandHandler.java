@@ -284,7 +284,7 @@ public class SourceEnableCommandHandler implements CommandHandler {
             // confirm; nothing to revive.
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_ALREADY_ACTIVE, inboundContext.effectiveLanguage()));
         }
-        if (!"rss".equals(preflight.kind)) {
+        if (STREAM_KINDS.contains(preflight.kind)) {
             return reply(scope,
                     bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_KIND_NOT_SUPPORTED_IN_V1, inboundContext.effectiveLanguage()));
         }
@@ -305,7 +305,7 @@ public class SourceEnableCommandHandler implements CommandHandler {
             try {
                 LockedRow locked = selectSourceForUpdate(conn, sourceId);
                 if (locked == null
-                        || !"rss".equals(locked.kind)
+                        || STREAM_KINDS.contains(locked.kind)
                         || locked.deletedAt == null) {
                     conn.rollback();
                     return reply(scope,

@@ -1,10 +1,30 @@
 ---
 id: M1-457
 title: Fix /source-enable revive to allow all HTTP-shaped kinds
-status: pending
+status: done
 created: 2026-06-26
 last_updated: 2026-06-26
 blocked_by: []
+reviews:
+  - round: 1
+    date: 2026-06-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 84
+      removed: 9
+clarity_check:
+  date: 2026-06-26
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: security_relevant: false claimed on a bot-admin command handler that writes audit rows; diff is low-risk (kind-check substitution in an already-audited path), but the reviewer should confirm the SOURCE_ENABLE audit write is exercised by the new sourceEnableRevivesSoftDeletedHttpNonRssKind test."
+  blockers: []
 files_budget: 3
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SourceEnableCommandHandler.java

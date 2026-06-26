@@ -359,6 +359,77 @@ class SourceEnableCommandHandlerTest {
     }
 
     @Test
+    void sourceEnableRevivesSoftDeletedHttpNonRssKind() throws Exception {
+        // M1-457: the soft-delete revive path must accept every
+        // HTTP-shaped kind, not just rss — matching the main kind gate
+        // (STREAM_KINDS) and the failed/disabled re-enable path. Before
+        // the fix, executeRevive's !"rss" check rejected a soft-deleted
+        // reddit/youtube/odysee/nitter/bluesky source as
+        // kind_not_supported_in_v1. Exercises reddit (a non-rss HTTP
+        // kind) end to end: prompt -> confirm -> full state transition +
+        // SOURCE_ENABLE audit row + no-subscriptions-restored disclosure.
+        String actor = PREFIX + "softRevReddit-actor";
+        UUID actorId = seedUser(actor, true);
+        UUID sourceId = seedSource("softRevReddit", "reddit", "active", true);
+
+        // Prompt then confirm.
+        handler.handle(new ScopeRef.Dm(actor), "/source-enable " + sourceId);
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/source-enable confirm");
+
+        assertTrue(reply.text().contains(PREFIX + "softRevReddit-name"),
+                "revival success reply must name the kind=reddit source — got: " + reply.text());
+        assertTrue(reply.text().contains("No subscriptions were restored"),
+                "revival success reply must include the no-subscriptions-restored "
+                        + "disclosure — got: " + reply.text());
+
+        assertFalse(readDeletedAtIsNotNull(sourceId),
+                "confirmed revival of a reddit source must clear deleted_at");
+        assertEquals("active", readStatus(sourceId),
+                "confirmed revival of a reddit source must set status='active'");
+        assertEquals(0, readConsecutiveFailures(sourceId),
+                "confirmed revival must reset consecutive_failures to 0");
+
+        assertEquals(1L, countAuditByActionForTarget("SOURCE_ENABLE", sourceId),
+                "confirmed revival of a reddit source must write one SOURCE_ENABLE audit row");
+        assertEquals(0L, countSubscriptions(sourceId),
+                "confirmed revival must NOT recreate any subscription rows");
+
+        Optional<ConfirmStateService.PendingConfirm> peeked =
+                confirmStateService.peek(actorId, new ScopeRef.Dm(actor));
+        assertFalse(peeked.isPresent(),
+                "ConfirmStateService.peek must be empty after the confirm consumes pending");
+    }
+
+    @Test
+    void sourceEnableSoftDeletedNostrStillReturnsKindNotSupported() throws Exception {
+        // M1-457: a soft-deleted stream-shaped kind (nostr) is still
+        // rejected at the main kind gate before any probe or state
+        // change — stream revive remains a documented v1 deferral.
+        String actor = PREFIX + "softNostr-actor";
+        seedUser(actor, true);
+        UUID sourceId = seedSource("softNostr", "nostr", "active", true);
+        long auditBefore = countAuditForTarget(sourceId);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/source-enable " + sourceId);
+
+        assertEquals(
+                bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_KIND_NOT_SUPPORTED_IN_V1),
+                reply.text(),
+                "/source-enable against a soft-deleted kind=nostr source must surface "
+                        + "kind_not_supported_in_v1");
+        assertTrue(readDeletedAtIsNotNull(sourceId),
+                "rejected nostr revive must leave the row soft-deleted");
+        assertEquals(auditBefore, countAuditForTarget(sourceId),
+                "rejected nostr revive must not write any audit row");
+        assertEquals(0, ((StubUrlProbe) urlProbe).callCount(),
+                "rejected nostr revive must short-circuit BEFORE the probe");
+    }
+
+    @Test
     void sourceEnableSoftDeletedConfirmWithFailingProbeLeavesRowSoftDeleted() throws Exception {
         String actor = PREFIX + "softProbeFail-actor";
         seedUser(actor, true);
