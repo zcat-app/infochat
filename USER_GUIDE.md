@@ -104,7 +104,7 @@ optional. Run `/help` to see the ones available to *you* right now.
 | `/get-tags` | Show the available topics and which you follow |
 | `/follow-tag <tag>` | Narrow your digests to specific topics |
 | `/unfollow-tag <tag>` | Drop a topic |
-| `/unfollow-tag --all` | Reset to the default ("everything from my sources") |
+| `/unfollow-tag --all` | Reset to the default ("everything from my sources") (asks to confirm) |
 
 By default you get **everything** from your subscribed sources. The moment you
 `/follow-tag` something, you switch to "only the topics I picked."
@@ -116,7 +116,7 @@ By default you get **everything** from your subscribed sources. The moment you
 | `/lang <code>` | Set the language the bot answers you in — its summaries and chat replies (English and Czech in v1; original posts aren't translated) |
 | `/stop` | Cancel whatever the bot is currently working on for you |
 | `/retry` | Re-generate the last summary's wording (same posts) |
-| `/clear` | Clear the current conversation's short-term context |
+| `/clear` | Clear the current conversation's short-term context (asks to confirm) |
 | `/forget` | Erase your stored data (see [Privacy](#your-privacy-and-your-data)) |
 | `/export` | Get a copy of your own data, sent back to you in chat |
 
