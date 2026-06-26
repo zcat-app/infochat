@@ -1,14 +1,59 @@
 ---
 id: M1-456
 title: Accept nitter kind in /add-source via operator host-config
-status: pending
+status: done
 created: 2026-06-26
 last_updated: 2026-06-26
+clarity_check:
+  date: 2026-06-26
+  verdict: WARN
+  warnings:
+    - "TEST-CHANGES-AUTHORIZED: test_plan.adds lists KindResolverTest.java and AddSourceCommandHandlerTest.java which already exist on disk; they are modifications, not new files. New behaviors are enumerated in acceptance so no authorization gap, only a labeling error."
+  blockers: []
+escalations:
+  - date: 2026-06-26
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — pre-review budget-breach: acceptance item 4's friendly
+      "configured Nitter instance" rejection error requires a new
+      BundleKeys constant, which BundleLoaderTest (M1-060) enforces in
+      BOTH en.properties and cs.properties. Those three files are outside
+      the original files_scope, taking the file count to 11 vs files_budget 9.
+revisions:
+  - date: 2026-06-26
+    reason: budget-breach refine — add bundle files for the nitter-host --type rejection error
+    prior_files_budget: 9
+    prior_files_scope:
+      - infochat-provider/src/main/java/app/zcat/infochat/provider/source/KindResolver.java
+      - infochat-provider/src/main/java/app/zcat/infochat/provider/command/AddSourceCommandHandler.java
+      - infochat-provider/src/test/java/app/zcat/infochat/provider/source/KindResolverTest.java
+      - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceCommandHandlerTest.java
+      - infochat-provider/src/main/resources/application.properties
+      - docs/spec/commands.md
+      - docs/design/03-commands.md
+      - USER_GUIDE.md
+reviews:
+  - round: 1
+    date: 2026-06-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 13
+      added: 332
+      removed: 35
 blocked_by: []
-files_budget: 9
+files_budget: 11
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/source/KindResolver.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/AddSourceCommandHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
+  - infochat-provider/src/main/resources/bundles/en.properties
+  - infochat-provider/src/main/resources/bundles/cs.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/source/KindResolverTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceCommandHandlerTest.java
   - infochat-provider/src/main/resources/application.properties

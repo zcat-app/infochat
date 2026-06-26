@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 485 |
+| done | 486 |
 | deferred | 6 |
-| **total** | **491** |
+| **total** | **495** |
 
 ---
 
@@ -24,7 +24,9 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-457 — Fix /source-enable revive to allow all HTTP-shaped kinds (complexity: low, risk: low)
+- M1-458 — Confirm-gate /quarantine reject on the forensic (BENIGN_CLOSED) path (complexity: medium, risk: low)
+- M1-459 — Note the confirm prompt for /clear and /unfollow-tag --all in USER_GUIDE (complexity: low, risk: low)
 
 ---
 
@@ -60,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-456 | Accept nitter kind in /add-source via operator host-config | 2026-06-26 | round 1 APPROVE |
 | M1-455 | Replace stray NUL-byte delimiter in adapterMessageId | 2026-06-26 | round 1 APPROVE |
 | M1-454 | Make provider retrieval/freshness-window decision time injectable: convert six audit-missed inline Instant.now() gates (SearchPostsTool, ListSavesTool, EligiblePostQuery, SavedCommandHandler, DigestWorker, AssetSnapshotReader) | 2026-06-26 | round 1 APPROVE |
 | M1-453 | cleanup: single-pass SimpleX group-mention decode + drop redundant InMemoryAdapter finalized map + fix stale @NonNull pom comment | 2026-06-25 | round 1 APPROVE |
@@ -69,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-449 | Make scheduler/pruner decision time injectable (PartitionPruner, DigestRetryService, FetchScheduler) | 2026-06-25 | round 1 APPROVE |
 | M1-448 | Make partition-scan worker time injectable (5 scan-window workers) | 2026-06-25 | round 1 APPROVE |
 | M1-447 | Make decision-logic time injectable: classify all now() sites + convert security-timing trio | 2026-06-25 | round 1 APPROVE |
-| M1-446 | build: pin the Maven toolchain (wrapper) and add a non-empty-unit-suite tripwire so a silent test-skip can never recur | 2026-06-25 | round 1 APPROVE |
 
 ---
 
@@ -654,4 +656,8 @@ M1-452 (done)
 M1-453 (done)
 M1-454 (done)
 M1-455 (done)
+M1-456 (done)
+M1-457 (pending) ← runnable
+M1-458 (pending) ← runnable
+M1-459 (pending) ← runnable
 ```

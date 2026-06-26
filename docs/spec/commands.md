@@ -372,13 +372,20 @@ shared across the group and writable only by group admins.
 
   **Kind resolution.** The source `kind` is determined deterministically:
 
-  1. An explicit `--type <kind>` always wins. The value is matched
+  1. An explicit `--type <kind>` wins (and `nitter` is a valid
+     explicit `--type`). The value is matched
      case-insensitively against the closed `source.kind` enum
      (SPEC.md §Glossary "Source kind"); unknown values produce the
      friendly-error path with fuzzy suggestions over the enum, the
      same path as an unknown tag argument. The value never reaches
      a SQL query as free-form text — the enum check is the validation
-     boundary.
+     boundary. **One exception qualifies "explicit `--type` wins":** a
+     URL whose host is a configured Nitter instance (the operator
+     allowlist in the table's row below) may only be added as
+     `--type nitter`. A non-nitter `--type` on such a host is rejected
+     with a friendly error naming the host as a configured Nitter
+     instance — forcing the wrong kind would file the same feed under a
+     second `(kind, identifier)` row and duplicate-fetch it.
   2. With no `--type`, the kind is inferred from the URL by the
      following closed table, applied in order. Host comparisons are
      case-insensitive against the URL's authority component:
@@ -391,6 +398,15 @@ shared across the group and writable only by group admins.
      - Host is `youtube.com`, `youtu.be`, or any subdomain
        thereof → `youtube`.
      - Host is `odysee.com` or any subdomain thereof → `odysee`.
+     - Host (or any subdomain thereof) is in the operator-declared
+       `infochat.sources.nitter-hosts` allowlist → `nitter`. This
+       row is **config-driven**, not a fixed host literal: Nitter is
+       self-hosted on arbitrary, churning domains with no canonical
+       host, so the operator names their instance(s). It applies
+       **before** RSS auto-detection (step 3) so a Nitter RSS URL
+       (`https://<instance>/<user>/rss`) on a configured host resolves
+       `nitter`, not `rss`. With the allowlist empty (the default),
+       this row never fires and behaviour is unchanged.
   3. **RSS auto-detection.** A URL whose path ends in `.xml`,
      `.rss`, or contains `/feed` (or `/feed/`, `/feed.xml`, etc.)
      resolves to `rss` without `--type`. The URL-validation probe
@@ -404,10 +420,13 @@ shared across the group and writable only by group admins.
   4. URLs that match none of the rows above are **ambiguous**: the
      call is rejected with a friendly error that lists the supported
      kinds and instructs the caller to supply `--type`. There is
-     no silent fallback for self-hosted Nitter instances (no
-     canonical host), non-canonical mirrors, or other RSS-shaped
-     feeds without the path/Content-Type signal — those require an
-     explicit `--type`. A URL silently routed to the wrong SPI
+     no silent fallback for self-hosted Nitter instances **not** in the
+     operator allowlist (no canonical host to auto-detect),
+     non-canonical mirrors, or other RSS-shaped feeds without the
+     path/Content-Type signal — those require an explicit `--type`. A
+     Nitter instance the operator has declared in
+     `infochat.sources.nitter-hosts` is the one case that auto-resolves
+     (the nitter-hosts row of step 2). A URL silently routed to the wrong SPI
      (Fetcher vs. StreamSource) and clashing with an existing row
      on the `(kind, identifier)` unique key is a worse failure
      mode than asking the caller for `--type`.

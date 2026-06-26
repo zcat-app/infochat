@@ -232,6 +232,30 @@ class AddSourceCommandHandlerTest {
                         + "— got: " + body);
     }
 
+    @Test
+    void addSourceTypeNitterCreatesNitterKindSource() {
+        // Explicit --type nitter resolves NITTER and persists kind='nitter'.
+        // The host is not a configured nitter-host here, so resolution comes
+        // purely from the explicit override; the feed takes the existing HTTP
+        // probe (NITTER != NOSTR), and the RSS confirm-or-contradict gate does
+        // not apply (kind != RSS) (M1-456).
+        dataSource.seedUser("m1-456-nitter", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://nitter.example/someuser/rss",
+                ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.FRESH_INSERT);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-456-nitter"),
+                "/add-source https://nitter.example/someuser/rss --type nitter --tags m1-456-news");
+
+        assertEquals(KindResolver.SourceKind.NITTER, sourceUpsertService.lastKind(),
+                "explicit --type nitter must persist kind='nitter'");
+        assertEquals(1, urlProbe.callCount(),
+                "nitter takes the existing HTTP probe exactly once, not the Nostr relay probe");
+        assertFalse(reply.text().isEmpty(),
+                "a successful nitter add must produce a non-empty reply");
+    }
+
     // ----- fixtures + collaborator stubs --------------------------------
 
     private static BundleLoader newRealBundleLoader() throws Exception {
@@ -251,9 +275,15 @@ class AddSourceCommandHandlerTest {
      */
     private static final class StubSourceUpsertService extends SourceUpsertService {
         private Outcome outcome = Outcome.FRESH_INSERT;
+        private KindResolver.SourceKind lastKind;
 
         void setOutcome(Outcome outcome) {
             this.outcome = outcome;
+        }
+
+        /** The {@code kind} the handler resolved and passed to the upsert. */
+        KindResolver.SourceKind lastKind() {
+            return lastKind;
         }
 
         @Override
@@ -266,6 +296,7 @@ class AddSourceCommandHandlerTest {
                                    String displayName,
                                    String category,
                                    List<String> tags) {
+            this.lastKind = kind;
             return new UpsertResult(outcome, UUID.randomUUID(), displayName);
         }
     }

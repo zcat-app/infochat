@@ -159,6 +159,13 @@ public class AddSourceCommandHandler implements CommandHandler {
 
         // Kind resolution.
         Resolution resolution = kindResolver.resolve(args.url(), args.typeOverride());
+        if (resolution.isNitterHostTypeConflict()) {
+            // Configured Nitter host forced to a non-nitter --type (M1-456):
+            // name the host so the operator/user knows why the override was
+            // refused.
+            return reply(scope, format(BundleKeys.ERROR_ADD_SOURCE_NITTER_HOST_TYPE_CONFLICT,
+                    resolution.nitterHostConflict().orElseThrow()));
+        }
         if (resolution.isAmbiguous()) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_AMBIGUOUS_URL, inboundContext.effectiveLanguage()));
         }

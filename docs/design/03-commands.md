@@ -595,7 +595,16 @@ Optional:
 
 **Kind resolution.** The source `kind` is determined deterministically:
 
-1. An explicit `--type <kind>` always wins (case-insensitive enum match).
+1. An explicit `--type <kind>` wins (case-insensitive enum match);
+   `nitter` is a valid explicit `--type`. **One exception** (M1-456): a
+   URL whose host is a configured Nitter instance (the `nitter-hosts`
+   row below) may only be added as `--type nitter`. A non-nitter
+   `--type` on such a host is rejected with a friendly error naming the
+   host (`error.add_source.nitter_host_type_conflict`) — forcing the
+   wrong kind would file the same feed under a second `(kind, identifier)`
+   row and duplicate-fetch it. Surfaced via a third `KindResolver.Resolution`
+   variant (`nitterHostTypeConflict`) the handler checks before the
+   ambiguous-URL path.
 2. Without `--type`, the kind is inferred from the URL by the closed table
    below, applied in order. Host comparisons are case-insensitive against
    the URL's authority component:
@@ -607,7 +616,16 @@ Optional:
    | host `reddit.com`, `redd.it`, or any subdomain | `reddit` |
    | host `youtube.com`, `youtu.be`, or any subdomain | `youtube` |
    | host `odysee.com` or any subdomain | `odysee` |
+   | host (or any subdomain) in `infochat.sources.nitter-hosts` | `nitter` |
 
+   The `nitter-hosts` row is **config-driven**, not a fixed host literal —
+   Nitter is self-hosted on arbitrary, churning domains with no canonical
+   host, so the operator declares their instance(s) in the comma-separated
+   `infochat.sources.nitter-hosts` allowlist (default empty; same trust
+   model as `bootstrap-sources.json`). It applies **before** RSS
+   auto-detection (step 3) so a Nitter RSS URL
+   (`https://<instance>/<user>/rss`) on a configured host resolves
+   `nitter`, not `rss`. With the allowlist empty, the row never fires.
 3. **RSS auto-detection.** A URL whose path ends in `.xml`, `.rss`, or
    contains `/feed` (or `/feed/`, `/feed.xml`, etc.) resolves to `rss`
    without `--type`. The URL-validation probe (below) inspects the response
@@ -617,8 +635,8 @@ Optional:
 4. URLs matching none of the rows above are **ambiguous**: the call is
    rejected with a friendly error listing the supported kinds and
    instructing the caller to supply `--type`. There is no silent fallback
-   for self-hosted Nitter instances or non-canonical mirrors — those
-   require explicit `--type`.
+   for self-hosted Nitter instances **not** in the operator allowlist, or
+   non-canonical mirrors — those require explicit `--type`.
 
 The host-pattern table is **closed at spec level**; additions are spec
 amendments. IDN/Punycode folding rules: hosts are folded via

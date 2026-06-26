@@ -213,11 +213,13 @@ can still be sorted even if automatic tagging misses):
 ```
 
 The bot figures out the source type from the address — RSS, Bluesky, Reddit,
-YouTube, Odysee, or Nostr. (Nitter/X feeds work too; the bot treats them as
-ordinary RSS feeds rather than a separate type.) When you add a brand-new
-source, the bot also reminds you that **source web addresses are visible to
-admins** — worth
-knowing before you add a private feed.
+YouTube, Odysee, or Nostr. **Nitter** is its own distinct type: add one with
+`--type nitter` (e.g. `/add-source https://nitter.example/user/rss --type nitter
+--tags news`). Because Nitter is self-hosted on all sorts of addresses, the bot
+can only auto-recognise the Nitter instances your operator has configured; for
+any other Nitter address, name the type with `--type nitter`. When you add a
+brand-new source, the bot also reminds you that **source web addresses are
+visible to admins** — worth knowing before you add a private feed.
 
 ### 4. Fix the topics you see
 

@@ -5,6 +5,7 @@ import app.zcat.infochat.provider.source.KindResolver.SourceKind;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -241,6 +242,65 @@ class KindResolverTest {
         Resolution r = resolver.resolve(evasion, Optional.empty());
         assertFalse(r.kind().filter(k -> k == SourceKind.BLUESKY).isPresent(),
                 "evilbsky.app.attacker.com must NOT resolve to Bluesky");
+    }
+
+    // ----- Nitter kind (M1-456) -----------------------------------------
+
+    @Test
+    void explicitTypeNitterResolvesNitter() {
+        // The enum gained NITTER: wire() round-trips and fromString
+        // accepts it case-insensitively, so `--type nitter` parses and
+        // wins regardless of host (no nitter-hosts configured here).
+        assertEquals("nitter", SourceKind.NITTER.wire());
+        Optional<SourceKind> parsed = SourceKind.fromString("nitter");
+        assertEquals(Optional.of(SourceKind.NITTER), parsed,
+                "SourceKind.fromString must accept 'nitter'");
+        Resolution r = resolver.resolve(
+                URI.create("https://nitter.example/someuser/rss"),
+                parsed);
+        assertResolved(SourceKind.NITTER, r);
+    }
+
+    @Test
+    void nitterHostResolvesNitterWithoutExplicitType() {
+        // A URL whose host is the operator-configured Nitter instance
+        // resolves NITTER with no --type, BEFORE the /rss path rule —
+        // the URL ends in /rss yet must not route to RSS.
+        KindResolver hostAware = new KindResolver(List.of("nitter.example"));
+        Resolution r = hostAware.resolve(
+                URI.create("https://nitter.example/someuser/rss"),
+                Optional.empty());
+        assertResolved(SourceKind.NITTER, r);
+    }
+
+    @Test
+    void nonNitterHostRssUrlStillResolvesRss() {
+        // With a nitter host configured, an unrelated host's RSS URL
+        // still auto-detects RSS — no regression to the existing rule.
+        KindResolver hostAware = new KindResolver(List.of("nitter.example"));
+        Resolution r = hostAware.resolve(
+                URI.create("https://news.example.com/feed.xml"),
+                Optional.empty());
+        assertResolved(SourceKind.RSS, r);
+    }
+
+    @Test
+    void nitterHostWithExplicitRssTypeIsRejected() {
+        // A configured Nitter host forced to --type rss is a conflict,
+        // not an honoured override: it would duplicate-fetch the feed
+        // under a second source.kind row. The conflict carries the host
+        // so the handler can name the configured instance.
+        KindResolver hostAware = new KindResolver(List.of("nitter.example"));
+        Resolution r = hostAware.resolve(
+                URI.create("https://nitter.example/someuser/rss"),
+                Optional.of(SourceKind.RSS));
+        assertTrue(r.isNitterHostTypeConflict(),
+                "a nitter-host URL with --type rss must be a conflict, not a resolved kind");
+        assertEquals(Optional.of("nitter.example"), r.nitterHostConflict(),
+                "the conflict must carry the canonical host so the handler can name it");
+        assertTrue(r.kind().isEmpty(), "a conflict carries no resolved kind");
+        assertFalse(r.isAmbiguous(),
+                "a nitter-host conflict is distinct from AMBIGUOUS — it has a specific cause");
     }
 
     private static void assertResolved(SourceKind expected, Resolution actual) {

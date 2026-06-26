@@ -1,6 +1,8 @@
 package app.zcat.infochat.provider.source;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.net.IDN;
 import java.net.URI;
@@ -30,6 +32,11 @@ import java.util.stream.Collectors;
  *             → {@link SourceKind#YOUTUBE}</li>
  *         <li>{@code odysee.com} (incl. subdomains) →
  *             {@link SourceKind#ODYSEE}</li>
+ *         <li>any host (incl. subdomains) in the operator-declared
+ *             {@code infochat.sources.nitter-hosts} allowlist →
+ *             {@link SourceKind#NITTER} (M1-456). Nitter is self-hosted
+ *             on arbitrary, churning domains with no canonical host, so
+ *             the allowlist is the only reliable signal.</li>
  *       </ul>
  *       The host is folded via {@link IDN#toASCII(String, int)
  *       IDN.toASCII(host, IDN.ALLOW_UNASSIGNED)} +
@@ -43,8 +50,13 @@ import java.util.stream.Collectors;
  * </ol>
  *
  * <p>Host-pattern matches BEAT RSS path matches when both apply (a
- * Bluesky URL whose path ends in {@code /feed} is Bluesky, not RSS).
- * Explicit {@code --type} BEATS all auto-detect paths.</p>
+ * Bluesky URL whose path ends in {@code /feed} is Bluesky, not RSS; a
+ * Nitter-host URL ending in {@code /rss} is Nitter, not RSS). Explicit
+ * {@code --type} BEATS all auto-detect paths, with ONE exception
+ * (M1-456): a configured Nitter host passed a non-nitter {@code --type}
+ * is a {@link Resolution#nitterHostTypeConflict(String) conflict}, not
+ * an honoured override — forcing the wrong kind would duplicate-fetch
+ * the same feed under two {@code source.kind} rows.</p>
  */
 @ApplicationScoped
 public class KindResolver {
@@ -56,7 +68,7 @@ public class KindResolver {
      * the application layer is the closure enforcer.
      */
     public enum SourceKind {
-        RSS, NOSTR, BLUESKY, REDDIT, YOUTUBE, ODYSEE;
+        RSS, NOSTR, BLUESKY, REDDIT, YOUTUBE, ODYSEE, NITTER;
 
         /** Lower-case wire form used in the {@code source.kind} column. */
         public String wire() {
@@ -83,19 +95,78 @@ public class KindResolver {
     }
 
     /**
-     * Either a resolved {@link SourceKind} or the {@link #ambiguous()}
-     * sentinel. A sealed result keeps the dispatch surface in the
-     * handler exhaustive.
+     * One of three outcomes: a resolved {@link SourceKind}, the
+     * {@link #ambiguous()} sentinel, or a
+     * {@link #nitterHostTypeConflict(String) Nitter-host/--type conflict}
+     * carrying the offending host so the handler can name it (M1-456).
      */
-    public record Resolution(Optional<SourceKind> kind, boolean isAmbiguous) {
+    public record Resolution(Optional<SourceKind> kind, boolean isAmbiguous,
+                             Optional<String> nitterHostConflict) {
 
         public static Resolution of(SourceKind kind) {
-            return new Resolution(Optional.of(kind), false);
+            return new Resolution(Optional.of(kind), false, Optional.empty());
         }
 
         public static Resolution ambiguous() {
-            return new Resolution(Optional.empty(), true);
+            return new Resolution(Optional.empty(), true, Optional.empty());
         }
+
+        /**
+         * A URL whose host is a configured Nitter instance was passed an
+         * explicit non-nitter {@code --type}. The canonical host rides
+         * along so the friendly error can name the configured instance.
+         */
+        public static Resolution nitterHostTypeConflict(String canonicalHost) {
+            return new Resolution(Optional.empty(), false, Optional.of(canonicalHost));
+        }
+
+        public boolean isNitterHostTypeConflict() {
+            return nitterHostConflict.isPresent();
+        }
+    }
+
+    /**
+     * Operator-declared Nitter instance hosts, canonicalized (IDN-folded,
+     * lower-cased) once at construction. A feed URL whose host matches an
+     * entry (exact or subdomain) resolves to {@link SourceKind#NITTER}
+     * without an explicit {@code --type}. Nitter is self-hosted on
+     * arbitrary domains with no canonical host to pattern-match, so this
+     * operator-supplied allowlist is the only reliable signal — the same
+     * trust model as bootstrap, where the operator declares the kind
+     * (M1-456). Empty by default, in which case behaviour is unchanged
+     * except that an explicit {@code --type nitter} is accepted.
+     */
+    private final List<String> nitterHosts;
+
+    @Inject
+    public KindResolver(
+            // Optional<String>, not a defaultValue="" String: SmallRye's String
+            // converter maps an empty config value to null (SRCFG00040), which a
+            // required String injection rejects at boot. Optional.empty() is the
+            // no-hosts-configured default.
+            @ConfigProperty(name = "infochat.sources.nitter-hosts")
+            Optional<String> nitterHostsCsv) {
+        this(parseHostCsv(nitterHostsCsv.orElse("")));
+    }
+
+    /** Seam for tests and the no-arg default: the host list is canonicalized here. */
+    public KindResolver(List<String> nitterHosts) {
+        this.nitterHosts = nitterHosts.stream()
+                .map(KindResolver::canonicalize)
+                .filter(host -> !host.isBlank())
+                .toList();
+    }
+
+    /** Default config shape: no Nitter hosts declared. */
+    public KindResolver() {
+        this(List.of());
+    }
+
+    private static List<String> parseHostCsv(String csv) {
+        return Arrays.stream(csv.split(","))
+                .map(String::trim)
+                .filter(token -> !token.isBlank())
+                .toList();
     }
 
     /**
@@ -104,8 +175,22 @@ public class KindResolver {
      * is a pure function with no side effects.
      */
     public Resolution resolve(URI url, Optional<SourceKind> explicitType) {
+        String host = url.getHost();
+        String canonicalHost = host == null ? "" : canonicalize(host);
+        boolean isNitterHost = isConfiguredNitterHost(canonicalHost);
+
         if (explicitType.isPresent()) {
-            return Resolution.of(explicitType.get());
+            SourceKind requested = explicitType.get();
+            // The one qualification to "explicit --type wins": a configured
+            // Nitter host can ONLY be added as NITTER. Honouring a non-nitter
+            // override here would file the same feed under a second
+            // source.kind row (source is UNIQUE(kind, identifier)) and
+            // duplicate-fetch it — the exact accidental duplicate this
+            // deterministic resolution exists to prevent (M1-456).
+            if (isNitterHost && requested != SourceKind.NITTER) {
+                return Resolution.nitterHostTypeConflict(canonicalHost);
+            }
+            return Resolution.of(requested);
         }
 
         String scheme = url.getScheme() == null ? "" : url.getScheme().toLowerCase(Locale.ROOT);
@@ -113,8 +198,6 @@ public class KindResolver {
             return Resolution.of(SourceKind.NOSTR);
         }
 
-        String host = url.getHost();
-        String canonicalHost = host == null ? "" : canonicalize(host);
         if (matchesHost(canonicalHost, "bsky.app") || matchesHost(canonicalHost, "bsky.social")) {
             return Resolution.of(SourceKind.BLUESKY);
         }
@@ -127,6 +210,12 @@ public class KindResolver {
         if (matchesHost(canonicalHost, "odysee.com")) {
             return Resolution.of(SourceKind.ODYSEE);
         }
+        // Operator-configured Nitter host — slots in BEFORE the /rss path
+        // rule so a Nitter RSS URL (https://<instance>/<user>/rss) on a
+        // configured host resolves NITTER, not RSS (M1-456).
+        if (isNitterHost) {
+            return Resolution.of(SourceKind.NITTER);
+        }
 
         String path = url.getPath() == null ? "" : url.getPath().toLowerCase(Locale.ROOT);
         if (path.endsWith(".xml") || path.endsWith(".rss") || path.contains("/feed")) {
@@ -134,6 +223,19 @@ public class KindResolver {
         }
 
         return Resolution.ambiguous();
+    }
+
+    /**
+     * Is the canonical host a configured Nitter instance? Subdomain-aware
+     * via {@link #matchesHost} so an operator naming {@code nitter.example}
+     * also catches {@code mobile.nitter.example}, matching the existing
+     * host-pattern rules.
+     */
+    private boolean isConfiguredNitterHost(String canonicalHost) {
+        if (canonicalHost.isEmpty()) {
+            return false;
+        }
+        return nitterHosts.stream().anyMatch(configured -> matchesHost(canonicalHost, configured));
     }
 
     /**

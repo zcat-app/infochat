@@ -209,6 +209,15 @@ public final class BundleKeys {
     /** Caller invoked {@code /add-source} in a group scope without group-admin privilege. */
     public static final String ERROR_ADD_SOURCE_GROUP_ADMIN_ONLY = "error.add_source.group_admin_only";
 
+    /**
+     * Caller passed an explicit non-nitter {@code --type} for a URL whose host
+     * is a configured Nitter instance (M1-456). {@code {0}} = the canonical
+     * host. Forcing the wrong kind would duplicate-fetch the feed under two
+     * {@code source.kind} rows, so the resolver refuses it.
+     */
+    public static final String ERROR_ADD_SOURCE_NITTER_HOST_TYPE_CONFLICT =
+            "error.add_source.nitter_host_type_conflict";
+
     // ----- /add-source successful replies (M1-036) ------------------------
 
     /** Branch A — fresh insert. {@code {0}} = source display name. */
