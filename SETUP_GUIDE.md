@@ -275,6 +275,10 @@ summary, you're done.
   ```bash
   ./prod/setup.sh --reset --hard   # ALSO deletes all stored posts
   ```
+
+  Either way, the **downloaded AI model is kept** — a reset never re-downloads
+  the multi-GB model file. (If you ever do need to free that space, remove the
+  `infochat-llamacpp-models` and `infochat-ollama` Docker volumes by hand.)
 - **To re-run setup** (e.g. to add Signal later), just run `./prod/setup.sh`
   again.
 
@@ -432,7 +436,7 @@ understand the internals.*
 ```bash
 ./prod/setup.sh --defaults      # take every default; still prompts for the mandatory admin contact id (CI / scripted installs)
 ./prod/setup.sh --reset         # tear down (keeping data) + clear wizard state, then run setup; no output if nothing to remove
-./prod/setup.sh --reset --hard  # same, but ALSO drop data volumes (deletes the database)
+./prod/setup.sh --reset --hard  # same, but ALSO drop the database volume (deletes the database); AI model caches are kept
 ./prod/setup.sh --help          # list all steps and options
 ```
 

@@ -52,8 +52,10 @@ usage() {
   echo "              wizard state, then run setup. Prints nothing if there is"
   echo "              nothing to remove. Combine with --defaults to re-setup"
   echo "              non-interactively."
-  echo "  --hard      Only with --reset: ALSO drop data volumes (deletes the"
-  echo "              database). Without it, your data is kept."
+  echo "  --hard      Only with --reset: ALSO drop the database volume (deletes"
+  echo "              the database). Without it, your data is kept. Downloaded LLM"
+  echo "              model caches are ALWAYS kept (never re-downloaded by a reset);"
+  echo "              remove them by hand if you truly need to."
   echo "  -h, --help  Show this help and exit."
 }
 
@@ -118,8 +120,12 @@ print_handoff() {
 # Tear down an existing deployment so the wizard that follows starts clean, then
 # RETURN to the caller (the orchestrator continues into the step loop — a reset is
 # "clean up if needed, then set up", M1-464). The first argument is the literal
-# "hard" when the operator passed --reset --hard, which additionally drops data
-# volumes; absent it, the database is always kept. Crucially, do_reset is SILENT on
+# "hard" when the operator passed --reset --hard, which additionally drops the
+# DATABASE volume (pgdata) only; absent it, the database is kept too. Either way
+# the LLM model caches (infochat-llamacpp-models, infochat-ollama) are NEVER
+# removed — they hold multi-GB GGUFs the wizard reuses (4-llm.sh fetch_gguf's
+# presence check / `ollama pull` idempotency), so wiping them would force a
+# needless re-download. Crucially, do_reset is SILENT on
 # a clean host: it probes for each kind of leftover before issuing any compose
 # command or printing any line, so a reset with nothing to remove neither prints a
 # removal message nor asks anything (the reported annoyance: removal noise + a [y/N]
@@ -154,20 +160,29 @@ do_reset() {
   if [[ -n "$container_ids" ]] || docker network inspect "$network_name" >/dev/null 2>&1; then
     has_runtime=1
   fi
-  # --hard drops data volumes too — but only when some exist, so a clean host gets
-  # no `-v` noise. Substring match covers both the project-prefixed volumes
-  # (infochat_infochat-pgdata, …) and the explicitly-named infochat-llamacpp-models.
-  local has_volumes=0
-  if [[ "$hard" == "hard" ]] && [[ -n "$(docker volume ls -q --filter name=infochat 2>/dev/null)" ]]; then
-    has_volumes=1
+  # --hard drops ONLY the database (pgdata) volume — never the model caches. A
+  # blanket `down -v` would also remove infochat-llamacpp-models and the ollama
+  # cache (both compose-managed, not external), forcing a multi-GB GGUF
+  # re-download; the model caches are reused across resets via 4-llm.sh. So the
+  # teardown is always plain `down` (containers + network), and --hard removes
+  # the pgdata volume explicitly afterwards. pgdata is compose-managed with no
+  # `name:` pin, so its real name is <project>_infochat-pgdata, mirroring the
+  # network-name derivation above.
+  local pgdata_volume="${COMPOSE_PROJECT_NAME:-$(basename "$REPO_ROOT")}_infochat-pgdata"
+  local has_pgdata=0
+  if [[ "$hard" == "hard" ]] && docker volume inspect "$pgdata_volume" >/dev/null 2>&1; then
+    has_pgdata=1
   fi
 
-  if [[ "$has_volumes" -eq 1 ]]; then
-    echo "+ docker compose -f $COMPOSE_FILE ${profiles[*]} down -v"
-    docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" "${profiles[@]}" down -v
-  elif [[ "$has_runtime" -eq 1 ]]; then
+  if [[ "$has_runtime" -eq 1 ]]; then
     echo "+ docker compose -f $COMPOSE_FILE ${profiles[*]} down"
     docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" "${profiles[@]}" down
+  fi
+  # Remove pgdata after `down` has detached the postgres container. Safe even
+  # when nothing was running (an orphaned volume from a prior kept reset).
+  if [[ "$has_pgdata" -eq 1 ]]; then
+    echo "+ docker volume rm $pgdata_volume"
+    docker volume rm "$pgdata_volume" >/dev/null
   fi
 
   # Clear resume state so the wizard below runs from the first step; silent when

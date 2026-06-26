@@ -86,6 +86,13 @@ services:
       # infochat.llm.* / infochat.embeddings.*; secrets are referenced as ${VAR} and
       # arrive via environment: (above), never written into this file (§7.3).
       - ./prod/runtime/application.properties:/app/config/application.properties:ro
+      # Wizard-seeded bootstrap files (§7.7.2 step 5): mounted at the fast-jar
+      # workdir (/app) so the Collector resolves them via the basenames in
+      # application.properties (infochat.bootstrap.{sources,assets}-file). The
+      # config carries the basename, NOT a host path, precisely because the host
+      # path does not exist inside the container. Read-only — the loaders only read.
+      - ./prod/runtime/bootstrap-sources.json:/app/bootstrap-sources.json:ro
+      - ./prod/runtime/bootstrap-assets.json:/app/bootstrap-assets.json:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -127,6 +134,11 @@ services:
       # %test), so this mount is what carries that key and lets the Provider boot
       # past AdapterRegistry gate 1 (§7.12.1). Read-only — the app never writes it.
       - ./prod/runtime/application.properties:/app/config/application.properties:ro
+      # Asset bootstrap (§7.7.2 step 5): the Provider's AssetRegistry reads
+      # bootstrap-assets.json via its basename relative to the fast-jar workdir
+      # (/app), the same file the Collector's BootstrapAssetsLoader reads. Sources
+      # are Collector-only, so the Provider mounts assets alone. Read-only.
+      - ./prod/runtime/bootstrap-assets.json:/app/bootstrap-assets.json:ro
       # Adapter identity material captured out-of-band in step 6 (§7.5, §7.7.2):
       # bind-mounted at the adapter's configured data-dir so the running adapters
       # read the queue keypair / signal-cli account dir they validate at startup.
