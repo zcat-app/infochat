@@ -228,6 +228,42 @@ class AuditLogWriterIT extends PostgresSchemaTestBase {
         }
     }
 
+    @Test
+    void nulEscapeInDetailsJsonStoredAsRedactionSentinel() throws SQLException {
+        // A details_json carrying a U+0000 escape is valid JSON text, but
+        // PostgreSQL jsonb cannot store the NUL code point: a raw ?::jsonb cast
+        // on it errors and would abort the audit-before-effect insert, taking the
+        // admin action down with it. The redaction guard must substitute
+        // REDACTED_FIELD_JSONB so the row commits instead. Proves end-to-end that
+        // the value that previously aborted the cast now lands as the sentinel.
+        String targetId = "nul-escape-target-" + UUID.randomUUID();
+        String detailsJson = "{\"payload\":\"\\u0000\"}";
+        RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
+                .action(AuditAction.LLM_OUTPUT_SANITIZED)
+                .targetKind(TargetKind.SYSTEM)
+                .targetId(targetId)
+                .requestId("req-nul-escape-1")
+                .detailsJson(detailsJson)
+                .build();
+
+        try (Connection c = newConnection()) {
+            c.setAutoCommit(true);
+            writer.write(c, row);
+        }
+
+        try (Connection c = newConnection();
+             Statement s = c.createStatement();
+             ResultSet rs = s.executeQuery(
+                     "SELECT details_json::text FROM audit_log WHERE target_id = '" + targetId + "'")) {
+            assertTrue(rs.next(), "audit row missing — NUL-bearing value aborted the ?::jsonb cast");
+            String stored = rs.getString(1);
+            assertTrue(stored.contains("\"_redacted\""),
+                    "NUL-bearing value must land as the redaction sentinel: " + stored);
+            assertFalse(stored.contains("payload"),
+                    "raw NUL-bearing payload reached the database: " + stored);
+        }
+    }
+
     private UUID seedOneActorUser() throws SQLException {
         try (Connection c = newConnection();
              var ps = c.prepareStatement(

@@ -2,6 +2,15 @@ package app.zcat.infochat.core.audit;
 
 import app.zcat.infochat.core.log.Redactor;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.json.Json;
+import jakarta.json.JsonArray;
+import jakarta.json.JsonException;
+import jakarta.json.JsonObject;
+import jakarta.json.JsonString;
+import jakarta.json.JsonValue;
+import jakarta.json.stream.JsonParser;
+
+import java.io.StringReader;
 
 /**
  * Default {@link RedactionHook} delegating to the shared
@@ -9,8 +18,9 @@ import jakarta.enterprise.context.ApplicationScoped;
  * §Secrets handling. The catalogue and watchdog engine live in
  * {@link Redactor} — this class adapts the string-level redaction
  * to the {@link RedactionHook.AuditRow} shape and guarantees the
- * returned row's {@code details_json} is null/empty or a valid JSON
- * document.
+ * returned row's {@code details_json} is null/empty or a JSON
+ * document that survives {@link AuditLogWriter}'s {@code ?::jsonb}
+ * cast.
  *
  * <h2>Contact-id handling</h2>
  * <p>The hook does NOT touch {@code target_contact_id} or any
@@ -41,15 +51,16 @@ public class DefaultRedactionHook implements RedactionHook {
             redacted = REDACTED_FIELD_JSONB;
         }
         // Fail-closed post-condition: the value we hand back must survive
-        // AuditLogWriter's ?::jsonb cast. Off-contract input (a non-JSON
-        // detailsJson built by a buggy caller) would otherwise reach the cast
-        // and abort the surrounding audit-before-effect transaction with an
-        // opaque SQLException, taking the admin action down and losing the
-        // audit row. Substituting the sentinel here keeps the failure inside
-        // the redaction layer that already owns the 'valid JSONB' promise. The
-        // check is a cheap structural heuristic, not a full parse — the
-        // authoritative parse runs server-side at the cast.
-        if (!isJsonShaped(redacted)) {
+        // AuditLogWriter's ?::jsonb cast. Off-contract input — malformed JSON
+        // from a buggy caller, or a value carrying a U+0000 escape that is valid
+        // JSON text but that PostgreSQL jsonb cannot store — would otherwise
+        // reach the cast and abort the surrounding audit-before-effect
+        // transaction with an opaque SQLException, taking the admin action down
+        // and losing the audit row. Substituting the sentinel here keeps the
+        // failure inside the redaction layer that already owns the 'valid JSONB'
+        // promise. isJsonbSafe parses authoritatively (catching balanced-but-
+        // invalid forms the cast also rejects) and additionally rejects U+0000.
+        if (!isJsonbSafe(redacted)) {
             redacted = REDACTED_FIELD_JSONB;
         }
         if (redacted.equals(detailsJson)) {
@@ -69,67 +80,67 @@ public class DefaultRedactionHook implements RedactionHook {
     }
 
     /**
-     * Cheap structural check that {@code value} could be a JSON
-     * document: it starts with {@code {} or {@code [} and its braces,
-     * brackets, and quotes are balanced (quotes scanned with escape
-     * awareness so a brace inside a string literal is not miscounted),
-     * and nothing follows the balanced top-level token (so
-     * {@code {"a":1}garbage} and two concatenated documents are
-     * rejected, matching what the {@code ?::jsonb} cast would reject).
-     * This is deliberately not a full parse — the authoritative parse
-     * runs server-side at {@link AuditLogWriter}'s {@code ?::jsonb}
-     * cast; this guard only has to be tight enough to keep off-contract
-     * non-JSON from reaching that cast.
+     * Authoritative check that {@code value} will survive
+     * {@link AuditLogWriter}'s {@code ?::jsonb} cast. Two conditions must
+     * hold, and they are checked independently because a spec-compliant JSON
+     * parse alone is not sufficient:
+     * <ol>
+     *   <li>{@code value} parses as exactly one top-level JSON object or array
+     *       with no trailing content. A streaming parse (replacing the loose
+     *       brace-balance heuristic this once was) rejects the
+     *       balanced-but-syntactically-invalid forms the cast also rejects —
+     *       {@code {"a":}}, {@code {"a" "b"}}, {@code {"a":1}garbage}, and two
+     *       concatenated documents.</li>
+     *   <li>No string node — object key or string value, at any depth — carries
+     *       the U+0000 code point. A compliant JSON parse ACCEPTS a U+0000
+     *       escape (it is valid JSON), but PostgreSQL {@code jsonb} is the one
+     *       sink that cannot store the NUL code point, so such a value casts to
+     *       an error. The parse must therefore be paired with an explicit NUL
+     *       rejection.</li>
+     * </ol>
+     * A top-level JSON scalar would in fact cast cleanly, but every audit
+     * {@code details_json} is an object or array, so a scalar is treated as
+     * off-contract and fails closed — preserving the prior guard's
+     * object/array-only contract. Anything failing either condition is replaced
+     * upstream with {@link #REDACTED_FIELD_JSONB} before it can reach the cast.
      */
-    private static boolean isJsonShaped(String value) {
-        String trimmed = value.strip();
-        if (trimmed.isEmpty()) {
-            return false;
-        }
-        char first = trimmed.charAt(0);
-        if (first != '{' && first != '[') {
-            return false;
-        }
-        int braces = 0;
-        int brackets = 0;
-        boolean inString = false;
-        boolean escaped = false;
-        for (int i = 0; i < trimmed.length(); i++) {
-            char c = trimmed.charAt(i);
-            if (escaped) {
-                escaped = false;
-                continue;
-            }
-            if (inString) {
-                if (c == '\\') {
-                    escaped = true;
-                } else if (c == '"') {
-                    inString = false;
-                }
-                continue;
-            }
-            switch (c) {
-                case '"' -> inString = true;
-                case '{' -> braces++;
-                case '}' -> braces--;
-                case '[' -> brackets++;
-                case ']' -> brackets--;
-                default -> { }
-            }
-            if (braces < 0 || brackets < 0) {
+    private static boolean isJsonbSafe(String value) {
+        JsonValue parsed;
+        try (JsonParser parser = Json.createParser(new StringReader(value))) {
+            if (!parser.hasNext()) {
                 return false;
             }
-            // Reject anything after the balanced top-level token closes. The
-            // first char is guaranteed '{' or '[', so braces==brackets==0 here
-            // can only mean the top-level structure just closed; any further
-            // (non-whitespace, since the value is stripped) char is trailing
-            // junk like {"a":1}garbage or a second concatenated document. The
-            // ?::jsonb cast rejects these, so catching them here keeps the gate
-            // fail-closed instead of aborting the audit transaction downstream.
-            if (!inString && braces == 0 && brackets == 0 && i < trimmed.length() - 1) {
+            JsonParser.Event first = parser.next();
+            if (first != JsonParser.Event.START_OBJECT && first != JsonParser.Event.START_ARRAY) {
                 return false;
             }
+            parsed = parser.getValue();
+            // getValue() consumed exactly the top-level structure; a remaining
+            // token means trailing junk ({"a":1}garbage) or a second document.
+            if (parser.hasNext()) {
+                return false;
+            }
+        } catch (JsonException malformed) {
+            return false;
         }
-        return !inString && braces == 0 && brackets == 0;
+        return !containsNul(parsed);
+    }
+
+    /**
+     * True if any string node — object key or string value, at any depth —
+     * carries the U+0000 code point that PostgreSQL {@code jsonb} cannot store.
+     * The parser has already decoded escapes, so a U+0000 escape in the source
+     * surfaces here as an actual NUL char, while an escaped backslash followed
+     * by the literal text {@code u0000} does not.
+     */
+    private static boolean containsNul(JsonValue value) {
+        return switch (value.getValueType()) {
+            case STRING -> ((JsonString) value).getString().indexOf('\u0000') >= 0;
+            case OBJECT -> ((JsonObject) value).entrySet().stream()
+                    .anyMatch(entry -> entry.getKey().indexOf('\u0000') >= 0
+                            || containsNul(entry.getValue()));
+            case ARRAY -> ((JsonArray) value).stream().anyMatch(DefaultRedactionHook::containsNul);
+            default -> false;
+        };
     }
 }

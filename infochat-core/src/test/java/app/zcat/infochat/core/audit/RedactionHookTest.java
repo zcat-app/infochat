@@ -228,6 +228,47 @@ class RedactionHookTest {
         assertEquals("{\"token\":\"[REDACTED]\"}", redacted.detailsJson());
     }
 
+    @Test
+    void nulCharRedactedValueSubstitutesSentinel() {
+        // A details_json carrying a U+0000 escape is valid JSON text (the brace-
+        // balance heuristic accepted it), but PostgreSQL jsonb cannot store the
+        // NUL code point, so the ?::jsonb cast would reject it. The guard must
+        // fail closed to the sentinel before the value reaches the cast. No
+        // API-key match, so the Redactor leaves the value for the guard.
+        String detailsJson = "{\"payload\":\"\\u0000\"}";
+        RedactionHook.AuditRow redacted = hook.redact(audit(detailsJson));
+        assertEquals(DefaultRedactionHook.REDACTED_FIELD_JSONB, redacted.detailsJson(),
+                "\\u0000-bearing value must fail closed to the sentinel: " + redacted.detailsJson());
+    }
+
+    @Test
+    void braceBalancedButInvalidJsonSubstitutesSentinel() {
+        // {"a":} and {"a" "b"} are brace-balanced — the old structural heuristic
+        // accepted them — but are syntactically invalid JSON the ?::jsonb cast
+        // rejects. The authoritative parse must reject them so the guard fails
+        // closed instead of aborting the audit transaction downstream.
+        for (String invalid : new String[]{"{\"a\":}", "{\"a\" \"b\"}"}) {
+            RedactionHook.AuditRow redacted = hook.redact(audit(invalid));
+            assertEquals(DefaultRedactionHook.REDACTED_FIELD_JSONB, redacted.detailsJson(),
+                    "balanced-but-invalid JSON must fail closed to the sentinel: " + invalid);
+        }
+    }
+
+    @Test
+    void validJsonPassesThroughUnchanged() {
+        // A genuinely valid, NUL-free JSON document with no API-key match must
+        // NOT be substituted — the parse-based guard must not false-positive on
+        // legitimate nested content.
+        String detailsJson = "{\"a\":1,\"b\":[1,2],\"c\":\"plain text\"}";
+        RedactionHook.AuditRow row = audit(detailsJson);
+
+        RedactionHook.AuditRow redacted = hook.redact(row);
+
+        assertSame(row, redacted,
+                "valid JSON with no secrets should return the SAME instance (no substitution)");
+        assertEquals(detailsJson, redacted.detailsJson());
+    }
+
     private static RedactionHook.AuditRow audit(String detailsJson) {
         return RedactionHook.AuditRow.builder()
                 .actorUserId(UUID.randomUUID())
