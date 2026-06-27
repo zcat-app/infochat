@@ -539,7 +539,7 @@ docker/
   postgres-init.sh        # service-role password bootstrap (below)
 prod/
   setup.sh                # the first-run wizard (§7.7.2) — the one command an operator runs
-  scripts/                # wizard subscripts + ops script (backup.sh; reembed.sh deferred beyond v1, §2.8)
+  scripts/                # wizard subscripts + ops scripts (apps.sh lifecycle, backup.sh; reembed.sh deferred beyond v1, §2.8)
   config/                 # COMMITTED TEMPLATES only:
                           #   application.properties.example, secrets.env.example,
                           #   bootstrap-sources.json
@@ -567,6 +567,7 @@ The **operator** ops scripts live under `prod/scripts/`, not here (they are prod
 
 | Script | Wraps | Notes |
 |---|---|---|
+| `prod/scripts/apps.sh {start\|stop\|restart\|status}` | `docker compose --profile prod` `stop` / `up -d --wait` on `infochat-collector` + `infochat-provider` (passing `--env-file` the runtime `secrets.env`). | Post-setup lifecycle control for the two app services — the day-2 analogue of wizard step 7 (`7-apps.sh`); leaves Postgres + the LLM service(s) running, and `stop` preserves containers and data volumes (it is **not** a `down`). `restart` is the supported way to apply an edited mounted `application.properties` or bootstrap JSON: a bind-mounted single file is only re-read when the container restarts, so a bare `up -d` on an already-running container does not pick the change up. |
 | `prod/scripts/backup.sh` | The §7.10 backup commands (`pg_dump` of the compose DB + per-adapter identity-dir tarball). | The cron entry point so an operator's crontab calls one named wrapper. |
 | `prod/scripts/reembed.sh` *(deferred beyond v1)* | The embedding-dimension migration of [02-schema.md §2.8](02-schema.md). | Not shipped in v1 — the embedding dimension is fixed at 768-d on every profile, so there is no migration to run. Listed as the intended post-v1 tool. |
 

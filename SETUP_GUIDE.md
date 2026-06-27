@@ -267,6 +267,20 @@ summary, you're done.
   connect to the bot (see
   [below](#connecting-to-the-bot-for-the-first-time)), then start with the
   [User Guide](USER_GUIDE.md).
+- **To stop, start, or restart the bot** day-to-day, use the lifecycle helper.
+  It controls just the two app services and leaves your database and the AI
+  model running, so a restart is quick:
+
+  ```bash
+  ./prod/scripts/apps.sh stop      # stop the bot (keeps all data)
+  ./prod/scripts/apps.sh start     # start it again
+  ./prod/scripts/apps.sh restart   # restart it
+  ./prod/scripts/apps.sh status    # is it running?
+  ```
+
+  Run `restart` after you edit a setting in `prod/runtime/application.properties`
+  or one of the bootstrap files — a config change is only picked up when the
+  container restarts, so editing the file alone does nothing until you do.
 - **To tear everything down and set up again from scratch**, run:
 
   ```bash
