@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 496 |
 | deferred | 6 |
-| **total** | **502** |
+| **total** | **504** |
 
 ---
 
@@ -24,7 +24,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-467 — Fix bootstrap-admin property key: wizard/docs vs runtime (complexity: low, risk: high)
+- M1-468 — Document last-admin protection blind spot for unreachable admins (complexity: low, risk: low)
 
 ---
 
@@ -665,4 +666,6 @@ M1-463 (done)
 M1-464 (done)
 M1-465 (done)
 M1-466 (done)
+M1-467 (pending) ← runnable
+M1-468 (pending) ← runnable
 ```
