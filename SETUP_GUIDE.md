@@ -299,8 +299,10 @@ summary, you're done.
   ```
 
   Either way, the **downloaded AI model is kept** — a reset never re-downloads
-  the multi-GB model file. (If you ever do need to free that space, remove the
-  `infochat-llamacpp-models` and `infochat-ollama` Docker volumes by hand.)
+  the multi-GB model file. (If you ever do need to free that space, add
+  `--wipe-models` to a reset — `./prod/setup.sh --reset --wipe-models` — which
+  drops the `infochat-llamacpp-models` and `infochat-ollama` volumes for you and
+  forces a fresh download on the next setup. It combines with `--hard`.)
 - **To re-run setup** (e.g. to add Signal later), just run `./prod/setup.sh`
   again.
 
@@ -456,16 +458,63 @@ understand the internals.*
 ### Non-interactive and reset modes
 
 ```bash
-./prod/setup.sh --defaults      # take every default; still prompts for the mandatory admin contact id (CI / scripted installs)
-./prod/setup.sh --reset         # tear down (keeping data) + clear wizard state, then run setup; no output if nothing to remove
-./prod/setup.sh --reset --hard  # same, but ALSO drop the database volume (deletes the database); AI model caches are kept
-./prod/setup.sh --help          # list all steps and options
+./prod/setup.sh --defaults             # take every default; still prompts for the mandatory admin contact id (CI / scripted installs)
+./prod/setup.sh --reset                # tear down (keeping data) + clear wizard state, then run setup; no output if nothing to remove
+./prod/setup.sh --reset --hard         # same, but ALSO drop the database volume (deletes the database); AI model caches are kept
+./prod/setup.sh --reset --wipe-models  # same, but ALSO drop the LLM model-cache volumes (forces a multi-GB re-download next setup)
+./prod/setup.sh --help                 # list all steps and options
 ```
+
+`--hard` and `--wipe-models` are independent reset modifiers — each is valid
+only alongside `--reset`, and the two can be combined
+(`--reset --hard --wipe-models`) for a total wipe of data **and** models.
 
 `--defaults` cannot pick a custom model file or a remote API endpoint (those
 require interactive input), so it only works with the **ollama** backend. The
 wizard records progress in a git-ignored `prod/runtime/.setup-state` file and
 resumes from the first incomplete step.
+
+### Running a single step or helper script directly
+
+`setup.sh` is only an **orchestrator**: it runs the numbered scripts under
+`prod/scripts/` in order. You can also run any one of them on its own — useful
+when you want to redo just one step without re-running the whole wizard (re-seed
+your sources after editing the JSON, re-show the SimpleX contact link, run the
+health check again, and so on). Each accepts `-h`/`--help`.
+
+Three things to know before you do:
+
+- **They build on each other.** A step reads the files earlier steps wrote
+  (`prod/runtime/application.properties`, `prod/runtime/secrets.env`), so run a
+  step on its own only after the steps before it have already completed.
+- **They're idempotent.** Re-running a completed step is safe — it skips values
+  already set and never rotates secrets or the SimpleX identity.
+- **Direct runs don't update `.setup-state`.** The resume marker is written only
+  by `setup.sh`'s loop, so a step you run by hand may be run once more on the
+  next `setup.sh` — harmless, because the steps are idempotent.
+
+| Script | What it does | Flags |
+|---|---|---|
+| `prod/scripts/0-doctor.sh` | Preflight host checks (Docker, free ports, disk) | `--defaults` (no-op — no prompts) |
+| `prod/scripts/1-profile.sh` | Choose the hardware profile; writes `quarkus.profile` | `--defaults` (takes `laptop`) |
+| `prod/scripts/2-secrets.sh` | Generate the DB-role passwords; optional remote LLM API key | `--defaults` (leaves the API key blank) |
+| `prod/scripts/3-postgres.sh` | Start Postgres and wait until healthy | `--defaults` (no-op — no prompts) |
+| `prod/scripts/4-llm.sh` | Provision the LLM backend; write the LLM + embeddings config | `--defaults` (takes the profile's default backend) |
+| `prod/scripts/5-bootstrap.sh` | Seed `bootstrap-sources.json` and wire the asset (price) commands | `--defaults` (uses the bundled defaults) |
+| `prod/scripts/6-adapter.sh` | Configure the messaging adapter(s); capture the bootstrap-admin id | `--defaults` (takes `simplex` and the default dirs; still prompts for the values a human must supply) |
+| `prod/scripts/6b-simplex-provision.sh` | Provision the SimpleX bot identity (profile + address + auto-accept) and **re-print the bot's contact link**. A no-op when SimpleX isn't enabled. Run it to recover the link, which the wizard prints only during step 7 and never saves. | _(no `--defaults`)_ |
+| `prod/scripts/7-apps.sh` | Build both images, provision SimpleX, start Collector then Provider | `--defaults` (no-op — no prompts) |
+| `prod/scripts/8-verify.sh` | Health-check the Collector and Provider; exits non-zero on timeout | `--defaults` (no-op — no prompts) |
+
+The post-setup **helper** scripts are documented in the main sections above:
+
+- `prod/scripts/apps.sh {start|stop|restart|status}` — day-to-day lifecycle
+  control for the two app services (see [After setup](#after-setup)).
+- `prod/switch-llm.sh` — re-route a generative LLM task to a different backend
+  after setup; fully interactive, no flags (see
+  [Switching your AI backend later](#switching-your-ai-backend-later)).
+- `prod/scripts/backup.sh [BACKUP_DIR]` — back up the database and the bot's
+  messaging-identity directories (see [Back up your data](#back-up-your-data)).
 
 ### What gets written where
 
