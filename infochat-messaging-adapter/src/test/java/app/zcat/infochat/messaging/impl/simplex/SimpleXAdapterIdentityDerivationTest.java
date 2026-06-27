@@ -55,9 +55,13 @@ class SimpleXAdapterIdentityDerivationTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Duration WAIT = Duration.ofSeconds(2);
 
-    // Well-formed queue addresses (URL-safe base64 charset, >= 43 chars).
-    private static final String QUEUE_A = "BotQueueAddrDerivedFromShowAddress000000001A";
-    private static final String QUEUE_B = "BotQueueAddrRederivedAfterRestart0000000002B";
+    // Well-formed queue addresses (URL-safe base64 charset, >= 32 chars).
+    // QUEUE_A/QUEUE_B are the bot's derived-and-adopted anchor, so they use
+    // the real 32-char wire width (24-byte recipient queue id, M1-504) and
+    // pass the isWellFormed length floor at adoption; CONTROL_ID is only a
+    // non-matching control mention, never adopted, so its length is incidental.
+    private static final String QUEUE_A = "BotQueueAddrShowAddrDerived0001A";
+    private static final String QUEUE_B = "BotQueueAddrRederivedRestart002B";
     private static final String CONTROL_ID = "ControlMentionNotTheBotsQueueAddr0000000003C";
 
     @TempDir

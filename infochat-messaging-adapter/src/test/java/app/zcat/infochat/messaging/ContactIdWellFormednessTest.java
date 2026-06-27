@@ -43,8 +43,8 @@ class ContactIdWellFormednessTest {
     @Test
     void simplexAcceptsUrlSafeBase64QueueAddressOfCryptographicLength() {
         assertTrue(new SimpleXAdapter()
-                        .isWellFormedContactId("SimplexBootstrapAdminQueueAddr0000000000000A"),
-                "a >=43-char URL-safe-base64 value is a well-formed SimpleX queue address");
+                        .isWellFormedContactId("SimplexBootstrapAdmin00000000001"),
+                "a 32-char URL-safe-base64 value (the real queue-address width) is well-formed");
     }
 
     @Test
@@ -52,7 +52,7 @@ class ContactIdWellFormednessTest {
         SimpleXAdapter simplex = new SimpleXAdapter();
         assertFalse(simplex.isWellFormedContactId("short-mistyped-slug"),
                 "a value below the cryptographic length floor must be rejected");
-        assertFalse(simplex.isWellFormedContactId("Simplex+BootstrapAdminQueueAddr000000000000A"),
+        assertFalse(simplex.isWellFormedContactId("Simplex+QueueAddr00000000000001A"),
                 "a non-URL-safe character ('+') must be rejected even at valid length");
     }
 

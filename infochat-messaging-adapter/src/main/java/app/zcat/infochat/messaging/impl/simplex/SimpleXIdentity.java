@@ -16,16 +16,22 @@ public record SimpleXIdentity(String queueAddress) {
 
     /**
      * Minimum character length of a well-formed SimpleX queue address.
-     * A queue address is a URL-safe base64 encoding of a cryptographic
-     * queue identifier ({@code docs/design/06-messaging.md} §6.4.4: the
-     * id formats are "URL-safe base64 (the SimpleX queue address
-     * itself)"). The smallest such identifier is a 32-byte value, whose
-     * base64 form is 43 characters; this floor rejects the kind of short
-     * mistyped operator value the fail-fast sentence targets — a
-     * human-readable slug, or a 36-character Signal ACI pasted into the
-     * SimpleX slot — while admitting any real queue address.
+     * A queue address is a URL-safe base64 encoding of the SMP recipient
+     * queue id ({@code docs/design/06-messaging.md} §6.4.4: the id formats
+     * are "URL-safe base64 (the SimpleX queue address itself)"). That id
+     * is a fixed 24-byte value, whose URL-safe-base64 form is 32
+     * characters, so this floor admits every real derived queue address.
+     * The prior 43-char value assumed a 32-byte id and so rejected every
+     * real 32-char address, leaving the adapter unable to start (M1-504).
+     *
+     * <p>The floor still rejects a short mistyped operator value — a
+     * human-readable slug below 32 chars. It does NOT reject a 36-char
+     * Signal ACI pasted into the SimpleX slot: the ACI is longer than the
+     * 32-char real address, so no floor that admits the real address can
+     * exclude it (M1-504 refine — an accepted, minor M1-208 fail-fast
+     * regression documented in the ticket Notes).</p>
      */
-    private static final int MIN_QUEUE_ADDRESS_LENGTH = 43;
+    private static final int MIN_QUEUE_ADDRESS_LENGTH = 32;
 
     /**
      * Whether {@code queueAddress} is a well-formed SimpleX queue

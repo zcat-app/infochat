@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 23 |
+| pending | 24 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 509 |
+| done | 510 |
 | deferred | 6 |
-| **total** | **538** |
+| **total** | **540** |
 
 ---
 
@@ -47,6 +47,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-499 — Test fixture duplication → testsupport, plus a leaked registration teardown (complexity: low, risk: low)
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-501 — Stage-1-flagged posts can permanently evade Stage 2 after a crash (complexity: medium, risk: medium)
+- M1-505 — SimpleX inbound DM identity (decimal contactId) never matches the configured admin (queue address) — admin unrecognized (complexity: high, risk: high)
 
 ---
 
@@ -82,6 +83,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-504 | SimpleX adapter cannot start: queue-address length floor (43) rejects every real bot address (32 chars) | 2026-06-27 | round 1 APPROVE |
 | M1-503 | upgrade.sh restart gate compares the running image to itself, never deploys a rebuilt app | 2026-06-27 | round 1 APPROVE |
 | M1-502 | RssFeedParser: tolerate leading whitespace before the XML declaration | 2026-06-27 | round 1 APPROVE |
 | M1-477 | upgrade.sh health gate: accept a running service that declares no healthcheck | 2026-06-27 | round 1 APPROVE |
@@ -91,7 +93,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-473 | prod/scripts/upgrade.sh: git-pull main + rebuild app images + ordered restart, all config/data preserved | 2026-06-27 | round 1 APPROVE |
 | M1-472 | Deep-review low-severity cleanup sweep: /summary single-connection retrieval + messaging redaction dedup | 2026-06-27 | round 1 APPROVE |
 | M1-471 | Move two audit-missed now() sites onto the Clock: PartitionCreator gates + probation-reply formatter | 2026-06-27 | round 1 APPROVE |
-| M1-470 | SSRF: share one body-read deadline across all redirect hops of a get() | 2026-06-27 | round 1 APPROVE |
 
 ---
 
@@ -723,4 +724,6 @@ M1-500 (pending) ← runnable
 M1-501 (pending) ← runnable
 M1-502 (done)
 M1-503 (done)
+M1-504 (done)
+  └── M1-505 (pending) ← runnable
 ```
