@@ -1,7 +1,7 @@
 ---
 id: M1-466
 title: Per-host outbound pacing in FetchScheduler
-status: pending
+status: done
 created: 2026-06-27
 last_updated: 2026-06-27
 blocked_by: []
@@ -55,12 +55,30 @@ test_plan:
 spec_refs:
   - docs/spec/architecture.md §Ingest SPIs
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-27
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 461
+      removed: 41
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-27
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-466.md
 ---
 
 # M1-466: Per-host outbound pacing in FetchScheduler

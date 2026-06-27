@@ -20,6 +20,8 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import javax.sql.DataSource;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.sql.Array;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -28,10 +30,13 @@ import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -176,6 +181,28 @@ public class FetchScheduler {
     // Per-kind last-tick tracking for interval gating.
     private final Map<String, Instant> lastTickByKind = new ConcurrentHashMap<>();
 
+    // Per-host outbound pacing (M1-466): host -> earliest instant the next
+    // request to that host may be dispatched. Pure in-memory DECISION state,
+    // so it is read only from the injected Clock, never a DB clock (§Injectable
+    // time). Written as each source dispatches; a source whose host is still
+    // cooling down is deferred (kept in pendingByKind), never dropped. Bounded
+    // by the number of distinct source hosts (tens), and a stale entry is inert
+    // once `now` passes it, so no eviction is needed in v1.
+    private final Map<String, Instant> hostNextAllowed = new ConcurrentHashMap<>();
+
+    // Per-kind queue of due sources enumerated this fetch cycle but not yet
+    // dispatched (M1-466). Populated by ONE enumeration when a kind becomes
+    // due, then drained across heartbeats as per-host pacing frees each
+    // source's host. A kind KEEPS its entry — and is therefore excluded from
+    // re-enumeration while it drains — until its queue empties, at which point
+    // lastTickByKind is stamped and the next kind-interval begins. This is what
+    // keeps a deferred source delayed only WITHIN its cycle, never stranded a
+    // whole kind-interval. Outer map ConcurrentHashMap for the same cross-tick
+    // visibility reason as lastTickByKind; each Deque value is touched only
+    // within a single onTick invocation (concurrentExecution=SKIP), so the
+    // non-thread-safe ArrayDeque is safe.
+    private final Map<String, Deque<SourceRow>> pendingByKind = new ConcurrentHashMap<>();
+
     // Tracks polled kinds already warned about (no registered Fetcher) to
     // avoid WARN-per-heartbeat noise. A genuine orphan is a polled kind
     // shipped in bootstrap-sources.json (or added via /add-source) before
@@ -211,50 +238,153 @@ public class FetchScheduler {
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void onTick() {
         Instant now = clock.instant();
+        // Sample the pacing window ONCE per heartbeat (one config read), and
+        // feed the same `now` to the dueness gate, the host-window comparison,
+        // the hostNextAllowed write, and the lastTickByKind stamp — so the
+        // whole component reads one clock (M1-444 / M1-449).
+        Duration hostMinInterval = hostMinInterval();
 
-        // Which registered (bound) kinds are due this heartbeat? Built
-        // from the in-memory fetcher map, so a fully-idle heartbeat issues
-        // no SQL at all — the 1m heartbeat polls far more often than the
-        // 5–30m per-kind intervals, so most heartbeats are idle.
-        Set<String> kindsToTick = new HashSet<>();
+        // Freshly-due kinds: a registered (bound) kind that is NOT mid-drain
+        // from a prior heartbeat AND whose per-kind interval has elapsed. A
+        // kind still draining its pending sources is excluded here so it is
+        // not re-enumerated — its remaining due sources finish first (M1-466).
+        // Built from the in-memory maps, so a fully-idle heartbeat (nothing
+        // due, nothing pending) issues no SQL at all.
+        Set<String> freshlyDue = new HashSet<>();
         for (String kind : fetchersByKind.keySet()) {
-            if (shouldTick(kind, now)) {
-                kindsToTick.add(kind);
+            if (!pendingByKind.containsKey(kind) && shouldTick(kind, now)) {
+                freshlyDue.add(kind);
             }
         }
-        if (kindsToTick.isEmpty()) {
+        if (freshlyDue.isEmpty() && pendingByKind.isEmpty()) {
             return;
         }
 
-        // Orphan warning: warn once per active polled kind that has no
-        // registered Fetcher. Driven by the distinct active kinds (a
-        // handful of strings), not the full row set, and excludes
-        // STREAM_KINDS so the signal flags only genuinely-missing
-        // polled-fetch bindings. Non-fatal — a failure here must not
-        // block the dispatch enumeration below.
-        try {
-            warnUnboundPolledKinds(distinctActiveKinds());
-        } catch (SQLException e) {
-            LOG.warn("FetchScheduler: failed to enumerate source kinds for orphan check", e);
+        if (!freshlyDue.isEmpty()) {
+            // Orphan warning: warn once per active polled kind that has no
+            // registered Fetcher. Driven by the distinct active kinds (a
+            // handful of strings), not the full row set, and excludes
+            // STREAM_KINDS so the signal flags only genuinely-missing
+            // polled-fetch bindings. Non-fatal — a failure here must not
+            // block the dispatch enumeration below.
+            try {
+                warnUnboundPolledKinds(distinctActiveKinds());
+            } catch (SQLException e) {
+                LOG.warn("FetchScheduler: failed to enumerate source kinds for orphan check", e);
+            }
+
+            // Enumerate only the freshly-due kinds' rows at SQL: the result
+            // set scales by due-source count, not total active source count.
+            // Stream kinds never appear here — they are never in
+            // fetchersByKind, hence never freshly-due. On enumeration failure
+            // we skip the whole heartbeat (no pending entries created yet, so
+            // these kinds stay freshly-due and retry next heartbeat) — the
+            // same skip semantics the single-pass loop had.
+            List<SourceRow> rows;
+            try {
+                rows = enumerateActiveSourcesByKinds(freshlyDue);
+            } catch (SQLException e) {
+                LOG.warn("FetchScheduler: failed to enumerate sources; skipping tick", e);
+                return;
+            }
+            // Give every freshly-due kind a pending queue (empty when it has
+            // no active rows) BEFORE partitioning rows in, so a zero-row kind
+            // is still stamped by the drain below rather than re-enumerated
+            // every heartbeat.
+            for (String kind : freshlyDue) {
+                pendingByKind.put(kind, new ArrayDeque<>());
+            }
+            for (SourceRow row : rows) {
+                // computeIfAbsent always returns the deque seeded above (every
+                // enumerated row's kind is in freshlyDue); the fallback is dead
+                // but keeps the result non-null for the dereference.
+                pendingByKind.computeIfAbsent(row.kind(), k -> new ArrayDeque<>()).add(row);
+            }
         }
 
-        // Enumerate only the due kinds' rows at SQL: the result set scales
-        // by due-source count, not total active source count. Stream kinds
-        // never appear here — they are never in fetchersByKind, hence
-        // never in kindsToTick.
-        List<SourceRow> rows;
-        try {
-            rows = enumerateActiveSourcesByKinds(kindsToTick);
-        } catch (SQLException e) {
-            LOG.warn("FetchScheduler: failed to enumerate sources; skipping tick", e);
-            return;
-        }
-        for (SourceRow row : rows) {
-            tickOnce(row);
-        }
+        drainPending(now, hostMinInterval);
+    }
 
-        for (String kind : kindsToTick) {
-            lastTickByKind.put(kind, now);
+    /**
+     * Dispatch as many pending due sources as per-host pacing allows this
+     * heartbeat. For each pending kind, in enumeration order
+     * ({@code added_at, id} — so the same source deterministically wins a
+     * crowded host's single slot), dispatch a source unless its host was
+     * already requested within the {@code host-min-interval} window; such a
+     * source stays pending and is retried on a later heartbeat. When a kind's
+     * queue empties its cycle is complete: stamp {@link #lastTickByKind} (the
+     * next per-kind interval starts) and drop the kind from
+     * {@link #pendingByKind} so it can become freshly-due again.
+     *
+     * <p>When pacing is disabled ({@code hostMinInterval == null}) the host
+     * gate is skipped entirely, so every pending source dispatches in the same
+     * heartbeat it was enumerated and each kind stamps immediately — behavior
+     * identical to the pre-M1-466 single-pass loop.
+     */
+    private void drainPending(Instant now, @Nullable Duration hostMinInterval) {
+        Iterator<Map.Entry<String, Deque<SourceRow>>> kinds =
+            pendingByKind.entrySet().iterator();
+        while (kinds.hasNext()) {
+            Map.Entry<String, Deque<SourceRow>> entry = kinds.next();
+            Deque<SourceRow> queue = entry.getValue();
+            Iterator<SourceRow> sources = queue.iterator();
+            while (sources.hasNext()) {
+                SourceRow row = sources.next();
+                // Pacing disabled, or a host we cannot extract (malformed /
+                // host-less identifier — a trusted-boundary fallback, all
+                // polled kinds carry URL identifiers), dispatches un-paced.
+                String host = hostMinInterval == null ? null : hostOf(row.identifier());
+                if (host != null) {
+                    Instant nextAllowed = hostNextAllowed.get(host);
+                    if (nextAllowed != null && now.isBefore(nextAllowed)) {
+                        continue;
+                    }
+                }
+                tickOnce(row);
+                sources.remove();
+                if (host != null) {
+                    hostNextAllowed.put(host, now.plus(hostMinInterval));
+                }
+            }
+            if (queue.isEmpty()) {
+                lastTickByKind.put(entry.getKey(), now);
+                kinds.remove();
+            }
+        }
+    }
+
+    /**
+     * The configured per-host minimum request interval, or {@code null} when
+     * pacing is disabled — the {@code off} sentinel or an absent key, mirroring
+     * the {@code infochat.linking.interval=off} convention. Read as a String
+     * first to recognize {@code off}, then re-read through the SmallRye
+     * {@code Duration} converter (NOT {@link Duration#parse}, which rejects the
+     * Quarkus {@code 20s} shorthand).
+     */
+    @Nullable
+    private Duration hostMinInterval() {
+        Optional<String> raw =
+            config.getOptionalValue("infochat.fetch.host-min-interval", String.class);
+        if (raw.isEmpty() || raw.get().equalsIgnoreCase("off")) {
+            return null;
+        }
+        return config.getOptionalValue("infochat.fetch.host-min-interval", Duration.class)
+            .orElse(null);
+    }
+
+    /**
+     * Host component of a source {@code identifier} URL, or {@code null} when
+     * the identifier is not a parseable URL or carries no host. A null host
+     * makes the source dispatch un-paced (it joins no host budget) — acceptable
+     * because all polled kinds carry validated URL identifiers, so this is a
+     * trusted-boundary fallback, not a defensive check.
+     */
+    @Nullable
+    static String hostOf(String identifier) {
+        try {
+            return new URI(identifier).getHost();
+        } catch (URISyntaxException e) {
+            return null;
         }
     }
 

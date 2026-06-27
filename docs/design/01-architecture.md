@@ -153,6 +153,28 @@ Enqueue post_id on the eval channel  ──────────┐
                                          eval workers (§1.3.4)
 ```
 
+**Per-host outbound pacing (M1-466).** When a kind is due, the scheduler does
+not blast every active source of that kind in one pass: several sources often
+share a host (e.g. the ~22 nitter feeds all on `rss.xcancel.com`), and bursting
+them trips the host's rate limit (a `403` whose HTML body fails the RSS parser,
+tripping each source to `failed` via the D42 ladder). The throttle is keyed on
+**host**, not kind: `infochat.fetch.host-min-interval` (a Quarkus duration, or
+`off` to disable — mirroring `infochat.linking.interval`) sets the minimum gap
+between two outbound requests to the same host. A due source whose host was
+requested within the window is **deferred** to a later heartbeat — held in an
+in-memory per-kind pending queue, drained one-per-host-per-window across
+successive heartbeats — and is never dropped nor postponed a whole
+kind-interval (the kind's `last_tick` stamp is withheld until its pending queue
+drains, so dueness is preserved across the deferral). Sources on distinct hosts
+are unaffected: a heartbeat whose due sources are all on different hosts
+dispatches them all. Pacing is **heartbeat-quantized** — because every source
+in one tick shares a single `now`, the effective floor is one dispatch per host
+per heartbeat when the window ≤ the heartbeat; with the 1m heartbeat a crowded
+host drains at ~1/min, exactly the burst-avoidance intended. True sub-heartbeat
+spacing would need delayed async dispatch, which the synchronous tick model
+deliberately does not do. The window decision reads the injected `Clock` (§9
+injectable-time rule), so it is pinnable in tests.
+
 ### 1.3.2 `StreamSource` → outbox
 
 ```
