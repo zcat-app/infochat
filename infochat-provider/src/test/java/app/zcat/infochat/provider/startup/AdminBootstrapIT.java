@@ -10,6 +10,8 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -46,6 +48,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @QuarkusTest
 @TestProfile(AdminBootstrapIT.Profile.class)
 class AdminBootstrapIT {
+
+    /** A bare SimpleX queue address (URL-safe base64, 44 chars ≥ the 43 floor). */
+    static final String SIMPLEX_BARE_QUEUE_ID = "SimplexBootstrapAdminQueueAddr0000000000000A";
+
+    /**
+     * The same bare id wrapped in a full SimpleX contact link — the
+     * operator-facing form {@link AdminBootstrap} must canonicalize to the
+     * bare queue id before seeding (M1-465). The SMP URI is URL-encoded so
+     * the test does not hand-roll the percent-encoding the adapter's
+     * extractor expects.
+     */
+    static final String SIMPLEX_ADMIN_FULL_LINK =
+            "https://simplex.chat/contact#/?v=2-7&smp="
+                    + URLEncoder.encode("smp://hQ@smp.example.com/" + SIMPLEX_BARE_QUEUE_ID
+                            + "#/?v=1&dh=AB", StandardCharsets.UTF_8);
 
     @Inject
     @SeedDataSource
@@ -173,6 +190,19 @@ class AdminBootstrapIT {
     }
 
     @Test
+    void adminGivenAsFullContactLinkSeedsBareQueueIdRow() throws Exception {
+        // The simplex bean canonicalizes the full contact link to its bare
+        // queue id before seeding (M1-465), so the seeded row is the id inbound
+        // messages byte-match — not the raw link.
+        adminBootstrap.seed("simplex");
+
+        assertTrue(isAdminAt("simplex", SIMPLEX_BARE_QUEUE_ID),
+                "the seeded admin row must carry the bare queue id, not the raw link");
+        assertFalse(isAdminAt("simplex", SIMPLEX_ADMIN_FULL_LINK),
+                "the raw contact link must NOT be seeded as a contact id");
+    }
+
+    @Test
     void existingNonAdminUserIsPromotedToAdminAndAudited() throws Exception {
         // "ensures ... that the configured contact exists with
         // is_admin = true (creating the user if needed)": the
@@ -272,7 +302,12 @@ class AdminBootstrapIT {
             return Map.of(
                     "infochat.adapters.fake-x.admin", "fake-x-bootstrap-admin",
                     "infochat.adapters.fake-y.admin", "fake-y-bootstrap-admin",
-                    "infochat.adapters.fake-promote.admin", "fake-promote-bootstrap-admin");
+                    "infochat.adapters.fake-promote.admin", "fake-promote-bootstrap-admin",
+                    // Full SimpleX contact link: the simplex bean canonicalizes it
+                    // to the bare queue id before seeding (M1-465). simplex is not
+                    // activated at boot (infochat.adapters=inmemory), so this is
+                    // consumed only by the explicit seed("simplex") call.
+                    "infochat.adapters.simplex.admin", SIMPLEX_ADMIN_FULL_LINK);
         }
     }
 }

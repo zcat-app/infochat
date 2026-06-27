@@ -308,7 +308,14 @@ public class AdapterRegistry {
             if (admin.isBlank()) {
                 continue;
             }
-            if (!adapter.isWellFormedContactId(admin)) {
+            // Canonicalize before validating (M1-465): an operator may supply
+            // the admin id in a richer form (a SimpleX contact link) that
+            // canonicalizes to the bare contact id inbound messages byte-match.
+            // AdminBootstrap runs the same SPI call and seeds the canonicalized
+            // value, so the value this gate validates and the value seeded
+            // cannot diverge.
+            String canonicalAdmin = adapter.canonicalizeContactId(admin);
+            if (!adapter.isWellFormedContactId(canonicalAdmin)) {
                 // Do NOT echo the offending value: the property key is the
                 // operator's repair pointer, and naming the adapter +
                 // property satisfies the deployment.md fail-fast contract

@@ -575,6 +575,23 @@
     decoder should already have rejected the value), and the
     exception documents the invariant for any future caller.
 
+  #### Operator-supplied bootstrap admin id (full link accepted)
+
+  The `infochat.adapters.simplex.admin` bootstrap-admin value (§7.6.3 in
+  [07-deployment.md](07-deployment.md)) may be pasted as the **full SimpleX
+  contact link** or as the bare queue id. `SimpleXAdapter.canonicalizeContactId`
+  extracts the bare queue id from a full link by **reusing the same
+  `extractQueueAddressId` parser** the bot-identity derivation uses (the bot's
+  own contact link → bare queue id, the §6.4 Bot identity item) — one extractor,
+  no parallel grammar. The bootstrap-admin consumption path canonicalizes
+  **before** validating and seeding (registry parse gate 7b and `AdminBootstrap`
+  call the same SPI method, idempotent on an already-bare id), so a value
+  supplied as a full link both passes the well-formed gate and seeds the bare
+  queue id that inbound messages byte-match (§6.2.3). An already-bare value, or a
+  link with no extractable queue id, passes through unchanged so the well-formed
+  gate makes the accept/reject decision. The wizard (`6-adapter.sh`) does NOT
+  extract the id in bash — the extraction is real URI parsing done once, in Java.
+
   ### 6.4.5 Command encoding                                                                                                                                                                                                                                
                                                                                    
   SimplexCommandEncoder serializes OutboundMessage to SimpleX /sendMessage commands:                                                                                                                                                                    

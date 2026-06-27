@@ -1,7 +1,7 @@
 ---
 id: M1-465
 title: Canonicalize bootstrap admin contact id from full link
-status: pending
+status: done
 created: 2026-06-27
 last_updated: 2026-06-27
 blocked_by: []
@@ -52,12 +52,42 @@ spec_refs:
   - docs/spec/messaging.md §Per-adapter trust level and identity
 decision_refs:
   - D32
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-27
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 261
+      removed: 20
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-27
+    verdict: CLEAN
+    base: ab8ff65e (fork point)
+    head: working tree (in-progress, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-465-2026-06-27.md
+    out_of_model_count: 1
+    note: |
+      Pre-commit audit (security_relevant). No findings. One out-of-model
+      observation (phantom-admin vs last-admin protection under operator
+      misconfig) judged NOT a diff-introduced gap — trusted operator config,
+      pre-existing risk, arguably reduced by reusing the single extractor.
+      No remediation ticket filed.
+clarity_check:
+  date: 2026-06-27
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-465: Canonicalize bootstrap admin contact id from full link

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 495 |
+| done | 496 |
 | deferred | 6 |
 | **total** | **502** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-465 — Canonicalize bootstrap admin contact id from full link (complexity: medium, risk: medium)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -61,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-466 | Per-host outbound pacing in FetchScheduler | 2026-06-27 | round 1 APPROVE |
+| M1-465 | Canonicalize bootstrap admin contact id from full link | 2026-06-27 | round 1 APPROVE |
 | M1-464 | setup.sh --reset: only tear down when resources exist (no removal noise on a clean host), then fall through into setup; keep data by default, add --reset --hard to wipe data volumes | 2026-06-26 | round 1 APPROVE |
 | M1-463 | setup.sh --reset: also tear down the llamacpp-embeddings service (its own compose profile is untouched by the current --profile prod/ollama/llamacpp down, leaving the container holding infochat_default open) | 2026-06-26 | round 1 APPROVE |
 | M1-462 | Deep-review low-severity cleanup sweep: dead scanWindow(), brittle quarantine error mapping, Reddit bare permalink, two SSRF doc/dedup nits | 2026-06-26 | round 2 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-459 | Note the confirm prompt for /clear and /unfollow-tag --all in USER_GUIDE | 2026-06-26 | round 1 APPROVE |
 | M1-458 | Confirm-gate /quarantine reject on the forensic (BENIGN_CLOSED) path | 2026-06-26 | round 1 APPROVE |
 | M1-457 | Fix /source-enable revive to allow all HTTP-shaped kinds | 2026-06-26 | round 1 APPROVE |
-| M1-456 | Accept nitter kind in /add-source via operator host-config | 2026-06-26 | round 1 APPROVE |
 
 ---
 
@@ -663,6 +663,6 @@ M1-461 (done)
 M1-462 (done)
 M1-463 (done)
 M1-464 (done)
-M1-465 (pending) ← runnable
+M1-465 (done)
 M1-466 (done)
 ```

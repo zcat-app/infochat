@@ -210,6 +210,23 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     /**
+     * Canonicalize an operator-supplied admin value to the bare queue
+     * address inbound messages byte-match: when it is a SimpleX contact
+     * link, extract the bare queue id by reusing the bot-identity
+     * extractor {@link SimpleXMessageCodec#extractQueueAddressId} (the
+     * single source of extraction truth, §Context drift). An
+     * already-bare value, or a link with no extractable queue id, yields
+     * {@code null} from the extractor and is returned unchanged so the
+     * {@link #isWellFormedContactId} gate makes the accept/reject
+     * decision (M1-465).
+     */
+    @Override
+    public String canonicalizeContactId(String contactId) {
+        String extracted = SimpleXMessageCodec.extractQueueAddressId(contactId);
+        return extracted == null ? contactId : extracted;
+    }
+
+    /**
      * Start the simplex-chat subprocess, wait for its WebSocket endpoint
      * to become reachable, open the WebSocket, then derive the bot's own
      * queue address — the D10 trust anchor — by querying the running

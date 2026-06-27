@@ -658,8 +658,14 @@ final class SimpleXMessageCodec {
      * maps it to the sentinel {@link CommandError}), and the extracted id
      * must pass {@link #isValidQueueAddressId} before it is surfaced — the
      * same gate every other wire-sourced id passes (design §6.4.4).</p>
+     *
+     * <p>Package-private (not {@code private}) so
+     * {@link SimpleXAdapter#canonicalizeContactId} reuses this one
+     * extractor for the operator-supplied admin link rather than
+     * duplicating the link grammar — the single source of extraction
+     * truth (the §Context drift argument, M1-465).</p>
      */
-    private static @Nullable String extractQueueAddressId(String contactLink) {
+    static @Nullable String extractQueueAddressId(String contactLink) {
         // The smp param key must be preceded by '?' or '&' so a raw '='
         // inside another param's value (e.g. base64 padding in dh=) can
         // never be misread as the key boundary.

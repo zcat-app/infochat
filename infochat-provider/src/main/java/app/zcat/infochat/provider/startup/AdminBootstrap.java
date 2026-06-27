@@ -143,8 +143,12 @@ public class AdminBootstrap {
             if (contactId.isBlank()) {
                 continue;
             }
-            validateContactId(adapterName, contactId);
-            adminByAdapter.put(adapterName, contactId);
+            // Seed the canonicalized value, not the raw operator input: a
+            // value supplied as a full SimpleX contact link is canonicalized
+            // to the bare queue id inbound messages byte-match (M1-465). The
+            // registry parse gate (7b) runs the same SPI call, so the value it
+            // validates and the value seeded here cannot diverge.
+            adminByAdapter.put(adapterName, canonicalizeAndValidateContactId(adapterName, contactId));
         }
         try (Connection conn = dataSource.getConnection()) {
             // All adapters seed in one transaction: a failure on any
@@ -171,22 +175,27 @@ public class AdminBootstrap {
     }
 
     /**
-     * Reject a configured contact id its owning adapter cannot parse,
-     * via {@link MessagingAdapter#isWellFormedContactId}. An adapter
-     * name that resolves to no registered bean is skipped: there is
-     * no validator to consult, and the unknown name itself is gate
-     * 2's failure to report at activation — this bean's contract is
-     * the contact-id format, not adapter-name resolution. The
-     * exception names the adapter and the property but never echoes
-     * the offending value (contact-id redaction discipline,
-     * security.md §Secrets handling), mirroring registry gate 7b.
+     * Canonicalize a configured contact id to its owning adapter's bare
+     * form via {@link MessagingAdapter#canonicalizeContactId}, reject it
+     * if the adapter cannot parse the result via
+     * {@link MessagingAdapter#isWellFormedContactId}, and return the
+     * canonical value so the SAME bytes that passed validation are what
+     * gets seeded (M1-465). An adapter name that resolves to no
+     * registered bean is returned unchanged: there is no validator to
+     * consult, and the unknown name itself is gate 2's failure to report
+     * at activation — this bean's contract is the contact-id format, not
+     * adapter-name resolution. The exception names the adapter and the
+     * property but never echoes the offending value (contact-id
+     * redaction discipline, security.md §Secrets handling), mirroring
+     * registry gate 7b.
      */
-    private void validateContactId(String adapterName, String contactId) {
+    private String canonicalizeAndValidateContactId(String adapterName, String contactId) {
         for (MessagingAdapter adapter : discoveredAdapters) {
             if (!adapter.name().equals(adapterName)) {
                 continue;
             }
-            if (!adapter.isWellFormedContactId(contactId)) {
+            String canonical = adapter.canonicalizeContactId(contactId);
+            if (!adapter.isWellFormedContactId(canonical)) {
                 throw new IllegalStateException(
                         "Bootstrap admin: infochat.adapters." + adapterName
                                 + ".admin is not a well-formed " + adapterName
@@ -194,8 +203,9 @@ public class AdminBootstrap {
                                 + " §Operator inputs — each value MUST be"
                                 + " parseable by its own adapter)");
             }
-            return;
+            return canonical;
         }
+        return contactId;
     }
 
     private void ensureAdmin(Connection conn, String adapterName, String contactId)

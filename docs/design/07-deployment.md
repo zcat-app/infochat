@@ -479,6 +479,8 @@ Each enabled adapter has its **own** bootstrap admin contact id, configured via 
 
 Each value is parseable only by its own adapter — SimpleX contact ids are not Signal ACIs, and vice versa — so each adapter validates its own value at startup and refuses to start that adapter (per-adapter resilience, [06-messaging.md §6.7](06-messaging.md)) on a format mismatch. Provider startup fails only if every adapter with a configured bootstrap admin fails its own validation **and** the union ends up empty.
 
+Each adapter also **canonicalizes** its operator-supplied bootstrap-admin value to the bare contact id inbound messages byte-match, **before** validating and seeding it. For **SimpleX** this means the value may be pasted as the **full SimpleX contact link** or the bare queue id: the adapter extracts the bare queue id from a full link, reusing the same parser its bot-identity derivation uses ([06-messaging.md §6.4.4](06-messaging.md), Operator-supplied bootstrap admin id). Both the registry parse gate and the seeding bean run the same canonicalization (idempotent on an already-bare id), so the value validated and the value seeded cannot diverge — a full-link admin therefore seeds the bare queue id, not the raw link, eliminating the hand-extraction mismatch that would otherwise leave an unreachable admin. Signal ACIs and the in-memory adapter have no link form and canonicalize to themselves unchanged.
+
 **Bootstrap-seeded admin row shape.** On startup, Provider ensures, for every enabled adapter that has a configured bootstrap admin, that the contact exists with this row shape ([../spec/deployment.md](../spec/deployment.md) §Bootstrap behavior — Bootstrap-seeded admin row shape; [02-schema.md §2.1.1](02-schema.md)):
 
 | Column | Value |

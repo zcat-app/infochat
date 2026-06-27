@@ -218,6 +218,13 @@ for adapter in "${chosen[@]}"; do
       # provisioning input, NOT runtime identity: the running adapter still derives
       # the bot contact id from simplex-chat at startup (§7.5) and never reads this.
       simplex_display_name="$(prompt_with_default "  SimpleX bot display name (the bot's profile name)" "infochat-bot")"
+      # The admin contact id may be pasted as the full SimpleX address link OR
+      # the bare queue id: the Provider canonicalizes a full link to the bare
+      # queue id at startup (M1-465), so no hand-extraction is needed here. The
+      # collect_admin prompt below captures the value verbatim — this script
+      # does NOT extract the queue id (that is real URI parsing done in Java).
+      echo "  Bootstrap admin: paste your full SimpleX address link (or the bare"
+      echo "  queue id) — the Provider extracts the bare queue id from a full link."
       if collect_admin INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID simplex "$only_adapter"; then
         admin_union=$((admin_union + 1))
       fi

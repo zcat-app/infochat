@@ -111,6 +111,39 @@ public interface MessagingAdapter {
     boolean isWellFormedContactId(String contactId);
 
     /**
+     * Canonicalize an operator-supplied contact id to the exact byte
+     * form this adapter reports for that contact's inbound messages, so
+     * a value configured in a richer operator-facing form still
+     * byte-matches inbound. Run on
+     * {@code infochat.adapters.<name>.admin} BEFORE
+     * {@link #isWellFormedContactId} and before the value seeds an admin
+     * row, at both the registry parse gate and {@code AdminBootstrap}
+     * (the same call, idempotent on an already-canonical value), so the
+     * validated value and the seeded value cannot diverge.
+     *
+     * <p>The default returns {@code contactId} unchanged — correct for
+     * adapters whose operator-facing form already IS the canonical
+     * contact id (Signal ACI, the in-memory test adapter). Unlike
+     * {@link #isWellFormedContactId} (deliberately abstract — a missing
+     * impl would be skipped validation, a security gap), a missing
+     * canonicalization is the identity transform, i.e. "the operator
+     * must supply the bare id", which is exactly the safe behavior
+     * before this method existed; so a permissive default is the safer,
+     * smaller choice and keeps link-less adapters out of the override.
+     * {@code SimpleXAdapter} overrides it so an operator can paste a
+     * full SimpleX contact link.</p>
+     *
+     * @param contactId the operator-supplied contact id; never null.
+     * @return the canonical contact id for this adapter; never null. A
+     *         value that cannot be canonicalized is returned unchanged
+     *         so {@link #isWellFormedContactId} makes the accept/reject
+     *         decision.
+     */
+    default String canonicalizeContactId(String contactId) {
+        return contactId;
+    }
+
+    /**
      * Send a new message to the given scope.
      *
      * @param msg the outbound message to deliver; never null.

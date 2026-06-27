@@ -1,16 +1,20 @@
 package app.zcat.infochat.provider.messaging;
 
 import app.zcat.infochat.messaging.MessagingAdapter;
+import app.zcat.infochat.messaging.impl.simplex.SimpleXAdapter;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -33,6 +37,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @TestProfile(BootstrapAdminParseGateTest.Profile.class)
 class BootstrapAdminParseGateTest {
 
+    /** A bare SimpleX queue address (URL-safe base64, 44 chars ≥ the 43 floor). */
+    static final String SIMPLEX_BARE_QUEUE_ID = "SimplexBootstrapAdminQueueAddr0000000000000A";
+
+    /**
+     * The same bare id wrapped in a full SimpleX contact link — the
+     * operator-facing form gate 7b must canonicalize before validating
+     * (M1-465). The SMP URI is URL-encoded so the test does not hand-roll
+     * the percent-encoding the adapter's extractor expects.
+     */
+    static final String SIMPLEX_ADMIN_FULL_LINK =
+            "https://simplex.chat/contact#/?v=2-7&smp="
+                    + URLEncoder.encode("smp://hQ@smp.example.com/" + SIMPLEX_BARE_QUEUE_ID
+                            + "#/?v=1&dh=AB", StandardCharsets.UTF_8);
+
     @Inject
     AdapterRegistry registry;
 
@@ -50,6 +68,27 @@ class BootstrapAdminParseGateTest {
     void gateAcceptsWellFormedSimplexAdminAndProceeds() {
         assertDoesNotThrow(() -> registry.start("simplex"),
                 "a well-formed simplex.admin must pass the parse gate");
+        List<String> activated = registry.activatedAdapters().stream()
+                .map(MessagingAdapter::name)
+                .toList();
+        assertTrue(activated.contains("simplex"),
+                "startup must proceed past the gate and activate simplex; got: " + activated);
+    }
+
+    @Test
+    void adminGivenAsFullContactLinkIsAcceptedAfterCanonicalization() {
+        // The profile configures simplex.admin as a full SimpleX contact link.
+        // On its own that raw link is NOT a well-formed bare queue id — the gate
+        // accepts it only because gate 7b canonicalizes it first (M1-465).
+        SimpleXAdapter simplex = new SimpleXAdapter();
+        assertFalse(simplex.isWellFormedContactId(SIMPLEX_ADMIN_FULL_LINK),
+                "a raw contact link must not be well-formed on its own");
+        assertTrue(simplex.isWellFormedContactId(
+                        simplex.canonicalizeContactId(SIMPLEX_ADMIN_FULL_LINK)),
+                "canonicalizing the link must yield a well-formed bare id");
+
+        assertDoesNotThrow(() -> registry.start("simplex"),
+                "the parse gate must accept a full-link admin after canonicalization");
         List<String> activated = registry.activatedAdapters().stream()
                 .map(MessagingAdapter::name)
                 .toList();
@@ -78,9 +117,9 @@ class BootstrapAdminParseGateTest {
                     Map.entry("infochat.adapters.simplex.binary", "/bin/sh"),
                     Map.entry("infochat.adapters.simplex.data-dir", "/tmp"),
                     Map.entry("infochat.adapters.simplex.ws-port", "5225"),
-                    // Well-formed SimpleX queue address (URL-safe base64, >=43 chars).
-                    Map.entry("infochat.adapters.simplex.admin",
-                            "SimplexBootstrapAdminQueueAddr0000000000000A"),
+                    // Full SimpleX contact link: gate 7b canonicalizes it to the
+                    // bare queue id before validating (M1-465), so it passes.
+                    Map.entry("infochat.adapters.simplex.admin", SIMPLEX_ADMIN_FULL_LINK),
                     Map.entry("infochat.adapters.signal.binary", "/bin/sh"),
                     Map.entry("infochat.adapters.signal.data-dir", "/tmp"),
                     Map.entry("infochat.adapters.signal.account", "test-account"),
