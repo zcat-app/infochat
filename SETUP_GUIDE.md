@@ -34,8 +34,8 @@ downloading and building things while you wait).
 infochat runs on **Linux** (a regular Linux PC, a home server, a Raspberry Pi,
 or a rented cloud server all work). You'll need:
 
-- **About 15 GB of free disk space** (for the program, the database, and one
-  small AI model).
+- **About 15 GB of free disk space** (for the program, the database, and a few
+  small AI models).
 - A reasonably modern processor and a few GB of free memory. A laptop from the
   last few years is fine.
 
@@ -132,7 +132,7 @@ their job and move on. Here's the whole journey in plain language:
 | **2. Secrets** | Creates strong random passwords for the database | Optional — a remote AI key, only if you'll use one |
 | **3. Database** | Starts the database and waits until it's ready | No |
 | **4. AI model** | Sets up the AI brain | Yes — pick `ollama`, `llamacpp`, or `remote` (default `ollama`) |
-| **5. Sources** | Installs a starter list of news/social sources | Optional — a path for price-command data, otherwise skipped |
+| **5. Sources** | Installs a starter list of news/social sources | Optional — a custom sources file, and whether to enable the price commands (default Yes) |
 | **6. Messaging** | Connects your SimpleX and/or Signal account | Yes — which app(s), where the program is, and the bot's account |
 | **7. Start apps** | Builds and launches infochat (this is the slow one) | No |
 | **8. Verify** | Confirms infochat is up and healthy | No |
@@ -174,7 +174,7 @@ one:
 
 | Pick this | Best for | What you need | Cost & privacy |
 |---|---|---|---|
-| **ollama** *(default, easiest)* | Most people | Nothing — it downloads a model for you (~5 GB) | Free, fully private (runs on your machine) |
+| **ollama** *(default, easiest)* | Most people | Nothing — it downloads the models for you (~5 GB) | Free, fully private (runs on your machine) |
 | **llamacpp** | Advanced users who want a specific model | Nothing for the defaults — it uses pinned, checksum-verified models (~4.5 GB); advanced users can paste their own model ("GGUF") URLs | Free, fully private |
 | **remote** | Best quality / weak hardware | A cloud AI account and key (any OpenAI-compatible API) | Costs money; your prompts go to that provider |
 
@@ -216,14 +216,16 @@ copies this file into place once and never overwrites it, so your edits stick.
 (You can also add feeds one at a time later with `/add-source` — see the
 [User Guide](USER_GUIDE.md).)
 
-**Price commands (off by default).** Step 5 also asks for an optional
-*bootstrap-assets* file path. Leave it blank to skip the price commands
-(`/zcash`, `/monero`, …) — they stay disabled and `/help` won't list them. To
-turn them on, you write a small JSON file listing the assets and price sources
-you want; there's no ready-made one. Copy the worked example from
+**Price commands (on by default).** Step 5 asks `Enable crypto asset commands
+(zcash, monero)? [Yes/no]`, defaulting to **Yes**: press Enter and the price
+commands (`/zcash`, `/monero`, …) ship enabled, seeded from the bundled
+`prod/config/bootstrap-assets.json` (zcash + monero — a ready-made file that's
+already there). To turn them off, answer **no** — then they stay disabled and
+`/help` won't list them. To offer different assets or price sources, supply your
+own JSON file at the custom-path prompt that follows a **Yes**: copy the worked
+example from
 [docs/design/10-asset-commands.md §10.6](docs/design/10-asset-commands.md), save
 it (e.g. as `prod/config/bootstrap-assets.json`), and give the wizard that path.
-You can add the file and re-run the wizard later if you skip it now.
 
 ### Step 6 — Which messaging app?
 
@@ -247,7 +249,9 @@ Trying infochat on your own Linux laptop, using the free local AI and SimpleX:
 Hardware profile [laptop]:            ⏎  (just press Enter)
 Remote LLM API key [blank]:           ⏎  (Enter — we're using local AI)
 LLM backend [ollama]:                 ⏎  (Enter — downloads a local model)
-Optional bootstrap-assets path:       ⏎  (Enter — skip price commands for now)
+Custom bootstrap-sources path [blank]: ⏎  (Enter — use the bundled sources)
+Enable crypto asset commands (zcash, monero)? [Yes/no]: ⏎  (Enter — Yes, the default)
+Custom bootstrap-assets path [blank]:  ⏎  (Enter — bundled zcash+monero)
 Enable which adapters [simplex]:      ⏎  (Enter — SimpleX)
 simplex-chat binary path [...]:       ⏎  (Enter — the image bakes it)
 SimpleX data-dir [prod/runtime/simplex]: ⏎
@@ -301,8 +305,8 @@ summary, you're done.
   Either way, the **downloaded AI model is kept** — a reset never re-downloads
   the multi-GB model file. (If you ever do need to free that space, add
   `--wipe-models` to a reset — `./prod/setup.sh --reset --wipe-models` — which
-  drops the `infochat-llamacpp-models` and `infochat-ollama` volumes for you and
-  forces a fresh download on the next setup. It combines with `--hard`.)
+  drops the downloaded-model volumes for you and forces a fresh download on the
+  next setup. It combines with `--hard`.)
 - **To re-run setup** (e.g. to add Signal later), just run `./prod/setup.sh`
   again.
 
@@ -328,7 +332,8 @@ infochat keeps real state on your machine — back it up regularly, and keep the
 copies **encrypted at rest**. Three things matter:
 
 - **The database** — your posts, users, saved items, settings, and the audit
-  log. It lives in the Docker volume `infochat-pgdata`.
+  log. It lives in a Docker volume on your machine, and the backup script below
+  captures it for you.
 - **The bot's messaging identity** — the SimpleX / Signal data directories you
   chose in step 6. **If you lose these you lose the bot's account for good**: a
   SimpleX queue keypair cannot be regenerated for the same address, and Signal

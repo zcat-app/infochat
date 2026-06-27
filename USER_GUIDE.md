@@ -72,7 +72,7 @@ optional. Run `/help` to see the ones available to *you* right now.
 | Command | What it does |
 |---|---|
 | `/summary [topic]` | Summarises the latest posts (optionally just one topic/tag) |
-| `/zcash` · `/monero` | Live cryptocurrency price/market data (if your admin enabled them) |
+| `/zcash` · `/monero` | Cryptocurrency price/market data — a cached snapshot stamped with its capture time and cache age (if your admin enabled them) |
 | *(plain question)* | Ask the bot anything about your news — see [Chatting](#chatting-in-plain-english) |
 
 ### Saving posts
@@ -157,14 +157,17 @@ News (last 24h)
 [topic_id=t-3f8b2c1d]
 Anthropic releases Fable 5, a Mythos-class model
 covered by: TechCrunch (uid 9d4e1ac0f23b7e8516a0c4d9f7b2e3018a5c6d7e0f1928374655a4b3c2d1e0f9), @anthropic on Bluesky (uid 3f8b2c1d0e9a7654b1c2d3e4f5061728394a5b6c7d8e9f001122334455667788)
-score: high (2 sources, news+social)
+score: 2 sources
 summary: Anthropic announced Fable 5, its new Mythos-class model, claiming...
+classification: ai, ml
 tags: ai, ml
 
 [topic_id=t-c0ffee11]
 DeepSeek proposes a transformer-replacement architecture
 covered by: VentureBeat (uid c0ffee11223344556677889900aabbccddeeff00112233445566778899aabbcc)
+score: 1 source
 summary: A new architecture aims to replace the transformer for...
+classification: ai
 tags: ai
 ```
 
