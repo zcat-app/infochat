@@ -179,6 +179,62 @@ class RssFeedParserTest {
             "unrecognized-root exception message must mention the root element");
     }
 
+    @Test
+    void parseToleratesTwoLeadingSpacesBeforeXmlDeclaration() {
+        // rss.xcancel.com serves RSS with two spaces before <?xml. XML 1.0
+        // forbids any content ahead of the declaration, so the strict StAX
+        // reader rejected it at [row,col]=[1,8] before M1-502; the parser now
+        // skips the insignificant whitespace prefix and parses the feed.
+        String xml = "  <?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            + "<rss version=\"2.0\"><channel>"
+            + "<title>Prefixed feed</title>"
+            + "<item><guid>urn:example:post:1</guid>"
+            + "<link>https://example.com/posts/1</link>"
+            + "<description>hello</description></item>"
+            + "</channel></rss>";
+
+        List<NormalizedPost> posts =
+            RssFeedParser.parse(SOURCE_ID, xml.getBytes(StandardCharsets.UTF_8), FETCHED_AT);
+
+        assertEquals(1, posts.size(),
+            "a feed with a two-space prefix before <?xml must parse its single <item>");
+        assertEquals("urn:example:post:1", posts.get(0).upstreamIdentifier(),
+            "the prefixed feed's <guid> is the upstreamIdentifier, proving the body parsed");
+    }
+
+    @Test
+    void parseToleratesMixedLeadingWhitespaceBeforeXmlDeclaration() {
+        // Tab, CR, LF, and space ahead of the declaration are all in the XML
+        // whitespace set (#x9 #xD #xA #x20) and must all be skipped.
+        String xml = "\t\r\n <?xml version=\"1.0\"?>"
+            + "<rss version=\"2.0\"><channel>"
+            + "<item><guid>urn:example:post:42</guid>"
+            + "<description>hi</description></item>"
+            + "</channel></rss>";
+
+        List<NormalizedPost> posts =
+            RssFeedParser.parse(SOURCE_ID, xml.getBytes(StandardCharsets.UTF_8), FETCHED_AT);
+
+        assertEquals(1, posts.size(),
+            "leading tab/CR/LF/space before <?xml must be skipped, leaving a parseable feed");
+        assertEquals("urn:example:post:42", posts.get(0).upstreamIdentifier(),
+            "the <guid> survives once the whitespace prefix is skipped");
+    }
+
+    @Test
+    void parseRaisesOnAllWhitespaceBody() {
+        // The whitespace tolerance must not mask a contentless feed: a body
+        // that is ENTIRELY whitespace has no root element and still raises.
+        String xml = "   \t\r\n  ";
+        RssFeedParseException ex = assertThrows(RssFeedParseException.class, () ->
+            RssFeedParser.parse(SOURCE_ID, xml.getBytes(StandardCharsets.UTF_8), FETCHED_AT));
+
+        String message = ex.getMessage().toLowerCase();
+        assertTrue(message.contains("root") || message.contains("xml stream"),
+            "an all-whitespace body must still raise — no root element / empty stream, "
+                + "not a silently-empty success");
+    }
+
     private List<NormalizedPost> parseRss() throws IOException {
         return RssFeedParser.parse(SOURCE_ID, Files.readAllBytes(RSS_FIXTURE), FETCHED_AT);
     }

@@ -1,7 +1,7 @@
 ---
 id: M1-502
 title: "RssFeedParser: tolerate leading whitespace before the XML declaration"
-status: in-progress
+status: done
 created: 2026-06-27
 last_updated: 2026-06-27
 blocked_by: []
@@ -69,6 +69,20 @@ clarity_check:
   warnings:
     - "spec_ref format: corrected `docs/spec/architecture.md` bare path to `docs/spec/architecture.md §Ingest SPIs` per the §<section-title> convention."
   blockers: []
+reviews:
+  - round: 1
+    date: 2026-06-27
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 262
+      removed: 7
 ---
 
 ## Problem

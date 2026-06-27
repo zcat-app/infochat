@@ -73,9 +73,25 @@ public final class RssFeedParser {
         factory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
         factory.setProperty(XMLInputFactory.SUPPORT_DTD, false);
 
+        // Tolerate insignificant leading whitespace before the XML
+        // declaration. XML 1.0 forbids ANY content — even whitespace —
+        // ahead of `<?xml`, so the strict StAX reader rejects it
+        // (ParseError at [1,N]); some lenient RSS hosts (rss.xcancel.com
+        // emits two spaces) still prefix it. Advance past the XML
+        // whitespace set (#x20 #x9 #xD #xA) so a well-formed document
+        // follows at the new offset. The skip is a no-op when the first
+        // byte is already `<`, so well-formed feeds parse byte-identically.
+        // A byte-order mark is intentionally NOT skipped — StAX auto-detects
+        // it for encoding selection (M1-502).
+        int offset = 0;
+        while (offset < body.length && isXmlWhitespace(body[offset])) {
+            offset++;
+        }
+
         XMLStreamReader reader;
         try {
-            reader = factory.createXMLStreamReader(new ByteArrayInputStream(body));
+            reader = factory.createXMLStreamReader(
+                new ByteArrayInputStream(body, offset, body.length - offset));
         } catch (XMLStreamException e) {
             throw new RssFeedParseException("Failed to open XML stream: " + e.getMessage(), e);
         }
@@ -289,6 +305,14 @@ public final class RssFeedParser {
             }
         }
         return sb.toString();
+    }
+
+    // XML 1.0 §2.3 white-space production (S): space, tab, CR, LF. Used only
+    // to skip an insignificant whitespace prefix ahead of the declaration
+    // (M1-502); high bytes (e.g. a 0xEF BOM lead) are not whitespace, so the
+    // skip stops and leaves them for StAX.
+    private static boolean isXmlWhitespace(byte b) {
+        return b == ' ' || b == '\t' || b == '\r' || b == '\n';
     }
 
     private static @Nullable Instant parseRfc1123(@Nullable String raw) {

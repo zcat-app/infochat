@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 23 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 507 |
+| done | 508 |
 | deferred | 6 |
-| **total** | **513** |
+| **total** | **537** |
 
 ---
 
@@ -24,7 +24,29 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-478 — Group personal /retry never matches the group anchor /summary writes (complexity: low, risk: low)
+- M1-479 — infochat-core partition seeds break after 2026-08-01 (no PartitionCreator in core tests) (complexity: low, risk: low)
+- M1-480 — /unban skips the in-transaction admin re-check its siblings perform (complexity: low, risk: medium)
+- M1-482 — Re-eval BENIGN over-audits/notifies infra-failure releases; uses post.id (complexity: low, risk: low)
+- M1-483 — /group-timezone: missing-arg wrong error + zone work before the auth gate (complexity: low, risk: low)
+- M1-484 — Asset fetcher ignores SPI supported-asset/quote gate; dedup readBigDecimal (complexity: low, risk: low)
+- M1-485 — Embedding batch retry has no backoff, unlike the sibling entity stage (complexity: low, risk: low)
+- M1-486 — Signal inbound line cap equals body cap, collapsing two layers (complexity: low, risk: low)
+- M1-487 — NewPostHandler @Transactional does not roll back on SQLException (complexity: low, risk: low)
+- M1-488 — quarantine_reject prompt apostrophe breaks its own {0} MessageFormat token (complexity: low, risk: low)
+- M1-489 — /follow-tag and /unfollow-tag skip spec-mandated tag normalization (complexity: low, risk: low)
+- M1-490 — Reconcile §9 split-clock decision sites against the M1-447 backlog (complexity: medium, risk: medium)
+- M1-491 — Log-sanitization hardening: relay NOTICE control-strip + SafeLog bidi/line-sep (complexity: low, risk: low)
+- M1-492 — Production javadoc/contract drift: stale or wrong SPI/handler contracts (complexity: low, risk: low)
+- M1-493 — Schema hardening: NOT NULL upstream_identifier + approve_quarantine phantom NOTIFY (complexity: low, risk: low)
+- M1-494 — Production dead-code and defensive-check cleanup sweep (complexity: low, risk: low)
+- M1-495 — Integration/DB-boot tests named *Test run in the surefire (unit) phase (complexity: low, risk: low)
+- M1-496 — Test-integrity sweep: vacuous, ambient-gated, and over-permissive assertions (complexity: low, risk: low)
+- M1-497 — Test name/comment accuracy sweep: names and comments that contradict the body (complexity: low, risk: low)
+- M1-498 — Test fidelity & coverage gaps: copied lambdas, wrong arms, untested paths (complexity: medium, risk: low)
+- M1-499 — Test fixture duplication → testsupport, plus a leaked registration teardown (complexity: low, risk: low)
+- M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
+- M1-501 — Stage-1-flagged posts can permanently evade Stage 2 after a crash (complexity: medium, risk: medium)
 
 ---
 
@@ -60,6 +82,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-502 | RssFeedParser: tolerate leading whitespace before the XML declaration | 2026-06-27 | round 1 APPROVE |
 | M1-477 | upgrade.sh health gate: accept a running service that declares no healthcheck | 2026-06-27 | round 1 APPROVE |
 | M1-476 | upgrade.sh deploys the current checkout with zero operator config | 2026-06-27 | round 1 APPROVE |
 | M1-475 | Enforce D43 over non-constant bundle keys (en-keyset gate) | 2026-06-27 | round 1 APPROVE |
@@ -69,7 +92,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-471 | Move two audit-missed now() sites onto the Clock: PartitionCreator gates + probation-reply formatter | 2026-06-27 | round 1 APPROVE |
 | M1-470 | SSRF: share one body-read deadline across all redirect hops of a get() | 2026-06-27 | round 1 APPROVE |
 | M1-469 | Fix verified guide-audit inaccuracies in 3 role guides | 2026-06-27 | round 1 APPROVE |
-| M1-468 | Document last-admin protection blind spot for unreachable admins | 2026-06-27 | round 1 APPROVE |
 
 ---
 
@@ -676,4 +698,28 @@ M1-474 (done)
 M1-475 (done)
 M1-476 (done)
 M1-477 (done)
+M1-478 (pending) ← runnable
+M1-479 (pending) ← runnable
+M1-480 (pending) ← runnable
+M1-482 (pending) ← runnable
+M1-483 (pending) ← runnable
+M1-484 (pending) ← runnable
+M1-485 (pending) ← runnable
+M1-486 (pending) ← runnable
+M1-487 (pending) ← runnable
+M1-488 (pending) ← runnable
+M1-489 (pending) ← runnable
+M1-490 (pending) ← runnable
+M1-491 (pending) ← runnable
+M1-492 (pending) ← runnable
+M1-493 (pending) ← runnable
+M1-494 (pending) ← runnable
+M1-495 (pending) ← runnable
+M1-496 (pending) ← runnable
+M1-497 (pending) ← runnable
+M1-498 (pending) ← runnable
+M1-499 (pending) ← runnable
+M1-500 (pending) ← runnable
+M1-501 (pending) ← runnable
+M1-502 (done)
 ```
