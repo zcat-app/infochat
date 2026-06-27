@@ -682,7 +682,7 @@ public class InboundRouter {
                 if (!commandPermissions.allowedDuringProbation(commandName)) {
                     String body = MessageFormat.format(
                             bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED, inboundContext.effectiveLanguage()),
-                            formatTimeUntilUnlock(probationActor.probationUntil()));
+                            formatTimeUntilUnlock(probationNow, probationActor.probationUntil()));
                     sendReply(msg.scope(), body, adapterName);
                     return;
                 }
@@ -1111,12 +1111,17 @@ public class InboundRouter {
      * is non-null whenever the gate fires and the null branch is a
      * formatter-totality guard; the sub-minute branch still covers an
      * expiry that elapses between the snapshot read and this call.
+     *
+     * <p>{@code now} is the gate's own {@code probationNow =
+     * clock.instant()} sample, threaded in so the rendered token is
+     * computed against the same instant as the block decision (and is
+     * pinnable in tests) rather than re-reading the wall clock. (M1-471)
      */
-    static String formatTimeUntilUnlock(@Nullable Instant expiry) {
+    static String formatTimeUntilUnlock(Instant now, @Nullable Instant expiry) {
         if (expiry == null) {
             return "<1m";
         }
-        Duration remaining = Duration.between(Instant.now(), expiry);
+        Duration remaining = Duration.between(now, expiry);
         if (remaining.isNegative() || remaining.toMinutes() < 1) {
             return "<1m";
         }

@@ -11,6 +11,7 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.YearMonth;
@@ -53,33 +54,59 @@ public class PartitionCreator {
     @io.quarkus.agroal.DataSource("owner")
     DataSource dataSource;
 
-    // Seeded at construction so a freshly started instance does not warn before
-    // its first tick; advanced only after a fully successful provisioning.
-    private volatile Instant lastSuccessfulRun = Instant.now();
+    // The provision-month decision, the liveness gate, and the on-success
+    // advance all read time from the injected Clock — not ambient Instant.now()
+    // / YearMonth.now() — so the gate is pinnable in tests (engineering-rules
+    // §9; sibling PartitionPruner is the reference seam). Production gets
+    // Clock.systemUTC() from the CDI producer; the initializer only covers
+    // hand-constructed instances. (M1-471, ref M1-449)
+    @Inject
+    Clock clock = Clock.systemUTC();
+
+    // Seeded on the injected Clock so a freshly started instance does not warn
+    // before its first tick; advanced only after a fully successful
+    // provisioning. The seed, the on-success advance, and the liveness-gate
+    // read share this one Clock (no two-clock split — §9). Declared after
+    // `clock` so the initializer sees it; its pre-injection default is
+    // Clock.systemUTC(), equal to the production clock, so the seed matches the
+    // prior Instant.now() byte-for-byte.
+    private volatile Instant lastSuccessfulRun = clock.instant();
 
     void onStart(@Observes StartupEvent event) {
-        provisionActiveAndNextMonth();
+        provisionActiveAndNextMonth(clock.instant());
     }
 
     @Scheduled(every = "{infochat.partitions.check-interval}")
     void onTick() {
-        provisionActiveAndNextMonth();
+        // One Clock sample feeds both the provisioning attempt's on-success
+        // advance and the liveness gate, so the gate reads lastSuccessfulRun
+        // back against the same instant that may have just written it.
+        Instant now = clock.instant();
+        provisionActiveAndNextMonth(now);
 
-        Duration sinceSuccess = Duration.between(lastSuccessfulRun, Instant.now());
-        if (sinceSuccess.compareTo(LIVENESS_THRESHOLD) > 0) {
+        if (livenessWarnDue(lastSuccessfulRun, now)) {
+            long staleDays = Duration.between(lastSuccessfulRun, now).toDays();
             LOG.warnf("PartitionCreator has not successfully provisioned partitions in %d days "
                     + "(threshold %d) — partitioned inserts will fail once the active month ends",
-                sinceSuccess.toDays(), LIVENESS_THRESHOLD.toDays());
+                staleDays, LIVENESS_THRESHOLD.toDays());
         }
     }
 
-    private void provisionActiveAndNextMonth() {
-        List<YearMonth> months = PartitionDdl.monthsToProvision(YearMonth.now(ZoneOffset.UTC));
+    // Pure liveness decision, parameterized on the sampled instant so it is
+    // pinnable without a Quarkus boot (mirrors the pure-decision pattern of
+    // PartitionDdl). WARN is due once the stale interval strictly exceeds the
+    // threshold; at exactly the threshold it is not yet due.
+    static boolean livenessWarnDue(Instant lastSuccessfulRun, Instant now) {
+        return Duration.between(lastSuccessfulRun, now).compareTo(LIVENESS_THRESHOLD) > 0;
+    }
+
+    private void provisionActiveAndNextMonth(Instant now) {
+        List<YearMonth> months = PartitionDdl.monthsToProvision(YearMonth.from(now.atZone(ZoneOffset.UTC)));
         try {
             for (YearMonth month : months) {
                 provision(month);
             }
-            lastSuccessfulRun = Instant.now();
+            lastSuccessfulRun = now;
         } catch (SQLException e) {
             LOG.errorf(e, "Partition provisioning for %s failed", months);
         }

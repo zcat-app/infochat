@@ -226,7 +226,7 @@ class InboundRouterProbationOrderingTest {
 
         assertEquals(1, target.captured.size(),
                 "blocked-during-probation path must produce exactly one reply; got: " + target.captured);
-        assertEquals("unlock-in " + InboundRouter.formatTimeUntilUnlock(probationUntil),
+        assertEquals("unlock-in " + InboundRouter.formatTimeUntilUnlock(Instant.now(), probationUntil),
                 target.captured.get(0).text(),
                 "the unlock token must be formatted from the snapshot's probation_until; got: "
                         + target.captured.get(0).text());

@@ -4,6 +4,7 @@ import app.zcat.infochat.messaging.Identity;
 import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
+import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
 import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
@@ -11,6 +12,7 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Optional;
@@ -113,6 +115,41 @@ class InboundRouterProbationClockTest {
                         + target.captured.get(0).text());
     }
 
+    /**
+     * The blocked reply's remaining-time token is rendered from the gate's
+     * injected-clock instant (M1-471), not a re-read wall clock. The clock is
+     * pinned 2h30m BEFORE {@code probation_until}, so the truncated-hours token
+     * is deterministically {@code ~2h}; under {@code Instant.now()} this would
+     * be non-deterministic and — with the 2020 expiry long past the real wall
+     * clock — would render {@code <1m} instead, proving the formatter reads the
+     * threaded gate instant.
+     */
+    @Test
+    void blockedReplyRendersRemainingTimeTokenFromInjectedClock() {
+        Instant pinnedNow = Instant.parse("2020-05-01T00:00:00Z");
+        Instant probationUntil = pinnedNow.plus(Duration.ofHours(2)).plus(Duration.ofMinutes(30));
+        Clock clock = Clock.fixed(pinnedNow, ZoneOffset.UTC);
+
+        UUID userId = UUID.randomUUID();
+        InboundRouter router = newRouter(userId, probationUntil);
+        router.clock = clock;
+        // A {0}-bearing probation template so the interpolated unlock token
+        // actually lands in the reply text (the default stub has no placeholder).
+        router.bundleLoader = new TokenTemplateBundleLoader();
+        router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(new CallLog(), "add-source"));
+        CapturingAdapter target = new CapturingAdapter();
+        router.setReplyTarget(target);
+
+        router.onMessage(dmInbound("/add-source https://example.org/feed --tags x"), ADAPTER);
+
+        assertEquals(1, target.captured.size(),
+                "in-probation blocked command must produce exactly one reply; got: " + target.captured);
+        assertEquals("unlock-in ~2h", target.captured.get(0).text(),
+                "the remaining-time token must be computed from the injected clock instant "
+                        + "(pinned 2h30m before probation_until → ~2h), not the wall clock; got: "
+                        + target.captured.get(0).text());
+    }
+
     // ----- harness ------------------------------------------------------------
 
     /**
@@ -182,5 +219,21 @@ class InboundRouterProbationClockTest {
                 body,
                 Instant.now(),
                 "msg-1");
+    }
+
+    /** A {0}-bearing probation template so the rendered unlock token lands in the reply. */
+    private static final class TokenTemplateBundleLoader extends BundleLoader {
+        @Override
+        public String get(String key) {
+            return get(key, "en");
+        }
+
+        @Override
+        public String get(String key, String langCode) {
+            if (BundleKeys.ERROR_PROBATION_BLOCKED.equals(key)) {
+                return "unlock-in {0}";
+            }
+            return FakeBundleLoader.stubFor(key);
+        }
     }
 }

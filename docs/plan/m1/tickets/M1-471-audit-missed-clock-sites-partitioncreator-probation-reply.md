@@ -1,7 +1,7 @@
 ---
 id: M1-471
 title: "Move two audit-missed now() sites onto the Clock: PartitionCreator gates + probation-reply formatter"
-status: pending
+status: done
 created: 2026-06-27
 last_updated: 2026-06-27
 blocked_by: []
@@ -11,6 +11,10 @@ files_scope:
   - infochat-collector/src/test/java/app/zcat/infochat/collector/partition/PartitionCreatorTest.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterProbationClockTest.java
+  # Added M1-471 (escalate->refine, budget-breach): the mandated
+  # formatTimeUntilUnlock signature change (acceptance item 2) orphans a second
+  # caller here that the author missed when scoping; one-line mechanical fix.
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterProbationOrderingTest.java
   - docs/plan/m1/now-clock-audit.md
 complexity: low
 risk: low
@@ -76,12 +80,55 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-27
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 184
+      removed: 25
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
 redteam_audits: []
+escalations:
+  - date: 2026-06-27
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — pre-review. The acceptance-item-2 signature change to
+      InboundRouter.formatTimeUntilUnlock orphans a second caller,
+      InboundRouterProbationOrderingTest.java:229, which was outside the
+      original files_scope. User chose refine (add the path to files_scope);
+      files_budget: 6 already covers the resulting 6 files.
+revisions:
+  - date: 2026-06-27
+    reason: budget-breach
+    prior_files_scope:
+      - infochat-collector/src/main/java/app/zcat/infochat/collector/partition/PartitionCreator.java
+      - infochat-collector/src/test/java/app/zcat/infochat/collector/partition/PartitionCreatorTest.java
+      - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
+      - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterProbationClockTest.java
+      - docs/plan/m1/now-clock-audit.md
+clarity_check:
+  date: 2026-06-27
+  verdict: WARN
+  warnings:
+    - >-
+      TEST-CHANGES-AUTHORIZED: PartitionCreatorTest.java (6 existing tests) and
+      InboundRouterProbationClockTest.java (3 existing tests) are listed in
+      test_plan.adds but both files already exist on disk. ADD new test methods
+      to each file; do not replace them. New expected behaviour is described in
+      acceptance items 1 and 3, so intent is recoverable — classification error
+      only.
+  blockers: []
 ---
 
 # M1-471: Move two audit-missed now() sites onto the Clock

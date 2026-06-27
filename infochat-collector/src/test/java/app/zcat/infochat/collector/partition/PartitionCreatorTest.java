@@ -6,7 +6,9 @@ import java.time.Instant;
 import java.time.YearMonth;
 import java.util.List;
 
+import static app.zcat.infochat.collector.partition.PartitionCreator.LIVENESS_THRESHOLD;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -100,6 +102,21 @@ class PartitionCreatorTest {
             YearMonth.of(2026, 6), -3650, Instant.parse("2026-06-15T00:00:00Z"));
         assertTrue(pathological.isEmpty(),
             "even a negative retention horizon must not select the active or next month");
+    }
+
+    @Test
+    void livenessWarnFiresOnlyOnceStaleExceedsTheThreshold() {
+        // The gate reads its instant from the injected Clock (M1-471), so the
+        // decision is pinnable directly: WARN is due exactly when fixed-now
+        // minus lastSuccessfulRun crosses LIVENESS_THRESHOLD, with the boundary
+        // strict (== threshold does not yet warn).
+        Instant now = Instant.parse("2026-06-15T00:00:00Z");
+        assertFalse(PartitionCreator.livenessWarnDue(now.minus(LIVENESS_THRESHOLD), now),
+            "stale interval exactly at the threshold must NOT warn (strict > comparison)");
+        assertFalse(PartitionCreator.livenessWarnDue(now.minus(LIVENESS_THRESHOLD).plusSeconds(1), now),
+            "stale interval just under the threshold must NOT warn");
+        assertTrue(PartitionCreator.livenessWarnDue(now.minus(LIVENESS_THRESHOLD).minusSeconds(1), now),
+            "stale interval just past the threshold must warn");
     }
 
     @Test

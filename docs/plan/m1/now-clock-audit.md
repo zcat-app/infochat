@@ -23,7 +23,9 @@ CLAUDE.md §"Injectable time in decision logic" / `engineering-rules-verbatim.md
 
 Raw surface (ripgrep): ~90 Java `*.now()` matches + ~21 files with SQL
 `now()`/`current_timestamp` in query strings, across both services. The vast
-majority are (B)/(C). The **unconverted (A) set is 11 components**.
+majority are (B)/(C). The **unconverted (A) set is 12 components** (originally
+recorded as 11; `PartitionCreator`, row 10, was audit-missed and added by
+M1-471).
 
 ## (A) decision-logic components
 
@@ -38,8 +40,9 @@ majority are (B)/(C). The **unconverted (A) set is 11 components**.
 | 7 | `ReadyPromoter` | collector | partition-scan pickup window | DEFERRED |
 | 8 | `PerSourceUnknownTracker` | collector | per-source UNKNOWN-rate scan window | DEFERRED |
 | 9 | `PartitionPruner` | collector | partition retention cutoff (`YearMonth.now`, `Instant.now`) | DEFERRED |
-| 10 | `DigestRetryService` | provider | digest retry cooldown (`Instant.now().isBefore(lastRetryAt.plus(cooldown))`) | DEFERRED |
-| 11 | `FetchScheduler` | collector | per-kind tick interval (`Duration.between(lastTick, now) >= interval`) | DEFERRED |
+| 10 | `PartitionCreator` | collector | provision-month decision (`YearMonth.now`) + liveness-WARN gate (`Duration.between(lastSuccessfulRun, Instant.now())` vs `LIVENESS_THRESHOLD`) | **CONVERTED (M1-471)** — audit-missed sibling of row 9 |
+| 11 | `DigestRetryService` | provider | digest retry cooldown (`Instant.now().isBefore(lastRetryAt.plus(cooldown))`) | DEFERRED |
+| 12 | `FetchScheduler` | collector | per-kind tick interval (`Duration.between(lastTick, now) >= interval`) | DEFERRED |
 
 The 8 DEFERRED components are out of scope for M1-447 (see the ticket's
 `out_of_scope`) and land as follow-up tickets, each a small independently
@@ -102,6 +105,28 @@ ONLY because production `Clock` is `Clock.systemUTC()` ≈ DB `now()`, so
 behaviour is byte-for-byte preserved (ticket acceptance item 2). The follow-up
 ticket that converts `ProbationCheck` should move its read onto the same `Clock`
 to close the split; this audit records that the write side already moved.
+
+## Audit-missed sites converted by M1-471
+
+The `/deep-code-review full` run (2026-06-27) surfaced two current-time sites
+this audit missed; both were converted by M1-471 and are byte-for-byte
+behaviour-preserving under the production `Clock.systemUTC()`.
+
+### `PartitionCreator` — (A) decision-logic (row 10)
+The in-package sibling of `PartitionPruner` (row 9), originally absent from the
+(A) table. One injected `Clock` now feeds every decision read: the
+which-months-to-provision decision (`YearMonth.from(clock.instant().atZone(UTC))`),
+the liveness-WARN gate (extracted to the pure `livenessWarnDue(lastSuccessfulRun,
+now)` for pinnability), and the `lastSuccessfulRun` seed + on-success advance —
+written and read back against the same `Clock` (no two-clock split, §9).
+
+### `InboundRouter.formatTimeUntilUnlock` — (C) display
+The step-5 probation gate already sampled `probationNow = clock.instant()`; only
+the blocked reply's remaining-time token re-read `Instant.now()`. The gate's
+instant is now threaded into the formatter so the rendered token is computed
+against the same instant as the block decision (and is pinnable). This is a (C)
+display/consistency fix, not a gate change — the authorization decision was
+already correctly clocked (M1-451).
 
 ## (B) / (C) summary (NOT converted)
 
