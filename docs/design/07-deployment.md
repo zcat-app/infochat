@@ -431,7 +431,7 @@ Field rules:
 | `identifier` | yes | string | URL for HTTP-shaped sources; **canonicalized JSON** filter spec for `nostr` (object keys sorted lexicographically, no extra whitespace — [../spec/architecture.md](../spec/architecture.md) §Ingest SPIs). Together with `kind` it is the unique key. |
 | `name` | yes | string | Display name. Fallback if feed has no title. |
 | `category` | yes | enum | `news`, `blog`, `social`. Drives socials auto-tag for social. |
-| `tags` | yes, ≥1 | array of strings | Tier-1 controlled vocab. Union across all entries seeds the `tag` table. |
+| `tags` | yes, ≥1 | array of strings | Tier-1 controlled vocab. Union across all entries seeds the `tag` table. Each tag must match `^[a-z0-9][a-z0-9-]{0,47}$` — lowercase letters, digits, and hyphens only, no spaces (a multi-word tag uses a hyphen, e.g. `glm-ai`). Values are auto-lowercased (so `"AI"` → `ai`), but spaces and other characters are **not** rewritten and fail-fast at startup. This is the source-`name` (free-form display string) vs `tags` (filter tokens) distinction — only `tags` are constrained. |
 | `config` | optional / per-kind | object or `null` | Omitted or `null` for HTTP-shaped sources. For `nostr`: the relay list and any per-source overrides. The shape is per-`kind`; new kinds add their own `config` schema in this file when they ship. |
 
 Per-kind `config` shape:

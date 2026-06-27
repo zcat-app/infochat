@@ -205,6 +205,14 @@ more), its URL or handle, a name, a category, and one or more tags. The full
 format, with a worked example for each kind, is in
 [docs/design/07-deployment.md §7.6.1](docs/design/07-deployment.md). The wizard
 copies this file into place once and never overwrites it, so your edits stick.
+
+> **Tags are filter tokens, not free text.** The `name` field is free-form —
+> "Z.ai (Twitter)", spaces and capitals and all. But each entry in `tags` must
+> be lowercase letters, digits, and hyphens only — no spaces (pattern
+> `^[a-z0-9][a-z0-9-]{0,47}$`). A capitalized single word like `"AI"` is fine
+> (it's auto-lowercased to `ai`), but a tag with a space like `"GLM AI"` is
+> rejected and the Collector **refuses to start**. Write multi-word tags with a
+> hyphen instead: `"glm-ai"`.
 (You can also add feeds one at a time later with `/add-source` — see the
 [User Guide](USER_GUIDE.md).)
 
