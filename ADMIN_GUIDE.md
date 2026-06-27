@@ -251,6 +251,12 @@ A few guarantees worth understanding — they're why the bot is safe to run:
 - Temporarily noisy or down? `/source-disable <...>` — pause it, keep its
   history, re-enable later.
 - Genuinely unwanted? `/remove-source <...>`.
+- Several feeds from the *same site* failing at once (e.g. all your Nitter
+  feeds returning errors)? That's usually the upstream host rate-limiting a
+  burst. The collector already paces requests per-host to prevent this; if it
+  still happens, an operator can widen the gap via
+  `infochat.fetch.host-min-interval` in `application.properties` (then restart
+  the collector). Details in that property's comments.
 
 ### Adding a co-admin / handing over
 

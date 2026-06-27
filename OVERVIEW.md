@@ -226,7 +226,7 @@ flowchart TD
 
 | Loop | Service | What it does |
 |---|---|---|
-| **Fetch scheduler** | Collector | Per-kind polling of `Fetcher` sources; `StreamSource` workers stay connected |
+| **Fetch scheduler** | Collector | Per-kind polling of `Fetcher` sources, paced per-host to avoid rate-limit bursts; `StreamSource` workers stay connected |
 | **Eval workers** | Collector | Drain the eval queue through Stage 1 → … → `READY` (rehydrated from `RAW` on restart) |
 | **Asset snapshots** | Collector | Per-`(asset, sub_verb)` price fetch → `price_snapshot` — **bypasses** the post pipeline (no Stage 1/2, no tagging, no embedding) |
 | **Linking job** | Collector | Builds `post_reference` edges via shared entities and vector similarity |
