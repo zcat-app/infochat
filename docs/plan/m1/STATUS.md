@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
-| in-progress | 0 |
+| pending | 3 |
+| in-progress | 1 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 498 |
 | deferred | 6 |
-| **total** | **504** |
+| **total** | **508** |
 
 ---
 
@@ -24,7 +24,9 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-470 — SSRF: share one body-read deadline across all redirect hops of a get() (complexity: low, risk: medium)
+- M1-471 — Move two audit-missed now() sites onto the Clock: PartitionCreator gates + probation-reply formatter (complexity: low, risk: low)
+- M1-472 — Deep-review low-severity cleanup sweep: /summary single-connection retrieval + messaging redaction dedup (complexity: low, risk: medium)
 
 ---
 
@@ -32,8 +34,7 @@ _(none — all pending tickets are blocked)_
 
 | ID | Title | Status | Last review |
 |---|---|---|---|
-
-_(none)_
+| M1-469 | Fix verified guide-audit inaccuracies in 3 role guides | in-progress | (none) |
 
 ---
 
@@ -667,4 +668,8 @@ M1-465 (done)
 M1-466 (done)
 M1-467 (done)
 M1-468 (done)
+M1-469 (in-progress)
+M1-470 (pending) ← runnable
+M1-471 (pending) ← runnable
+M1-472 (pending) ← runnable
 ```
