@@ -143,26 +143,6 @@ wait_healthy() {
   return 1
 }
 
-# Image id the RUNNING container for $1 is currently using, with docker's
-# `sha256:` prefix stripped so it compares equal to `compose images -q` (which
-# omits the prefix). Empty when the service has no running container — which the
-# restart decision treats as "changed", so a stopped app gets (re)started rather
-# than left down. The container pins the image id it started with, so this stays
-# accurate to "what is serving" even after a rebuild repoints the :latest tag. (M1-476)
-running_image_id() {
-  local svc="$1" cid
-  cid="$(compose ps -q "$svc" 2>/dev/null || true)"
-  if [[ -z "$cid" ]]; then
-    return 0
-  fi
-  docker inspect -f '{{.Image}}' "$cid" 2>/dev/null | sed 's/^sha256://' || true
-}
-
-# Image id `compose build` produced/tagged for service $1 (already prefix-free).
-built_image_id() {
-  compose images -q "$1" 2>/dev/null || true
-}
-
 # Auto-rollback of CODE: check out the pre-upgrade commit (detached HEAD —
 # deliberately, to avoid the forbidden `git reset --hard`; the operator restores
 # the branch once the cause is fixed and re-runs upgrade), rebuild from it, and
@@ -289,36 +269,23 @@ main() {
     echo "aborted: build declined. Code is pulled but not rebuilt; re-run upgrade.sh to continue." >&2
     exit 1
   fi
-  # Snapshot what each app is running BEFORE the rebuild, so Step 5 can tell a
-  # real image change (or a stopped app) from a no-op cache-hit rebuild.
-  local -a running_before=()
-  local svc
-  for svc in "${APP_SERVICES[@]}"; do
-    running_before+=("$(running_image_id "$svc")")
-  done
   if ! compose build "${APP_SERVICES[@]}"; then
     echo "FAIL: build failed at ${new_sha} — rolling back code." >&2
     rollback "$original_sha" "$db_artifact"
     exit 1
   fi
 
-  # ── Step 5: restart Collector then Provider — only if the image changed ──
-  # A full cache-hit rebuild yields the SAME image id, so when every app is
-  # already running its freshly-built image, recreating containers would be pure
-  # churn (and needless downtime) — print and exit. A differing id (source
-  # changed) OR an empty running id (the app is stopped) counts as changed and
-  # triggers the ordered restart. (M1-476)
-  local changed=0 i
-  for i in "${!APP_SERVICES[@]}"; do
-    if [[ "${running_before[$i]}" != "$(built_image_id "${APP_SERVICES[$i]}")" ]]; then
-      changed=1
-    fi
-  done
-  if [[ "$changed" -eq 0 ]]; then
-    echo "no change — both apps are already running the freshly-built image at ${new_sha}; nothing to restart."
-    exit 0
-  fi
-  if ! confirm "Restart the apps onto the new image (Collector, then Provider)?"; then
+  # ── Step 5: restart Collector then Provider via `compose up -d` ──
+  # `compose up -d` (run by start_apps) is itself the change-detector: it
+  # recreates ONLY a service whose resolved image or config differs from its
+  # running container and leaves an unchanged service running — so a cache-hit
+  # rebuild that produced byte-identical images is a no-op with zero downtime,
+  # while a rebuilt image (source changed) or a stopped app IS recreated. The
+  # earlier hand-rolled comparison could not see a fresh build: it read
+  # `docker compose images -q`, which reports the RUNNING container's image (not
+  # the freshly-built `:latest`), so it compared running-vs-running and never
+  # redeployed a rebuilt app while it was up. (M1-503; replaces the M1-476 gate.)
+  if ! confirm "Restart the apps onto the freshly-built image (Collector, then Provider)?"; then
     echo "aborted: restart declined. New images are built but not deployed; re-run upgrade.sh or use apps.sh restart." >&2
     exit 1
   fi

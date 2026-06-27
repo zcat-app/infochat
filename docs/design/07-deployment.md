@@ -965,18 +965,19 @@ confirms before each irreversible gate):
 5. **Rebuild** the two app images from the current source
    (`docker compose --profile prod build infochat-collector infochat-provider`),
    always — a full cache-hit rebuild is cheap and yields the same image id — while
-   the old containers keep serving. The script first snapshots the image id each
-   app is currently running. A compile failure here stops before anything is
+   the old containers keep serving. A compile failure here stops before anything is
    recreated, so the running bot is unaffected.
-6. **Restart in §Topology order, only when the image changed.** Per app, the
-   script compares the freshly-built image id against what that app was running:
-   a differing id (the source changed) **or** a stopped app (no running image)
-   counts as changed and triggers the restart; when both apps are already running
-   the freshly-built image it prints "nothing to restart" and exits without
-   recreating a container (a cache-hit rebuild then has zero downtime). On a
-   change it `up -d --wait` the Collector (it runs Flyway under the §7.8.5
-   advisory lock) so its healthcheck must pass before the Provider starts against
-   the migrated schema, then `up -d` the Provider.
+6. **Restart in §Topology order via `docker compose up -d`.** `up -d` is itself
+   the change-detector: it recreates only a service whose resolved image differs
+   from its running container (the source changed → a rebuilt image) or whose
+   container is stopped, and leaves an unchanged service running — so a cache-hit
+   rebuild that yields byte-identical images is a no-op with zero downtime, with
+   no separate image-id bookkeeping. It `up -d --wait` the Collector (it runs
+   Flyway under the §7.8.5 advisory lock) so its healthcheck must pass before the
+   Provider starts against the migrated schema, then `up -d` the Provider. (M1-503
+   replaced an earlier hand-rolled image-id comparison that read `docker compose
+   images -q` — which reports the running container's image, not the freshly-built
+   tag — and so never redeployed a rebuilt app while it was running.)
 7. **Health gate**: confirm the Collector reports `healthy` (it declares a
    `/q/health/ready` compose healthcheck) and the Provider's container is
    `running` (it declares no compose healthcheck, so it cannot be health-gated —

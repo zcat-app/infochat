@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 24 |
+| pending | 23 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 508 |
+| done | 509 |
 | deferred | 6 |
 | **total** | **538** |
 
@@ -47,7 +47,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-499 — Test fixture duplication → testsupport, plus a leaked registration teardown (complexity: low, risk: low)
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-501 — Stage-1-flagged posts can permanently evade Stage 2 after a crash (complexity: medium, risk: medium)
-- M1-503 — upgrade.sh restart gate compares the running image to itself, never deploys a rebuilt app (complexity: low, risk: medium)
 
 ---
 
@@ -83,6 +82,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-503 | upgrade.sh restart gate compares the running image to itself, never deploys a rebuilt app | 2026-06-27 | round 1 APPROVE |
 | M1-502 | RssFeedParser: tolerate leading whitespace before the XML declaration | 2026-06-27 | round 1 APPROVE |
 | M1-477 | upgrade.sh health gate: accept a running service that declares no healthcheck | 2026-06-27 | round 1 APPROVE |
 | M1-476 | upgrade.sh deploys the current checkout with zero operator config | 2026-06-27 | round 1 APPROVE |
@@ -92,7 +92,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-472 | Deep-review low-severity cleanup sweep: /summary single-connection retrieval + messaging redaction dedup | 2026-06-27 | round 1 APPROVE |
 | M1-471 | Move two audit-missed now() sites onto the Clock: PartitionCreator gates + probation-reply formatter | 2026-06-27 | round 1 APPROVE |
 | M1-470 | SSRF: share one body-read deadline across all redirect hops of a get() | 2026-06-27 | round 1 APPROVE |
-| M1-469 | Fix verified guide-audit inaccuracies in 3 role guides | 2026-06-27 | round 1 APPROVE |
 
 ---
 
@@ -723,5 +722,5 @@ M1-499 (pending) ← runnable
 M1-500 (pending) ← runnable
 M1-501 (pending) ← runnable
 M1-502 (done)
-M1-503 (pending) ← runnable
+M1-503 (done)
 ```

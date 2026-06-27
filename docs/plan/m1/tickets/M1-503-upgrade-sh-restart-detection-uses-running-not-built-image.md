@@ -1,7 +1,7 @@
 ---
 id: M1-503
 title: "upgrade.sh restart gate compares the running image to itself, never deploys a rebuilt app"
-status: pending
+status: done
 created: 2026-06-27
 last_updated: 2026-06-27
 blocked_by: []
@@ -80,6 +80,27 @@ acceptance:
     serving; the operator had to `compose up -d` the collector by hand.)
 spec_refs:
   - docs/spec/deployment.md §Operator inputs
+clarity_check:
+  date: 2026-06-27
+  verdict: WARN
+  warnings:
+    - "Acceptance item 7's live-deployment verification ('recorded in the round's verification notes') is not independently reproducible — the only available mechanism for a shell change with no automated harness (same posture as M1-477); developer must commit/attach concrete notes for the reviewer."
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-06-27
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    notes: "SPEC-CONFORMANCE WARN (non-blocking): spec_refs over-cites docs/spec/deployment.md §Operator inputs; the spec-of-record is docs/design/07-deployment.md §7.11, which the diff updates consistently."
+    diff_stats:
+      files: 4
+      added: 34
+      removed: 62
 ---
 
 ## Problem
