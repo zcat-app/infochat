@@ -977,8 +977,10 @@ confirms before each irreversible gate):
    change it `up -d --wait` the Collector (it runs Flyway under the §7.8.5
    advisory lock) so its healthcheck must pass before the Provider starts against
    the migrated schema, then `up -d` the Provider.
-7. **Health gate**: confirm both app containers report healthy
-   (`docker compose ps`). On a build failure (step 5) or a failed health gate,
+7. **Health gate**: confirm the Collector reports `healthy` (it declares a
+   `/q/health/ready` compose healthcheck) and the Provider's container is
+   `running` (it declares no compose healthcheck, so it cannot be health-gated —
+   its functional check is the step-8 smoke test). On a build failure (step 5) or a failed health gate,
    the script **auto-rolls back the code** — `git checkout` the recorded
    pre-upgrade commit, rebuild, restart — and exits non-zero. Schema rollback is
    **not** automated: Flyway migrates forward only, so if a migration already

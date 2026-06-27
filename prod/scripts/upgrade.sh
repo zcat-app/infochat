@@ -115,11 +115,16 @@ start_apps() {
   compose up -d infochat-provider || return 1
 }
 
-# Poll a service's container health until healthy or WAIT_TIMEOUT. docker inspect
-# (not `compose ps --format`) reads the health status portably across compose
-# versions and needs no jq. A service with no healthcheck reports "none" and is
-# treated as not-yet-confirmed until the timeout (both app services DO declare
-# healthchecks, so this is the normal path).
+# Poll a service until it is confirmed up, or WAIT_TIMEOUT. docker inspect (not
+# `compose ps --format`) reads status portably across compose versions and needs
+# no jq. The two app services are NOT symmetric: the Collector DECLARES a
+# /q/health/ready healthcheck and is gated on "healthy"; the Provider declares
+# NONE (see docker-compose.yml) and so reports health "none" forever — it cannot
+# be health-gated, so it is accepted as soon as its container is "running"
+# (start_apps already ran `up -d`), its functional check being the §7.11 smoke
+# step. A no-healthcheck service that is NOT running keeps polling and fails at
+# the deadline. (Before M1-477 the Provider's "none" was never accepted, so the
+# gate spun the full timeout and false-failed into a rollback.)
 wait_healthy() {
   local svc="$1" deadline=$((SECONDS + WAIT_TIMEOUT)) cid state
   while (( SECONDS < deadline )); do
@@ -127,6 +132,11 @@ wait_healthy() {
     if [[ -n "$cid" ]]; then
       state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo none)"
       [[ "$state" == "healthy" ]] && return 0
+      # No healthcheck declared: gate on container-running instead of health.
+      if [[ "$state" == "none" ]] \
+         && [[ "$(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null || echo)" == "running" ]]; then
+        return 0
+      fi
     fi
     sleep 3
   done
@@ -318,11 +328,11 @@ main() {
     exit 1
   fi
 
-  # ── Step 6: post-restart health gate (docker compose ps health) ──
+  # ── Step 6: post-restart gate (Collector healthcheck; Provider running) ──
   if wait_healthy infochat-collector && wait_healthy infochat-provider; then
-    echo "upgrade complete: now at ${new_sha} (both apps healthy)."
+    echo "upgrade complete: now at ${new_sha} (Collector healthy, Provider running)."
   else
-    echo "FAIL: post-restart health check did not report both apps healthy — rolling back code." >&2
+    echo "FAIL: post-restart gate did not confirm both apps (Collector healthy + Provider running) — rolling back code." >&2
     rollback "$original_sha" "$db_artifact"
     exit 1
   fi

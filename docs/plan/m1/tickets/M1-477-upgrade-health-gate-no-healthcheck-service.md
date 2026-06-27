@@ -1,7 +1,7 @@
 ---
 id: M1-477
 title: "upgrade.sh health gate: accept a running service that declares no healthcheck"
-status: pending
+status: done
 created: 2026-06-27
 last_updated: 2026-06-27
 blocked_by: []
@@ -68,12 +68,29 @@ spec_refs:
   - "docs/design/07-deployment.md §7.11"
   - "docs/design/07-deployment.md §7.12"
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-27
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 32
+      removed: 16
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-27
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-477: upgrade.sh health gate — accept a running service that declares no healthcheck
