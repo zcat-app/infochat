@@ -402,6 +402,16 @@ public final class SsrfGuardedHttpClient {
         // established connection, so the body-read phase needs no
         // pin).
         PinnedDnsResolver.Provider.PinHandle hopPin = null;
+        // ONE body-read time budget for the whole call (M1-470): a single
+        // bodyReadStartNanos sample, captured before the redirect loop and
+        // threaded into every followed-hop discardBounded and the terminal
+        // readBounded, so the cumulative body-read wall-clock across all hops
+        // is bounded by ONE bodyReadDeadline — the "TOTAL wall-clock time" the
+        // class / supervisedReadChunk javadoc promises for the M1-026 Finding 1
+        // drip-attacker defense. Capturing it per body-read phase instead would
+        // grant a self-redirecting attacker (redirectCap + 1) independent full
+        // deadlines, holding a fetcher thread far past the documented bound.
+        long bodyReadStartNanos = System.nanoTime();
         try {
             URI current = uri;
             int redirectCount = 0;
@@ -447,8 +457,10 @@ public final class SsrfGuardedHttpClient {
                     }
                     // Drain only the hops we actually follow. An over-cap
                     // redirect body aborts here with BODY_CAP_EXCEEDED rather
-                    // than being read unbounded (M1-355).
-                    discardBounded(response.body());
+                    // than being read unbounded (M1-355). The shared
+                    // bodyReadStartNanos makes every followed hop's drain
+                    // count against the one call-wide deadline (M1-470).
+                    discardBounded(response.body(), bodyReadStartNanos);
                     String location = response.headers().firstValue("Location")
                         .orElseThrow(() -> new SsrfPolicyException(
                             SsrfPolicyException.Reason.REDIRECT_LOCATION_MISSING,
@@ -489,7 +501,7 @@ public final class SsrfGuardedHttpClient {
             }
         }
 
-        byte[] body = readBounded(terminalResponse);
+        byte[] body = readBounded(terminalResponse, bodyReadStartNanos);
         return new BoundedByteArrayResponse(terminalResponse, body);
     }
 
@@ -648,7 +660,7 @@ public final class SsrfGuardedHttpClient {
         return new ResolvedHost(canonicalHost, addresses);
     }
 
-    private byte[] readBounded(HttpResponse<InputStream> response)
+    private byte[] readBounded(HttpResponse<InputStream> response, long bodyReadStartNanos)
             throws IOException, InterruptedException {
         // Terminal hop: accumulate the body the caller receives. The size cap,
         // per-read watchdog, and total deadline all live in supervisedDrain —
@@ -656,8 +668,11 @@ public final class SsrfGuardedHttpClient {
         // (M1-355) — so this method only supplies the accumulating sink.
         // ByteArrayOutputStream.close() is a no-op, so it needs no
         // try-with-resources; supervisedDrain owns closing the InputStream.
+        // bodyReadStartNanos is the one call-wide budget origin captured in
+        // get() before the redirect loop (M1-470).
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        supervisedDrain(response.body(), (chunk, length) -> out.write(chunk, 0, length));
+        supervisedDrain(response.body(), (chunk, length) -> out.write(chunk, 0, length),
+            bodyReadStartNanos);
         return out.toByteArray();
     }
 
@@ -766,10 +781,15 @@ public final class SsrfGuardedHttpClient {
      * BODY_READ_DEADLINE_EXCEEDED}. A size-only cap would reopen the M1-025
      * slow-dribble DoS on the redirect path; the redirect body is thrown away,
      * but it is not read un-timed.
+     *
+     * <p>{@code bodyReadStartNanos} is the one call-wide body-read budget
+     * origin captured in {@link #get(URI, Map)} before the redirect loop
+     * (M1-470), so every followed hop's drain counts against the SAME
+     * {@code bodyReadDeadline} rather than each hop receiving a fresh one.
      */
-    long discardBounded(InputStream body)
+    long discardBounded(InputStream body, long bodyReadStartNanos)
             throws IOException, InterruptedException {
-        return supervisedDrain(body, (chunk, length) -> { });
+        return supervisedDrain(body, (chunk, length) -> { }, bodyReadStartNanos);
     }
 
     /**
@@ -787,10 +807,16 @@ public final class SsrfGuardedHttpClient {
      * over-cap body (see the verified close()-drain note on the redirect-cap
      * path in {@link #get(URI, Map)}). The {@code body} stream is always closed
      * on exit.
+     *
+     * <p>{@code bodyReadStartNanos} is supplied by the caller rather than
+     * sampled here (M1-470): {@link #get(URI, Map)} captures it once before the
+     * redirect loop so the per-read deadline check in
+     * {@link #supervisedReadChunk} measures cumulative body-read time across
+     * EVERY followed hop plus the terminal read against one
+     * {@code bodyReadDeadline}, not a fresh deadline per body-read phase.
      */
-    private long supervisedDrain(InputStream body, ChunkSink sink)
+    private long supervisedDrain(InputStream body, ChunkSink sink, long bodyReadStartNanos)
             throws IOException, InterruptedException {
-        long bodyReadStartNanos = System.nanoTime();
         try (InputStream in = body) {
             // 64 KiB buffer: each in.read() runs on its own virtual thread
             // (see supervisedReadChunk), so a larger buffer means ~8x fewer

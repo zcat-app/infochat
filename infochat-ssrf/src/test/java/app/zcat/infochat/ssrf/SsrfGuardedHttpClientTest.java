@@ -489,6 +489,103 @@ class SsrfGuardedHttpClientTest {
     }
 
     // -----------------------------------------------------------------
+    // M1-470 shared body-read deadline across redirect hops (deep-review
+    // ssrf F1, DOS / low). A single get() must bound the CUMULATIVE
+    // body-read wall-clock across every followed redirect hop plus the
+    // terminal read by ONE bodyReadDeadline — not grant each hop a fresh
+    // one. Before the fix, supervisedDrain captured bodyReadStartNanos per
+    // body-read phase, so a self-redirecting host got (redirectCap + 1)
+    // independent full deadlines, holding a fetcher thread ~(redirectCap+1)x
+    // the documented bound while each individual read stayed under the
+    // per-read watchdog.
+    // -----------------------------------------------------------------
+
+    @Test
+    void redirectChainSharesOneBodyReadDeadline() {
+        // The server self-redirects /chain -> /chain, and each 302 carries a
+        // small body that drips one byte per (readTimeout / 4) = 125ms — well
+        // under the 500ms per-read watchdog, so ONLY the cumulative total
+        // deadline can stop the call. Each hop's body drains in ~7 * 125ms ≈
+        // 0.875s: comfortably under one 2s bodyReadDeadline (so a single hop
+        // never trips it alone), but more than a third of it, so the cumulative
+        // across 2-3 hops crosses the ONE shared deadline before the redirect
+        // cap is reached. Thread.sleep is a floor, so 3 hops always sum to
+        // ≥2.625s ≥ the deadline — the deadline therefore always fires before a
+        // 4th request, regardless of CI speed.
+        //
+        // Reason cleanly distinguishes the fix from the bug: with one shared
+        // budget the call aborts mid-chain with BODY_READ_DEADLINE_EXCEEDED;
+        // with the pre-fix per-hop capture every hop got a fresh 2s, each
+        // ~0.875s body drained fully to EOF, all redirectCap hops were
+        // followed, and the call surfaced REDIRECT_CAP_EXCEEDED instead.
+        Duration readTimeout = Duration.ofMillis(500);
+        Duration bodyReadDeadline = Duration.ofSeconds(2);
+        Duration dripInterval = readTimeout.dividedBy(4);
+        int hopBodyBytes = 7;
+        int redirectCap = 3;
+
+        AtomicInteger hits = new AtomicInteger();
+        server.createContext("/chain", exchange -> {
+            hits.incrementAndGet();
+            exchange.getResponseHeaders().add("Location", "/chain");
+            exchange.sendResponseHeaders(302, hopBodyBytes);
+            OutputStream out = exchange.getResponseBody();
+            try {
+                for (int i = 0; i < hopBodyBytes; i++) {
+                    out.write('A');
+                    out.flush();
+                    Thread.sleep(dripInterval.toMillis());
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (IOException e) {
+                // Expected: wrapper aborted mid-drain and reset the connection.
+            } finally {
+                try {
+                    out.close();
+                } catch (IOException ignored) {
+                    // Connection already gone.
+                }
+            }
+        });
+
+        SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
+            LoopbackPermittingBlocklist.create(),
+            Duration.ofSeconds(2),
+            // Long request-timeout so the abort cannot be the request-level
+            // timeout instead of the shared body-read deadline.
+            Duration.ofSeconds(30),
+            readTimeout,
+            bodyReadDeadline,
+            10L * 1024 * 1024,
+            redirectCap);
+
+        long start = System.currentTimeMillis();
+        SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
+            () -> client.get(URI.create("http://127.0.0.1:" + port + "/chain")));
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertEquals(SsrfPolicyException.Reason.BODY_READ_DEADLINE_EXCEEDED, ex.reason(),
+            "the cumulative body-read across followed redirect hops must abort "
+            + "with ONE shared BODY_READ_DEADLINE_EXCEEDED; a per-hop deadline "
+            + "would let every hop drain fully and surface REDIRECT_CAP_EXCEEDED "
+            + "instead. got: " + ex.reason());
+        assertTrue(hits.get() >= 2,
+            "the call must traverse more than one redirect hop before the shared "
+            + "deadline fires — proving the budget spans hops rather than "
+            + "resetting per hop; hits=" + hits.get());
+        assertTrue(elapsed >= bodyReadDeadline.toMillis(),
+            "the shared deadline must not fire BEFORE one bodyReadDeadline of "
+            + "cumulative body-read; elapsed=" + elapsed + "ms, bodyReadDeadline="
+            + bodyReadDeadline.toMillis() + "ms");
+        assertTrue(elapsed < (long) (redirectCap + 1) * bodyReadDeadline.toMillis(),
+            "the call must abort at ONE shared deadline, NOT after "
+            + "(redirectCap + 1) x bodyReadDeadline of per-hop budgets; elapsed="
+            + elapsed + "ms, (redirectCap+1)xdeadline="
+            + ((redirectCap + 1) * bodyReadDeadline.toMillis()) + "ms");
+    }
+
+    // -----------------------------------------------------------------
     // M1-026 canonical-host pinning (Finding 2: INFO-LEAK / medium).
     // M1-025's pin map was keyed by raw URI.getHost(); the JDK's
     // HttpClient.send may pass a normalized form (case-fold,
@@ -1034,8 +1131,11 @@ class SsrfGuardedHttpClientTest {
         // readTimeout (5s) and deadline (2min) mean the in-memory fast reads
         // never trip the time watchdog — only the size cap aborts the drain.
         SsrfGuardedHttpClient client = testModeClient();
+        // M1-470: discardBounded now takes the call-wide bodyReadStartNanos
+        // get() captures before the redirect loop; a direct unit call supplies
+        // "now" to reproduce the prior at-drain-entry budget origin.
         SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
-            () -> client.discardBounded(oversizedBody));
+            () -> client.discardBounded(oversizedBody, System.nanoTime()));
         assertEquals(SsrfPolicyException.Reason.BODY_CAP_EXCEEDED, ex.reason(),
             "an over-cap redirect-body drain must abort with BODY_CAP_EXCEEDED, "
             + "matching the terminal readBounded path");
@@ -1082,8 +1182,10 @@ class SsrfGuardedHttpClientTest {
             }
         };
 
+        // M1-470: supply "now" as the call-wide bodyReadStartNanos for this
+        // direct unit call (get() captures it before the redirect loop).
         SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
-            () -> client.discardBounded(stallingBody));
+            () -> client.discardBounded(stallingBody, System.nanoTime()));
         assertTrue(
             ex.reason() == SsrfPolicyException.Reason.BODY_READ_TIMEOUT
                 || ex.reason() == SsrfPolicyException.Reason.BODY_READ_DEADLINE_EXCEEDED,

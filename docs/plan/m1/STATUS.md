@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 499 |
+| done | 500 |
 | deferred | 6 |
 | **total** | **508** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-470 — SSRF: share one body-read deadline across all redirect hops of a get() (complexity: low, risk: medium)
 - M1-471 — Move two audit-missed now() sites onto the Clock: PartitionCreator gates + probation-reply formatter (complexity: low, risk: low)
 - M1-472 — Deep-review low-severity cleanup sweep: /summary single-connection retrieval + messaging redaction dedup (complexity: low, risk: medium)
 
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-470 | SSRF: share one body-read deadline across all redirect hops of a get() | 2026-06-27 | round 1 APPROVE |
 | M1-469 | Fix verified guide-audit inaccuracies in 3 role guides | 2026-06-27 | round 1 APPROVE |
 | M1-468 | Document last-admin protection blind spot for unreachable admins | 2026-06-27 | round 1 APPROVE |
 | M1-467 | Fix bootstrap-admin property key: wizard/docs vs runtime | 2026-06-27 | round 1 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-463 | setup.sh --reset: also tear down the llamacpp-embeddings service (its own compose profile is untouched by the current --profile prod/ollama/llamacpp down, leaving the container holding infochat_default open) | 2026-06-26 | round 1 APPROVE |
 | M1-462 | Deep-review low-severity cleanup sweep: dead scanWindow(), brittle quarantine error mapping, Reddit bare permalink, two SSRF doc/dedup nits | 2026-06-26 | round 2 APPROVE |
 | M1-461 | Close the audit details_json fail-closed guard's gaps: NUL escape and balanced-but-invalid JSON that ?::jsonb rejects | 2026-06-26 | round 1 APPROVE |
-| M1-460 | Move LlmRateCap's per-user rate-limit window onto the injected Clock (audit-missed §9 site) | 2026-06-26 | round 1 APPROVE |
 
 ---
 
@@ -670,7 +669,7 @@ M1-466 (done)
 M1-467 (done)
 M1-468 (done)
 M1-469 (done)
-M1-470 (pending) ← runnable
+M1-470 (done)
 M1-471 (pending) ← runnable
 M1-472 (pending) ← runnable
 ```

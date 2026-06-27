@@ -1,9 +1,14 @@
 ---
 id: M1-470
 title: "SSRF: share one body-read deadline across all redirect hops of a get()"
-status: pending
+status: done
 created: 2026-06-27
 last_updated: 2026-06-27
+clarity_check:
+  date: 2026-06-27
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 2
 files_scope:
@@ -56,12 +61,40 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-27
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 149
+      removed: 18
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-06-27
+    verdict: CLEAN
+    base: working tree fork-point (merge-base main HEAD)
+    head: working tree (m1/M1-470 branch, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-470-2026-06-27.md
+    out_of_model_count: 1
+    note: |
+      CLEAN — diff strengthens the body-read-deadline cap (one shared
+      bodyReadDeadline across all redirect hops). No threat-model commitment
+      weakened. One out-of-model item: a multi-redirect call's whole
+      wall-clock is still ~redirectCap x requestTimeout + one
+      bodyReadDeadline (per-hop header phases use the separate requestTimeout)
+      — a pre-existing design property unchanged by this diff, not a gap it
+      introduces. No remediation ticket warranted; a single aggregate
+      whole-call wall-clock cap would be a spec-amendment decision.
 ---
 
 # M1-470: SSRF — share one body-read deadline across all redirect hops of a get()
