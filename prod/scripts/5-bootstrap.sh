@@ -2,9 +2,10 @@
 # prod/scripts/5-bootstrap.sh — wizard step 5: seed the runtime bootstrap-sources
 # and bootstrap-assets files from the committed templates (§7.7.2 step 5).
 #
-# Copies prod/config/bootstrap-sources.json into the runtime dir only when no
-# runtime sources file exists yet — a resumed run never clobbers an operator's
-# edited sources file (§7.7.2 idempotency). Asset commands ship ENABLED by
+# Seeds bootstrap-sources.json into the runtime dir: on plain Enter from the
+# bundled prod/config/ template (never clobbering an existing runtime file — a
+# resumed run preserves operator edits, §7.7.2 idempotency), or from an operator-
+# supplied custom path when one is given. Asset commands ship ENABLED by
 # default (§7.6.2): on plain Enter the bundled zcash+monero
 # prod/config/bootstrap-assets.json is copied into the runtime dir (self-heal,
 # never clobbering an existing one). The operator may instead supply a custom
@@ -36,11 +37,11 @@ ASSETS_BASENAME="bootstrap-assets.json"
 
 usage() {
   echo "Usage: 5-bootstrap.sh [--defaults] [-h|--help]"
-  echo "  Copy the committed bootstrap-sources.json template into the runtime dir"
-  echo "  if none is present (never overwriting an existing one), then enable"
-  echo "  asset commands: wire infochat.bootstrap.assets-file to the bundled"
+  echo "  Seed the runtime bootstrap-sources.json — from the committed template"
+  echo "  (default) or an operator-supplied custom path — then enable asset"
+  echo "  commands: wire infochat.bootstrap.assets-file to the bundled"
   echo "  zcash+monero defaults, a custom path, or disable them."
-  echo "  --defaults  wire the bundled asset defaults non-interactively."
+  echo "  --defaults  use the bundled source + asset defaults non-interactively."
 }
 
 defaults=0
@@ -89,9 +90,28 @@ if [[ -e "$CONFIG_FILE" && ! -w "$CONFIG_FILE" ]]; then
   exit 1
 fi
 
-# Never clobber an existing runtime sources file — a resumed run preserves any
-# operator edits (§7.7.2 "No generated [value] is overwritten").
-if [[ -f "$SOURCES_RUNTIME" ]]; then
+# Sources are seeded from the bundled template by default; the operator may point
+# at their own bootstrap-sources.json instead — the wizard offers the choice
+# rather than silently defaulting. Plain Enter keeps the bundled default (or
+# preserves an operator-edited runtime file from a prior run, §7.7.2 idempotency);
+# a path copies that file into the runtime location the container mounts, winning
+# over any prior runtime file because it is an explicit operator instruction.
+# Sources cannot be disabled — a deployment always needs a seed source list.
+custom_sources_path=""
+if [[ "$defaults" -eq 0 ]]; then
+  read -rp "Path to a custom bootstrap-sources.json (blank = bundled default): " custom_sources_path
+fi
+if [[ -n "$custom_sources_path" ]]; then
+  # Fail now on an unreadable path rather than letting the Collector fail-fast at
+  # first boot. Overwrite the runtime copy so the single mounted path carries the
+  # operator's content (mirrors the custom-assets path below).
+  if [[ ! -r "$custom_sources_path" ]]; then
+    echo "FAIL: custom bootstrap-sources.json not readable: $custom_sources_path" >&2
+    exit 1
+  fi
+  echo "+ cp $custom_sources_path $SOURCES_RUNTIME"
+  cp "$custom_sources_path" "$SOURCES_RUNTIME"
+elif [[ -f "$SOURCES_RUNTIME" ]]; then
   echo "skip bootstrap-sources.json (already present in runtime dir)"
 else
   echo "+ cp $SOURCES_TEMPLATE $SOURCES_RUNTIME"

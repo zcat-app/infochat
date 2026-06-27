@@ -35,7 +35,7 @@ STEPS=(
 )
 
 usage() {
-  echo "Usage: setup.sh [--defaults] [--reset [--hard]] [-h|--help]"
+  echo "Usage: setup.sh [--defaults] [--reset [--hard] [--wipe-models]] [-h|--help]"
   echo
   echo "First-run setup wizard. Runs each step in order, resuming from the first"
   echo "incomplete step on re-run (state recorded in $STATE_FILE)."
@@ -54,8 +54,10 @@ usage() {
   echo "              non-interactively."
   echo "  --hard      Only with --reset: ALSO drop the database volume (deletes"
   echo "              the database). Without it, your data is kept. Downloaded LLM"
-  echo "              model caches are ALWAYS kept (never re-downloaded by a reset);"
-  echo "              remove them by hand if you truly need to."
+  echo "              model caches are kept unless --wipe-models is also given."
+  echo "  --wipe-models  Only with --reset: ALSO drop the LLM model-cache volumes"
+  echo "              (llama.cpp GGUFs + ollama blobs). Frees disk but forces a"
+  echo "              multi-GB re-download on the next setup. Independent of --hard."
   echo "  -h, --help  Show this help and exit."
 }
 
@@ -132,6 +134,7 @@ print_handoff() {
 # volume prompt on every run regardless of state).
 do_reset() {
   local hard="${1:-}"
+  local wipe_models="${2:-}"
   # Feed secrets to compose via its own dotenv parser (--env-file), never a shell
   # `source` of secrets.env: operator-pasted values (SimpleX queue addresses with
   # '#' / '&', API keys) would otherwise truncate at '#' or execute as shell
@@ -173,6 +176,20 @@ do_reset() {
   if [[ "$hard" == "hard" ]] && docker volume inspect "$pgdata_volume" >/dev/null 2>&1; then
     has_pgdata=1
   fi
+  # --wipe-models drops the LLM model-cache volumes too — opt-in and independent of
+  # --hard because re-downloading multi-GB GGUFs / ollama blobs is expensive, so it
+  # must never ride along with a data-only reset. The llama.cpp server + embeddings
+  # services share infochat-llamacpp-models (pinned name, docker-compose.yml volumes:
+  # — no project prefix); the ollama backend uses the unpinned, project-namespaced
+  # <project>_infochat-ollama. Only volumes that exist are removed (probe per name),
+  # so the reset stays silent when there is nothing to wipe.
+  local model_volumes=()
+  if [[ "$wipe_models" == "wipe" ]]; then
+    local v
+    for v in "infochat-llamacpp-models" "${COMPOSE_PROJECT_NAME:-$(basename "$REPO_ROOT")}_infochat-ollama"; do
+      docker volume inspect "$v" >/dev/null 2>&1 && model_volumes+=("$v")
+    done
+  fi
 
   if [[ "$has_runtime" -eq 1 ]]; then
     echo "+ docker compose -f $COMPOSE_FILE ${profiles[*]} down"
@@ -184,6 +201,12 @@ do_reset() {
     echo "+ docker volume rm $pgdata_volume"
     docker volume rm "$pgdata_volume" >/dev/null
   fi
+  # Remove model caches after `down` has detached the llama.cpp / ollama containers.
+  local model_volume
+  for model_volume in "${model_volumes[@]}"; do
+    echo "+ docker volume rm $model_volume"
+    docker volume rm "$model_volume" >/dev/null
+  done
 
   # Clear resume state so the wizard below runs from the first step; silent when
   # there is nothing to clear.
@@ -196,11 +219,13 @@ do_reset() {
 defaults=0
 reset=0
 hard=0
+wipe_models=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
     --reset) reset=1 ;;
     --hard) hard=1 ;;
+    --wipe-models) wipe_models=1 ;;
     --defaults) defaults=1 ;;
     *) usage >&2; exit 2 ;;
   esac
@@ -213,6 +238,12 @@ if [[ "$hard" -eq 1 && "$reset" -eq 0 ]]; then
   echo "--hard is only valid together with --reset (it wipes data volumes during a reset)." >&2
   exit 2
 fi
+# --wipe-models is likewise a reset modifier: alone it would mean wiping model
+# caches outside any teardown, which the reset-only invariant forbids.
+if [[ "$wipe_models" -eq 1 && "$reset" -eq 0 ]]; then
+  echo "--wipe-models is only valid together with --reset (it wipes model caches during a reset)." >&2
+  exit 2
+fi
 
 umask 077
 mkdir -p "$RUNTIME_DIR"
@@ -220,7 +251,11 @@ mkdir -p "$RUNTIME_DIR"
 # A reset cleans up any existing deployment first, then falls through into the
 # wizard below (M1-464) — so `--reset` is one command that tears down and sets up.
 if [[ "$reset" -eq 1 ]]; then
-  if [[ "$hard" -eq 1 ]]; then do_reset hard; else do_reset; fi
+  hard_arg=""
+  wipe_arg=""
+  [[ "$hard" -eq 1 ]] && hard_arg="hard"
+  [[ "$wipe_models" -eq 1 ]] && wipe_arg="wipe"
+  do_reset "$hard_arg" "$wipe_arg"
 fi
 
 print_menu
