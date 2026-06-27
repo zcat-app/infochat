@@ -285,6 +285,18 @@ summary, you're done.
   Run `restart` after you edit a setting in `prod/runtime/application.properties`
   or one of the bootstrap files — a config change is only picked up when the
   container restarts, so editing the file alone does nothing until you do.
+- **To upgrade the bot to the latest code**, run:
+
+  ```bash
+  ./prod/scripts/upgrade.sh          # backup, pull main, rebuild, restart
+  ./prod/scripts/upgrade.sh -y       # same, unattended (no confirmations)
+  ```
+
+  It backs up first, pulls the latest `main`, rebuilds the two app images, and
+  restarts the bot — all your data and settings (database, LLM config, secrets,
+  messaging identities) are preserved. On a build or health failure it rolls the
+  code back automatically. Only run it on a deployment you have already set up.
+  Full procedure: `docs/design/07-deployment.md` §7.11.
 - **To tear everything down and set up again from scratch**, run:
 
   ```bash
@@ -520,6 +532,10 @@ The post-setup **helper** scripts are documented in the main sections above:
   [Switching your AI backend later](#switching-your-ai-backend-later)).
 - `prod/scripts/backup.sh [BACKUP_DIR]` — back up the database and the bot's
   messaging-identity directories (see [Back up your data](#back-up-your-data)).
+- `prod/scripts/upgrade.sh [-y]` — upgrade to the latest `main`: backup, pull,
+  rebuild the app images, restart Collector then Provider, all data and config
+  preserved (see [After setup](#after-setup) and `docs/design/07-deployment.md`
+  §7.11).
 
 ### What gets written where
 

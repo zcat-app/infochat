@@ -903,17 +903,72 @@ The artifact names are exactly what the retention `find` patterns above match.
 
 ## 7.11 Upgrade procedure
 
-1. Place new jars in `/opt/infochat/releases/<new-version>/`.
-2. Diff `application.properties` against the new template; merge any new keys.
-3. Stop Provider (`systemctl stop infochat-provider`). The Provider's advisory lock (§7.8.5) is released as the process exits.
-4. Stop Collector. The Collector's advisory lock is released as the process exits.
-5. Update the `current` symlink to the new version.
-6. Start Collector. Flyway runs migrations. Watch for ERROR.
-7. Start Provider.
-8. Smoke check: `/help`, `/summary -w 1h`, `/status` (admin).
-9. Roll back: revert symlink, restart. Schema migrations are forward-compatible — rollback within one minor version is supported by reverse migrations shipped alongside forward ones; cross-major rollbacks require restoring from backup.
+The shipped deployment is the containerized `docker compose --profile prod`
+stack (§7.4, §7.7.2): the two app services **build their source into the image**,
+while Postgres and the LLM backends are pulled `image:`s. So upgrading the app is
+"pull the new source, rebuild the two app images, restart" — there is no jar to
+place and no `current` symlink. `prod/scripts/upgrade.sh` wraps the whole flow;
+the steps below are what it does (and the manual equivalent).
 
-A misconfigured rolling upgrade that brings up the new Provider before the old one releases the advisory lock is rejected at step 7 with the fatal-conflict log message from §7.8.5; this is by design.
+**What is preserved across an upgrade.** Everything that holds state lives
+outside the rebuild path and is never touched:
+
+- the database (the `infochat-pgdata` named volume),
+- the LLM model caches (`infochat-ollama` / `infochat-llamacpp-models`),
+- config, secrets, bootstrap files, and the SimpleX/Signal identities (the
+  `prod/runtime/` bind-mounts — and `prod/runtime/` is gitignored, so `git pull`
+  cannot clobber operator config).
+
+The upgrade never runs `down` and never passes `-v`; it is `build` (old
+containers keep serving) then `up -d` (compose recreates only the two app
+services whose image changed). Downtime is the recreate, not the multi-minute
+build.
+
+**Precondition.** Upgrade applies only to a deployment that has already been
+through `prod/setup.sh`. `prod/scripts/upgrade.sh` aborts up front if
+`prod/runtime/secrets.env` is absent and tells the operator to run setup first.
+
+Procedure (`prod/scripts/upgrade.sh`; `-y` runs it unattended, otherwise it
+confirms before each irreversible gate):
+
+1. **Preflight.** Abort if the deployment is not configured (no `secrets.env`),
+   if tracked files have uncommitted changes (a `git pull --ff-only` would
+   refuse), or if docker / the compose file are missing.
+2. **Backup first** via `prod/scripts/backup.sh` — the DB dump is the real
+   rollback path for a schema change (migrations are forward-only, see step 7).
+3. **Record** the current commit for code-rollback, then
+   `git fetch origin && git pull --ff-only origin main`.
+4. **Show what config changed this release** (informational; never edits the
+   runtime file). Config is two-layer (§7.6.2): the baked module defaults carry
+   every key with a working default, and the mounted `prod/runtime/` file
+   overrides a subset — so a *new* key ships with its default and needs no merge.
+   The real risk is a key the operator overrides that a release *renamed or
+   removed*, whose override then silently stops taking effect. The script
+   surfaces this with `git diff <pre>..<post>` over the baked
+   `src/main/resources/application.properties` files and lists the operator's
+   own override keys to reconcile. (There is no `prod/config/application.properties`
+   template — `application.properties` is image-baked, not a `prod/config/`
+   file like the bootstrap JSONs.)
+5. **Rebuild** the two app images
+   (`docker compose --profile prod build infochat-collector infochat-provider`)
+   while the old containers keep serving. A compile failure here stops before
+   anything is recreated, so the running bot is unaffected.
+6. **Restart in §Topology order**: `up -d --wait` the Collector (it runs Flyway
+   under the §7.8.5 advisory lock) so its healthcheck must pass before the
+   Provider starts against the migrated schema, then `up -d` the Provider.
+7. **Health gate**: confirm both app containers report healthy
+   (`docker compose ps`). On a build failure (step 5) or a failed health gate,
+   the script **auto-rolls back the code** — `git checkout` the recorded
+   pre-upgrade commit, rebuild, restart — and exits non-zero. Schema rollback is
+   **not** automated: Flyway migrates forward only, so if a migration already
+   applied, restore the database from the step-2 backup (see §7.10 restore).
+8. **Smoke check**: `/help`, `/summary -w 1h`, `/status` (admin).
+
+A misconfigured rolling upgrade that brings up the new Provider before the old
+one releases the advisory lock is rejected with the fatal-conflict log message
+from §7.8.5; this is by design. Within a single-host compose deployment the
+`up -d` recreate is stop-then-start of one service at a time, so the old
+Collector releases the lock (process exit) before the new one acquires it.
 
 ---
 
