@@ -109,7 +109,7 @@ Within a class, codes are not reused. Allocation is append-only — once shipped
 | `E4001` | DB connection acquisition timeout |
 | `E4002` | Flyway migration failed |
 | `E4003` | Adapter WS disconnect (transient) |
-| `E4004` | SimpleX adapter: session token revoked or repeatedly rejected → terminal `AUTH_FAILED`. Recovery: rotate `SIMPLEX_SESSION_TOKEN`, restart Provider — see [06-messaging.md §6.4.6](06-messaging.md) and [07-deployment.md](07-deployment.md) §7.14 "Rotate a SimpleX session token". |
+| `E4004` | Withdrawn. SimpleX is unauthenticated loopback IPC (no session/cookie/token), so there is no auth-failure mode; code retained, not reused. |
 | `E4005` | LISTEN/NOTIFY channel dropped — reconciler runs on next startup |
 | `E4006` | Outbound queue overflow — newest message dropped |
 | `E4007` | Inbound dispatch queue overflow — newest message dropped (silent: drop counter + WARN, no reply) — see [06-messaging.md §6.3.7](06-messaging.md) |
@@ -137,7 +137,6 @@ A common task: "I see error code `Eabcd` in a log — where is it documented?"
 
 A handful of E4xxx codes have a more specific anchor than the generic §7.14 runbook entry:
 
-- `E4004` (SimpleX `AUTH_FAILED`) → [06-messaging.md §6.4.6](06-messaging.md) for the auth-failure state machine + [07-deployment.md](07-deployment.md) §7.14 "Rotate a SimpleX session token" for the operator runbook.
 - `E4011` (`bootstrap-assets.json` missing or malformed) → [07-deployment.md §7.6.2](07-deployment.md) for the path-unset / path-set+absent / path-set+malformed file-state semantics.
 - `E4012` (Signal `AUTH_FAILED`) → [06-messaging.md](06-messaging.md) §6.5 for the Signal adapter's auth-failure terminal state + [07-deployment.md](07-deployment.md) §7.14 "Re-register `signal-cli`" for the operator runbook.
 
