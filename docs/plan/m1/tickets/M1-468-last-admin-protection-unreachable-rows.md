@@ -1,7 +1,7 @@
 ---
 id: M1-468
 title: Document last-admin protection blind spot for unreachable admins
-status: pending
+status: done
 created: 2026-06-27
 last_updated: 2026-06-27
 blocked_by: []
@@ -52,12 +52,47 @@ spec_refs:
 decision_refs:
   - D9
   - D10
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-27
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 47
+      removed: 8
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-27
+    verdict: CLEAN
+    base: 02be0840d54d2fe8786e7e5d84125718565cf5d1
+    head: working-tree (pre-commit, in-progress audit)
+    verdict_file: docs/plan/m1/redteam/M1-468-2026-06-27.md
+    out_of_model_count: 1
+    note: |
+      Doc-only ticket audited pre-commit. No promise-vs-delivery gap; the diff
+      adds spec text + operator runbook only, weakens no enforced defense. One
+      out-of-model item: the phantom/unreachable-admin lockout this ticket
+      documents — confirmed outside the threat model (trusted operator-set
+      config + trusted-insider abuse), correctly deferred behind a spec
+      amendment. No remediation or follow-up ticket required.
+clarity_check:
+  date: 2026-06-27
+  verdict: WARN
+  warnings:
+    - >-
+      Acceptance item 2 "§7.14 / the recovery table" is ambiguous between
+      §7.14 (Operator runbook prose) and §7.15 (Disaster scenarios table);
+      implementer should address both locations.
+  blockers: []
 ---
 
 # M1-468: Document the last-admin protection blind spot for unreachable admins

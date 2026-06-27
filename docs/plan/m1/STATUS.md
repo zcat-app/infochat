@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 497 |
+| done | 498 |
 | deferred | 6 |
 | **total** | **504** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-468 — Document last-admin protection blind spot for unreachable admins (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-468 | Document last-admin protection blind spot for unreachable admins | 2026-06-27 | round 1 APPROVE |
 | M1-467 | Fix bootstrap-admin property key: wizard/docs vs runtime | 2026-06-27 | round 1 APPROVE |
 | M1-466 | Per-host outbound pacing in FetchScheduler | 2026-06-27 | round 1 APPROVE |
 | M1-465 | Canonicalize bootstrap admin contact id from full link | 2026-06-27 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-461 | Close the audit details_json fail-closed guard's gaps: NUL escape and balanced-but-invalid JSON that ?::jsonb rejects | 2026-06-26 | round 1 APPROVE |
 | M1-460 | Move LlmRateCap's per-user rate-limit window onto the injected Clock (audit-missed §9 site) | 2026-06-26 | round 1 APPROVE |
 | M1-459 | Note the confirm prompt for /clear and /unfollow-tag --all in USER_GUIDE | 2026-06-26 | round 1 APPROVE |
-| M1-458 | Confirm-gate /quarantine reject on the forensic (BENIGN_CLOSED) path | 2026-06-26 | round 1 APPROVE |
 
 ---
 
@@ -666,5 +666,5 @@ M1-464 (done)
 M1-465 (done)
 M1-466 (done)
 M1-467 (done)
-M1-468 (pending) ← runnable
+M1-468 (done)
 ```

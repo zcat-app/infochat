@@ -361,6 +361,29 @@ Invariants (also enforced in `schema.md`):
   protection** — a group can exist with zero admins (a banned or
   demoted group admin is not auto-replaced; the next bot-admin
   `/promote` or first-mention path refills the slot).
+  - **Blind spot: the count is flag-based, not reachability-based.**
+    The COUNT above counts `is_admin = true AND is_banned = false`
+    rows only; it has **no reachability dimension** — it does not
+    verify that an admin's `contact_id` ever byte-matches what its
+    adapter reports for inbound messages. A bootstrap-seeded admin
+    whose `contact_id` never matches inbound — a **phantom admin**,
+    e.g. from a mistyped bare contact id — therefore counts as a live
+    admin even though no message can ever be attributed to it.
+    Consequence: with a phantom admin plus a reachable co-admin, the
+    co-admin can `/revoke-admin` (or ban) the reachable admin(s) down
+    to only the phantom; the trigger sees `count >= 1`, allows it, and
+    leaves the deployment **locked out of admin while the invariant
+    believes one admin remains**. This is an
+    **operator-misconfiguration risk, not an adversary-reachable
+    path** — the seeded contact id is trusted operator config
+    (§Trust boundaries), never attacker-controlled, and a co-admin
+    abusing it is already a trusted bot admin. Operator detection and
+    recovery steps live in the deployment runbook
+    (`docs/design/07-deployment.md` §7.14/§7.15). A
+    reachability-aware "confirmed admin" count that would close the
+    gap is a future hardening: it needs a schema column, an intake
+    write, and a change to this security invariant's trigger, so it is
+    deferred behind a spec amendment rather than bolted on here.
 - **One group admin per group at any time.** Enforced by partial unique
   index. The auto-promote path applies whenever the group has **zero**
   `is_group_admin` rows — covering both newly-approved groups and
