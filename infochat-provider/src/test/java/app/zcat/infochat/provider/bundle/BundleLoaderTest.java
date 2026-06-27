@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
+import java.util.TreeSet;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -102,6 +103,44 @@ class BundleLoaderTest {
                         "bundle key present but empty in " + lang + ".properties: " + key
                                 + " — bundle-completeness CI check requires a non-empty value");
             }
+        }
+    }
+
+    @Test
+    void everyShippedBundleHasExactlyEnKeysetMinusTheEnOnlyProbe() throws Exception {
+        // D43 en-keyset parity (M1-475). The constant-driven check above only
+        // sees BundleKeys constants, but a bundle key need not be a constant:
+        // error.quarantine.rate_limit (a local string in QuarantineCommandHandler)
+        // and error.add_source.userinfo_rejected (a raw Failure literal) reach
+        // BundleLoader without one and are therefore invisible to that iteration.
+        // en's OWN keyset is the de-facto registry of every shipped key — a grep
+        // confirmed no bundle key is constructed dynamically (every lookup is a
+        // static literal), so en's keyset is a provably complete enumeration and
+        // set-equality against it is an airtight, bilateral gate: a key shipped in
+        // en but absent from another bundle fails, AND an orphan key present in a
+        // non-en bundle but absent from en fails. This is ADDITIVE to the
+        // constant-completeness check, which catches the converse (a BundleKeys
+        // constant missing from en, the D43 startup-error case the parity check
+        // cannot see). FALLBACK_PROBE_KEY is the single deliberate en-only key
+        // (it exercises the 2-arg en-fallback path) and is the only exclusion;
+        // removing it from every bundle's set keeps the en-vs-en comparison
+        // trivially consistent.
+        Set<String> expected = new TreeSet<>(loadOwnKeys("en").stringPropertyNames());
+        expected.remove(FALLBACK_PROBE_KEY);
+
+        Set<String> supported = bundleLoader.supportedLanguages();
+        assertFalse(supported.isEmpty(),
+                "BundleLoader.supportedLanguages() must be non-empty; the parity "
+                        + "check would silently pass against an empty language set");
+
+        for (String lang : supported) {
+            Set<String> ownKeys = new TreeSet<>(loadOwnKeys(lang).stringPropertyNames());
+            ownKeys.remove(FALLBACK_PROBE_KEY);
+            assertEquals(expected, ownKeys,
+                    lang + ".properties own keyset must equal en's own keyset minus the "
+                            + "deliberate en-only " + FALLBACK_PROBE_KEY + " — a key shipped in "
+                            + "en but missing here, or an orphan key here absent from en, both "
+                            + "fail D43's full-keyset completeness invariant");
         }
     }
 

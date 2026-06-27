@@ -1,9 +1,28 @@
 ---
 id: M1-475
 title: "Enforce D43 over non-constant bundle keys (en-keyset gate)"
-status: pending
+status: done
 created: 2026-06-27
 last_updated: 2026-06-27
+clarity_check:
+  date: 2026-06-27
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-06-27
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 54
+      removed: 10
 blocked_by: []
 files_budget: 3
 files_scope:
