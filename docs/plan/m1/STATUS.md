@@ -47,7 +47,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-499 — Test fixture duplication → testsupport, plus a leaked registration teardown (complexity: low, risk: low)
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-501 — Stage-1-flagged posts can permanently evade Stage 2 after a crash (complexity: medium, risk: medium)
-- M1-505 — SimpleX inbound DM identity (decimal contactId) never matches the configured admin (queue address) — admin unrecognized (complexity: high, risk: high)
+- M1-505 — SimpleX: map inbound admin DM to the configured admin address (complexity: medium, risk: high)
 
 ---
 
