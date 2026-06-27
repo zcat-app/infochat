@@ -887,12 +887,17 @@ The recommended entry point is `prod/scripts/backup.sh` (§7.7.1) so the operato
 ```
 # Run by absolute path — backup.sh locates docker-compose.yml and
 # prod/runtime/secrets.env relative to its own location, so cwd does not matter.
+# With no argument it writes into its default dir, prod/runtime/backups (here
+# /srv/infochat/prod/runtime/backups); the retention find lines below prune that
+# same dir. Pass an explicit dir (or set $INFOCHAT_BACKUP_DIR) to write off-host
+# — recommended for real disaster recovery, since the default sits on the same
+# disk as the data it backs up.
 0 3 * * * /srv/infochat/prod/scripts/backup.sh
-0 4 * * * find /backups -name 'infochat-*.pgc' -mtime +14 -delete
-0 4 * * * find /backups -name 'adapters-*.tgz' -mtime +14 -delete
+0 4 * * * find /srv/infochat/prod/runtime/backups -name 'infochat-*.pgc' -mtime +14 -delete
+0 4 * * * find /srv/infochat/prod/runtime/backups -name 'adapters-*.tgz' -mtime +14 -delete
 ```
 
-`prod/scripts/backup.sh` writes two date-stamped artifacts into the backup directory (default `/backups`; override with a positional argument or `$INFOCHAT_BACKUP_DIR`):
+`prod/scripts/backup.sh` writes two date-stamped artifacts into the backup directory (default `prod/runtime/backups` — gitignored and writable by the runtime user, so the no-arg invocation works with zero operator config; override with a positional argument or `$INFOCHAT_BACKUP_DIR`):
 
 - **`infochat-YYYYMMDD.pgc`** — `pg_dump -F c infochat` run *inside* the `postgres` compose service (`docker compose exec`), so it needs no host-side Postgres client and reads the `infochat` owner password from the container environment, never the host.
 - **`adapters-YYYYMMDD.tgz`** — a tar of every *configured* adapter identity data-dir (`INFOCHAT_SIMPLEX_DATA_DIR` / `INFOCHAT_SIGNAL_DATA_DIR`, read from `prod/runtime/secrets.env`), stored relative to `/` with modes preserved so the restore step above reconstructs each dir in place. An enabled adapter whose data-dir is missing fails the run loudly rather than producing an empty archive.
@@ -906,9 +911,14 @@ The artifact names are exactly what the retention `find` patterns above match.
 The shipped deployment is the containerized `docker compose --profile prod`
 stack (§7.4, §7.7.2): the two app services **build their source into the image**,
 while Postgres and the LLM backends are pulled `image:`s. So upgrading the app is
-"pull the new source, rebuild the two app images, restart" — there is no jar to
-place and no `current` symlink. `prod/scripts/upgrade.sh` wraps the whole flow;
-the steps below are what it does (and the manual equivalent).
+"rebuild the two app images from the current source and restart them" — there is
+no jar to place and no `current` symlink. The `git pull` that fetches new commits
+is **best-effort, not the trigger**: this deployment is operated by committing to
+the local checkout, so the checkout is routinely already at `origin/main` while
+the running images are stale — and a bare `prod/scripts/upgrade.sh` still rebuilds
+and redeploys those stale images with no operator-supplied env var and no git
+surgery. `prod/scripts/upgrade.sh` wraps the whole flow; the steps below are what
+it does (and the manual equivalent).
 
 **What is preserved across an upgrade.** Everything that holds state lives
 outside the rebuild path and is never touched:
@@ -937,7 +947,10 @@ confirms before each irreversible gate):
 2. **Backup first** via `prod/scripts/backup.sh` — the DB dump is the real
    rollback path for a schema change (migrations are forward-only, see step 7).
 3. **Record** the current commit for code-rollback, then
-   `git fetch origin && git pull --ff-only origin main`.
+   `git fetch origin && git pull --ff-only origin main`. The pull is best-effort:
+   it advances the checkout when it is behind `origin/main`, but a no-op pull
+   (the checkout is already current) does **not** end the run — whether to
+   rebuild/restart is decided in step 6, not by whether the pull moved `HEAD`.
 4. **Show what config changed this release** (informational; never edits the
    runtime file). Config is two-layer (§7.6.2): the baked module defaults carry
    every key with a working default, and the mounted `prod/runtime/` file
@@ -949,13 +962,21 @@ confirms before each irreversible gate):
    own override keys to reconcile. (There is no `prod/config/application.properties`
    template — `application.properties` is image-baked, not a `prod/config/`
    file like the bootstrap JSONs.)
-5. **Rebuild** the two app images
-   (`docker compose --profile prod build infochat-collector infochat-provider`)
-   while the old containers keep serving. A compile failure here stops before
-   anything is recreated, so the running bot is unaffected.
-6. **Restart in §Topology order**: `up -d --wait` the Collector (it runs Flyway
-   under the §7.8.5 advisory lock) so its healthcheck must pass before the
-   Provider starts against the migrated schema, then `up -d` the Provider.
+5. **Rebuild** the two app images from the current source
+   (`docker compose --profile prod build infochat-collector infochat-provider`),
+   always — a full cache-hit rebuild is cheap and yields the same image id — while
+   the old containers keep serving. The script first snapshots the image id each
+   app is currently running. A compile failure here stops before anything is
+   recreated, so the running bot is unaffected.
+6. **Restart in §Topology order, only when the image changed.** Per app, the
+   script compares the freshly-built image id against what that app was running:
+   a differing id (the source changed) **or** a stopped app (no running image)
+   counts as changed and triggers the restart; when both apps are already running
+   the freshly-built image it prints "nothing to restart" and exits without
+   recreating a container (a cache-hit rebuild then has zero downtime). On a
+   change it `up -d --wait` the Collector (it runs Flyway under the §7.8.5
+   advisory lock) so its healthcheck must pass before the Provider starts against
+   the migrated schema, then `up -d` the Provider.
 7. **Health gate**: confirm both app containers report healthy
    (`docker compose ps`). On a build failure (step 5) or a failed health gate,
    the script **auto-rolls back the code** — `git checkout` the recorded

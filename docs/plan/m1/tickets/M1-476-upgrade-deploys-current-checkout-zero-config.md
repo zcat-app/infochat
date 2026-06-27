@@ -1,7 +1,7 @@
 ---
 id: M1-476
 title: "upgrade.sh deploys the current checkout with zero operator config"
-status: pending
+status: done
 created: 2026-06-27
 last_updated: 2026-06-27
 blocked_by: []
@@ -105,12 +105,29 @@ spec_refs:
   - "docs/design/07-deployment.md §7.8.5"
   - "docs/spec/deployment.md §Topology"
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-27
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 121
+      removed: 30
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-27
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-476: upgrade.sh deploys the current checkout with zero operator config

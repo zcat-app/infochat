@@ -1,7 +1,19 @@
 #!/bin/bash
-# prod/scripts/upgrade.sh — move a CONFIGURED infochat deployment to the latest
-# origin/main: backup → pull → rebuild the two app images → restart Collector
-# then Provider — preserving ALL data and config.
+# prod/scripts/upgrade.sh — deploy a CONFIGURED infochat deployment to the
+# current checkout: backup → (best-effort) pull → rebuild the two app images
+# from the current source → restart Collector then Provider WHEN their image
+# changed — preserving ALL data and config.
+#
+# ZERO-CONFIG: a bare `upgrade.sh` (or `-y`) needs NO operator-supplied env var
+# and NO git checkout/reset. It rebuilds from whatever the checkout currently
+# holds and redeploys the two app images if they are stale relative to that
+# source. The `git pull` is best-effort — it ADVANCES the checkout when it is
+# behind origin/main, but it is NOT the gate for whether the upgrade does work.
+# This deployment is operated by committing to the local checkout, so the
+# checkout is routinely already at origin/main while the running images are
+# stale; the rebuild/restart decision is therefore a docker image-id comparison
+# (running container vs freshly-built image, Step 5), not "did the pull move
+# HEAD". (M1-476)
 #
 # This is the operator's upgrade verb, sitting beside apps.sh (lifecycle) and
 # backup.sh (backups). setup.sh is first-run/idempotent-resume; upgrade is a
@@ -121,6 +133,26 @@ wait_healthy() {
   return 1
 }
 
+# Image id the RUNNING container for $1 is currently using, with docker's
+# `sha256:` prefix stripped so it compares equal to `compose images -q` (which
+# omits the prefix). Empty when the service has no running container — which the
+# restart decision treats as "changed", so a stopped app gets (re)started rather
+# than left down. The container pins the image id it started with, so this stays
+# accurate to "what is serving" even after a rebuild repoints the :latest tag. (M1-476)
+running_image_id() {
+  local svc="$1" cid
+  cid="$(compose ps -q "$svc" 2>/dev/null || true)"
+  if [[ -z "$cid" ]]; then
+    return 0
+  fi
+  docker inspect -f '{{.Image}}' "$cid" 2>/dev/null | sed 's/^sha256://' || true
+}
+
+# Image id `compose build` produced/tagged for service $1 (already prefix-free).
+built_image_id() {
+  compose images -q "$1" 2>/dev/null || true
+}
+
 # Auto-rollback of CODE: check out the pre-upgrade commit (detached HEAD —
 # deliberately, to avoid the forbidden `git reset --hard`; the operator restores
 # the branch once the cause is fixed and re-runs upgrade), rebuild from it, and
@@ -185,7 +217,10 @@ main() {
 
   # ── Step 1: backup first (the real rollback path for a schema change) ──
   local backup_dir db_artifact
-  backup_dir="${INFOCHAT_BACKUP_DIR:-/backups}"
+  # Mirror the default backup.sh computes ("$RUNTIME_DIR/backups", gitignored and
+  # writable) so the rollback note below points at where backup.sh actually
+  # wrote. (M1-476)
+  backup_dir="${INFOCHAT_BACKUP_DIR:-$RUNTIME_DIR/backups}"
   # Reconstruct the DB artifact path backup.sh will write (same naming), so the
   # rollback note can point at it WITHOUT reading anything back from prod/runtime/.
   db_artifact="$backup_dir/infochat-$(date +%Y%m%d).pgc"
@@ -194,7 +229,11 @@ main() {
   fi
   "$BACKUP_SCRIPT" "$backup_dir"
 
-  # ── Step 2: pull latest main ──
+  # ── Step 2: pull latest main (best-effort; NOT the gate) ──
+  # The pull ADVANCES the checkout when it is behind origin/main, but a no-op
+  # pull does NOT end the run: whether to rebuild/restart is decided in Step 5 by
+  # comparing the running image to the freshly-built one, so a checkout that is
+  # already current still redeploys its (possibly stale) images. (M1-476)
   if ! confirm "git fetch + pull --ff-only origin main?"; then
     echo "aborted: pull declined — nothing changed." >&2; exit 1
   fi
@@ -203,10 +242,10 @@ main() {
   local new_sha
   new_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
   if [[ "$new_sha" == "$original_sha" ]]; then
-    echo "already up to date at ${original_sha} — nothing to upgrade."
-    exit 0
+    echo "checkout already at ${original_sha} (no new origin/main commits) — continuing; the rebuild below redeploys the current source if the running images are stale."
+  else
+    echo "pulled ${original_sha} -> ${new_sha}"
   fi
-  echo "pulled ${original_sha} -> ${new_sha}"
 
   # ── Step 3: show what config changed this release (informational; never edits) ──
   # Config is two-layer (§7.6.2): the baked module defaults (ordinal 250) carry
@@ -240,13 +279,35 @@ main() {
     echo "aborted: build declined. Code is pulled but not rebuilt; re-run upgrade.sh to continue." >&2
     exit 1
   fi
+  # Snapshot what each app is running BEFORE the rebuild, so Step 5 can tell a
+  # real image change (or a stopped app) from a no-op cache-hit rebuild.
+  local -a running_before=()
+  local svc
+  for svc in "${APP_SERVICES[@]}"; do
+    running_before+=("$(running_image_id "$svc")")
+  done
   if ! compose build "${APP_SERVICES[@]}"; then
     echo "FAIL: build failed at ${new_sha} — rolling back code." >&2
     rollback "$original_sha" "$db_artifact"
     exit 1
   fi
 
-  # ── Step 5: restart Collector then Provider onto the new image ──
+  # ── Step 5: restart Collector then Provider — only if the image changed ──
+  # A full cache-hit rebuild yields the SAME image id, so when every app is
+  # already running its freshly-built image, recreating containers would be pure
+  # churn (and needless downtime) — print and exit. A differing id (source
+  # changed) OR an empty running id (the app is stopped) counts as changed and
+  # triggers the ordered restart. (M1-476)
+  local changed=0 i
+  for i in "${!APP_SERVICES[@]}"; do
+    if [[ "${running_before[$i]}" != "$(built_image_id "${APP_SERVICES[$i]}")" ]]; then
+      changed=1
+    fi
+  done
+  if [[ "$changed" -eq 0 ]]; then
+    echo "no change — both apps are already running the freshly-built image at ${new_sha}; nothing to restart."
+    exit 0
+  fi
   if ! confirm "Restart the apps onto the new image (Collector, then Provider)?"; then
     echo "aborted: restart declined. New images are built but not deployed; re-run upgrade.sh or use apps.sh restart." >&2
     exit 1

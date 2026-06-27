@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 505 |
+| done | 506 |
 | deferred | 6 |
-| **total** | **511** |
+| **total** | **512** |
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-476 | upgrade.sh deploys the current checkout with zero operator config | 2026-06-27 | round 1 APPROVE |
 | M1-475 | Enforce D43 over non-constant bundle keys (en-keyset gate) | 2026-06-27 | round 1 APPROVE |
 | M1-474 | Enforce D43 bundle completeness: make BundleLoaderTest fail on a missing per-bundle key + backfill cs.properties | 2026-06-27 | round 1 APPROVE |
 | M1-473 | prod/scripts/upgrade.sh: git-pull main + rebuild app images + ordered restart, all config/data preserved | 2026-06-27 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-469 | Fix verified guide-audit inaccuracies in 3 role guides | 2026-06-27 | round 1 APPROVE |
 | M1-468 | Document last-admin protection blind spot for unreachable admins | 2026-06-27 | round 1 APPROVE |
 | M1-467 | Fix bootstrap-admin property key: wizard/docs vs runtime | 2026-06-27 | round 1 APPROVE |
-| M1-466 | Per-host outbound pacing in FetchScheduler | 2026-06-27 | round 1 APPROVE |
 
 ---
 
@@ -674,4 +674,5 @@ M1-472 (done)
 M1-473 (done)
 M1-474 (done)
 M1-475 (done)
+M1-476 (done)
 ```

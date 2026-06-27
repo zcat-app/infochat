@@ -33,7 +33,12 @@ REPO_ROOT="$(cd "$PROD_DIR/.." && pwd)"
 RUNTIME_DIR="${INFOCHAT_RUNTIME_DIR:-$PROD_DIR/runtime}"
 SECRETS_FILE="$RUNTIME_DIR/secrets.env"
 COMPOSE_FILE="$REPO_ROOT/docker-compose.yml"
-DEFAULT_BACKUP_DIR="/backups"
+# Default under prod/runtime/ (gitignored, owned by the runtime user) so the
+# no-arg invocation works with zero operator config — the `mkdir -p` below
+# creates it. The host-root `/backups` it replaced is not writable by the
+# runtime user, which broke upgrade.sh's backup-first step. A positional arg and
+# $INFOCHAT_BACKUP_DIR still win, in that order (see BACKUP_DIR below). (M1-476)
+DEFAULT_BACKUP_DIR="$RUNTIME_DIR/backups"
 
 usage() {
   echo "Usage: backup.sh [BACKUP_DIR] [-h|--help]"
