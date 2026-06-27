@@ -219,8 +219,10 @@ kind of identity assertion they are getting.
   cryptographic message-routing layer; the bot trusts it as the
   D10 anchor.
 - **Signal.** Trust level: **HIGH**. The contact id is the user's
-  registered phone number (E.164) or, where Signal supports it,
-  the username. The Signal protocol's Sealed Sender / sender
+  ACI (the UUID Signal binds to its identity keys, surfaced by
+  `signal-cli` as `mentionUuid`) — not the phone number (E.164) or
+  username, which are discovery identifiers only and may change
+  without changing the ACI. The Signal protocol's Sealed Sender / sender
   certificate provides cryptographic identity assertion at the
   message layer; display name is informational. The Signal
   identity assertion is the D10 anchor on Signal. **Cross-adapter
