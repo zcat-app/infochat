@@ -1,7 +1,7 @@
 ---
 id: M1-467
 title: "Fix bootstrap-admin property key: wizard/docs vs runtime"
-status: pending
+status: done
 created: 2026-06-27
 last_updated: 2026-06-27
 blocked_by: []
@@ -63,12 +63,41 @@ spec_refs:
 decision_refs:
   - D9
   - D46
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-27
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 22
+      removed: 20
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-27
+    verdict: CLEAN
+    base: 98f5ef9e49af2e1859bd912acc9d9fadef98eac8
+    head: m1/M1-467-bootstrap-admin-property-key-contract
+    verdict_file: docs/plan/m1/redteam/M1-467-2026-06-27.md
+    out_of_model_count: 0
+    note: |
+      In-progress audit between review APPROVE and commit. Doc/script/config-only
+      diff aligning the wizard + design to the shipped runtime bootstrap-admin key
+      (infochat.adapters.<name>.admin); no source security-surface code touched.
+      CLEAN, no findings.
+clarity_check:
+  date: 2026-06-27
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-467: Fix bootstrap-admin property key contract (wizard/docs vs runtime)

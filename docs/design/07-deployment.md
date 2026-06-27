@@ -196,7 +196,7 @@ infochat.adapters.simplex.data-dir=prod/runtime/simplex
 infochat.adapters.simplex.ws-port=5225
 # Optional bootstrap admin contact id for SimpleX. Per-adapter optional;
 # only the union across enabled adapters MUST be non-empty (§7.6.3).
-infochat.adapters.simplex.bootstrap-admin-contact-id=${INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID}
+infochat.adapters.simplex.admin=${INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID}
 # infochat.adapters.simplex.allow-low-trust=false   # default
 
 # Signal (signal-cli JSON-RPC subprocess — see 06-messaging.md §6.5.1). Keys
@@ -206,7 +206,7 @@ infochat.adapters.signal.binary=/usr/local/bin/signal-cli
 infochat.adapters.signal.data-dir=prod/runtime/signal-cli
 infochat.adapters.signal.account=+15551234567
 # infochat.adapters.signal.endpoint=127.0.0.1:7654  # default (loopback daemon)
-infochat.adapters.signal.bootstrap-admin-contact-id=${INFOCHAT_SIGNAL_ADMIN_CONTACT_ID}
+infochat.adapters.signal.admin=${INFOCHAT_SIGNAL_ADMIN_CONTACT_ID}
 # infochat.adapters.signal.allow-low-trust=false    # default
 
 # ── LLM (per-task; profile fills in defaults if not set) ───────────────
@@ -350,7 +350,7 @@ Notes:
 
 Per-adapter identity material (e.g., the `signal-cli` account directory and the SimpleX queue keypair file) lives **on disk** under `infochat.adapters.<name>.data-dir`, not in env vars; the operator owns its lifecycle (see [06-messaging.md §6.4.1, §6.5.4](06-messaging.md)). Each adapter validates its own identity material at adapter startup and refuses to start that adapter if the directory is missing or unreadable; per-adapter resilience ([06-messaging.md §6.7](06-messaging.md)) means one adapter's identity-store failure does not abort Provider.
 
-The Provider refuses to start if any required variable for the active configuration is missing. The error message names the missing variable. For the bootstrap-admin variables specifically: Provider counts the `bootstrap-admin-contact-id` properties across all enabled adapters; if the union is empty, startup fails with a fatal log message naming the constraint (last-admin protection only works if at least one admin row exists somewhere — [../spec/deployment.md](../spec/deployment.md) §Operator inputs).
+The Provider refuses to start if any required variable for the active configuration is missing. The error message names the missing variable. For the bootstrap-admin variables specifically: Provider counts the `infochat.adapters.<name>.admin` properties across all enabled adapters; if the union is empty, startup fails with a fatal log message naming the constraint (last-admin protection only works if at least one admin row exists somewhere — [../spec/deployment.md](../spec/deployment.md) §Operator inputs).
 
 ---
 
@@ -475,7 +475,7 @@ Loader behavior (Collector startup, when configured):
 
 ### 7.6.3 Bootstrap admin (per-adapter; optional per-adapter, union non-empty)
 
-Each enabled adapter has its **own** bootstrap admin contact id, configured via `infochat.adapters.<name>.bootstrap-admin-contact-id` (§7.4 example). The property is **optional per adapter** — an adapter without a configured bootstrap admin still serves users on that adapter, but mints no admin row of its own at startup. The deployment-wide constraint is that **the union of bootstrap admin contacts across all enabled adapters MUST be non-empty**; Provider refuses to start otherwise (last-admin protection only works if at least one admin row exists somewhere — [../spec/deployment.md](../spec/deployment.md) §Operator inputs item 2).
+Each enabled adapter has its **own** bootstrap admin contact id, configured via `infochat.adapters.<name>.admin` (§7.4 example). The property is **optional per adapter** — an adapter without a configured bootstrap admin still serves users on that adapter, but mints no admin row of its own at startup. The deployment-wide constraint is that **the union of bootstrap admin contacts across all enabled adapters MUST be non-empty**; Provider refuses to start otherwise (last-admin protection only works if at least one admin row exists somewhere — [../spec/deployment.md](../spec/deployment.md) §Operator inputs item 2).
 
 Each value is parseable only by its own adapter — SimpleX contact ids are not Signal ACIs, and vice versa — so each adapter validates its own value at startup and refuses to start that adapter (per-adapter resilience, [06-messaging.md §6.7](06-messaging.md)) on a format mismatch. Provider startup fails only if every adapter with a configured bootstrap admin fails its own validation **and** the union ends up empty.
 
@@ -669,7 +669,7 @@ The right-hand column maps each step to the operator inputs enumerated in [../sp
 | 3 | `3-postgres.sh` | `docker compose --profile prod up -d postgres`; the service-role password bootstrap runs from `docker/postgres-init.sh` (§7.7) on first container init. | 5 (DB creds) |
 | 4 | `4-llm.sh` | Branch on the choice. **Ollama:** start the ollama service and `ollama pull` the profile's chat / security / embedding models. **llama.cpp (D49):** fetch the chosen generative GGUF (curated checksum-pinned default or operator override), mint its filename into `secrets.env`, and start the `llamacpp` service (`LLAMA_ARG_MODEL`/`LLAMA_ARG_HOST`); then wire embeddings to the operator-chosen backend — a second `llamacpp-embeddings` instance (nomic GGUF, `--embeddings`) or the co-running Ollama nomic embedder — never the generative GGUF, dimension 768. **Remote:** collect base-URL + key only. Writes `infochat.llm.*` and `infochat.embeddings.*` (§7.4). | 6 (LLM config) |
 | 5 | `5-bootstrap.sh` | Seed the runtime `bootstrap-sources.json` — from the `prod/config/` template (plain Enter, never clobbering an existing runtime file) or from an operator-supplied custom path; enable asset commands by default — copy the bundled `bootstrap-assets.json` (zcash + monero) into the runtime dir and wire `infochat.bootstrap.assets-file`, unless the operator supplies a custom path or opts out (§7.6.2 — Wizard default). | 3 (sources), 4 (assets) |
-| 6 | `6-adapter.sh` | For each chosen adapter capture the `binary` path + `data-dir`, and collect that adapter's `bootstrap-admin-contact-id`. **SimpleX** additionally prompts for the bot **display name** (consumed by the step-7 provisioning below); **Signal** captures its `account` and stays interactive (phone+captcha out-of-band — §7.7 operator note, [06-messaging.md §6.5.1](06-messaging.md)). Enforces a non-empty admin union before proceeding (§7.6.3). Writes `infochat.adapters` and the per-adapter blocks (§7.4). | 2 (bootstrap admin), 7 (adapters) |
+| 6 | `6-adapter.sh` | For each chosen adapter capture the `binary` path + `data-dir`, and collect that adapter's `admin` contact id. **SimpleX** additionally prompts for the bot **display name** (consumed by the step-7 provisioning below); **Signal** captures its `account` and stays interactive (phone+captcha out-of-band — §7.7 operator note, [06-messaging.md §6.5.1](06-messaging.md)). Enforces a non-empty admin union before proceeding (§7.6.3). Writes `infochat.adapters` and the per-adapter blocks (§7.4). | 2 (bootstrap admin), 7 (adapters) |
 | 7 | `7-apps.sh` | Build both images, then — when `simplex` is enabled — provision the SimpleX bot identity via `6b-simplex-provision.sh` (below) before any app container serves traffic, then `docker compose --profile prod up -d` the Collector (which runs Flyway), wait until it is healthy, then the Provider — encoding the [../spec/deployment.md](../spec/deployment.md) §Topology startup ordering (only the Collector migrates in production). | — |
 | 8 | `8-verify.sh` | Poll `/q/health` on each app's **main loopback HTTP port** (collector 8080 / provider 8081; the §7.12.1 shipped-default shape, not a management interface), reached inside the container via `docker compose exec` — the same loopback bind the Collector's own compose healthcheck uses — until ready or timeout; print a green/red summary naming any unhealthy component. | — |
 
@@ -853,7 +853,7 @@ The same shape applies to messaging-adapter startup ([06-messaging.md §6.7](06-
 7. Place `bootstrap-sources.json` next to the jars. If asset commands are wanted, also place `bootstrap-assets.json` and set `infochat.bootstrap.assets-file` (§7.6.2 — file-state semantics).
 8. Set the per-adapter bootstrap admin contact ids (`INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID`, `INFOCHAT_SIGNAL_ADMIN_CONTACT_ID`). At least one MUST be set (the union-non-empty rule, §7.6.3).
 9. Start Collector via `scripts/run-collector.sh` (or directly with `./mvnw -pl infochat-collector quarkus:dev` in dev, or `systemctl start infochat-collector` in prod). It runs Flyway, loads bootstrap files, and idles until Provider starts. The Collector's `pg_advisory_lock` and heartbeat row are taken at this step (§7.8.5).
-10. Start Provider via `scripts/run-provider.sh` (or directly with `./mvnw -pl infochat-provider quarkus:dev` / `systemctl start infochat-provider`). It runs Flyway again (idempotent), takes its own advisory lock, and bootstraps the per-adapter admin rows from the configured `bootstrap-admin-contact-id` properties; then it attaches each enabled messaging adapter (per-adapter resilience — one failing adapter does not block the others).
+10. Start Provider via `scripts/run-provider.sh` (or directly with `./mvnw -pl infochat-provider quarkus:dev` / `systemctl start infochat-provider`). It runs Flyway again (idempotent), takes its own advisory lock, and bootstraps the per-adapter admin rows from the configured `infochat.adapters.<name>.admin` properties; then it attaches each enabled messaging adapter (per-adapter resilience — one failing adapter does not block the others).
 11. From any configured admin's chat client (on the adapter where they are admin), send `/help` to the bot. Verify response.
 12. Add a personal source: `/add-source --kind rss --identifier ... --tags ai`.
 13. Wait one fetch interval; run `/summary -w 1h`. If posts arrive, system is up.
@@ -1131,8 +1131,8 @@ See §7.8.5. Likely causes: a previous Provider crashed without releasing its ad
 | All adapters wedged | Bot appears offline. Fix at least one adapter; on reconnect, queued outbounds (if any, in-memory only — see §7.16) flush. No DB state loss. |
 | Profile mistake (a misset profile or overridden tuning value) | Stop services, correct `quarkus.profile` / the offending key, restart (§7.2.1). The embedding dimension is fixed at 768-d in v1, so a profile switch never changes it — there is no embedding migration to run. |
 | Compromised LLM API key | Rotate the env var. Restart Provider. Add an audit row noting rotation reason. |
-| Lost SimpleX bootstrap admin | Edit `application.properties` to point `infochat.adapters.simplex.bootstrap-admin-contact-id` at a different SimpleX contact. Restart Provider (bootstrap admin drift, §7.6.3). The new contact becomes admin; the old admin keeps `is_admin=true` until `/revoke-admin`. |
-| Lost Signal bootstrap admin | Same shape on the Signal adapter: rotate `infochat.adapters.signal.bootstrap-admin-contact-id`, restart, `/revoke-admin` the prior. |
+| Lost SimpleX bootstrap admin | Edit `application.properties` to point `infochat.adapters.simplex.admin` at a different SimpleX contact. Restart Provider (bootstrap admin drift, §7.6.3). The new contact becomes admin; the old admin keeps `is_admin=true` until `/revoke-admin`. |
+| Lost Signal bootstrap admin | Same shape on the Signal adapter: rotate `infochat.adapters.signal.admin`, restart, `/revoke-admin` the prior. |
 | Bot account compromised on one adapter | Per-adapter scope ([04-security.md §4.4](04-security.md)). Recover the relevant client (rotate the SimpleX bootstrap-admin contact / queue per §7.14; re-register Signal); rotate the bootstrap admin per the rows above; reissue invite links to known users. Source data and the other adapter are untouched. Cross-adapter elevation is impossible by design (`/grant-admin` and `/revoke-admin` are inbound-adapter-scoped). |
 | Both messaging clients lost simultaneously | Treat each adapter recovery independently; Provider stays down (zero adapters connected → readiness fails) until at least one is restored. Source data is untouched. |
 | Duplicate-instance brought up by a misconfigured deploy | The new instance is rejected by `pg_try_advisory_lock` (§7.8.5) and exits non-zero; the running instance is unaffected. Fix the deploy script. |
@@ -1161,7 +1161,7 @@ See §7.8.5. Likely causes: a previous Provider crashed without releasing its ad
 - JDK 25 installed; `/opt/infochat/jdk-25/bin/java -version` confirms `25.x` (D1).
 - `infochat.adapters` list set; for each enabled adapter:
   - `infochat.adapters.<name>.data-dir` exists, is owned by the `infochat` user, and contains valid bot identity material (out-of-band registration completed for SimpleX and/or Signal); `infochat.adapters.<name>.binary` points at the installed `simplex-chat` / `signal-cli` executable.
-  - `infochat.adapters.<name>.bootstrap-admin-contact-id` is set on **at least one** adapter (the union-non-empty rule, §7.6.3); each value is parseable by its own adapter.
+  - `infochat.adapters.<name>.admin` is set on **at least one** adapter (the union-non-empty rule, §7.6.3); each value is parseable by its own adapter.
 - `bootstrap-sources.json` validated (per-`kind` config block, especially `nostr` relays); URLs reachable from the host.
 - If asset commands are wanted: `infochat.bootstrap.assets-file` set and the file parses cleanly (§7.6.2 — file-state semantics).
 - Ollama models pre-pulled.

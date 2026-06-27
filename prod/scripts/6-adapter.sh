@@ -304,7 +304,7 @@ done
         # at startup (§7.5), not from an operator-typed name.
         printf 'infochat.adapters.simplex.display-name=%s\n' "$simplex_display_name"
         if grep -qE '^INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID=.+' "$SECRETS_FILE"; then
-          printf 'infochat.adapters.simplex.bootstrap-admin-contact-id=%s\n' '${INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID}'
+          printf 'infochat.adapters.simplex.admin=%s\n' '${INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID}'
         fi
         ;;
       signal)
@@ -312,7 +312,7 @@ done
         printf 'infochat.adapters.signal.data-dir=%s\n' "$signal_data_dir"
         printf 'infochat.adapters.signal.account=%s\n' "$signal_account"
         if grep -qE '^INFOCHAT_SIGNAL_ADMIN_CONTACT_ID=.+' "$SECRETS_FILE"; then
-          printf 'infochat.adapters.signal.bootstrap-admin-contact-id=%s\n' '${INFOCHAT_SIGNAL_ADMIN_CONTACT_ID}'
+          printf 'infochat.adapters.signal.admin=%s\n' '${INFOCHAT_SIGNAL_ADMIN_CONTACT_ID}'
         fi
         ;;
     esac
