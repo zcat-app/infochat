@@ -201,6 +201,15 @@ services:
     # only — the containerized apps reach it over the compose network as
     # llamacpp:8080, so it needs no host port publish.
     image: ghcr.io/ggml-org/llama.cpp:server-b9776
+    # Recover automatically from a kernel OOM kill (exit 137). Without a restart
+    # policy an OOM-killed model server stays dead, and once its container exits
+    # the compose-network DNS name `llamacpp` stops resolving — so the
+    # collector's tagger/entity LLM calls fail with UnresolvedAddressException
+    # and ingestion stalls silently (RAW backlog, no surfaced error). The model
+    # fits the host in steady state; the kill was a transient memory peak, so a
+    # restart recovers. `unless-stopped` (not `always`) restarts on failure and
+    # host reboot while still honoring an operator `docker compose stop`.
+    restart: unless-stopped
     environment:
       # The operator-chosen generative GGUF *filename* is minted by the §7.3
       # wizard (4-llm.sh) into secrets.env and fed to compose via --env-file;
@@ -238,6 +247,10 @@ services:
   llamacpp-embeddings:
     profiles: [llamacpp-embeddings]
     image: ghcr.io/ggml-org/llama.cpp:server-b9776
+    # Same OOM-recovery rationale as the `llamacpp` service above: a dead
+    # embeddings server drops the `llamacpp-embeddings` DNS name and stalls the
+    # embedding stage. `unless-stopped` brings it back after an OOM or reboot.
+    restart: unless-stopped
     environment:
       LLAMA_ARG_MODEL: /models/${INFOCHAT_LLAMACPP_EMBED_GGUF:-}
       LLAMA_ARG_EMBEDDINGS: "1"
