@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 23 |
+| pending | 24 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 508 |
 | deferred | 6 |
-| **total** | **537** |
+| **total** | **538** |
 
 ---
 
@@ -47,6 +47,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-499 — Test fixture duplication → testsupport, plus a leaked registration teardown (complexity: low, risk: low)
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-501 — Stage-1-flagged posts can permanently evade Stage 2 after a crash (complexity: medium, risk: medium)
+- M1-503 — upgrade.sh restart gate compares the running image to itself, never deploys a rebuilt app (complexity: low, risk: medium)
 
 ---
 
@@ -722,4 +723,5 @@ M1-499 (pending) ← runnable
 M1-500 (pending) ← runnable
 M1-501 (pending) ← runnable
 M1-502 (done)
+M1-503 (pending) ← runnable
 ```
