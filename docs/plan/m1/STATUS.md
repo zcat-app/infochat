@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 504 |
 | deferred | 6 |
-| **total** | **510** |
+| **total** | **511** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-475 — Enforce D43 over non-constant bundle keys (en-keyset gate) (complexity: low, risk: low)
 
 ---
 
@@ -673,4 +673,5 @@ M1-471 (done)
 M1-472 (done)
 M1-473 (done)
 M1-474 (done)
+M1-475 (pending) ← runnable
 ```
