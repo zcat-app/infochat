@@ -324,6 +324,29 @@ headlines-and-links digest; `/retry --digest` regenerates the full version once
 load clears. Missed slots (bot was down) are skipped, not caught up, and
 recorded in the audit log.
 
+### Upgrading the bot
+
+To move the bot to the latest code, run **one command** on the host — no
+environment variables, no git steps:
+
+```bash
+./prod/scripts/upgrade.sh        # confirms before each step
+./prod/scripts/upgrade.sh -y     # unattended (no confirmations)
+```
+
+It backs up first (database dump + messaging identities), rebuilds the two app
+images from the latest code, and restarts the Collector and then the Provider.
+Everything that holds state is preserved — the database, your LLM and adapter
+settings, secrets, and the SimpleX/Signal identities all survive untouched. An
+app is only restarted if its rebuilt image actually changed, so re-running when
+nothing is new is harmless. If the build or the post-restart check fails, the
+code is rolled back automatically; a database migration that had already applied
+is restored from the backup the upgrade took first.
+
+Run it only on a deployment you have already set up. The per-step detail and the
+single-host rolling-restart caveat are in the [Setup Guide](SETUP_GUIDE.md) and
+[docs/design/07-deployment.md](docs/design/07-deployment.md) §7.11.
+
 ### Full references
 
 - Command catalogue (every command, every flag, exact argument grammar):
