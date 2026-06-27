@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 494 |
 | deferred | 6 |
-| **total** | **501** |
+| **total** | **502** |
 
 ---
 
@@ -25,6 +25,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-465 — Canonicalize bootstrap admin contact id from full link (complexity: medium, risk: medium)
+- M1-466 — Per-host outbound pacing in FetchScheduler (complexity: high, risk: medium)
 
 ---
 
@@ -664,4 +665,5 @@ M1-462 (done)
 M1-463 (done)
 M1-464 (done)
 M1-465 (pending) ← runnable
+M1-466 (pending) ← runnable
 ```
