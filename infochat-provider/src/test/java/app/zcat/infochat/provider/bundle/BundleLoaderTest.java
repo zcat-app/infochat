@@ -4,11 +4,15 @@ import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Properties;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -21,22 +25,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Bundle-completeness CI check for {@link BundleLoader} per
  * {@code docs/spec/commands.md} §Discovery /help (Bundle composition).
  *
- * <p>M1-060 widens the original M1-035c en-only completeness check to
- * a bilateral one: every {@link BundleKeys} constant must resolve to
- * a non-empty value in EVERY {@link BundleLoader#supportedLanguages()}
- * entry — i.e. both {@code en.properties} and {@code cs.properties}
- * in v1. The en case is the {@code lang='en'} iteration of the
- * widened check, so no scenario is silently dropped relative to the
- * pre-M1-060 baseline.</p>
+ * <p>M1-060 widened the original M1-035c en-only completeness check to
+ * a bilateral one: every {@link BundleKeys} constant must be present
+ * with a non-empty value in EVERY {@link BundleLoader#supportedLanguages()}
+ * entry — i.e. both {@code en.properties} and {@code cs.properties} in
+ * v1. M1-474 gives that check the teeth D43 mandates: it now reads each
+ * shipped bundle's OWN key set directly from the classpath resource
+ * rather than calling {@link BundleLoader#get(String, String)}, whose
+ * en fallback (a key missing from {@code cs} silently resolves to the
+ * en value) masked an incomplete bundle and let the gate stay green
+ * while the D43 invariant was violated. A {@link BundleKeys} constant
+ * present in {@code en} but absent from {@code cs} now fails the build,
+ * as D43 requires ("CI fails on a missing key").</p>
  *
  * <p>The probe-key scenarios use the test-only
  * {@code test.fallback.probe} entry, which lives ONLY in
  * en.properties and is NOT a {@link BundleKeys} constant — so the
- * bilateral completeness iteration does not see it (the iteration
- * walks BundleKeys' reflective field set, not the bundle's
- * key set). This is the load-bearing setup that lets the test
- * exercise the 2-arg accessor's en-fallback path without breaking
- * bilateral parity.</p>
+ * constant-driven completeness iteration never inspects it (the
+ * iteration walks BundleKeys' reflective field set). This is the
+ * load-bearing setup that lets the test exercise the 2-arg accessor's
+ * en-fallback path without breaking bilateral parity.</p>
  */
 @QuarkusTest
 class BundleLoaderTest {
@@ -60,12 +68,12 @@ class BundleLoaderTest {
     BundleLoader bundleLoader;
 
     @Test
-    void everyBundleKeysConstantResolvesInEveryLoadedBundleToANonEmptyString() throws Exception {
+    void everyBundleKeysConstantHasNonEmptyOwnValueInEveryShippedBundle() throws Exception {
         // Reflect over BundleKeys to enumerate every key constant. The
         // reflection walk subsumes the original M1-035c en-only
-        // scenario: en is one of the iterated languages, so removing a
-        // key from en.properties would fail this widened check the
-        // same way it failed the pre-M1-060 one.
+        // scenario: en is one of the iterated bundles, so removing a
+        // key from en.properties fails this check the same way it
+        // failed the pre-M1-060 one.
         List<String> keys = collectBundleKeys();
         assertFalse(keys.isEmpty(),
                 "BundleKeys must declare at least one public static final String constant; "
@@ -78,15 +86,21 @@ class BundleLoaderTest {
                         + "check would silently pass against an empty language set");
 
         for (String lang : supported) {
+            // D43 teeth (M1-474): inspect THIS bundle's own key set, read
+            // straight from the shipped resource — NOT bundleLoader.get(key,
+            // lang), whose en fallback masks a key missing from cs and made
+            // this gate structurally blind. A BundleKeys constant present in
+            // en but absent from this bundle must fail the build.
+            Properties ownKeys = loadOwnKeys(lang);
             for (String key : keys) {
-                String value = bundleLoader.get(key, lang);
+                String value = ownKeys.getProperty(key);
                 assertNotNull(value,
-                        "bundle key resolved to null: " + key + " (language=" + lang + ")");
+                        "bundle key absent from " + lang + ".properties own key set: " + key
+                                + " — D43 requires every shipped bundle to carry every BundleKeys "
+                                + "constant in its own key set (no en fallback)");
                 assertFalse(value.isEmpty(),
-                        "bundle key resolved to empty string: " + key
-                                + " (language=" + lang + ") — bundle-completeness CI check "
-                                + "requires every BundleKeys constant to have a non-empty value "
-                                + "in every loaded bundle");
+                        "bundle key present but empty in " + lang + ".properties: " + key
+                                + " — bundle-completeness CI check requires a non-empty value");
             }
         }
     }
@@ -155,6 +169,20 @@ class BundleLoaderTest {
         String roundtripped = new String(csBytes, StandardCharsets.UTF_8);
         assertEquals(csValue, roundtripped,
                 "UTF-8 round-trip through bytes must preserve the cs.properties value");
+    }
+
+    private static Properties loadOwnKeys(String lang) throws IOException {
+        // Mirror BundleLoader's load path (InputStreamReader UTF-8) so cs
+        // diacritics decode identically; reading the resource directly is
+        // what lets the assertion see each bundle's OWN keys without the
+        // 2-arg accessor's en fallback.
+        String resource = "/bundles/" + lang + ".properties";
+        Properties bundle = new Properties();
+        try (InputStream stream = BundleLoaderTest.class.getResourceAsStream(resource)) {
+            assertNotNull(stream, "bundle resource not found on classpath: " + resource);
+            bundle.load(new InputStreamReader(stream, StandardCharsets.UTF_8));
+        }
+        return bundle;
     }
 
     private static List<String> collectBundleKeys() throws IllegalAccessException {

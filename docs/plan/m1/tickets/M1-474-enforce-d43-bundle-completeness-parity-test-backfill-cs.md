@@ -1,7 +1,7 @@
 ---
 id: M1-474
 title: "Enforce D43 bundle completeness: make BundleLoaderTest fail on a missing per-bundle key + backfill cs.properties"
-status: todo
+status: done
 created: 2026-06-27
 last_updated: 2026-06-27
 blocked_by: []
@@ -83,6 +83,27 @@ test_plan:
 spec_refs: []
 decision_refs:
   - D43
+clarity_check:
+  date: 2026-06-27
+  verdict: WARN
+  warnings:
+    - "COMPLEXITY-RISK-CALIBRATED: round_cap: 3 set on complexity: medium / risk: medium; spec conditions for round_cap 3 are complexity:high or risk:high."
+    - "FORWARD-REFERENCE-CHECK: M1-3xx in body prose matches the ticket-ID regex but resolves to no ticket; informal range shorthand."
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-06-27
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 139
+      removed: 27
 ---
 
 # M1-474: Enforce D43 bundle completeness

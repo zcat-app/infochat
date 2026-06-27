@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 503 |
+| done | 504 |
 | deferred | 6 |
-| **total** | **509** |
+| **total** | **510** |
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-474 | Enforce D43 bundle completeness: make BundleLoaderTest fail on a missing per-bundle key + backfill cs.properties | 2026-06-27 | round 1 APPROVE |
 | M1-473 | prod/scripts/upgrade.sh: git-pull main + rebuild app images + ordered restart, all config/data preserved | 2026-06-27 | round 1 APPROVE |
 | M1-472 | Deep-review low-severity cleanup sweep: /summary single-connection retrieval + messaging redaction dedup | 2026-06-27 | round 1 APPROVE |
 | M1-471 | Move two audit-missed now() sites onto the Clock: PartitionCreator gates + probation-reply formatter | 2026-06-27 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-467 | Fix bootstrap-admin property key: wizard/docs vs runtime | 2026-06-27 | round 1 APPROVE |
 | M1-466 | Per-host outbound pacing in FetchScheduler | 2026-06-27 | round 1 APPROVE |
 | M1-465 | Canonicalize bootstrap admin contact id from full link | 2026-06-27 | round 1 APPROVE |
-| M1-464 | setup.sh --reset: only tear down when resources exist (no removal noise on a clean host), then fall through into setup; keep data by default, add --reset --hard to wipe data volumes | 2026-06-26 | round 1 APPROVE |
 
 ---
 
@@ -672,4 +672,5 @@ M1-470 (done)
 M1-471 (done)
 M1-472 (done)
 M1-473 (done)
+M1-474 (done)
 ```
