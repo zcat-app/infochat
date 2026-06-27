@@ -63,9 +63,10 @@ test_plan:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/SimpleXAdminClaimTokenTest.java
   modifies:
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXMessageCodecTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/startup/AdminBootstrapIT.java
   preserves:
-    - all tests currently green on main
-    - existing Signal bootstrap-admin tests (AdminBootstrap / parse-gate)
+    - all tests currently green on main EXCEPT the SimpleX-specific AdminBootstrapIT case(s) this ticket updates (see modifies and Notes "AdminBootstrapIT")
+    - existing Signal bootstrap-admin tests (AdminBootstrap / parse-gate) and all non-SimpleX AdminBootstrapIT cases stay green
 spec_refs:
   - "docs/spec/deployment.md §Operator inputs"
   - "docs/spec/security.md §Authorization model"
@@ -157,6 +158,18 @@ token lifecycle beyond single-use first-admin**; **no schema migration**.
 - **Secret handling.** The token is a secret: never log it raw (security.md
   §Secrets handling), compare without leaking timing/validity beyond the fixed
   invite-style reply, and source it from config/env, not the DB.
+- **AdminBootstrapIT (authorized test change).** Making AdminBootstrap stop
+  seeding for SimpleX (acceptance item 1) breaks the pre-existing green case
+  `AdminBootstrapIT.adminGivenAsFullContactLinkSeedsBareQueueIdRow` (M1-465),
+  which seeds `simplex` from a configured full contact link and asserts a
+  by-address `is_admin` row is created — the exact behavior this ticket removes.
+  That test (and the `infochat.adapters.simplex.admin = SIMPLEX_ADMIN_FULL_LINK`
+  entry in `AdminBootstrapIT.Profile`, plus the now-dead SIMPLEX_* link
+  constants it feeds) is authorized to change: its NEW expected behavior is that
+  `seed("simplex")` creates NO admin row (SimpleX has no pre-seedable address).
+  Delete-vs-invert is the implementer's call; the assertion must reflect item 1.
+  All other AdminBootstrapIT cases (inmemory boot, fake-x/fake-y/fake-promote
+  seed/rotate/idempotency, the gate-7 union case) are unaffected and stay green.
 - **Follow-up (not this ticket).** The by-address admin commands
   (`/grant-admin <contact>`, `/ban <contact>`) carry the same broken
   "stable public SimpleX address" assumption and need a connection/handle-based
