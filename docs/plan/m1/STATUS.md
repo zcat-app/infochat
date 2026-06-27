@@ -15,8 +15,8 @@
 | in-review | 0 |
 | escalated | 0 |
 | done | 510 |
-| deferred | 6 |
-| **total** | **540** |
+| deferred | 7 |
+| **total** | **541** |
 
 ---
 
@@ -47,7 +47,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-499 — Test fixture duplication → testsupport, plus a leaked registration teardown (complexity: low, risk: low)
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-501 — Stage-1-flagged posts can permanently evade Stage 2 after a crash (complexity: medium, risk: medium)
-- M1-505 — SimpleX: map inbound admin DM to the configured admin address (complexity: medium, risk: high)
+- M1-506 — SimpleX: claim-token bot-admin bootstrap (drop by-address) (complexity: high, risk: high)
 
 ---
 
@@ -97,6 +97,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 ---
 
 ## Deferred
+
+### blocked-on-new-ticket (1)
+- M1-505 → M1-506
 
 ### decomposed (2)
 - M1-034 → M1-034a
@@ -725,5 +728,7 @@ M1-501 (pending) ← runnable
 M1-502 (done)
 M1-503 (done)
 M1-504 (done)
-  └── M1-505 (pending) ← runnable
+  └── M1-505 (deferred)
+M1-506 (pending) ← runnable
+  └── M1-505 (deferred) [see above]
 ```

@@ -1,9 +1,11 @@
 ---
 id: M1-505
 title: "SimpleX: map inbound admin DM to the configured admin address"
-status: pending
+status: deferred
 created: 2026-06-27
 last_updated: 2026-06-27
+deferred_on: M1-506
+deferred_reason: blocked-on-new-ticket
 blocked_by:
   - M1-504
 files_budget: 8
@@ -50,15 +52,119 @@ spec_refs:
 decision_refs:
   - D10
   - D32
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-27
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 314
+      removed: 13
+escalations:
+  - date: 2026-06-27
+    reason: redteam-finding
+    reviewer_verdict_excerpt: |
+      RED-TEAM VERDICT: FINDINGS (critical=1 high=1).
+      critical PERM-ESCAL: DM identity derived from self-asserted
+      contact.profile.contactLink and used as the (adapter, contact_id) authz
+      join key → any contact who knows the admin's public address can spoof it
+      and /grant-admin themselves. security.md trust boundary 1 / D10 (identity
+      must be cryptographically anchored, never self-asserted) is unamended.
+      high INFO-LEAK: the self-asserted address becomes the DM partition key for
+      ALL users → cross-user impersonation / data theft (saved_post, chat_memory,
+      /export, /forget) — broader than the ticket's admin-only documented
+      acceptance. Full verdict: docs/plan/m1/redteam/M1-505-2026-06-27.md
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-06-27
+    category: PERM-ESCAL
+    severity: critical
+    promise: |
+      security.md §Trust boundaries (1): the adapter asserts identity via a
+      stable, cryptographically anchored ID; display names / self-asserted
+      fields are never used for authorization (D10). §Per-adapter admin threat
+      profile: the SimpleX admin's identity is a cryptographic queue address.
+    gap: |
+      SimpleXMessageCodec.decodeNewChatItem derives the DM identity from
+      contact.profile.contactLink — a peer-supplied, SELF-ASSERTED field — via
+      canonicalizeAdvertisedAddress, and uses it as BOTH Identity.contactId and
+      ScopeRef.Dm.contactId, i.e. the (adapter, contact_id) authorization join
+      key. security.md (the authoritative trust-path doc) retains the
+      cryptographic-anchor commitment unamended; the acceptance caveat lives
+      only in deployment.md.
+    repro: |
+      Adversary sets their own profile contactLink to the admin's published
+      queue address (a public value) and DMs /grant-admin <self>. The codec
+      canonicalizes to the admin's bare queue id; the seeded is_admin row
+      already exists for that contact_id, so the invite gate never fires and
+      the admin-only command executes → full bot-admin compromise.
+    suggested_fix_class: trust-boundary-tightening
+  - date: 2026-06-27
+    category: INFO-LEAK
+    severity: high
+    promise: |
+      Per-(user, scope) isolation (CLAUDE.md key conventions / security.md):
+      never leak across users or between DM and group. LLM tools (recallMemory,
+      listSaves) bind isolation to the resolved (user, scope) identity.
+    gap: |
+      The DM partition key is now the self-asserted contact.profile.contactLink,
+      so the per-(user, scope) key is attacker-controlled for EVERY user, not
+      just the admin — broader than the documented admin-only acceptance.
+    repro: |
+      Adversary advertises a victim's published address, DMs the bot, and is
+      resolved to the victim's (adapter, contact_id) — reading the victim's
+      saved_post / chat_memory / exportable state and able to /forget (destroy)
+      it. Breaks the cross-user isolation invariant the spec commits to "never"
+      violate.
+    suggested_fix_class: trust-boundary-tightening
+redteam_audits:
+  - date: 2026-06-27
+    verdict: FINDINGS
+    base: main (dde389dd)
+    head: working-tree (m1/M1-505 branch, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-505-2026-06-27.md
+    findings_count: 2
+    out_of_model_count: 1
+    note: |
+      Audited at branch tip before commit (security_relevant gate). HALTED — no
+      commit. Critical is the operator-accepted admin-spoof tradeoff but
+      security.md is unamended (diff contradicts trust boundary 1 / D10). High
+      exceeds the documented acceptance: self-asserted address becomes the DM
+      partition key for ALL users → cross-user impersonation / data theft.
+      Resolution requires a user-owned spec/design decision; surfaced via the
+      five-way escalation menu (redteam-finding).
+clarity_check:
+  date: 2026-06-27
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-505: SimpleX — map inbound admin DM to the configured admin address
+
+> **DEFERRED 2026-06-27 — premise invalid, superseded by M1-506.** Implementation
+> passed review (APPROVE) but the in-progress redteam audit found a critical
+> PERM-ESCAL + high INFO-LEAK (see `redteam_findings:` and
+> `docs/plan/m1/redteam/M1-505-2026-06-27.md`). Verified against the SimpleX
+> Messaging Protocol spec
+> (https://github.com/simplex-chat/simplexmq/blob/stable/protocol/simplex-messaging.md):
+> a sender's advertised address (`contact.profile.contactLink`) is **not**
+> cryptographically verified — "the sender's own published address is not
+> verified … out of scope of SMP protocol." SimpleX has no long-term sender
+> identifier; identity is the per-connection id. So "map the inbound advertised
+> address to the configured admin" is unfixable as framed — any matched value is
+> self-asserted. The whole approach is dropped. M1-506 replaces it: keep the
+> connection-based DM identity (revert this change, already discarded) and
+> bootstrap the SimpleX admin via a single-use secret claim-token instead of an
+> address. Branch changes discarded; codec/spec returned to `main`.
 
 ## Context
 
