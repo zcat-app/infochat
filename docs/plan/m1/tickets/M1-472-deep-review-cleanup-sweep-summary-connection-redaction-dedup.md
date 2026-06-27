@@ -1,9 +1,19 @@
 ---
 id: M1-472
 title: "Deep-review low-severity cleanup sweep: /summary single-connection retrieval + messaging redaction dedup"
-status: pending
+status: done
 created: 2026-06-27
 last_updated: 2026-06-27
+clarity_check:
+  date: 2026-06-27
+  verdict: WARN
+  warnings:
+    - >-
+      SECURITY-FLAG-CONSISTENT: ticket body calls the contact-id redaction "a
+      security-relevant log-hygiene primitive" but security_relevant is false.
+      Actual diff risk is low (structural move only, no algorithm change, token
+      form unchanged); informational, not a blocker.
+  blockers: []
 blocked_by: []
 files_budget: 7
 files_scope:
@@ -69,7 +79,20 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-27
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 202
+      removed: 75
 overrides: []
 aborted_attempts: []
 reopens: []

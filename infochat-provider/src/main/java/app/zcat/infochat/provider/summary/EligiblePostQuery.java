@@ -135,29 +135,41 @@ public class EligiblePostQuery {
         Optional<TopTagRestriction> restriction = Optional.empty();
         List<String> restrictedTags = List.of();
 
-        if (positionalTag.isEmpty()) {
-            int followedCount = countFollowedTags(scopeKind, scopeId);
-            if (followedCount > TOP_TAG_RESTRICTION_THRESHOLD) {
-                restrictedTags = topActiveFollowedTags(scopeKind, scopeId, cutoff);
-                restriction = Optional.of(new TopTagRestriction(followedCount, restrictedTags));
+        // One pooled connection and one statement_timeout SET for the whole
+        // /summary read: the up-to-four helper reads all run on this single
+        // connection, so the pool sees one acquisition and one SET round-trip
+        // rather than four (the SearchPostsTool single-acquisition discipline,
+        // SearchPostsTool.java:81; M1-472). The public readVocabulary() is a
+        // separate call and keeps its own connection.
+        try (Connection conn = dataSource.getConnection()) {
+            cancellationService.applyStatementTimeout(conn);
+
+            if (positionalTag.isEmpty()) {
+                int followedCount = countFollowedTags(conn, scopeKind, scopeId);
+                if (followedCount > TOP_TAG_RESTRICTION_THRESHOLD) {
+                    restrictedTags = topActiveFollowedTags(conn, scopeKind, scopeId, cutoff);
+                    restriction = Optional.of(new TopTagRestriction(followedCount, restrictedTags));
+                }
             }
+
+            TagMode tagMode = readTagMode(conn, scopeKind, scopeId);
+
+            Selection selection = selectPosts(conn, scopeKind, scopeId, positionalTag, cutoff,
+                    tagMode, restrictedTags);
+
+            // The SQL LIMIT already kept the freshest clusterCap (head of
+            // the DESC ordering, dropping the OLDEST per the spec); the
+            // window-function count carries the true pre-LIMIT total so the
+            // cap-excess message stays exact without materializing every
+            // eligible body in Java.
+            int total = selection.totalBeforeCap();
+            List<Post> capped = selection.posts();
+            int excluded = total - capped.size();
+
+            return new Result(capped, total, excluded, clusterCap, profileLabel, restriction);
+        } catch (SQLException e) {
+            throw new IllegalStateException("EligiblePostQuery.fetch failed", e);
         }
-
-        TagMode tagMode = readTagMode(scopeKind, scopeId);
-
-        Selection selection = selectPosts(scopeKind, scopeId, positionalTag, cutoff,
-                tagMode, restrictedTags);
-
-        // The SQL LIMIT already kept the freshest clusterCap (head of
-        // the DESC ordering, dropping the OLDEST per the spec); the
-        // window-function count carries the true pre-LIMIT total so the
-        // cap-excess message stays exact without materializing every
-        // eligible body in Java.
-        int total = selection.totalBeforeCap();
-        List<Post> capped = selection.posts();
-        int excluded = total - capped.size();
-
-        return new Result(capped, total, excluded, clusterCap, profileLabel, restriction);
     }
 
     /** {@link ScopeRef.Dm} → {@code scope_kind='dm'}, {@link ScopeRef.Group} → {@code scope_kind='group'}. */
@@ -174,7 +186,7 @@ public class EligiblePostQuery {
     private record Selection(List<Post> posts, int totalBeforeCap) {
     }
 
-    private Selection selectPosts(String scopeKind, UUID scopeId,
+    private Selection selectPosts(Connection conn, String scopeKind, UUID scopeId,
                                     Optional<String> positionalTag, Instant cutoff,
                                     TagMode tagMode, List<String> restrictedTags) {
         // The SELECT pins:
@@ -229,8 +241,7 @@ public class EligiblePostQuery {
         sql.append(" LIMIT ? ");
         params.add(clusterCap);
 
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = prepareTimed(conn, sql.toString())) {
+        try (PreparedStatement ps = conn.prepareStatement(sql.toString())) {
             bindParams(ps, conn, params);
             try (ResultSet rs = ps.executeQuery()) {
                 List<Post> out = new ArrayList<>();
@@ -259,10 +270,9 @@ public class EligiblePostQuery {
         }
     }
 
-    private int countFollowedTags(String scopeKind, UUID scopeId) {
+    private int countFollowedTags(Connection conn, String scopeKind, UUID scopeId) {
         String sql = "SELECT COUNT(*) FROM scope_tag WHERE scope_kind = ? AND scope_id = ?";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = prepareTimed(conn, sql)) {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, scopeKind);
             ps.setObject(2, scopeId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -279,7 +289,7 @@ public class EligiblePostQuery {
      * Ordering: post-count DESC, then {@code tag.name} ASC for stable
      * tie-break across runs (acceptance item 6).
      */
-    private List<String> topActiveFollowedTags(String scopeKind, UUID scopeId, Instant cutoff) {
+    private List<String> topActiveFollowedTags(Connection conn, String scopeKind, UUID scopeId, Instant cutoff) {
         // unnest(p.tags) intersected with the scope's followed tag set,
         // counted per tag, ordered count DESC + name ASC.
         String sql =
@@ -297,8 +307,7 @@ public class EligiblePostQuery {
               + " GROUP BY t.name "
               + " ORDER BY post_count DESC, t.name ASC "
               + " LIMIT ?";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = prepareTimed(conn, sql)) {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, scopeKind);
             ps.setObject(2, scopeId);
             ps.setTimestamp(3, Timestamp.from(cutoff));
@@ -315,10 +324,9 @@ public class EligiblePostQuery {
         }
     }
 
-    private TagMode readTagMode(String scopeKind, UUID scopeId) {
+    private TagMode readTagMode(Connection conn, String scopeKind, UUID scopeId) {
         String sql = "SELECT tag_mode FROM scope_preferences WHERE scope_kind = ? AND scope_id = ?";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = prepareTimed(conn, sql)) {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, scopeKind);
             ps.setObject(2, scopeId);
             try (ResultSet rs = ps.executeQuery()) {

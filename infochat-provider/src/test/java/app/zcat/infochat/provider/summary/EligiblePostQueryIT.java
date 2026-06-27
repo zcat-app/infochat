@@ -21,6 +21,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -352,6 +353,19 @@ class EligiblePostQueryIT {
                 .filter(p -> p.tags().contains(PREFIX + "delta"))
                 .count();
         assertEquals(0, delta, "delta-tagged posts are outside top-3 and excluded");
+
+        // The followedCount>threshold path now threads ONE shared connection
+        // through all four helpers (countFollowedTags → topActiveFollowedTags →
+        // readTagMode → selectPosts), M1-472. Tighten the eligible-set
+        // assertions to pin that the restricted set is unchanged: the pre-cap
+        // match count is exactly the 13 alpha/beta/gamma posts (5+4+4), and
+        // every returned post carries a top-3 tag.
+        assertEquals(13, result.totalBeforeCap(),
+                "only the 13 alpha/beta/gamma posts match under the top-3 restriction");
+        Set<String> top3 = Set.of(PREFIX + "alpha", PREFIX + "beta", PREFIX + "gamma");
+        assertTrue(result.posts().stream()
+                        .allMatch(p -> p.tags().stream().anyMatch(top3::contains)),
+                "every returned post intersects the top-3 tag set on the shared connection");
     }
 
     @Test

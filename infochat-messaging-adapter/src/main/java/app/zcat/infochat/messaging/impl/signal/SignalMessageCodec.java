@@ -1,6 +1,7 @@
 package app.zcat.infochat.messaging.impl.signal;
 
 
+import app.zcat.infochat.messaging.ContactIdRedactor;
 import app.zcat.infochat.messaging.Utf8;
 
 import jakarta.json.Json;
@@ -11,10 +12,6 @@ import jakarta.json.JsonReader;
 import jakarta.json.JsonValue;
 
 import java.io.StringReader;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
@@ -373,18 +370,13 @@ final class SignalMessageCodec {
      * Non-reversible short token for a sender contact id, safe to log
      * under D37 (a Signal ACI is a sensitive identifier and is never
      * logged raw). Stable per sender so a repeat flooder stays
-     * correlatable across drop WARN lines without exposing the id. A pure
-     * function, so it lives on the codec and is shared by every Signal
-     * drop site ({@link SignalJsonRpcClient}, {@link SignalGroupHandler}).
+     * correlatable across drop WARN lines without exposing the id. Delegates
+     * to the shared {@link ContactIdRedactor} so the SimpleX and Signal
+     * transports share one implementation of the primitive (M1-472); the
+     * Signal drop sites ({@link SignalJsonRpcClient}, {@link SignalGroupHandler})
+     * keep calling through the codec.
      */
     static String redactContactId(String contactId) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(contactId.getBytes(StandardCharsets.UTF_8));
-            return "contact#" + HexFormat.of().formatHex(digest, 0, 4);
-        } catch (NoSuchAlgorithmException e) {
-            // SHA-256 is a JDK-mandated algorithm; its absence cannot happen.
-            throw new AssertionError(e);
-        }
+        return ContactIdRedactor.redact(contactId);
     }
 }

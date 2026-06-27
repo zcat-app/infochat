@@ -4,6 +4,7 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import app.zcat.infochat.messaging.ContactIdRedactor;
 import app.zcat.infochat.messaging.FailureCategory;
 import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessagingException;
@@ -12,11 +13,7 @@ import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
-import java.util.HexFormat;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
@@ -378,23 +375,6 @@ final class SimpleXWebSocketClient {
         this.metrics = metrics;
     }
 
-    /**
-     * Non-reversible short token for a sender contact id, safe to log
-     * under D37 (a SimpleX queue address is a sensitive identifier and is
-     * never logged raw). Stable per sender so a repeat flooder stays
-     * correlatable in the overflow WARN line without exposing the address.
-     */
-    private static String redactContactId(String contactId) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(contactId.getBytes(StandardCharsets.UTF_8));
-            return "contact#" + HexFormat.of().formatHex(digest, 0, 4);
-        } catch (NoSuchAlgorithmException e) {
-            // SHA-256 is a JDK-mandated algorithm; its absence cannot happen.
-            throw new AssertionError(e);
-        }
-    }
-
     private final class Listener implements WebSocket.Listener {
 
         private final StringBuilder buffer = new StringBuilder();
@@ -485,7 +465,7 @@ final class SimpleXWebSocketClient {
                 metrics.inboundDropped(ADAPTER_NAME, od.scope(), AdapterMetrics.DropReason.OVERSIZE);
                 LOG.warn("inbound dropped — exceeds {}-byte size cap; from {} adapterMessageId {}",
                         SimpleXMessageCodec.MAX_INBOUND_TEXT_BYTES,
-                        redactContactId(od.senderContactId()), od.adapterMessageId());
+                        ContactIdRedactor.redact(od.senderContactId()), od.adapterMessageId());
             }
             case SimpleXMessageCodec.Ignored ignored ->
                     LOG.debug("simplex-chat frame ignored: {}", ignored.reason());
@@ -523,7 +503,7 @@ final class SimpleXWebSocketClient {
             // drop fires at enqueue, decoupled from the decoded dm/group scope.
             metrics.inboundDropped(ADAPTER_NAME, null, AdapterMetrics.DropReason.QUEUE_FULL);
             LOG.warn("inbound dispatch queue full (cap {}); dropped newest from {} (total dropped {})",
-                    inboundQueueCapacity, redactContactId(senderContactId), dropped);
+                    inboundQueueCapacity, ContactIdRedactor.redact(senderContactId), dropped);
         }
     }
 
