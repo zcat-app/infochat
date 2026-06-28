@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 23 |
+| pending | 25 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 512 |
 | deferred | 7 |
-| **total** | **542** |
+| **total** | **544** |
 
 ---
 
@@ -47,6 +47,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-499 — Test fixture duplication → testsupport, plus a leaked registration teardown (complexity: low, risk: low)
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-501 — Stage-1-flagged posts can permanently evade Stage 2 after a crash (complexity: medium, risk: medium)
+- M1-508 — SimpleX codec: decode newChatItems (plural) inbound (v6.5.4) (complexity: medium, risk: high)
+- M1-509 — Operator onboarding: simple (comic) + advanced admin guides (complexity: medium, risk: low)
 
 ---
 
@@ -731,4 +733,6 @@ M1-504 (done)
 M1-506 (done)
   └── M1-505 (deferred) [see above]
 M1-507 (done)
+M1-508 (pending) ← runnable
+M1-509 (pending) ← runnable
 ```
