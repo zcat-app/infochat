@@ -49,7 +49,7 @@ class AdapterAdminPromptWiringTest {
                 "a single-adapter run that supplies a valid admin after a blank must succeed:\n" + r.output);
         assertTrue(r.output.contains("the only enabled adapter"),
                 "a blank admin for the sole adapter must re-prompt with the required-reason:\n" + r.output);
-        assertFalse(r.output.contains("FAIL: no bootstrap admin contact id was supplied"),
+        assertFalse(r.output.contains("FAIL: no bootstrap admin credential was supplied"),
                 "a first blank must NOT fall through to the union FAIL gate:\n" + r.output);
     }
 
@@ -63,8 +63,8 @@ class AdapterAdminPromptWiringTest {
         assertEquals(0, r.exitCode, "a single-adapter run with a valid admin must exit 0:\n" + r.output);
 
         String secrets = Files.readString(tmp.resolve("runtime/secrets.env"), StandardCharsets.UTF_8);
-        assertTrue(secrets.contains("INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID="),
-                "the admin contact id must be recorded in secrets.env:\n" + secrets);
+        assertTrue(secrets.contains("INFOCHAT_SIMPLEX_ADMIN_TOKEN="),
+                "the SimpleX admin claim-token must be recorded in secrets.env:\n" + secrets);
 
         String props = Files.readString(tmp.resolve("runtime/application.properties"), StandardCharsets.UTF_8);
         assertTrue(props.contains("infochat.adapters=simplex"),
@@ -84,7 +84,7 @@ class AdapterAdminPromptWiringTest {
 
         assertNotEquals(0, r.exitCode,
                 "two adapters with no admin on either must abort at the union gate:\n" + r.output);
-        assertTrue(r.output.contains("FAIL: no bootstrap admin contact id was supplied for any chosen adapter"),
+        assertTrue(r.output.contains("FAIL: no bootstrap admin credential was supplied for any chosen adapter"),
                 "the multi-adapter all-blank case must hit the union FAIL gate:\n" + r.output);
     }
 
