@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 24 |
+| pending | 26 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 513 |
 | deferred | 7 |
-| **total** | **544** |
+| **total** | **546** |
 
 ---
 
@@ -48,6 +48,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-501 — Stage-1-flagged posts can permanently evade Stage 2 after a crash (complexity: medium, risk: medium)
 - M1-509 — Operator onboarding: simple (comic) + advanced admin guides (complexity: medium, risk: low)
+- M1-510 — SimpleX codec: align DM inbound/outbound/error decode with live v6.5.4.1 wire format (complexity: medium, risk: high)
 
 ---
 
@@ -64,7 +65,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-511 — blocked_by: M1-510 (pending)
 
 ---
 
@@ -734,4 +735,6 @@ M1-506 (done)
 M1-507 (done)
 M1-508 (done)
 M1-509 (pending) ← runnable
+M1-510 (pending) ← runnable
+  └── M1-511 (pending)
 ```
