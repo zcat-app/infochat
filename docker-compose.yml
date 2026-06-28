@@ -126,6 +126,11 @@ services:
       # is inert. Secrets stay in the environment, never in a mounted file (§7.3).
       INFOCHAT_LLM_API_KEY: ${INFOCHAT_LLM_API_KEY:-}
       INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID: ${INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID:-}
+      # SimpleX bootstrap admin is the single-use claim-token (D50/M1-506); the
+      # mounted application.properties references it as
+      # infochat.adapters.simplex.admin-token=${INFOCHAT_SIMPLEX_ADMIN_TOKEN}, so
+      # the var MUST reach the container env or gate 7 fails "admin union empty".
+      INFOCHAT_SIMPLEX_ADMIN_TOKEN: ${INFOCHAT_SIMPLEX_ADMIN_TOKEN:-}
       INFOCHAT_SIGNAL_ADMIN_CONTACT_ID: ${INFOCHAT_SIGNAL_ADMIN_CONTACT_ID:-}
     volumes:
       # Runtime config — same mount as the Collector (§7.7.2): carries the operator's
