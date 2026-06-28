@@ -64,7 +64,14 @@ import java.util.concurrent.atomic.AtomicLong;
  *       over-cap inbound is dropped silently with no outbound;</li>
  *   <li>1.7 Unicode normalize (NFKC + bidi-strip + zero-width-strip,
  *       per-line outside CommonMark fenced code);</li>
- *   <li>2 DM unknown contact → {@link InviteCodeConsumer#consume} with
+ *   <li>2 DM unknown contact → first the SimpleX bootstrap-admin
+ *       claim-token (D50): {@link SimpleXAdminClaim#claim} on the
+ *       normalized body; a {@link SimpleXAdminClaim.Claimed} outcome
+ *       sends the {@code reply.welcome.dm_fresh} entry and stops, and
+ *       {@link SimpleXAdminClaim.NotClaimed} (wrong/used token, no token
+ *       configured, or non-SimpleX adapter) falls through to the invite
+ *       path so a bad token gets the SAME fixed reply an invalid invite
+ *       would. Then {@link InviteCodeConsumer#consume} with
  *       the normalized body. The consumer owns the UUID-parse: a
  *       non-UUID body and an invalid UUID share the same Rejected
  *       branch (both increment the brute-force counter — M1-044e
@@ -257,6 +264,9 @@ public class InboundRouter {
 
     @Inject
     InviteCodeConsumer inviteCodeConsumer;
+
+    @Inject
+    SimpleXAdminClaim simpleXAdminClaim;
 
     @Inject
     BundleLoader bundleLoader;
@@ -477,11 +487,27 @@ public class InboundRouter {
             // reply (the spec gives the same user-visible reply for
             // both — the rate-limit state does not change it).
             if (msg.scope() instanceof ScopeRef.Dm && snapshot.isEmpty()) {
-                InviteCodeConsumer.Outcome outcome =
-                        inviteCodeConsumer.consume(adapterName, contactId, normalized);
                 // No users row → no scope_preferences row, so the context
                 // language is necessarily the "en" default here.
                 String lang = inboundContext.effectiveLanguage();
+                // SimpleX bootstrap-admin claim-token (D50): a first DM
+                // whose body equals the configured admin-token establishes
+                // the bootstrap admin (registers the sending connection's
+                // contact + flips is_admin). Runs BEFORE the invite consume
+                // so a token presentation is not counted as an invite
+                // brute-force attempt; a NotClaimed outcome (wrong/used
+                // token, no token configured, or any non-SimpleX adapter)
+                // falls through to the invite path and gets the SAME fixed
+                // reply an invalid invite would — no oracle on token
+                // validity. The claim consumer owns all SimpleX specificity,
+                // keeping this router adapter-agnostic.
+                if (simpleXAdminClaim.claim(adapterName, contactId, normalized)
+                        instanceof SimpleXAdminClaim.Claimed) {
+                    sendReply(msg.scope(), bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH, lang), adapterName);
+                    return;
+                }
+                InviteCodeConsumer.Outcome outcome =
+                        inviteCodeConsumer.consume(adapterName, contactId, normalized);
                 switch (outcome) {
                     case InviteCodeConsumer.Accepted a ->
                             sendReply(msg.scope(), bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH, lang), adapterName);

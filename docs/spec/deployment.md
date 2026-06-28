@@ -66,21 +66,48 @@ An operator must provide:
    and **may be omitted for individual adapters** — an adapter
    without a configured bootstrap admin still serves users, but
    has no admin row of its own at startup. The deployment-wide
-   constraint is that **the union of bootstrap admin contacts
+   constraint is that **the union of bootstrap admin paths
    across all enabled adapters MUST be non-empty**; Provider
    refuses to start otherwise (last-admin protection,
    `security.md` §Authorization model, only works if at least one
-   admin exists somewhere). The contact-id string format is
-   **adapter-specific** — SimpleX contact ids are not Signal
-   ACI/UUIDs — so each value MUST be parseable by its own adapter;
-   Provider validates each at startup and refuses to start on a
-   mismatch. On startup Provider ensures, for every adapter that
-   does have a bootstrap admin, that the configured contact exists
-   with `is_admin = true` (creating the user if needed) and writes
-   a bootstrap row to `audit_log` (decision D9). The same human
-   typically maps to two distinct `users` rows — one per
-   `(adapter, contact_id)` — and is admin on each independently
-   per the inbound-adapter-scoped grant rule
+   admin exists somewhere).
+
+   **The bootstrap mechanism is adapter-specific, because the
+   adapters expose different identity primitives (decision D50):**
+
+   - **Signal — configure-by-ACI (pre-seed).** Signal's ACI is a
+     real cryptographic account id, so the operator supplies it
+     directly and Provider, on startup, ensures the configured
+     contact exists with `is_admin = true` (creating the user if
+     needed) and writes a bootstrap row to `audit_log` (decision
+     D9). The value MUST be parseable as a Signal ACI; Provider
+     validates it at startup and refuses to start on a mismatch.
+   - **SimpleX — single-use claim-token (no pre-seed).** SimpleX
+     exposes **no pre-configurable cryptographic sender address**:
+     identity is the per-connection id the transport assigns, and
+     a sender's advertised profile address
+     (`contact.profile.contactLink`) is **self-asserted, not
+     verified** (out of scope of the SMP protocol), so it cannot
+     be used as an authorization key. The operator therefore
+     configures a secret claim-token
+     (`infochat.adapters.simplex.admin-token`) instead of an
+     address; **nothing is pre-seeded for SimpleX**. The **first**
+     DM whose normalized body equals the token registers the
+     sending connection's contact id and sets `is_admin = true` on
+     that `(simplex, contact_id)` row (audit-logged as a bootstrap
+     row); the token is **single-use** — a later presentation
+     (same or different contact) grants nothing and gets the same
+     fixed reply an invalid invite would (no validity oracle). A
+     configured SimpleX admin-token **counts as SimpleX's
+     bootstrap-admin path** for the union constraint above. Operators
+     should **unset the token once the first admin is established**
+     (standard bootstrap-secret hygiene; see `security.md`
+     §Per-adapter admin threat profile for the single-use caveat a
+     still-configured token leaves).
+
+   The same human typically maps to two distinct `users` rows —
+   one per `(adapter, contact_id)` — and is admin on each
+   independently per the inbound-adapter-scoped grant rule
    (`commands.md` §Admin). Operators concerned about per-adapter
    compromise risk should consult `security.md`
    §Per-adapter admin threat profile when choosing where to

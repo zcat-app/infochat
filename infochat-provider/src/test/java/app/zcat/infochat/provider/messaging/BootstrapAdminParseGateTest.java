@@ -1,20 +1,13 @@
 package app.zcat.infochat.provider.messaging;
 
-import app.zcat.infochat.messaging.MessagingAdapter;
-import app.zcat.infochat.messaging.impl.simplex.SimpleXAdapter;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -26,30 +19,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * "each value MUST be parseable by its own adapter; Provider validates
  * each at startup and refuses to start on a mismatch."
  *
- * <p>The profile configures a MALFORMED {@code signal.admin} (non-UUID)
- * and a WELL-FORMED {@code simplex.admin} (URL-safe base64 queue address);
- * each {@code @Test} activates exactly one adapter so both the reject and
- * the proceed case are exercised against a single fixed profile.
+ * <p>The profile configures a MALFORMED {@code signal.admin} (non-ACI);
+ * activating {@code signal} exercises gate 7b's reject path.
  * {@link MessagingStartup} is excluded so {@code start()} is driven
- * manually and never launches the real SimpleX / Signal subprocesses.</p>
+ * manually and never launches the real Signal subprocess.</p>
+ *
+ * <p><b>M1-506 / D50.</b> The former SimpleX cases (a well-formed
+ * {@code simplex.admin}, and a full SimpleX contact link canonicalized by
+ * gate 7b) were removed: SimpleX has no pre-configurable cryptographic
+ * sender address, so {@code simplex.admin} is no longer a bootstrap-admin
+ * path (gate 7's union counts only {@code simplex.admin-token}), and
+ * {@code start("simplex")} with only {@code .admin} now correctly fails
+ * gate 7. The gate-7b SimpleX-link canonicalization those cases proved is
+ * preserved by
+ * {@code AdminBootstrapIT.simplexAdminTokenSatisfiesGate7Union}, whose
+ * profile sets both {@code simplex.admin} (full link) and a token so
+ * {@code start("simplex")} still runs gate-7b canonicalization on the
+ * link.</p>
  */
 @QuarkusTest
 @TestProfile(BootstrapAdminParseGateTest.Profile.class)
 class BootstrapAdminParseGateTest {
-
-    /** A bare SimpleX queue address (URL-safe base64, 44 chars ≥ the 43 floor). */
-    static final String SIMPLEX_BARE_QUEUE_ID = "SimplexBootstrapAdminQueueAddr0000000000000A";
-
-    /**
-     * The same bare id wrapped in a full SimpleX contact link — the
-     * operator-facing form gate 7b must canonicalize before validating
-     * (M1-465). The SMP URI is URL-encoded so the test does not hand-roll
-     * the percent-encoding the adapter's extractor expects.
-     */
-    static final String SIMPLEX_ADMIN_FULL_LINK =
-            "https://simplex.chat/contact#/?v=2-7&smp="
-                    + URLEncoder.encode("smp://hQ@smp.example.com/" + SIMPLEX_BARE_QUEUE_ID
-                            + "#/?v=1&dh=AB", StandardCharsets.UTF_8);
 
     @Inject
     AdapterRegistry registry;
@@ -64,38 +54,6 @@ class BootstrapAdminParseGateTest {
                 "gate message must name the offending property, got: " + e.getMessage());
     }
 
-    @Test
-    void gateAcceptsWellFormedSimplexAdminAndProceeds() {
-        assertDoesNotThrow(() -> registry.start("simplex"),
-                "a well-formed simplex.admin must pass the parse gate");
-        List<String> activated = registry.activatedAdapters().stream()
-                .map(MessagingAdapter::name)
-                .toList();
-        assertTrue(activated.contains("simplex"),
-                "startup must proceed past the gate and activate simplex; got: " + activated);
-    }
-
-    @Test
-    void adminGivenAsFullContactLinkIsAcceptedAfterCanonicalization() {
-        // The profile configures simplex.admin as a full SimpleX contact link.
-        // On its own that raw link is NOT a well-formed bare queue id — the gate
-        // accepts it only because gate 7b canonicalizes it first (M1-465).
-        SimpleXAdapter simplex = new SimpleXAdapter();
-        assertFalse(simplex.isWellFormedContactId(SIMPLEX_ADMIN_FULL_LINK),
-                "a raw contact link must not be well-formed on its own");
-        assertTrue(simplex.isWellFormedContactId(
-                        simplex.canonicalizeContactId(SIMPLEX_ADMIN_FULL_LINK)),
-                "canonicalizing the link must yield a well-formed bare id");
-
-        assertDoesNotThrow(() -> registry.start("simplex"),
-                "the parse gate must accept a full-link admin after canonicalization");
-        List<String> activated = registry.activatedAdapters().stream()
-                .map(MessagingAdapter::name)
-                .toList();
-        assertTrue(activated.contains("simplex"),
-                "startup must proceed past the gate and activate simplex; got: " + activated);
-    }
-
     public static class Profile implements QuarkusTestProfile {
         @Override
         public Map<String, String> getConfigOverrides() {
@@ -107,19 +65,13 @@ class BootstrapAdminParseGateTest {
             // values at boot (before any write), so the deliberately
             // malformed signal.admin below would otherwise abort this test
             // app's startup before the gate under test ever runs. The only
-            // values this test depends on are the two .admin entries.
+            // value this test depends on is the malformed signal.admin.
             return Map.ofEntries(
                     Map.entry("quarkus.arc.exclude-types",
                             "app.zcat.infochat.provider.messaging.MessagingStartup,"
                                     + "app.zcat.infochat.provider.startup.AdminBootstrap"),
-                    Map.entry("infochat.adapters", "simplex,signal"),
+                    Map.entry("infochat.adapters", "signal"),
                     Map.entry("infochat.adapters.inmemory.allow-low-trust", "true"),
-                    Map.entry("infochat.adapters.simplex.binary", "/bin/sh"),
-                    Map.entry("infochat.adapters.simplex.data-dir", "/tmp"),
-                    Map.entry("infochat.adapters.simplex.ws-port", "5225"),
-                    // Full SimpleX contact link: gate 7b canonicalizes it to the
-                    // bare queue id before validating (M1-465), so it passes.
-                    Map.entry("infochat.adapters.simplex.admin", SIMPLEX_ADMIN_FULL_LINK),
                     Map.entry("infochat.adapters.signal.binary", "/bin/sh"),
                     Map.entry("infochat.adapters.signal.data-dir", "/tmp"),
                     Map.entry("infochat.adapters.signal.account", "test-account"),

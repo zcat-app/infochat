@@ -554,6 +554,17 @@ class InboundRouterIntakeOrderingTest {
         router.inboundContext = new RecordingInboundContext(log);
         router.rateCapBucket = new CountingRateCapBucket(log);
         router.inviteCodeConsumer = new FakeInviteCodeConsumer(log);
+        // M1-506: step 2 now calls the SimpleX admin-claim BEFORE the invite
+        // consume. These ordering scenarios use ADAPTER="inmemory" (never a
+        // claim), so a log-silent stub returning NotClaimed keeps the flow
+        // falling through to inviteCodeConsumer exactly as before — the
+        // per-step call-order assertions are unchanged (the stub never logs).
+        router.simpleXAdminClaim = new SimpleXAdminClaim() {
+            @Override
+            public Outcome claim(String adapter, String contactId, String body) {
+                return new NotClaimed();
+            }
+        };
         router.bundleLoader = new FakeBundleLoader(log);
         // M1-051: step 4.5 confirm-cancel sweep peek call would NPE on
         // a null @Inject field. The Noop returns Optional.empty() AND

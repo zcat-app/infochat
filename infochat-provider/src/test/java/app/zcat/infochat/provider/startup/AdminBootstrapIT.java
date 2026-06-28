@@ -18,6 +18,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -190,16 +191,40 @@ class AdminBootstrapIT {
     }
 
     @Test
-    void adminGivenAsFullContactLinkSeedsBareQueueIdRow() throws Exception {
-        // The simplex bean canonicalizes the full contact link to its bare
-        // queue id before seeding (M1-465), so the seeded row is the id inbound
-        // messages byte-match — not the raw link.
+    void seedSkipsSimplexEvenWhenAdminConfiguredAsContactLink() throws Exception {
+        // D50 / M1-506: SimpleX has no pre-seedable cryptographic sender
+        // address, so AdminBootstrap.seed NEVER pre-seeds a SimpleX admin
+        // row — even when infochat.adapters.simplex.admin is configured
+        // (here a full contact link, set in Profile below). The SimpleX
+        // admin is established at claim time by SimpleXAdminClaim
+        // (admin-token, first DM), not here. This replaces the former
+        // adminGivenAsFullContactLinkSeedsBareQueueIdRow, whose by-address
+        // seeding is the protocol-unsound behavior this ticket removes; the
+        // configured .admin is kept in Profile so the assertion proves the
+        // production skip overrides a real configured value (not merely
+        // config absence).
         adminBootstrap.seed("simplex");
 
-        assertTrue(isAdminAt("simplex", SIMPLEX_BARE_QUEUE_ID),
-                "the seeded admin row must carry the bare queue id, not the raw link");
+        assertFalse(isAdminAt("simplex", SIMPLEX_BARE_QUEUE_ID),
+                "the bare queue id must NOT be seeded — SimpleX is not pre-seeded by address (D50)");
         assertFalse(isAdminAt("simplex", SIMPLEX_ADMIN_FULL_LINK),
-                "the raw contact link must NOT be seeded as a contact id");
+                "the raw contact link must NOT be seeded either");
+        assertEquals(0, adminCountForAdapter("simplex"),
+                "AdminBootstrap must create NO SimpleX admin row (claim-time only, D50)");
+    }
+
+    @Test
+    void simplexAdminTokenSatisfiesGate7Union() {
+        // D50: a configured infochat.adapters.simplex.admin-token (set in
+        // Profile) is SimpleX's bootstrap-admin path — SimpleX has no
+        // pre-seedable address — and MUST satisfy the gate-7 admin union,
+        // so activating SimpleX alone does not throw "union empty". The
+        // token is the ONLY thing satisfying SimpleX's side of the union:
+        // AdapterRegistry.hasBootstrapAdminPath reads the admin-token key
+        // for SimpleX and deliberately ignores a stray .admin (inert post-
+        // D50), so this pass is attributable to the token.
+        assertDoesNotThrow(() -> registry.start("simplex"),
+                "a configured SimpleX admin-token must satisfy the gate-7 admin union (D50)");
     }
 
     @Test
@@ -303,11 +328,17 @@ class AdminBootstrapIT {
                     "infochat.adapters.fake-x.admin", "fake-x-bootstrap-admin",
                     "infochat.adapters.fake-y.admin", "fake-y-bootstrap-admin",
                     "infochat.adapters.fake-promote.admin", "fake-promote-bootstrap-admin",
-                    // Full SimpleX contact link: the simplex bean canonicalizes it
-                    // to the bare queue id before seeding (M1-465). simplex is not
-                    // activated at boot (infochat.adapters=inmemory), so this is
-                    // consumed only by the explicit seed("simplex") call.
-                    "infochat.adapters.simplex.admin", SIMPLEX_ADMIN_FULL_LINK);
+                    // A configured SimpleX .admin (full contact link) that
+                    // seedSkipsSimplexEvenWhenAdminConfiguredAsContactLink proves
+                    // is now IGNORED — AdminBootstrap skips SimpleX (D50). simplex
+                    // is not activated at boot (infochat.adapters=inmemory), so
+                    // this is consumed only by the explicit seed("simplex") call.
+                    "infochat.adapters.simplex.admin", SIMPLEX_ADMIN_FULL_LINK,
+                    // SimpleX's real bootstrap-admin path (D50): the single-use
+                    // claim-token. simplexAdminTokenSatisfiesGate7Union proves a
+                    // configured token satisfies the gate-7 union via the explicit
+                    // registry.start("simplex") call.
+                    "infochat.adapters.simplex.admin-token", "test-simplex-admin-token");
         }
     }
 }

@@ -78,6 +78,20 @@ public class AdapterRegistry {
      */
     static final String INMEMORY_NAME = "inmemory";
 
+    /**
+     * Production name reserved by the SimpleX adapter. SimpleX has no
+     * pre-configurable cryptographic sender address (decision D50), so
+     * its bootstrap-admin path is the single-use claim-token
+     * {@code infochat.adapters.simplex.admin-token}, NOT
+     * {@code infochat.adapters.simplex.admin} — gate 7's union check
+     * reads the token key for this adapter (see
+     * {@link #hasBootstrapAdminPath}).
+     */
+    static final String SIMPLEX_NAME = "simplex";
+
+    /** The SimpleX claim-token config key (decision D50). */
+    static final String SIMPLEX_ADMIN_TOKEN_KEY = "infochat.adapters.simplex.admin-token";
+
     @Inject
     @Any
     Instance<MessagingAdapter> discoveredAdapters;
@@ -263,10 +277,7 @@ public class AdapterRegistry {
         Config config = ConfigProvider.getConfig();
         boolean anyBootstrapAdminConfigured = false;
         for (MessagingAdapter adapter : activating) {
-            String admin = config.getOptionalValue(
-                    "infochat.adapters." + adapter.name() + ".admin",
-                    String.class).orElse("");
-            if (!admin.isBlank()) {
+            if (hasBootstrapAdminPath(config, adapter.name())) {
                 anyBootstrapAdminConfigured = true;
                 break;
             }
@@ -277,10 +288,12 @@ public class AdapterRegistry {
                     .reduce((a, b) -> a + ", " + b)
                     .orElse("");
             throw new IllegalStateException(
-                    "Bootstrap admin: the union of infochat.adapters.<name>.admin"
+                    "Bootstrap admin: the union of bootstrap-admin paths"
+                            + " (infochat.adapters.<name>.admin, or"
+                            + " infochat.adapters.simplex.admin-token for SimpleX)"
                             + " across activated adapters (" + names + ") is empty —"
                             + " at least one enabled adapter MUST declare a"
-                            + " bootstrap admin contact id per"
+                            + " bootstrap admin path per"
                             + " docs/spec/deployment.md §Operator inputs");
         }
 
@@ -398,6 +411,25 @@ public class AdapterRegistry {
             }
         }
         return out;
+    }
+
+    /**
+     * Does {@code adapterName} have a configured bootstrap-admin path?
+     * For SimpleX the path is the single-use claim-token
+     * {@code infochat.adapters.simplex.admin-token} (decision D50 —
+     * SimpleX has no pre-seedable cryptographic address, so a stray
+     * {@code .admin} on SimpleX is inert and deliberately does NOT
+     * count here: counting it would let a deployment pass gate 7 with
+     * no admin ever created and no token to claim one). For every other
+     * adapter the path is the configure-by-address
+     * {@code infochat.adapters.<name>.admin} that AdminBootstrap
+     * pre-seeds.
+     */
+    private static boolean hasBootstrapAdminPath(Config config, String adapterName) {
+        String key = SIMPLEX_NAME.equals(adapterName)
+                ? SIMPLEX_ADMIN_TOKEN_KEY
+                : "infochat.adapters." + adapterName + ".admin";
+        return !config.getOptionalValue(key, String.class).orElse("").isBlank();
     }
 
     private static boolean isLowTrustAllowed(String adapterName) {

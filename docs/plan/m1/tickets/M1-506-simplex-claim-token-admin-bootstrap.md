@@ -1,9 +1,9 @@
 ---
 id: M1-506
 title: "SimpleX: claim-token bot-admin bootstrap (drop by-address)"
-status: pending
+status: done
 created: 2026-06-27
-last_updated: 2026-06-27
+last_updated: 2026-06-28
 blocked_by: []
 files_budget: 12
 complexity: high
@@ -64,6 +64,8 @@ test_plan:
   modifies:
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXMessageCodecTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/startup/AdminBootstrapIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/BootstrapAdminParseGateTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterIntakeOrderingTest.java
   preserves:
     - all tests currently green on main EXCEPT the SimpleX-specific AdminBootstrapIT case(s) this ticket updates (see modifies and Notes "AdminBootstrapIT")
     - existing Signal bootstrap-admin tests (AdminBootstrap / parse-gate) and all non-SimpleX AdminBootstrapIT cases stay green
@@ -77,12 +79,90 @@ decision_refs:
   - D10
   - D32
   - D44
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-28
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 14
+      added: 899
+      removed: 118
+  - round: 2
+    date: 2026-06-28
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 15
+      added: 1100
+      removed: 122
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-06-28
+    category: PERM-ESCAL
+    severity: medium
+    promise: |
+      D50 / security.md §Authorization model + §Per-adapter admin threat
+      profile: the token is single-use — once any contact has claimed SimpleX
+      admin, a later presentation grants nothing; "a leaked token cannot be
+      replayed once the real admin has claimed."
+    gap: |
+      Single-use is gated on row-existence (WHERE NOT EXISTS (… is_admin=TRUE)),
+      not token-spent. A /revoke-admin of the SimpleX admin (allowed in
+      multi-adapter deployments — the global last-admin counter is kept >= 1 by
+      a Signal admin) re-arms the still-configured token, so a leaked token can
+      re-claim admin. Also makes the security.md rotation paragraph describe
+      behavior the code cannot do.
+    repro: |
+      SimpleX+Signal deployment; SimpleX admin claimed; /revoke-admin the
+      SimpleX admin (global count stays >=1 via Signal); SimpleX is_admin count
+      is now 0; attacker holding the leaked token sends one DM with the token →
+      claim succeeds again.
+    suggested_fix_class: trust-boundary-tightening
+redteam_audits:
+  - date: 2026-06-28
+    verdict: FINDINGS
+    base: working-tree fork point (M1-506 refine commit)
+    head: working-tree (uncommitted M1-506 implementation)
+    verdict_file: docs/plan/m1/redteam/M1-506-2026-06-28.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      One medium PERM-ESCAL (single-use row-existence-based, not token-spent).
+      RESOLVED (round 2, user-delegated) by spec-alignment + operator
+      mitigation, NOT by a code gate change. The durable-audit-log gate that
+      would make single-use survive a revoke is infeasible: the application DB
+      role is write-only on audit_log (audit-integrity least-privilege, D34),
+      so the claim path cannot read the claim record, and a durable token-spent
+      marker would need a schema migration this ticket's out_of_scope forbids
+      (verified: an audit_log-read gate failed with "permission denied for
+      table audit_log"). Instead the over-promising spec wording was corrected
+      to the actual guarantee (single-use while a SimpleX admin exists), the
+      operator mitigation that fully closes the attack is documented (unset
+      infochat.adapters.simplex.admin-token once the first admin is
+      established — with no token, nothing can re-arm), and
+      permanent-single-use-without-unsetting is filed as a follow-up (needs the
+      durable marker + migration). Removing the promise-vs-delivery gap is what
+      resolves the finding. Out-of-model token-length side channel: not
+      actioned (body is attacker-chosen; spec does not commit to hiding length).
+clarity_check:
+  date: 2026-06-27
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-506.md
 ---
 
 # M1-506: SimpleX — claim-token bot-admin bootstrap (drop by-address)
@@ -170,10 +250,40 @@ token lifecycle beyond single-use first-admin**; **no schema migration**.
   Delete-vs-invert is the implementer's call; the assertion must reflect item 1.
   All other AdminBootstrapIT cases (inmemory boot, fake-x/fake-y/fake-promote
   seed/rotate/idempotency, the gate-7 union case) are unaffected and stay green.
+- **Additional pre-existing tests modified (authorized 2026-06-28, user
+  directive "ultrathink and recommend" after mid-implementation full-verify
+  surfaced them — same class as the AdminBootstrapIT conflict).**
+  - `BootstrapAdminParseGateTest`: its two SimpleX cases
+    (`gateAcceptsWellFormedSimplexAdminAndProceeds`,
+    `adminGivenAsFullContactLinkIsAcceptedAfterCanonicalization`) assert that
+    `infochat.adapters.simplex.admin` is a valid bootstrap admin that passes
+    the startup gates — exactly the by-address behavior D50 removes (gate 7's
+    union no longer counts SimpleX `.admin`). New expected behavior: those two
+    cases are DELETED as obsolete; the Signal reject case stays. The M1-465
+    gate-7b canonicalization coverage they provided is preserved by the new
+    `AdminBootstrapIT.simplexAdminTokenSatisfiesGate7Union` (its profile sets
+    `simplex.admin` = full link + a token, so `start("simplex")` still runs
+    gate-7b canonicalization on the link).
+  - `InboundRouterIntakeOrderingTest`: pure scaffolding — the hand-constructed
+    router gains a log-silent `SimpleXAdminClaim` stub returning `NotClaimed`
+    so step 2 reaches the invite consumer as before. No assertion changes.
 - **Follow-up (not this ticket).** The by-address admin commands
   (`/grant-admin <contact>`, `/ban <contact>`) carry the same broken
   "stable public SimpleX address" assumption and need a connection/handle-based
-  rework. File a separate ticket.
+  rework. File a separate ticket. Also file: gate 7b
+  (`AdapterRegistry`) still format-validates a now-inert
+  `infochat.adapters.simplex.admin` if present; for full per-adapter
+  consistency it could skip SimpleX (like gate 7 and AdminBootstrap now do).
+  Deferred here as a non-acceptance consistency improvement (the residual
+  behavior is harmless fail-fast on stale config, not a security gap). Also
+  file: **permanent SimpleX claim-token single-use** (M1-506 redteam medium
+  PERM-ESCAL) — make single-use survive a `/revoke-admin` without relying on
+  the operator unsetting the token. This needs a durable token-spent marker;
+  the application DB role is write-only on `audit_log` (so the claim path
+  cannot read a claim record), so the marker requires a schema migration
+  (a `users` column or a small `bootstrap_token_claim` table) — out of scope
+  here (no-migration). v1 relies on the documented operator hygiene (unset the
+  token after the first admin is established).
 
 ## Pre-flight self-check (author-side)
 

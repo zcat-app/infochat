@@ -277,6 +277,59 @@ class SimpleXMessageCodecTest {
     }
 
     @Test
+    void directNewChatItemWithProfileContactLinkStillResolvesConnectionContactId() {
+        // Regression guard for M1-506 / decision D50: a SimpleX sender's
+        // advertised profile address (contact.profile.contactLink) is
+        // self-asserted and NOT verified (out of scope of the SMP
+        // protocol), so it must never influence the resolved identity.
+        // The discarded M1-505 approach mapped that advertised address to
+        // the contact_id / authz key, which let any contact spoof the
+        // admin. This asserts the codec still resolves both
+        // Identity.contactId AND ScopeRef.Dm.contactId to the
+        // connection-based contactId even when a contactLink is present and
+        // differs from it — the mapping is not (re)introduced.
+        String connectionContactId = "Bnv1l0BPLkXjA38n-bWvHQ==";
+        String advertisedContactLink =
+                "https://simplex.chat/contact#/?v=2-7&smp=smp%3A%2F%2FhQ%40smp.example.com";
+        String frame = """
+                {
+                  "resp": {
+                    "type": "newChatItem",
+                    "chatItem": {
+                      "chatInfo": {
+                        "chatType": "direct",
+                        "contact": {
+                          "contactId": %s,
+                          "displayName": "Peer",
+                          "profile": {
+                            "contactLink": %s
+                          }
+                        }
+                      },
+                      "chatItem": {
+                        "itemId": "msg-1",
+                        "content": {
+                          "msgContent": {
+                            "type": "text",
+                            "text": "hi"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                """.formatted(jsonStringLiteral(connectionContactId),
+                        jsonStringLiteral(advertisedContactLink));
+        var decoded = SimpleXMessageCodec.decode(frame);
+        var inbound = assertInstanceOf(SimpleXMessageCodec.Inbound.class, decoded,
+                "a direct frame with a profile.contactLink must still decode as Inbound");
+        assertEquals(connectionContactId, inbound.message().sender().contactId(),
+                "identity is the connection contactId, never the advertised contactLink");
+        assertEquals(new ScopeRef.Dm(connectionContactId), inbound.message().scope(),
+                "scope ref carries the connection contactId, never the advertised contactLink");
+    }
+
+    @Test
     void decodeAcceptsValidQueueAddressShapedContactId() {
         // A contactId in the documented queue-address character set
         // (URL-safe base64 ∪ decimal — A-Z, a-z, 0-9, _ = . -)

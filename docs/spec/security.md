@@ -39,7 +39,14 @@ notes. The spec-level commitments below cover all of them.
 
 1. **Adapter → Provider.** The adapter asserts identity via a stable,                                                                                                                                                                                 
    cryptographically anchored ID. Display names are informational and never                                                                                                                                                                           
-   used for authorization (decision D10).
+   used for authorization (decision D10). For SimpleX the anchored ID
+   is the **per-connection contact id** the transport assigns; a
+   sender's advertised profile address (`contact.profile.contactLink`)
+   is **self-asserted and not verified** (out of scope of the SMP
+   protocol) and so falls in the same "informational, never used for
+   authorization" category as display names — it never influences the
+   resolved identity, including for the SimpleX admin claim-token path
+   (decision D50, §Authorization model).
 2. **Provider intake → command/chat router.** Identity resolution and the        
    ban check run *before* parsing. Banned users get one fixed reply and                                                                                                                                                                               
    never reach the parser, the chat agent, or any DB query past the ban          
@@ -336,7 +343,26 @@ codebase rather than a discipline.
 Two admin tiers (decision D9):
 
 - **Bot admin** — global. Bootstrapped from config; `/grant-admin` by                                                                                                                                                                                 
-  another bot admin.
+  another bot admin. **The bootstrap mechanism is per-adapter
+  (decision D50), because the adapters expose different identity
+  primitives.** Signal pre-seeds an `is_admin = true` row from the
+  configured ACI (a real cryptographic account id) at startup.
+  **SimpleX cannot be configured by address** — it exposes no
+  pre-configurable cryptographic sender address; identity is the
+  per-connection id, and a sender's advertised profile address
+  (`contact.profile.contactLink`) is **self-asserted, not
+  verified** (out of scope of the SMP protocol), so it is never an
+  authorization key. SimpleX admin is instead claimed by a
+  **single-use secret token** (`infochat.adapters.simplex.admin-token`,
+  the D44 invite-code shape extended to flip `is_admin`): the first
+  DM presenting the token flips `is_admin` on the *sending
+  connection's* `(simplex, contact_id)` row; while that admin exists a
+  later presentation grants nothing and gives the same fixed reply an
+  invalid invite would (no validity oracle). Nothing is pre-seeded for
+  SimpleX. Operators should unset the token once the first admin is
+  established (the residual single-use caveat and that mitigation are
+  detailed in §Per-adapter admin threat profile). See `deployment.md`
+  §Operator inputs item 2 and §Per-adapter admin threat profile.
 - **Group admin** — one group only. Bootstrapped by first `@mention` in a                                                                                                                                                                             
   new group; `/promote` / `/demote` by bot admin.
 
@@ -552,14 +578,42 @@ should pick admin placement deliberately:
   powers on the Signal adapter only (per the inbound-adapter-scoped
   grant rule above), but that includes invite issuance, ban,
   source mutation, and audit access for that adapter.
-- **SimpleX admin.** The admin's identity is a cryptographic queue
-  address with no phone number, no username layer, and no
-  third-party recovery path. The address can be **rotated**
-  (operator generates a fresh queue, updates the bootstrap
-  property, restarts; the prior admin row is left in place per
-  `deployment.md` §Bootstrap admin drift and can be `/revoke-admin`'d
-  from the new admin). This is the recommended high-assurance
-  admin placement.
+- **SimpleX admin.** The admin's identity is the per-connection id
+  the transport assigns — cryptographically authenticated by SMP,
+  with no phone number, no username layer, and no third-party
+  recovery path. Because SimpleX exposes **no pre-configurable
+  cryptographic sender address** (the advertised
+  `contact.profile.contactLink` is self-asserted and not verified —
+  out of scope of the SMP protocol), the admin is **not** configured
+  by address; it is established by a **single-use claim-token**
+  (decision D50, `deployment.md` §Operator inputs item 2): the
+  operator sets `infochat.adapters.simplex.admin-token`, and the
+  first DM presenting it flips `is_admin` on the sending
+  connection's row. **Why the token is secure where an advertised
+  address would not be:** the connection is cryptographically
+  authenticated by SMP and the token is a secret only the operator
+  holds, so an attacker without the token cannot claim admin and
+  cannot influence their own connection-based `contact_id`; an
+  attacker who could only spoof an advertised address (the discarded
+  M1-505 approach) could impersonate the admin outright. The claim is
+  **single-use while a SimpleX admin exists**: the first DM presenting
+  the token establishes the admin, and while that admin row exists the
+  token grants nothing on any later presentation (same or different
+  contact). **Operators should unset
+  `infochat.adapters.simplex.admin-token` once the first admin is
+  established** — standard bootstrap-secret hygiene: with no token
+  configured, nothing can re-establish admin. That hygiene also closes
+  the residual case where a *still-configured* token could re-arm if
+  the SimpleX admin is later `/revoke-admin`'d (possible in a
+  multi-adapter deployment because last-admin protection is global
+  across adapters). Making single-use survive a revoke *without*
+  relying on the operator unsetting the token is **future work**: it
+  needs a durable token-spent marker, and because the application DB
+  role is write-only on the audit log (audit-integrity
+  least-privilege), that marker requires a schema change beyond this
+  change's scope. Re-issuing/rotating the token and multi-admin
+  issuance are likewise future work. This is the recommended
+  high-assurance admin placement.
 
 **Operator-side mitigations:**
 

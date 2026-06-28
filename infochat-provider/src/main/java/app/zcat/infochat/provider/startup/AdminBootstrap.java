@@ -77,6 +77,16 @@ public class AdminBootstrap {
     private static final Logger log = LoggerFactory.getLogger(AdminBootstrap.class);
 
     /**
+     * The SimpleX adapter name. SimpleX is skipped by {@link #seed}:
+     * it has no pre-configurable cryptographic sender address
+     * (decision D50), so its bootstrap admin is established at claim
+     * time by the single-use {@code infochat.adapters.simplex.admin-token}
+     * (handled by {@code SimpleXAdminClaim} on the first DM), never
+     * pre-seeded by address here.
+     */
+    private static final String SIMPLEX_NAME = "simplex";
+
+    /**
      * One-statement ensure: the INSERT arm creates the row with the
      * spec's bootstrap-seeded shape ({@code is_admin = true},
      * {@code is_banned = false}, {@code registration_state =
@@ -137,6 +147,14 @@ public class AdminBootstrap {
         // with no users/audit residue from the well-formed ones.
         Map<String, String> adminByAdapter = new LinkedHashMap<>();
         for (String adapterName : parseAdaptersList(csv)) {
+            // SimpleX is never pre-seeded by address (decision D50): a
+            // stray infochat.adapters.simplex.admin is deliberately
+            // ignored so the protocol-unsound by-address mapping cannot
+            // be reintroduced. The SimpleX admin row is created only at
+            // claim time by SimpleXAdminClaim (admin-token, first DM).
+            if (SIMPLEX_NAME.equals(adapterName)) {
+                continue;
+            }
             String contactId = config.getOptionalValue(
                     "infochat.adapters." + adapterName + ".admin",
                     String.class).orElse("");
