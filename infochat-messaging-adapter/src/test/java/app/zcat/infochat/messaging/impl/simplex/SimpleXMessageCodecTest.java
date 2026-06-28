@@ -732,6 +732,249 @@ class SimpleXMessageCodecTest {
                 "fixed sentinel per security.md §User content in exceptions");
     }
 
+    // --- M1-508: plural newChatItems (v6.5.4) inbound decode ---
+
+    // The batched plural async event simplex-chat v6.5.4 delivers for a
+    // RECEIVED direct message: resp.type == "newChatItems" (PLURAL), NO corrId,
+    // a chatItems ARRAY whose entry is an AChatItem ({chatInfo, chatItem}) with
+    // chatInfo.chatType == "direct" and a received chatItem. This is the real
+    // v6.5.4 frame structure (chatItems is an ARRAY, not the hand-rolled
+    // singular newChatItem object whose test-vs-reality gap hid the bug that
+    // silently discarded 100% of v6.5.4 inbound). Built inline so no resource
+    // file is added (files_scope is the codec + this test only).
+    private static final String NEW_CHAT_ITEMS_DIRECT_RECEIVED = """
+            {
+              "resp": {
+                "type": "newChatItems",
+                "chatItems": [
+                  {
+                    "chatInfo": {
+                      "chatType": "direct",
+                      "contact": {
+                        "contactId": "contact-xyz",
+                        "displayName": "Test User"
+                      }
+                    },
+                    "chatItem": {
+                      "itemId": "msg-77",
+                      "content": {
+                        "msgContent": {
+                          "type": "text",
+                          "text": "Inbound payload"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+            """;
+
+    @Test
+    void decodesNewChatItemsPluralDirectReceivedAsInbound() {
+        // Acceptance item 1: the v6.5.4 batched plural received-DM event decodes
+        // to an Inbound whose sender().contactId() and ScopeRef.Dm equal the
+        // connection contactId, carrying the message body. This is the fix —
+        // before M1-508 the plural type routed unconditionally to decodeSendAck
+        // and the message was dropped as send-ack-without-chatItemId.
+        var decoded = SimpleXMessageCodec.decode(NEW_CHAT_ITEMS_DIRECT_RECEIVED);
+        var inbound = assertInstanceOf(SimpleXMessageCodec.Inbound.class, decoded,
+                "a plural newChatItems received DM must decode as Inbound, not be dropped");
+        assertEquals("contact-xyz", inbound.message().sender().contactId(),
+                "identity is the connection contactId (D10)");
+        assertEquals("Test User", inbound.message().sender().displayName());
+        assertEquals("Inbound payload", inbound.message().text());
+        assertEquals(new ScopeRef.Dm("contact-xyz"), inbound.message().scope(),
+                "scope is the DM keyed on the connection contactId");
+        assertEquals("msg-77", inbound.message().adapterMessageId());
+    }
+
+    @Test
+    void newChatItemsWithCorrIdStillDecodesAsSendAck() {
+        // Acceptance item 2: the SAME plural shape but WITH a corrId is the
+        // response to our own /_send, not an inbound message. It must decode as
+        // a SendAck (extracting chatItems[0].chatItem.itemId), never as an
+        // Inbound — otherwise the bot would treat its own sent message as a
+        // received one (self-echo loop). corrId is the discriminator: present →
+        // SendAck; absent → inbound.
+        String sendResult = """
+                {
+                  "corrId": "corr-send-1",
+                  "resp": {
+                    "type": "newChatItems",
+                    "chatItems": [
+                      {
+                        "chatInfo": {
+                          "chatType": "direct",
+                          "contact": {"contactId": "contact-xyz", "displayName": "Test User"}
+                        },
+                        "chatItem": {
+                          "itemId": "sent-99",
+                          "content": {"msgContent": {"type": "text", "text": "our reply"}}
+                        }
+                      }
+                    ]
+                  }
+                }
+                """;
+        var decoded = SimpleXMessageCodec.decode(sendResult);
+        var ack = assertInstanceOf(SimpleXMessageCodec.SendAck.class, decoded,
+                "a plural newChatItems WITH corrId is our send result — a SendAck, not an Inbound");
+        assertEquals("corr-send-1", ack.corrId());
+        assertEquals("sent-99", ack.chatItemId(),
+                "the chat-item id is read from chatItems[0].chatItem.itemId on the v6.5.4 array shape");
+    }
+
+    @Test
+    void decodesNewChatItemsPluralGroupReceivedAsGroupInbound() {
+        // Acceptance item 3: a group received message in the plural shape
+        // (chatInfo.chatType == "group") decodes to a group-scope GroupCandidate,
+        // mirroring the existing singular group path — the identity rules are
+        // shared (decodeChatItemEntry), so the plural path resolves the sender to
+        // the connection-based memberContactId exactly as the singular path does.
+        String groupFrame = """
+                {
+                  "resp": {
+                    "type": "newChatItems",
+                    "chatItems": [
+                      {
+                        "chatInfo": {
+                          "chatType": "group",
+                          "groupInfo": {"groupId": "group-1"}
+                        },
+                        "chatItem": {
+                          "itemId": "g-msg-1",
+                          "chatDir": {
+                            "groupMember": {
+                              "memberContactId": "sender-qaddr",
+                              "localDisplayName": "Sender"
+                            }
+                          },
+                          "content": {"msgContent": {"type": "text", "text": "group hello"}}
+                        }
+                      }
+                    ]
+                  }
+                }
+                """;
+        var candidate = assertInstanceOf(
+                SimpleXMessageCodec.GroupCandidate.class,
+                SimpleXMessageCodec.decode(groupFrame),
+                "a plural newChatItems group message must decode as GroupCandidate");
+        assertEquals("group-1", candidate.adapterGroupId());
+        assertEquals("sender-qaddr", candidate.senderContactId(),
+                "sender is the connection-based memberContactId (D10)");
+        assertEquals("group hello", candidate.text());
+        assertEquals("g-msg-1", candidate.adapterMessageId());
+    }
+
+    @Test
+    void newChatItemsPluralDirectAppliesConnectionContactIdNotAdvertisedLink() {
+        // Acceptance item 4 (regression, security): the M1-506/D50 rule — a
+        // sender's self-asserted profile.contactLink must never influence the
+        // resolved identity — holds on the plural path too. Because the plural
+        // and singular paths share decodeChatItemEntry, the connection contactId
+        // is authoritative here exactly as in the singular regression test.
+        String connectionContactId = "Bnv1l0BPLkXjA38n-bWvHQ==";
+        String advertisedContactLink =
+                "https://simplex.chat/contact#/?v=2-7&smp=smp%3A%2F%2FhQ%40smp.example.com";
+        String frame = """
+                {
+                  "resp": {
+                    "type": "newChatItems",
+                    "chatItems": [
+                      {
+                        "chatInfo": {
+                          "chatType": "direct",
+                          "contact": {
+                            "contactId": %s,
+                            "displayName": "Peer",
+                            "profile": {"contactLink": %s}
+                          }
+                        },
+                        "chatItem": {
+                          "itemId": "msg-1",
+                          "content": {"msgContent": {"type": "text", "text": "hi"}}
+                        }
+                      }
+                    ]
+                  }
+                }
+                """.formatted(jsonStringLiteral(connectionContactId),
+                        jsonStringLiteral(advertisedContactLink));
+        var inbound = assertInstanceOf(SimpleXMessageCodec.Inbound.class,
+                SimpleXMessageCodec.decode(frame),
+                "a plural direct frame with a profile.contactLink still decodes as Inbound");
+        assertEquals(connectionContactId, inbound.message().sender().contactId(),
+                "identity is the connection contactId, never the advertised contactLink");
+        assertEquals(new ScopeRef.Dm(connectionContactId), inbound.message().scope(),
+                "scope carries the connection contactId, never the advertised contactLink");
+    }
+
+    @Test
+    void newChatItemsPluralAsyncMultiItemDecodesFirstOnly() {
+        // First-only (v1) behavior, called out explicitly: decode() returns a
+        // single DecodedFrame and its consumer handles one frame per call, so a
+        // received async newChatItems batch carrying >1 item decodes only the
+        // first. v6.5.4 delivers exactly one received item per async event, so
+        // this loses nothing in practice; the test pins the documented choice so
+        // a future change is a deliberate one. The second item (a distinct
+        // contactId) must NOT surface from this single decode call.
+        String twoItems = """
+                {
+                  "resp": {
+                    "type": "newChatItems",
+                    "chatItems": [
+                      {
+                        "chatInfo": {
+                          "chatType": "direct",
+                          "contact": {"contactId": "first-contact", "displayName": "First"}
+                        },
+                        "chatItem": {
+                          "itemId": "msg-a",
+                          "content": {"msgContent": {"type": "text", "text": "first"}}
+                        }
+                      },
+                      {
+                        "chatInfo": {
+                          "chatType": "direct",
+                          "contact": {"contactId": "second-contact", "displayName": "Second"}
+                        },
+                        "chatItem": {
+                          "itemId": "msg-b",
+                          "content": {"msgContent": {"type": "text", "text": "second"}}
+                        }
+                      }
+                    ]
+                  }
+                }
+                """;
+        var inbound = assertInstanceOf(SimpleXMessageCodec.Inbound.class,
+                SimpleXMessageCodec.decode(twoItems),
+                "the first item of a multi-item plural batch decodes as Inbound");
+        assertEquals("first-contact", inbound.message().sender().contactId(),
+                "first-only: the first array entry is the one decoded");
+        assertEquals("first", inbound.message().text());
+    }
+
+    @Test
+    void newChatItemsAsyncWithoutItemsArrayIsIgnored() {
+        // A no-corrId plural event lacking a usable chatItems ARRAY is dropped
+        // with a fixed sentinel (no attacker bytes in the reason — it flows to
+        // the WS-client DEBUG log, security.md §User content in exceptions).
+        var empty = SimpleXMessageCodec.decode(
+                "{\"resp\": {\"type\": \"newChatItems\", \"chatItems\": []}}");
+        var ignoredEmpty = assertInstanceOf(SimpleXMessageCodec.Ignored.class, empty,
+                "an empty chatItems array on a received plural event is Ignored");
+        assertEquals("newChatItems-without-items", ignoredEmpty.reason());
+
+        var missing = SimpleXMessageCodec.decode(
+                "{\"resp\": {\"type\": \"newChatItems\"}}");
+        var ignoredMissing = assertInstanceOf(SimpleXMessageCodec.Ignored.class, missing,
+                "a missing chatItems on a received plural event is Ignored");
+        assertEquals("newChatItems-without-items", ignoredMissing.reason());
+    }
+
     @Test
     void unrecognizedErrorEnvelopeYieldsFixedDetail() {
         // chatCmdError / chatItemUpdateError frames where no recognized

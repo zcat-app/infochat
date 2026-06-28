@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 25 |
+| pending | 24 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 512 |
+| done | 513 |
 | deferred | 7 |
 | **total** | **544** |
 
@@ -47,7 +47,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-499 — Test fixture duplication → testsupport, plus a leaked registration teardown (complexity: low, risk: low)
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-501 — Stage-1-flagged posts can permanently evade Stage 2 after a crash (complexity: medium, risk: medium)
-- M1-508 — SimpleX codec: decode newChatItems (plural) inbound (v6.5.4) (complexity: medium, risk: high)
 - M1-509 — Operator onboarding: simple (comic) + advanced admin guides (complexity: medium, risk: low)
 
 ---
@@ -84,6 +83,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-508 | SimpleX codec: decode newChatItems (plural) inbound (v6.5.4) | 2026-06-28 | round 1 APPROVE |
 | M1-507 | Operator tooling + docs for SimpleX claim-token bootstrap | 2026-06-28 | round 1 APPROVE |
 | M1-506 | SimpleX: claim-token bot-admin bootstrap (drop by-address) | 2026-06-28 | round 2 APPROVE |
 | M1-504 | SimpleX adapter cannot start: queue-address length floor (43) rejects every real bot address (32 chars) | 2026-06-27 | round 1 APPROVE |
@@ -93,7 +93,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-476 | upgrade.sh deploys the current checkout with zero operator config | 2026-06-27 | round 1 APPROVE |
 | M1-475 | Enforce D43 over non-constant bundle keys (en-keyset gate) | 2026-06-27 | round 1 APPROVE |
 | M1-474 | Enforce D43 bundle completeness: make BundleLoaderTest fail on a missing per-bundle key + backfill cs.properties | 2026-06-27 | round 1 APPROVE |
-| M1-473 | prod/scripts/upgrade.sh: git-pull main + rebuild app images + ordered restart, all config/data preserved | 2026-06-27 | round 1 APPROVE |
 
 ---
 
@@ -733,6 +732,6 @@ M1-504 (done)
 M1-506 (done)
   └── M1-505 (deferred) [see above]
 M1-507 (done)
-M1-508 (pending) ← runnable
+M1-508 (done)
 M1-509 (pending) ← runnable
 ```

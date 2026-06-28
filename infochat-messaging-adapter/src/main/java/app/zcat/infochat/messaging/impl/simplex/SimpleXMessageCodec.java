@@ -279,7 +279,8 @@ final class SimpleXMessageCodec {
         String type = typeNode.asText();
         return switch (type) {
             case "newChatItem" -> decodeNewChatItem(resp);
-            case "sentMessage", "apiSendMessageResponse", "newChatItems" -> decodeSendAck(corrId, resp);
+            case "newChatItems" -> decodeNewChatItems(corrId, resp);
+            case "sentMessage", "apiSendMessageResponse" -> decodeSendAck(corrId, resp);
             case "userContactLink" -> decodeSelfAddress(corrId, resp);
             case "chatCmdError", "chatItemUpdateError" -> decodeError(corrId, resp);
             // Fixed sentinel — same rule as the chatType-non-direct branch
@@ -299,6 +300,56 @@ final class SimpleXMessageCodec {
         if (chatItem == null || !chatItem.isObject()) {
             return new Ignored("newChatItem-without-chatItem");
         }
+        return decodeChatItemEntry(chatItem);
+    }
+
+    /**
+     * Decode the batched plural {@code newChatItems} event. simplex-chat
+     * v6.5.4 delivers BOTH the result of our own {@code /_send} AND a freshly
+     * RECEIVED message through this one event type; they are told apart by
+     * {@code corrId}. A send result carries the {@code corrId} of the command
+     * it answers; a received-message async event has none. The {@code corrId}
+     * is stamped by the local simplex-chat process on responses it pairs to
+     * our commands — the remote peer never controls the bot-API envelope — so
+     * its presence is a trusted local-process signal, not attacker-influenced
+     * (D10 trust boundary). corrId present → {@link #decodeSendAck}; corrId
+     * absent → decode the received item as inbound.
+     *
+     * <p>Before M1-508 the plural type was routed unconditionally to
+     * {@link #decodeSendAck}, so on v6.5.4 — which delivers every received DM
+     * as {@code newChatItems} — 100% of inbound was discarded as
+     * {@code send-ack-without-chatItemId} and never reached the router.</p>
+     *
+     * <p><strong>First-only (v1).</strong> A received {@code newChatItems}
+     * async event carries exactly one item on v6.5.4, and {@link #decode}
+     * returns a single {@link DecodedFrame} whose consumer
+     * ({@code SimpleXWebSocketClient.dispatch}) handles one frame per call.
+     * If a future version batches more than one received item in a single
+     * async event, only the first is decoded and delivered; the rest are not.
+     * Delivering all would require widening the codec→client single-frame
+     * contract, out of this ticket's scope.</p>
+     */
+    private static DecodedFrame decodeNewChatItems(@Nullable String corrId, JsonNode resp) {
+        if (corrId != null) {
+            return decodeSendAck(corrId, resp);
+        }
+        JsonNode chatItems = resp.get("chatItems");
+        if (chatItems == null || !chatItems.isArray() || chatItems.isEmpty()) {
+            return new Ignored("newChatItems-without-items");
+        }
+        return decodeChatItemEntry(chatItems.get(0));
+    }
+
+    /**
+     * Decode one {@code AChatItem} entry — the {@code {chatInfo, chatItem}}
+     * object that is {@code resp.chatItem} on a singular {@code newChatItem}
+     * frame and each element of {@code resp.chatItems[]} on a plural
+     * {@code newChatItems} frame. The identity rules (D10: contact_id is the
+     * connection-based id, never the advertised contactLink) live here and are
+     * shared by both frame shapes, so the singular and plural paths cannot
+     * drift apart.
+     */
+    private static DecodedFrame decodeChatItemEntry(JsonNode chatItem) {
         JsonNode chatInfo = chatItem.get("chatInfo");
         if (chatInfo == null) {
             return new Ignored("newChatItem-without-chatInfo");
@@ -716,16 +767,22 @@ final class SimpleXMessageCodec {
 
     private static DecodedFrame decodeSendAck(@Nullable String corrId, JsonNode resp) {
         // Known simplex-chat shapes only: the chat-item id lives either
-        // directly on the response or under the chatItems container.
-        // Reading the known fields — not a breadth-first key search over
-        // every child object — keeps attacker-influenced envelope content
-        // (echoed inbound bytes) from being picked up as a forged
-        // chatItemId out of an unrelated nested object.
+        // directly on the response, on a chatItems container object, or — on
+        // the v6.5.4 plural newChatItems send result — inside the first
+        // element of the chatItems ARRAY as chatItems[0].chatItem.itemId
+        // (the AChatItem shape, same as a received item). Reading the known
+        // fields — not a breadth-first key search over every child object —
+        // keeps attacker-influenced envelope content (echoed inbound bytes)
+        // from being picked up as a forged chatItemId out of an unrelated
+        // nested object. path()/path(int) yield MissingNode (never null) for
+        // the shapes that don't apply, so each candidate is shape-safe.
         String chatItemId = firstTextual(
                 resp.get("itemId"),
                 resp.get("chatItemId"),
                 resp.path("chatItems").get("itemId"),
-                resp.path("chatItems").get("chatItemId"));
+                resp.path("chatItems").get("chatItemId"),
+                resp.path("chatItems").path(0).path("chatItem").get("itemId"),
+                resp.path("chatItems").path(0).path("chatItem").get("chatItemId"));
         if (chatItemId == null) {
             return new Ignored("send-ack-without-chatItemId");
         }

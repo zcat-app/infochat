@@ -1,7 +1,7 @@
 ---
 id: M1-508
 title: "SimpleX codec: decode newChatItems (plural) inbound (v6.5.4)"
-status: pending
+status: done
 created: 2026-06-28
 last_updated: 2026-06-28
 blocked_by: []
@@ -57,13 +57,45 @@ spec_refs:
 decision_refs:
   - D10
   - D46
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-28
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 319
+      removed: 15
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-28
+    verdict: CLEAN
+    base: main
+    head: "working-tree (m1/M1-508-simplex-codec-newchatitems-plural-inbound, uncommitted)"
+    verdict_file: docs/plan/m1/redteam/M1-508-2026-06-28.md
+    out_of_model_count: 2
+    note: |
+      CLEAN — plural newChatItems inbound decode preserves D10/D50 identity
+      (shared decodeChatItemEntry) and the corrId discriminator cannot be
+      driven to self-echo or mis-attribution by adversary-reachable input. Two
+      OUT-OF-MODEL advisory items (corrId direction trust within boundary 7;
+      first-only multi-item drop as an availability caveat), both non-blocking
+      and documented in-code; no follow-up ticket filed.
+clarity_check:
+  date: 2026-06-28
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 3: group-decode criterion says 'Named test covers it' without naming the test method; developer to name it."
+    - "FILES-BUDGET-PLAUSIBLE: test_plan.adds is empty but a real v6.5.4 frame fixture is required; resolved by inlining the fixture as a string constant in the test class (no new resource file)."
+  blockers: []
 ---
 
 # M1-508: SimpleX codec — decode newChatItems (plural) inbound (v6.5.4)
