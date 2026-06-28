@@ -1,8 +1,9 @@
 #!/bin/bash
 # prod/scripts/6-adapter.sh — wizard step 6: for each chosen messaging adapter,
 # drive its out-of-band registration, capture the on-disk identity material into
-# the runtime config/secrets, collect each adapter's bootstrap-admin contact id,
-# and enforce the non-empty admin union the Provider requires to start (§7.7.2
+# the runtime config/secrets, collect each adapter's bootstrap-admin credential
+# (SimpleX claim-token / Signal contact id), and enforce the non-empty admin
+# union the Provider requires to start (§7.7.2
 # step 6, §7.6.3). SimpleX queue creation and Signal phone/captcha enrolment stay
 # manual (§7.7 operator note, 06-messaging.md §6.5.1); this script only sequences
 # those steps and captures their output — it does not automate the registration.
@@ -102,32 +103,46 @@ dotenv_escape() {
   printf '%s' "$value"
 }
 
-# Collect a per-adapter bootstrap-admin contact id into secrets.env. The third
-# arg is 1 when this is the ONLY enabled adapter: then a blank is guaranteed to
-# trip the union gate (below) seconds later, so the prompt is REQUIRED and a
-# blank re-prompts with the reason rather than being accepted as 'none' (M1-441).
-# With 2+ adapters the property stays optional per adapter (§7.6.3) — a blank is
-# legal here because another enabled adapter may supply the admin, and the union
-# gate is the backstop for the all-blank case. Returns 0 when a contact ends up
-# set for this adapter (captured now or on a prior run), 1 when none is set — the
-# caller tallies the union (§7.6.3).
+# Collect a per-adapter bootstrap-admin credential into secrets.env. $4 is the
+# credential noun for the prompt ("contact id" for Signal's address, "claim-token"
+# for SimpleX's secret D50 token); $5 is 1 to read it with no terminal echo (the
+# SimpleX token is a secret, like the LLM key in 2-secrets.sh — Signal's address
+# is not). The third arg is 1 when this is the ONLY enabled adapter: then a blank
+# is guaranteed to trip the union gate (below) seconds later, so the prompt is
+# REQUIRED and a blank re-prompts with the reason rather than being accepted as
+# 'none' (M1-441). With 2+ adapters the credential stays optional per adapter
+# (§7.6.3) — a blank is legal here because another enabled adapter may supply the
+# admin, and the union gate is the backstop for the all-blank case. Returns 0 when
+# a credential ends up set for this adapter (captured now or on a prior run), 1
+# when none is set — the caller tallies the union (§7.6.3). For SimpleX the union
+# counts the admin-TOKEN, mirroring AdapterRegistry.hasBootstrapAdminPath (gate 7
+# counts infochat.adapters.simplex.admin-token, never the inert .admin — D50).
 collect_admin() {
-  local key="$1" adapter="$2" only_adapter="$3" val read_ok prompt
+  local key="$1" adapter="$2" only_adapter="$3" noun="$4" secret="$5" val read_ok prompt
   if grep -qE "^${key}=.+" "$SECRETS_FILE"; then
     echo "skip ${key} (already set)"
     return 0
   fi
   if [[ "$only_adapter" -eq 1 ]]; then
-    prompt="Bootstrap admin contact id for ${adapter} (required — the only enabled adapter, so its admin is the deployment's sole admin; last-admin protection needs it)"
+    prompt="Bootstrap admin ${noun} for ${adapter} (required — the only enabled adapter, so its admin is the deployment's sole admin; last-admin protection needs it)"
   else
-    prompt="Bootstrap admin contact id for ${adapter} (at least one across enabled adapters is required; blank only if another enabled adapter supplies one)"
+    prompt="Bootstrap admin ${noun} for ${adapter} (at least one across enabled adapters is required; blank only if another enabled adapter supplies one)"
   fi
   while true; do
-    if read -rp "$prompt: " val; then read_ok=1; else read_ok=0; fi
+    if [[ "$secret" -eq 1 ]]; then
+      # -s: do not echo the secret token to the terminal (shoulder-surf /
+      # terminal-capture hardening, mirroring the LLM-key prompt in 2-secrets.sh);
+      # the bare echo restores the newline -s eats so following output is aligned.
+      if read -rsp "$prompt: " val; then read_ok=1; else read_ok=0; fi
+      echo
+    else
+      if read -rp "$prompt: " val; then read_ok=1; else read_ok=0; fi
+    fi
     if [[ -n "$val" ]]; then
-      # Quote the value: a SimpleX queue address carries '#' / '&' / '?' / '+' /
-      # '=' — unquoted, compose's --env-file dotenv parse would truncate it at '#'
-      # (M1-389), so the bootstrap-admin id reaching the Provider would be wrong.
+      # Quote the value: a SimpleX claim-token or a Signal id can carry '#' / '&'
+      # / '?' / '+' / '=' — unquoted, compose's --env-file dotenv parse would
+      # truncate it at '#' (M1-389), so the bootstrap-admin credential reaching
+      # the Provider would be wrong.
       printf '%s="%s"\n' "$key" "$(dotenv_escape "$val")" >> "$SECRETS_FILE"
       echo "+ recorded ${key}"
       return 0
@@ -138,7 +153,7 @@ collect_admin() {
       # re-prompt productively, so fail closed rather than spin — interactive
       # input is a system boundary, so this guard belongs here.
       if [[ "$read_ok" -eq 0 ]]; then
-        echo "FAIL: a bootstrap admin contact id is required for the only enabled adapter (${adapter})." >&2
+        echo "FAIL: a bootstrap admin ${noun} is required for the only enabled adapter (${adapter})." >&2
         exit 1
       fi
       echo "  Required: this is the only enabled adapter, so its bootstrap admin" >&2
@@ -218,14 +233,19 @@ for adapter in "${chosen[@]}"; do
       # provisioning input, NOT runtime identity: the running adapter still derives
       # the bot contact id from simplex-chat at startup (§7.5) and never reads this.
       simplex_display_name="$(prompt_with_default "  SimpleX bot display name (the bot's profile name)" "infochat-bot")"
-      # The admin contact id may be pasted as the full SimpleX address link OR
-      # the bare queue id: the Provider canonicalizes a full link to the bare
-      # queue id at startup (M1-465), so no hand-extraction is needed here. The
-      # collect_admin prompt below captures the value verbatim — this script
-      # does NOT extract the queue id (that is real URI parsing done in Java).
-      echo "  Bootstrap admin: paste your full SimpleX address link (or the bare"
-      echo "  queue id) — the Provider extracts the bare queue id from a full link."
-      if collect_admin INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID simplex "$only_adapter"; then
+      # SimpleX bootstrap admin is a single-use claim-TOKEN, not an address
+      # (D50): SimpleX has no pre-seedable cryptographic sender address, so the
+      # operator configures a secret and the FIRST DM whose body equals it becomes
+      # admin (SimpleXAdminClaim). The token is a secret captured into secrets.env
+      # and referenced as infochat.adapters.simplex.admin-token; collect_admin
+      # reads it with no terminal echo (secret=1). Operator hygiene: unset the
+      # token once the first admin is claimed (security.md §Per-adapter admin
+      # threat profile) — that closes the re-arm-after-revoke gap.
+      echo "  Bootstrap admin: choose a SECRET claim-token. After the bot starts,"
+      echo "  DM it this token to become the bot admin; then unset"
+      echo "  infochat.adapters.simplex.admin-token. (SimpleX has no pre-seedable"
+      echo "  address, so there is nothing to paste here — D50.)"
+      if collect_admin INFOCHAT_SIMPLEX_ADMIN_TOKEN simplex "$only_adapter" "claim-token" 1; then
         admin_union=$((admin_union + 1))
       fi
       ;;
@@ -239,7 +259,7 @@ for adapter in "${chosen[@]}"; do
       signal_binary="$(prompt_with_default "  signal-cli binary path" "$DEFAULT_SIGNAL_BINARY")"
       signal_data_dir="$(prompt_with_default "  Signal data-dir (signal-cli account directory)" "$DEFAULT_SIGNAL_DATA_DIR")"
       signal_account="$(prompt_required "  Signal account (registered phone number, e.g. +15551234567)")"
-      if collect_admin INFOCHAT_SIGNAL_ADMIN_CONTACT_ID signal "$only_adapter"; then
+      if collect_admin INFOCHAT_SIGNAL_ADMIN_CONTACT_ID signal "$only_adapter" "contact id" 0; then
         admin_union=$((admin_union + 1))
       fi
       ;;
@@ -252,7 +272,7 @@ done
 # somewhere). Gate BEFORE writing the adapters config so a refused run leaves no
 # half-written block a resume would treat as complete.
 if [[ "$admin_union" -eq 0 ]]; then
-  echo "FAIL: no bootstrap admin contact id was supplied for any chosen adapter." >&2
+  echo "FAIL: no bootstrap admin credential was supplied for any chosen adapter." >&2
   echo "      The union of bootstrap admins across enabled adapters MUST be" >&2
   echo "      non-empty or the Provider refuses to start (§7.6.3)." >&2
   exit 1
@@ -303,8 +323,12 @@ done
         # ignores it — the bot contact id stays derived from the identity material
         # at startup (§7.5), not from an operator-typed name.
         printf 'infochat.adapters.simplex.display-name=%s\n' "$simplex_display_name"
-        if grep -qE '^INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID=.+' "$SECRETS_FILE"; then
-          printf 'infochat.adapters.simplex.admin=%s\n' '${INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID}'
+        # SimpleX bootstrap admin is the single-use claim-token (D50), NOT the
+        # by-address .admin (which gate 7 ignores for SimpleX — writing it would
+        # be inert and misleading). The line is emitted only when the token var
+        # is set, keeping the property optional per adapter (§7.6.3).
+        if grep -qE '^INFOCHAT_SIMPLEX_ADMIN_TOKEN=.+' "$SECRETS_FILE"; then
+          printf 'infochat.adapters.simplex.admin-token=%s\n' '${INFOCHAT_SIMPLEX_ADMIN_TOKEN}'
         fi
         ;;
       signal)

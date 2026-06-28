@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 24 |
+| pending | 23 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 511 |
+| done | 512 |
 | deferred | 7 |
 | **total** | **542** |
 
@@ -47,7 +47,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-499 — Test fixture duplication → testsupport, plus a leaked registration teardown (complexity: low, risk: low)
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-501 — Stage-1-flagged posts can permanently evade Stage 2 after a crash (complexity: medium, risk: medium)
-- M1-507 — Operator tooling + docs for SimpleX claim-token bootstrap (complexity: medium, risk: medium)
 
 ---
 
@@ -83,6 +82,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-507 | Operator tooling + docs for SimpleX claim-token bootstrap | 2026-06-28 | round 1 APPROVE |
 | M1-506 | SimpleX: claim-token bot-admin bootstrap (drop by-address) | 2026-06-28 | round 2 APPROVE |
 | M1-504 | SimpleX adapter cannot start: queue-address length floor (43) rejects every real bot address (32 chars) | 2026-06-27 | round 1 APPROVE |
 | M1-503 | upgrade.sh restart gate compares the running image to itself, never deploys a rebuilt app | 2026-06-27 | round 1 APPROVE |
@@ -92,7 +92,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-475 | Enforce D43 over non-constant bundle keys (en-keyset gate) | 2026-06-27 | round 1 APPROVE |
 | M1-474 | Enforce D43 bundle completeness: make BundleLoaderTest fail on a missing per-bundle key + backfill cs.properties | 2026-06-27 | round 1 APPROVE |
 | M1-473 | prod/scripts/upgrade.sh: git-pull main + rebuild app images + ordered restart, all config/data preserved | 2026-06-27 | round 1 APPROVE |
-| M1-472 | Deep-review low-severity cleanup sweep: /summary single-connection retrieval + messaging redaction dedup | 2026-06-27 | round 1 APPROVE |
 
 ---
 
@@ -731,5 +730,5 @@ M1-504 (done)
   └── M1-505 (deferred)
 M1-506 (done)
   └── M1-505 (deferred) [see above]
-M1-507 (pending) ← runnable
+M1-507 (done)
 ```

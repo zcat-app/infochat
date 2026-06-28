@@ -1,7 +1,7 @@
 ---
 id: M1-507
 title: "Operator tooling + docs for SimpleX claim-token bootstrap"
-status: pending
+status: done
 created: 2026-06-28
 last_updated: 2026-06-28
 blocked_by: []
@@ -83,13 +83,42 @@ decision_refs:
   - D9
   - D46
   - D50
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-28
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 204
+      removed: 101
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-28
+    verdict: CLEAN
+    base: 6fc3acda8b559533c70ff085b997db515f9e4af4
+    head: "working-tree (m1/M1-507 branch tip, uncommitted)"
+    verdict_file: docs/plan/m1/redteam/M1-507-2026-06-28.md
+    out_of_model_count: 2
+    note: |
+      CLEAN. Tooling+docs only, no security code in the diff. Two non-blocking
+      OUT-OF-MODEL advisories (optional "confirm trigger re-enabled" note for the
+      migration break-glass; diff strengthens the documented re-arm hygiene). No
+      follow-up ticket warranted.
+clarity_check:
+  date: 2026-06-28
+  verdict: WARN
+  warnings:
+    - "AC7 is acknowledged N/A for this ticket's inert diff; it tests only the pre-existing baseline and adds no discriminating check for the actual changes."
+  blockers: []
 ---
 
 # M1-507: Operator tooling + docs for SimpleX claim-token bootstrap

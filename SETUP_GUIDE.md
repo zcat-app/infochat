@@ -142,12 +142,23 @@ The three steps that actually need a decision from you are **1 (Profile)**,
 
 ### The one question you must not skip: who's the admin?
 
-In step 6, the wizard asks for a **bootstrap admin contact id** for your
-messaging app. This makes *you* the bot's administrator. **You must provide at
-least one** — if you don't, infochat refuses to start (this is a safety guard,
-so a deployment never launches with nobody in charge). Getting your own contact
-id and what admin powers it grants are covered in the
-[Admin Guide](ADMIN_GUIDE.md).
+In step 6, the wizard asks how you become the bot's administrator. The answer
+differs by app, because the two apps prove identity differently:
+
+- **SimpleX** has no phone number or fixed address to point at, so you choose a
+  **secret claim-token**. After the bot starts, you DM it that token from your
+  own SimpleX app, and that first message makes *you* the admin. Once you've
+  claimed admin, **unset the token** (the wizard writes it to
+  `prod/runtime/secrets.env` as `INFOCHAT_SIMPLEX_ADMIN_TOKEN`; blank it and
+  restart) so a leaked token can never re-claim admin later.
+- **Signal** has a stable account, so you give the wizard your Signal **contact
+  id** (ACI) directly and you are the admin from the first start — nothing to
+  claim.
+
+**You must provide at least one** (a SimpleX token or a Signal contact id) — if
+you don't, infochat refuses to start (this is a safety guard, so a deployment
+never launches with nobody in charge). Getting your own contact id and what
+admin powers it grants are covered in the [Admin Guide](ADMIN_GUIDE.md).
 
 ---
 
@@ -237,7 +248,9 @@ Choose **simplex**, **signal**, or both (type them comma-separated, e.g.
 - for SimpleX, a **display name** for the bot (the wizard then provisions the
   SimpleX profile, address, and auto-accept for you in step 7),
 - for Signal, the bot's **phone number**,
-- and the **admin contact id** that makes you the administrator.
+- and how you become the administrator: for SimpleX a **secret claim-token**
+  you'll DM the bot after it starts (then unset); for Signal your **contact id**
+  (ACI) directly. See [the admin question](#the-one-question-you-must-not-skip-whos-the-admin).
 
 Prefer **SimpleX** if you value privacy and don't want to use a phone number.
 
@@ -257,8 +270,12 @@ simplex-chat binary path [...]:       ⏎  (Enter — the image bakes it)
 SimpleX data-dir [prod/runtime/simplex]: ⏎
 SimpleX WebSocket port [5225]:        ⏎
 SimpleX bot display name [infochat-bot]: ⏎  (or type a name for the bot)
-Bootstrap admin contact id:           <paste your SimpleX address here>
+Bootstrap admin claim-token for simplex: <type a secret token — keep it safe>
 ```
+
+(The token is hidden as you type. After the bot is up, DM it this exact token
+from your own SimpleX app to become admin, then blank
+`INFOCHAT_SIMPLEX_ADMIN_TOKEN` in `prod/runtime/secrets.env` and restart.)
 
 Everything else runs automatically. When step 8 prints a green "healthy"
 summary, you're done.
@@ -334,9 +351,19 @@ How you reach the bot depends on your app:
   `/c <bot-address>`; in the mobile/desktop app, tap "Connect" and paste the
   link. The bot auto-accepts and you're connected.
 
-You are the **bootstrap admin**, so you do **not** need an invite code — once
-connected, just message the bot (try `/help`). Everyone else needs an invite you
-issue with `/invite` (see the [Admin Guide](ADMIN_GUIDE.md)).
+You are the **bootstrap admin**, so you do **not** need an invite code — but how
+you claim admin differs by app:
+
+- **Signal:** you're already the admin (the wizard configured your contact id), so
+  once you message the bot, just go — try `/help`.
+- **SimpleX:** your **first DM to the bot must be the exact claim-token** you set
+  in step 6. That message makes you admin (you'll get a welcome reply); after
+  that, use the bot normally. Then **unset the token**: blank
+  `INFOCHAT_SIMPLEX_ADMIN_TOKEN` in `prod/runtime/secrets.env` and restart, so a
+  leaked token can never re-claim admin.
+
+Everyone else needs an invite you issue with `/invite` (see the
+[Admin Guide](ADMIN_GUIDE.md)).
 
 ### Back up your data
 
@@ -351,8 +378,8 @@ copies **encrypted at rest**. Three things matter:
   SimpleX queue keypair cannot be regenerated for the same address, and Signal
   re-registration is an external, out-of-band process.
 - **Your configuration and secrets** — `prod/runtime/application.properties` and
-  `prod/runtime/secrets.env` (database passwords, any LLM API key, admin contact
-  ids).
+  `prod/runtime/secrets.env` (database passwords, any LLM API key, admin
+  credentials — the SimpleX claim-token / Signal contact id).
 
 infochat ships a backup script that captures all three for you —
 `prod/scripts/backup.sh`. It writes a database dump plus a tar of the bot's
@@ -460,7 +487,7 @@ docker compose -f docker-compose.yml --env-file prod/runtime/secrets.env --profi
 | **Connections to the database/AI "time out" or "reset" for no clear reason** | If you run a **VPN**, it may be silently blocking local (localhost) traffic between the containers. Try turning the VPN off, or allow loopback traffic, then re-run. *(This one has cost people hours — check it early.)* |
 | **The local AI model won't download (ollama)** | The download needs internet access to Ollama's model registry. Check your connection / proxy and re-run step 4. |
 | **You chose a "remote" AI but it fails to connect** | Double-check the API address and key. Remote and `llamacpp` setups can't be done with `--defaults` — they need you to type the values in. |
-| **Wizard refuses to finish: "no bootstrap admin contact id"** | You must give at least one admin contact id in step 6 (see [the admin question](#the-one-question-you-must-not-skip-whos-the-admin)). Re-run and provide it. |
+| **Wizard refuses to finish: "no bootstrap admin credential"** | You must give at least one admin credential in step 6 — a SimpleX claim-token or a Signal contact id (see [the admin question](#the-one-question-you-must-not-skip-whos-the-admin)). Re-run and provide it. |
 | **You provided your own model file (llamacpp) and it's rejected** | The pinned default models are checksum-verified automatically. For a custom URL: if you entered a checksum the file must match it (re-check the URL and checksum), and a custom *embeddings* model must be 768-dimensional. |
 | **Step 8 says a service is "DEGRADED"** | Often harmless — usually one messaging adapter hasn't finished connecting yet. Give it a minute; if it stays down, check that the bot's messaging account (step 6 paths) is correct. |
 | **A service exits right away saying another instance is "already running"** | You started a second Collector or Provider against the same database. infochat allows only one of each — stop the extra copy. See [Run only one copy of each service](#run-only-one-copy-of-each-service). |
@@ -475,7 +502,7 @@ understand the internals.*
 ### Non-interactive and reset modes
 
 ```bash
-./prod/setup.sh --defaults             # take every default; still prompts for the mandatory admin contact id (CI / scripted installs)
+./prod/setup.sh --defaults             # take every default; still prompts for the mandatory admin credential — SimpleX claim-token / Signal contact id (CI / scripted installs)
 ./prod/setup.sh --reset                # tear down (keeping data) + clear wizard state, then run setup; no output if nothing to remove
 ./prod/setup.sh --reset --hard         # same, but ALSO drop the database volume (deletes the database); AI model caches are kept
 ./prod/setup.sh --reset --wipe-models  # same, but ALSO drop the LLM model-cache volumes (forces a multi-GB re-download next setup)
@@ -518,7 +545,7 @@ Three things to know before you do:
 | `prod/scripts/3-postgres.sh` | Start Postgres and wait until healthy | `--defaults` (no-op — no prompts) |
 | `prod/scripts/4-llm.sh` | Provision the LLM backend; write the LLM + embeddings config | `--defaults` (takes the profile's default backend) |
 | `prod/scripts/5-bootstrap.sh` | Seed `bootstrap-sources.json` and wire the asset (price) commands | `--defaults` (uses the bundled defaults) |
-| `prod/scripts/6-adapter.sh` | Configure the messaging adapter(s); capture the bootstrap-admin id | `--defaults` (takes `simplex` and the default dirs; still prompts for the values a human must supply) |
+| `prod/scripts/6-adapter.sh` | Configure the messaging adapter(s); capture the bootstrap-admin credential (SimpleX claim-token / Signal contact id) | `--defaults` (takes `simplex` and the default dirs; still prompts for the values a human must supply) |
 | `prod/scripts/6b-simplex-provision.sh` | Provision the SimpleX bot identity (profile + address + auto-accept) and **re-print the bot's contact link**. A no-op when SimpleX isn't enabled. Run it to recover the link, which the wizard prints only during step 7 and never saves. | _(no `--defaults`)_ |
 | `prod/scripts/7-apps.sh` | Build both images, provision SimpleX, start Collector then Provider | `--defaults` (no-op — no prompts) |
 | `prod/scripts/8-verify.sh` | Health-check the Collector and Provider; exits non-zero on timeout | `--defaults` (no-op — no prompts) |
@@ -544,7 +571,8 @@ The wizard writes only to `prod/runtime/` (git-ignored):
 - `prod/runtime/application.properties` — the generated configuration (profile,
   LLM endpoints, adapter blocks).
 - `prod/runtime/secrets.env` — generated DB passwords, the optional LLM API
-  key, adapter admin contact ids, and adapter data-dir paths. Created with
+  key, adapter admin credentials (SimpleX claim-token / Signal contact id), and
+  adapter data-dir paths. Created with
   `0600` permissions and fed to Docker Compose via `--env-file` (never sourced
   into a shell), so pasted values containing `#`, `$`, or `&` can't break or
   execute. The committed template is `prod/config/secrets.env.example`.
