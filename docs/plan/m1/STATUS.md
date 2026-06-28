@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 23 |
+| pending | 24 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 511 |
 | deferred | 7 |
-| **total** | **541** |
+| **total** | **542** |
 
 ---
 
@@ -47,6 +47,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-499 — Test fixture duplication → testsupport, plus a leaked registration teardown (complexity: low, risk: low)
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-501 — Stage-1-flagged posts can permanently evade Stage 2 after a crash (complexity: medium, risk: medium)
+- M1-507 — Operator tooling + docs for SimpleX claim-token bootstrap (complexity: medium, risk: medium)
 
 ---
 
@@ -730,4 +731,5 @@ M1-504 (done)
   └── M1-505 (deferred)
 M1-506 (done)
   └── M1-505 (deferred) [see above]
+M1-507 (pending) ← runnable
 ```
