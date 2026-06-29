@@ -169,16 +169,20 @@ public class DigestWorker {
                 content = degradedRenderer.render(collection.posts());
                 isDegraded = true;
             } else {
+                CompletableFuture<String> renderFuture = CompletableFuture.supplyAsync(
+                        () -> digestRenderer.render(collection.posts(), meta.language()),
+                        renderExecutor);
                 try {
-                    content = CompletableFuture
-                            .supplyAsync(
-                                    () -> digestRenderer.render(collection.posts(), meta.language()),
-                                    renderExecutor)
-                            .get(remaining.toMillis(), TimeUnit.MILLISECONDS);
+                    content = renderFuture.get(remaining.toMillis(), TimeUnit.MILLISECONDS);
                 } catch (TimeoutException | ExecutionException | InterruptedException e) {
                     if (e instanceof InterruptedException) {
                         Thread.currentThread().interrupt();
                     }
+                    // Cancel the orphaned render rather than leaving it to run
+                    // past the slot window after we have already degraded — the
+                    // get(timeout) above stops waiting but does not stop the work
+                    // behind the future. (M1-494 13#F4)
+                    renderFuture.cancel(true);
                     content = degradedRenderer.render(collection.posts());
                     isDegraded = true;
                 }

@@ -69,12 +69,7 @@ public interface LlmProvider {
      * router.
      */
     default String providerName() {
-        Class<?> cls = getClass();
-        while (cls.getSimpleName().contains("_") && cls.getSuperclass() != null
-                && LlmProvider.class.isAssignableFrom(cls.getSuperclass())) {
-            cls = cls.getSuperclass();
-        }
-        return cls.getSimpleName();
+        return ProviderNames.unwrapProxySimpleName(getClass(), LlmProvider.class);
     }
 
     /**

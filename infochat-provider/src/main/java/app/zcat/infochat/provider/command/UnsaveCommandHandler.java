@@ -74,9 +74,6 @@ public class UnsaveCommandHandler implements CommandHandler {
 
         String adapter = inboundContext.adapterName();
         String callerContactId = resolveContactId(scope);
-        if (callerContactId == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNSAVE_UNKNOWN_UID, inboundContext.effectiveLanguage()));
-        }
 
         try (Connection conn = dataSource.getConnection()) {
             UUID userId = lookupActor(conn, adapter, callerContactId);

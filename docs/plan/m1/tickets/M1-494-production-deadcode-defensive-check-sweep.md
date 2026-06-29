@@ -1,7 +1,7 @@
 ---
 id: M1-494
 title: "Production dead-code and defensive-check cleanup sweep"
-status: pending
+status: done
 created: 2026-06-27
 last_updated: 2026-06-29
 blocked_by: []
@@ -46,12 +46,30 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 16
+      added: 85
+      removed: 75
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-29
+  verdict: WARN
+  warnings:
+    - "OUT-OF-SCOPE-SPECIFIC: out_of_scope entries are categorical (the permitted character of changes / a positive constraint on 13#F4) rather than naming specific excluded files; acceptable for a sweep, slightly underspecified."
+  blockers: []
 ---
 
 # M1-494: Production dead-code and defensive-check cleanup sweep

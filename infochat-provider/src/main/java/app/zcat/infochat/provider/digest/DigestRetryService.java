@@ -27,7 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class DigestRetryService {
 
     private static final String SELECT_LATEST_CACHE =
-            "SELECT slot_kind, slot_fired_at, expires_at, is_degraded"
+            "SELECT slot_kind, slot_fired_at, expires_at"
                     + " FROM summary_cache"
                     + " WHERE group_id = ?"
                     + " ORDER BY slot_fired_at DESC LIMIT 1";
@@ -111,8 +111,7 @@ public class DigestRetryService {
                 return new SlotCoordinates(
                         rs.getString("slot_kind"),
                         rs.getTimestamp("slot_fired_at").toInstant(),
-                        rs.getTimestamp("expires_at").toInstant(),
-                        rs.getBoolean("is_degraded"));
+                        rs.getTimestamp("expires_at").toInstant());
             }
         } catch (SQLException e) {
             throw new IllegalStateException(
@@ -146,7 +145,6 @@ public class DigestRetryService {
     record SlotCoordinates(
             String slotKind,
             Instant slotFiredAt,
-            Instant expiresAt,
-            boolean isDegraded) {
+            Instant expiresAt) {
     }
 }

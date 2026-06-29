@@ -212,7 +212,6 @@ public class VouchCommandHandler implements CommandHandler {
         // the 4-way reply discrimination (M1-045 redteam-fix round 2
         // INFO-LEAK closure). The /revoke-admin TOCTOU close (OUT-OF-
         // MODEL #2) is the FOR UPDATE on the actor row.
-        String successReplyText = null;
         String outcomeBundleKey = null;
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);

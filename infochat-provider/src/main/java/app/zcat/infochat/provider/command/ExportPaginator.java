@@ -39,7 +39,6 @@ public final class ExportPaginator {
 
         List<String> pages = new ArrayList<>();
         LinkedHashMap<String, List<String>> currentPage = new LinkedHashMap<>();
-        int currentSize = estimateSize(currentPage);
 
         for (Map.Entry<String, List<String>> entry : tableRows.entrySet()) {
             String table = entry.getKey();
@@ -49,7 +48,6 @@ public final class ExportPaginator {
                 // Empty tables still appear in the output as empty arrays.
                 // They cost only the key overhead; add to current page.
                 currentPage.put(table, new ArrayList<>());
-                currentSize = estimateSize(currentPage);
                 continue;
             }
 
@@ -60,12 +58,10 @@ public final class ExportPaginator {
                     // Flush current page before adding this row.
                     pages.add(renderJson(currentPage));
                     currentPage = new LinkedHashMap<>();
-                    currentSize = estimateSize(currentPage);
                 }
 
                 // Add the row (may start a new page or extend current).
                 currentPage.computeIfAbsent(table, k -> new ArrayList<>()).add(row);
-                currentSize = estimateSize(currentPage);
             }
         }
 

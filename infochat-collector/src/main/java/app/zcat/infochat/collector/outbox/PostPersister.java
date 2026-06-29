@@ -17,7 +17,6 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -113,8 +112,6 @@ public class PostPersister {
      */
     public Optional<PersistedPostKey> persist(Connection conn, UUID sourceUuid,
                                               NormalizedPost normalized) {
-        Objects.requireNonNull(sourceUuid, "sourceUuid");
-        Objects.requireNonNull(normalized, "normalized");
         String upstreamIdentifier = normalized.upstreamIdentifier();
         if (upstreamIdentifier == null || upstreamIdentifier.isEmpty()) {
             // SPI-contract assertion: NormalizedPost.upstreamIdentifier

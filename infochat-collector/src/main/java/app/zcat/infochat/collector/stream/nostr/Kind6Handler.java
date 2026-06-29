@@ -134,24 +134,24 @@ public class Kind6Handler {
         // committed post would leave a later sweep nothing to recover
         // from. The event itself stays recoverable across restarts: the
         // since cursor never advanced past it.
-        PostPersister.PersistedPostKey[] persistedKey = new PostPersister.PersistedPostKey[1];
-        TransactionHelper.inTransaction(dataSource, "Kind6Handler", conn -> {
-            Optional<PostPersister.PersistedPostKey> persisted =
-                postPersister.persist(conn, sourceUuid, post);
-            if (persisted.isEmpty()) {
-                // ON CONFLICT branch: duplicate (source_id, upstream_identifier,
-                // fetched_at) — the kind-6 was already persisted on a prior
-                // tick of this same fetched_at second. Do NOT write a fresh
-                // post_reference row (it would duplicate the prior one) and
-                // do NOT re-emit to the eval queue (the prior delivery already did).
-                return;
-            }
-            persistedKey[0] = persisted.get();
-            if (repostTarget != null && !repostTarget.isEmpty()) {
-                insertRepostEdge(conn, persistedKey[0].id(), repostTarget);
-            }
-        });
-        if (persistedKey[0] == null) {
+        Optional<PostPersister.PersistedPostKey> persistedKey =
+            TransactionHelper.inTransactionReturning(dataSource, "Kind6Handler", conn -> {
+                Optional<PostPersister.PersistedPostKey> persisted =
+                    postPersister.persist(conn, sourceUuid, post);
+                if (persisted.isEmpty()) {
+                    // ON CONFLICT branch: duplicate (source_id, upstream_identifier,
+                    // fetched_at) — the kind-6 was already persisted on a prior
+                    // tick of this same fetched_at second. Do NOT write a fresh
+                    // post_reference row (it would duplicate the prior one) and
+                    // do NOT re-emit to the eval queue (the prior delivery already did).
+                    return Optional.<PostPersister.PersistedPostKey>empty();
+                }
+                if (repostTarget != null && !repostTarget.isEmpty()) {
+                    insertRepostEdge(conn, persisted.get().id(), repostTarget);
+                }
+                return persisted;
+            });
+        if (persistedKey.isEmpty()) {
             return Optional.empty();
         }
         if (repostTarget != null && !repostTarget.isEmpty()) {
@@ -164,8 +164,8 @@ public class Kind6Handler {
                 .ifPresent(originalPostId ->
                     repostEdgeResolver.resolveEdgesPointingTo(originalPostId, repostTarget));
         }
-        evalQueueProducer.emit(persistedKey[0]);
-        return Optional.of(persistedKey[0]);
+        evalQueueProducer.emit(persistedKey.get());
+        return persistedKey;
     }
 
     /**

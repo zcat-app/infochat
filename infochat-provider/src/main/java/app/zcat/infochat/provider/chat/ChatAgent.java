@@ -196,14 +196,14 @@ public class ChatAgent {
 
     /**
      * Compute the reply for a chat-mode message and discard the deferred
-     * commit. Used where the caller does not orchestrate delivery and so
-     * cannot defer persistence to a post-delivery point — only the
-     * compute behaviour (prompt build, tool loop, sanitize, translate) is
-     * exercised, never the turn persistence. The production router uses
-     * {@link #handleTurn} instead, persisting only after a successful send.
+     * commit — only the compute behaviour (prompt build, tool loop,
+     * sanitize, translate) is exercised, never the turn persistence.
+     * Package-private: this is a test-visibility helper for assertions on
+     * the reply alone. The production router uses {@link #handleTurn}
+     * instead, persisting only after a successful send.
      */
-    public @Nullable String handle(UUID userId, String scopeKind,
-                                   UUID scopeId, String userMessage) {
+    @Nullable String handle(UUID userId, String scopeKind,
+                            UUID scopeId, String userMessage) {
         return handleTurn(userId, scopeKind, scopeId, userMessage).reply();
     }
 

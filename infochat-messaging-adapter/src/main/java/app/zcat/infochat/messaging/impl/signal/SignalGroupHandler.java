@@ -296,14 +296,14 @@ final class SignalGroupHandler {
         return stripped.toString().strip();
     }
 
-    private boolean dispatchMembership(String groupId, @Nullable JsonArray acis, boolean joined) {
+    private void dispatchMembership(String groupId, @Nullable JsonArray acis, boolean joined) {
         if (acis == null || acis.isEmpty()) {
-            return false;
+            return;
         }
         MessagingAdapter.MembershipHandler handler = membershipHandler;
         if (handler == null) {
             LOG.debugf("Signal membership event dropped — no MembershipHandler set");
-            return true;
+            return;
         }
         for (JsonValue entry : acis) {
             String aci = aciFromArrayEntry(entry);
@@ -326,7 +326,6 @@ final class SignalGroupHandler {
                         groupId, e.getClass().getName());
             }
         }
-        return true;
     }
 
     private static @Nullable JsonArray arrayOrNull(JsonObject object, String name) {

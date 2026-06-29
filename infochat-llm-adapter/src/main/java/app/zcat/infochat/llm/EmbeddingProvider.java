@@ -46,11 +46,6 @@ public interface EmbeddingProvider {
      * framework versions.
      */
     default String providerName() {
-        Class<?> cls = getClass();
-        while (cls.getSimpleName().contains("_") && cls.getSuperclass() != null
-                && EmbeddingProvider.class.isAssignableFrom(cls.getSuperclass())) {
-            cls = cls.getSuperclass();
-        }
-        return cls.getSimpleName();
+        return ProviderNames.unwrapProxySimpleName(getClass(), EmbeddingProvider.class);
     }
 }

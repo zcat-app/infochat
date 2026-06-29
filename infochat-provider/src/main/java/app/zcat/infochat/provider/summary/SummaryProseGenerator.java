@@ -115,8 +115,7 @@ public class SummaryProseGenerator {
             try {
                 LlmResponse response = provider.generate(
                         ModelTask.SUMMARIZER, SUMMARIZER_SYSTEM_PROMPT, userPrompt);
-                String text = response == null || response.text() == null
-                        ? "" : response.text().trim();
+                String text = response.text().trim();
                 if (text.startsWith("[REFUSAL:") && text.endsWith("]")) {
                     // Per docs/spec/security.md §Prompt-injection defenses: the
                     // model emits [REFUSAL: <reason>] when the wrapped content
