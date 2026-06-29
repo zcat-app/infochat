@@ -12,11 +12,11 @@ import app.zcat.infochat.provider.source.UrlProbe.ProbeResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newRealBundleLoader;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -257,14 +257,6 @@ class AddSourceCommandHandlerTest {
     }
 
     // ----- fixtures + collaborator stubs --------------------------------
-
-    private static BundleLoader newRealBundleLoader() throws Exception {
-        BundleLoader loader = new BundleLoader();
-        Method load = BundleLoader.class.getDeclaredMethod("load");
-        load.setAccessible(true);
-        load.invoke(loader);
-        return loader;
-    }
 
     /**
      * Programmable {@link SourceUpsertService} stub: returns a canned

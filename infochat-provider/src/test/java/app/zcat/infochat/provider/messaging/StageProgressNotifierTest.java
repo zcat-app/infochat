@@ -8,10 +8,10 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Method;
 import java.time.Duration;
 import java.util.List;
 
+import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newRealBundleLoader;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -255,11 +255,4 @@ class StageProgressNotifierTest {
         return notifier;
     }
 
-    private static BundleLoader newRealBundleLoader() throws Exception {
-        BundleLoader loader = new BundleLoader();
-        Method load = BundleLoader.class.getDeclaredMethod("load");
-        load.setAccessible(true);
-        load.invoke(loader);
-        return loader;
-    }
 }

@@ -12,7 +12,6 @@ import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 
-import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -53,7 +52,7 @@ class SimpleXAdapterChunkedSendTest {
 
         try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
             fake.start();
-            SimpleXAdapter adapter = newAdapter(fake);
+            SimpleXAdapter adapter = SimpleXTestHarness.newAdapter(fake, tempDir);
             adapter.rebuildWebSocket();
             try {
                 fake.awaitClient(WAIT);
@@ -67,7 +66,7 @@ class SimpleXAdapterChunkedSendTest {
                             String envelope = fake.awaitFrame(WAIT);
                             envelopes.add(envelope);
                             String corrId = MAPPER.readTree(envelope).get("corrId").asText();
-                            fake.sendFrame(ackFrame(corrId, i));
+                            fake.sendFrame(SimpleXTestHarness.ackFrame(corrId, i));
                         }
                     } catch (Exception e) {
                         throw new RuntimeException(e);
@@ -101,17 +100,6 @@ class SimpleXAdapterChunkedSendTest {
         }
     }
 
-    private SimpleXAdapter newAdapter(FakeSimpleXProcess fake) {
-        // binary/dataDir are never exercised: start() (where cfg.validate()
-        // lives) is not called; only wsPort() is read by rebuildWebSocket().
-        SimpleXConfig cfg = new SimpleXConfig(
-                "/usr/bin/simplex-chat", tempDir.toString(), fake.port());
-        return new SimpleXAdapter(
-                cfg,
-                HttpClient.newHttpClient(),
-                msg -> { /* admin notifications unused here */ });
-    }
-
     /** Prose long enough for three chunks — a plausible 200-post group digest. */
     private static String digestLikeText() {
         StringBuilder text = new StringBuilder();
@@ -139,18 +127,6 @@ class SimpleXAdapterChunkedSendTest {
     private static OutboundMessage outbound(String text) {
         return new OutboundMessage(
                 new ScopeRef.Dm("alice-queue-addr"), text, Instant.now(), "corr-digest");
-    }
-
-    private static String ackFrame(String corrId, int i) {
-        return """
-                {
-                  "corrId": "%s",
-                  "resp": {
-                    "type": "newChatItems",
-                    "chatItems": {"itemId": "item-%d"}
-                  }
-                }
-                """.formatted(corrId, i);
     }
 
     private static int utf8Length(String s) {

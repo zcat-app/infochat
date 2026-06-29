@@ -10,7 +10,6 @@ import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 
-import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -55,7 +54,7 @@ class SimpleXEditFallbackTest {
 
         try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
             fake.start();
-            SimpleXAdapter adapter = newAdapter(fake);
+            SimpleXAdapter adapter = SimpleXTestHarness.newAdapter(fake, tempDir);
             adapter.rebuildWebSocket();
             List<String> frames = Collections.synchronizedList(new ArrayList<>());
             AtomicBoolean done = new AtomicBoolean();
@@ -90,7 +89,7 @@ class SimpleXEditFallbackTest {
     void fallbackHandleSkipsFurtherEditsAfterRejection() throws Exception {
         try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
             fake.start();
-            SimpleXAdapter adapter = newAdapter(fake);
+            SimpleXAdapter adapter = SimpleXTestHarness.newAdapter(fake, tempDir);
             adapter.rebuildWebSocket();
             List<String> frames = Collections.synchronizedList(new ArrayList<>());
             AtomicBoolean done = new AtomicBoolean();
@@ -146,7 +145,7 @@ class SimpleXEditFallbackTest {
         String finalBody = overCapText();
         try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
             fake.start();
-            SimpleXAdapter adapter = newAdapter(fake);
+            SimpleXAdapter adapter = SimpleXTestHarness.newAdapter(fake, tempDir);
             adapter.rebuildWebSocket();
             List<String> frames = Collections.synchronizedList(new ArrayList<>());
             AtomicBoolean done = new AtomicBoolean();
@@ -207,24 +206,13 @@ class SimpleXEditFallbackTest {
                     if (rejectUpdates && cmdOf(envelope).startsWith("/_update")) {
                         fake.sendFrame(updateRejectFrame(corrId));
                     } else {
-                        fake.sendFrame(ackFrame(corrId, itemSeq.getAndIncrement()));
+                        fake.sendFrame(SimpleXTestHarness.ackFrame(corrId, itemSeq.getAndIncrement()));
                     }
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
             }
         });
-    }
-
-    private SimpleXAdapter newAdapter(FakeSimpleXProcess fake) {
-        // binary/dataDir are never exercised: start() (where cfg.validate()
-        // lives) is not called; only wsPort() is read by rebuildWebSocket().
-        SimpleXConfig cfg = new SimpleXConfig(
-                "/usr/bin/simplex-chat", tempDir.toString(), fake.port());
-        return new SimpleXAdapter(
-                cfg,
-                HttpClient.newHttpClient(),
-                msg -> { /* admin notifications unused here */ });
     }
 
     /** Concatenate the user-visible text of a list of {@code /_send} envelopes. */
@@ -277,18 +265,6 @@ class SimpleXEditFallbackTest {
     private static OutboundMessage outbound(String text) {
         return new OutboundMessage(
                 new ScopeRef.Dm("alice-queue-addr"), text, Instant.now(), "corr-summary");
-    }
-
-    private static String ackFrame(String corrId, int i) {
-        return """
-                {
-                  "corrId": "%s",
-                  "resp": {
-                    "type": "newChatItems",
-                    "chatItems": {"itemId": "item-%d"}
-                  }
-                }
-                """.formatted(corrId, i);
     }
 
     /** A CEInvalidChatItemUpdate rejection — PERMANENT per the codec's classifier. */

@@ -19,14 +19,11 @@ import app.zcat.infochat.provider.summary.EmptyEdgeSource;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
 import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
-import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import app.zcat.infochat.provider.translation.TranslationCache;
 
-import java.lang.reflect.Method;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -37,6 +34,8 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
+import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newEnShortCircuitPipeline;
+import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newRealBundleLoader;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -529,30 +528,6 @@ class SummaryCommandHandlerTest {
     }
 
     // ----- fixtures + collaborator stubs --------------------------------
-
-    private static TranslationPipeline newEnShortCircuitPipeline() throws Exception {
-        TranslationPipeline pipeline = new TranslationPipeline();
-        java.lang.reflect.Field cacheField = TranslationPipeline.class.getDeclaredField("translationCache");
-        cacheField.setAccessible(true);
-        cacheField.set(pipeline, new TranslationCache());
-
-        java.lang.reflect.Field providerField = TranslationPipeline.class.getDeclaredField("translationProvider");
-        providerField.setAccessible(true);
-        providerField.set(pipeline, (app.zcat.infochat.messaging.TranslationProvider) (text, from, to) -> text);
-
-        java.lang.reflect.Field sanitizerField = TranslationPipeline.class.getDeclaredField("llmOutputSanitizer");
-        sanitizerField.setAccessible(true);
-        sanitizerField.set(pipeline, SanitizerTestDoubles.noAuditSanitizer());
-        return pipeline;
-    }
-
-    private static BundleLoader newRealBundleLoader() throws Exception {
-        BundleLoader loader = new BundleLoader();
-        Method load = BundleLoader.class.getDeclaredMethod("load");
-        load.setAccessible(true);
-        load.invoke(loader);
-        return loader;
-    }
 
     private static Post post(String uid, String title, Instant publishedAt) {
         return new Post(

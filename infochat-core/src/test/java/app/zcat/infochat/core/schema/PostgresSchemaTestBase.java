@@ -5,6 +5,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
@@ -12,6 +14,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Properties;
 
 /**
  * Shared Testcontainers + Flyway fixture for the §2.1 identity/audit
@@ -26,10 +29,13 @@ import java.util.List;
  * re-spinning the container per test would be orders of magnitude
  * slower than a TRUNCATE.
  *
- * <p>Image: {@code pgvector/pgvector:pg16}. V1 declares
- * {@code CREATE EXTENSION vector} and V11 adds {@code vector(N)}
- * columns, so a non-pgvector image would fail Flyway. Using the same
- * image the rest of the stack uses keeps DB shape consistent.
+ * <p>Image: read from this module's test {@code application.properties}
+ * key {@code quarkus.datasource.devservices.image-name} — the single pin the
+ * dev-services container also uses (see {@link #pgVectorImageName()}). V1
+ * declares {@code CREATE EXTENSION vector} and V11 adds {@code vector(N)}
+ * columns, so a non-pgvector image would fail Flyway; reading the configured
+ * image rather than a duplicated literal keeps this container and the
+ * dev-services container provably on the same image.
  *
  * <p>Flyway runs once on container start, applying every migration
  * under {@code classpath:db/migration} (V1 through the current head —
@@ -47,7 +53,7 @@ public abstract class PostgresSchemaTestBase {
 
     static {
         POSTGRES = new PostgreSQLContainer<>(
-                DockerImageName.parse("pgvector/pgvector:pg16")
+                DockerImageName.parse(pgVectorImageName())
                         .asCompatibleSubstituteFor("postgres"))
                 .withDatabaseName("infochat_test")
                 .withUsername("infochat")
@@ -58,6 +64,26 @@ public abstract class PostgresSchemaTestBase {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
+    }
+
+    /**
+     * The pgvector image, read from the single pin in this module's test
+     * {@code application.properties} ({@code quarkus.datasource.devservices
+     * .image-name}) so this raw-Testcontainers base and the {@code @QuarkusTest}
+     * dev-services container cannot drift onto different images. The base runs
+     * outside the Quarkus runtime (a static initializer, before any CDI/config
+     * bootstrap), so it loads the property file off the classpath directly
+     * rather than through {@code ConfigProvider}.
+     */
+    private static String pgVectorImageName() {
+        Properties props = new Properties();
+        try (InputStream in =
+                PostgresSchemaTestBase.class.getResourceAsStream("/application.properties")) {
+            props.load(in);
+        } catch (IOException e) {
+            throw new ExceptionInInitializerError(e);
+        }
+        return props.getProperty("quarkus.datasource.devservices.image-name");
     }
 
     /**

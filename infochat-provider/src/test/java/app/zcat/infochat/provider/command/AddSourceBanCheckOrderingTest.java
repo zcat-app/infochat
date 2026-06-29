@@ -10,12 +10,12 @@ import app.zcat.infochat.provider.source.SourceUpsertService.UpsertResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newRealBundleLoader;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -125,14 +125,6 @@ class AddSourceBanCheckOrderingTest {
      * {@code @PostConstruct load()} does not fire automatically, so the
      * test invokes it via reflection.
      */
-    private static BundleLoader newRealBundleLoader() throws Exception {
-        BundleLoader loader = new BundleLoader();
-        Method load = BundleLoader.class.getDeclaredMethod("load");
-        load.setAccessible(true);
-        load.invoke(loader);
-        return loader;
-    }
-
     private static final class RecordingSourceUpsertService extends SourceUpsertService {
         private final AtomicInteger callCount = new AtomicInteger();
 

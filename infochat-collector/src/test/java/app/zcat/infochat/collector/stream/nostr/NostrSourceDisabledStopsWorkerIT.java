@@ -7,6 +7,7 @@ import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.core.ingest.StreamSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
@@ -43,6 +44,17 @@ class NostrSourceDisabledStopsWorkerIT {
 
     @Inject
     StreamSourceSupervisor supervisor;
+
+    // The supervisor is an application-scoped CDI singleton shared across the
+    // whole @QuarkusTest run; disableStopsOnlyTheMatchingWorker stops only
+    // DISABLED_KEY's worker, leaving OTHER_KEY registered. Deregister both keys
+    // here (stop() is an idempotent no-op for an already-removed/absent key) so
+    // the shared bean is clean between tests.
+    @AfterEach
+    void deregisterTestWorkers() {
+        supervisor.stop(DISABLED_KEY);
+        supervisor.stop(OTHER_KEY);
+    }
 
     @Test
     void disableStopsOnlyTheMatchingWorker() throws InterruptedException {

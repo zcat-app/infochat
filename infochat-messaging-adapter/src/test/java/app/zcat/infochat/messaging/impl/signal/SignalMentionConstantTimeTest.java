@@ -1,13 +1,11 @@
 package app.zcat.infochat.messaging.impl.signal;
 
+import static app.zcat.infochat.messaging.impl.signal.SignalTestJson.parse;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import jakarta.json.Json;
 import jakarta.json.JsonObject;
-import jakarta.json.JsonReader;
 
-import java.io.StringReader;
 
 import org.junit.jupiter.api.Test;
 
@@ -83,9 +81,4 @@ class SignalMentionConstantTimeTest {
                 "an unrelated uuid must NOT be recognized as the bot");
     }
 
-    private static JsonObject parse(String json) {
-        try (JsonReader r = Json.createReader(new StringReader(json))) {
-            return r.readObject();
-        }
-    }
 }

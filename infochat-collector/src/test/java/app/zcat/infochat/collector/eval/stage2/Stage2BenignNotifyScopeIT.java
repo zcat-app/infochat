@@ -12,13 +12,12 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 
+import static app.zcat.infochat.collector.testsupport.PgNotifyFixture.awaitNotifications;
+import static app.zcat.infochat.collector.testsupport.PgNotifyFixture.listenTo;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -153,47 +152,6 @@ class Stage2BenignNotifyScopeIT {
             }
             ps.executeUpdate();
         }
-    }
-
-    /**
-     * LISTEN on a clean slate. Pooled connections keep their LISTEN
-     * registrations across pool check-ins and accumulate notifications
-     * from other tests' commits, so reset the registrations and drain
-     * anything already delivered before the test acts.
-     */
-    private static PGConnection listenTo(Connection conn, String channel) throws Exception {
-        conn.setAutoCommit(true);
-        try (Statement s = conn.createStatement()) {
-            s.execute("UNLISTEN *");
-            s.execute("LISTEN " + channel);
-        }
-        PGConnection pg = conn.unwrap(PGConnection.class);
-        pg.getNotifications();
-        return pg;
-    }
-
-    /**
-     * Poll {@code getNotifications} until at least {@code minimum}
-     * notifications arrive OR the bounded wait elapses. Returns the
-     * accumulated array (possibly more than {@code minimum} elements)
-     * or null when nothing arrived — same shape as
-     * QuarantinePendingNotifyIT.
-     */
-    private PGNotification[] awaitNotifications(PGConnection pg, int minimum) throws Exception {
-        long deadlineNanos = System.nanoTime() + 10_000_000_000L;
-        List<PGNotification> collected = new ArrayList<>();
-        while (System.nanoTime() < deadlineNanos) {
-            PGNotification[] batch = pg.getNotifications(500);
-            if (batch != null) {
-                for (PGNotification n : batch) {
-                    collected.add(n);
-                }
-                if (collected.size() >= minimum) {
-                    return collected.toArray(new PGNotification[0]);
-                }
-            }
-        }
-        return collected.isEmpty() ? null : collected.toArray(new PGNotification[0]);
     }
 
     private record SeededPost(UUID id, String uid, Instant fetchedAt) {

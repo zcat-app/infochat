@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.outbox;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.provider.testsupport.OutboxItFixtures;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -183,39 +184,15 @@ class NewPostReconcilerPagingIT {
     }
 
     private void clearAllItPosts() throws Exception {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                 "DELETE FROM post WHERE uid LIKE '%-it/%'")) {
-            ps.executeUpdate();
-        }
+        OutboxItFixtures.clearAllItPosts(dataSource);
     }
 
     private void resetNewPostCursor() throws Exception {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                 "UPDATE provider_state "
-                     + "   SET cursor_high = 'epoch'::TIMESTAMPTZ, "
-                     + "       cursor_low_kind = '', "
-                     + "       cursor_low_id = '', "
-                     + "       updated_at = now() "
-                     + " WHERE channel = 'new_post'")) {
-            ps.executeUpdate();
-        }
+        OutboxItFixtures.resetNewPostCursor(dataSource);
     }
 
     private UUID ensureTestSource() throws Exception {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                 "INSERT INTO source (kind, identifier, display_name, category) "
-                     + "VALUES ('rss', 'paging-it://test', 'paging-it', 'news') "
-                     + "ON CONFLICT (kind, identifier) DO UPDATE "
-                     + "SET display_name = EXCLUDED.display_name "
-                     + "RETURNING id")) {
-            try (ResultSet rs = ps.executeQuery()) {
-                assertTrue(rs.next(), "test source upsert must yield an id");
-                return rs.getObject("id", UUID.class);
-            }
-        }
+        return OutboxItFixtures.ensureTestSource(dataSource, "paging-it://test", "paging-it");
     }
 
     private record SeededRow(UUID id, Instant readyAt) {}

@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.outbox;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.provider.testsupport.OutboxItFixtures;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -417,18 +418,7 @@ class QuarantineReviewListenerIT {
     }
 
     private UUID ensureTestSource() throws Exception {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO source (kind, identifier, display_name, category) "
-                             + "VALUES ('rss', 'qrl-it://test', 'qrl-it', 'news') "
-                             + "ON CONFLICT (kind, identifier) DO UPDATE "
-                             + "SET display_name = EXCLUDED.display_name "
-                             + "RETURNING id")) {
-            try (ResultSet rs = ps.executeQuery()) {
-                rs.next();
-                return rs.getObject("id", UUID.class);
-            }
-        }
+        return OutboxItFixtures.ensureTestSource(dataSource, "qrl-it://test", "qrl-it");
     }
 
     private void awaitCursor(Predicate<ProviderStateDao.Cursor> predicate,

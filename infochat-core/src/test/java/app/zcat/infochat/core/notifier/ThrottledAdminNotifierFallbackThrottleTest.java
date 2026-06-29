@@ -1,5 +1,6 @@
 package app.zcat.infochat.core.notifier;
 
+import app.zcat.infochat.core.testsupport.MutableClock;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -8,7 +9,6 @@ import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -153,31 +153,4 @@ class ThrottledAdminNotifierFallbackThrottleTest {
         return sb.append("]").toString();
     }
 
-    /** Settable clock so a single notifier instance can be advanced across the window boundary. */
-    static final class MutableClock extends Clock {
-        private volatile Instant now;
-
-        MutableClock(Instant initial) {
-            this.now = initial;
-        }
-
-        void advance(Duration d) {
-            this.now = this.now.plus(d);
-        }
-
-        @Override
-        public Instant instant() {
-            return now;
-        }
-
-        @Override
-        public ZoneId getZone() {
-            return ZoneOffset.UTC;
-        }
-
-        @Override
-        public Clock withZone(ZoneId zone) {
-            return this;
-        }
-    }
 }

@@ -5,7 +5,6 @@ import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
-import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.digest.DigestRetryService;
 import app.zcat.infochat.provider.digest.DigestRetryService.RetryResult;
@@ -19,7 +18,6 @@ import app.zcat.infochat.provider.user.UserRepository;
 
 import javax.sql.DataSource;
 import java.io.PrintWriter;
-import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -29,6 +27,7 @@ import java.sql.Statement;
 import java.util.UUID;
 import java.util.logging.Logger;
 
+import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newRealBundleLoader;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -239,14 +238,6 @@ class RetryDigestCommandTest {
         @Override public <T> T unwrap(Class<T> iface) { throw new UnsupportedOperationException(); }
         @Override public boolean isWrapperFor(Class<?> iface) { return false; }
     };
-
-    private static BundleLoader newRealBundleLoader() throws Exception {
-        BundleLoader loader = new BundleLoader();
-        Method load = BundleLoader.class.getDeclaredMethod("load");
-        load.setAccessible(true);
-        load.invoke(loader);
-        return loader;
-    }
 
     private static DataSource stubDigestDataSource(UUID userId, boolean isAdmin, UUID groupId) {
         return stubDigestDataSource(userId, isAdmin, groupId, true);

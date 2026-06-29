@@ -1,20 +1,13 @@
 package app.zcat.infochat.messaging.impl.signal;
 
+import static app.zcat.infochat.messaging.impl.signal.SignalTestJson.parse;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import jakarta.json.Json;
-import jakarta.json.JsonObject;
-import jakarta.json.JsonReader;
 
-import java.io.StringReader;
-import java.util.ArrayList;
-import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-import app.zcat.infochat.messaging.InboundMessage;
-import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 /**
@@ -92,18 +85,4 @@ class SignalGroupSpanTypeTest {
                 "a well-formed mention span is stripped before delivery");
     }
 
-    private static JsonObject parse(String json) {
-        try (JsonReader r = Json.createReader(new StringReader(json))) {
-            return r.readObject();
-        }
-    }
-
-    private static final class RecordingInbound implements MessagingAdapter.InboundHandler {
-        final List<InboundMessage> messages = new ArrayList<>();
-
-        @Override
-        public void onMessage(InboundMessage msg) {
-            messages.add(msg);
-        }
-    }
 }

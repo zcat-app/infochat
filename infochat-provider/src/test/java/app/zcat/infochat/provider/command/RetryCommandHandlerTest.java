@@ -15,8 +15,6 @@ import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
 import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
-import app.zcat.infochat.provider.translation.TranslationCache;
-import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -24,7 +22,6 @@ import app.zcat.infochat.provider.user.UserRepository;
 
 import javax.sql.DataSource;
 import java.io.PrintWriter;
-import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.sql.Array;
 import java.sql.Connection;
@@ -42,6 +39,8 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.logging.Logger;
 
+import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newEnShortCircuitPipeline;
+import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newRealBundleLoader;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -391,30 +390,6 @@ class RetryCommandHandlerTest {
             }
             return out;
         }
-    }
-
-    private static TranslationPipeline newEnShortCircuitPipeline() throws Exception {
-        TranslationPipeline pipeline = new TranslationPipeline();
-        java.lang.reflect.Field cacheField = TranslationPipeline.class.getDeclaredField("translationCache");
-        cacheField.setAccessible(true);
-        cacheField.set(pipeline, new TranslationCache());
-
-        java.lang.reflect.Field providerField = TranslationPipeline.class.getDeclaredField("translationProvider");
-        providerField.setAccessible(true);
-        providerField.set(pipeline, (app.zcat.infochat.messaging.TranslationProvider) (text, from, to) -> text);
-
-        java.lang.reflect.Field sanitizerField = TranslationPipeline.class.getDeclaredField("llmOutputSanitizer");
-        sanitizerField.setAccessible(true);
-        sanitizerField.set(pipeline, SanitizerTestDoubles.noAuditSanitizer());
-        return pipeline;
-    }
-
-    private static BundleLoader newRealBundleLoader() throws Exception {
-        BundleLoader loader = new BundleLoader();
-        Method load = BundleLoader.class.getDeclaredMethod("load");
-        load.setAccessible(true);
-        load.invoke(loader);
-        return loader;
     }
 
     /**

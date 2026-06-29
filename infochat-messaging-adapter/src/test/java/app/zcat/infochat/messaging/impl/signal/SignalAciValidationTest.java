@@ -6,13 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import jakarta.json.Json;
 import jakarta.json.JsonObject;
 
-import java.util.ArrayList;
-import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-import app.zcat.infochat.messaging.InboundMessage;
-import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 /**
@@ -111,12 +107,4 @@ class SignalAciValidationTest {
                 .build();
     }
 
-    private static final class RecordingInbound implements MessagingAdapter.InboundHandler {
-        final List<InboundMessage> messages = new ArrayList<>();
-
-        @Override
-        public void onMessage(InboundMessage msg) {
-            messages.add(msg);
-        }
-    }
 }

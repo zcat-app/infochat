@@ -1,13 +1,11 @@
 package app.zcat.infochat.messaging.impl.signal;
 
+import static app.zcat.infochat.messaging.impl.signal.SignalTestJson.parse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
-import jakarta.json.Json;
 import jakarta.json.JsonObject;
-import jakarta.json.JsonReader;
 
-import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -64,12 +62,6 @@ class SignalGroupHandlerMembershipIsolationTest {
         assertEquals(SECOND_ACI, second.contactId(),
                 "second event must carry the second ACI");
         assertEquals(GROUP_V2_ID, second.adapterGroupId());
-    }
-
-    private static JsonObject parse(String json) {
-        try (JsonReader r = Json.createReader(new StringReader(json))) {
-            return r.readObject();
-        }
     }
 
     private static final class ThrowOnFirstEventMembership

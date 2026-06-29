@@ -1,5 +1,6 @@
 package app.zcat.infochat.core.notifier;
 
+import app.zcat.infochat.core.testsupport.MutableClock;
 import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -16,8 +17,6 @@ import java.sql.Statement;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -31,7 +30,6 @@ import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -447,40 +445,6 @@ class ThrottledAdminNotifierTest {
                 "suppressed_count must equal N-1 after the race");
         } finally {
             pool.shutdownNow();
-        }
-    }
-
-    /**
-     * Settable {@link Clock} for the test seam. Quarkus-CDI proxies
-     * a normal-scoped Clock bean per its standard rules, so an
-     * {@code @Inject Clock} field — both here and in the notifier —
-     * resolves through the same proxy and observes the mutations.
-     */
-    static final class MutableClock extends Clock {
-        private volatile Instant now;
-
-        MutableClock(Instant initial) {
-            assertNotNull(initial, "initial instant must not be null");
-            this.now = initial;
-        }
-
-        void advance(Duration d) {
-            this.now = this.now.plus(d);
-        }
-
-        @Override
-        public Instant instant() {
-            return now;
-        }
-
-        @Override
-        public ZoneId getZone() {
-            return ZoneOffset.UTC;
-        }
-
-        @Override
-        public Clock withZone(ZoneId zone) {
-            return this;
         }
     }
 

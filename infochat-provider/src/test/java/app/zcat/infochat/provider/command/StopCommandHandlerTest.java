@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
-import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.group.GroupRepository;
@@ -13,7 +12,6 @@ import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
 import java.io.PrintWriter;
-import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -24,6 +22,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.logging.Logger;
 
+import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newRealBundleLoader;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -188,14 +187,6 @@ class StopCommandHandlerTest {
                 public String sweepPrefix() { return pendingCommandName; }
             });
         }
-    }
-
-    private static BundleLoader newRealBundleLoader() throws Exception {
-        BundleLoader loader = new BundleLoader();
-        Method load = BundleLoader.class.getDeclaredMethod("load");
-        load.setAccessible(true);
-        load.invoke(loader);
-        return loader;
     }
 
     private static DataSource stubUserDataSource(UUID userId) {

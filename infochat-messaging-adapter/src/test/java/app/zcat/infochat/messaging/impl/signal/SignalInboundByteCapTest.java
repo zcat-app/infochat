@@ -9,15 +9,11 @@ import jakarta.json.Json;
 import jakarta.json.JsonObject;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
-import app.zcat.infochat.messaging.InboundMessage;
-import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 /**
@@ -132,12 +128,4 @@ class SignalInboundByteCapTest {
                 .build();
     }
 
-    private static final class RecordingInbound implements MessagingAdapter.InboundHandler {
-        final List<InboundMessage> messages = new ArrayList<>();
-
-        @Override
-        public void onMessage(InboundMessage msg) {
-            messages.add(msg);
-        }
-    }
 }

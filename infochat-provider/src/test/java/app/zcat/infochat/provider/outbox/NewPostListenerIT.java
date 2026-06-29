@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.outbox;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.provider.testsupport.OutboxItFixtures;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -10,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -221,26 +221,11 @@ class NewPostListenerIT {
     }
 
     private void clearAllItPosts() throws Exception {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                 "DELETE FROM post WHERE uid LIKE '%-it/%'")) {
-            ps.executeUpdate();
-        }
+        OutboxItFixtures.clearAllItPosts(dataSource);
     }
 
     private UUID ensureTestSource() throws Exception {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                 "INSERT INTO source (kind, identifier, display_name, category) "
-                     + "VALUES ('rss', 'listener-it://test', 'listener-it', 'news') "
-                     + "ON CONFLICT (kind, identifier) DO UPDATE "
-                     + "SET display_name = EXCLUDED.display_name "
-                     + "RETURNING id")) {
-            try (ResultSet rs = ps.executeQuery()) {
-                assertTrue(rs.next(), "test source upsert must yield an id");
-                return rs.getObject("id", UUID.class);
-            }
-        }
+        return OutboxItFixtures.ensureTestSource(dataSource, "listener-it://test", "listener-it");
     }
 
     private void emitNewPostNotify(Instant readyAt, UUID postId) throws Exception {

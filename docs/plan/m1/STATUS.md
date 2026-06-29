@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 544 |
+| done | 545 |
 | deferred | 10 |
 | **total** | **560** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-499 — Test fixture duplication → testsupport, plus a leaked registration teardown (complexity: low, risk: low)
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-509 — Operator onboarding: simple (comic) + advanced admin guides (complexity: medium, risk: low)
 - M1-524 — Unify the divergent outbox-IT awaitCursor poll helper into one fixture (complexity: low, risk: low)
@@ -706,7 +705,7 @@ M1-495 (done)
 M1-496 (done)
 M1-497 (done)
 M1-498 (done)
-M1-499 (pending) ← runnable
+M1-499 (done)
 M1-500 (pending) ← runnable
 M1-501 (done)
 M1-502 (done)

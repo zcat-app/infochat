@@ -1,13 +1,10 @@
 package app.zcat.infochat.messaging.impl.signal;
 
+import static app.zcat.infochat.messaging.impl.signal.SignalTestJson.parse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
-import jakarta.json.Json;
-import jakarta.json.JsonObject;
-import jakarta.json.JsonReader;
 
-import java.io.StringReader;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.List;
@@ -87,9 +84,4 @@ class MembershipDispatchShapeTest {
                 "left ACI must be canonicalized to lowercase");
     }
 
-    private static JsonObject parse(String json) {
-        try (JsonReader r = Json.createReader(new StringReader(json))) {
-            return r.readObject();
-        }
-    }
 }

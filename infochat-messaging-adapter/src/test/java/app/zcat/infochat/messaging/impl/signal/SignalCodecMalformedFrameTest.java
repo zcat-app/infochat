@@ -1,16 +1,13 @@
 package app.zcat.infochat.messaging.impl.signal;
 
+import static app.zcat.infochat.messaging.impl.signal.SignalTestJson.parse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import jakarta.json.Json;
-import jakarta.json.JsonObject;
-import jakarta.json.JsonReader;
 
-import java.io.StringReader;
 
 import org.junit.jupiter.api.Test;
 
@@ -144,9 +141,4 @@ class SignalCodecMalformedFrameTest {
         }
     }
 
-    private static JsonObject parse(String json) {
-        try (JsonReader r = Json.createReader(new StringReader(json))) {
-            return r.readObject();
-        }
-    }
 }
