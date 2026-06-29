@@ -37,6 +37,11 @@ class GroupInvitationHandlerTest {
     // Unique per run so parallel/repeat runs never collide on the natural key.
     private static final String CONTACT_PREFIX = "gih-" + UUID.randomUUID() + "-";
     private static final String GROUP_ID = "2";
+    // Distinct, run-unique upstream group ids for the M1-519 total-cap tests so
+    // each auto-join records its own auto_joined_group row (the natural key is
+    // (adapter, upstream_group_id)); the per-run UUID avoids colliding with a
+    // leftover row from a crashed prior run.
+    private static final String GROUP_PREFIX = "gih-grp-" + UUID.randomUUID() + "-";
 
     @Inject @SeedDataSource DataSource dataSource;
     @Inject GroupInvitationHandler handler;
@@ -47,12 +52,22 @@ class GroupInvitationHandlerTest {
 
     @AfterEach
     void cleanup() throws Exception {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "DELETE FROM users WHERE adapter = ? AND contact_id LIKE ?")) {
-            ps.setString(1, TEST_ADAPTER);
-            ps.setString(2, CONTACT_PREFIX + "%");
-            ps.executeUpdate();
+        try (Connection conn = dataSource.getConnection()) {
+            // Delete the auto_joined_group rows FIRST: inviter_user_id has a FK
+            // to users(id), so the users delete below would otherwise fail. All
+            // rows this class records use TEST_ADAPTER, and it is the only writer
+            // of inmemory join rows, so an adapter-scoped delete is exact.
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "DELETE FROM auto_joined_group WHERE adapter = ?")) {
+                ps.setString(1, TEST_ADAPTER);
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "DELETE FROM users WHERE adapter = ? AND contact_id LIKE ?")) {
+                ps.setString(1, TEST_ADAPTER);
+                ps.setString(2, CONTACT_PREFIX + "%");
+                ps.executeUpdate();
+            }
         }
         // Drop any in-memory registered-set entries this test added so the
         // rate-cap split state never leaks into another test class's bucket.
@@ -149,6 +164,76 @@ class GroupInvitationHandlerTest {
         assertTrue(source.joined.size() <= cap + 5,
                 "joins stay bounded at the per-(adapter, contactId) cap (~" + cap
                         + "), not the full flood of " + flood);
+    }
+
+    @Test
+    void perInviterActivationCapStopsJoiningNewGroups() throws Exception {
+        // M1-519 total cap: once one inviter has pulled the bot into
+        // per-user-activation-cap (%test = 3) DISTINCT groups, a further
+        // invitation to a NEW group from that inviter does NOT auto-join — even
+        // though the transport rate cap still has tokens (only cap+1 handle()
+        // calls, far under the 60/min rate cap). This is the TOTAL cap, distinct
+        // from the rate cap exercised by overCapInvitationFloodStopsJoining.
+        clearJoinRows();
+        String inviter = seedRegisteredInviter("vouched");
+        JoinCapturingAdapter source = new JoinCapturingAdapter(TEST_ADAPTER);
+
+        int cap = 3; // %test infochat.groups.per-user-activation-cap
+        for (int i = 0; i <= cap; i++) { // cap + 1 distinct groups
+            handler.handle(new MessagingAdapter.GroupInvitation(groupId("p" + i), inviter),
+                    TEST_ADAPTER, source);
+        }
+
+        assertEquals(cap, source.joined.size(),
+                "exactly the per-inviter activation cap (" + cap + ") groups join; the "
+                        + (cap + 1) + "th invitation is dropped while the rate cap still has tokens");
+    }
+
+    @Test
+    void globalMaxGroupsCapStopsJoiningEvenWhenInviterUnderOwnCap() throws Exception {
+        // M1-519 global cap: two inviters, each individually UNDER the per-inviter
+        // cap of 3, collectively fill the global cap (%test = 5). Inviter A joins
+        // 3, inviter B joins 2 (total 5). B's next invitation to a NEW group — B
+        // is still under its own cap (2 < 3) — is NOT joined because the GLOBAL
+        // cap is reached. Few handle() calls, so the rate cap is never the gate.
+        clearJoinRows();
+        String inviterA = seedRegisteredInviter("vouched");
+        String inviterB = seedRegisteredInviter("invited");
+        JoinCapturingAdapter source = new JoinCapturingAdapter(TEST_ADAPTER);
+
+        for (int i = 0; i < 3; i++) { // A fills its own per-inviter cap
+            handler.handle(new MessagingAdapter.GroupInvitation(groupId("a" + i), inviterA),
+                    TEST_ADAPTER, source);
+        }
+        for (int i = 0; i < 2; i++) { // B adds 2 → global now at the cap of 5
+            handler.handle(new MessagingAdapter.GroupInvitation(groupId("b" + i), inviterB),
+                    TEST_ADAPTER, source);
+        }
+        assertEquals(5, source.joined.size(), "5 joins across two inviters fill the global cap");
+
+        handler.handle(new MessagingAdapter.GroupInvitation(groupId("b-overflow"), inviterB),
+                TEST_ADAPTER, source);
+
+        assertEquals(5, source.joined.size(),
+                "the global max-groups cap blocks a further join even though inviter B "
+                        + "is under its own per-inviter cap");
+    }
+
+    /** Run-unique upstream group id for a total-cap test case. */
+    private static String groupId(String suffix) {
+        return GROUP_PREFIX + suffix;
+    }
+
+    /** Establish a zero global-count baseline for the total-cap tests: countJoins()
+     * is a global SELECT COUNT(*), so a leftover inmemory row would skew the
+     * global-cap assertion. This class is the only writer of inmemory join rows. */
+    private void clearJoinRows() throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "DELETE FROM auto_joined_group WHERE adapter = ?")) {
+            ps.setString(1, TEST_ADAPTER);
+            ps.executeUpdate();
+        }
     }
 
     /** Seed a registered, non-banned inviter and mark it in the in-memory

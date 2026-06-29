@@ -8,10 +8,13 @@ import app.zcat.infochat.provider.messaging.RegisteredContactSet;
 import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Provider-side decision point for received group invitations (M1-515). Wired
@@ -32,6 +35,16 @@ import java.util.Set;
  * traffic, no presence signal — M1-515 decision). The group still enters the
  * D47 {@code approval_status='pending'} machine on the first @mention after a
  * join; no approval logic is added here.</p>
+ *
+ * <p>A registered inviter's auto-joins are additionally bounded by the D47
+ * total group-count caps (M1-519): before issuing {@code /_join} the handler
+ * enforces a per-inviter activation cap and a global max-groups cap, counted
+ * from the durable {@code auto_joined_group} table ({@link GroupJoinRepository})
+ * under the same config keys the §3.5 @mention path reads. This bounds the
+ * bot's TOTAL passive memberships, where the transport rate cap only bounds
+ * their RATE; an over-cap invitation is dropped silently (no join, no reply).
+ * The §3.5 {@code groups} approval machine is untouched — the join surface
+ * writes no {@code groups} row.</p>
  */
 @ApplicationScoped
 public class GroupInvitationHandler {
@@ -47,14 +60,31 @@ public class GroupInvitationHandler {
     private final UserRepository userRepository;
     private final RateCapBucket rateCapBucket;
     private final RegisteredContactSet registeredContactSet;
+    private final GroupJoinRepository groupJoinRepository;
+
+    // The D47 total group-count caps, reusing the SAME config keys the §3.5
+    // @mention path reads (GroupApprovalService) — one config surface, not a
+    // forked one (M1-519). Note the two surfaces COUNT DIFFERENT TABLES: this
+    // one counts auto_joined_group (passive joins), §3.5 counts `groups`
+    // (@mention-activated groups). The ceilings are therefore enforced
+    // independently — the bot's total group footprint can reach up to the sum
+    // of the two counters (≈2× the configured value), not a single shared
+    // bound. Profile-driven values live in application.properties.
+    @ConfigProperty(name = "infochat.groups.per-user-activation-cap", defaultValue = "3")
+    int perUserActivationCap;
+
+    @ConfigProperty(name = "infochat.groups.global-max-groups", defaultValue = "10")
+    int globalMaxGroups;
 
     @Inject
     public GroupInvitationHandler(UserRepository userRepository,
                                   RateCapBucket rateCapBucket,
-                                  RegisteredContactSet registeredContactSet) {
+                                  RegisteredContactSet registeredContactSet,
+                                  GroupJoinRepository groupJoinRepository) {
         this.userRepository = userRepository;
         this.rateCapBucket = rateCapBucket;
         this.registeredContactSet = registeredContactSet;
+        this.groupJoinRepository = groupJoinRepository;
     }
 
     /**
@@ -93,12 +123,13 @@ public class GroupInvitationHandler {
         // Authoritative gate: the in-memory set above is a query-free fast path
         // for the cap split; the users row carries the ban flag and exact
         // registration_state the D47 decision must not race against a stale set.
-        boolean registeredInviter = userRepository
+        // Retain the row (not just a boolean) — the inviter's users.id keys the
+        // per-inviter total-cap count below (M1-519).
+        Optional<UserRepository.UserRow> inviterRow = userRepository
                 .findByAdapterAndContactId(adapter, inviterContactId)
                 .filter(user -> !user.isBanned())
-                .map(user -> REGISTERED_STATES.contains(user.registrationState()))
-                .orElse(false);
-        if (!registeredInviter) {
+                .filter(user -> REGISTERED_STATES.contains(user.registrationState()));
+        if (inviterRow.isEmpty()) {
             // Ignore, do not decline (see class javadoc): no join, no reply.
             log.info("group invitation ignored: inviter not a registered user; "
                             + "adapter={} inviter={} group={}",
@@ -106,6 +137,45 @@ public class GroupInvitationHandler {
                     ContactIds.redact(invitation.adapterGroupId()));
             return;
         }
+        UUID inviterUserId = inviterRow.get().id();
+
+        // D47 total group-count caps (M1-519), enforced BEFORE /_join so an
+        // over-cap invitation produces no join and no reply — a silent drop, the
+        // same shape as the rate-cap and registration-gate drops above. These
+        // bound the bot's TOTAL passive memberships; the transport rate cap above
+        // only bounds their RATE. Counts come from auto_joined_group, NOT the
+        // §3.5 `groups` table, so the @mention approval machine stays untouched.
+        // The per-inviter cap is race-free (one inviter's invitations serialize
+        // per contactId in the adapter dispatch). The global cap is a non-atomic
+        // check-then-act (count here, record below) with no lock spanning the
+        // two, so — exactly as the §3.5 GroupApprovalService "Race window R2"
+        // documents — concurrent invitations from DISTINCT inviters can overshoot
+        // the global ceiling by a bounded amount (≤ dispatch concurrency width).
+        // Per spec §Rate limiting these caps are flood-bounds (resource-exhaustion
+        // defenses), not strict invariants: the unbounded-growth DoS is closed; a
+        // hard atomic ceiling would need advisory-lock serialization, deferred to
+        // M1-522 (M1-519 redteam Finding 1).
+        if (groupJoinRepository.countJoinsByInviter(inviterUserId) >= perUserActivationCap) {
+            log.info("group invitation dropped: per-inviter group-activation cap reached; "
+                            + "adapter={} inviter={} group={}",
+                    adapter, ContactIds.redact(invitation.inviterContactId()),
+                    ContactIds.redact(invitation.adapterGroupId()));
+            return;
+        }
+        if (groupJoinRepository.countJoins() >= globalMaxGroups) {
+            log.info("group invitation dropped: global max-groups cap reached; "
+                            + "adapter={} inviter={} group={}",
+                    adapter, ContactIds.redact(invitation.inviterContactId()),
+                    ContactIds.redact(invitation.adapterGroupId()));
+            return;
+        }
+        // Record-then-join: the conservative ordering for a security cap. If
+        // joinGroup throws a transport fault after the record, the slot is
+        // consumed (a one-row over-count) — the safe direction for a DoS bound,
+        // never an under-count that could let the cap be exceeded. The record is
+        // idempotent on the natural key, so a re-invite to an already-joined
+        // group does not inflate the count.
+        groupJoinRepository.tryRecordJoin(adapter, invitation.adapterGroupId(), inviterUserId);
         source.joinGroup(invitation.adapterGroupId());
         log.info("group invitation auto-accepted: registered inviter; "
                         + "adapter={} inviter={} group={}",

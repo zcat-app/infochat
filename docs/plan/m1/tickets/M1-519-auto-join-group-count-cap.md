@@ -1,7 +1,7 @@
 ---
 id: M1-519
 title: "Enforce D47 group-count caps on the auto-join surface"
-status: pending
+status: done
 created: 2026-06-29
 last_updated: 2026-06-29
 blocked_by:
@@ -34,7 +34,8 @@ acceptance:
     migration applies cleanly on a fresh DB.
   - "mvn -B verify is green from the repo root."
 test_plan:
-  adds: []
+  adds:
+    - GroupInvitationHandlerTest
   preserves:
     - all tests currently green on main
 spec_refs:
@@ -43,12 +44,86 @@ spec_refs:
 decision_refs:
   - D47
 remediates: M1-515
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 567
+      removed: 21
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-06-29
+    category: DOS
+    severity: medium
+    promise: |
+      The D47 caps "bound the bot's TOTAL passive memberships" and the global cap
+      "stops the aggregate even when every inviter is individually under its own
+      cap" (§3.5 / GroupInvitationHandler comments).
+    gap: |
+      Global-cap enforcement is a non-atomic check-then-act (countJoins() read,
+      then tryRecordJoin INSERT) with no lock spanning read and insert. Distinct
+      registered inviters dispatch concurrently (per-inviter FIFO only), so N
+      inviters racing the window each see count < globalMaxGroups and all record,
+      overshooting the global ceiling by up to N-1. Per-inviter cap is safe;
+      global cap races. Overshoot bounded by concurrency width (unbounded-growth
+      DoS still closed).
+    repro: |
+      N colluding registered inviters each invite the bot to a distinct new group
+      at the same instant with the global pool near full; all evaluate countJoins()
+      before any commits, all join, bot ends in globalMaxGroups+(N-1) groups.
+    suggested_fix_class: other
+  - date: 2026-06-29
+    category: DOS
+    severity: medium
+    promise: |
+      Caps "close the unbounded-growth DoS" while keeping the bot able to serve
+      legitimate auto-join traffic.
+    gap: |
+      auto_joined_group has no removed_at and DELETE is revoked from all app roles;
+      counts never decrease (slot-freeing deferred to M1-522). ceil(global/per-user)
+      registered inviters (2 on pi, 4 on laptop) can fill the global pool with
+      throwaway groups, then leave them — the rows persist, so the bot silently
+      refuses ALL further auto-joins deployment-wide, recoverable only via operator
+      psql under the owner role.
+    repro: |
+      A small invite-gated actor set fills countJoins() to globalMaxGroups with
+      disposable groups, then leaves/deletes them; rows remain, every subsequent
+      legitimate invitation is dropped with no chat/admin recovery. Anticipated/
+      deferred trade-off (M1-522), surfaced because the recovery ticket is undelivered.
+    suggested_fix_class: other
+redteam_audits:
+  - date: 2026-06-29
+    verdict: FINDINGS
+    base: bfcd24de
+    head: working-tree (m1/M1-519-auto-join-group-count-cap, uncommitted)
+    verdict_file: docs/plan/m1/redteam/M1-519-2026-06-29.md
+    findings_count: 2
+    out_of_model_count: 1
+    note: |
+      2 MEDIUM DOS findings, both anticipated. F1 (global-cap check-then-act race,
+      bounded overshoot) mirrors the §3.5 GroupApprovalService flood-bound race it
+      already documents as acceptable; the unbounded-growth DoS remains closed. F2
+      (lifetime-ratchet lockout) is the user-accepted slot-freeing deferral tracked
+      by M1-522. Out-of-model: the dual-table shared-config-key comment overstates
+      a single shared ceiling. Awaiting user escalation decision.
+outline_file: target/m1-tick-outline-M1-519.md
+clarity_check:
+  date: 2026-06-29
+  verdict: WARN
+  warnings:
+    - "Acceptance criterion 3 does not name a test that verifies surviving restart; if no schema change is made there is no named artifact proving durability. Address by naming a durability test or making persistence non-optional."
+    - "frontmatter test_plan.adds was empty but criterion 2 requires adding GroupInvitationHandlerTest; populated."
+  blockers: []
 ---
 
 # M1-519: Enforce D47 group-count caps on the auto-join surface
