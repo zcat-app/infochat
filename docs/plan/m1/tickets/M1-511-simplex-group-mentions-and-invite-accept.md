@@ -1,9 +1,10 @@
 ---
 id: M1-511
 title: "SimpleX groups: v6.5.4.1 mention recognition + auto-accept group invitations"
-status: pending
+status: deferred
+deferred_reason: decomposed
 created: 2026-06-28
-last_updated: 2026-06-28
+last_updated: 2026-06-29
 blocked_by:
   - M1-510
 files_budget: 10
@@ -87,7 +88,32 @@ aborted_attempts: []
 reopens: []
 redteam_findings: []
 redteam_audits: []
-clarity_check: {}
+escalations:
+  - date: 2026-06-29
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      CLARITY VERDICT: FAIL (2 blockers)
+      1. FILES-BUDGET-PLAUSIBLE: files_scope excludes SPI/Provider paths required by
+         AC 5 (InboundHandler.java, MessagingAdapter.java, a Provider-side handler/test
+         for the registered-inviter gate). Add the missing paths to files_scope, or
+         decompose the SPI-surface change into a separate ticket and narrow AC 5 to
+         adapter-codec-only work.
+      2. TEST-CHANGES-AUTHORIZED: AC 3 (removing the queue-address mention path)
+         requires changing/deleting existing test methods in SimpleXMessageCodecTest.java
+         that the ticket does not name. List the modified/deleted methods with new
+         assertions, or state only-additions and move the file to test_plan.adds.
+clarity_check:
+  date: 2026-06-29
+  verdict: FAIL
+  warnings:
+    - "AC 4: real receivedGroupInvitation frame not captured at write time; test finalizable only after the live capture step during impl."
+    - "AC 5: registered/banned-inviter gate logic should have a named unit test but none is specified (the memberStatus transition is a live-system check, not a unit test)."
+    - "AC 6: doc/decision update acceptance is by inspection only; no runnable check."
+    - "SELF-CONTAINED: new SPI method signatures (InboundHandler group-invitation callback; adapter join/decline method) are not spelled out in the ticket body."
+    - "FORWARD-REFERENCE: M1-511a / M1-511b referenced in Notes as a decomposition path do not exist on disk."
+  blockers:
+    - "FILES-BUDGET-PLAUSIBLE: files_scope excludes SPI/Provider paths required by AC 5 (InboundHandler.java, MessagingAdapter.java, and a Provider-side handler/test for the registered-inviter gate). Add the missing paths to files_scope, or decompose the SPI-surface change into a separate ticket and narrow AC 5 to adapter-codec-only work."
+    - "TEST-CHANGES-AUTHORIZED: AC 3 (removing the queue-address mention path) requires changing/deleting existing test methods in SimpleXMessageCodecTest.java that the ticket does not name. List the modified/deleted methods with new assertions, or state only-additions and move the file to test_plan.adds."
 ---
 
 # M1-511: SimpleX groups — v6.5.4.1 mention recognition + auto-accept invitations

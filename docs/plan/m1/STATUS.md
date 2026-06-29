@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 25 |
+| pending | 26 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 514 |
-| deferred | 7 |
-| **total** | **546** |
+| deferred | 8 |
+| **total** | **548** |
 
 ---
 
@@ -48,7 +48,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-501 — Stage-1-flagged posts can permanently evade Stage 2 after a crash (complexity: medium, risk: medium)
 - M1-509 — Operator onboarding: simple (comic) + advanced admin guides (complexity: medium, risk: low)
-- M1-511 — SimpleX groups: v6.5.4.1 mention recognition + auto-accept group invitations (complexity: high, risk: high)
+- M1-514 — SimpleX groups: meta.userMention @-mention recognition (complexity: high, risk: high)
 
 ---
 
@@ -65,7 +65,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-515 — blocked_by: M1-514 (pending)
 
 ---
 
@@ -102,9 +102,10 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 ### blocked-on-new-ticket (1)
 - M1-505 → M1-506
 
-### decomposed (2)
+### decomposed (3)
 - M1-034 → M1-034a
 - M1-318 → unspecified
+- M1-511 → unspecified
 
 ### post-mvp-hardening (1)
 - M1-031 → unspecified
@@ -736,7 +737,9 @@ M1-507 (done)
 M1-508 (done)
 M1-509 (pending) ← runnable
 M1-510 (done)
-  └── M1-511 (pending) ← runnable
+  └── M1-511 (deferred)
 M1-512 (draft)
 M1-513 (draft)
+M1-514 (pending) ← runnable
+  └── M1-515 (pending)
 ```
