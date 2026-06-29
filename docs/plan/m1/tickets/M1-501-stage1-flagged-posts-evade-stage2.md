@@ -1,9 +1,9 @@
 ---
 id: M1-501
 title: "Stage-1-flagged posts can permanently evade Stage 2 after a crash"
-status: pending
+status: done
 created: 2026-06-27
-last_updated: 2026-06-27
+last_updated: 2026-06-29
 blocked_by: []
 files_budget: 4
 complexity: medium
@@ -40,12 +40,46 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 295
+      removed: 15
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-29
+    verdict: CLEAN
+    base: 2eb47507ecc5a3bee0c52f52c54f1ac9a6d48c47
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-501-2026-06-29.md
+    out_of_model_count: 1
+    note: |
+      In-progress branch audit (run flow, between review APPROVE and commit).
+      CLEAN — no findings. One out-of-model advisory: under the fail-open
+      posture the rescued orphan becomes user-visible (Stage-1-redacted)
+      before any Stage-2 judge sees it, relying on async re-eval. The
+      threat-actor itself classed it a defense-in-depth design choice, not a
+      spec violation, with a non-adversary-reachable trigger (no actor
+      controls crash timing) and an exposure window identical in nature to
+      the already-accepted Stage-2-infra-failure degraded mode. No follow-up
+      ticket warranted.
+clarity_check:
+  date: 2026-06-29
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-501: Stage-1-flagged posts can permanently evade Stage 2 after a crash

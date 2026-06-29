@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.eval.stage1;
 
+import app.zcat.infochat.collector.eval.stage2.Stage2VerdictHandler;
 import app.zcat.infochat.collector.eval.stage2.Stage2Worker;
 import app.zcat.infochat.collector.outbox.EvalQueueProducer;
 import app.zcat.infochat.collector.outbox.PostPersister;
@@ -84,6 +85,15 @@ public class Stage1Worker {
     @Inject
     Stage2Worker stage2Worker;
 
+    /**
+     * M1-501 orphan rescue: a Stage-1-flagged post whose Stage 2 never
+     * completed (crash or failed verdict write between the stage1_done
+     * commit and Stage 2) is routed back through the verdict handler's
+     * INFRA_FAILURE path. See {@link #processKey}.
+     */
+    @Inject
+    Stage2VerdictHandler stage2VerdictHandler;
+
     @Inject
     EvalQueueProducer evalQueueProducer;
 
@@ -157,10 +167,42 @@ public class Stage1Worker {
             return;
         }
         if (row.stage1Done) {
+            if (row.stage1Flagged && !row.stage2Done) {
+                // Orphan rescue (M1-501). Stage 1 flagged this post — so it
+                // owed Stage 2 a verdict — but the verdict never landed: a
+                // crash or a failed Stage-2 write between the stage1_done
+                // commit and Stage 2 completion strands the post at RAW /
+                // stage1_flagged=TRUE / stage2_done=FALSE. The Tagger pickup
+                // (stage1_flagged=FALSE OR stage2_done=TRUE) and the re-eval
+                // enumeration (stage2_failed=TRUE OR QUARANTINED) both skip
+                // that exact bitmap, and re-running Stage 1 here would
+                // duplicate its quarantine rows — so without this branch the
+                // post stays stranded forever and reEmitStaleRaw re-selects it
+                // on every pass (schema Invariant 5). "Stage 2 owed a verdict
+                // but never ran" IS the INFRA_FAILURE case (docs/spec/security.md
+                // §Failure handling — "the judge did NOT run"), so apply the
+                // operator's configured Stage-2-failure posture: fail-closed →
+                // QUARANTINED, fail-open → released with Stage 1 redactions.
+                // Either outcome sets stage2_done=TRUE and stage2_failed=TRUE,
+                // moving the post out of the orphan bitmap; the re-evaluation
+                // job already enumerates stage2_failed=TRUE and re-judges it
+                // with the body it reconstructs from the surviving quarantine
+                // rows, so ownership of the eventual verdict passes cleanly to
+                // that one recovery path. (stage1_flagged && !stage2_done
+                // implies status='RAW': the only QUARANTINED posts with
+                // stage2_done=FALSE are the Stage-1 fail-closed paths, which
+                // leave stage1_flagged=FALSE.)
+                LOG.warnf("Stage1Worker: rescuing orphaned Stage-1-flagged post_id=%s "
+                        + "(stage2 never completed) via Stage-2 infra-failure handling.", key.id());
+                stage2VerdictHandler.apply(key.id(), key.fetchedAt(),
+                    Stage2VerdictHandler.Verdict.INFRA_FAILURE);
+                return;
+            }
             // Invariant 5 re-enqueue: rehydrator may re-emit a post
-            // whose Stage 1 already completed. INFO log + short
-            // circuit so Stage 2 (M1-033) and Tagger (M1-034) reach
-            // their downstream advance paths without doubled Stage-1
+            // whose Stage 1 already completed and whose Stage 2 path is
+            // resolved (stage1_flagged=FALSE, or stage2_done=TRUE). INFO
+            // log + short circuit so Stage 2 (M1-033) and Tagger (M1-034)
+            // reach their downstream advance paths without doubled Stage-1
             // side effects.
             LOG.infof("Stage1Worker: post_id=%s already stage1_done; skipping.", key.id());
             return;
@@ -233,7 +275,7 @@ public class Stage1Worker {
 
     private @Nullable PostRow loadPost(PostPersister.PersistedPostKey key) throws SQLException {
         final String sql =
-            "SELECT uid, body, stage1_done FROM post "
+            "SELECT uid, body, stage1_done, stage1_flagged, stage2_done FROM post "
                 + "WHERE id = ? AND fetched_at = ?";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -246,12 +288,17 @@ public class Stage1Worker {
                 return new PostRow(
                     rs.getString("uid"),
                     rs.getString("body"),
-                    rs.getBoolean("stage1_done"));
+                    rs.getBoolean("stage1_done"),
+                    rs.getBoolean("stage1_flagged"),
+                    rs.getBoolean("stage2_done"));
             }
         }
     }
 
     // body reflects the V7 schema: post.body is a nullable column.
-    private record PostRow(String uid, @Nullable String body, boolean stage1Done) {
+    // stage1Flagged + stage2Done drive the orphan-rescue branch in
+    // processKey (M1-501).
+    private record PostRow(String uid, @Nullable String body, boolean stage1Done,
+                           boolean stage1Flagged, boolean stage2Done) {
     }
 }

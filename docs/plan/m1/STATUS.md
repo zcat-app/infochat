@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 16 |
+| pending | 15 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 525 |
+| done | 526 |
 | deferred | 8 |
 | **total** | **549** |
 
@@ -36,7 +36,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-498 — Test fidelity & coverage gaps: copied lambdas, wrong arms, untested paths (complexity: medium, risk: low)
 - M1-499 — Test fixture duplication → testsupport, plus a leaked registration teardown (complexity: low, risk: low)
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
-- M1-501 — Stage-1-flagged posts can permanently evade Stage 2 after a crash (complexity: medium, risk: medium)
 - M1-509 — Operator onboarding: simple (comic) + advanced admin guides (complexity: medium, risk: low)
 - M1-514 — SimpleX groups: meta.userMention @-mention recognition (complexity: high, risk: high)
 
@@ -76,6 +75,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-512 | Production runtime resource harness: swap, container memory/CPU caps, dev-runtime teardown | 2026-06-29 | round 1 APPROVE |
 | M1-510 | SimpleX codec: align DM inbound/outbound/error decode with live v6.5.4.1 wire format | 2026-06-29 | round 1 APPROVE |
+| M1-501 | Stage-1-flagged posts can permanently evade Stage 2 after a crash | 2026-06-29 | round 1 APPROVE |
 | M1-489 | /follow-tag and /unfollow-tag skip spec-mandated tag normalization | 2026-06-29 | round 1 APPROVE |
 | M1-488 | quarantine_reject prompt apostrophe breaks its own {0} MessageFormat token | 2026-06-29 | round 1 APPROVE |
 | M1-487 | NewPostHandler @Transactional does not roll back on SQLException | 2026-06-29 | round 1 APPROVE |
@@ -83,7 +83,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-485 | Embedding batch retry has no backoff, unlike the sibling entity stage | 2026-06-29 | round 1 APPROVE |
 | M1-484 | Asset fetcher ignores SPI supported-asset/quote gate; dedup readBigDecimal | 2026-06-29 | round 1 APPROVE |
 | M1-483 | /group-timezone: missing-arg wrong error + zone work before the auth gate | 2026-06-29 | round 1 APPROVE |
-| M1-480 | /unban skips the in-transaction admin re-check its siblings perform | 2026-06-29 | round 1 APPROVE |
 
 ---
 
@@ -716,7 +715,7 @@ M1-497 (pending) ← runnable
 M1-498 (pending) ← runnable
 M1-499 (pending) ← runnable
 M1-500 (pending) ← runnable
-M1-501 (pending) ← runnable
+M1-501 (done)
 M1-502 (done)
 M1-503 (done)
 M1-504 (done)
