@@ -188,9 +188,8 @@ class EligiblePostQueryIT {
         UUID userId = insertUser("cap-user");
         UUID sourceId = insertSource("cap-src", "CAP");
         insertSubscription("dm", userId, sourceId);
-        // Profile cap defaults to 200 in test profile; seed 205 posts.
-        // Cluster cap is %test = 5 (set in MvpProfile) so we don't pay
-        // 200 inserts per test run.
+        // Profile cap is 5 in the test profile (set in MvpProfile); seed 8
+        // posts so the 3-post surplus is dropped and reported as excluded.
         Instant now = Instant.now();
         for (int i = 0; i < 8; i++) {
             // Stagger by minutes so ORDER BY published_at DESC has a

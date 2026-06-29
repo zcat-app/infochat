@@ -116,7 +116,8 @@ class ForgetPurgeServiceTest {
         seedChatMemory(userId, scopeKind, scopeId);
         seedSavedPost(userId, "post-admin");
 
-        // Seed an audit row with this user as actor.
+        // Capture the audit row count before purge; the assertion below
+        // pins that purge leaves audit_log untouched.
         int auditBefore = countAuditRows();
 
         try (Connection conn = dataSource.getConnection()) {

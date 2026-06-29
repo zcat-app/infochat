@@ -15,8 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Pins that the four eval-stage pickup queries share ONE
  * {@link PartitionScan} source rather than each carrying its own
- * horizon+slack constant, and that the source computes the floor as the
- * post retention horizon widened by the partition slack.
+ * horizon+slack constant.
  */
 @QuarkusTest
 class PartitionScanSharedSourceTest {

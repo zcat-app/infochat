@@ -50,9 +50,16 @@ class JsonEscaperTest {
     @Test
     void escapedOutputContainsNoRawControlByte() {
         String escaped = JsonEscaper.escape("title" + (char) 0x08 + "with" + (char) 0x0c + "controls");
+        // The guard rejects the full control range — C0 (<0x20), DEL (0x7f),
+        // and C1 (0x80-0x9f) — so it matches the method's "no raw control
+        // byte" claim, not only C0. DEL and C1 are valid raw in JSON
+        // (RFC 8259), so JsonEscaper passes them through and they are not fed
+        // here; the guard still flags any control byte that escaping should
+        // have removed from this C0 input.
         for (int i = 0; i < escaped.length(); i++) {
-            assertTrue(escaped.charAt(i) >= 0x20,
-                "escaped output must not contain a raw C0 byte at index " + i);
+            char ch = escaped.charAt(i);
+            assertTrue(ch >= 0x20 && ch != 0x7f && (ch < 0x80 || ch > 0x9f),
+                "escaped output must not contain a raw control byte (C0/DEL/C1) at index " + i);
         }
     }
 }

@@ -231,17 +231,14 @@ class ExportDataCollectorTest {
     }
 
     @Test
-    void truncationReportedWhenCapExceeded() throws Exception {
+    void underCapTableNotFlaggedTruncated() throws Exception {
         String contactId = PREFIX + "trunc-actor";
         UUID userId = seedUser(contactId);
         UUID sourceId = seedSource(PREFIX + "trunc-source");
 
-        // The default maxRowsPerTable is 10000; override to a small
-        // value for the test by seeding more rows than a low cap.
-        // Since we can't override the config mid-test, seed enough
-        // rows to verify the LIMIT is applied (default 10000 means
-        // we won't hit truncation in normal tests — this test verifies
-        // the structural path by checking saved_post count <= cap).
+        // Seed 5 rows, well under the injected bean's default 10000-row
+        // cap, so no table is flagged truncated. The over-cap path has its
+        // own test (direct-instantiated with a small cap).
         for (int i = 0; i < 5; i++) {
             seedSavedPost(userId, sourceId, PREFIX + "trunc-uid-" + i,
                     new String[]{}, Instant.now().minus(i, ChronoUnit.HOURS));
@@ -250,9 +247,8 @@ class ExportDataCollectorTest {
         ExportDataCollector.ExportResult result =
                 collector.collect(userId, "dm", userId);
 
-        // With 5 rows and a default cap of 10000, no truncation.
         assertTrue(result.truncatedTables().isEmpty(),
-                "5 rows should not trigger truncation at default cap");
+                "5 rows under the default cap must not trigger truncation");
         assertEquals(5, result.tables().get("saved_post").size());
     }
 

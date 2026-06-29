@@ -95,7 +95,8 @@ class InboundRouterClearCompressIT {
         // threshold and trigger auto-compress after the reply.
         adapter.deliverDm(contactId, "trigger auto-compress please");
 
-        // Wait briefly for async processing and check the reply.
+        // Read the reply. deliverDm drives the router synchronously, so the
+        // outbound message is already recorded — no async wait is needed.
         var sent = adapter.sentMessages();
         assertFalse(sent.isEmpty(), "Expected at least one reply");
         OutboundMessage reply = sent.getLast();
