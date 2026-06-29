@@ -36,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code infochat.summary.cluster-cap} bound the on-demand /summary path
  * applies (M1-263 acceptance item 3), and the collector's queries run under
  * the profile-driven {@code statement_timeout} (item 5). Mirrors the
- * {@code EligiblePostQueryIT} / {@code EligiblePostQueryStatementTimeoutTest}
+ * {@code EligiblePostQueryIT} / {@code EligiblePostQueryStatementTimeoutIT}
  * patterns in the summary package. Fixtures are keyed on the
  * {@code m1-263c-} prefix and deleted before each test.
  */
@@ -174,7 +174,7 @@ class DigestPostCollectorIT {
      * {@code createStatement().execute(...)} on each connection (where the
      * {@code SET LOCAL statement_timeout} lands), delegating every other call to
      * the real connection — same shape as the recorder in
-     * {@code EligiblePostQueryStatementTimeoutTest}.
+     * {@code EligiblePostQueryStatementTimeoutIT}.
      */
     static final class RecordingDataSource implements DataSource {
         private final DataSource delegate;

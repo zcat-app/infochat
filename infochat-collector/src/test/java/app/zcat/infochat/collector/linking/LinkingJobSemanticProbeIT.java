@@ -37,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * probe is supposed to exploit.
  */
 @QuarkusTest
-@TestProfile(LinkingJobTest.WideLookbackProfile.class)
+@TestProfile(LinkingJobBehaviorIT.WideLookbackProfile.class)
 class LinkingJobSemanticProbeIT {
 
     /** Co-temporal: every seeded post shares one fetched_at (and partition). */

@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * for the seed-and-drive shape.
  */
 @QuarkusTest
-@TestProfile(LinkingJobTest.WideLookbackProfile.class)
+@TestProfile(LinkingJobBehaviorIT.WideLookbackProfile.class)
 class LinkingJobIT {
 
     private static final Instant FETCHED_AT = Instant.parse("2026-05-22T11:00:00Z");

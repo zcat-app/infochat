@@ -593,7 +593,7 @@ public final class NostrStreamSource implements StreamSource {
          * replays events the dedup filter drops. A stale source (no row
          * inside the window) falls back to the unbounded scan, keeping
          * the cursor semantics identical to the pre-bound form.
-         * Package-private for the NostrSinceCursorTest seam.
+         * Package-private for the NostrSinceCursorIT seam.
          */
         OptionalLong latestPublishedAtEpochSeconds(UUID sourceUuid) {
             OptionalLong bounded = maxPublishedAtEpochSeconds(sourceUuid, true);

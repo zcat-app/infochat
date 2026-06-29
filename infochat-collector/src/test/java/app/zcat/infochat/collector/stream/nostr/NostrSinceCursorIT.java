@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code now()} (current-month partition, provisioned at startup).
  */
 @QuarkusTest
-class NostrSinceCursorTest {
+class NostrSinceCursorIT {
 
     private static final Instant BELOW_FLOOR_FETCHED_AT = Instant.parse("2026-05-01T00:00:00Z");
 

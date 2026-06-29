@@ -51,7 +51,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Nostr ITs and must not delete their rows.
  */
 @QuarkusTest
-class Kind6HandlerTest {
+class Kind6HandlerIT {
 
     /** Pinned fetched_at inside V7/V29 bootstrap partitions (May 2026). */
     private static final Instant FETCHED_AT = Instant.parse("2026-05-22T10:00:00Z");

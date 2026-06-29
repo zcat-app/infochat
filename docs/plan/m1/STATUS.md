@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 538 |
+| done | 539 |
 | deferred | 9 |
 | **total** | **555** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-495 — Integration/DB-boot tests named *Test run in the surefire (unit) phase (complexity: low, risk: low)
 - M1-498 — Test fidelity & coverage gaps: copied lambdas, wrong arms, untested paths (complexity: medium, risk: low)
 - M1-499 — Test fixture duplication → testsupport, plus a leaked registration teardown (complexity: low, risk: low)
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
@@ -704,7 +703,7 @@ M1-491 (done)
 M1-492 (done)
 M1-493 (deferred)
 M1-494 (done)
-M1-495 (pending) ← runnable
+M1-495 (done)
 M1-496 (done)
 M1-497 (done)
 M1-498 (pending) ← runnable

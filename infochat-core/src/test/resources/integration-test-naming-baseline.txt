@@ -1,0 +1,104 @@
+# Frozen baseline for IntegrationTestNamingGuardTest (M1-495).
+#
+# These are the pre-existing *Test-named classes that ARE @QuarkusTest AND
+# inject a DataSource / @SeedDataSource — i.e. they boot DevServices Postgres
+# yet run in the surefire (unit) phase. By the documented convention
+# (docs/design/08-verification.md §8.2: *Test=unit, *IT=integration) they are
+# integration-shaped and "should" be *IT, but renaming all of them is out of
+# scope for M1-495. They are recorded here as accepted debt so the guard can
+# ratchet: the guard asserts the live found-set is a SUBSET of this list, so a
+# NEW integration-shaped class named *Test fails the build, while renaming any
+# of these to *IT only shrinks the found-set (tolerated, no guard edit needed).
+#
+# To intentionally add a new DB-backed @QuarkusTest *Test class (rare — prefer
+# *IT), append its fully-qualified name here. One FQCN per line; blank lines and
+# #-comments ignored.
+app.zcat.infochat.collector.assets.AssetSnapshotFetcherSupportGateTest
+app.zcat.infochat.collector.assets.AssetSnapshotFetcherTest
+app.zcat.infochat.collector.assets.store.PriceSnapshotStoreTest
+app.zcat.infochat.collector.bootstrap.BootstrapAssetsLoaderTest
+app.zcat.infochat.collector.eval.embedding.EmbeddingWorkerBackoffTest
+app.zcat.infochat.collector.eval.embedding.EmbeddingWorkerDimensionMismatchTest
+app.zcat.infochat.collector.eval.embedding.EmbeddingWorkerNonFiniteTest
+app.zcat.infochat.collector.eval.embedding.EmbeddingWorkerPgvectorRejectionTest
+app.zcat.infochat.collector.eval.entity.EntityExtractorWorkerBackoffTest
+app.zcat.infochat.collector.eval.entity.EntityExtractorWorkerTest
+app.zcat.infochat.collector.eval.reeval.AdminReviewTtlJobTest
+app.zcat.infochat.collector.eval.reeval.PerSourceUnknownTrackerTest
+app.zcat.infochat.collector.eval.reeval.ReEvaluationJobCooldownTest
+app.zcat.infochat.collector.eval.reeval.ReEvaluationJobTest
+app.zcat.infochat.collector.eval.reeval.ReEvaluationJobWindowTest
+app.zcat.infochat.collector.eval.tagger.TaggerWorkerBackoffTest
+app.zcat.infochat.collector.eval.tagger.TaggerWorkerTest
+app.zcat.infochat.collector.eval.tagger.TagVocabularyRefreshTest
+app.zcat.infochat.collector.fetch.FetchSchedulerFailureLadderTest
+app.zcat.infochat.core.notifier.ThrottledAdminNotifierTest
+app.zcat.infochat.core.startup.InstanceLockLivenessTest
+app.zcat.infochat.provider.chat.AutoCompressTriggerTest
+app.zcat.infochat.provider.chat.ChatSessionRepositoryConcurrencyTest
+app.zcat.infochat.provider.chat.ChatSessionRepositoryTest
+app.zcat.infochat.provider.chat.tool.GetPostToolTest
+app.zcat.infochat.provider.chat.tool.GetReferencesToolTest
+app.zcat.infochat.provider.chat.tool.ListSavesToolClockTest
+app.zcat.infochat.provider.chat.tool.ListSavesToolTest
+app.zcat.infochat.provider.chat.tool.RecallMemoryToolTest
+app.zcat.infochat.provider.chat.tool.SearchPostsToolClockTest
+app.zcat.infochat.provider.chat.tool.SearchPostsToolTest
+app.zcat.infochat.provider.command.AdminGatedGroupScopeTest
+app.zcat.infochat.provider.command.ApproveGroupCommandHandlerTest
+app.zcat.infochat.provider.command.asset.AssetSnapshotReaderClockTest
+app.zcat.infochat.provider.command.AuditCommandHandlerTest
+app.zcat.infochat.provider.command.BanCommandHandlerTest
+app.zcat.infochat.provider.command.ClearCommandHandlerTest
+app.zcat.infochat.provider.command.CompressCommandHandlerTest
+app.zcat.infochat.provider.command.DemoteCommandHandlerTest
+app.zcat.infochat.provider.command.DigestCommandHandlerTest
+app.zcat.infochat.provider.command.ExportCommandHandlerTest
+app.zcat.infochat.provider.command.ExportDataCollectorTest
+app.zcat.infochat.provider.command.FollowTagCommandHandlerTest
+app.zcat.infochat.provider.command.FollowTagNormalizationTest
+app.zcat.infochat.provider.command.ForgetCommandHandlerTest
+app.zcat.infochat.provider.command.ForgetPurgeServiceTest
+app.zcat.infochat.provider.command.GetSourcesAliasTest
+app.zcat.infochat.provider.command.GetTagsCommandHandlerTest
+app.zcat.infochat.provider.command.GrantAdminCommandHandlerTest
+app.zcat.infochat.provider.command.GroupTimezoneAuthOrderTest
+app.zcat.infochat.provider.command.GroupTimezoneCommandHandlerTest
+app.zcat.infochat.provider.command.InviteCommandHandlerTest
+app.zcat.infochat.provider.command.LangCommandHandlerTest
+app.zcat.infochat.provider.command.ListGroupsCommandHandlerTest
+app.zcat.infochat.provider.command.ListSourcesCommandHandlerTest
+app.zcat.infochat.provider.command.MissingArgumentUsageReplyTest
+app.zcat.infochat.provider.command.PromoteCommandHandlerProbationClockTest
+app.zcat.infochat.provider.command.PromoteCommandHandlerTest
+app.zcat.infochat.provider.command.QuarantineCommandHandlerTest
+app.zcat.infochat.provider.command.RejectGroupCommandHandlerTest
+app.zcat.infochat.provider.command.RemoveSourceCommandHandlerTest
+app.zcat.infochat.provider.command.RevokeAdminCommandHandlerTest
+app.zcat.infochat.provider.command.SaveCommandHandlerTest
+app.zcat.infochat.provider.command.SavedCommandHandlerClockTest
+app.zcat.infochat.provider.command.SavedCommandHandlerTest
+app.zcat.infochat.provider.command.SourceDisableCommandHandlerTest
+app.zcat.infochat.provider.command.SourceEnableCommandHandlerTest
+app.zcat.infochat.provider.command.UnbanCommandHandlerTest
+app.zcat.infochat.provider.command.UnfollowSourceCommandHandlerTest
+app.zcat.infochat.provider.command.UnfollowTagCommandHandlerTest
+app.zcat.infochat.provider.command.UnsaveCommandHandlerTest
+app.zcat.infochat.provider.command.VouchCommandHandlerProbationClockTest
+app.zcat.infochat.provider.command.VouchCommandHandlerTest
+app.zcat.infochat.provider.digest.DigestSchedulerMissedSlotTest
+app.zcat.infochat.provider.digest.DigestSchedulerTest
+app.zcat.infochat.provider.digest.SummaryCacheRepositoryTest
+app.zcat.infochat.provider.group.GroupApprovalServiceTest
+app.zcat.infochat.provider.group.GroupAutoPromoteServiceTest
+app.zcat.infochat.provider.group.GroupInvitationHandlerTest
+app.zcat.infochat.provider.group.GroupMembershipRepositoryTest
+app.zcat.infochat.provider.group.GroupRepositoryTest
+app.zcat.infochat.provider.group.MembershipEventHandlerTest
+app.zcat.infochat.provider.messaging.InboundRouterTest
+app.zcat.infochat.provider.messaging.InviteCodeConsumerTest
+app.zcat.infochat.provider.messaging.MembershipDispatchIsolationTest
+app.zcat.infochat.provider.messaging.ProbationCheckTest
+app.zcat.infochat.provider.messaging.RegisteredContactSetTest
+app.zcat.infochat.provider.messaging.SimpleXAdminClaimTokenTest
+app.zcat.infochat.provider.scheduler.ChatMemoryPrunerTest

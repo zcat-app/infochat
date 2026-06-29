@@ -316,7 +316,7 @@ public class LinkingJob {
      * <p>A driving post without a {@code post_embedding} row produces
      * zero candidates: the PK read finds no row, so the method returns an
      * empty list <i>without issuing the probe</i>. Acceptance item [9] +
-     * LinkingJobTest.noEmbedding_semanticSkipped_entityStillWorks.
+     * LinkingJobBehaviorIT.noEmbedding_semanticSkipped_entityStillWorks.
      */
     List<Candidate> findSemanticCandidates(Connection conn, DrivingPost driving) throws SQLException {
         return findSemanticCandidates(conn, driving, clock.instant());

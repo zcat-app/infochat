@@ -377,7 +377,7 @@ class ExportDataCollectorTest {
      * {@code SET LOCAL statement_timeout} lands) at execute time —
      * delegating every other call to the real Postgres connection.
      * Same shape as the recording wrappers in
-     * {@code EligiblePostQueryStatementTimeoutTest} and
+     * {@code EligiblePostQueryStatementTimeoutIT} and
      * {@code DigestPostCollectorIT}.
      */
     static final class SqlOrderRecordingDataSource implements DataSource {

@@ -38,7 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * connections {@code fetch()} opens.
  */
 @QuarkusTest
-class EligiblePostQueryStatementTimeoutTest {
+class EligiblePostQueryStatementTimeoutIT {
 
     @Inject
     @SeedDataSource

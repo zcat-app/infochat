@@ -33,8 +33,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * pattern.
  */
 @QuarkusTest
-@TestProfile(LinkingJobTest.WideLookbackProfile.class)
-class LinkingJobTest {
+@TestProfile(LinkingJobBehaviorIT.WideLookbackProfile.class)
+class LinkingJobBehaviorIT {
 
     /** All seeded posts use the same fetched_at so they share the V29 bootstrap partition. */
     private static final Instant FETCHED_AT = Instant.parse("2026-05-22T10:00:00Z");

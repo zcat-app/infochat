@@ -38,7 +38,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  * silently dropped by the CAS-advance gate.
  */
 @QuarkusTest
-class QuarantineReviewListenerTest {
+class QuarantineReviewListenerIT {
 
     private static final Duration AWAIT_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration AWAIT_POLL = Duration.ofMillis(50);
