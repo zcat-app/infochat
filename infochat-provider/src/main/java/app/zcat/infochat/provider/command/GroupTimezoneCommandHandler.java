@@ -77,19 +77,9 @@ public class GroupTimezoneCommandHandler implements CommandHandler {
 
         String tzArg = parseTimezone(rawText);
         if (tzArg == null || tzArg.isBlank()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_TIMEZONE_NOT_ADMIN, inboundContext.effectiveLanguage()));
-        }
-
-        // Validate IANA zone
-        ZoneId zoneId;
-        try {
-            zoneId = ZoneId.of(tzArg);
-        } catch (DateTimeException e) {
-            String suggestions = fuzzySuggestions(tzArg);
-            String replyText = MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_GROUP_TIMEZONE_INVALID_ZONE, inboundContext.effectiveLanguage()),
-                    tzArg, suggestions);
-            return reply(scope, replyText);
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT, inboundContext.effectiveLanguage()),
+                    "/group-timezone <tz>"));
         }
 
         String requestId = UUID.randomUUID().toString();
@@ -106,10 +96,25 @@ public class GroupTimezoneCommandHandler implements CommandHandler {
                 // Resolve group
                 UUID groupId = resolveGroupInTx(conn, adapter, group.adapterGroupId());
 
-                // Authorization: group-admin OR bot-admin
+                // Authorization: group-admin OR bot-admin. Gated BEFORE zone
+                // validation so an unauthorized member cannot force the full
+                // IANA-zone fuzzy scan with an invalid tz (M1-483 / 12#F6).
                 if (!actor.isAdmin && !isGroupAdmin(conn, groupId, actor.id)) {
                     conn.rollback();
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_TIMEZONE_NOT_ADMIN, inboundContext.effectiveLanguage()));
+                }
+
+                // Validate IANA zone (after the auth gate)
+                ZoneId zoneId;
+                try {
+                    zoneId = ZoneId.of(tzArg);
+                } catch (DateTimeException e) {
+                    conn.rollback();
+                    String suggestions = fuzzySuggestions(tzArg);
+                    String replyText = MessageFormat.format(
+                            bundleLoader.get(BundleKeys.ERROR_GROUP_TIMEZONE_INVALID_ZONE, inboundContext.effectiveLanguage()),
+                            tzArg, suggestions);
+                    return reply(scope, replyText);
                 }
 
                 // Audit before effect
@@ -130,6 +135,11 @@ public class GroupTimezoneCommandHandler implements CommandHandler {
                 updateTimezone(conn, groupId, zoneId.getId());
 
                 conn.commit();
+
+                String replyText = MessageFormat.format(
+                        bundleLoader.get(BundleKeys.REPLY_GROUP_TIMEZONE_SUCCESS, inboundContext.effectiveLanguage()),
+                        zoneId.getId());
+                return reply(scope, replyText);
             } catch (SQLException e) {
                 conn.rollback();
                 throw new IllegalStateException(
@@ -140,11 +150,6 @@ public class GroupTimezoneCommandHandler implements CommandHandler {
             throw new IllegalStateException(
                     "GroupTimezoneCommandHandler connection failed for adapter=" + adapter, e);
         }
-
-        String replyText = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_GROUP_TIMEZONE_SUCCESS, inboundContext.effectiveLanguage()),
-                zoneId.getId());
-        return reply(scope, replyText);
     }
 
     private @Nullable ActorRow resolveActor(Connection conn, String adapter,

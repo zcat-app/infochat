@@ -1,9 +1,9 @@
 ---
 id: M1-483
 title: "/group-timezone: missing-arg wrong error + zone work before the auth gate"
-status: pending
+status: done
 created: 2026-06-27
-last_updated: 2026-06-27
+last_updated: 2026-06-29
 blocked_by: []
 files_budget: 3
 complexity: low
@@ -37,12 +37,31 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 163
+      removed: 28
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-29
+  verdict: WARN
+  warnings:
+    - "COMPLEXITY-RISK-CALIBRATED: risk: low claimed; ticket touches admin-tier auth gate ordering in GroupTimezoneCommandHandler. Consider raising to risk: medium or risk: high."
+    - "SECURITY-FLAG-CONSISTENT: security_relevant: false claimed; ticket directly modifies the group-admin authorization gate. Consider flipping to security_relevant: true."
+  blockers: []
 ---
 
 # M1-483: /group-timezone — missing-arg wrong error + zone work before the auth gate
