@@ -124,6 +124,12 @@ public final class SimpleXAdapter implements MessagingAdapter {
     // every emission site.
     private volatile AdapterMetrics metrics = AdapterMetrics.noop();
     private volatile @Nullable InboundHandler inboundHandler;
+    // Group-invitation handler (M1-515): late-bound by Provider via
+    // setGroupInvitationHandler, the same shape as inboundHandler. Null until
+    // Provider attaches; invitations arriving earlier are dropped in
+    // onGroupInvitation. Volatile: written by the registration thread, read on
+    // the WS inbound-dispatch thread.
+    private volatile @Nullable InvitationHandler invitationHandler;
     private volatile @Nullable SimpleXSubprocess subprocess;
     private volatile @Nullable SimpleXWebSocketClient webSocket;
     // Group-candidate dispatch handler, (re)built when the bot's queue address
@@ -349,7 +355,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
         }
         URI uri = URI.create("ws://127.0.0.1:" + cfg.wsPort());
         SimpleXWebSocketClient ws = new SimpleXWebSocketClient(
-                uri, http, this::onInbound, this::onGroupCandidate);
+                uri, http, this::onInbound, this::onGroupCandidate, this::onGroupInvitation);
         // Bind the current metrics before start() so a drop on the very first
         // frame is counted; bindMetrics() below re-binds a live ws if metrics
         // arrive after the transport is already up.
@@ -755,6 +761,22 @@ public final class SimpleXAdapter implements MessagingAdapter {
         this.inboundHandler = handler;
     }
 
+    @Override
+    public void setGroupInvitationHandler(InvitationHandler handler) {
+        this.invitationHandler = handler;
+    }
+
+    @Override
+    public void joinGroup(String adapterGroupId) throws MessagingException {
+        SimpleXWebSocketClient ws = requireConnected();
+        String corrId = nextCorrId();
+        // /_join is a one-off control command (no chat-item handle, not a paced
+        // user message), so it is fire-and-forget and draws no rate token — the
+        // same treatment as the /show_address control command. The membership
+        // transition invited→connected lands later as an async event (M1-515).
+        ws.sendNoAck(corrId, SimpleXMessageCodec.encodeJoinGroupCommand(corrId, adapterGroupId));
+    }
+
     // -- internals -----------------------------------------------------------
 
     /**
@@ -775,6 +797,36 @@ public final class SimpleXAdapter implements MessagingAdapter {
             return;
         }
         handler.onGroupCandidate(gc);
+    }
+
+    /**
+     * Group-invitation entry point handed to the WebSocket client (M1-515).
+     * Re-reads the volatile {@code invitationHandler} on every dispatch
+     * (mirroring {@link #onInbound}) so a handler attached after the transport
+     * came up is picked up immediately; an invitation arriving before Provider
+     * registers is dropped (lifecycle, the same shape as onInbound's no-handler
+     * drop). The codec's
+     * {@link SimpleXMessageCodec.ReceivedGroupInvitation} is surfaced to
+     * Provider as the adapter-agnostic {@link GroupInvitation}.
+     */
+    private void onGroupInvitation(SimpleXMessageCodec.ReceivedGroupInvitation invitation) {
+        InvitationHandler current = invitationHandler;
+        if (current == null) {
+            LOG.debug("dropping group invitation; no handler registered");
+            return;
+        }
+        try {
+            current.onInvitation(new GroupInvitation(
+                    invitation.adapterGroupId(), invitation.inviterContactId()));
+        } catch (RuntimeException e) {
+            // Provider-side handler; a misbehaving handler must not tear the WS
+            // inbound-dispatch thread down. The invitation carries no
+            // user-authored prose, but a wrapped SQLException message could, so
+            // the message stays suppressed (D37) — the class + stack localizes a
+            // handler bug without leaking content, the same shape as onInbound.
+            LOG.warn("group-invitation handler threw, suppressed per D37; class + stack:\n{}",
+                    stackWithoutMessage(e));
+        }
     }
 
     private void onInbound(InboundMessage msg) {

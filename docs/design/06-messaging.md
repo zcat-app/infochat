@@ -574,6 +574,43 @@
     Unrecognized tags still fail closed to PERMANENT (§6.4.7).                                                                                                                                                                             
 
 
+  #### Group invitation auto-accept (M1-515)
+
+  A `receivedGroupInvitation` async event (the bot was added to a group but has
+  not yet joined — `membership.memberStatus == "invited"`) decodes to a
+  `ReceivedGroupInvitation` carrying two fields from the live v6.5.4.1 frame:
+
+  - **group id** is `resp.groupInfo.groupId` (the same numeric id echoed into
+    `/_join`), queue-address-validated at decode like every other group id.
+  - **inviter contact id** is `resp.groupInfo.membership.invitedBy.byContactId`,
+    read only when `invitedBy.type == "contact"`. A non-contact inviter
+    (`"member"` / `"unknown"`, e.g. a pre-contact host) carries no contact id
+    Provider can resolve, so the invitation is dropped fail-closed and never
+    auto-joined.
+
+  The adapter makes no accept decision (D10): it surfaces the invitation across
+  the new `MessagingAdapter.setGroupInvitationHandler` SPI callback (parallel to
+  `setMembershipEventHandler`). Provider's `GroupInvitationHandler` applies the
+  D47 registered-only gate — it instructs the adapter to `joinGroup` (issuing
+  `/_join #<groupId>`) ONLY when the inviter is a registered
+  (`registration_state IN ('invited','vouched')`), non-banned user. An invitation
+  from an unregistered or banned inviter is **ignored, not declined**: the bot
+  neither joins nor replies, so it does not join an arbitrary group and does not
+  reveal it processed the invitation (less traffic, no presence signal). This
+  closes redteam vector 3 from M1-511 — the gate cannot be bypassed to make the
+  bot join arbitrary groups.
+
+  `/_join #<groupId>` is live-confirmed against v6.5.4.1: it returns a
+  `userAcceptedGroupSent` command response (`memberStatus "accepted"`) followed
+  by an async `userJoinedGroup` (`memberStatus "connected"`), so the bot's
+  membership transitions invited→connected. The join is issued fire-and-forget
+  (it returns no chat-item handle and is not a paced user message, so it draws no
+  rate token — the same treatment as `/show_address`); the group then enters the
+  D47 `approval_status='pending'` machine on the first @mention (no approval logic
+  added here). The SPI addition is capability-shaped (default no-op
+  `setGroupInvitationHandler` / `joinGroup`), so the Signal and in-memory adapters
+  are unaffected and need no change.
+
   #### Queue-address character set (decode and encode validation)
 
   Every identifier the adapter pastes into a SimpleX command string —

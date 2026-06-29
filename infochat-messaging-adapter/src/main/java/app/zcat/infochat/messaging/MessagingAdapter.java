@@ -233,6 +233,39 @@ public interface MessagingAdapter {
     }
 
     /**
+     * Register the handler that receives group invitations. Parallel to
+     * {@link #setMembershipEventHandler}: an adapter that surfaces invitations
+     * stores the handler and invokes {@link InvitationHandler#onInvitation}
+     * directly (the same direct-invocation shape the inbound path uses). The
+     * accept decision lives in Provider (the adapter queries no DB, D10) — a
+     * registered-inviter invitation is accepted by Provider calling
+     * {@link #joinGroup} back; an unregistered/banned inviter is simply not
+     * joined. Default no-op so adapters without group-invitation support — the
+     * in-memory test double and the Signal adapter (native membership events) —
+     * are unaffected and need no change (M1-515).
+     *
+     * @param handler the invitation callback; never null.
+     */
+    default void setGroupInvitationHandler(InvitationHandler handler) {
+        // No-op — overridden by adapters that surface group invitations.
+    }
+
+    /**
+     * Join the group identified by {@code adapterGroupId}, accepting a pending
+     * invitation surfaced through {@link #setGroupInvitationHandler}. Provider
+     * calls this back only for an invitation from a registered, non-banned
+     * inviter (the D47 registered-only auto-join gate). Default no-op so
+     * adapters without a group-join transport — the in-memory test double and
+     * the Signal adapter — are unaffected and need no change (M1-515).
+     *
+     * @param adapterGroupId the adapter-native id of the group to join.
+     * @throws MessagingException on transport failure issuing the join.
+     */
+    default void joinGroup(String adapterGroupId) throws MessagingException {
+        // No-op — overridden by adapters that can join a group by id.
+    }
+
+    /**
      * Start the adapter's transport (spawn the backing subprocess,
      * open the wire connection, probe readiness). Called once by
      * Provider's startup driver after handler registration; a failure
@@ -374,5 +407,36 @@ public interface MessagingAdapter {
          * @param event the membership event; never null.
          */
         void onEvent(MembershipEvent event);
+    }
+
+    /**
+     * Functional callback Provider registers with each
+     * {@link MessagingAdapter} to receive group invitations (M1-515).
+     * Parallel to {@link MembershipHandler}.
+     *
+     * <p>Threading contract: like {@link InboundHandler}, the handler may
+     * block — it reads the {@code users} table and may issue an outbound
+     * {@link MessagingAdapter#joinGroup} — so adapters MUST NOT invoke it on
+     * the thread that reads the transport socket.</p>
+     */
+    @FunctionalInterface
+    interface InvitationHandler {
+        /**
+         * Handle one received group invitation.
+         *
+         * @param invitation the invitation; never null.
+         */
+        void onInvitation(GroupInvitation invitation);
+    }
+
+    /**
+     * A group invitation surfaced by an adapter (M1-515).
+     * {@code adapterGroupId} is the adapter-native id to {@link #joinGroup};
+     * {@code inviterContactId} is the inviting user's adapter-native contact
+     * id, which Provider resolves to a registered user for the D47 auto-join
+     * gate. Immutable; the adapter makes no accept decision (D10 — that
+     * decision lives in Provider).
+     */
+    record GroupInvitation(String adapterGroupId, String inviterContactId) {
     }
 }

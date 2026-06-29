@@ -172,6 +172,23 @@ final class SimpleXMessageCodec {
         return envelope(corrId, "/show_address");
     }
 
+    /**
+     * Encode the group-join command the adapter issues to accept a received
+     * invitation (M1-515). {@code adapterGroupId} is echoed into the command
+     * string, so it is queue-address-validated here at the encode boundary —
+     * the same discipline as {@link #targetSelector} — and a malformed id
+     * fails PERMANENT rather than reaching the wire. Live-confirmed against
+     * simplex-chat v6.5.4.1: {@code /_join #<groupId>} returns
+     * {@code userAcceptedGroupSent} and drives the bot's membership
+     * invited→connected (followed by an async {@code userJoinedGroup}); the
+     * adapter sends it fire-and-forget (no chat-item handle to return).
+     */
+    static String encodeJoinGroupCommand(String corrId, String adapterGroupId)
+            throws MessagingException {
+        requireValidQueueAddressId(adapterGroupId, "adapterGroupId");
+        return envelope(corrId, "/_join #" + adapterGroupId);
+    }
+
     private static String targetSelector(ScopeRef scope) throws MessagingException {
         return switch (scope) {
             case ScopeRef.Dm dm -> {
@@ -309,6 +326,7 @@ final class SimpleXMessageCodec {
         return switch (type) {
             case "newChatItem" -> decodeNewChatItem(resp);
             case "newChatItems" -> decodeNewChatItems(corrId, resp);
+            case "receivedGroupInvitation" -> decodeReceivedGroupInvitation(resp);
             case "sentMessage", "apiSendMessageResponse" -> decodeSendAck(corrId, resp);
             case "userContactLink" -> decodeSelfAddress(corrId, resp);
             case "chatCmdError", "chatItemUpdateError" -> decodeError(corrId, resp);
@@ -367,6 +385,66 @@ final class SimpleXMessageCodec {
             return new Ignored("newChatItems-without-items");
         }
         return decodeChatItemEntry(chatItems.get(0));
+    }
+
+    /**
+     * Decode a {@code receivedGroupInvitation} async event (live v6.5.4.1,
+     * M1-515) into a {@link ReceivedGroupInvitation}. The bot has been invited
+     * to a group but has not yet joined ({@code membership.memberStatus} is
+     * {@code "invited"}); Provider decides whether to auto-join based on the
+     * inviter's registration state (the adapter queries no DB, D10).
+     *
+     * <p>Two fields are extracted from the live frame
+     * ({@code resp.groupInfo.{groupId, membership.invitedBy.byContactId}}):</p>
+     * <ul>
+     *   <li>{@code adapterGroupId} — echoed into {@code /_join #<groupId>}
+     *       ({@link #encodeJoinGroupCommand}), so it is rejected here unless it
+     *       matches the queue-address charset, the same decode-boundary
+     *       discipline the group-inbound path applies to its groupId (a frame
+     *       that fails can never carry an injected command fragment, §6.4.4).</li>
+     *   <li>{@code inviterContactId} — the inviter's connection contact id,
+     *       used ONLY in Provider's parameterized registered-inviter lookup,
+     *       never echoed into a command. It is read only when
+     *       {@code invitedBy.type == "contact"}: a non-contact inviter
+     *       ({@code "member"}/{@code "unknown"}, e.g. a pre-contact host)
+     *       carries no contact id Provider can resolve, so the invitation is
+     *       dropped fail-closed and never auto-joined (redteam vector 3 — the
+     *       gate cannot be bypassed to make the bot join arbitrary groups).</li>
+     * </ul>
+     */
+    private static DecodedFrame decodeReceivedGroupInvitation(JsonNode resp) {
+        JsonNode groupInfo = resp.get("groupInfo");
+        if (groupInfo == null) {
+            return new Ignored("groupInvitation-without-groupInfo");
+        }
+        String adapterGroupId = optText(groupInfo, "groupId");
+        if (adapterGroupId == null) {
+            return new Ignored("groupInvitation-without-groupId");
+        }
+        if (!isValidQueueAddressId(adapterGroupId)) {
+            return new Ignored("groupInvitation-invalid-groupId");
+        }
+        JsonNode membership = groupInfo.get("membership");
+        if (membership == null) {
+            return new Ignored("groupInvitation-without-membership");
+        }
+        JsonNode invitedBy = membership.get("invitedBy");
+        if (invitedBy == null) {
+            return new Ignored("groupInvitation-without-invitedBy");
+        }
+        if (!"contact".equals(optText(invitedBy, "type"))) {
+            return new Ignored("groupInvitation-inviter-not-contact");
+        }
+        String inviterContactId = optText(invitedBy, "byContactId");
+        if (inviterContactId == null) {
+            return new Ignored("groupInvitation-without-inviter");
+        }
+        // Same id validator the inbound-contact path applies: a malformed
+        // value is dropped fail-closed rather than reaching the Provider gate.
+        if (!isValidQueueAddressId(inviterContactId)) {
+            return new Ignored("groupInvitation-invalid-inviter");
+        }
+        return new ReceivedGroupInvitation(adapterGroupId, inviterContactId);
     }
 
     /**
@@ -989,7 +1067,8 @@ final class SimpleXMessageCodec {
 
     /** Sealed hierarchy of frame variants returned by {@link #decode}. */
     sealed interface DecodedFrame
-            permits Inbound, GroupCandidate, OversizeDropped, SendAck, SelfAddress, CommandError, Ignored {
+            permits Inbound, GroupCandidate, ReceivedGroupInvitation, OversizeDropped,
+                    SendAck, SelfAddress, CommandError, Ignored {
     }
 
     /** A direct-message inbound that should be delivered to Provider. */
@@ -1033,6 +1112,19 @@ final class SimpleXMessageCodec {
      * reconstruct the message text exactly.
      */
     record MentionSpan(String memberId, int start, int length) {
+    }
+
+    /**
+     * A group invitation the bot received but has not yet joined (the
+     * {@code receivedGroupInvitation} async event, M1-515). {@code adapterGroupId}
+     * is the queue-address-validated group id to echo into {@code /_join};
+     * {@code inviterContactId} is the inviter's connection contact id Provider
+     * resolves to a registered user (the auto-join gate, D47). The codec stays
+     * pure-static and makes no accept decision — Provider gates and instructs
+     * the join via {@link MessagingAdapter}.
+     */
+    record ReceivedGroupInvitation(String adapterGroupId, String inviterContactId)
+            implements DecodedFrame {
     }
 
     /** Response to a command we previously issued, carrying the chat-item id. */

@@ -4,8 +4,10 @@ import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.messaging.AdapterTrustLevel;
 import app.zcat.infochat.messaging.MembershipEvent;
 import app.zcat.infochat.messaging.MessagingAdapter;
+import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.messaging.metrics.AdapterMetrics;
+import app.zcat.infochat.provider.group.GroupInvitationHandler;
 import app.zcat.infochat.provider.group.MembershipEventHandler;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -104,6 +106,9 @@ public class AdapterRegistry {
 
     @Inject
     MembershipEventHandler membershipEventHandler;
+
+    @Inject
+    GroupInvitationHandler groupInvitationHandler;
 
     /**
      * The §6.12 adapter-metrics emission point, bound to each activated
@@ -363,6 +368,11 @@ public class AdapterRegistry {
             String adapterName = adapter.name();
             adapter.setInboundHandler(msg -> inboundRouter.onMessage(msg, adapterName));
             adapter.setMembershipEventHandler(event -> dispatchMembershipEvent(event, adapterName));
+            // The invitation lambda captures the adapter itself (not just its
+            // name): Provider's gate calls joinGroup back on the inviting
+            // adapter, so the source must reach dispatchGroupInvitation (M1-515).
+            adapter.setGroupInvitationHandler(
+                    invitation -> dispatchGroupInvitation(invitation, adapterName, adapter));
             // §6.12 observability: per-adapter gauges + the adapter's
             // transport-internal emission binding (AdapterMetrics javadoc).
             adapterMetrics.bindAdapter(adapter);
@@ -396,6 +406,24 @@ public class AdapterRegistry {
             membershipEventHandler.handle(event, adapterName);
         } catch (RuntimeException e) {
             SafeLog.error(log, "membership event dispatch failed adapter=" + adapterName, e);
+        }
+    }
+
+    /**
+     * Per-invitation isolation on the wired group-invitation path (M1-515):
+     * a failed gate decision or join must not tear down the adapter's WS
+     * inbound-dispatch thread. {@code source} is the inviting adapter the gate
+     * calls {@code joinGroup} back on. {@code MessagingException} (a join
+     * transport fault) and {@code RuntimeException} (a {@code SQLException}
+     * wrapped by the user lookup) are both caught; SafeLog drops any message
+     * body so a wrapped DB detail never reaches the log. Errors propagate.
+     */
+    void dispatchGroupInvitation(MessagingAdapter.GroupInvitation invitation,
+                                 String adapterName, MessagingAdapter source) {
+        try {
+            groupInvitationHandler.handle(invitation, adapterName, source);
+        } catch (MessagingException | RuntimeException e) {
+            SafeLog.error(log, "group invitation dispatch failed adapter=" + adapterName, e);
         }
     }
 

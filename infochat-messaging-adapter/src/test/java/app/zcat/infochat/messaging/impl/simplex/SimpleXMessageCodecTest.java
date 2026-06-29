@@ -1157,6 +1157,36 @@ class SimpleXMessageCodecTest {
         assertEquals("Partial", payload.get("msgContent").get("text").asText());
     }
 
+    @Test
+    void decodesReceivedGroupInvitationFromRealV654Frame() {
+        // REAL captured receivedGroupInvitation async event from live
+        // simplex-chat v6.5.4.1 (M1-515): the bot was invited to group
+        // "invite test" (groupId 2) by contactId 5. The full wire frame is
+        // embedded verbatim — group id at resp.groupInfo.groupId, inviter at
+        // resp.groupInfo.membership.invitedBy.byContactId.
+        String frame = """
+                {"resp":{"type":"receivedGroupInvitation","user":{"userId":1,"agentUserId":"1","userContactId":1,"localDisplayName":"Admin-Reno","profile":{"profileId":1,"displayName":"Admin-Reno","fullName":"","preferences":{"files":{"allow":"no"}},"peerType":"bot","localAlias":""},"fullPreferences":{"timedMessages":{"allow":"yes"},"fullDelete":{"allow":"no"},"reactions":{"allow":"yes"},"voice":{"allow":"yes"},"files":{"allow":"no"},"calls":{"allow":"yes"},"sessions":{"allow":"no"},"commands":[]},"activeUser":true,"activeOrder":1,"showNtfs":true,"sendRcptsContacts":true,"sendRcptsSmallGroups":true,"autoAcceptMemberContacts":false,"userChatRelay":false},"groupInfo":{"groupId":2,"useRelays":false,"localDisplayName":"invite test","groupProfile":{"displayName":"invite test","fullName":"","groupPreferences":{"history":{"enable":"on"}}},"localAlias":"","fullGroupPreferences":{"timedMessages":{"enable":"off","ttl":86400},"directMessages":{"enable":"off"},"fullDelete":{"enable":"off"},"reactions":{"enable":"on"},"voice":{"enable":"on"},"files":{"enable":"on"},"simplexLinks":{"enable":"on"},"reports":{"enable":"on"},"history":{"enable":"on"},"support":{"enable":"on"},"sessions":{"enable":"off"},"comments":{"enable":"off"},"commands":[]},"membership":{"groupMemberId":4,"groupId":2,"indexInGroup":1,"memberId":"RUMxTE5IMWdmNEtDV2NGWg==","memberRole":"member","memberCategory":"user","memberStatus":"invited","memberSettings":{"showMessages":true},"blockedByAdmin":false,"invitedBy":{"type":"contact","byContactId":5},"invitedByGroupMemberId":3,"localDisplayName":"Admin-Reno","memberProfile":{"profileId":1,"displayName":"Admin-Reno","fullName":"","preferences":{"files":{"allow":"no"}},"peerType":"bot","localAlias":""},"memberContactId":1,"memberContactProfileId":1,"memberChatVRange":{"minVersion":1,"maxVersion":17},"createdAt":"2026-06-29T16:36:42.342814838Z","updatedAt":"2026-06-29T16:36:42.342814838Z"},"chatSettings":{"enableNtfs":"all","favorite":false},"createdAt":"2026-06-29T16:36:42.342814838Z","updatedAt":"2026-06-29T16:36:42.342814838Z","chatTs":"2026-06-29T16:36:42.342814838Z","userMemberProfileSentAt":"2026-06-29T16:36:42.342814838Z","chatTags":[],"groupSummary":{"currentMembers":2},"membersRequireAttention":0},"contact":{"contactId":5,"localDisplayName":"admin_1","profile":{"profileId":5,"displayName":"admin","fullName":"","contactLink":"https://smp17.simplex.im/a#yyPGSnLVqurNqAPSIor-H1FX-vGxh29fUctWzM-kX7g","preferences":{"timedMessages":{"allow":"yes"},"fullDelete":{"allow":"no"},"reactions":{"allow":"yes"},"voice":{"allow":"yes"},"files":{"allow":"always"},"calls":{"allow":"yes"},"sessions":{"allow":"no"},"commands":[]},"localAlias":""},"activeConn":{"connId":3,"agentConnId":"aE5HajNVS2hyOTJ6ZEFMSQ==","connChatVersion":17,"peerChatVRange":{"minVersion":1,"maxVersion":17},"connLevel":0,"viaUserContactLink":1,"viaGroupLink":false,"connType":"contact","connStatus":{"type":"ready"},"contactConnInitiated":false,"localAlias":"","entityId":5,"pqSupport":true,"pqEncryption":true,"pqSndEnabled":true,"pqRcvEnabled":true,"authErrCounter":0,"quotaErrCounter":0,"createdAt":"2026-06-28T11:21:20.27497632Z"},"contactUsed":true,"contactStatus":"active","chatSettings":{"enableNtfs":"all","favorite":false},"userPreferences":{},"mergedPreferences":{"timedMessages":{"enabled":{"forUser":true,"forContact":true},"userPreference":{"type":"user","preference":{"allow":"yes"}},"contactPreference":{"allow":"yes"}},"fullDelete":{"enabled":{"forUser":false,"forContact":false},"userPreference":{"type":"user","preference":{"allow":"no"}},"contactPreference":{"allow":"no"}},"reactions":{"enabled":{"forUser":true,"forContact":true},"userPreference":{"type":"user","preference":{"allow":"yes"}},"contactPreference":{"allow":"yes"}},"voice":{"enabled":{"forUser":true,"forContact":true},"userPreference":{"type":"user","preference":{"allow":"yes"}},"contactPreference":{"allow":"yes"}},"files":{"enabled":{"forUser":true,"forContact":false},"userPreference":{"type":"user","preference":{"allow":"no"}},"contactPreference":{"allow":"always"}},"calls":{"enabled":{"forUser":true,"forContact":true},"userPreference":{"type":"user","preference":{"allow":"yes"}},"contactPreference":{"allow":"yes"}},"sessions":{"enabled":{"forUser":false,"forContact":false},"userPreference":{"type":"user","preference":{"allow":"no"}},"contactPreference":{"allow":"no"}},"commands":[]},"createdAt":"2026-06-28T11:21:20.079045222Z","updatedAt":"2026-06-28T11:21:20.079045222Z","chatTs":"2026-06-28T16:46:44.758895679Z","contactRequestId":2,"contactGrpInvSent":false,"chatTags":[],"chatDeleted":false},"fromMemberRole":"owner","memberRole":"member"}}
+                """;
+        var invitation = assertInstanceOf(
+                SimpleXMessageCodec.ReceivedGroupInvitation.class,
+                SimpleXMessageCodec.decode(frame),
+                "a receivedGroupInvitation async event decodes to ReceivedGroupInvitation");
+        assertEquals("2", invitation.adapterGroupId(),
+                "adapterGroupId comes from resp.groupInfo.groupId");
+        assertEquals("5", invitation.inviterContactId(),
+                "inviterContactId comes from membership.invitedBy.byContactId");
+    }
+
+    @Test
+    void encodeJoinGroupCommandEmitsJoinByGroupId() throws Exception {
+        // Live-confirmed accept mechanism (M1-515): /_join #<groupId>.
+        String frame = SimpleXMessageCodec.encodeJoinGroupCommand("corr-join", "2");
+        JsonNode root = MAPPER.readTree(frame);
+        assertEquals("corr-join", root.get("corrId").asText());
+        assertEquals("/_join #2", root.get("cmd").asText(),
+                "the join command targets the group by numeric id");
+    }
+
     /** The JSON content of a SimpleX command string — everything after " json ". */
     private static String jsonPayload(String cmd) {
         int marker = cmd.indexOf(" json ");

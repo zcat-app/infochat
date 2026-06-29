@@ -104,10 +104,24 @@ final class SimpleXWebSocketClient {
         void onGroupCandidate(SimpleXMessageCodec.GroupCandidate gc);
     }
 
+    /**
+     * Receives decoded group invitations on the client's dedicated
+     * inbound-dispatch thread (same threading contract as
+     * {@link InboundConsumer} — the consumer may block on a DB read and an
+     * outbound join). The accept/decline decision belongs to the downstream
+     * consumer (Provider's {@code GroupInvitationHandler}); the client just
+     * routes the variant (M1-515).
+     */
+    @FunctionalInterface
+    interface GroupInvitationConsumer {
+        void onGroupInvitation(SimpleXMessageCodec.ReceivedGroupInvitation invitation);
+    }
+
     private final URI uri;
     private final HttpClient httpClient;
     private final InboundConsumer inboundConsumer;
     private final GroupCandidateConsumer groupCandidateConsumer;
+    private final GroupInvitationConsumer groupInvitationConsumer;
 
     private final Map<String, CompletableFuture<String>> pending = new ConcurrentHashMap<>();
     // Single dedicated inbound-dispatch thread: Inbound / GroupCandidate
@@ -149,11 +163,29 @@ final class SimpleXWebSocketClient {
     private final Object sendLock = new Object();
     private volatile boolean closed = false;
 
+    // A client built without an invitation consumer ignores group invitations:
+    // the inbound / group-candidate / transport tests do not exercise the
+    // invitation path, so their existing constructors keep their signatures and
+    // default to this (the same noop-default idiom as the metrics field). Only
+    // the production wiring (SimpleXAdapter) passes a real consumer (M1-515).
+    private static final GroupInvitationConsumer NOOP_INVITATION = invitation -> { };
+
     SimpleXWebSocketClient(URI uri,
                            HttpClient httpClient,
                            InboundConsumer inboundConsumer,
                            GroupCandidateConsumer groupCandidateConsumer) {
-        this(uri, httpClient, inboundConsumer, groupCandidateConsumer, INBOUND_QUEUE_CAPACITY);
+        this(uri, httpClient, inboundConsumer, groupCandidateConsumer,
+                NOOP_INVITATION, INBOUND_QUEUE_CAPACITY);
+    }
+
+    /** Production constructor: wires the real group-invitation consumer (M1-515). */
+    SimpleXWebSocketClient(URI uri,
+                           HttpClient httpClient,
+                           InboundConsumer inboundConsumer,
+                           GroupCandidateConsumer groupCandidateConsumer,
+                           GroupInvitationConsumer groupInvitationConsumer) {
+        this(uri, httpClient, inboundConsumer, groupCandidateConsumer,
+                groupInvitationConsumer, INBOUND_QUEUE_CAPACITY);
     }
 
     // Test seam: a small capacity drives the overflow path deterministically
@@ -163,10 +195,21 @@ final class SimpleXWebSocketClient {
                            InboundConsumer inboundConsumer,
                            GroupCandidateConsumer groupCandidateConsumer,
                            int inboundQueueCapacity) {
+        this(uri, httpClient, inboundConsumer, groupCandidateConsumer,
+                NOOP_INVITATION, inboundQueueCapacity);
+    }
+
+    SimpleXWebSocketClient(URI uri,
+                           HttpClient httpClient,
+                           InboundConsumer inboundConsumer,
+                           GroupCandidateConsumer groupCandidateConsumer,
+                           GroupInvitationConsumer groupInvitationConsumer,
+                           int inboundQueueCapacity) {
         this.uri = uri;
         this.httpClient = httpClient;
         this.inboundConsumer = inboundConsumer;
         this.groupCandidateConsumer = groupCandidateConsumer;
+        this.groupInvitationConsumer = groupInvitationConsumer;
         this.inboundQueueCapacity = inboundQueueCapacity;
         this.dispatchQueue = new LinkedBlockingQueue<>(inboundQueueCapacity);
         this.dispatchExecutor = new ThreadPoolExecutor(
@@ -306,6 +349,29 @@ final class SimpleXWebSocketClient {
         } finally {
             pending.remove(corrId);
         }
+    }
+
+    /**
+     * Transmit a command whose success is observed out-of-band rather than
+     * through a {@code corrId} ack — used for {@code /_join} (M1-515): the live
+     * wire returns {@code userAcceptedGroupSent} (corrId) plus an async
+     * {@code userJoinedGroup}, neither carrying a chat-item handle the caller
+     * needs, so registering and awaiting a pending future would only time out.
+     * The same closed/not-started guards and {@link #transmit} TRANSIENT
+     * classification as {@link #sendCommand} apply, so a wedged socket still
+     * routes through the supervisor restart path; only the ack wait is dropped.
+     */
+    void sendNoAck(String corrId, String envelopeJson) throws MessagingException {
+        if (closed) {
+            throw new MessagingException(FailureCategory.PERMANENT,
+                    "WebSocket is closed; cannot send corrId=" + corrId);
+        }
+        WebSocket ws = webSocket;
+        if (ws == null) {
+            throw new MessagingException(FailureCategory.PERMANENT,
+                    "WebSocket is not yet started; cannot send corrId=" + corrId);
+        }
+        transmit(ws, corrId, envelopeJson);
     }
 
     /**
@@ -452,6 +518,12 @@ final class SimpleXWebSocketClient {
             case SimpleXMessageCodec.GroupCandidate gc ->
                     dispatchAsync(gc.senderContactId(),
                             () -> groupCandidateConsumer.onGroupCandidate(gc));
+            // Hop off the listener thread (the consumer reads the DB and may
+            // issue an outbound join) and key the FIFO ordering on the inviter,
+            // mirroring the GroupCandidate dispatch (M1-515).
+            case SimpleXMessageCodec.ReceivedGroupInvitation inv ->
+                    dispatchAsync(inv.inviterContactId(),
+                            () -> groupInvitationConsumer.onGroupInvitation(inv));
             case SimpleXMessageCodec.SendAck ack -> completePending(ack.corrId(), ack.chatItemId());
             case SimpleXMessageCodec.SelfAddress sa ->
                     completePending(sa.corrId(), sa.queueAddressId());
