@@ -1,9 +1,9 @@
 ---
 id: M1-498
 title: "Test fidelity & coverage gaps: copied lambdas, wrong arms, untested paths"
-status: pending
+status: done
 created: 2026-06-27
-last_updated: 2026-06-27
+last_updated: 2026-06-29
 blocked_by: []
 files_budget: 9
 complexity: medium
@@ -57,12 +57,45 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 265
+      removed: 167
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-29
+    verdict: CLEAN
+    base: fd566507 (branch fork point)
+    head: working tree (uncommitted, APPROVED r1)
+    verdict_file: docs/plan/m1/redteam/M1-498-2026-06-29.md
+    out_of_model_count: 0
+    note: |
+      Advisory audit run to honor the clarity SECURITY-FLAG-CONSISTENT WARN
+      despite security_relevant:false. Diff is test-only plus two behavior-
+      preserving package-private test seams; no new production behavior or
+      attack surface. CLEAN — nothing feeds a future ticket.
+clarity_check:
+  date: 2026-06-29
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 2: criterion says 'no longer reach private fields by reflection' but the Note's path B keeps reflection with documentation; the two halves contradict. Resolved by taking path A (the seam) so the literal criterion is met."
+    - "ACCEPTANCE-RUNNABLE item 5: 'asserts its contract' for resolveForWebSocket is unspecified; pinned concretely as allowed-host→returns validated set, blocked-host→BLOCKED_IP, non-ws scheme→SCHEME_NOT_ALLOWED."
+    - "OUT-OF-SCOPE-SPECIFIC: 'no production code change' conflicts with test_plan including FetchScheduler.java; the seam-only package-private accessors are behavior-preserving and permitted (same carve-out the ticket already lists)."
+    - "SECURITY-FLAG-CONSISTENT: security_relevant:false but the diff adds SSRF-guard test coverage; will run /redteam --in-progress to honor the WARN rather than flip the flag."
+  blockers: []
 ---
 
 # M1-498: Test fidelity & coverage gaps

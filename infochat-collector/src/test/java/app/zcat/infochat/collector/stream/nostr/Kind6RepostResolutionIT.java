@@ -1,7 +1,5 @@
 package app.zcat.infochat.collector.stream.nostr;
 
-import app.zcat.infochat.collector.outbox.EvalQueueProducer;
-import app.zcat.infochat.collector.outbox.PostPersister;
 import app.zcat.infochat.collector.outbox.TestEvalQueueConsumer;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.ingest.NormalizedPost;
@@ -44,12 +42,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *     the edge at write time.</li>
  * </ul>
  *
- * <p>Events are driven through an inline verbatim copy of the
- * production Registrar deliver lambda, exactly as {@link Kind6LinkingIT}
- * does (see its class javadoc for why the copy, not the production
- * lambda, is invoked). Event ids are prefix-scoped strings rather than
- * 64-hex digests so the per-test cleanup can find every row this class
- * seeds without disturbing parallel Nostr ITs.</p>
+ * <p>Events are driven through the actual production callback
+ * {@link NostrStreamSource.Registrar#deliverFor(java.util.UUID)}, exactly
+ * as {@link Kind6LinkingIT} does, so the dispatch under test is the real
+ * lambda rather than a copy (M1-498). Event ids are prefix-scoped strings
+ * rather than 64-hex digests so the per-test cleanup can find every row
+ * this class seeds without disturbing parallel Nostr ITs.</p>
  */
 @QuarkusTest
 class Kind6RepostResolutionIT {
@@ -64,16 +62,7 @@ class Kind6RepostResolutionIT {
     DataSource dataSource;
 
     @Inject
-    PostPersister postPersister;
-
-    @Inject
-    EvalQueueProducer evalQueueProducer;
-
-    @Inject
-    Kind6Handler kind6Handler;
-
-    @Inject
-    RepostEdgeResolver repostEdgeResolver;
+    NostrStreamSource.Registrar registrar;
 
     @Inject
     TestEvalQueueConsumer evalConsumer;
@@ -94,7 +83,7 @@ class Kind6RepostResolutionIT {
     void repostThenOriginalResolves() throws Exception {
         UUID sourceUuid = seedNostrSource(UPSTREAM_PREFIX + "source-repost-first");
         String originalEventId = UPSTREAM_PREFIX + "original-repost-first";
-        Consumer<NormalizedPost> deliver = deliverLambda(sourceUuid);
+        Consumer<NormalizedPost> deliver = registrar.deliverFor(sourceUuid);
 
         deliver.accept(kind6Event(UPSTREAM_PREFIX + "repost-1", originalEventId)
                 .toNormalizedPost(0L, FETCHED_AT));
@@ -125,7 +114,7 @@ class Kind6RepostResolutionIT {
     void originalThenRepostResolves() throws Exception {
         UUID sourceUuid = seedNostrSource(UPSTREAM_PREFIX + "source-original-first");
         String originalEventId = UPSTREAM_PREFIX + "original-original-first";
-        Consumer<NormalizedPost> deliver = deliverLambda(sourceUuid);
+        Consumer<NormalizedPost> deliver = registrar.deliverFor(sourceUuid);
 
         deliver.accept(kind1Event(originalEventId).toNormalizedPost(0L, FETCHED_AT));
         UUID originalPostId = lookupPostId(sourceUuid, originalEventId);
@@ -144,25 +133,6 @@ class Kind6RepostResolutionIT {
     }
 
     // ---------- helpers ----------
-
-    /**
-     * Verbatim copy of the Registrar's deliver lambda from
-     * NostrStreamSource.Registrar.registerNostrSources (same rationale
-     * as Kind6LinkingIT's copy).
-     */
-    private Consumer<NormalizedPost> deliverLambda(UUID sourceUuid) {
-        return p -> {
-            if ("6".equals(p.rawMetadata().get(NostrEvent.META_KIND))) {
-                kind6Handler.handle(p, sourceUuid).ifPresent(key ->
-                        repostEdgeResolver.resolveEdgesPointingTo(key.id(), p.upstreamIdentifier()));
-            } else {
-                postPersister.persist(sourceUuid, p).ifPresent(key -> {
-                    evalQueueProducer.emit(key);
-                    repostEdgeResolver.resolveEdgesPointingTo(key.id(), p.upstreamIdentifier());
-                });
-            }
-        };
-    }
 
     private NostrEvent kind6Event(String eventId, String originalEventId) {
         return new NostrEvent(

@@ -420,32 +420,42 @@ public final class NostrStreamSource implements StreamSource {
                 NostrStreamSource worker = new NostrStreamSource(
                         relays, since, backoffBase, backoffMax,
                         httpClient, ssrfClient, verifier, tracker, dedupFilter);
-                // Dispatch by NormalizedPost.rawMetadata's NostrEvent.META_KIND key
-                // per M1-100. NostrEvent.toNormalizedPost populates the key for
-                // kind-6 events; kind-1 events emit an empty rawMetadata and follow
-                // the existing persist→eval-queue path. Reading the kind
-                // here (rather than threading Kind6Handler through NostrStreamSource's
-                // constructor) leaves the SPI surface untouched. Both branches
-                // resolve repost edges naming the new post as their target after a
-                // successful persist — a kind-6 can itself be a repost target —
-                // covering the repost-arrived-first order (the handler's own
-                // original lookup covers original-arrived-first).
-                Consumer<NormalizedPost> deliver = post -> {
-                    if ("6".equals(post.rawMetadata().get(NostrEvent.META_KIND))) {
-                        kind6Handler.handle(post, sourceUuid).ifPresent(key ->
-                                repostEdgeResolver.resolveEdgesPointingTo(key.id(), post.upstreamIdentifier()));
-                    } else {
-                        postPersister.persist(sourceUuid, post).ifPresent(key -> {
-                            evalQueueProducer.emit(key);
-                            repostEdgeResolver.resolveEdgesPointingTo(key.id(), post.upstreamIdentifier());
-                        });
-                    }
-                };
-                supervisor.register(dispatchKey, row.identifier(), worker, deliver);
+                supervisor.register(dispatchKey, row.identifier(), worker, deliverFor(sourceUuid));
                 dispatchKeyBySource.put(sourceUuid, dispatchKey);
                 LOG.info("Registered NostrStreamSource for source {} across {} relay(s)",
                         sourceUuid, relays.size());
             }
+        }
+
+        /**
+         * The per-source outbox-delivery callback the supervisor invokes for
+         * every {@link NormalizedPost} this source yields.
+         *
+         * <p>Dispatch by NormalizedPost.rawMetadata's NostrEvent.META_KIND key
+         * per M1-100. NostrEvent.toNormalizedPost populates the key for kind-6
+         * events; kind-1 events emit an empty rawMetadata and follow the existing
+         * persist→eval-queue path. Reading the kind here (rather than threading
+         * Kind6Handler through NostrStreamSource's constructor) leaves the SPI
+         * surface untouched. Both branches resolve repost edges naming the new
+         * post as their target after a successful persist — a kind-6 can itself
+         * be a repost target — covering the repost-arrived-first order (the
+         * handler's own original lookup covers original-arrived-first).
+         *
+         * <p>Package-private so Kind6LinkingIT / Kind6RepostResolutionIT drive
+         * the real production callback rather than a re-implemented copy (M1-498).
+         */
+        Consumer<NormalizedPost> deliverFor(UUID sourceUuid) {
+            return post -> {
+                if ("6".equals(post.rawMetadata().get(NostrEvent.META_KIND))) {
+                    kind6Handler.handle(post, sourceUuid).ifPresent(key ->
+                            repostEdgeResolver.resolveEdgesPointingTo(key.id(), post.upstreamIdentifier()));
+                } else {
+                    postPersister.persist(sourceUuid, post).ifPresent(key -> {
+                        evalQueueProducer.emit(key);
+                        repostEdgeResolver.resolveEdgesPointingTo(key.id(), post.upstreamIdentifier());
+                    });
+                }
+            };
         }
 
         /**

@@ -353,6 +353,31 @@ public class FetchScheduler {
         }
     }
 
+    // Package-private scheduling-state seams (M1-498). FetchSchedulerClockIT and
+    // FetchSchedulerHostPacingIT pin and read these in-memory maps to drive
+    // onTick() deterministically. Returning the live maps replaces setAccessible
+    // reflection on the private fields with a typed, compile-checked seam — the
+    // fields stay private, only these in-package accessors expose them, and no
+    // production caller uses them. Mirrors the same-package test-seam idiom of
+    // SsrfGuardedHttpClient.httpClient() and NostrStreamSource.Registrar.ssrfClient().
+
+    Map<String, Instant> lastTickByKind() {
+        return lastTickByKind;
+    }
+
+    Map<String, Instant> hostNextAllowed() {
+        return hostNextAllowed;
+    }
+
+    Map<String, Deque<SourceRow>> pendingByKind() {
+        return pendingByKind;
+    }
+
+    /** The registered fetcher kinds — the {@code kind → Fetcher} dispatch keyset. */
+    Set<String> registeredKinds() {
+        return fetchersByKind.keySet();
+    }
+
     /**
      * The configured per-host minimum request interval, or {@code null} when
      * pacing is disabled — the {@code off} sentinel or an absent key, mirroring

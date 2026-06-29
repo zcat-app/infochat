@@ -89,12 +89,12 @@ class FetchSchedulerHostPacingIT {
             new FetcherKind.Literal(PACED_KIND));
 
         // Pacing is ON for every test in this class, so the in-memory pacing
-        // maps would bleed between tests — clear them, mirroring the
-        // FetchSchedulerClockIT reflection pattern.
+        // maps would bleed between tests — clear them through the package-private
+        // scheduling-state seams.
         FetchScheduler real = ClientProxy.unwrap(fetchScheduler);
-        mapField(real, "hostNextAllowed").clear();
-        mapField(real, "pendingByKind").clear();
-        mapField(real, "lastTickByKind").clear();
+        real.hostNextAllowed().clear();
+        real.pendingByKind().clear();
+        real.lastTickByKind().clear();
     }
 
     @AfterEach
@@ -141,8 +141,7 @@ class FetchSchedulerHostPacingIT {
         // deferred source is delayed WITHIN the cycle and the next kind-interval
         // starts only after the whole crowded host is drained — never postponed
         // a whole kind-interval.
-        Instant lastTick = (Instant) mapField(
-            ClientProxy.unwrap(fetchScheduler), "lastTickByKind").get(PACED_KIND);
+        Instant lastTick = ClientProxy.unwrap(fetchScheduler).lastTickByKind().get(PACED_KIND);
         assertEquals(BASE.plus(ADVANCE).plus(ADVANCE), lastTick,
             "lastTickByKind is stamped from the injected Clock only after the "
                 + "kind's pending sources all drain");
@@ -180,11 +179,10 @@ class FetchSchedulerHostPacingIT {
         QuarkusMock.installMockForType(Clock.fixed(now, ZoneOffset.UTC), Clock.class);
     }
 
-    @SuppressWarnings("unchecked")
-    private void markOthersNotDue(Instant now) throws Exception {
+    private void markOthersNotDue(Instant now) {
         FetchScheduler real = ClientProxy.unwrap(fetchScheduler);
-        Map<String, Instant> lastTick = (Map<String, Instant>) mapField(real, "lastTickByKind");
-        for (String kind : mapField(real, "fetchersByKind").keySet()) {
+        Map<String, Instant> lastTick = real.lastTickByKind();
+        for (String kind : real.registeredKinds()) {
             if (!kind.equals(PACED_KIND)) {
                 lastTick.put(kind, now);
             }
@@ -209,13 +207,6 @@ class FetchSchedulerHostPacingIT {
                  "DELETE FROM source WHERE kind = 'nitter'")) {
             ps.executeUpdate();
         }
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, ?> mapField(FetchScheduler scheduler, String name) throws Exception {
-        var field = FetchScheduler.class.getDeclaredField(name);
-        field.setAccessible(true);
-        return (Map<String, ?>) field.get(scheduler);
     }
 
     /**

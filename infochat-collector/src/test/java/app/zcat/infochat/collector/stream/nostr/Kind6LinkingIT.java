@@ -1,7 +1,5 @@
 package app.zcat.infochat.collector.stream.nostr;
 
-import app.zcat.infochat.collector.outbox.EvalQueueProducer;
-import app.zcat.infochat.collector.outbox.PostPersister;
 import app.zcat.infochat.collector.outbox.TestEvalQueueConsumer;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.ingest.NormalizedPost;
@@ -18,7 +16,6 @@ import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -34,16 +31,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code post} row AND one {@code post_reference} row with
  * {@code link_type='repost'} in the DB.
  *
- * <p>The deliver lambda is reproduced inline here (rather than invoking
- * the production Registrar's lambda) to keep the IT independent of the
- * Registrar startup wiring — the Registrar fires at {@code @Startup
- * @Priority(460)} which has already run before any test method executes,
- * and re-wiring it inline would require a fresh CDI context. The contract
- * the IT pins is: {@code rawMetadata.get(NostrEvent.META_KIND).equals("6")}
- * → {@code kind6Handler.handle(post, sourceUuid)} followed by the
- * repost-edge resolution sweep on the persisted key, exactly as the
- * production Registrar's deliver lambda does (verbatim copy so any
- * divergence in the production wiring shows up as an IT failure).
+ * <p>The event is driven through the actual production callback —
+ * {@link NostrStreamSource.Registrar#deliverFor(java.util.UUID)}, the
+ * factory the Registrar wires into {@code supervisor.register} for every
+ * nostr source — so the dispatch under test is the real lambda, not a copy.
+ * Any divergence in the production wiring surfaces as an IT failure (M1-498).
  */
 @QuarkusTest
 class Kind6LinkingIT {
@@ -58,16 +50,7 @@ class Kind6LinkingIT {
     DataSource dataSource;
 
     @Inject
-    PostPersister postPersister;
-
-    @Inject
-    EvalQueueProducer evalQueueProducer;
-
-    @Inject
-    Kind6Handler kind6Handler;
-
-    @Inject
-    RepostEdgeResolver repostEdgeResolver;
+    NostrStreamSource.Registrar registrar;
 
     @Inject
     TestEvalQueueConsumer evalConsumer;
@@ -100,21 +83,8 @@ class Kind6LinkingIT {
 
         NormalizedPost post = kind6.toNormalizedPost(0L, FETCHED_AT);
 
-        // Verbatim copy of the Registrar's deliver lambda from
-        // NostrStreamSource.Registrar.registerNostrSources.
-        Consumer<NormalizedPost> deliver = p -> {
-            if ("6".equals(p.rawMetadata().get(NostrEvent.META_KIND))) {
-                kind6Handler.handle(p, sourceUuid).ifPresent(key ->
-                        repostEdgeResolver.resolveEdgesPointingTo(key.id(), p.upstreamIdentifier()));
-            } else {
-                postPersister.persist(sourceUuid, p).ifPresent(key -> {
-                    evalQueueProducer.emit(key);
-                    repostEdgeResolver.resolveEdgesPointingTo(key.id(), p.upstreamIdentifier());
-                });
-            }
-        };
-
-        deliver.accept(post);
+        // The real production callback the Registrar wires per source.
+        registrar.deliverFor(sourceUuid).accept(post);
 
         UUID postId = lookupPostId(sourceUuid, upstreamId);
         assertNotNull(postId, "the kind-6 event produced a post row");

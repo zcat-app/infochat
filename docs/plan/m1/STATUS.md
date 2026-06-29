@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 539 |
+| done | 540 |
 | deferred | 9 |
 | **total** | **555** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-498 — Test fidelity & coverage gaps: copied lambdas, wrong arms, untested paths (complexity: medium, risk: low)
 - M1-499 — Test fixture duplication → testsupport, plus a leaked registration teardown (complexity: low, risk: low)
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-509 — Operator onboarding: simple (comic) + advanced admin guides (complexity: medium, risk: low)
@@ -74,8 +73,8 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-512 | Production runtime resource harness: swap, container memory/CPU caps, dev-runtime teardown | 2026-06-29 | round 1 APPROVE |
 | M1-510 | SimpleX codec: align DM inbound/outbound/error decode with live v6.5.4.1 wire format | 2026-06-29 | round 1 APPROVE |
 | M1-501 | Stage-1-flagged posts can permanently evade Stage 2 after a crash | 2026-06-29 | round 1 APPROVE |
+| M1-498 | Test fidelity & coverage gaps: copied lambdas, wrong arms, untested paths | 2026-06-29 | round 1 APPROVE |
 | M1-497 | Test name/comment accuracy sweep: names and comments that contradict the body | 2026-06-29 | round 1 APPROVE |
-| M1-496 | Test-integrity sweep: vacuous, ambient-gated, and over-permissive assertions | 2026-06-29 | round 1 APPROVE |
 
 ---
 
@@ -706,7 +705,7 @@ M1-494 (done)
 M1-495 (done)
 M1-496 (done)
 M1-497 (done)
-M1-498 (pending) ← runnable
+M1-498 (done)
 M1-499 (pending) ← runnable
 M1-500 (pending) ← runnable
 M1-501 (done)

@@ -24,6 +24,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -44,17 +45,23 @@ class OpenAiCompatibleProviderTest {
     private String baseUrl;
     /** Model field of each request body the mock server received, in order. */
     private List<String> receivedModels;
+    /**
+     * Canned reply the mock server returns for every call. Defaults to a
+     * minimal text-only reply (no root {@code model}, no {@code usage} block);
+     * a test that needs those fields overwrites it before calling generate().
+     */
+    private volatile String responseBody;
 
     @BeforeEach
     void setUp() throws Exception {
         mockServer = HttpServer.create(new InetSocketAddress(0), 0);
         baseUrl = "http://localhost:" + mockServer.getAddress().getPort();
         receivedModels = new CopyOnWriteArrayList<>();
+        responseBody = "{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}";
         mockServer.createContext("/chat/completions", exchange -> {
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             receivedModels.add(JSON.readTree(body).path("model").asText());
-            byte[] resp = "{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}"
-                .getBytes(StandardCharsets.UTF_8);
+            byte[] resp = responseBody.getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, resp.length);
             try (OutputStream os = exchange.getResponseBody()) {
                 os.write(resp);
@@ -142,6 +149,32 @@ class OpenAiCompatibleProviderTest {
         assertThrows(LlmProvider.TaskConfigUnresolvableException.class, router::assertAllTasksResolve,
             "the startup scan must surface a missing per-task model key as the "
                 + "SPI-owned type, not the config system's NoSuchElementException");
+    }
+
+    @Test
+    void usageAndModelFieldsParseFromResponse() {
+        // A canned reply WITH the optional root `model` and `usage` block —
+        // both absent from the default reply, so this is the only test that
+        // pins parseChoiceText's usage/model parse (M1-498, 26#F1). Without it
+        // a regression that dropped response.usage()/model() would ship green.
+        responseBody = "{\"choices\":[{\"message\":{\"content\":\"ok\"}}],"
+            + "\"model\":\"served-model-7\","
+            + "\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7}}";
+        OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(new StubConfig(Map.of(
+            "infochat.llm.tagger.base-url", baseUrl,
+            "infochat.llm.tagger.api-key", "",
+            "infochat.llm.tagger.model", "model-tagger")));
+
+        LlmResponse response = provider.generate(ModelTask.TAGGER, "sys", "usr");
+
+        assertEquals("ok", response.text(), "the message content still round-trips");
+        assertEquals("served-model-7", response.model(),
+            "the root `model` field must populate response.model()");
+        assertNotNull(response.usage(), "the usage block must populate response.usage()");
+        assertEquals(11, response.usage().inputTokens(),
+            "usage.prompt_tokens maps to TokenUsage.inputTokens");
+        assertEquals(7, response.usage().outputTokens(),
+            "usage.completion_tokens maps to TokenUsage.outputTokens");
     }
 
     @Test

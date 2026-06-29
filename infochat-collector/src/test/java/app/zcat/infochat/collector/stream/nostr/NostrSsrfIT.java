@@ -65,28 +65,46 @@ class NostrSsrfIT {
         }
     }
 
+    /**
+     * Blocklist arm: the watcher re-resolves to 169.254.169.254 (cloud-
+     * metadata; refused by the strict super-implementation of IpBlocklist),
+     * so {@code resolveForWebSocket} raises SsrfPolicyException, which
+     * {@code peerIpDiverged()} treats as a peer-IP-change signal → hard close.
+     */
     @Test
-    void peerIpChangeTriggersHardClose() {
-        // Two-phase resolver seam:
-        //   Call 1 (connect-time SSRF check) — returns 127.0.0.1 so the
-        //     WebSocket handshake reaches the local FakeNostrRelay
-        //     (which binds to 127.0.0.1).
-        //   Call 2+ (periodic watcher re-resolve) — returns
-        //     169.254.169.254 (cloud-metadata; refused by the strict
-        //     super-implementation of IpBlocklist). The watcher's
-        //     resolveForWebSocket raises SsrfPolicyException, which
-        //     peerIpDiverged() treats as a peer-IP-change signal →
-        //     hard close.
-        // The "blocked re-resolve" arm is deterministic; the "different
-        // but still allowed" arm is equally covered by the watcher's
-        // intersection check, but reaching it would require routing a
-        // non-pinned loopback alias to the FakeNostrRelay, which is
-        // platform-dependent. The spec's "peer-IP change" wording
-        // covers either trigger.
+    void blockedReResolveTriggersHardClose() {
+        assertWatcherHardClosesOnDivergence(blockedMetadata());
+    }
+
+    /**
+     * Connection-migration arm (M1-498): the watcher re-resolves to a DIFFERENT
+     * but still-allowed loopback alias (127.0.0.2). The blocklist does NOT
+     * refuse it, so {@code resolveForWebSocket} returns normally; divergence is
+     * detected purely by {@code peerIpDiverged()}'s set-intersection check — the
+     * pinned set {127.0.0.1} is disjoint from the re-resolved {127.0.0.2} — and
+     * the connection is still hard-closed. This is the spec's "allowed-but-
+     * changed IP" trigger, distinct from the blocklist arm above; a regression
+     * that only fired on the blocklist arm would ship green without it.
+     */
+    @Test
+    void allowedButChangedPeerIpTriggersHardClose() {
+        assertWatcherHardClosesOnDivergence(loopbackAlias());
+    }
+
+    /**
+     * Drive the live watcher with a two-phase resolver seam — call 1 (the
+     * connect-time SSRF check) returns 127.0.0.1 so the WebSocket handshake
+     * reaches the local FakeNostrRelay; call 2+ (the periodic watcher
+     * re-resolve) returns {@code secondResolve}. Asserts the handshake
+     * completes, the watcher actually re-resolves, then the connection is
+     * hard-closed because the re-resolved peer address diverges from the
+     * pinned set.
+     */
+    private void assertWatcherHardClosesOnDivergence(InetAddress secondResolve) {
         AtomicInteger seamCalls = new AtomicInteger();
         Function<String, List<InetAddress>> seam = host -> {
             int n = seamCalls.incrementAndGet();
-            return List.of(n == 1 ? loopback() : blockedMetadata());
+            return List.of(n == 1 ? loopback() : secondResolve);
         };
 
         SsrfGuardedHttpClient ssrfClient = new SsrfGuardedHttpClient(
@@ -132,12 +150,12 @@ class NostrSsrfIT {
                         + "connect (the periodic peer-IP watcher); seamCalls="
                         + seamCalls.get());
 
-        // Phase 3: peerIpDiverged returned true (blocked re-resolve),
-        // the runLoop called webSocket.abort(), and the fake relay's
-        // closeHandler decrements liveConnectionCount to 0.
+        // Phase 3: peerIpDiverged returned true, the runLoop called
+        // webSocket.abort(), and the fake relay's closeHandler decrements
+        // liveConnectionCount to 0.
         assertTrue(relay.awaitConnectionCount(0, AWAIT),
                 "watcher must hard-close the connection after the re-resolved peer "
-                        + "address is refused by the SSRF gate (mid-session DNS rebind)");
+                        + "address diverges from the pinned set (mid-session DNS rebind)");
     }
 
     private static void awaitCondition(BooleanSupplier condition, Duration timeout) {
@@ -158,6 +176,19 @@ class NostrSsrfIT {
     private static InetAddress loopback() {
         try {
             return InetAddress.getByName("127.0.0.1");
+        } catch (UnknownHostException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static InetAddress loopbackAlias() {
+        try {
+            // 127.0.0.2 — a DIFFERENT address in the loopback range
+            // (127.0.0.0/8). LoopbackPermittingBlocklist permits the whole
+            // range, so the re-resolve passes the SSRF gate; it is still
+            // disjoint from the pinned 127.0.0.1, exercising the set-
+            // intersection divergence arm rather than the blocklist arm.
+            return InetAddress.getByName("127.0.0.2");
         } catch (UnknownHostException e) {
             throw new IllegalStateException(e);
         }

@@ -61,13 +61,12 @@ class FetchSchedulerClockIT {
             "precondition: the forced-due kind must have no active source so onTick fetches nothing");
 
         FetchScheduler real = ClientProxy.unwrap(fetchScheduler);
-        Map<String, Instant> lastTick = lastTickByKind(real);
-        Map<String, ?> fetchersByKind = fetchersByKind(real);
+        Map<String, Instant> lastTick = real.lastTickByKind();
 
         lastTick.clear();
         // Mark every registered kind as just-ticked under the pinned clock so no
         // source-bearing kind (rss/bluesky) is due → no fetch this tick.
-        for (String kind : fetchersByKind.keySet()) {
+        for (String kind : real.registeredKinds()) {
             lastTick.put(kind, PINNED_NOW);
         }
         // Force one no-source kind due: a day before the pinned now, well past
@@ -93,19 +92,5 @@ class FetchSchedulerClockIT {
                 return rs.getLong(1);
             }
         }
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, Instant> lastTickByKind(FetchScheduler scheduler) throws Exception {
-        var field = FetchScheduler.class.getDeclaredField("lastTickByKind");
-        field.setAccessible(true);
-        return (Map<String, Instant>) field.get(scheduler);
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, ?> fetchersByKind(FetchScheduler scheduler) throws Exception {
-        var field = FetchScheduler.class.getDeclaredField("fetchersByKind");
-        field.setAccessible(true);
-        return (Map<String, ?>) field.get(scheduler);
     }
 }
