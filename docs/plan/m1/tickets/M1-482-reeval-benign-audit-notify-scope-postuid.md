@@ -3,9 +3,9 @@ id: M1-482
 title: "Re-eval BENIGN over-audits/notifies infra-failure releases; uses post.id"
 status: pending
 created: 2026-06-27
-last_updated: 2026-06-27
+last_updated: 2026-06-29
 blocked_by: []
-files_budget: 4
+files_budget: 5
 complexity: low
 risk: low
 round_cap: 2
@@ -41,7 +41,26 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+revisions:
+  - date: 2026-06-29
+    reason: >-
+      budget-breach refine (pre-start): files_budget 4→5. Acceptance item 2
+      mandates the ReEvalCandidate record carry the post_uid ("the candidate
+      enumeration selects the uid it needs"), and switching the audit target_id
+      from post.id→post.uid reverses a behavior three existing tests pin. The
+      record-signature change ripples to all 3 ReEvalCandidate construction
+      sites and the behavior-reversal sweep touches ReEvaluationJobTest's audit
+      helpers — 5 files total (ReEvaluationJob.java + new IT + 3 preserves-
+      mandated test edits). The +1 over the original 4 is entirely mandated by
+      `preserves: all tests currently green on main` (mechanical compile/assert
+      fixes of orphans this change creates), matching the M1-517 precedent.
+    snapshot:
+      files_budget: 4
+clarity_check:
+  date: 2026-06-29
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-482: Re-eval BENIGN over-audits/notifies infra-failure releases; uses post.id
