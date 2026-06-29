@@ -20,6 +20,7 @@ import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.messaging.RateCapBucket;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
+import app.zcat.infochat.provider.summary.EligiblePostQuery;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
@@ -145,12 +146,20 @@ public class RetryCommandHandler implements CommandHandler {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ANCHOR, inboundContext.effectiveLanguage()));
         }
 
-        // v1 DM scope: scopeId = userId; resolveUserId already rejected
-        // non-DM scopes, so the anchor key's scope_kind is 'dm' here.
-        UUID scopeId = userId.get();
+        // The anchor read key must match what SummaryCommandHandler writes
+        // (per-(user, scope) isolation, D19/D36): scope_kind is derived from
+        // the actual inbound scope, scope_id is the caller's own id in a DM
+        // and the group's id in a group. A group with no registered row can
+        // hold no anchor, so it reads as NO_ANCHOR.
+        String scopeKind = EligiblePostQuery.scopeKindOf(scope);
+        Optional<UUID> scopeIdOpt = resolveScopeId(scope, userId.get());
+        if (scopeIdOpt.isEmpty()) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ANCHOR, inboundContext.effectiveLanguage()));
+        }
+        UUID scopeId = scopeIdOpt.get();
 
         Optional<AnchorRow> anchorOpt =
-                summaryAnchorRepository.read(userId.get(), "dm", scopeId);
+                summaryAnchorRepository.read(userId.get(), scopeKind, scopeId);
         if (anchorOpt.isEmpty()) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ANCHOR, inboundContext.effectiveLanguage()));
         }
@@ -172,7 +181,6 @@ public class RetryCommandHandler implements CommandHandler {
         // consumes neither a bucket token nor one of the anchor's
         // retry slots — rejections leave both in a state where the
         // next permitted request succeeds.
-        String scopeKind = "dm";
         InFlightTracker.CancellationHandle slot =
                 inFlightTracker.tryAcquire(userId.get(), scopeKind, scopeId);
         if (slot == null) {
@@ -190,7 +198,7 @@ public class RetryCommandHandler implements CommandHandler {
             // above serializes re-rolls for this (user, scope), so the peeked
             // count cannot be raced by a concurrent increment before the
             // increment below.
-            if (summaryAnchorRepository.peekRetryCount(userId.get(), "dm", scopeId) >= retryCap) {
+            if (summaryAnchorRepository.peekRetryCount(userId.get(), scopeKind, scopeId) >= retryCap) {
                 return reply(scope, MessageFormat.format(
                         bundleLoader.get(BundleKeys.ERROR_RETRY_CAP_EXHAUSTED, inboundContext.effectiveLanguage()),
                         String.valueOf(retryCap)));
@@ -208,7 +216,7 @@ public class RetryCommandHandler implements CommandHandler {
 
             // Under cap (checked above) — record this retry.
             summaryAnchorRepository.incrementAndGetRetryCount(
-                    userId.get(), "dm", scopeId);
+                    userId.get(), scopeKind, scopeId);
 
             // Reconstruct clusters from the stored cluster_map, filtering
             // to only READY posts
@@ -329,10 +337,27 @@ public class RetryCommandHandler implements CommandHandler {
     }
 
     private Optional<UUID> resolveUserId(ScopeRef scope) {
-        if (!(scope instanceof ScopeRef.Dm dm)) {
-            return Optional.empty();
-        }
-        return userRepository.resolveUserId(inboundContext.adapterName(), dm.contactId());
+        // The caller's contact id: ScopeRef carries it only for a DM, but
+        // InboundContext carries the sender's contact id for both DM and group
+        // scope, so a group member resolves to their own users.id here.
+        String contactId = switch (scope) {
+            case ScopeRef.Dm dm -> dm.contactId();
+            case ScopeRef.Group ignored -> inboundContext.senderContactId();
+        };
+        return userRepository.resolveUserId(inboundContext.adapterName(), contactId);
+    }
+
+    // DM: scope_id is the caller's own user id; group: the group's db id
+    // (matching SummaryCommandHandler's write-side resolution). Empty when
+    // the group has no registered row, so no anchor can exist for it.
+    private Optional<UUID> resolveScopeId(ScopeRef scope, UUID userId) {
+        return switch (scope) {
+            case ScopeRef.Dm ignored -> Optional.of(userId);
+            case ScopeRef.Group group -> {
+                GroupRow groupRow = lookupGroup(group.adapterGroupId());
+                yield groupRow == null ? Optional.empty() : Optional.of(groupRow.id());
+            }
+        };
     }
 
     private String readScopeLanguage(String scopeKind, UUID scopeId) {

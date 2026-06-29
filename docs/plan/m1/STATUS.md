@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 21 |
+| pending | 20 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 520 |
+| done | 521 |
 | deferred | 8 |
 | **total** | **549** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-478 — Group personal /retry never matches the group anchor /summary writes (complexity: low, risk: low)
 - M1-482 — Re-eval BENIGN over-audits/notifies infra-failure releases; uses post.id (complexity: low, risk: low)
 - M1-484 — Asset fetcher ignores SPI supported-asset/quote gate; dedup readBigDecimal (complexity: low, risk: low)
 - M1-485 — Embedding batch retry has no backoff, unlike the sibling entity stage (complexity: low, risk: low)
@@ -86,9 +85,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-483 | /group-timezone: missing-arg wrong error + zone work before the auth gate | 2026-06-29 | round 1 APPROVE |
 | M1-480 | /unban skips the in-transaction admin re-check its siblings perform | 2026-06-29 | round 1 APPROVE |
 | M1-479 | infochat-core partition seeds break after 2026-08-01 (no PartitionCreator in core tests) | 2026-06-29 | round 1 APPROVE |
+| M1-478 | Group personal /retry never matches the group anchor /summary writes | 2026-06-29 | round 1 APPROVE |
 | M1-508 | SimpleX codec: decode newChatItems (plural) inbound (v6.5.4) | 2026-06-28 | round 1 APPROVE |
 | M1-507 | Operator tooling + docs for SimpleX claim-token bootstrap | 2026-06-28 | round 1 APPROVE |
-| M1-506 | SimpleX: claim-token bot-admin bootstrap (drop by-address) | 2026-06-28 | round 2 APPROVE |
 
 ---
 
@@ -699,7 +698,7 @@ M1-474 (done)
 M1-475 (done)
 M1-476 (done)
 M1-477 (done)
-M1-478 (pending) ← runnable
+M1-478 (done)
 M1-479 (done)
 M1-480 (done)
 M1-482 (pending) ← runnable
