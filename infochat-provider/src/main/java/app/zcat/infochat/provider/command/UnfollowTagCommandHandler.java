@@ -217,10 +217,17 @@ public class UnfollowTagCommandHandler implements CommandHandler {
                     "/unfollow-tag <tag>|--all"));
         }
 
-        Optional<UUID> tagId = lookupTagId(parsed.positionalTag);
+        // Apply the controlled-vocabulary pipeline (trim → NFC → lowercase
+        // → char-class) before the lookup, mirroring /follow-tag, so a
+        // case/Unicode variant of a vocabulary tag resolves instead of
+        // silently missing the exact WHERE name = ? match. (M1-489)
+        String normalizedTag = TagNormalizer.normalize(parsed.positionalTag);
+        Optional<UUID> tagId = TagNormalizer.isValid(normalizedTag)
+                ? lookupTagId(normalizedTag)
+                : Optional.empty();
         if (tagId.isEmpty()) {
             List<String> vocab = readVocabulary();
-            List<String> suggestions = fuzzySuggest(parsed.positionalTag, vocab, FUZZY_SUGGESTION_MAX);
+            List<String> suggestions = fuzzySuggest(normalizedTag, vocab, FUZZY_SUGGESTION_MAX);
             String body = MessageFormat.format(
                     bundleLoader.get(BundleKeys.ERROR_UNFOLLOW_TAG_UNKNOWN_TAG, inboundContext.effectiveLanguage()),
                     parsed.positionalTag, String.join(", ", suggestions));
@@ -228,7 +235,7 @@ public class UnfollowTagCommandHandler implements CommandHandler {
         }
 
         return executeUnfollowTagPositionalTransaction(
-                scope, scopeKind, scopeId, tagId.get(), parsed.positionalTag);
+                scope, scopeKind, scopeId, tagId.get(), normalizedTag);
     }
 
     private OutboundMessage executeUnfollowTagPositionalTransaction(ScopeRef scope,

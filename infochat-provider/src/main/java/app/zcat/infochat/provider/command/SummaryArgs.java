@@ -1,6 +1,5 @@
 package app.zcat.infochat.provider.command;
 
-import java.text.Normalizer;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -24,14 +23,12 @@ import java.util.regex.Pattern;
  *   <li>{@code -w <duration>} (optional; default 24h)</li>
  * </ul>
  *
- * <p>Tag normalization is inlined here per the M1-037 ticket's
- * Implementation notes (no shared {@code TagNormalizer} class exists in
- * the repo at the time this lands; the M1-036 {@code AddSourceArgs}
- * normalizes NFC + lowercase only and relies on the SQL CHECK; {@code
- * /summary} is a read-side filter with no SQL CHECK to fall back on, so
- * the regex / length check runs here at parse time). The third tag
- * consumer (e.g. {@code /follow-tag} in T2-B) is the right time to extract
- * the shared utility.
+ * <p>Tag normalization is delegated to {@link TagNormalizer} — the
+ * shared trim&nbsp;&rarr;&nbsp;NFC&nbsp;&rarr;&nbsp;lowercase&nbsp;&rarr;&nbsp;char-class
+ * pipeline extracted in M1-489 when {@code /follow-tag} and
+ * {@code /unfollow-tag} became the third and fourth controlled-vocabulary
+ * consumers. {@code /summary} is a read-side filter with no SQL CHECK to
+ * fall back on, so the char-class step runs here at parse time.
  */
 public record SummaryArgs(
         Optional<String> tag,
@@ -39,14 +36,6 @@ public record SummaryArgs(
 
     /** Default time window per design 03 §Time window flag. */
     public static final Duration DEFAULT_WINDOW = Duration.ofHours(24);
-
-    /**
-     * Tag-name regex from the V6 {@code tag.name} CHECK constraint and
-     * docs/design/03-commands.md §Tag arguments. Used by the inline
-     * read-side normalizer; the write-side bootstrap loader + {@code
-     * /add-source} rely on the same constraint at the SQL boundary.
-     */
-    private static final Pattern TAG_PATTERN = Pattern.compile("^[a-z0-9][a-z0-9-]{0,47}$");
 
     /** {@code -w <N><unit>} pattern; unit is one of {@code h}, {@code d}, {@code w}. */
     private static final Pattern WINDOW_PATTERN = Pattern.compile("^([0-9]+)([hdwm])$");
@@ -104,8 +93,8 @@ public record SummaryArgs(
                 if (tag.isPresent()) {
                     return new Failure(BUNDLE_TAG_MALFORMED);
                 }
-                String normalized = normalizeTag(token);
-                if (!isValidTag(normalized)) {
+                String normalized = TagNormalizer.normalize(token);
+                if (!TagNormalizer.isValid(normalized)) {
                     return new Failure(BUNDLE_TAG_MALFORMED);
                 }
                 tag = Optional.of(normalized);
@@ -152,19 +141,6 @@ public record SummaryArgs(
             case "w" -> n >= 1 && n <= 4;
             default -> false;
         };
-    }
-
-    /**
-     * NFC + {@code Locale.ROOT} lower-case. The {@link #TAG_PATTERN}
-     * regex catches any residual invalid characters; the two-step shape
-     * matches the docs/design/03-commands.md §Tag arguments contract.
-     */
-    private static String normalizeTag(String raw) {
-        return Normalizer.normalize(raw.trim(), Normalizer.Form.NFC).toLowerCase(Locale.ROOT);
-    }
-
-    private static boolean isValidTag(String normalized) {
-        return TAG_PATTERN.matcher(normalized).matches();
     }
 
     // Bundle keys referenced from this file (kept as private constants

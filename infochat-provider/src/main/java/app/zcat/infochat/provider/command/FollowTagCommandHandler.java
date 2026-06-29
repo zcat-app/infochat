@@ -169,17 +169,26 @@ public class FollowTagCommandHandler implements CommandHandler {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
         }
 
-        Optional<UUID> tagId = lookupTagId(suppliedTag);
+        // Apply the controlled-vocabulary pipeline (trim → NFC → lowercase
+        // → char-class) before the lookup, so a case/Unicode variant of a
+        // vocabulary tag resolves instead of silently missing the exact
+        // WHERE name = ? match. An input that fails the char-class cannot
+        // be in the (char-class-constrained) vocabulary, so it folds into
+        // the same unknown-tag path. (M1-489)
+        String normalizedTag = TagNormalizer.normalize(suppliedTag);
+        Optional<UUID> tagId = TagNormalizer.isValid(normalizedTag)
+                ? lookupTagId(normalizedTag)
+                : Optional.empty();
         if (tagId.isEmpty()) {
             List<String> vocab = readVocabulary();
-            List<String> suggestions = fuzzySuggest(suppliedTag, vocab, FUZZY_SUGGESTION_MAX);
+            List<String> suggestions = fuzzySuggest(normalizedTag, vocab, FUZZY_SUGGESTION_MAX);
             String body = MessageFormat.format(
                     bundleLoader.get(BundleKeys.ERROR_FOLLOW_TAG_UNKNOWN_TAG, inboundContext.effectiveLanguage()),
                     suppliedTag, String.join(", ", suggestions));
             return reply(scope, body);
         }
 
-        return executeFollowTagTransaction(scope, scopeKind, scopeId, tagId.get(), suppliedTag);
+        return executeFollowTagTransaction(scope, scopeKind, scopeId, tagId.get(), normalizedTag);
     }
 
     private OutboundMessage executeFollowTagTransaction(ScopeRef scope,
