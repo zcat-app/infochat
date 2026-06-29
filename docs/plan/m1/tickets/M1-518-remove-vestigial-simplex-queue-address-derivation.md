@@ -5,11 +5,16 @@ status: pending
 created: 2026-06-29
 last_updated: 2026-06-29
 blocked_by: []
-files_budget: 8
+files_budget: 10
 files_scope:
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXMessageCodec.java
+  - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClient.java
+  - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXIdentity.java
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapterIdentityDerivationTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXStartIdentityValidationTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXReconnectTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXSelfAddressFixture.java
   - docs/design/06-messaging.md
   - docs/spec/decisions.md
 complexity: high
@@ -33,10 +38,14 @@ acceptance:
     test asserts a memberId mention still routes after start() and after a restart.
   - >-
     No dead self-address code remains (no /show_address encode, no SelfAddress
-    decode, no isWellFormed-at-adoption gate that nothing feeds). SimpleXIdentity
-    is removed or reduced to only what other callers still use (audit its remaining
-    references first; sender identity and the bootstrap-admin id validation use
-    static isValidQueueAddressId / isWellFormed, not the derived bot self-address).
+    decode, no isWellFormed-at-adoption gate that nothing feeds). Removing the
+    SelfAddress DecodedFrame variant from the sealed hierarchy forces dropping its
+    dispatch case in SimpleXWebSocketClient.dispatch() (sealed-switch
+    exhaustiveness). SimpleXIdentity is reduced to its static survivors — the
+    queueAddress record component is dropped and the static isWellFormed stays
+    (audit its remaining references first; sender identity and the bootstrap-admin
+    id validation use static isValidQueueAddressId / isWellFormed, not the derived
+    bot self-address, so SimpleXIdentityTest needs no change).
   - >-
     SimpleXAdapterIdentityDerivationTest is reduced to the surviving behavior:
     the memberId end-to-end routing + restart-resilience cases stay; the
@@ -53,6 +62,10 @@ test_plan:
   adds: []
   modifies:
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapterIdentityDerivationTest.java
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXReconnectTest.java
+  deletes:
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXStartIdentityValidationTest.java
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXSelfAddressFixture.java
   preserves:
     - all tests green on main after M1-514
 spec_refs:
@@ -67,6 +80,34 @@ reopens: []
 redteam_findings: []
 redteam_audits: []
 clarity_check: {}
+revisions:
+  - date: 2026-06-29
+    reason: >-
+      clarity-fail rework — widen files_scope/budget for the unscoped self-address
+      consumers (SimpleXWebSocketClient SelfAddress dispatch case, SimpleXIdentity
+      record reduction, SimpleXStartIdentityValidationTest deletion, SimpleXReconnectTest
+      modification, SimpleXSelfAddressFixture deletion) and extend the test-integrity
+      authorization to cover those test changes. SimpleXGroupHandler is NOT scoped —
+      the lifecycle hook reuses `new SimpleXGroupHandler(this::onInbound)` unchanged;
+      SimpleXIdentityTest is NOT scoped — only the static isWellFormed survives, which
+      it already exercises.
+    snapshot:
+      files_budget: 8
+      files_scope:
+        - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java
+        - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXMessageCodec.java
+        - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapterIdentityDerivationTest.java
+        - docs/design/06-messaging.md
+        - docs/spec/decisions.md
+escalations:
+  - date: 2026-06-29
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      FILES-BUDGET-PLAUSIBLE: FAIL
+      Blocker 1: files_scope omits SimpleXIdentity.java and SimpleXIdentityTest.java.
+      Acceptance criterion 2 explicitly requires "SimpleXIdentity is removed or
+      reduced" — both files exist as separate files on disk (confirmed). Fix: add
+      them to files_scope.
 ---
 
 # M1-518: Remove vestigial SimpleX bot-queue-address derivation
@@ -100,12 +141,30 @@ still derives and consumes its ACI for mention recognition, so its derivation is
 NOT vestigial — only SimpleX's is.
 
 **Pre-existing tests this ticket modifies / deletes** (test-integrity
-authorization): `SimpleXAdapterIdentityDerivationTest` — the self-address codec
-round-trips (`encodeShowMyAddressCommandCarriesCorrIdAndCommand`,
-`decodeUserContactLink*`) are deleted along with the code they cover; the memberId
-end-to-end routing and restart-resilience tests are kept (and may be renamed/moved
-to a plainer `SimpleXAdapterLifecycleTest` if the derivation framing no longer
-fits the class name).
+authorization):
+
+- `SimpleXAdapterIdentityDerivationTest` — the self-address codec round-trips
+  (`encodeShowMyAddressCommandCarriesCorrIdAndCommand`, `decodeUserContactLink*`)
+  are deleted along with the code they cover; the memberId end-to-end routing and
+  restart-resilience tests are kept (and may be renamed/moved to a plainer
+  `SimpleXAdapterLifecycleTest` if the derivation framing no longer fits the class
+  name), retargeted from the removed `deriveAndAdoptIdentity` seam to the new
+  direct group-handler lifecycle hook.
+- `SimpleXStartIdentityValidationTest` — **deleted in full**: both tests
+  (`startRejectsMalformedDerivedQueueAddressNamingTheSource`,
+  `startFailsWhenContactLinkCannotBeExtractedNamingTheSource`) pin start()-time
+  validation of the *derived* queue address, which no longer exists once the
+  `/show_address` derivation is removed. Their subject is gone, not merely renamed.
+- `SimpleXReconnectTest` — `servesOnRebuiltTransportWhenRederivedAddressMalformed`
+  is **deleted**: it pins the M1-402 reconnect `IllegalStateException` arm that
+  handled a malformed *re-derived* address; that arm becomes dead code once
+  reconnect stops re-deriving, so it is removed with the code it covered. The
+  `/show_address` branch (and its `rederivedQueueAddressId` parameter) is dropped
+  from the `startSendResponder` helper. The other reconnect tests
+  (`inboundDeliveredExactlyOnceAfterReconnect`, etc.) are unaffected and kept.
+- `SimpleXSelfAddressFixture` — **deleted**: once the self-address codec
+  round-trips and the start/reconnect derivation responders above are gone, nothing
+  references it (`contactLink`, `userContactLinkFrame`, `startShowAddressResponder`).
 
 ## Notes
 
