@@ -15,12 +15,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Integration test for the reconnect catch-up on
@@ -166,16 +164,8 @@ class QuarantineReviewReconcileOnReconnectIT {
 
     private void awaitCursor(Predicate<ProviderStateDao.Cursor> predicate,
                              String failMsg) throws Exception {
-        Instant deadline = Instant.now().plus(AWAIT_TIMEOUT);
-        while (Instant.now().isBefore(deadline)) {
-            Optional<ProviderStateDao.Cursor> cursor =
-                    providerStateDao.readCursor(QuarantineReviewListener.CHANNEL);
-            if (cursor.isPresent() && predicate.test(cursor.get())) {
-                return;
-            }
-            Thread.sleep(AWAIT_POLL.toMillis());
-        }
-        fail(failMsg);
+        OutboxItFixtures.awaitCursor(providerStateDao, QuarantineReviewListener.CHANNEL,
+            predicate, failMsg, AWAIT_TIMEOUT, AWAIT_POLL);
     }
 
     private static void exec(Connection conn, String sql) throws Exception {

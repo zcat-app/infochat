@@ -20,9 +20,7 @@ import java.util.UUID;
 import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Integration test for {@link NewPostListener}: emits real
@@ -256,16 +254,7 @@ class NewPostListenerIT {
 
     private void awaitCursor(Predicate<ProviderStateDao.Cursor> condition, String failureMessage)
             throws Exception {
-        long deadline = System.nanoTime() + AWAIT_TIMEOUT.toNanos();
-        while (System.nanoTime() < deadline) {
-            Optional<ProviderStateDao.Cursor> c =
-                providerStateDao.readCursor(NewPostHandler.CHANNEL_NEW_POST);
-            assertNotNull(c);
-            if (c.isPresent() && condition.test(c.get())) {
-                return;
-            }
-            Thread.sleep(AWAIT_POLL.toMillis());
-        }
-        fail(failureMessage);
+        OutboxItFixtures.awaitCursor(providerStateDao, NewPostHandler.CHANNEL_NEW_POST,
+            condition, failureMessage, AWAIT_TIMEOUT, AWAIT_POLL);
     }
 }

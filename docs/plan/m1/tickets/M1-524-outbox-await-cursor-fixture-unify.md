@@ -1,7 +1,7 @@
 ---
 id: M1-524
 title: "Unify the divergent outbox-IT awaitCursor poll helper into one fixture"
-status: pending
+status: done
 created: 2026-06-29
 last_updated: 2026-06-29
 decomposed_from: M1-499
@@ -38,12 +38,29 @@ test_plan:
     - all five outbox ITs still green; the cursor-advance conditions they assert are unchanged
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 50
+      removed: 68
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-29
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-524: Unify the divergent outbox-IT awaitCursor poll helper into one fixture

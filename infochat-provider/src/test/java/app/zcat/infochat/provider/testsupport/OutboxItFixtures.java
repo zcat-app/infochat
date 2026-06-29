@@ -1,12 +1,18 @@
 package app.zcat.infochat.provider.testsupport;
 
+import app.zcat.infochat.provider.outbox.ProviderStateDao;
+
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.time.Duration;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Shared DB-fixture helpers for the provider outbox ITs (NewPost* and
@@ -65,5 +71,29 @@ public final class OutboxItFixtures {
                 return rs.getObject("id", UUID.class);
             }
         }
+    }
+
+    /**
+     * Poll {@code provider_state} for {@code channel}'s cursor until
+     * {@code condition} holds, then return; if {@code timeout} elapses first,
+     * {@code fail(failureMessage)}. Sleeps {@code poll} between reads. Each outbox
+     * IT supplies its own channel, predicate, fail message, and timeout/poll
+     * budget. The former per-file copies split between a {@code System.nanoTime()}
+     * and an {@code Instant.now()} deadline; this single copy uses the monotonic
+     * {@code System.nanoTime()} clock, which a wall-clock adjustment cannot skew.
+     */
+    public static void awaitCursor(ProviderStateDao providerStateDao, String channel,
+                                   Predicate<ProviderStateDao.Cursor> condition,
+                                   String failureMessage, Duration timeout, Duration poll)
+            throws Exception {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            Optional<ProviderStateDao.Cursor> cursor = providerStateDao.readCursor(channel);
+            if (cursor.isPresent() && condition.test(cursor.get())) {
+                return;
+            }
+            Thread.sleep(poll.toMillis());
+        }
+        fail(failureMessage);
     }
 }

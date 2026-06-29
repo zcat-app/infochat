@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 545 |
+| done | 546 |
 | deferred | 10 |
 | **total** | **560** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-509 — Operator onboarding: simple (comic) + advanced admin guides (complexity: medium, risk: low)
-- M1-524 — Unify the divergent outbox-IT awaitCursor poll helper into one fixture (complexity: low, risk: low)
 - M1-525 — Free auto_joined_group slots when the bot leaves a group (complexity: low, risk: low)
 
 ---
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-524 | Unify the divergent outbox-IT awaitCursor poll helper into one fixture | 2026-06-29 | round 1 APPROVE |
 | M1-523 | Rename DB-boot GroupJoinRepositoryTest to *IT (M1-519 naming-guard trunk-red fix) | 2026-06-29 | round 1 APPROVE |
 | M1-521 | Widen SafeLog.stripControls to the full bidi-control set (close log-line spoof gap) | 2026-06-29 | round 1 APPROVE |
 | M1-520 | Remove test-only no-arg AssetCommandFamilyOracle ctor | 2026-06-29 | round 1 APPROVE |
@@ -72,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-516 | approve_quarantine: guard new_post NOTIFY when post UPDATE matches zero rows | 2026-06-29 | round 1 APPROVE |
 | M1-515 | SimpleX groups: auto-accept invitations (registered-inviter gate) | 2026-06-29 | round 2 APPROVE |
 | M1-514 | SimpleX groups: per-group memberId @-mention recognition | 2026-06-29 | round 1 APPROVE |
-| M1-512 | Production runtime resource harness: swap, container memory/CPU caps, dev-runtime teardown | 2026-06-29 | round 1 APPROVE |
 
 ---
 
@@ -731,7 +730,7 @@ M1-518 (done)
 M1-520 (done)
 M1-521 (done)
 M1-523 (done)
-M1-524 (pending) ← runnable
+M1-524 (done)
 M1-525 (pending) ← runnable
   └── M1-526 (pending)
 ```

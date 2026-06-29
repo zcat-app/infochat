@@ -423,16 +423,8 @@ class QuarantineReviewListenerIT {
 
     private void awaitCursor(Predicate<ProviderStateDao.Cursor> predicate,
                              String failMsg) throws Exception {
-        Instant deadline = Instant.now().plus(AWAIT_TIMEOUT);
-        while (Instant.now().isBefore(deadline)) {
-            Optional<ProviderStateDao.Cursor> cursor =
-                    providerStateDao.readCursor(QuarantineReviewListener.CHANNEL);
-            if (cursor.isPresent() && predicate.test(cursor.get())) {
-                return;
-            }
-            Thread.sleep(AWAIT_POLL.toMillis());
-        }
-        fail(failMsg);
+        OutboxItFixtures.awaitCursor(providerStateDao, QuarantineReviewListener.CHANNEL,
+            predicate, failMsg, AWAIT_TIMEOUT, AWAIT_POLL);
     }
 
     private void awaitNotification(String key, String failMsg) throws Exception {
