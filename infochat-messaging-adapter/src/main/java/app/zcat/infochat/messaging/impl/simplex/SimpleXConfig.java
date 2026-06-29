@@ -17,17 +17,21 @@ import java.util.Optional;
  * WebSocket API port — and validates them via {@link #validate()}
  * before the Provider serves any traffic.
  *
- * <p>{@code @ApplicationScoped @Startup} makes this an eager bean,
- * mirroring {@link app.zcat.infochat.messaging.impl.signal.SignalConfig}:
- * Quarkus instantiates it at Provider boot and runs {@link #validate()}
- * ({@code @PostConstruct}) immediately, so a misconfigured simplex-chat
- * fails startup rather than surfacing on the first transport call. The
- * constructor reads {@code infochat.adapters.simplex.*} via
- * {@code @ConfigProperty}; making the Provider <em>discover</em> this
- * bean (jandex / {@code quarkus.index-dependency}) is Provider-side
- * wiring (M1-035b/M1-105), not this module. Until then the Provider
- * constructs the value directly and {@code SimpleXAdapter.start()}
- * invokes {@link #validate()} lazily for activated adapters.</p>
+ * <p>{@code @ApplicationScoped @Startup} declares an eager-validation
+ * hook, mirroring {@link app.zcat.infochat.messaging.impl.signal.SignalConfig}:
+ * <em>were</em> this bean CDI-indexed, Quarkus would instantiate it at
+ * Provider boot and run {@link #validate()} ({@code @PostConstruct})
+ * immediately, so a misconfigured simplex-chat would fail startup rather
+ * than surfacing on the first transport call. That eager path is
+ * <strong>inert in the current build</strong>: this messaging-adapter jar
+ * is not CDI-indexed by the Provider — jandex / {@code quarkus.index-dependency}
+ * is Provider-side wiring (M1-035b/M1-105), not this module — so the
+ * {@code @PostConstruct} never fires today. Validation runs lazily
+ * instead: the Provider constructs the value directly (the constructor
+ * reads {@code infochat.adapters.simplex.*} via {@code @ConfigProperty})
+ * and {@code SimpleXAdapter.start()} invokes {@link #validate()} for
+ * activated adapters. See {@link #onStartup()} for the dormant-activation
+ * guard that keeps the hook safe should a future build index the jar.</p>
  */
 @ApplicationScoped
 @Startup

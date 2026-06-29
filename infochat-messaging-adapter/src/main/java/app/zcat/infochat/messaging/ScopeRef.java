@@ -15,9 +15,9 @@ package app.zcat.infochat.messaging;
  *       name.</li>
  *   <li>{@link Group} — group-mention scope. The {@code adapterGroupId}
  *       is the adapter-defined stable group identifier. Group-scope
- *       dispatch is deferred to T2-F; v1 ships this case for type
- *       completeness so the sealed interface does not re-shape when
- *       groups land.</li>
+ *       dispatch is live in v1: the group handlers build a
+ *       {@code ScopeRef.Group} and dispatch the group-mention turn
+ *       (e.g. {@code SignalGroupHandler}, {@code SimpleXGroupHandler}).</li>
  * </ul>
  */
 public sealed interface ScopeRef {

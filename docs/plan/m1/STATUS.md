@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 14 |
+| pending | 13 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 529 |
+| done | 530 |
 | deferred | 9 |
 | **total** | **552** |
 
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-482 — Re-eval BENIGN over-audits/notifies infra-failure releases; uses post.id (complexity: low, risk: low)
 - M1-490 — Reconcile §9 split-clock decision sites against the M1-447 backlog (complexity: medium, risk: medium)
 - M1-491 — Log-sanitization hardening: relay NOTICE control-strip + SafeLog bidi/line-sep (complexity: low, risk: low)
-- M1-492 — Production javadoc/contract drift: stale or wrong SPI/handler contracts (complexity: low, risk: low)
 - M1-494 — Production dead-code and defensive-check cleanup sweep (complexity: low, risk: low)
 - M1-495 — Integration/DB-boot tests named *Test run in the surefire (unit) phase (complexity: low, risk: low)
 - M1-496 — Test-integrity sweep: vacuous, ambient-gated, and over-permissive assertions (complexity: low, risk: low)
@@ -79,10 +78,10 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-512 | Production runtime resource harness: swap, container memory/CPU caps, dev-runtime teardown | 2026-06-29 | round 1 APPROVE |
 | M1-510 | SimpleX codec: align DM inbound/outbound/error decode with live v6.5.4.1 wire format | 2026-06-29 | round 1 APPROVE |
 | M1-501 | Stage-1-flagged posts can permanently evade Stage 2 after a crash | 2026-06-29 | round 1 APPROVE |
+| M1-492 | Production javadoc/contract drift: stale or wrong SPI/handler contracts | 2026-06-29 | round 1 APPROVE |
 | M1-489 | /follow-tag and /unfollow-tag skip spec-mandated tag normalization | 2026-06-29 | round 1 APPROVE |
 | M1-488 | quarantine_reject prompt apostrophe breaks its own {0} MessageFormat token | 2026-06-29 | round 1 APPROVE |
 | M1-487 | NewPostHandler @Transactional does not roll back on SQLException | 2026-06-29 | round 1 APPROVE |
-| M1-486 | Signal inbound line cap equals body cap, collapsing two layers | 2026-06-29 | round 1 APPROVE |
 
 ---
 
@@ -707,7 +706,7 @@ M1-488 (done)
 M1-489 (done)
 M1-490 (pending) ← runnable
 M1-491 (pending) ← runnable
-M1-492 (pending) ← runnable
+M1-492 (done)
 M1-493 (deferred)
 M1-494 (pending) ← runnable
 M1-495 (pending) ← runnable

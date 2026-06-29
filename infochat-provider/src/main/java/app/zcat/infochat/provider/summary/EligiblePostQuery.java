@@ -345,9 +345,11 @@ public class EligiblePostQuery {
     /**
      * Resolve the controlled-vocabulary tag-name set so the handler can
      * tell whether a positional tag passed parser validation but misses
-     * the vocabulary. Returns an empty set on SQL failure; the handler
-     * treats a missing vocabulary as "every tag is unknown" — the
-     * fuzzy-suggestion footer surfaces in that case as an empty list.
+     * the vocabulary. On SQL failure this throws {@link
+     * IllegalStateException} rather than degrading to an empty set — a
+     * vocabulary read that cannot reach the database is an infrastructure
+     * fault that propagates to the caller (which does not catch it), the
+     * same posture as {@link #readTagMode}.
      */
     public List<String> readVocabulary() {
         String sql = "SELECT name FROM tag ORDER BY name ASC";

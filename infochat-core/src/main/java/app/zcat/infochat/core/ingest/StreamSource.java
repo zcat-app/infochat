@@ -38,9 +38,19 @@ public interface StreamSource {
     void start(long dispatchKey, String filterSpec, Consumer<NormalizedPost> deliver);
 
     /**
-     * Close the subscription. Implementations must release any
-     * network / thread resources before returning. After {@code stop}
-     * returns, no further delivery callbacks may fire for this stream.
+     * Close the subscription, draining in-flight events first. On
+     * graceful shutdown the implementation MUST aggressively flush every
+     * in-flight event through the {@code deliver} callback supplied to
+     * {@link #start} — i.e. to the outbox — before returning, rather than
+     * dropping them (architecture.md §Ingest SPIs, "Drain on shutdown").
+     * The supervisor treats {@code stop()} returning as the signal the
+     * flush completed; it bounds the wait by a profile-driven drain
+     * timeout, and events still buffered when that timeout fires are
+     * dropped (and counted on the per-source lost-events counter).
+     *
+     * <p>Implementations must release any network / thread resources
+     * before returning. After {@code stop} returns, no further delivery
+     * callbacks may fire for this stream.</p>
      */
     void stop();
 }
