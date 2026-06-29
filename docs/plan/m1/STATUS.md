@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 10 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 534 |
 | deferred | 9 |
-| **total** | **553** |
+| **total** | **554** |
 
 ---
 
@@ -33,6 +33,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-509 — Operator onboarding: simple (comic) + advanced admin guides (complexity: medium, risk: low)
 - M1-518 — Remove vestigial SimpleX bot-queue-address derivation (complexity: high, risk: medium)
 - M1-519 — Enforce D47 group-count caps on the auto-join surface (complexity: high, risk: high)
+- M1-520 — Remove test-only no-arg AssetCommandFamilyOracle ctor (complexity: low, risk: low)
 
 ---
 
@@ -732,4 +733,5 @@ M1-514 (done)
 M1-516 (done)
 M1-517 (done)
 M1-518 (pending) ← runnable
+M1-520 (pending) ← runnable
 ```

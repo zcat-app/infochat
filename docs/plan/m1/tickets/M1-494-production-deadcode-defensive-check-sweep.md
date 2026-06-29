@@ -3,7 +3,7 @@ id: M1-494
 title: "Production dead-code and defensive-check cleanup sweep"
 status: pending
 created: 2026-06-27
-last_updated: 2026-06-27
+last_updated: 2026-06-29
 blocked_by: []
 files_budget: 16
 complexity: low
@@ -23,9 +23,8 @@ acceptance:
     Kind6Handler.java:137-168 replaced with TransactionHelper.inTransactionReturning;
     (08#F3) unused boolean return of dispatchMembership in SignalGroupHandler.java:299;
     (10#F1) test-only ChatAgent.handle() entry point (ChatAgent.java:205-208)
-    removed or made test-visibility-only; (10#F2) AssetCommandFamilyOracle no-arg
-    shim ctor (AssetCommandFamilyOracle.java:25-29) removed or made test-only;
-    (10#F3) BundleLoader.supportedLanguages() returns an unmodifiable view
+    removed or made test-visibility-only; (10#F3)
+    BundleLoader.supportedLanguages() returns an unmodifiable view
     (BundleLoader.java:134-136); (11#F2) dead ExportPaginator.currentSize and its
     redundant render (ExportPaginator.java:42,63,68); (13#F2) dead successReplyText
     local (VouchCommandHandler.java:215); (13#F3) unreachable null-check on
@@ -64,10 +63,15 @@ findings — dead variables/returns, defensive checks at internal (non-boundary)
 seams forbidden by engineering-rules §7, test-only entry points in production
 code, and one contained micro-fix (orphaned-future cancel) —
 verified at source and bundled as one sweep per the M1-462 precedent. Findings:
-04#F1, 04#F2, 07#F2, 08#F3, 10#F1, 10#F2, 10#F3, 11#F2, 13#F2, 13#F3,
-13#F4, 13#F5, 15#F3. (Two findings from the original report — 07#F1 silent
-body-cap and 14#F3 /help double query — were FALSIFIED as documented-intentional
-behavior and dropped.)
+04#F1, 04#F2, 07#F2, 08#F3, 10#F1, 10#F3, 11#F2, 13#F2, 13#F3,
+13#F4, 13#F5, 15#F3 (12 findings). (Two findings from the original report —
+07#F1 silent body-cap and 14#F3 /help double query — were FALSIFIED as
+documented-intentional behavior and dropped.) 10#F2 (no-arg
+AssetCommandFamilyOracle ctor) was split out to M1-520 during a budget-breach
+refine: its proper resolution (remove the ctor, which is coupled to the dead
+`assetRegistry != null` guard and must move with it) ripples to ~9 cross-package
+test call sites — not a contained micro-fix, and it would breach this sweep's
+files_budget.
 
 ## Acceptance
 
