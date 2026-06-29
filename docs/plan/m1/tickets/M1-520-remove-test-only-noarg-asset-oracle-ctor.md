@@ -1,7 +1,7 @@
 ---
 id: M1-520
 title: "Remove test-only no-arg AssetCommandFamilyOracle ctor"
-status: pending
+status: done
 created: 2026-06-29
 last_updated: 2026-06-29
 blocked_by: []
@@ -60,12 +60,29 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 12
+      added: 33
+      removed: 37
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-29
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-520: Remove test-only no-arg AssetCommandFamilyOracle ctor

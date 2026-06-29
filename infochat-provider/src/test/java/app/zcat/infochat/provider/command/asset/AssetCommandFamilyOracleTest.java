@@ -66,8 +66,8 @@ class AssetCommandFamilyOracleTest {
     }
 
     @Test
-    void noArgConstructorReturnsFalseForAll() {
-        AssetCommandFamilyOracle oracle = new AssetCommandFamilyOracle();
+    void emptyRegistryReturnsFalseForAll() {
+        AssetCommandFamilyOracle oracle = new AssetCommandFamilyOracle(new AssetRegistry(Map.of()));
         assertFalse(oracle.isAssetCommand("zcash"));
         assertFalse(oracle.isAssetCommand("monero"));
         assertFalse(oracle.isAssetCommand(""));

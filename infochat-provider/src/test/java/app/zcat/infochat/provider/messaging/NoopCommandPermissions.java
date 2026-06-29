@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.messaging;
 
 import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
 import app.zcat.infochat.provider.command.CommandPermissions;
+import app.zcat.infochat.provider.command.asset.AssetRegistry;
 
 /**
  * Plain-JUnit collaborator stand-in for {@link CommandPermissions}
@@ -22,7 +23,7 @@ import app.zcat.infochat.provider.command.CommandPermissions;
  */
 class NoopCommandPermissions extends CommandPermissions {
     NoopCommandPermissions() {
-        super(new AssetCommandFamilyOracle());
+        super(new AssetCommandFamilyOracle(new AssetRegistry()));
     }
 
     @Override

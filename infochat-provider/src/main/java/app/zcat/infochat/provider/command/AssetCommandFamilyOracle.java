@@ -3,7 +3,6 @@ package app.zcat.infochat.provider.command;
 import app.zcat.infochat.provider.command.asset.AssetRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.Nullable;
 
 /**
  * Per-asset slash command family oracle. Consulted by
@@ -11,22 +10,12 @@ import org.jspecify.annotations.Nullable;
  * a slash command belongs to the operator-configured asset family
  * (and is therefore allowed during slow-start probation).
  *
- * <p>The oracle delegates to {@link AssetRegistry} on each call.
- * The no-arg constructor preserves backward compatibility: tests that
- * call {@code new AssetCommandFamilyOracle()} get an oracle that
- * returns {@code false} for all inputs (identical to the pre-swap
- * v1 seam behavior).</p>
+ * <p>The oracle delegates to {@link AssetRegistry} on each call.</p>
  */
 @ApplicationScoped
 public class AssetCommandFamilyOracle {
 
-    private final @Nullable AssetRegistry assetRegistry;
-
-    /** No-arg constructor — returns false for all inputs. Preserves
-     *  the pre-swap contract for pre-existing tests. */
-    public AssetCommandFamilyOracle() {
-        this.assetRegistry = null;
-    }
+    private final AssetRegistry assetRegistry;
 
     @Inject
     public AssetCommandFamilyOracle(AssetRegistry assetRegistry) {
@@ -38,8 +27,6 @@ public class AssetCommandFamilyOracle {
      * {@code /}) belongs to the operator-configured asset family.
      */
     public boolean isAssetCommand(String slashCommand) {
-        // No-arg (test) path: no registry → false for all.
-        // CDI (production) path: delegates to the loaded registry.
-        return assetRegistry != null && assetRegistry.containsEnabledAsset(slashCommand);
+        return assetRegistry.containsEnabledAsset(slashCommand);
     }
 }

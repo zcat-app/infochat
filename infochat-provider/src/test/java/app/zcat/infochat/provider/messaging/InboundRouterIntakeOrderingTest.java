@@ -7,6 +7,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
+import app.zcat.infochat.provider.command.asset.AssetRegistry;
 import app.zcat.infochat.provider.group.GroupApprovalCheck;
 import org.junit.jupiter.api.Test;
 
@@ -607,7 +608,7 @@ class InboundRouterIntakeOrderingTest {
         // overridden seams above); the no-arg oracle answers false for
         // every asset probe.
         router.registeredContactSet = new NoopRegisteredContactSet();
-        router.assetCommandFamilyOracle = new AssetCommandFamilyOracle();
+        router.assetCommandFamilyOracle = new AssetCommandFamilyOracle(new AssetRegistry());
         CountingDispatchDataSource dispatchDataSource =
                 new CountingDispatchDataSource(UUID.randomUUID());
         router.dataSource = dispatchDataSource;

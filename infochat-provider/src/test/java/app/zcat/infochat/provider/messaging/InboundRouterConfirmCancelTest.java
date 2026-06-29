@@ -10,6 +10,7 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
 import app.zcat.infochat.provider.command.BanConfirm;
 import app.zcat.infochat.provider.command.ConfirmStateService;
+import app.zcat.infochat.provider.command.asset.AssetRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -172,7 +173,7 @@ class InboundRouterConfirmCancelTest {
         // every dispatch, and the handleSlash unknown-command fallback
         // probes the asset oracle (the no-arg oracle answers false).
         router.registeredContactSet = new NoopRegisteredContactSet();
-        router.assetCommandFamilyOracle = new AssetCommandFamilyOracle();
+        router.assetCommandFamilyOracle = new AssetCommandFamilyOracle(new AssetRegistry());
         router.maxInboundBodyBytes = 65536;
         router.commandBodyCap = 65536;
         router.setReplyTarget(target);

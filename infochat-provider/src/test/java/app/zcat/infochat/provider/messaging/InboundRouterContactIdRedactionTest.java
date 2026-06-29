@@ -11,6 +11,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
+import app.zcat.infochat.provider.command.asset.AssetRegistry;
 import org.jboss.logmanager.LogContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -192,7 +193,7 @@ class InboundRouterContactIdRedactionTest {
         // every dispatch, and the handleSlash unknown-command fallback
         // (/xyz scenarios) probes the asset oracle (no-arg → false).
         router.registeredContactSet = new NoopRegisteredContactSet();
-        router.assetCommandFamilyOracle = new AssetCommandFamilyOracle();
+        router.assetCommandFamilyOracle = new AssetCommandFamilyOracle(new AssetRegistry());
         router.outboundDelivery = TestOutboundDelivery.passThrough();
         return router;
     }

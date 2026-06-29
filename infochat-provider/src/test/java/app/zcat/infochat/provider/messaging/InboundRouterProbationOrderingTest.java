@@ -7,6 +7,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
 import app.zcat.infochat.provider.command.CommandPermissions;
+import app.zcat.infochat.provider.command.asset.AssetRegistry;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.group.GroupApprovalCheck;
 import org.jspecify.annotations.Nullable;
@@ -410,7 +411,7 @@ class InboundRouterProbationOrderingTest {
         // overridden seams above); the no-arg oracle answers false for
         // every asset probe.
         router.registeredContactSet = new NoopRegisteredContactSet();
-        router.assetCommandFamilyOracle = new AssetCommandFamilyOracle();
+        router.assetCommandFamilyOracle = new AssetCommandFamilyOracle(new AssetRegistry());
         CountingDispatchDataSource dispatchDataSource =
                 new CountingDispatchDataSource(snapshot.id());
         router.dataSource = dispatchDataSource;
@@ -511,7 +512,7 @@ class InboundRouterProbationOrderingTest {
         private final CallLog log;
         private final boolean allowed;
         RecordingCommandPermissions(CallLog log, boolean allowed) {
-            super(new AssetCommandFamilyOracle());
+            super(new AssetCommandFamilyOracle(new AssetRegistry()));
             this.log = log;
             this.allowed = allowed;
         }

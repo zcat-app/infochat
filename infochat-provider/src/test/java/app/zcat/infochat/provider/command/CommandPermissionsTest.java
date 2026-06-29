@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.command;
 
+import app.zcat.infochat.provider.command.asset.AssetRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -79,7 +80,7 @@ class CommandPermissionsTest {
 
     @BeforeEach
     void setUp() {
-        permissions = new CommandPermissions(new AssetCommandFamilyOracle());
+        permissions = new CommandPermissions(new AssetCommandFamilyOracle(new AssetRegistry()));
     }
 
     @Test
@@ -135,7 +136,7 @@ class CommandPermissionsTest {
         // true; T2-H's new impl plugs in here without any further
         // change to CommandPermissions.
         Set<String> family = Set.of("zcash", "monero");
-        CommandPermissions withStub = new CommandPermissions(new AssetCommandFamilyOracle() {
+        CommandPermissions withStub = new CommandPermissions(new AssetCommandFamilyOracle(new AssetRegistry()) {
             @Override
             public boolean isAssetCommand(String slashCommand) {
                 return family.contains(slashCommand);

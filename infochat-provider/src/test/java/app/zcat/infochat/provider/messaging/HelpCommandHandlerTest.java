@@ -64,7 +64,7 @@ class HelpCommandHandlerTest {
         // The real probation classifier so the probation-filter test
         // exercises the genuine allowed-subset (the same predicate the
         // intake gate uses), not a stubbed always-true.
-        commandPermissions = new CommandPermissions(new AssetCommandFamilyOracle());
+        commandPermissions = new CommandPermissions(new AssetCommandFamilyOracle(new AssetRegistry()));
     }
 
     @Test

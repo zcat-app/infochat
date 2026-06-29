@@ -7,6 +7,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
 import app.zcat.infochat.provider.command.CommandPermissions;
+import app.zcat.infochat.provider.command.asset.AssetRegistry;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -190,7 +191,7 @@ class InboundRouterProbationClockTest {
         router.confirmStateService = new NoopConfirmStateService();
         // The command is always blocked-during-probation, isolating the gate:
         // block-vs-dispatch is driven solely by probation_until vs the clock.
-        router.commandPermissions = new CommandPermissions(new AssetCommandFamilyOracle()) {
+        router.commandPermissions = new CommandPermissions(new AssetCommandFamilyOracle(new AssetRegistry())) {
             @Override
             public boolean allowedDuringProbation(String slashCommand) {
                 return false;
@@ -202,7 +203,7 @@ class InboundRouterProbationClockTest {
             @Override public void clear(UUID userId2, String scopeKind, UUID scopeId) {}
         };
         router.registeredContactSet = new NoopRegisteredContactSet();
-        router.assetCommandFamilyOracle = new AssetCommandFamilyOracle();
+        router.assetCommandFamilyOracle = new AssetCommandFamilyOracle(new AssetRegistry());
         CountingDispatchDataSource dispatchDataSource = new CountingDispatchDataSource(userId);
         router.dataSource = dispatchDataSource;
         router.groupAutoPromoteService = new NoopGroupAutoPromoteService(dispatchDataSource);
