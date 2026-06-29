@@ -525,8 +525,6 @@ final class SimpleXWebSocketClient {
                     dispatchAsync(inv.inviterContactId(),
                             () -> groupInvitationConsumer.onGroupInvitation(inv));
             case SimpleXMessageCodec.SendAck ack -> completePending(ack.corrId(), ack.chatItemId());
-            case SimpleXMessageCodec.SelfAddress sa ->
-                    completePending(sa.corrId(), sa.queueAddressId());
             case SimpleXMessageCodec.CommandError err -> failPending(err);
             case SimpleXMessageCodec.OversizeDropped od -> {
                 // §6.3.10 transport size-cap shed: silent at the boundary (no

@@ -1,11 +1,11 @@
 ---
 id: M1-518
 title: "Remove vestigial SimpleX bot-queue-address derivation"
-status: pending
+status: done
 created: 2026-06-29
 last_updated: 2026-06-29
 blocked_by: []
-files_budget: 10
+files_budget: 11
 files_scope:
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXMessageCodec.java
@@ -15,6 +15,7 @@ files_scope:
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXStartIdentityValidationTest.java
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXReconnectTest.java
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXSelfAddressFixture.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/MultiAdapterProductionIT.java
   - docs/design/06-messaging.md
   - docs/spec/decisions.md
 complexity: high
@@ -22,6 +23,7 @@ risk: medium
 round_cap: 3
 security_relevant: true
 migration_touch: false
+outline_file: target/m1-tick-outline-M1-518.md
 out_of_scope:
   - "Group @-mention recognition logic (memberId byte-equality) — landed in M1-514; do not change recognition or span-stripping. This ticket only removes the now-unused queue-address derivation machinery around it."
   - "Signal adapter identity derivation (the ACI/mentionUuid read from the signal-cli store) — Signal still consumes its derived id for mention recognition; untouched."
@@ -63,6 +65,7 @@ test_plan:
   modifies:
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapterIdentityDerivationTest.java
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXReconnectTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/MultiAdapterProductionIT.java
   deletes:
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXStartIdentityValidationTest.java
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXSelfAddressFixture.java
@@ -73,13 +76,40 @@ spec_refs:
   - "docs/design/06-messaging.md §6.4.4 Event decoding"
 decision_refs:
   - D51
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 13
+      added: 212
+      removed: 719
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-29
+    verdict: CLEAN
+    base: b6afb87e2bcf1d96eb1f7d09c93753b585d519dc
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-518-2026-06-29.md
+    out_of_model_count: 0
+    note: |
+      Pre-commit --in-progress audit of the /show_address derivation removal. CLEAN:
+      no auth/authz/ban/audit surface altered; codec input-validation boundary and the
+      D51 memberId mention anchor untouched. No findings, no out-of-model items.
+clarity_check:
+  date: 2026-06-29
+  verdict: PASS
+  warnings: []
+  blockers: []
 revisions:
   - date: 2026-06-29
     reason: >-
@@ -99,6 +129,27 @@ revisions:
         - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapterIdentityDerivationTest.java
         - docs/design/06-messaging.md
         - docs/spec/decisions.md
+  - date: 2026-06-29
+    reason: >-
+      budget-breach rework — plan-writer Risk 1+2 surfaced that MultiAdapterProductionIT
+      (infochat-provider) consumes SimpleXSelfAddressFixture and its one-shot answerer
+      would steal the liveness-probe frame once start() stops issuing /show_address.
+      Add MultiAdapterProductionIT.java to files_scope (budget 10->11) and authorize its
+      modification; the fixture then becomes consumer-less and its deletion (acceptance
+      item 3 conditional) fires.
+    snapshot:
+      files_budget: 10
+      files_scope:
+        - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java
+        - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXMessageCodec.java
+        - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClient.java
+        - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXIdentity.java
+        - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapterIdentityDerivationTest.java
+        - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXStartIdentityValidationTest.java
+        - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXReconnectTest.java
+        - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXSelfAddressFixture.java
+        - docs/design/06-messaging.md
+        - docs/spec/decisions.md
 escalations:
   - date: 2026-06-29
     reason: clarity-fail
@@ -108,6 +159,19 @@ escalations:
       Acceptance criterion 2 explicitly requires "SimpleXIdentity is removed or
       reduced" — both files exist as separate files on disk (confirmed). Fix: add
       them to files_scope.
+  - date: 2026-06-29
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (developer-surfaced via plan-writer Risk 1+2). Removing the /show_address
+      derivation breaks MultiAdapterProductionIT (infochat-provider, OUTSIDE
+      files_scope): its signalCrashDoesNotAffectSimpleX one-shot answerer thread,
+      which currently exits after answering start()'s /show_address, never exits
+      once start() stops issuing the query — it then steals the liveness-probe
+      /_send frame the test's own awaitFrame(2s) expects, failing the assertion.
+      SimpleXSelfAddressFixture also cannot be deleted while that IT references it.
+      Fix requires adding MultiAdapterProductionIT.java to files_scope (budget 10->11)
+      and authorizing its modification; doing so makes the fixture consumer-less so
+      its already-authorized deletion then applies.
 ---
 
 # M1-518: Remove vestigial SimpleX bot-queue-address derivation
@@ -162,9 +226,22 @@ authorization):
   `/show_address` branch (and its `rederivedQueueAddressId` parameter) is dropped
   from the `startSendResponder` helper. The other reconnect tests
   (`inboundDeliveredExactlyOnceAfterReconnect`, etc.) are unaffected and kept.
-- `SimpleXSelfAddressFixture` — **deleted**: once the self-address codec
-  round-trips and the start/reconnect derivation responders above are gone, nothing
-  references it (`contactLink`, `userContactLinkFrame`, `startShowAddressResponder`).
+- `MultiAdapterProductionIT` (infochat-provider, added to files_scope at the
+  budget-breach refine) — the standing `startShowAddressResponder` (static init) and
+  the two one-shot `answerNextShowAddress` calls in `simpleXCrashDoesNotAffectSignal`
+  / `signalCrashDoesNotAffectSimpleX` answer a `/show_address` that `start()` no
+  longer issues. The one-shot in `signalCrashDoesNotAffectSimpleX` would otherwise
+  never exit and would **steal the liveness-probe `/_send` frame** the test's own
+  `awaitFrame(2s)` expects (the IT's own comment names this exact hazard). Remove the
+  responder + both answerers + the now-unused `SimpleXSelfAddressFixture` import, and
+  reword the related comments. The cross-adapter blast-radius assertions are
+  unchanged — only the now-defunct identity-query plumbing is removed.
+- `SimpleXSelfAddressFixture` — **deleted**, but only **after** the
+  `MultiAdapterProductionIT` change above removes its last consumer. Within the
+  adapter module its callers (`SimpleXAdapterIdentityDerivationTest` retarget,
+  `SimpleXStartIdentityValidationTest` delete) already drop it; the provider IT was
+  the remaining reference. With all gone, acceptance item 3's conditional ("removed
+  if nothing else references it") fires and the fixture is deleted.
 
 ## Notes
 

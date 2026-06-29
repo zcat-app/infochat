@@ -495,8 +495,8 @@
   SimpleX provides a self-hosted Chat CLI / SimpleX Chat server with a WebSocket-based bot API. The adapter speaks that WebSocket protocol.                                                                                                             
    
   - Connection: WebSocket to the local simplex-chat on a loopback port (default 5225), configured via infochat.adapters.simplex.ws-port; the simplex-chat executable is infochat.adapters.simplex.binary.
-  - Authentication: none. The WebSocket bot API is a loopback channel to the co-located simplex-chat subprocess the adapter itself spawns, so there is no session, cookie, or token to present. The bot identity lives in the subprocess data-dir (infochat.adapters.simplex.data-dir) and is queried at start() per the Bot identity item below. Session-token auth is deferred for the v1 loopback-IPC transport (§6.4.6).
-  - **Bot identity** (per [../spec/deployment.md](../spec/deployment.md) §Operator inputs item 7): the bot's queue address is **queried from the running simplex-chat over the adapter's own WebSocket at `start()`** (a `/show_address`-shaped self-address command; the bare queue id is extracted from the returned contact link) and re-derived on supervised subprocess restart. Since simplex-chat v6.5.4.1 the group mention payload no longer carries a queue address, so this derived value is **no longer the mention anchor** (decision D51 — group mentions resolve against the per-group `memberId`, see §Mention anchoring below); the `/show_address` derivation now serves only as a startup contract health-check (a malformed or absent self-address refuses *that adapter's* startup, per-adapter resilience §6.7) and is slated for removal (M1-518). It is NOT an operator-typed property and is not parsed from disk.
+  - Authentication: none. The WebSocket bot API is a loopback channel to the co-located simplex-chat subprocess the adapter itself spawns, so there is no session, cookie, or token to present. The bot identity material lives in the subprocess data-dir (infochat.adapters.simplex.data-dir). Session-token auth is deferred for the v1 loopback-IPC transport (§6.4.6).
+  - **Bot identity**: SimpleX group @-mention recognition resolves against the bot's **per-group `memberId`**, read per-frame from `chatInfo.groupInfo.membership.memberId` (decision D51, see §Mention anchoring below), so the bot needs no derived account-level identity. The earlier `/show_address` self-address derivation — queried from the running simplex-chat over the adapter's own WebSocket at `start()` and re-derived on supervised restart — became consumer-less once D51 landed and was **removed in M1-518**; `start()` now issues no identity query and builds the group-candidate handler directly. The bot identity material is the subprocess data-dir, not an operator-typed property and not parsed from disk.
   - Identity: the SimpleX contact display ID (e.g., xftp://...); cryptographically bound. trustLevel = HIGH.
   - **Mention anchoring (D51):** SimpleX's group `newChatItem` carries a top-level `mentions{}` object (display name → per-group `memberId`), and the bot's own per-group `memberId` is in the same frame at `chatInfo.groupInfo.membership.memberId`. The adapter recognises a bot @mention by **byte-equality of a `mentions{}` memberId against `groupInfo.membership.memberId`**; it does NOT scan the message body for the bot's display name. The bot's own mention span is located by resolving the matched memberId back to its `mentions{}` display-name key and stripping the `formattedText` segment(s) carrying that `memberName`, leaving co-mentions of other members intact. `supportsMentionByContactId = true`.
 
@@ -605,7 +605,7 @@
   by an async `userJoinedGroup` (`memberStatus "connected"`), so the bot's
   membership transitions invited→connected. The join is issued fire-and-forget
   (it returns no chat-item handle and is not a paced user message, so it draws no
-  rate token — the same treatment as `/show_address`); the group then enters the
+  rate token); the group then enters the
   D47 `approval_status='pending'` machine on the first @mention (no approval logic
   added here). The SPI addition is capability-shaped (default no-op
   `setGroupInvitationHandler` / `joinGroup`), so the Signal and in-memory adapters
@@ -661,12 +661,12 @@
   SimpleX, and a stray `infochat.adapters.simplex.admin` is inert (gate 7 counts
   only the token).
 
-  The `extractQueueAddressId` parser still exists, but its role is **the bot's
-  own identity**, not an admin address: the running `simplex-chat` reports the
-  bot's contact link, and the adapter extracts the bare queue id from it to learn
-  the bot's own address at startup (M1-320, the §6.4 Bot identity item) —
-  independent of any admin value. There is no operator-pasted SimpleX admin link
-  to parse, so the wizard (`6-adapter.sh`) collects only the secret token.
+  The `extractQueueAddressId` parser still exists; since the bot's own
+  queue-address derivation was removed in M1-518 (the mention anchor is the
+  per-group `memberId`, D51), its surviving caller is
+  `SimpleXAdapter.canonicalizeContactId`, which canonicalizes an operator-supplied
+  admin contact link to the bare queue id (M1-465). The wizard (`6-adapter.sh`)
+  collects only the secret token.
 
   ### 6.4.5 Command encoding                                                                                                                                                                                                                                
                                                                                    

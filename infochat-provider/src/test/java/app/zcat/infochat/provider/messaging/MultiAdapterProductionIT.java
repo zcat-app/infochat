@@ -11,7 +11,6 @@ import app.zcat.infochat.messaging.impl.signal.SignalAdapter;
 import app.zcat.infochat.messaging.impl.simplex.FakeSimpleXProcess;
 import app.zcat.infochat.messaging.impl.simplex.SimpleXAdapter;
 import app.zcat.infochat.messaging.impl.simplex.SimpleXConfig;
-import app.zcat.infochat.messaging.impl.simplex.SimpleXSelfAddressFixture;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.command.GrantAdminCommandHandler;
@@ -160,24 +159,15 @@ class MultiAdapterProductionIT {
     // static-init block as the fakes because Profile.getConfigOverrides()
     // runs after class load.
     static final Path sharedSignalStoreDir;
-    // SimpleXAdapter.start() likewise derives the bot's queue address (the
-    // D10 anchor) by querying simplex-chat over its own WebSocket, so the
-    // shared fake needs a standing responder answering every /show_address
-    // — the CDI bean's boot-time start() blocks awaiting it, and each
-    // supervised restart of the /bin/sleep stand-in re-derives through the
-    // same responder. The served queue id is the value the removed
-    // .bot-queue-address property used to supply, so the anchor the tests
-    // observe is unchanged. No test awaits non-query frames from the
-    // SHARED fake, so the standing (frame-consuming) loop is safe here;
-    // the crash tests use one-shot answerers on their own fakes instead.
-    static final String SIMPLEX_BOT_QUEUE_ADDRESS =
-            "M1109SimplexBotIdentityQueueAddr00000000000A";
+    // SimpleXAdapter.start() no longer derives a bot queue address (the
+    // /show_address derivation was removed in M1-518; group @-mention
+    // recognition reads the per-group memberId per-frame, D51), so the shared
+    // fake needs no standing /show_address responder — the CDI bean's boot-time
+    // start() connects its WebSocket and returns without issuing a query.
     static {
         try {
             sharedFakeSimplex = new FakeSimpleXProcess();
             sharedFakeSimplex.start();
-            SimpleXSelfAddressFixture.startShowAddressResponder(sharedFakeSimplex,
-                    () -> SimpleXSelfAddressFixture.contactLink(SIMPLEX_BOT_QUEUE_ADDRESS));
             sharedFakeSignal = new FakeSignalCli();
             sharedSignalStoreDir = Files.createTempDirectory("m1-109-signal-store-");
             SignalAccountStoreFixture.writeStore(sharedSignalStoreDir,
@@ -391,11 +381,8 @@ class MultiAdapterProductionIT {
             SimpleXAdapter sx = newSimpleXAdapter(sxFake);
             SignalAdapter sg = newSignalAdapter(sgFake);
             try {
-                // One-shot (not standing) answerer: sx.start() blocks on
-                // the /show_address identity query; answering exactly one
-                // leaves the fake's frame queue to the test afterwards.
-                SimpleXSelfAddressFixture.answerNextShowAddress(sxFake,
-                        SimpleXSelfAddressFixture.contactLink(SIMPLEX_BOT_QUEUE_ADDRESS));
+                // sx.start() no longer issues a /show_address identity query
+                // (M1-518), so no answerer is needed before it.
                 sx.start();
                 sg.start();
 
@@ -452,12 +439,9 @@ class MultiAdapterProductionIT {
             SimpleXAdapter sx = newSimpleXAdapter(sxFake);
             SignalAdapter sg = newSignalAdapter(sgFake);
             try {
-                // One-shot answerer for the start()-time identity query —
-                // see simpleXCrashDoesNotAffectSignal; here it matters even
-                // more because this test awaits the liveness-probe frame
-                // from sxFake below, which a standing responder would steal.
-                SimpleXSelfAddressFixture.answerNextShowAddress(sxFake,
-                        SimpleXSelfAddressFixture.contactLink(SIMPLEX_BOT_QUEUE_ADDRESS));
+                // sx.start() no longer issues a /show_address identity query
+                // (M1-518); the test's liveness probe below is the only reader
+                // of sxFake's frame queue, so no answerer thread can steal it.
                 sx.start();
                 sg.start();
                 // Wait for SimpleX's WebSocket handshake to complete on
@@ -527,9 +511,8 @@ class MultiAdapterProductionIT {
                 // the notification channel. Wiring a logger here would
                 // surface the suppressed supervisor failures, which is
                 // the noise the per-test application.properties is set
-                // up to dampen. The bot queue address is no construction
-                // input — start() derives it from the fake's /show_address
-                // answer (the caller spawns the one-shot answerer first).
+                // up to dampen. The bot needs no construction-time identity:
+                // start() no longer derives one (M1-518).
                 notice -> { });
     }
 
@@ -658,11 +641,10 @@ class MultiAdapterProductionIT {
             // (every CSV name resolves to a registered bean — the
             // production beans live in ProductionAdapterBeans (M1-120)).
             // Gate 7 (bootstrap admin union non-empty) is satisfied by the
-            // two .admin entries. Neither bot-identity anchor is configured:
-            // Signal's is derived at start() from the account-store fixture
-            // under .data-dir, SimpleX's from the shared fake's
-            // /show_address answer (the standing responder in the static
-            // block). The .binary / .data-dir / .ws-port / .account /
+            // two .admin entries. Signal's bot-identity anchor is derived at
+            // start() from the account-store fixture under .data-dir; SimpleX
+            // needs none (the /show_address derivation was removed in M1-518).
+            // The .binary / .data-dir / .ws-port / .account /
             // .endpoint entries point at the shared in-process fakes so
             // adapter.start() (called reflectively by MessagingStartup at
             // @PostConstruct) connects to the fakes' bound ephemeral

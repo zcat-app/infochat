@@ -1,18 +1,21 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
 /**
- * The bot's SimpleX identity — its queue address, the cryptographically
- * anchored identifier SimpleX surfaces for the bot's account (decision
- * D32, {@code docs/spec/messaging.md} §Per-adapter trust level and
- * identity). The queue address is the bot's stable {@code contact_id}
- * on SimpleX and the D10 trust anchor for this adapter. Derived at
- * adapter startup by querying the running simplex-chat for the bot's
- * own address ({@code SimpleXAdapter#deriveAndAdoptIdentity}) — never
- * an operator-typed property.
+ * SimpleX queue-address well-formedness validation (decision D32,
+ * {@code docs/spec/messaging.md} §Per-adapter trust level and identity). A
+ * SimpleX queue address is the cryptographically anchored identifier SimpleX
+ * surfaces for an account — the stable {@code contact_id} on SimpleX and the
+ * D10 trust anchor for this adapter.
  *
- * @param queueAddress the bot's SimpleX queue address; never null.
+ * <p>Static validator only — no instance state. {@link #isWellFormed} is the
+ * sole survivor of the former bot-self-address machinery (the
+ * {@code /show_address} startup derivation removed in M1-518): the registry
+ * uses it to reject an operator-mistyped bootstrap-admin value before it seeds
+ * an admin row no real contact can ever claim. Group @-mention recognition is
+ * anchored to the per-group {@code memberId} carried in each frame (decision
+ * D51), not to a derived queue address.</p>
  */
-public record SimpleXIdentity(String queueAddress) {
+public final class SimpleXIdentity {
 
     /**
      * Minimum character length of a well-formed SimpleX queue address.
@@ -20,9 +23,9 @@ public record SimpleXIdentity(String queueAddress) {
      * queue id ({@code docs/design/06-messaging.md} §6.4.4: the id formats
      * are "URL-safe base64 (the SimpleX queue address itself)"). That id
      * is a fixed 24-byte value, whose URL-safe-base64 form is 32
-     * characters, so this floor admits every real derived queue address.
-     * The prior 43-char value assumed a 32-byte id and so rejected every
-     * real 32-char address, leaving the adapter unable to start (M1-504).
+     * characters, so this floor admits every real queue address. The prior
+     * 43-char value assumed a 32-byte id and so rejected every real 32-char
+     * address (M1-504).
      *
      * <p>The floor still rejects a short mistyped operator value — a
      * human-readable slug below 32 chars. It does NOT reject a 36-char
@@ -32,6 +35,10 @@ public record SimpleXIdentity(String queueAddress) {
      * regression documented in the ticket Notes).</p>
      */
     private static final int MIN_QUEUE_ADDRESS_LENGTH = 32;
+
+    private SimpleXIdentity() {
+        // Static queue-address validator; not instantiable.
+    }
 
     /**
      * Whether {@code queueAddress} is a well-formed SimpleX queue

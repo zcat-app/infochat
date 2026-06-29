@@ -152,8 +152,7 @@ class SimpleXReconnectTest {
             SimpleXAdapter adapter = newAdapter(fake);
             SimpleXSubprocess sub = newOneShotSubprocess();
             sub.start();
-            Thread responder = startSendResponder(
-                    fake, "ReconnectRederivedBotQueueAddress00000000008");
+            Thread responder = startSendResponder(fake);
             try {
                 adapter.attachSubprocess(sub);
                 adapter.rebuildWebSocket();
@@ -170,45 +169,6 @@ class SimpleXReconnectTest {
                 assertNotNull(handle,
                         "send must succeed once the WebSocket client was rebuilt"
                                 + " after the supervised restart");
-            } finally {
-                responder.interrupt();
-                adapter.close();
-            }
-        }
-    }
-
-    @Test
-    void servesOnRebuiltTransportWhenRederivedAddressMalformed() throws Exception {
-        // M1-402: the post-restart identity re-derivation rejects a
-        // non-well-formed address (a short queue id — valid charset, under the
-        // isWellFormed length floor) AFTER waitForWebSocketReady +
-        // rebuildWebSocket already produced a live client. reconnect()'s
-        // IllegalStateException arm must clear `reconnecting` so the healthy
-        // rebuilt transport serves; leaving the flag set would wedge every send
-        // TRANSIENT forever with no restart coming (a healthy subprocess never
-        // fires another onRestart) to clear it.
-        try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
-            fake.start();
-            SimpleXAdapter adapter = newAdapter(fake);
-            SimpleXSubprocess sub = newOneShotSubprocess();
-            sub.start();
-            Thread responder = startSendResponder(fake, "MalformedShortQueueAddr");
-            try {
-                adapter.attachSubprocess(sub);
-                adapter.rebuildWebSocket();
-                fake.awaitClient(WAIT);
-                int generationBeforeKill = fake.clientGeneration();
-                fake.killClientConnection();
-                touchDieFlag();
-                // Restart → reconnect: fresh client handshake (generation +1),
-                // then deriveAndAdoptIdentity rejects the malformed address and
-                // the IllegalStateException arm clears `reconnecting`.
-                fake.awaitClientGeneration(generationBeforeKill + 1, Duration.ofSeconds(10));
-                MessageHandle handle = sendUntilSuccess(adapter, 10_000);
-                assertNotNull(handle,
-                        "the rebuilt transport must serve sends after a malformed"
-                                + " re-derivation — a leftover reconnecting flag would"
-                                + " classify every send TRANSIENT forever");
             } finally {
                 responder.interrupt();
                 adapter.close();
@@ -314,21 +274,11 @@ class SimpleXReconnectTest {
 
     /**
      * Background acker: answer every client command frame with a
-     * {@code newChatItems} success so {@code adapter.send} calls can
-     * complete — except the {@code /show_address} identity query the
-     * post-restart reconnect now issues, which gets a {@code
-     * userContactLink} frame whose queue id is {@code
-     * rederivedQueueAddressId} (a generic ack would feed "acked-item-1"
-     * into the adoption gate and wedge the reconnect). Callers pass a
-     * well-formed id for the clean-reconnect success path, or a
-     * short-but-valid-charset id for the M1-402 malformed-re-derivation
-     * case — the latter passes {@code extractQueueAddressId}'s charset
-     * gate but fails {@code SimpleXIdentity.isWellFormed}'s length floor,
-     * so {@code deriveAndAdoptIdentity} throws IllegalStateException.
-     * Exits on interrupt or when no frame arrives for 15 s.
+     * {@code newChatItems} success so {@code adapter.send} calls can complete
+     * after the supervised restart. Exits on interrupt or when no frame
+     * arrives for 15 s.
      */
-    private static Thread startSendResponder(FakeSimpleXProcess fake,
-                                             String rederivedQueueAddressId) {
+    private static Thread startSendResponder(FakeSimpleXProcess fake) {
         return Thread.ofVirtual().name("fake-simplex-send-responder").start(() -> {
             try {
                 while (!Thread.currentThread().isInterrupted()) {
@@ -336,19 +286,6 @@ class SimpleXReconnectTest {
                     JsonNode root = MAPPER.readTree(envelope);
                     JsonNode corrId = root.get("corrId");
                     if (corrId == null) {
-                        continue;
-                    }
-                    JsonNode cmd = root.get("cmd");
-                    if (cmd != null && cmd.asText().startsWith("/show_address")) {
-                        // Percent escapes collide with formatted() syntax, so
-                        // the contact-link frame is built by concatenation.
-                        fake.sendFrame("{\"corrId\":\"" + corrId.asText()
-                                + "\",\"resp\":{\"type\":\"userContactLink\","
-                                + "\"contactLink\":{\"connLinkContact\":{\"connFullLink\":"
-                                + "\"simplex:/contact#/?v=2-7&smp=smp%3A%2F%2FKeyHash%3D"
-                                + "%40smp.example.org%2F"
-                                + rederivedQueueAddressId
-                                + "%23\"}}}}");
                         continue;
                     }
                     fake.sendFrame("""

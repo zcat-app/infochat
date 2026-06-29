@@ -5,10 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
-import app.zcat.infochat.messaging.FailureCategory;
 import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 
@@ -21,7 +17,6 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
@@ -29,38 +24,26 @@ import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Pins {@link SimpleXAdapter#start()}'s bot-queue-address derivation and the
- * adapter's end-to-end group-mention routing. {@code start()} still queries the
- * running simplex-chat for its self-address ({@code /show_address} over the
- * adapter's own WebSocket) and validates the result — a startup contract
- * health-check (the derived value no longer routes mentions since v6.5.4.1; that
- * derivation is slated for removal in M1-516). Mention recognition (D51) is by
- * the per-group {@code memberId}: a {@code mentions{}} entry whose memberId
- * equals the frame's {@code groupInfo.membership.memberId} is delivered.
- * {@code start()} runs for real against a {@link FakeSimpleXProcess} answering
- * the self-address query, with a stay-alive wrapper script standing in for the
- * simplex-chat binary; routing is asserted behaviorally by pushing group frames
- * through the fake's wire path, so no test-only accessor exists.
- *
- * <p>The codec round-trip cases for the self-address wire surface (the encoder
- * envelope and the {@code userContactLink} decode, including the bare-queue-id
- * extraction contract) live here too: the contact-link fixtures pin that
- * extraction yields the same identifier the operator used to extract manually,
- * and drift fails loudly at {@code start()}.</p>
+ * Pins {@link SimpleXAdapter}'s end-to-end group-mention routing across
+ * {@code start()} and a supervised restart. {@code start()} builds the
+ * group-candidate handler via the direct {@link SimpleXAdapter#buildGroupHandler}
+ * lifecycle hook — the former {@code /show_address} self-address derivation was
+ * removed in M1-518, so {@code start()} issues no identity query. Mention
+ * recognition (D51) is by the per-group {@code memberId}: a {@code mentions{}}
+ * entry whose memberId equals the frame's {@code groupInfo.membership.memberId}
+ * is delivered. {@code start()} runs for real against a {@link FakeSimpleXProcess}
+ * with a stay-alive wrapper script standing in for the simplex-chat binary;
+ * routing is asserted behaviorally by pushing group frames through the fake's
+ * wire path, so no test-only accessor exists.
  */
 @DisabledOnOs(OS.WINDOWS)
 class SimpleXAdapterIdentityDerivationTest {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Duration WAIT = Duration.ofSeconds(2);
 
-    // QUEUE_A is the bot's derived self-address served by the fake — still
-    // queried and validated at start() (the contract health-check), so it uses
-    // the real 32-char wire width (24-byte recipient queue id, M1-504) and passes
-    // the isWellFormed length floor at adoption. BOT_MEMBER_ID is the bot's own
-    // per-group memberId (the D51 mention-routing anchor, carried in each frame's
-    // groupInfo.membership); OTHER_MEMBER_ID is a non-bot mention that must drop.
-    private static final String QUEUE_A = "BotQueueAddrShowAddrDerived0001A";
+    // BOT_MEMBER_ID is the bot's own per-group memberId (the D51 mention-routing
+    // anchor, carried in each frame's groupInfo.membership); OTHER_MEMBER_ID is a
+    // non-bot mention that must drop.
     private static final String BOT_MEMBER_ID = "WE1sRTBSZlVvMS9WYXdFcQ==";
     private static final String OTHER_MEMBER_ID = "T3RoZXJNZW1iZXJGb3JUZXN0MTI=";
 
@@ -68,19 +51,16 @@ class SimpleXAdapterIdentityDerivationTest {
     Path tempDir;
 
     @Test
-    void startCompletesDerivationAndRoutesGroupMentionByMemberId() throws Exception {
-        // start() queries the running simplex-chat for its self-address and
-        // validates it (the contract health-check) — and group mention routing
-        // works end-to-end on the memberId model (D51): a mention whose memberId
-        // equals the frame's groupInfo.membership.memberId is delivered; a
-        // non-matching mention is dropped. FIFO dispatch order (single
-        // inbound-dispatch thread) means a wrongly-delivered control would arrive
-        // BEFORE the matching mention, so the first delivery being the match
+    void routesGroupMentionByMemberIdAfterStart() throws Exception {
+        // start() builds the group handler (no /show_address derivation, M1-518)
+        // and group mention routing works end-to-end on the memberId model (D51):
+        // a mention whose memberId equals the frame's groupInfo.membership.memberId
+        // is delivered; a non-matching mention is dropped. FIFO dispatch order
+        // (single inbound-dispatch thread) means a wrongly-delivered control would
+        // arrive BEFORE the matching mention, so the first delivery being the match
         // proves the drop without a timing-fragile sleep.
         try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
             fake.start();
-            Thread responder = startShowAddressResponder(
-                    fake, new AtomicReference<>(contactLink(QUEUE_A)));
             SimpleXAdapter adapter = newAdapter(fake);
             LinkedBlockingQueue<InboundMessage> delivered = new LinkedBlockingQueue<>();
             adapter.setInboundHandler(delivered::add);
@@ -101,7 +81,6 @@ class SimpleXAdapterIdentityDerivationTest {
                 assertNull(delivered.poll(400, TimeUnit.MILLISECONDS),
                         "the non-matching control mention must never surface");
             } finally {
-                responder.interrupt();
                 adapter.close();
             }
         }
@@ -111,15 +90,14 @@ class SimpleXAdapterIdentityDerivationTest {
     void groupMentionRoutingSurvivesRestart() throws Exception {
         // The mention-routing wire path (codec -> handler -> delivered) is
         // re-established through the production reconnect path after a supervised
-        // restart. Routing is by memberId and does not depend on the re-derived
-        // self-address, so this pins that group mentions still route after the WS
-        // client and group handler are rebuilt. Choreography mirrors
-        // SimpleXReconnectTest: a one-shot flag-file child dies on the test's
-        // signal and the supervisor performs exactly one production restart.
+        // restart. Routing is by memberId and the handler is rebuilt by
+        // buildGroupHandler() (no re-derivation, M1-518), so this pins that group
+        // mentions still route after the WS client and group handler are rebuilt.
+        // Choreography mirrors SimpleXReconnectTest: a one-shot flag-file child
+        // dies on the test's signal and the supervisor performs exactly one
+        // production restart.
         try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
             fake.start();
-            AtomicReference<String> servedLink = new AtomicReference<>(contactLink(QUEUE_A));
-            Thread responder = startShowAddressResponder(fake, servedLink);
             SimpleXAdapter adapter = newAdapter(fake);
             LinkedBlockingQueue<InboundMessage> delivered = new LinkedBlockingQueue<>();
             adapter.setInboundHandler(delivered::add);
@@ -129,7 +107,7 @@ class SimpleXAdapterIdentityDerivationTest {
                 adapter.attachSubprocess(sub);
                 adapter.rebuildWebSocket();
                 fake.awaitClient(WAIT);
-                adapter.deriveAndAdoptIdentity();
+                adapter.buildGroupHandler();
 
                 fake.sendFrame(groupMentionFrame(BOT_MEMBER_ID, BOT_MEMBER_ID, "pre-restart-item"));
                 InboundMessage preRestart = delivered.poll(5_000, TimeUnit.MILLISECONDS);
@@ -149,7 +127,6 @@ class SimpleXAdapterIdentityDerivationTest {
                 assertNotNull(postRestart,
                         "a memberId mention routes again after the supervised restart");
             } finally {
-                responder.interrupt();
                 adapter.close();
             }
         }
@@ -161,65 +138,6 @@ class SimpleXAdapterIdentityDerivationTest {
     // no queue-address mention anchor, so the property is now structural (the
     // adapter has no admin input AND no derived-address routing). Authorized in
     // the M1-514 ticket §Out-of-scope.
-
-    // -- codec round-trips for the self-address wire surface ------------------
-
-    @Test
-    void encodeShowMyAddressCommandCarriesCorrIdAndCommand() throws Exception {
-        JsonNode root = MAPPER.readTree(
-                SimpleXMessageCodec.encodeShowMyAddressCommand("corr-42"));
-        assertEquals("corr-42", root.get("corrId").asText());
-        assertEquals("/show_address", root.get("cmd").asText());
-    }
-
-    @Test
-    void decodeUserContactLinkExtractsBareQueueId() {
-        // The extraction contract: the full contact link embeds the
-        // percent-encoded SMP queue URI; the bare queue id — the same
-        // identifier the operator used to extract manually — is the path
-        // segment after the server authority.
-        SimpleXMessageCodec.DecodedFrame decoded = SimpleXMessageCodec.decode(
-                userContactLinkFrame("corr-7", contactLink(QUEUE_A)));
-        SimpleXMessageCodec.SelfAddress selfAddress =
-                assertInstanceOf(SimpleXMessageCodec.SelfAddress.class, decoded);
-        assertEquals("corr-7", selfAddress.corrId());
-        assertEquals(QUEUE_A, selfAddress.queueAddressId(),
-                "extraction must yield the bare queue id embedded in the smp param");
-    }
-
-    @Test
-    void decodeUserContactLinkWithoutLinkFailsPromptly() {
-        // A CommandError (not Ignored) so the pending future fails with the
-        // named cause instead of stalling start() for the full ack timeout.
-        SimpleXMessageCodec.DecodedFrame decoded = SimpleXMessageCodec.decode(
-                "{\"corrId\":\"corr-8\",\"resp\":{\"type\":\"userContactLink\"}}");
-        SimpleXMessageCodec.CommandError error =
-                assertInstanceOf(SimpleXMessageCodec.CommandError.class, decoded);
-        assertEquals("corr-8", error.corrId());
-        assertEquals(FailureCategory.PERMANENT, error.category());
-        assertEquals("self-address-without-contact-link", error.detail(),
-                "fixed sentinel only — no envelope bytes in the detail");
-    }
-
-    @Test
-    void decodeUserContactLinkWithMalformedLinkFailsPromptly() {
-        SimpleXMessageCodec.DecodedFrame decoded = SimpleXMessageCodec.decode(
-                userContactLinkFrame("corr-9", "https://example.org/not-a-simplex-link"));
-        SimpleXMessageCodec.CommandError error =
-                assertInstanceOf(SimpleXMessageCodec.CommandError.class, decoded);
-        assertEquals(FailureCategory.PERMANENT, error.category());
-        assertEquals("self-address-extraction-failed", error.detail(),
-                "fixed sentinel only — the link bytes never reach the detail");
-    }
-
-    @Test
-    void decodeUserContactLinkWithoutCorrIdIsIgnored() {
-        // An async userContactLink event nobody requested cannot complete a
-        // pending future; it is dropped like every other unrequested variant.
-        SimpleXMessageCodec.DecodedFrame decoded = SimpleXMessageCodec.decode(
-                "{\"resp\":{\"type\":\"userContactLink\"}}");
-        assertInstanceOf(SimpleXMessageCodec.Ignored.class, decoded);
-    }
 
     // -- choreography helpers --------------------------------------------------
 
@@ -272,11 +190,6 @@ class SimpleXAdapterIdentityDerivationTest {
                 new Random(0L));
     }
 
-    private static Thread startShowAddressResponder(FakeSimpleXProcess fake,
-                                                    AtomicReference<String> servedLink) {
-        return SimpleXSelfAddressFixture.startShowAddressResponder(fake, servedLink::get);
-    }
-
     /**
      * Poll for the asynchronous post-restart handler rebuild: push bot-memberId
      * mentions until one is delivered or the deadline passes. Mentions pushed
@@ -299,14 +212,6 @@ class SimpleXAdapterIdentityDerivationTest {
             }
         }
         return null;
-    }
-
-    private static String contactLink(String queueAddressId) {
-        return SimpleXSelfAddressFixture.contactLink(queueAddressId);
-    }
-
-    private static String userContactLinkFrame(String corrId, String fullLink) {
-        return SimpleXSelfAddressFixture.userContactLinkFrame(corrId, fullLink);
     }
 
     /**
