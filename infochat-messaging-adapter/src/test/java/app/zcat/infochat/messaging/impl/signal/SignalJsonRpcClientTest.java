@@ -350,12 +350,15 @@ class SignalJsonRpcClientTest {
             client.setInboundHandler(delivered::add);
             client.connect();
             try {
-                // Feed an oversize line (well over the 16384 cap). The
+                // Feed an oversize line (well over MAX_INBOUND_LINE_CHARS). The
                 // payload happens to be valid-looking JSON-RPC, but the
-                // size-cap must fire BEFORE the codec ever sees it.
-                StringBuilder oversize = new StringBuilder(20_000);
+                // size-cap must fire BEFORE the codec ever sees it. Sized off
+                // the cap constant so this stays a genuine over-cap line if the
+                // cap moves (it was decoupled from the body cap in M1-486).
+                int oversizeChars = SignalJsonRpcClient.MAX_INBOUND_LINE_CHARS + 4_096;
+                StringBuilder oversize = new StringBuilder(oversizeChars + 64);
                 oversize.append("{\"jsonrpc\":\"2.0\",\"method\":\"receive\",\"params\":\"");
-                for (int i = 0; i < 20_000; i++) {
+                for (int i = 0; i < oversizeChars; i++) {
                     oversize.append('A');
                 }
                 oversize.append("\"}");

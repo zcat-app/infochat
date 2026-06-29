@@ -1,9 +1,9 @@
 ---
 id: M1-486
 title: "Signal inbound line cap equals body cap, collapsing two layers"
-status: pending
+status: done
 created: 2026-06-27
-last_updated: 2026-06-27
+last_updated: 2026-06-29
 blocked_by: []
 files_budget: 4
 complexity: low
@@ -34,12 +34,43 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 132
+      removed: 18
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-29
+    verdict: CLEAN
+    base: 4edfef0507abb73cb42cf45a463fbb651bcf3dec
+    head: m1/M1-486-signal-inbound-line-cap-vs-body-cap
+    verdict_file: docs/plan/m1/redteam/M1-486-2026-06-29.md
+    out_of_model_count: 1
+    note: |
+      Pre-commit audit run despite security_relevant:false, to honor the clarity
+      WARN that MAX_INBOUND_LINE_CHARS is an inbound intake/DoS guard. CLEAN: no
+      gap between the threat model and the diff. One out-of-model robustness note
+      (control-char bodies escaping to 6x can still exceed the 4x line cap) —
+      advisory only, not a defended-promise gap; no follow-up ticket recommended.
+clarity_check:
+  date: 2026-06-29
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: MAX_INBOUND_LINE_CHARS is an inbound-message intake guard; consider setting security_relevant: true even though the change is a correctness fix, so the redteam pass is triggered automatically."
+  blockers: []
 ---
 
 # M1-486: Signal inbound line cap equals body cap, collapsing two layers

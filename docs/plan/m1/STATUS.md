@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 22 |
+| pending | 21 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 519 |
+| done | 520 |
 | deferred | 8 |
 | **total** | **549** |
 
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-482 — Re-eval BENIGN over-audits/notifies infra-failure releases; uses post.id (complexity: low, risk: low)
 - M1-484 — Asset fetcher ignores SPI supported-asset/quote gate; dedup readBigDecimal (complexity: low, risk: low)
 - M1-485 — Embedding batch retry has no backoff, unlike the sibling entity stage (complexity: low, risk: low)
-- M1-486 — Signal inbound line cap equals body cap, collapsing two layers (complexity: low, risk: low)
 - M1-488 — quarantine_reject prompt apostrophe breaks its own {0} MessageFormat token (complexity: low, risk: low)
 - M1-489 — /follow-tag and /unfollow-tag skip spec-mandated tag normalization (complexity: low, risk: low)
 - M1-490 — Reconcile §9 split-clock decision sites against the M1-447 backlog (complexity: medium, risk: medium)
@@ -83,13 +82,13 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-512 | Production runtime resource harness: swap, container memory/CPU caps, dev-runtime teardown | 2026-06-29 | round 1 APPROVE |
 | M1-510 | SimpleX codec: align DM inbound/outbound/error decode with live v6.5.4.1 wire format | 2026-06-29 | round 1 APPROVE |
 | M1-487 | NewPostHandler @Transactional does not roll back on SQLException | 2026-06-29 | round 1 APPROVE |
+| M1-486 | Signal inbound line cap equals body cap, collapsing two layers | 2026-06-29 | round 1 APPROVE |
 | M1-483 | /group-timezone: missing-arg wrong error + zone work before the auth gate | 2026-06-29 | round 1 APPROVE |
 | M1-480 | /unban skips the in-transaction admin re-check its siblings perform | 2026-06-29 | round 1 APPROVE |
 | M1-479 | infochat-core partition seeds break after 2026-08-01 (no PartitionCreator in core tests) | 2026-06-29 | round 1 APPROVE |
 | M1-508 | SimpleX codec: decode newChatItems (plural) inbound (v6.5.4) | 2026-06-28 | round 1 APPROVE |
 | M1-507 | Operator tooling + docs for SimpleX claim-token bootstrap | 2026-06-28 | round 1 APPROVE |
 | M1-506 | SimpleX: claim-token bot-admin bootstrap (drop by-address) | 2026-06-28 | round 2 APPROVE |
-| M1-504 | SimpleX adapter cannot start: queue-address length floor (43) rejects every real bot address (32 chars) | 2026-06-27 | round 1 APPROVE |
 
 ---
 
@@ -707,7 +706,7 @@ M1-482 (pending) ← runnable
 M1-483 (done)
 M1-484 (pending) ← runnable
 M1-485 (pending) ← runnable
-M1-486 (pending) ← runnable
+M1-486 (done)
 M1-487 (done)
 M1-488 (pending) ← runnable
 M1-489 (pending) ← runnable

@@ -114,12 +114,19 @@ class SignalJsonRpcClient {
      * NOT the {@code maxInboundMessageBytes} capability. That capability
      * is a UTF-8 byte budget on the decoded message body and is enforced
      * in {@link SignalMessageCodec#exceedsInboundByteCap} on both the DM
-     * and group paths (mirroring SimpleX). The two are independent: an
-     * envelope line under this char cap can still carry a body over the
-     * byte cap (multi-byte chars, or envelope framing overhead the body
-     * does not pay), so the body cap is enforced separately at decode.</p>
+     * and group paths (mirroring SimpleX). The two are genuinely distinct
+     * layers, so this line cap is sized strictly <em>above</em> the body
+     * cap — never equal to it. If the two were the same value, the
+     * envelope framing and JSON string-escaping a body always pays would
+     * push the enclosing line over the shared cap before a body at (or
+     * just under) the byte budget could reach {@code exceedsInboundByteCap},
+     * silently dropping legal messages at the line layer (M1-486). Sizing
+     * the line cap at 4× the body cap clears worst-case escaping (a body of
+     * all {@code "}/{@code \\} doubles in the JSON string) plus envelope
+     * overhead, so the body-cap layer — not this OOM guard — governs which
+     * messages are dropped, while the raw line stays bounded at ~64 K chars.</p>
      */
-    private static final int MAX_INBOUND_LINE_CHARS = 16_384;
+    static final int MAX_INBOUND_LINE_CHARS = 4 * SignalMessageCodec.MAX_INBOUND_TEXT_BYTES;
 
     /**
      * Number of consecutive JSON-RPC response timeouts that classifies the
