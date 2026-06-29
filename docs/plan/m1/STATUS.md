@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 543 |
-| deferred | 9 |
-| **total** | **558** |
+| deferred | 10 |
+| **total** | **560** |
 
 ---
 
@@ -28,8 +28,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-509 — Operator onboarding: simple (comic) + advanced admin guides (complexity: medium, risk: low)
 - M1-520 — Remove test-only no-arg AssetCommandFamilyOracle ctor (complexity: low, risk: low)
-- M1-522 — Free auto_joined_group slots when the bot leaves a group (complexity: high, risk: medium)
 - M1-524 — Unify the divergent outbox-IT awaitCursor poll helper into one fixture (complexity: low, risk: low)
+- M1-525 — Free auto_joined_group slots when the bot leaves a group (complexity: low, risk: low)
 
 ---
 
@@ -46,7 +46,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-526 — blocked_by: M1-525 (pending)
 
 ---
 
@@ -83,11 +83,12 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 ### blocked-on-new-ticket (1)
 - M1-505 → M1-506
 
-### decomposed (4)
+### decomposed (5)
 - M1-034 → M1-034a
 - M1-318 → unspecified
 - M1-493 → unspecified
 - M1-511 → unspecified
+- M1-522 → unspecified
 
 ### post-mvp-hardening (1)
 - M1-031 → unspecified
@@ -725,7 +726,7 @@ M1-513 (draft)
 M1-514 (done)
   └── M1-515 (done)
         └── M1-519 (done)
-              └── M1-522 (pending) ← runnable
+              └── M1-522 (deferred)
 M1-516 (done)
 M1-517 (done)
 M1-518 (done)
@@ -733,4 +734,6 @@ M1-520 (pending) ← runnable
 M1-521 (done)
 M1-523 (done)
 M1-524 (pending) ← runnable
+M1-525 (pending) ← runnable
+  └── M1-526 (pending)
 ```

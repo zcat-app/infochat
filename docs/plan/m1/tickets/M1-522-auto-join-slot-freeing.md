@@ -1,17 +1,21 @@
 ---
 id: M1-522
 title: "Free auto_joined_group slots when the bot leaves a group"
-status: pending
+status: deferred
 created: 2026-06-29
 last_updated: 2026-06-29
+deferred_reason: decomposed
+decomposed_into:
+  - M1-525
+  - M1-526
 blocked_by:
   - M1-519
 files_budget: 8
 files_scope: []
 complexity: high
-risk: medium
+risk: high
 round_cap: 3
-security_relevant: false
+security_relevant: true
 migration_touch: true
 out_of_scope:
   - "The D47 total caps themselves (per-user-activation-cap / global-max-groups) and their enforcement in GroupInvitationHandler — M1-519 added those; this ticket only makes the count decrease when the bot leaves a group."
@@ -49,7 +53,43 @@ decision_refs:
 remediates: M1-519
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-29
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE: items 1-3 pledge a named test without naming it; sharpen with concrete test names during implementation."
+    - "COMPLEXITY-RISK-CALIBRATED: risk medium->high (persistence migration + new admin command + DB GRANT). Applied: risk now high."
+    - "SECURITY-FLAG-CONSISTENT: security_relevant false->true (new privileged bot-admin command + DB role GRANT). Applied: security_relevant now true."
+  blockers: []
+escalations:
+  - date: 2026-06-29
+    reason: outline-fail
+    reviewer_verdict_excerpt: |
+      ## OUTLINE FAILED — escalation recommended
+      REASON: No implementable outline satisfying all four acceptance items fits
+      within files_budget: 8. Acceptance item 3 alone (a new bot-admin recovery
+      command) has a hard floor of ~8 production files: handler, localized reply
+      strings in BOTH bundles/en.properties and bundles/cs.properties, a
+      BundleKeys constant, a new AuditAction verb, the GroupJoinRepository
+      freeing/list method, AND — because every bot-admin command must appear in
+      the CI-enforced closed privileged-tier list — additions to BOTH
+      docs/spec/commands.md §"Closed list of privileged-tier commands" and
+      LlmOutputSanitizer.CLOSED_LIST (byte-equality enforced by
+      LlmOutputSanitizerTest.matchSetEqualsSpecClosedList). Acceptance items 1+2
+      add a non-overlapping set: the V56 Flyway migration (removed_at + GRANT
+      UPDATE, DELETE stays revoked per V55), the removed_at IS NULL
+      count-exclusion plus the handleBotRemoved groupId==null freeing branch, AND
+      the SimpleX permanent-delivery-failure freeing path
+      (OutboundDelivery/GroupRepository) — load-bearing because SimpleX fires no
+      native BotRemoved event (supportsMembershipEvents=false). Minimal
+      production-file set ~11, before tests — well over the ceiling of 8.
+      SUGGESTED ESCALATION: decompose (split items 1+2 ~6 files from item 3 ~7-8
+      files), OR refine to raise files_budget to ~12. Secondary scoping note: a
+      pure join-only SimpleX group never @mentioned has no groups row and is
+      never sent to, so neither the native hook nor the permanent-failure path
+      ever fires — genuine auto-detection needs a known-group-reconciliation SPI
+      (deferred today); the in-band admin command is the only recovery for that
+      residual.
 ---
 
 # M1-522: Free auto_joined_group slots when the bot leaves a group
