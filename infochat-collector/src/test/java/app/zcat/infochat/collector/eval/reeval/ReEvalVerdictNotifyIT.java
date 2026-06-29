@@ -232,7 +232,7 @@ class ReEvalVerdictNotifyIT {
         // verdict (the judge never ran), UNKNOWN-class posts carry 'UNKNOWN'.
         // Carry the live post.body, as enumerateCandidates folds body into
         // the candidate scan that reconstructOriginalBody reads from.
-        return new ReEvaluationJob.ReEvalCandidate(post.id, post.fetchedAt, stage2Failed, attempts,
+        return new ReEvaluationJob.ReEvalCandidate(post.id, post.uid, post.fetchedAt, stage2Failed, attempts,
             stage2Failed ? null : "UNKNOWN", currentBody(post));
     }
 

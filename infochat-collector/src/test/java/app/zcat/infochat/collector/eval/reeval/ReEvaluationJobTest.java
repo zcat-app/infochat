@@ -63,7 +63,12 @@ class ReEvaluationJobTest {
         assertPostField(post.id, "stage2_failed", false);
         assertPostBodyContains(post.id, "[REDACTED:placeholder-1]");
         assertQuarantineStatus(post.id, "BENIGN_CLOSED");
-        assertAuditRowExists(post.id, "RE_EVAL_RELEASED", "re_eval_job");
+        // A RAW (in-pipeline, not yet user-visible) infra-failure post was never
+        // withheld pending review, so its BENIGN re-eval is not a held→visible
+        // release: no RE_EVAL_RELEASED audit (M1-482 visibility-based scoping).
+        // The QUARANTINED→released infra-failure case still audits — pinned by
+        // quarantinedInfraFailureBenign_requeuesToRaw_singleReleaseAuditRow.
+        assertReEvalReleasedCount(post.id, 0);
     }
 
     @Test
@@ -267,7 +272,7 @@ class ReEvaluationJobTest {
         seedQuarantineRow(post, "m", "<original>");
 
         ReEvaluationJob.ReEvalCandidate candidate = new ReEvaluationJob.ReEvalCandidate(
-            post.id, post.fetchedAt, true, 0, null, "live [REDACTED:m] body");
+            post.id, readUid(post.id), post.fetchedAt, true, 0, null, "live [REDACTED:m] body");
 
         assertEquals("live <original> body", reEvaluationJob.reconstructOriginalBody(candidate),
             "reconstruct must splice into the candidate-carried body, not a second post read");
@@ -300,8 +305,20 @@ class ReEvaluationJobTest {
         // Carry the live post.body, mirroring how enumerateCandidates folds
         // body into the candidate scan — reconstructOriginalBody now reads
         // the body from the candidate, not from a second post read.
-        return new ReEvaluationJob.ReEvalCandidate(post.id, post.fetchedAt, stage2Failed, attempts,
-            stage2Verdict, currentBody(post));
+        return new ReEvaluationJob.ReEvalCandidate(post.id, readUid(post.id), post.fetchedAt, stage2Failed,
+            attempts, stage2Verdict, currentBody(post));
+    }
+
+    private String readUid(UUID postId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT uid FROM post WHERE id = ?")) {
+            ps.setObject(1, postId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "expected seeded post " + postId);
+                return rs.getString(1);
+            }
+        }
     }
 
     private @Nullable String currentBody(SeededPost post) throws Exception {
@@ -577,27 +594,13 @@ class ReEvaluationJobTest {
         }
     }
 
-    private void assertAuditRowExists(UUID postId, String action, String actorContactId)
-            throws Exception {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                 "SELECT 1 FROM audit_log WHERE target_id = ? AND action = ? "
-                     + "AND actor_contact_id = ?")) {
-            ps.setString(1, postId.toString());
-            ps.setString(2, action);
-            ps.setString(3, actorContactId);
-            try (ResultSet rs = ps.executeQuery()) {
-                assertTrue(rs.next(), "Expected audit row: action=" + action + " target=" + postId);
-            }
-        }
-    }
-
     private void assertReEvalReleasedCount(UUID postId, int expected) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "SELECT COUNT(*) FROM audit_log "
-                     + "WHERE target_id = ? AND action = 'RE_EVAL_RELEASED'")) {
-            ps.setString(1, postId.toString());
+                     + "WHERE target_id = (SELECT uid FROM post WHERE id = ?) "
+                     + "AND action = 'RE_EVAL_RELEASED'")) {
+            ps.setObject(1, postId);
             try (ResultSet rs = ps.executeQuery()) {
                 assertTrue(rs.next());
                 assertEquals(expected, rs.getInt(1),
@@ -612,8 +615,9 @@ class ReEvaluationJobTest {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "SELECT details_json->>'prior_verdict' FROM audit_log "
-                     + "WHERE target_id = ? AND action = 'RE_EVAL_RELEASED'")) {
-            ps.setString(1, postId.toString());
+                     + "WHERE target_id = (SELECT uid FROM post WHERE id = ?) "
+                     + "AND action = 'RE_EVAL_RELEASED'")) {
+            ps.setObject(1, postId);
             try (ResultSet rs = ps.executeQuery()) {
                 assertTrue(rs.next(), "Expected RE_EVAL_RELEASED audit row for " + postId);
                 assertEquals(expected, rs.getString(1),

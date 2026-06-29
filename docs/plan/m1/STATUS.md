@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 13 |
+| pending | 12 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 530 |
+| done | 531 |
 | deferred | 9 |
 | **total** | **552** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-482 — Re-eval BENIGN over-audits/notifies infra-failure releases; uses post.id (complexity: low, risk: low)
 - M1-490 — Reconcile §9 split-clock decision sites against the M1-447 backlog (complexity: medium, risk: medium)
 - M1-491 — Log-sanitization hardening: relay NOTICE control-strip + SafeLog bidi/line-sep (complexity: low, risk: low)
 - M1-494 — Production dead-code and defensive-check cleanup sweep (complexity: low, risk: low)
@@ -696,7 +695,7 @@ M1-477 (done)
 M1-478 (done)
 M1-479 (done)
 M1-480 (done)
-M1-482 (pending) ← runnable
+M1-482 (done)
 M1-483 (done)
 M1-484 (done)
 M1-485 (done)

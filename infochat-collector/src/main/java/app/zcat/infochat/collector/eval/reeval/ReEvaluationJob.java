@@ -216,7 +216,22 @@ public class ReEvaluationJob {
         String priorVerdict = candidate.stage2Verdict() != null
             ? candidate.stage2Verdict() : "INFRA_FAILURE";
         Instant now = clock.instant();
-        TransactionHelper.inTransaction(dataSource, "ReEvaluationJob.applyBenign", conn -> {
+        // The RE_EVAL_RELEASED audit row + throttled admin page fire iff this
+        // BENIGN re-eval newly exposes a HELD post — one that was QUARANTINED
+        // (hidden pending review) immediately before this transition. That is
+        // the silent hidden→visible auto-release docs/spec/security.md
+        // §Re-evaluation job guards: an UNKNOWN candidate (always QUARANTINED)
+        // and the infra-failure release-on-stage2-failure=false / re-hidden-by-
+        // a-prior-non-BENIGN-roll sub-cases all qualify. An already-visible
+        // (READY) or in-pipeline (RAW) infra-failure post was never withheld
+        // for review, so clearing its flag is not a release: no audit, no page.
+        // Scoping on the live pre-transition status (not the post class) keeps
+        // the audit on a genuine QUARANTINED→released infra-failure exposure —
+        // the gap a class-based scope would have opened (M1-482, premise-fail
+        // refine of deep-review 03#F2; M1-182 pins the QUARANTINED case).
+        boolean wasHeld = TransactionHelper.inTransactionReturning(
+                dataSource, "ReEvaluationJob.applyBenign", conn -> {
+            boolean held = postIsQuarantined(conn, candidate);
             if (candidate.stage2Failed()) {
                 // Infra-failure: clear stage2_failed; a QUARANTINED
                 // post is requeued to RAW, a RAW/READY one keeps its
@@ -227,15 +242,44 @@ public class ReEvaluationJob {
                 requeueForPipeline(conn, candidate, now);
             }
             closeQuarantineRows(conn, candidate.postId(), now);
-            writeReEvalReleasedAudit(conn, candidate, priorVerdict, candidate.reEvalAttempts() + 1);
+            if (held) {
+                writeReEvalReleasedAudit(conn, candidate, priorVerdict, candidate.reEvalAttempts() + 1);
+            }
+            return held;
         });
-        throttledAdminNotifier.notifyOnce(
-            ERROR_CLASS_REEVAL_RELEASED,
-            ERROR_CLASS_REEVAL_RELEASED,
-            "Re-eval released post_id=" + candidate.postId()
-                + " prior_verdict=" + priorVerdict);
-        LOG.info("ReEvaluationJob: BENIGN re-eval for post_id={} (prior={}) — released",
-            candidate.postId(), priorVerdict);
+        if (wasHeld) {
+            throttledAdminNotifier.notifyOnce(
+                ERROR_CLASS_REEVAL_RELEASED,
+                ERROR_CLASS_REEVAL_RELEASED,
+                "Re-eval released post_uid=" + candidate.postUid()
+                    + " prior_verdict=" + priorVerdict);
+        }
+        LOG.info("ReEvaluationJob: BENIGN re-eval for post_id={} (prior={}, was_held={}) — {}",
+            candidate.postId(), priorVerdict, wasHeld,
+            wasHeld ? "released" : "flag cleared, visibility unchanged");
+    }
+
+    /**
+     * Whether the post is QUARANTINED (held pending review) right now,
+     * read inside the BENIGN-re-eval transaction before the
+     * release/clear UPDATE runs. A {@code true} result means the
+     * impending transition is a genuine hidden→visible release that
+     * {@link #writeReEvalReleasedAudit} and the admin page must record
+     * (docs/spec/security.md §Re-evaluation job). The re-eval scheduler
+     * is single-instance (M1-009 advisory lock + SKIP concurrent), so
+     * the status read here and the UPDATE that follows in the same
+     * transaction observe a stable row. (M1-482)
+     */
+    private static boolean postIsQuarantined(Connection conn, ReEvalCandidate candidate) throws SQLException {
+        final String sql = "SELECT status = 'QUARANTINED' FROM post WHERE id = ? AND fetched_at = ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setObject(1, candidate.postId());
+            ps.setTimestamp(2, Timestamp.from(candidate.fetchedAt()));
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getBoolean(1);
+            }
+        }
     }
 
     private void transitionToNeedsReview(ReEvalCandidate candidate) {
@@ -456,7 +500,10 @@ public class ReEvaluationJob {
             .actorContactId("re_eval_job")
             .action(AuditAction.RE_EVAL_RELEASED)
             .targetKind(TargetKind.POST)
-            .targetId(candidate.postId().toString())
+            // The spec mandates the post UID (stable, cross-Collector) as the
+            // audit target_id, never the internal post.id surrogate
+            // (docs/spec/security.md §Re-evaluation job). (M1-482)
+            .targetId(candidate.postUid())
             .detailsJson(detailsJson)
             .build();
         auditLogWriter.write(conn, row);
@@ -586,7 +633,7 @@ public class ReEvaluationJob {
         Instant scanFloor = scanWindowFloor(now);
         Instant cooldownFloor = now.minus(Duration.ofSeconds(reEvalCooldown.toSeconds()));
         final String sql =
-            "SELECT id, fetched_at, stage2_failed, re_eval_attempts, stage2_verdict, body FROM post "
+            "SELECT id, uid, fetched_at, stage2_failed, re_eval_attempts, stage2_verdict, body FROM post "
                 + "WHERE fetched_at >= ? "
                 + "  AND ("
                 + "  (stage2_failed = TRUE AND status != 'NEEDS_REVIEW'"
@@ -605,11 +652,12 @@ public class ReEvaluationJob {
                 while (rs.next()) {
                     candidates.add(new ReEvalCandidate(
                         (UUID) rs.getObject(1),
-                        rs.getTimestamp(2).toInstant(),
-                        rs.getBoolean(3),
-                        rs.getInt(4),
-                        rs.getString(5),
-                        rs.getString(6)));
+                        rs.getString(2),
+                        rs.getTimestamp(3).toInstant(),
+                        rs.getBoolean(4),
+                        rs.getInt(5),
+                        rs.getString(6),
+                        rs.getString(7)));
                 }
             }
         }
@@ -669,12 +717,16 @@ public class ReEvaluationJob {
     }
 
     /**
-     * {@code stage2Verdict} is the recorded {@code post.stage2_verdict}
+     * {@code postUid} is the post's stable spec UID ({@code post.uid}),
+     * carried alongside the internal {@code postId} surrogate so the
+     * RE_EVAL_RELEASED audit row can record the UID the spec mandates
+     * (docs/spec/security.md §Re-evaluation job) without a second post
+     * read. {@code stage2Verdict} is the recorded {@code post.stage2_verdict}
      * — NULL only for infra-failure posts the judge never produced a
      * verdict for (Stage2VerdictHandler records every parsed verdict;
      * non-BENIGN re-eval rolls overwrite it).
      */
-    record ReEvalCandidate(UUID postId, Instant fetchedAt, boolean stage2Failed, int reEvalAttempts,
-                           @Nullable String stage2Verdict, @Nullable String body) {
+    record ReEvalCandidate(UUID postId, String postUid, Instant fetchedAt, boolean stage2Failed,
+                           int reEvalAttempts, @Nullable String stage2Verdict, @Nullable String body) {
     }
 }

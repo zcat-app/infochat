@@ -1,7 +1,7 @@
 ---
 id: M1-482
 title: "Re-eval BENIGN over-audits/notifies infra-failure releases; uses post.id"
-status: pending
+status: done
 created: 2026-06-27
 last_updated: 2026-06-29
 blocked_by: []
@@ -16,18 +16,26 @@ out_of_scope:
 acceptance:
   - >-
     applyBenignReEval writes the RE_EVAL_RELEASED audit row and emits the release
-    NOTIFY only for the UNKNOWN→BENIGN transition (a post that was actually held)
-    — not for the infra-failure class, which was already visible and is not a
-    release. This matches docs/spec/security.md, which scopes the audit +
-    notification to the UNKNOWN→BENIGN case only.
+    NOTIFY iff the BENIGN re-eval releases a post that was HELD
+    (status='QUARANTINED') at re-eval time — the genuine hidden→visible
+    transition docs/spec/security.md §Re-evaluation job guards. This covers every
+    UNKNOWN→BENIGN release (an UNKNOWN candidate is always QUARANTINED) AND the
+    infra-failure release-on-stage2-failure=false / re-hidden-by-prior-non-BENIGN
+    sub-cases. An infra-failure post that was already user-visible (READY) or
+    still in the normal pipeline (RAW) is not a held-pending-review release and is
+    neither audited nor paged. (Refines the original class-based scoping, which
+    would have dropped the audit on a genuine QUARANTINED→released infra-failure
+    exposure that M1-182 deliberately audits — see the 2026-06-29 premise-fail
+    escalation.)
   - >-
     The RE_EVAL_RELEASED audit row's target_id carries the post_uid, not the
-    internal post.id (ReEvaluationJob.java:459,589 currently emit
-    candidate.postId()); the candidate enumeration selects the uid it needs.
+    internal post.id (ReEvaluationJob.java currently emits candidate.postId());
+    the candidate enumeration selects the uid it needs.
   - >-
-    Tests assert (a) the infra-failure re-eval path writes no RE_EVAL_RELEASED
-    audit and emits no release NOTIFY, and (b) the UNKNOWN→BENIGN audit row's
-    target_id equals the post_uid.
+    Tests assert (a) a non-held infra-failure BENIGN re-eval (RAW/READY) writes no
+    RE_EVAL_RELEASED audit and emits no release NOTIFY, while a QUARANTINED→
+    released infra-failure BENIGN re-eval DOES audit and page; and (b) the
+    UNKNOWN→BENIGN audit row's target_id equals the post_uid.
   - "mvn -B verify is green from the repo root."
 test_plan:
   adds:
@@ -36,12 +44,69 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 458
+      removed: 61
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-29
+    verdict: CLEAN
+    base: 41a489ffce11af5d476cb43f41b2afadb5308339
+    head: m1/M1-482-reeval-benign-audit-notify-scope-postuid (working tree)
+    verdict_file: docs/plan/m1/redteam/M1-482-2026-06-29.md
+    out_of_model_count: 0
+    note: |
+      Pre-commit in-progress audit of the visibility-based audit/notify
+      rescoping. CLEAN, no findings, no out-of-model items. The audit/page
+      remains gated on a genuine hidden→visible release (status QUARANTINED at
+      re-eval time), so the threat model's silent-auto-release signal is intact.
+escalations:
+  - date: 2026-06-29
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      N/A (developer-surfaced during implementation). The acceptance's
+      class-based scoping ("not for the infra-failure class, which was already
+      visible") is false for a subset of infra-failure posts: a QUARANTINED
+      infra-failure post (release-on-stage2-failure=false, or re-hidden by a
+      prior non-BENIGN roll) released via BENIGN re-eval IS a genuine
+      hidden→visible transition. M1-182's quarantinedInfraFailureBenign_
+      requeuesToRaw_singleReleaseAuditRow deliberately audits it (count=1), and
+      security.md's UNKNOWN audit rationale ("posts auto-released from
+      QUARANTINED reach users with no human reviewer having seen the row")
+      applies equally. Dropping that audit would be a security regression.
+      Resolved by refine to visibility-based scoping (user decision 2026-06-29):
+      audit/notify iff the post was QUARANTINED (held) at re-eval time.
 revisions:
+  - date: 2026-06-29
+    reason: >-
+      premise-fail refine: acceptance re-scoped from class-based ("not for the
+      infra-failure class") to visibility-based ("iff the post was QUARANTINED/
+      held at re-eval time"). Preserves M1-182's audit of a genuine
+      QUARANTINED→released infra-failure exposure while still dropping the
+      phantom audit on already-visible (READY) / in-pipeline (RAW) infra-failure
+      posts. Acceptance items 1 and 3 rewritten; item 2 (post_uid) unchanged.
+    snapshot:
+      acceptance_item_1: >-
+        applyBenignReEval writes the RE_EVAL_RELEASED audit row and emits the
+        release NOTIFY only for the UNKNOWN→BENIGN transition — not for the
+        infra-failure class, which was already visible and is not a release.
+      acceptance_item_3a: >-
+        the infra-failure re-eval path writes no RE_EVAL_RELEASED audit and emits
+        no release NOTIFY
   - date: 2026-06-29
     reason: >-
       budget-breach refine (pre-start): files_budget 4→5. Acceptance item 2
