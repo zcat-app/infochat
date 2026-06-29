@@ -1,7 +1,7 @@
 ---
 id: M1-521
 title: "Widen SafeLog.stripControls to the full bidi-control set (close log-line spoof gap)"
-status: pending
+status: done
 created: 2026-06-29
 last_updated: 2026-06-29
 remediates: M1-491
@@ -66,12 +66,42 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §User content in exceptions
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 74
+      removed: 26
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-29
+    verdict: CLEAN
+    base: "256e14e6 (fork point; impl uncommitted in working tree)"
+    head: "working tree"
+    verdict_file: docs/plan/m1/redteam/M1-521-2026-06-29.md
+    out_of_model_count: 1
+    note: |
+      CLEAN, no findings. One OUT-OF-MODEL wording observation (SafeLog javadoc
+      / test comment reference IngestTextNormalizer.stripBidiAndZeroWidth, which
+      also strips zero-width codepoints SafeLog deliberately omits). Not a
+      threat-model gap; javadoc already scoped to "bidi-control set" and the
+      out_of_scope documents the zero-width exclusion. No follow-up ticket.
+clarity_check:
+  date: 2026-06-29
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-521: Widen SafeLog.stripControls to the full bidi-control set (close log-line spoof gap)

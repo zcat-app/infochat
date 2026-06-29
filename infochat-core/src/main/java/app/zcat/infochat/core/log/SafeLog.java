@@ -24,18 +24,24 @@ public final class SafeLog {
 
     /**
      * Replace every control or line-integrity-breaking character with a
-     * single space: C0 (0x00–0x1F), DEL (0x7F), C1 (0x80–0x9F), plus the
-     * Unicode bidi override U+202E and the line / paragraph separators
-     * U+2028 / U+2029. The C1 range matters because 0x9B is the single-byte
-     * CSI — it opens an ANSI escape sequence exactly like ESC-[ does, so
-     * stripping C0 alone leaves terminal-control forgery open. The three
-     * named Unicode codepoints are not ISO controls and so survive the
-     * C0/C1 sweep, yet each breaks one-line log integrity: U+202E (right-
-     * to-left override) visually reorders the remainder of the line to
-     * spoof it, and U+2028 / U+2029 are line / paragraph breaks many log
-     * viewers honour — the same line-splitting forgery CR/LF give. Full-
-     * range sweeps for the control bands, not an enumerated blacklist: no
-     * control character has a legitimate place in a one-line log value,
+     * single space: C0 (0x00–0x1F), DEL (0x7F), C1 (0x80–0x9F), the full
+     * Unicode bidi-control set — U+061C (ALM), U+200E / U+200F (LRM / RLM),
+     * U+202A–U+202E (LRE / RLE / PDF / LRO / RLO) and the directional
+     * isolates U+2066–U+2069 (LRI / RLI / FSI / PDI) — plus the line /
+     * paragraph separators U+2028 / U+2029. The C1 range matters because
+     * 0x9B is the single-byte CSI — it opens an ANSI escape sequence exactly
+     * like ESC-[ does, so stripping C0 alone leaves terminal-control forgery
+     * open. The bidi controls and the two separators are not ISO controls
+     * and so survive the C0/C1 sweep, yet each breaks one-line log
+     * integrity: the bidi controls visually reorder the remainder of the
+     * line to spoof it (the Trojan-Source class, CVE-2021-42574), and
+     * U+2028 / U+2029 are line / paragraph breaks many log viewers honour —
+     * the same line-splitting forgery CR/LF give. This is the same
+     * bidi-control set IngestTextNormalizer.stripBidiAndZeroWidth strips on
+     * the ingest path; SafeLog must keep replacing each with a space (its
+     * one-line log semantics) rather than deleting, as the ingest path does.
+     * Full-range sweeps for the control bands, not an enumerated blacklist:
+     * no control character has a legitimate place in a one-line log value,
      * and replacing the whole ranges leaves no gaps.
      */
     public static String stripControls(String s) {
@@ -44,7 +50,11 @@ public final class SafeLog {
             char c = s.charAt(i);
             boolean control = c < 0x20
                     || (c >= 0x7F && c <= 0x9F)
-                    || c == '\u202E'
+                    || c == '\u061C'
+                    || c == '\u200E'
+                    || c == '\u200F'
+                    || (c >= '\u202A' && c <= '\u202E')
+                    || (c >= '\u2066' && c <= '\u2069')
                     || c == '\u2028'
                     || c == '\u2029';
             stripped.append(control ? ' ' : c);

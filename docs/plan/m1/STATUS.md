@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 537 |
+| done | 538 |
 | deferred | 9 |
 | **total** | **555** |
 
@@ -32,7 +32,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-518 — Remove vestigial SimpleX bot-queue-address derivation (complexity: high, risk: medium)
 - M1-519 — Enforce D47 group-count caps on the auto-join surface (complexity: high, risk: high)
 - M1-520 — Remove test-only no-arg AssetCommandFamilyOracle ctor (complexity: low, risk: low)
-- M1-521 — Widen SafeLog.stripControls to the full bidi-control set (close log-line spoof gap) (complexity: low, risk: low)
 
 ---
 
@@ -68,6 +67,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-521 | Widen SafeLog.stripControls to the full bidi-control set (close log-line spoof gap) | 2026-06-29 | round 1 APPROVE |
 | M1-517 | Schema: NOT NULL post.upstream_identifier + backfill 37 test fixtures | 2026-06-29 | round 1 APPROVE |
 | M1-516 | approve_quarantine: guard new_post NOTIFY when post UPDATE matches zero rows | 2026-06-29 | round 1 APPROVE |
 | M1-515 | SimpleX groups: auto-accept invitations (registered-inviter gate) | 2026-06-29 | round 2 APPROVE |
@@ -77,7 +77,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-501 | Stage-1-flagged posts can permanently evade Stage 2 after a crash | 2026-06-29 | round 1 APPROVE |
 | M1-497 | Test name/comment accuracy sweep: names and comments that contradict the body | 2026-06-29 | round 1 APPROVE |
 | M1-496 | Test-integrity sweep: vacuous, ambient-gated, and over-permissive assertions | 2026-06-29 | round 1 APPROVE |
-| M1-494 | Production dead-code and defensive-check cleanup sweep | 2026-06-29 | round 1 APPROVE |
 
 ---
 
@@ -732,5 +731,5 @@ M1-516 (done)
 M1-517 (done)
 M1-518 (pending) ← runnable
 M1-520 (pending) ← runnable
-M1-521 (pending) ← runnable
+M1-521 (done)
 ```
