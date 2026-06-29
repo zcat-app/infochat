@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.eval.embedding;
 
 import app.zcat.infochat.collector.eval.PartitionScan;
+import app.zcat.infochat.collector.eval.RetryBackoff;
 import app.zcat.infochat.collector.eval.TransactionHelper;
 import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
@@ -56,7 +57,13 @@ import java.util.concurrent.Semaphore;
  * <ul>
  *   <li>Any exception from {@link EmbeddingProvider#embed(List)} OR a
  *       response whose size does NOT equal the input size triggers ONE
- *       retry with the IDENTICAL input list.</li>
+ *       retry with the IDENTICAL input list. An exception (the provider
+ *       call did not complete) sleeps the shared {@link RetryBackoff}
+ *       before that retry — mirroring the sibling
+ *       {@link app.zcat.infochat.collector.eval.entity.EntityExtractorWorker}'s
+ *       UNREACHABLE arm — so a transient failure does not burn both
+ *       attempts back-to-back; a wrong-shape reply re-issues immediately
+ *       (the endpoint is reachable, so there is nothing to wait out).</li>
  *   <li>On second failure: every post in the batch advances
  *       {@code embedding_done=TRUE} WITHOUT a corresponding
  *       {@code post_embedding} row — the no-vector release path. The
@@ -198,6 +205,9 @@ public class EmbeddingWorker {
     @Inject
     PartitionScan partitionScan;
 
+    @Inject
+    RetryBackoff retryBackoff;
+
     // The scan-window floor is computed in Java from the injected Clock and
     // bound as a Timestamp (see enumeratePending), never SQL now(), so the
     // pickup window can be pinned under a fixed test clock instead of a
@@ -299,6 +309,20 @@ public class EmbeddingWorker {
 
             AttemptResult attempt = attemptEmbed(inputs, /* attempt */ 1);
             if (!attempt.success()) {
+                if (attempt.infrastructureFailure()) {
+                    // Mirror EntityExtractorWorker's UNREACHABLE arm
+                    // (EntityExtractorWorker.java:243): an exception means the
+                    // provider call did not complete (e.g. a rate-limited
+                    // 429/503), so sleep the shared backoff before the single
+                    // retry — re-firing immediately into the same rate-limit
+                    // window is near-certain to fail again and burn both
+                    // attempts back-to-back, prematurely releasing the post
+                    // embedding_done=TRUE with no vector. A wrong-shape reply,
+                    // by contrast, proves the endpoint is reachable, so it
+                    // re-issues at once (RetryBackoff's documented contract).
+                    // No DB connection or transaction is open here.
+                    retryBackoff.sleepBeforeRetry();
+                }
                 AttemptResult retry = attemptEmbed(inputs, /* attempt */ 2);
                 if (!retry.success()) {
                     // Two consecutive batch failures → no-vector
@@ -435,7 +459,7 @@ public class EmbeddingWorker {
             // bodies in the embed input list (docs/spec/security.md
             // §Secrets handling — User content in exceptions).
             SafeLog.warn(LOG, "EmbeddingWorker: embed call attempt " + attempt + " threw", e);
-            return AttemptResult.failure("exception: " + e.getClass().getSimpleName());
+            return AttemptResult.exceptionFailure("exception: " + e.getClass().getSimpleName());
         }
         if (results.size() != inputs.size()) {
             // Wrong-shape response: per spec, "any per-element error
@@ -444,7 +468,7 @@ public class EmbeddingWorker {
             LOG.warn(
                 "EmbeddingWorker: embed call attempt {} returned wrong shape (expected {} got {})",
                 attempt, inputs.size(), results.size());
-            return AttemptResult.failure("wrong-shape: expected=" + inputs.size() + " got=" + results.size());
+            return AttemptResult.wrongShapeFailure("wrong-shape: expected=" + inputs.size() + " got=" + results.size());
         }
         return AttemptResult.success(results);
     }
@@ -618,15 +642,25 @@ public class EmbeddingWorker {
     /**
      * Outcome of one {@link #attemptEmbed} call: either a successful
      * results list or a structured failure description for the second
-     * attempt's log line.
+     * attempt's log line. {@code infrastructureFailure} distinguishes the
+     * two failure shapes for the retry-backoff decision: {@code true} when
+     * the provider call threw (waits out the {@link RetryBackoff} before
+     * the retry), {@code false} for a reachable wrong-shape reply (retries
+     * immediately) — the same split {@link app.zcat.infochat.collector.eval.entity.EntityExtractorWorker}
+     * draws between its UNREACHABLE and SCHEMA_VIOLATING arms.
      */
-    private record AttemptResult(boolean success, List<EmbeddingResult> results, @Nullable String failureReason) {
+    private record AttemptResult(boolean success, List<EmbeddingResult> results,
+                                 @Nullable String failureReason, boolean infrastructureFailure) {
         static AttemptResult success(List<EmbeddingResult> results) {
-            return new AttemptResult(true, results, null);
+            return new AttemptResult(true, results, null, false);
         }
 
-        static AttemptResult failure(String reason) {
-            return new AttemptResult(false, List.of(), reason);
+        static AttemptResult exceptionFailure(String reason) {
+            return new AttemptResult(false, List.of(), reason, true);
+        }
+
+        static AttemptResult wrongShapeFailure(String reason) {
+            return new AttemptResult(false, List.of(), reason, false);
         }
     }
 }
