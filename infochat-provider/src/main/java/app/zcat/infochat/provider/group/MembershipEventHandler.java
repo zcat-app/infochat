@@ -44,6 +44,15 @@ public class MembershipEventHandler {
     private final GroupRepository groupRepository;
     private final AuditLogWriter auditLogWriter;
 
+    // Field-injected (the GroupRepository.auditLogWriter seam) so the existing
+    // 4-arg constructor — used by the hand-constructed failing-writer test
+    // doubles — stays unchanged. Non-null in the container; the only test that
+    // hand-constructs the handler AND reaches handleBotRemoved sets this field
+    // explicitly. handleUserLeft never touches it, so the UserLeft-only doubles
+    // may leave it null. (M1-525)
+    @Inject
+    GroupJoinRepository joinRepository;
+
     @Inject
     public MembershipEventHandler(DataSource dataSource,
                                   GroupMembershipRepository membershipRepository,
@@ -135,10 +144,28 @@ public class MembershipEventHandler {
     }
 
     private void handleBotRemoved(MembershipEvent.BotRemoved event, String adapter) {
+        // Free the auto_joined_group slot first, keyed by the natural key the
+        // event carries (M1-525). This is the ONLY freeing point for a join-only
+        // group — one auto-joined by invite but never @mentioned, so it has no
+        // groups row — and so it must run even when resolveGroup returns null.
+        // Unaudited, mirroring the unaudited tryRecordJoin INSERT on this same
+        // table; idempotent via the removed_at IS NULL guard. Its own
+        // transaction: the slot-free is the desired end state regardless of the
+        // groups-row audit outcome below.
+        boolean slotFreed = joinRepository.markRemovedByNaturalKey(adapter, event.adapterGroupId());
+
         UUID groupId = resolveGroup(adapter, event.adapterGroupId());
         if (groupId == null) {
-            log.warn("BotRemoved: unknown group adapter={} groupId={}",
-                    adapter, ContactIds.redact(event.adapterGroupId()));
+            // No groups row: either a pure join-only group (slot just freed) or
+            // a genuinely unknown group. Emit the redacted unknown-group WARN
+            // only when nothing was freed; a real join-only free is INFO.
+            if (slotFreed) {
+                log.info("BotRemoved: freed join-only auto-join slot adapter={} groupId={}",
+                        adapter, ContactIds.redact(event.adapterGroupId()));
+            } else {
+                log.warn("BotRemoved: unknown group adapter={} groupId={}",
+                        adapter, ContactIds.redact(event.adapterGroupId()));
+            }
             return;
         }
         // One transaction, audit row INSERTed BEFORE the mutation per

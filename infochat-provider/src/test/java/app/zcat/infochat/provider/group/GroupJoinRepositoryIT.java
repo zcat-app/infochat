@@ -13,6 +13,9 @@ import java.sql.ResultSet;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Exercises {@link GroupJoinRepository}, the durable join-tracking the D47
@@ -74,7 +77,8 @@ class GroupJoinRepositoryIT {
         repository.tryRecordJoin(TEST_ADAPTER, group("dup"), inviter); // same natural key
 
         assertEquals(1, repository.countJoinsByInviter(inviter),
-                "ON CONFLICT DO NOTHING: a re-recorded join of the same group counts once, "
+                "the unique natural key means a re-recorded join of the same active group "
+                        + "counts once (ON CONFLICT reactivates the single row in place), "
                         + "so a duplicate invitation cannot inflate the cap count");
     }
 
@@ -101,6 +105,77 @@ class GroupJoinRepositoryIT {
         }
         assertEquals(1, repository.countJoinsByInviter(inviter),
                 "the committed row is counted back, so the cap survives a restart");
+    }
+
+    @Test
+    void freedJoinIsExcludedFromBothCounts() throws Exception {
+        // M1-525: a slot freed via removed_at (bot left the group) must stop
+        // counting against BOTH the per-inviter and the global D47 caps.
+        UUID inviter = seedUser();
+        long globalBefore = repository.countJoins();
+        repository.tryRecordJoin(TEST_ADAPTER, group("keep"), inviter);
+        repository.tryRecordJoin(TEST_ADAPTER, group("free"), inviter);
+        assertEquals(2, repository.countJoinsByInviter(inviter),
+                "both joins count before either is freed");
+        assertEquals(globalBefore + 2, repository.countJoins(),
+                "both joins count globally before either is freed");
+
+        assertTrue(repository.markRemovedByNaturalKey(TEST_ADAPTER, group("free")),
+                "freeing a non-removed slot reports a row was freed");
+
+        assertEquals(1, repository.countJoinsByInviter(inviter),
+                "a removed_at-set row is excluded from the per-inviter count");
+        assertEquals(globalBefore + 1, repository.countJoins(),
+                "a removed_at-set row is excluded from the global count");
+
+        assertFalse(repository.markRemovedByNaturalKey(TEST_ADAPTER, group("free")),
+                "freeing an already-freed slot is an idempotent no-op (no row freed)");
+    }
+
+    @Test
+    void reJoinReactivatesFreedSlotAndReattributesInviter() throws Exception {
+        // M1-525 item 4 (redteam HIGH remediation): after a slot is freed, a
+        // re-join of the same natural key must REACTIVATE the row — re-count it
+        // against both D47 caps and re-attribute it to the current inviter — so a
+        // leave->re-join cycle cannot launder an active group into an uncounted
+        // one.
+        UUID firstInviter = seedUser();
+        UUID secondInviter = seedUser();
+        long globalBefore = repository.countJoins();
+
+        repository.tryRecordJoin(TEST_ADAPTER, group("launder"), firstInviter);
+        repository.markRemovedByNaturalKey(TEST_ADAPTER, group("launder"));
+        assertEquals(globalBefore, repository.countJoins(),
+                "the freed slot is uncounted globally");
+        assertEquals(0, repository.countJoinsByInviter(firstInviter),
+                "the freed slot is uncounted for the original inviter");
+
+        // Re-join by a DIFFERENT inviter.
+        repository.tryRecordJoin(TEST_ADAPTER, group("launder"), secondInviter);
+
+        assertEquals(globalBefore + 1, repository.countJoins(),
+                "re-join reactivates the slot: it counts globally again (cap not laundered)");
+        assertEquals(1, repository.countJoinsByInviter(secondInviter),
+                "the reactivated slot is re-attributed to the current inviter");
+        assertEquals(0, repository.countJoinsByInviter(firstInviter),
+                "the reactivated slot no longer counts against the original inviter");
+
+        // Direct row check: exactly one row, removed_at NULL, inviter re-attributed.
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT inviter_user_id, removed_at FROM auto_joined_group "
+                             + "WHERE adapter = ? AND upstream_group_id = ?")) {
+            ps.setString(1, TEST_ADAPTER);
+            ps.setString(2, group("launder"));
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "the reactivated row exists");
+                assertEquals(secondInviter, rs.getObject("inviter_user_id", UUID.class),
+                        "inviter_user_id re-attributed to the current inviter");
+                assertNull(rs.getTimestamp("removed_at"),
+                        "removed_at cleared back to NULL on reactivation");
+                assertFalse(rs.next(), "exactly one row for the natural key (reactivated in place)");
+            }
+        }
     }
 
     private static String group(String suffix) {

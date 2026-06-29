@@ -140,6 +140,15 @@ public class GroupRepository {
     @Inject
     AuditLogWriter auditLogWriter;
 
+    // Field-injected (the auditLogWriter seam above) so the 1-arg constructor —
+    // and every super(dataSource) / new GroupRepository(...) test double — stays
+    // unchanged. Frees the auto_joined_group slot inside markRemovedAudited's
+    // transaction (M1-525, the SimpleX permanent-delivery-failure path), AFTER
+    // the audit write so the audit-rollback test's FailingAuditLogWriter throws
+    // before this (null-in-doubles) field is ever dereferenced.
+    @Inject
+    GroupJoinRepository groupJoinRepository;
+
     @Inject
     public GroupRepository(DataSource dataSource) {
         this.dataSource = dataSource;
@@ -219,6 +228,11 @@ public class GroupRepository {
      * two-statement transaction here keeps the soft-remove and its audit row
      * atomic.</p>
      *
+     * <p>Also frees the group's {@code auto_joined_group} slot in the same
+     * transaction (M1-525) so a SimpleX group the bot is inferred-removed from
+     * stops counting against the D47 caps — this path is the only bot-removed
+     * signal on adapters without native membership events.</p>
+     *
      * @param adapter the failing channel name, recorded as {@code actor_adapter}.
      */
     public void markRemovedAudited(UUID groupId, String adapter) {
@@ -237,6 +251,14 @@ public class GroupRepository {
                         .requestId(UUID.randomUUID().toString())
                         .build());
                 markRemoved(conn, groupId);
+                // Free the auto_joined_group slot in the same transaction
+                // (M1-525): this permanent-delivery-failure path is the only
+                // bot-removed signal on SimpleX (supportsMembershipEvents=false),
+                // so it must decrement the D47 count here. MUST sit AFTER the
+                // audit write — the audit-rollback test hand-constructs this
+                // repo with a null groupJoinRepository field and a writer that
+                // throws first, so this line is never reached there.
+                groupJoinRepository.markRemovedByGroupId(conn, groupId);
                 conn.commit();
             } catch (SQLException e) {
                 conn.rollback();

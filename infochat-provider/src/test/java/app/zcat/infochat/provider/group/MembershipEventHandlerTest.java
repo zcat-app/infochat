@@ -39,6 +39,7 @@ class MembershipEventHandlerTest {
     @Inject @SeedDataSource DataSource dataSource;
     @Inject GroupRepository groupRepository;
     @Inject GroupMembershipRepository membershipRepository;
+    @Inject GroupJoinRepository joinRepository;
     @Inject MembershipEventHandler handler;
 
     private UUID groupId;
@@ -133,6 +134,52 @@ class MembershipEventHandlerTest {
     }
 
     @Test
+    void botRemoved_freesJoinOnlyAutoJoinSlot() throws Exception {
+        // M1-525 item 2: a join-only auto-joined group — recorded in
+        // auto_joined_group but with NO groups row (never @mentioned, so it
+        // never entered the approval machine) — must have its slot freed on
+        // BotRemoved even though resolveGroup returns null.
+        String joinOnlyUpstream = "meh-joinonly-" + UUID.randomUUID();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO auto_joined_group (adapter, upstream_group_id, inviter_user_id) "
+                             + "VALUES (?, ?, ?)")) {
+            ps.setString(1, TEST_ADAPTER);
+            ps.setString(2, joinOnlyUpstream);
+            ps.setObject(3, userId);
+            ps.executeUpdate();
+        }
+
+        try {
+            handler.handle(new MembershipEvent.BotRemoved(joinOnlyUpstream), TEST_ADAPTER);
+
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(
+                         "SELECT removed_at FROM auto_joined_group "
+                                 + "WHERE adapter = ? AND upstream_group_id = ?")) {
+                ps.setString(1, TEST_ADAPTER);
+                ps.setString(2, joinOnlyUpstream);
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next(), "the join-only auto_joined_group row should exist");
+                    assertNotNull(rs.getTimestamp("removed_at"),
+                            "BotRemoved must free the join-only slot (set removed_at)");
+                }
+            }
+        } finally {
+            // The join-only row uses a distinct upstream id the @BeforeEach
+            // cleanup does not cover; delete it so its inviter FK does not
+            // block this test's user teardown on the next run.
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(
+                         "DELETE FROM auto_joined_group WHERE adapter = ? AND upstream_group_id = ?")) {
+                ps.setString(1, TEST_ADAPTER);
+                ps.setString(2, joinOnlyUpstream);
+                ps.executeUpdate();
+            }
+        }
+    }
+
+    @Test
     void userLeft_auditWriteFailureRollsBackMutation() throws Exception {
         membershipRepository.addMember(groupId, userId);
         membershipRepository.promoteToAdmin(groupId, userId);
@@ -170,6 +217,12 @@ class MembershipEventHandlerTest {
         MembershipEventHandler failingHandler = new MembershipEventHandler(
                 dataSource, membershipRepository, groupRepository,
                 new FailingAuditLogWriter());
+        // handleBotRemoved frees the auto_joined_group slot before the audit tx
+        // (M1-525); the hand-constructed handler has a null field-injected
+        // joinRepository, so wire the real one in. The seeded group has no
+        // auto_joined_group row, so the free is a 0-row no-op and the rollback
+        // assertions below are unaffected.
+        failingHandler.joinRepository = joinRepository;
 
         assertThrows(IllegalStateException.class, () -> failingHandler.handle(
                 new MembershipEvent.BotRemoved(TEST_UPSTREAM_GROUP_ID),

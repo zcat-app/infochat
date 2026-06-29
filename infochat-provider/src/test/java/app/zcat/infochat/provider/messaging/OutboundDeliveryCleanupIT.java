@@ -64,6 +64,11 @@ class OutboundDeliveryCleanupIT {
     static final UUID ITEM6_GROUP = UUID.fromString("0b540003-0003-4000-8000-000000000003");
     static final UUID ITEM6_USER = UUID.fromString("0b540004-0004-4000-8000-000000000004");
     static final UUID ITEM6_SOURCE = UUID.fromString("0b540005-0005-4000-8000-000000000005");
+    // M1-525 SimpleX-path slot-free. Distinct fixed ids so the in-process
+    // per-group permanent-failure counter never bleeds across tests.
+    static final UUID M1525_GROUP = UUID.fromString("0b540006-0006-4000-8000-000000000006");
+    static final UUID M1525_INVITER = UUID.fromString("0b540007-0007-4000-8000-000000000007");
+    static final String M1525_UPSTREAM = "ob-it-m1525-upstream";
 
     static final String EXHAUST_CHANNEL = "ob-it-exhaust-chan";
     static final String FAIL_CHANNEL = "ob-it-chan";
@@ -90,6 +95,14 @@ class OutboundDeliveryCleanupIT {
             exec(conn, "DELETE FROM users WHERE id = ?", ITEM6_USER);
             exec(conn, "DELETE FROM admin_notification_state WHERE notification_key LIKE ?",
                     EXHAUST_CHANNEL + "%");
+            // M1-525: auto_joined_group (inviter FK) before the group and user.
+            // The BOT_REMOVED audit row the threshold crossing writes is NOT
+            // deleted here — audit_log is append-only (Invariant 10), so it is
+            // left to accumulate exactly as the sibling threshold test's row is.
+            exec(conn, "DELETE FROM auto_joined_group WHERE adapter = 'inmemory' AND upstream_group_id = ?",
+                    M1525_UPSTREAM);
+            exec(conn, "DELETE FROM groups WHERE id = ?", M1525_GROUP);
+            exec(conn, "DELETE FROM users WHERE id = ?", M1525_INVITER);
         }
     }
 
@@ -137,6 +150,33 @@ class OutboundDeliveryCleanupIT {
         // The unaffected control group has no BOT_REMOVED row.
         assertNull(readBotRemovedRow(ITEM5_CONTROL),
                 "an unrelated group must not get a BOT_REMOVED row");
+    }
+
+    @Test
+    void thresholdPermanentGroupFailuresFreeAutoJoinedSlot() throws SQLException {
+        // M1-525 item 3: for SimpleX (supportsMembershipEvents=false) the
+        // permanent-delivery-failure inference is the only bot-removed signal.
+        // Crossing the threshold must also free the auto_joined_group slot so
+        // the group stops counting against the D47 caps. The group is one the
+        // bot SENDS to (an approved groups row with a matching auto_joined_group
+        // row) — a pure join-only group has no groups row and no send path, so
+        // it is out of scope here (recovered in-band by M1-526).
+        try (Connection conn = dataSource.getConnection()) {
+            insertUser(conn, M1525_INVITER, "ob-it-m1525-inviter");
+            insertGroup(conn, M1525_GROUP, M1525_UPSTREAM, "approved", true);
+            insertAutoJoin(conn, M1525_UPSTREAM, M1525_INVITER);
+        }
+
+        // Threshold is 3 (base/laptop profile). Drive three consecutive
+        // PERMANENT group-send failures through the chokepoint.
+        for (int i = 0; i < 3; i++) {
+            FailingMessagingAdapter adapter =
+                    FailingMessagingAdapter.alwaysFailing("ob-it-chan", FailureCategory.PERMANENT);
+            assertNull(outboundDelivery.deliverToGroup(adapter, groupMessage(), M1525_GROUP));
+        }
+
+        assertNotNull(readAutoJoinRemovedAt(M1525_UPSTREAM),
+                "threshold crossing must soft-set auto_joined_group.removed_at (free the D47 slot)");
     }
 
     @Test
@@ -230,6 +270,14 @@ class OutboundDeliveryCleanupIT {
                 groupId, userId);
     }
 
+    private static void insertAutoJoin(Connection conn, String upstreamGroupId, UUID inviterUserId)
+            throws SQLException {
+        exec(conn,
+                "INSERT INTO auto_joined_group (adapter, upstream_group_id, inviter_user_id)"
+                        + " VALUES ('inmemory', ?, ?)",
+                upstreamGroupId, inviterUserId);
+    }
+
     private static void insertChatState(Connection conn, UUID userId, UUID scopeId) throws SQLException {
         exec(conn,
                 "INSERT INTO chat_session (user_id, scope_kind, scope_id)"
@@ -278,6 +326,13 @@ class OutboundDeliveryCleanupIT {
 
     private java.sql.Timestamp readRemovedAt(UUID groupId) throws SQLException {
         return readTimestamp("SELECT removed_at FROM groups WHERE id = ?", groupId);
+    }
+
+    private java.sql.Timestamp readAutoJoinRemovedAt(String upstreamGroupId) throws SQLException {
+        return readTimestamp(
+                "SELECT removed_at FROM auto_joined_group"
+                        + " WHERE adapter = 'inmemory' AND upstream_group_id = ?",
+                upstreamGroupId);
     }
 
     private record BotRemovedRow(@Nullable UUID actorUserId, @Nullable String actorContactId,

@@ -1,7 +1,7 @@
 ---
 id: M1-525
 title: "Free auto_joined_group slots when the bot leaves a group"
-status: pending
+status: done
 created: 2026-06-29
 last_updated: 2026-06-29
 blocked_by: []
@@ -40,6 +40,15 @@ acceptance:
     leave-detection mechanism frees the auto_joined_group slot so the cap is not
     a permanent lifetime ratchet. A named test asserts the slot is freed on that
     signal.
+  - >-
+    tryRecordJoin REACTIVATES a previously-freed slot on re-join: its INSERT ...
+    ON CONFLICT (adapter, upstream_group_id) clears removed_at back to NULL and
+    re-attributes inviter_user_id to the current inviter, instead of DO NOTHING.
+    Without this, the removed_at exclusion lets a leave->re-join cycle leave an
+    active group permanently uncounted by both D47 caps — an unbounded-growth DoS
+    (redteam M1-525-2026-06-29 HIGH finding). A named test asserts that after a
+    slot is freed and the same natural key is re-recorded, both countJoins and
+    countJoinsByInviter count it again (and that the inviter is re-attributed).
   - "mvn -B verify is green from the repo root."
 test_plan:
   adds: []
@@ -52,10 +61,74 @@ spec_refs:
 decision_refs:
   - D47
 decomposed_from: M1-522
+outline_file: target/m1-tick-outline-M1-525.md
 remediates: M1-519
 reopens: []
+# No OPEN findings after the round-2 remediation recheck (CLEAN). The original
+# HIGH leave->re-join laundering finding's verbatim text is preserved in
+# redteam_audits[0].verdict_file (docs/plan/m1/redteam/M1-525-2026-06-29.md);
+# the recheck audit below confirms closure.
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-29
+    verdict: FINDINGS
+    base: ee7317f977928d1255042636ee20969d635e2abc
+    head: "m1/M1-525-free-auto-join-slots-on-leave (working tree)"
+    verdict_file: docs/plan/m1/redteam/M1-525-2026-06-29.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      In-progress audit before commit (security_relevant ticket). One high DOS
+      finding: leave->re-join laundering via tryRecordJoin's ON CONFLICT DO
+      NOTHING not clearing removed_at — introduced by this diff. Routed to the
+      lifecycle for in-branch remediation via escalate redteam-finding. One
+      advisory out-of-model item (unaudited join-only slot free), no action.
+  - date: 2026-06-29
+    verdict: CLEAN
+    base: ee7317f977928d1255042636ee20969d635e2abc
+    head: "m1/M1-525-free-auto-join-slots-on-leave (working tree)"
+    verdict_file: docs/plan/m1/redteam/M1-525-2026-06-29-recheck.md
+    out_of_model_count: 2
+    note: |
+      Recheck after the round-2 reactivation remediation (tryRecordJoin ON
+      CONFLICT DO UPDATE clears removed_at + re-attributes inviter; acceptance
+      item 4). CLEAN — the prior HIGH cap-laundering finding is closed. Two
+      out-of-model advisory items recorded in the recheck verdict file; advisory
+      only, no action.
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 300
+      removed: 19
+  - round: 2
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 562
+      removed: 31
+clarity_check:
+  date: 2026-06-29
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 3: §Notes says 'Scope the mechanism before /m1-tick start' but the SimpleX leave-detection mechanism (delivery-failure inference vs. periodic reconciliation) is not committed anywhere; 'that signal' in the named-test requirement is undefined. The developer must make and record this design decision before writing the item-3 test."
+    - "§Notes 'Consider remediates: M1-519 once acceptance is finalized' is stale — frontmatter already carries remediates: M1-519."
+  blockers: []
 revisions:
   - date: 2026-06-29
     reason: clarity-fail rework
@@ -86,6 +159,20 @@ revisions:
         warnings:
           - "complexity: low / risk: low are template defaults; Notes flag them as likely needing medium+ once migration + SimpleX detection path are confirmed"
           - "security_relevant: false flagged by Notes as likely wrong once the DB migration + GRANT is confirmed in scope"
+  - date: 2026-06-29
+    reason: redteam-finding rework
+    snapshot:
+      status: in-review
+      note: >-
+        Round-1 review APPROVED; the in-progress redteam audit then found a HIGH
+        DOS (docs/plan/m1/redteam/M1-525-2026-06-29.md): tryRecordJoin's INSERT
+        ... ON CONFLICT DO NOTHING did not clear removed_at on re-join, so a
+        leave->re-join cycle left an active group uncounted by both D47 caps.
+        Refine adds acceptance item 4 requiring tryRecordJoin to reactivate
+        (clear removed_at, re-attribute inviter) on conflict, plus a
+        re-join-reactivation test. User-accepted in-branch remediation (the
+        citable mandate for the round-2 growth). No files_budget change — the fix
+        lands in GroupJoinRepository + its IT, both already in the diff.
 escalations:
   - date: 2026-06-29
     reason: clarity-fail
@@ -97,6 +184,16 @@ escalations:
       2. out_of_scope: frontmatter field is empty (out_of_scope: []). Body
          §Out-of-scope is marked TODO. Move the boundary prose into the
          frontmatter list as specific named entries.
+  - date: 2026-06-29
+    reason: redteam-finding
+    reviewer_verdict_excerpt: |
+      RED-TEAM VERDICT: FINDINGS (1 high DOS, 1 out-of-model)
+      HIGH/DOS — leave->re-join cap-laundering introduced by this diff:
+      removed_at excludes freed rows from both D47 counters, but tryRecordJoin's
+      INSERT ... ON CONFLICT DO NOTHING does not clear removed_at on a re-invite,
+      so a re-joined ACTIVE group stays permanently uncounted by both caps. An
+      attacker repeats leave->re-join across G1..Gn to drive the bot into
+      unbounded live groups while the global cap never trips.
 ---
 
 # M1-525: Free auto_joined_group slots when the bot leaves a group
@@ -142,7 +239,16 @@ failure inference is the documented candidate; see §Notes).
    a leave-detection mechanism frees the `auto_joined_group` slot so the cap is
    not a permanent lifetime ratchet. A named test asserts the slot is freed on
    that signal.
-4. `mvn -B verify` is green from the repo root.
+4. `tryRecordJoin` REACTIVATES a previously-freed slot on re-join: its
+   `INSERT ... ON CONFLICT (adapter, upstream_group_id)` clears `removed_at` back
+   to NULL and re-attributes `inviter_user_id` to the current inviter, instead of
+   `DO NOTHING`. Without this, the `removed_at` exclusion lets a leave→re-join
+   cycle leave an active group permanently uncounted by both D47 caps — an
+   unbounded-growth DoS (redteam `docs/plan/m1/redteam/M1-525-2026-06-29.md`
+   HIGH finding). A named test asserts that after a slot is freed and the same
+   natural key is re-recorded, both `countJoins` and `countJoinsByInviter` count
+   it again (and that the inviter is re-attributed to the current inviter).
+5. `mvn -B verify` is green from the repo root.
 
 ## Out-of-scope
 
