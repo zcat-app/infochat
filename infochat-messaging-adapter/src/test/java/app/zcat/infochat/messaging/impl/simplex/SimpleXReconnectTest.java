@@ -403,14 +403,14 @@ class SimpleXReconnectTest {
                     "type": "newChatItem",
                     "chatItem": {
                       "chatInfo": {
-                        "chatType": "direct",
+                        "type": "direct",
                         "contact": {
                           "contactId": "alice-queue-addr",
-                          "displayName": "Alice"
+                          "localDisplayName": "Alice"
                         }
                       },
                       "chatItem": {
-                        "itemId": "%s",
+                        "meta": {"itemId": "%s"},
                         "content": {
                           "msgContent": {
                             "type": "text",

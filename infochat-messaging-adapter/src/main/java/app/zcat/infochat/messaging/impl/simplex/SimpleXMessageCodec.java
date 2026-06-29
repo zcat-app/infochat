@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import app.zcat.infochat.messaging.FailureCategory;
@@ -117,7 +118,7 @@ final class SimpleXMessageCodec {
                                              String text) throws MessagingException {
         requireWithinCap(text);
         String target = targetSelector(scope);
-        String cmd = "/_send " + target + " json " + textContent(text);
+        String cmd = "/_send " + target + " json " + composedMessageArray(text);
         return envelope(corrId, cmd);
     }
 
@@ -207,13 +208,40 @@ final class SimpleXMessageCodec {
         return !id.isEmpty() && QUEUE_ADDRESS_CHARSET.matcher(id).matches();
     }
 
-    private static String textContent(String text) {
+    /**
+     * The {@code {"msgContent":{"type":"text","text":…}}} composed-message
+     * wrapper, shared by the {@code /_send} array element and the
+     * {@code /_update item} single object.
+     */
+    private static ObjectNode composedMessage(String text) {
         ObjectNode msgContent = MAPPER.createObjectNode();
         msgContent.put("type", "text");
         msgContent.put("text", text);
         ObjectNode wrapper = MAPPER.createObjectNode();
         wrapper.set("msgContent", msgContent);
-        return wrapper.toString();
+        return wrapper;
+    }
+
+    /**
+     * The {@code /_send} message-content payload: a JSON ARRAY of composed
+     * messages. simplex-chat v6.5.4.1 requires the array form
+     * ({@code /_send @<id> json [{"msgContent":…}]}) and rejects a bare object
+     * with {@code chatCmdError commandError "Failed reading: empty"}
+     * (live-confirmed, M1-510). v1 sends one message per command, so the array
+     * carries exactly one element; outbound chunking (§6.3.4) still emits one
+     * {@code /_send} per chunk. The {@code /_update item} edit path keeps the
+     * single-object {@link #textContent} form — an edit targets exactly one
+     * existing item, so there is no composed-message list.
+     */
+    private static String composedMessageArray(String text) {
+        ArrayNode payload = MAPPER.createArrayNode();
+        payload.add(composedMessage(text));
+        return payload.toString();
+    }
+
+    /** Single-object composed message for the {@code /_update item} edit path. */
+    private static String textContent(String text) {
+        return composedMessage(text).toString();
     }
 
     private static String envelope(String corrId, String cmd) {
@@ -354,7 +382,10 @@ final class SimpleXMessageCodec {
         if (chatInfo == null) {
             return new Ignored("newChatItem-without-chatInfo");
         }
-        String chatType = optText(chatInfo, "chatType");
+        // The chat-type discriminator is chatInfo.type on the live v6.5.4.1
+        // wire (NOT chatInfo.chatType, the hand-rolled-fixture fiction that
+        // dropped 100% of real inbound as newChatItem-without-chatType, M1-510).
+        String chatType = optText(chatInfo, "type");
         if (chatType == null) {
             return new Ignored("newChatItem-without-chatType");
         }
@@ -390,7 +421,12 @@ final class SimpleXMessageCodec {
         if (!isValidQueueAddressId(contactId)) {
             return new Ignored("newChatItem-invalid-contactId");
         }
-        String displayName = optText(contact, "displayName");
+        // localDisplayName is simplex-chat's locally-resolved handle for the
+        // contact ("admin_1" on the live v6.5.4.1 frame); contact.profile.
+        // displayName is the sender's self-asserted profile name and is never
+        // read here. displayName is informational only — identity is always the
+        // connection contactId (D10) — but the local handle is the stable one.
+        String displayName = optText(contact, "localDisplayName");
         JsonNode itemBody = chatItem.get("chatItem");
         if (itemBody == null) {
             return new Ignored("newChatItem-without-inner-chatItem");
@@ -632,14 +668,14 @@ final class SimpleXMessageCodec {
 
     /**
      * adapterMessageId for a {@code newChatItem} inner body: the wire
-     * {@code itemId} when present, else a deterministic fallback derived from
-     * the frame's stable identifying fields. Mirrors SignalMessageCodec
+     * {@code meta.itemId} when present, else a deterministic fallback derived
+     * from the frame's stable identifying fields. Mirrors SignalMessageCodec
      * deriving its id from the message timestamp — adapterMessageId is the
      * stable correlation key ({@link InboundMessage} javadoc: retry
      * correlation, audit cross-reference), so two decodes of the same
      * itemId-less frame MUST yield the same id; {@code System.nanoTime()}
      * defeated that. The fallback path is rare (simplex-chat supplies
-     * {@code itemId} on real frames) and the id is never persisted across
+     * {@code meta.itemId} on real frames) and the id is never persisted across
      * instances, so a content hash that two itemId-less frames with identical
      * stable fields could share is acceptable. The fields are joined with a
      * space — absent from the queue-address charset that the leading
@@ -647,7 +683,7 @@ final class SimpleXMessageCodec {
      * the trailing free-text field stays unambiguous.
      */
     private static String adapterMessageId(JsonNode itemBody, String... stableFields) {
-        String itemId = optText(itemBody, "itemId");
+        String itemId = optText(itemBody.path("meta"), "itemId");
         if (itemId != null) {
             return itemId;
         }
@@ -768,20 +804,29 @@ final class SimpleXMessageCodec {
     private static DecodedFrame decodeSendAck(@Nullable String corrId, JsonNode resp) {
         // Known simplex-chat shapes only: the chat-item id lives either
         // directly on the response, on a chatItems container object, or — on
-        // the v6.5.4 plural newChatItems send result — inside the first
-        // element of the chatItems ARRAY as chatItems[0].chatItem.itemId
-        // (the AChatItem shape, same as a received item). Reading the known
-        // fields — not a breadth-first key search over every child object —
-        // keeps attacker-influenced envelope content (echoed inbound bytes)
-        // from being picked up as a forged chatItemId out of an unrelated
-        // nested object. path()/path(int) yield MissingNode (never null) for
-        // the shapes that don't apply, so each candidate is shape-safe.
-        String chatItemId = firstTextual(
+        // the v6.5.4.1 plural newChatItems send result — inside the first
+        // element of the chatItems ARRAY as chatItems[0].chatItem.meta.itemId
+        // (the AChatItem shape, same meta.itemId location as a received item;
+        // live-confirmed, M1-510). Reading the known fields — not a
+        // breadth-first key search over every child object — keeps
+        // attacker-influenced envelope content (echoed inbound bytes) from
+        // being picked up as a forged chatItemId out of an unrelated nested
+        // object. path()/path(int) yield MissingNode (never null) for the
+        // shapes that don't apply, so each candidate is shape-safe.
+        //
+        // The id is read with firstScalarText (textual OR numeric): on the live
+        // v6.5.4.1 wire meta.itemId is a JSON NUMBER (e.g. 21), so a
+        // textual-only read would miss it and drop the ack as
+        // send-ack-without-chatItemId (M1-510). A numeric id cannot carry a
+        // command terminator, and any id later pasted into an edit command is
+        // re-gated by isValidQueueAddressId at encode time, so widening to
+        // numeric does not loosen the injection boundary.
+        String chatItemId = firstScalarText(
                 resp.get("itemId"),
                 resp.get("chatItemId"),
                 resp.path("chatItems").get("itemId"),
                 resp.path("chatItems").get("chatItemId"),
-                resp.path("chatItems").path(0).path("chatItem").get("itemId"),
+                resp.path("chatItems").path(0).path("chatItem").path("meta").get("itemId"),
                 resp.path("chatItems").path(0).path("chatItem").get("chatItemId"));
         if (chatItemId == null) {
             return new Ignored("send-ack-without-chatItemId");
@@ -790,12 +835,18 @@ final class SimpleXMessageCodec {
     }
 
     private static DecodedFrame decodeError(@Nullable String corrId, JsonNode resp) {
-        // Same known-field rule as decodeSendAck: the discriminating tag
-        // is either a textual chatError / errorType / error directly on
-        // the response, or nested as {chatError: {errorType: "..."}}.
+        // Same known-field rule as decodeSendAck. On the live v6.5.4.1 wire the
+        // discriminating tag is the .type of a nested error object — both
+        // {chatError:{errorType:{type:"commandError",…}}} and
+        // {chatError:{storeError:{type:"groupAlreadyJoined"}}} occur
+        // (live-confirmed, M1-510). Only the enum-like .type is read, never the
+        // sibling free-form "message" field, so echoed user prose ("Failed
+        // reading: empty") cannot leak into CommandError.detail() or the logs
+        // (security.md §User content in exceptions). The trailing top-level
+        // candidates remain for shapes that surface the tag directly.
         String errorTag = firstTextual(
-                resp.get("chatError"),
-                resp.path("chatError").get("errorType"),
+                resp.path("chatError").path("errorType").get("type"),
+                resp.path("chatError").path("storeError").get("type"),
                 resp.get("errorType"),
                 resp.get("error"));
         FailureCategory category = classifyError(errorTag == null ? "" : errorTag);
@@ -837,6 +888,23 @@ final class SimpleXMessageCodec {
     private static @Nullable String firstTextual(JsonNode... candidates) {
         for (JsonNode candidate : candidates) {
             if (candidate != null && candidate.isTextual()) {
+                return candidate.asText();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * First textual-OR-numeric node among the candidates, rendered via
+     * {@code asText()}, or null. Distinct from {@link #firstTextual}: a
+     * simplex-chat chat-item id ({@code meta.itemId}) arrives as a JSON number
+     * on the live v6.5.4.1 wire, so the send-ack extractor must accept a numeric
+     * node and stringify it. Used only by {@link #decodeSendAck}; error-tag
+     * decoding stays textual-only (tags are enum-like strings).
+     */
+    private static @Nullable String firstScalarText(JsonNode... candidates) {
+        for (JsonNode candidate : candidates) {
+            if (candidate != null && (candidate.isTextual() || candidate.isNumber())) {
                 return candidate.asText();
             }
         }

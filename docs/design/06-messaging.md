@@ -533,12 +533,40 @@
    
   SimplexEventDecoder maps SimpleX chatItem events to InboundMessage:                                                                                                                                                                                   
                                                                                    
-  - event.kind == "newChatItem" and chatItem.chatType == "direct" → ScopeRef.Dm(contact_id).                                                                                                                                                            
-  - event.kind == "newChatItem" and chatItem.chatType == "group" → ScopeRef.Group(group_id). The decoder reads the SimpleX mention metadata on the chatItem; if any mention's target contact id matches the bot's per-adapter queue address byte-equal (§6.2.3 / §6.10), the mention spans are stripped from the rendered text and the message is delivered. Group messages without a mention payload referencing the bot are dropped — display-name string matching is forever-out-of-v1.
+  - event.kind == "newChatItem" and chatInfo.type == "direct" → ScopeRef.Dm(contact_id).                                                                                                                                                            
+  - event.kind == "newChatItem" and chatInfo.type == "group" → ScopeRef.Group(group_id). The decoder reads the SimpleX mention metadata on the chatItem; if any mention's target contact id matches the bot's per-adapter queue address byte-equal (§6.2.3 / §6.10), the mention spans are stripped from the rendered text and the message is delivered. Group messages without a mention payload referencing the bot are dropped — display-name string matching is forever-out-of-v1.
   - event.kind == "memberJoined" (group) → InboundHandler.onUserJoinedGroup(group_id, identity). (`supportsMembershipEvents = false` despite this — Provider does not rely on the join event for cleanup logic; per-user *left* events are the missing piece, see §6.4.2.)
   - Other event kinds: logged at DEBUG, dropped.                                                                                                                                                                                                        
                                                                                                                                                                                                                                                         
-  The decoder is pure (no I/O) and unit-tested with recorded JSON fixtures.                                                                                                                                                                             
+  The decoder is pure (no I/O) and unit-tested with recorded JSON fixtures.
+
+  #### Live v6.5.4.1 field locations (M1-510)
+
+  The decoded field paths below are confirmed against frames captured from a
+  live simplex-chat **v6.5.4.1** deployment (a throwaway loopback
+  `ws://127.0.0.1:5225` probe). Earlier hand-rolled fixtures encoded different
+  field names and silently dropped 100% of real inbound:
+
+  - **chat-type discriminator** is `chatInfo.type` (`"direct"` / `"group"`),
+    **not** `chatInfo.chatType`. A real `newChatItems` event with
+    `chatInfo.type == "direct"` decodes to an inbound; the old `chatType` read
+    dropped it as `Ignored("newChatItem-without-chatType")`.
+  - **inbound adapterMessageId** is `chatItem.meta.itemId`, not a top-level
+    `chatItem.itemId`.
+  - **inbound DM sender display name** is `contact.localDisplayName` (the
+    locally-resolved handle, e.g. `"admin_1"`), not `contact.displayName`.
+    `contact.profile.displayName` is the sender's self-asserted profile name and
+    is never read (identity is always the connection `contact_id`, D10).
+  - **send-result chat-item id** (the response to our own `/_send`, a
+    `newChatItems` frame carrying a `corrId`) is
+    `chatItems[0].chatItem.meta.itemId`, same `meta.itemId` location as a
+    received item.
+  - **error tag** is the `.type` of a nested error object — both
+    `chatError.errorType.type` (e.g. `"commandError"`) and
+    `chatError.storeError.type` (e.g. `"groupAlreadyJoined"`) occur. Only the
+    enum-like `.type` is read; the sibling free-form `message` (which may echo
+    user prose) is never surfaced (security.md §User content in exceptions).
+    Unrecognized tags still fail closed to PERMANENT (§6.4.7).                                                                                                                                                                             
 
 
   #### Queue-address character set (decode and encode validation)
@@ -604,7 +632,25 @@
    
   - DM: /_send @<contact> text=<base64-encoded text>                                                                                                                                                                                                    
   - Group: /_send #<group> text=<base64-encoded text>                              
-                                                                                                                                                                                                                                                        
+
+  #### Send content shape (live v6.5.4.1, M1-510)
+
+  The actual v6.5.4.1 bot-API `/_send` form (live-confirmed, superseding the
+  `text=<base64>` sketch above) takes the message content as a JSON **array** of
+  composed messages:
+
+      /_send @<contact> json [{"msgContent": {"type": "text", "text": "<text>"}}]
+
+  simplex-chat **rejects the bare single-object form** (`json {"msgContent": …}`)
+  with `chatCmdError commandError "Failed reading: empty"`; the array is
+  required. The array exists because a single send may compose multiple
+  messages — v1 sends exactly one, so the array carries one element, and
+  outbound chunking (§6.3.4) still emits one `/_send` per chunk. By contrast the
+  `/_update item` edit (below) keeps a single `{"msgContent": …}` **object**: an
+  edit targets exactly one existing item, so there is no composed-message list.
+  (The `/_update` single-object form is inferred from this asymmetry, not
+  live-re-verified — live-editing would mutate a real message.)
+
   #### Update encoding
 
   `update(handle, text)` and `finalize(handle, text)` both serialize to the SimpleX

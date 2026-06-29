@@ -122,14 +122,14 @@ class SimpleXGroupHandlerTest {
                     "type": "newChatItem",
                     "chatItem": {
                       "chatInfo": {
-                        "chatType": "direct",
+                        "type": "direct",
                         "contact": {
                           "contactId": "alice-queue-addr",
-                          "displayName": "Alice"
+                          "localDisplayName": "Alice"
                         }
                       },
                       "chatItem": {
-                        "itemId": "dm-1",
+                        "meta": {"itemId": "dm-1"},
                         "content": {
                           "msgContent": {
                             "type": "text",
@@ -224,13 +224,13 @@ class SimpleXGroupHandlerTest {
                     "type": "newChatItem",
                     "chatItem": {
                       "chatInfo": {
-                        "chatType": "group",
+                        "type": "group",
                         "groupInfo": {
                           "groupId": "group-7"
                         }
                       },
                       "chatItem": {
-                        "itemId": "msg-precontact",
+                        "meta": {"itemId": "msg-precontact"},
                         "chatDir": {
                           "groupMember": {
                             "memberId": "m-1",
@@ -376,13 +376,13 @@ class SimpleXGroupHandlerTest {
                     "type": "newChatItem",
                     "chatItem": {
                       "chatInfo": {
-                        "chatType": "group",
+                        "type": "group",
                         "groupInfo": {
                           "groupId": "%s"
                         }
                       },
                       "chatItem": {
-                        "itemId": "%s",
+                        "meta": {"itemId": "%s"},
                         "chatDir": {
                           "groupMember": {
                             "memberContactId": "%s",

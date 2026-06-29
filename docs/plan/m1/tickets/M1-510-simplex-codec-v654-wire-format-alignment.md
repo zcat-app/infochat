@@ -1,14 +1,31 @@
 ---
 id: M1-510
 title: "SimpleX codec: align DM inbound/outbound/error decode with live v6.5.4.1 wire format"
-status: pending
+status: done
 created: 2026-06-28
-last_updated: 2026-06-28
+last_updated: 2026-06-29
 blocked_by: []
-files_budget: 4
+files_budget: 15
 files_scope:
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXMessageCodec.java
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXMessageCodecTest.java
+  # M1-510 refine (budget-breach): the chatInfo.type rename lives in the SHARED
+  # decodeChatItemEntry, and the /_send array + meta.itemId moves change the
+  # shared encode/decode helpers, so every adapter test that hand-builds a frame
+  # breaks. These 11 files are migrated to the real v6.5.4.1 fixture shape in the
+  # same commit (mvn verify cannot be green otherwise). Empirically confirmed via
+  # a module test run: 28 failures across exactly these classes.
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXMessageCodecKnownFieldTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXCodecDeterministicIdTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXGroupHandlerTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXInboundDispatchTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXInboundQueueBoundTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXOversizeDropTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXReconnectTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClientTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapterIdentityDerivationTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapterChunkedSendTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXEditFallbackTest.java
   - docs/design/06-messaging.md
 complexity: medium
 risk: high
@@ -16,7 +33,7 @@ round_cap: 3
 security_relevant: true
 migration_touch: false
 out_of_scope:
-  - "Group @-mention recognition rework (formattedText/mentions{}/meta.userMention) and group invitation auto-accept — those are M1-511. This ticket touches the group path ONLY for the chatInfo.type rename, which is shared by the direct and group dispatch; it does NOT change mention extraction."
+  - "Group @-mention RECOGNITION rework (formattedText/mentions{}/meta.userMention) and group invitation auto-accept — those are M1-511. This ticket touches the group path only for the SHARED decoder field reads (chatInfo.type discriminator and chatItem.meta.itemId, both shared by the direct and group dispatch), and the corresponding group test fixtures; it does NOT change mention extraction logic (extractGroupMentions is untouched) or invite-accept."
   - "Signal adapter — its codec has its own envelope shape; do not touch it."
   - "DM identity rules — inbound identity stays the connection-based contactId (D10); this ticket fixes WHICH JSON field the contactId/displayName/itemId are read from, never the identity model."
   - "Pinning a different simplex-chat version — the fix targets the bundled v6.5.4.1 frame shape; version bumps are separate."
@@ -86,13 +103,65 @@ spec_refs:
 decision_refs:
   - D10
   - D46
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 16
+      added: 402
+      removed: 101
 overrides: []
+escalations:
+  - date: 2026-06-29
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — mid-implementation budget-breach. The chatInfo.type rename lives in
+      the shared decodeChatItemEntry (used by BOTH singular and plural, direct
+      and group), and the /_send array + meta.itemId moves change the shared
+      encode/decode helpers. A module test run showed 28 failures across 12
+      adapter test files, all outside the original 3-file files_scope. The codec
+      fix and all fixture migrations must land in one commit (mvn verify cannot
+      be green between them), so a follow-up ticket is infeasible. User chose
+      refine (widen files_scope/files_budget) on 2026-06-29.
+revisions:
+  - date: 2026-06-29
+    reason: "budget-breach refine — widen files_scope from 3 to 14 files and files_budget 4→15 to cover the SimpleX adapter test fixtures broken by the shared-decoder field changes"
+    snapshot:
+      files_budget: 4
+      files_scope:
+        - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXMessageCodec.java
+        - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXMessageCodecTest.java
+        - docs/design/06-messaging.md
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-29
+    verdict: CLEAN
+    base: 103e1d22aed0d2b3758f6033c0f2901e80e4cc40
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-510-2026-06-29.md
+    out_of_model_count: 0
+    note: |
+      In-progress audit before commit. CLEAN: the inbound identity-decode field
+      moves keep identity as the connection contactId (D10), the
+      isValidQueueAddressId boundary still gates every wire id, and decodeError
+      reads only the enum-like .type (never the free-form message), so no user
+      prose leaks into logs/exceptions. No remediation needed.
+clarity_check:
+  date: 2026-06-28
+  verdict: WARN
+  warnings:
+    - "Acceptance items 2-6 assert 'Named test asserts [X]' without naming the test method (item 1 does name decodesDirectInboundUsingRealV654Frame); behavioral assertions are concrete and reviewer-verifiable from diff/output."
+    - "Acceptance item 7 (/_update edit format) is underdetermined until live v6.5.4.1 verification runs during implementation; handled via conditional branches, reviewer-checkable after the fact."
+  blockers: []
 ---
 
 # M1-510: SimpleX codec — align DM inbound/outbound/error decode with live v6.5.4.1

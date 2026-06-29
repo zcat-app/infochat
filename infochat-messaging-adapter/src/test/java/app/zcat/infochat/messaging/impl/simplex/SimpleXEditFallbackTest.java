@@ -265,7 +265,10 @@ class SimpleXEditFallbackTest {
         try {
             String cmd = cmdOf(envelope);
             String json = cmd.substring(cmd.indexOf(" json ") + " json ".length());
-            return MAPPER.readTree(json).get("msgContent").get("text").asText();
+            // sentText is only called on /_send envelopes (both callers guard on
+            // startsWith("/_send")); v6.5.4.1 /_send carries a JSON array of
+            // composed messages, so the single element holds the msgContent (M1-510).
+            return MAPPER.readTree(json).get(0).get("msgContent").get("text").asText();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

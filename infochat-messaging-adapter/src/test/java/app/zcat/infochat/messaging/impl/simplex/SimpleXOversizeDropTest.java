@@ -85,14 +85,14 @@ class SimpleXOversizeDropTest {
                     "type": "newChatItem",
                     "chatItem": {
                       "chatInfo": {
-                        "chatType": "direct",
+                        "type": "direct",
                         "contact": {
                           "contactId": "alice-queue-addr",
-                          "displayName": "Alice"
+                          "localDisplayName": "Alice"
                         }
                       },
                       "chatItem": {
-                        "itemId": "msg-big",
+                        "meta": {"itemId": "msg-big"},
                         "content": {
                           "msgContent": {
                             "type": "text",

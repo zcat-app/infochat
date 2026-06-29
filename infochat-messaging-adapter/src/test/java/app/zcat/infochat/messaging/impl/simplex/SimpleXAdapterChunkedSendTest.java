@@ -131,7 +131,9 @@ class SimpleXAdapterChunkedSendTest {
                 "every chunk must be a /_send to the same scope; got: "
                         + cmd.substring(0, Math.min(cmd.length(), 40)));
         String json = cmd.substring(cmd.indexOf(" json ") + " json ".length());
-        return MAPPER.readTree(json).get("msgContent").get("text").asText();
+        // v6.5.4.1 /_send carries a JSON array of composed messages; v1 sends
+        // one, so the single element holds the msgContent (M1-510).
+        return MAPPER.readTree(json).get(0).get("msgContent").get("text").asText();
     }
 
     private static OutboundMessage outbound(String text) {

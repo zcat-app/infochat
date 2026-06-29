@@ -24,7 +24,7 @@ class SimpleXCodecDeterministicIdTest {
                 "type": "newChatItem",
                 "chatItem": {
                   "chatInfo": {
-                    "chatType": "direct",
+                    "type": "direct",
                     "contact": {
                       "contactId": "contact-xyz",
                       "displayName": "Test User"
@@ -49,7 +49,7 @@ class SimpleXCodecDeterministicIdTest {
                 "type": "newChatItem",
                 "chatItem": {
                   "chatInfo": {
-                    "chatType": "group",
+                    "type": "group",
                     "groupInfo": {
                       "groupId": "group-7"
                     }

@@ -52,14 +52,14 @@ class SimpleXWebSocketClientTest {
                             "type": "newChatItem",
                             "chatItem": {
                               "chatInfo": {
-                                "chatType": "direct",
+                                "type": "direct",
                                 "contact": {
                                   "contactId": "alice-queue-addr",
-                                  "displayName": "Alice"
+                                  "localDisplayName": "Alice"
                                 }
                               },
                               "chatItem": {
-                                "itemId": "inbound-1",
+                                "meta": {"itemId": "inbound-1"},
                                 "content": {
                                   "msgContent": {
                                     "type": "text",

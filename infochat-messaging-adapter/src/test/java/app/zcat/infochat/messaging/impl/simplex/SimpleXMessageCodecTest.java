@@ -67,14 +67,14 @@ class SimpleXMessageCodecTest {
                     "type": "newChatItem",
                     "chatItem": {
                       "chatInfo": {
-                        "chatType": "direct",
+                        "type": "direct",
                         "contact": {
                           "contactId": "contact-xyz",
-                          "displayName": "Test User"
+                          "localDisplayName": "Test User"
                         }
                       },
                       "chatItem": {
-                        "itemId": "msg-77",
+                        "meta": {"itemId": "msg-77"},
                         "content": {
                           "msgContent": {
                             "type": "text",
@@ -156,12 +156,14 @@ class SimpleXMessageCodecTest {
                 SimpleXMessageCodec.classifyError("CRChatCmdError"));
 
         // End-to-end: decoding an error envelope buckets via the same rule.
+        // The tag is the .type of the nested errorType object on the live
+        // v6.5.4.1 wire (M1-510).
         String errorJson = """
                 {
                   "corrId": "corr-9",
                   "resp": {
                     "type": "chatCmdError",
-                    "chatError": {"errorType": "contactNotFound"}
+                    "chatError": {"type": "error", "errorType": {"type": "contactNotFound"}}
                   }
                 }
                 """;
@@ -176,7 +178,7 @@ class SimpleXMessageCodecTest {
                   "corrId": "corr-10",
                   "resp": {
                     "type": "chatCmdError",
-                    "chatError": {"errorType": "rcvRateLimit"}
+                    "chatError": {"type": "error", "errorType": {"type": "rcvRateLimit"}}
                   }
                 }
                 """;
@@ -248,7 +250,7 @@ class SimpleXMessageCodecTest {
                         "type": "newChatItem",
                         "chatItem": {
                           "chatInfo": {
-                            "chatType": "direct",
+                            "type": "direct",
                             "contact": {
                               "contactId": %s,
                               "displayName": "Peer"
@@ -297,7 +299,7 @@ class SimpleXMessageCodecTest {
                     "type": "newChatItem",
                     "chatItem": {
                       "chatInfo": {
-                        "chatType": "direct",
+                        "type": "direct",
                         "contact": {
                           "contactId": %s,
                           "displayName": "Peer",
@@ -349,7 +351,7 @@ class SimpleXMessageCodecTest {
                         "type": "newChatItem",
                         "chatItem": {
                           "chatInfo": {
-                            "chatType": "direct",
+                            "type": "direct",
                             "contact": {
                               "contactId": %s,
                               "displayName": "Peer"
@@ -468,14 +470,14 @@ class SimpleXMessageCodecTest {
                     "type": "newChatItem",
                     "chatItem": {
                       "chatInfo": {
-                        "chatType": "direct",
+                        "type": "direct",
                         "contact": {
                           "contactId": "contact-abc",
                           "displayName": "Peer"
                         }
                       },
                       "chatItem": {
-                        "itemId": "msg-big",
+                        "meta": {"itemId": "msg-big"},
                         "content": {
                           "msgContent": {
                             "type": "text",
@@ -514,7 +516,7 @@ class SimpleXMessageCodecTest {
                     "type": "newChatItem",
                     "chatItem": {
                       "chatInfo": {
-                        "chatType": "direct",
+                        "type": "direct",
                         "contact": {
                           "contactId": "contact-abc",
                           "displayName": "Peer"
@@ -555,7 +557,7 @@ class SimpleXMessageCodecTest {
                     "type": "newChatItem",
                     "chatItem": {
                       "chatInfo": {
-                        "chatType": "group",
+                        "type": "group",
                         "groupInfo": {"groupId": "group-1"}
                       },
                       "chatItem": {
@@ -611,7 +613,7 @@ class SimpleXMessageCodecTest {
                     "type": "newChatItem",
                     "chatItem": {
                       "chatInfo": {
-                        "chatType": "group",
+                        "type": "group",
                         "groupInfo": {"groupId": "group-1"}
                       },
                       "chatItem": {
@@ -692,7 +694,7 @@ class SimpleXMessageCodecTest {
                     "type": "newChatItem",
                     "chatItem": {
                       "chatInfo": {
-                        "chatType": "%s"
+                        "type": "%s"
                       }
                     }
                   }
@@ -737,11 +739,13 @@ class SimpleXMessageCodecTest {
     // The batched plural async event simplex-chat v6.5.4 delivers for a
     // RECEIVED direct message: resp.type == "newChatItems" (PLURAL), NO corrId,
     // a chatItems ARRAY whose entry is an AChatItem ({chatInfo, chatItem}) with
-    // chatInfo.chatType == "direct" and a received chatItem. This is the real
+    // chatInfo.type == "direct" and a received chatItem. This is the real
     // v6.5.4 frame structure (chatItems is an ARRAY, not the hand-rolled
     // singular newChatItem object whose test-vs-reality gap hid the bug that
-    // silently discarded 100% of v6.5.4 inbound). Built inline so no resource
-    // file is added (files_scope is the codec + this test only).
+    // silently discarded 100% of v6.5.4 inbound). Field locations are the live
+    // v6.5.4.1 shape (contact.localDisplayName, chatItem.meta.itemId; M1-510).
+    // Built inline so no resource file is added (files_scope is the codec + this
+    // test only).
     private static final String NEW_CHAT_ITEMS_DIRECT_RECEIVED = """
             {
               "resp": {
@@ -749,14 +753,14 @@ class SimpleXMessageCodecTest {
                 "chatItems": [
                   {
                     "chatInfo": {
-                      "chatType": "direct",
+                      "type": "direct",
                       "contact": {
                         "contactId": "contact-xyz",
-                        "displayName": "Test User"
+                        "localDisplayName": "Test User"
                       }
                     },
                     "chatItem": {
-                      "itemId": "msg-77",
+                      "meta": {"itemId": "msg-77"},
                       "content": {
                         "msgContent": {
                           "type": "text",
@@ -793,7 +797,7 @@ class SimpleXMessageCodecTest {
     void newChatItemsWithCorrIdStillDecodesAsSendAck() {
         // Acceptance item 2: the SAME plural shape but WITH a corrId is the
         // response to our own /_send, not an inbound message. It must decode as
-        // a SendAck (extracting chatItems[0].chatItem.itemId), never as an
+        // a SendAck (extracting chatItems[0].chatItem.meta.itemId), never as an
         // Inbound — otherwise the bot would treat its own sent message as a
         // received one (self-echo loop). corrId is the discriminator: present →
         // SendAck; absent → inbound.
@@ -805,11 +809,11 @@ class SimpleXMessageCodecTest {
                     "chatItems": [
                       {
                         "chatInfo": {
-                          "chatType": "direct",
-                          "contact": {"contactId": "contact-xyz", "displayName": "Test User"}
+                          "type": "direct",
+                          "contact": {"contactId": "contact-xyz", "localDisplayName": "Test User"}
                         },
                         "chatItem": {
-                          "itemId": "sent-99",
+                          "meta": {"itemId": "sent-99"},
                           "content": {"msgContent": {"type": "text", "text": "our reply"}}
                         }
                       }
@@ -822,13 +826,13 @@ class SimpleXMessageCodecTest {
                 "a plural newChatItems WITH corrId is our send result — a SendAck, not an Inbound");
         assertEquals("corr-send-1", ack.corrId());
         assertEquals("sent-99", ack.chatItemId(),
-                "the chat-item id is read from chatItems[0].chatItem.itemId on the v6.5.4 array shape");
+                "the chat-item id is read from chatItems[0].chatItem.meta.itemId on the v6.5.4.1 array shape");
     }
 
     @Test
     void decodesNewChatItemsPluralGroupReceivedAsGroupInbound() {
         // Acceptance item 3: a group received message in the plural shape
-        // (chatInfo.chatType == "group") decodes to a group-scope GroupCandidate,
+        // (chatInfo.type == "group") decodes to a group-scope GroupCandidate,
         // mirroring the existing singular group path — the identity rules are
         // shared (decodeChatItemEntry), so the plural path resolves the sender to
         // the connection-based memberContactId exactly as the singular path does.
@@ -839,11 +843,11 @@ class SimpleXMessageCodecTest {
                     "chatItems": [
                       {
                         "chatInfo": {
-                          "chatType": "group",
+                          "type": "group",
                           "groupInfo": {"groupId": "group-1"}
                         },
                         "chatItem": {
-                          "itemId": "g-msg-1",
+                          "meta": {"itemId": "g-msg-1"},
                           "chatDir": {
                             "groupMember": {
                               "memberContactId": "sender-qaddr",
@@ -885,7 +889,7 @@ class SimpleXMessageCodecTest {
                     "chatItems": [
                       {
                         "chatInfo": {
-                          "chatType": "direct",
+                          "type": "direct",
                           "contact": {
                             "contactId": %s,
                             "displayName": "Peer",
@@ -927,7 +931,7 @@ class SimpleXMessageCodecTest {
                     "chatItems": [
                       {
                         "chatInfo": {
-                          "chatType": "direct",
+                          "type": "direct",
                           "contact": {"contactId": "first-contact", "displayName": "First"}
                         },
                         "chatItem": {
@@ -937,7 +941,7 @@ class SimpleXMessageCodecTest {
                       },
                       {
                         "chatInfo": {
-                          "chatType": "direct",
+                          "type": "direct",
                           "contact": {"contactId": "second-contact", "displayName": "Second"}
                         },
                         "chatItem": {
@@ -1009,5 +1013,141 @@ class SimpleXMessageCodecTest {
         // — the spec rule (unknown tags default to PERMANENT) is unchanged.
         assertEquals(FailureCategory.PERMANENT, decoded.category());
         assertEquals("corr-x", decoded.corrId());
+    }
+
+    // --- M1-510: live v6.5.4.1 wire-format alignment (real captured frames) ---
+
+    // Direct inbound DM "/help" captured verbatim from a live v6.5.4.1
+    // deployment (a throwaway loopback ws://127.0.0.1:5225 probe, M1-510). The
+    // decoded fields are chatInfo.type, contact.localDisplayName,
+    // chatItem.meta.itemId, content.msgContent.text; contactId is the numeric
+    // connection id (5). contact.profile.displayName ("admin") is present but
+    // MUST NOT be read — the surfaced display name is the local handle "admin_1".
+    private static final String REAL_V654_DIRECT_INBOUND = """
+            {"resp":{"type":"newChatItems","chatItems":[{
+              "chatInfo":{"type":"direct","contact":{"contactId":5,"localDisplayName":"admin_1",
+                          "profile":{"displayName":"admin"}}},
+              "chatItem":{"chatDir":{"type":"directRcv"},
+                          "meta":{"itemId":20,"itemText":"/help"},
+                          "content":{"type":"rcvMsgContent","msgContent":{"type":"text","text":"/help"}}}}]}}
+            """;
+
+    @Test
+    void decodesDirectInboundUsingRealV654Frame() {
+        // Acceptance items 1-3: the live v6.5.4.1 direct inbound — no corrId,
+        // chatInfo.type=="direct" — decodes to an Inbound instead of being
+        // dropped as Ignored("newChatItem-without-chatType"). The id is the
+        // numeric connection contactId (D10), the display name is the local
+        // handle (contact.localDisplayName, NOT the self-asserted
+        // profile.displayName), and the adapterMessageId is chatItem.meta.itemId.
+        var inbound = assertInstanceOf(SimpleXMessageCodec.Inbound.class,
+                SimpleXMessageCodec.decode(REAL_V654_DIRECT_INBOUND),
+                "the real v6.5.4.1 direct inbound must decode as Inbound, not be dropped");
+        assertEquals("5", inbound.message().sender().contactId(),
+                "identity is the numeric connection contactId (D10)");
+        assertEquals("admin_1", inbound.message().sender().displayName(),
+                "display name is contact.localDisplayName, never the self-asserted profile.displayName");
+        assertEquals("/help", inbound.message().text());
+        assertEquals("20", inbound.message().adapterMessageId(),
+                "adapterMessageId is chatItem.meta.itemId");
+        assertEquals(new ScopeRef.Dm("5"), inbound.message().scope());
+    }
+
+    @Test
+    void decodesSendAckUsingRealV654Frame() {
+        // Acceptance item 5: the live v6.5.4.1 send result — resp.type ==
+        // "newChatItems" WITH a corrId — decodes to a SendAck carrying
+        // chatItems[0].chatItem.meta.itemId, not
+        // Ignored("send-ack-without-chatItemId").
+        String frame = """
+                {"corrId":"probe","resp":{"type":"newChatItems","chatItems":[{
+                  "chatInfo":{"type":"direct","contact":{"contactId":5}},
+                  "chatItem":{"chatDir":{"type":"directSnd"},
+                              "meta":{"itemId":21,"itemStatus":{"type":"sndNew"}},
+                              "content":{"type":"sndMsgContent","msgContent":{"type":"text","text":"reply"}}}}]}}
+                """;
+        var ack = assertInstanceOf(SimpleXMessageCodec.SendAck.class,
+                SimpleXMessageCodec.decode(frame),
+                "a v6.5.4.1 send result with corrId decodes as SendAck");
+        assertEquals("probe", ack.corrId());
+        assertEquals("21", ack.chatItemId(),
+                "chat-item id is chatItems[0].chatItem.meta.itemId");
+    }
+
+    @Test
+    void decodesCommandErrorUsingRealV654Frame() {
+        // Acceptance item 6: the live commandError shape — the tag is the .type
+        // of the nested errorType object. The sibling "message" ("Failed
+        // reading: empty") is echoed-prose-shaped and MUST NOT reach
+        // CommandError.detail() (security.md §User content in exceptions).
+        String frame = """
+                {"resp":{"type":"chatCmdError","chatError":{"type":"error","errorType":{"type":"commandError","message":"Failed reading: empty"}}}}
+                """;
+        var error = assertInstanceOf(SimpleXMessageCodec.CommandError.class,
+                SimpleXMessageCodec.decode(frame));
+        assertEquals("commandError", error.detail(),
+                "the tag is chatError.errorType.type");
+        assertFalse(error.detail().contains("Failed reading"),
+                "the free-form errorType.message must not leak into detail; was: " + error.detail());
+        assertEquals(FailureCategory.PERMANENT, error.category(),
+                "commandError is not a transient tag — fail-closed PERMANENT");
+    }
+
+    @Test
+    void decodesStoreErrorUsingRealV654Frame() {
+        // Acceptance item 6: the second live error shape — the tag is the .type
+        // of the nested storeError object.
+        String frame = """
+                {"resp":{"type":"chatCmdError","chatError":{"type":"errorStore","storeError":{"type":"groupAlreadyJoined"}}}}
+                """;
+        var error = assertInstanceOf(SimpleXMessageCodec.CommandError.class,
+                SimpleXMessageCodec.decode(frame));
+        assertEquals("groupAlreadyJoined", error.detail(),
+                "the tag is chatError.storeError.type");
+        assertEquals(FailureCategory.PERMANENT, error.category());
+    }
+
+    @Test
+    void encodeSendCommandEmitsMsgContentArray() throws Exception {
+        // Acceptance item 4: /_send must emit the message content as a JSON
+        // ARRAY [{"msgContent":…}]. v6.5.4.1 rejects the single-object form with
+        // commandError "Failed reading: empty"; the array form is accepted.
+        String frame = SimpleXMessageCodec.encodeSendCommand(
+                "corr-1", new ScopeRef.Dm("5"), "Hello, world");
+        String cmd = MAPPER.readTree(frame).get("cmd").asText();
+        assertTrue(cmd.startsWith("/_send @5 json "),
+                "the command targets the DM and carries a json payload: " + cmd);
+        JsonNode payload = MAPPER.readTree(jsonPayload(cmd));
+        assertTrue(payload.isArray(), "the /_send payload is a JSON array: " + cmd);
+        assertEquals(1, payload.size(),
+                "v1 sends one composed message per command");
+        assertEquals("Hello, world",
+                payload.get(0).get("msgContent").get("text").asText(),
+                "the single array element wraps the msgContent");
+    }
+
+    @Test
+    void encodeUpdateCommandEmitsSingleMsgContentObject() throws Exception {
+        // Acceptance item 7: /_update item edits exactly ONE existing item, so
+        // its content stays a single {"msgContent":…} OBJECT, not the /_send
+        // array. NOTE: the array form is the live-confirmed fix for /_send; the
+        // /_update single-object form was NOT live-re-verified in this pass
+        // (live-editing would mutate a real message). It follows from the array
+        // existing only because a send composes multiple messages while an edit
+        // targets one (design §6.4.5).
+        String frame = SimpleXMessageCodec.encodeUpdateCommand(
+                "corr-2", "chat-item-9", new ScopeRef.Dm("5"), "Partial");
+        String cmd = MAPPER.readTree(frame).get("cmd").asText();
+        JsonNode payload = MAPPER.readTree(jsonPayload(cmd));
+        assertTrue(payload.isObject(),
+                "the /_update payload is a single JSON object, not an array: " + cmd);
+        assertEquals("Partial", payload.get("msgContent").get("text").asText());
+    }
+
+    /** The JSON content of a SimpleX command string — everything after " json ". */
+    private static String jsonPayload(String cmd) {
+        int marker = cmd.indexOf(" json ");
+        assertTrue(marker >= 0, "command carries a json payload: " + cmd);
+        return cmd.substring(marker + " json ".length());
     }
 }

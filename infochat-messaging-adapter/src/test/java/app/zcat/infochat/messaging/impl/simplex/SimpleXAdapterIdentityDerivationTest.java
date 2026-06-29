@@ -360,11 +360,11 @@ class SimpleXAdapterIdentityDerivationTest {
                     "type": "newChatItem",
                     "chatItem": {
                       "chatInfo": {
-                        "chatType": "group",
+                        "type": "group",
                         "groupInfo": {"groupId": "GroupQueueAddressForDerivationTest000000006"}
                       },
                       "chatItem": {
-                        "itemId": "%s",
+                        "meta": {"itemId": "%s"},
                         "chatDir": {
                           "groupMember": {
                             "memberContactId": "SenderMemberContactQueueAddress000000000007",

@@ -82,7 +82,7 @@ class SimpleXMessageCodecKnownFieldTest {
                   "corrId": "corr-4",
                   "resp": {
                     "type": "chatCmdError",
-                    "chatError": {"errorType": "rcvRateLimit"}
+                    "chatError": {"type": "error", "errorType": {"type": "rcvRateLimit"}}
                   }
                 }
                 """;
