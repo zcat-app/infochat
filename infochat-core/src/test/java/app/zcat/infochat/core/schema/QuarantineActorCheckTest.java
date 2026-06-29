@@ -194,10 +194,18 @@ class QuarantineActorCheckTest extends PostgresSchemaTestBase {
 
         UUID postId = UUID.randomUUID();
         String placeholderId = UUID.randomUUID().toString().substring(0, 8);
+        // fetched_at is pinned inside a V30-provisioned partition (post_202607)
+        // rather than now(): the infochat-core test datasource never runs the
+        // collector's PartitionCreator, so a wall-clock fetched_at past the V30
+        // horizon (>= '2026-08-01') would hit "no partition of relation post
+        // found for row" and turn this suite red with no code change (M1-479).
+        // status_changed_at stays now() — it only records time, it is not the
+        // partition key.
         try (PreparedStatement ps = c.prepareStatement(
                 "INSERT INTO post (id, source_id, fetched_at, uid, title, "
                         + "body, status, status_changed_at) "
-                        + "VALUES (?, ?, now(), ?, 'Test', ?, 'QUARANTINED', now())")) {
+                        + "VALUES (?, ?, '2026-07-15 00:00:00+00', ?, 'Test', ?, "
+                        + "'QUARANTINED', now())")) {
             ps.setObject(1, postId);
             ps.setObject(2, sourceId);
             ps.setString(3, "uid-" + postId);

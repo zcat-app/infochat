@@ -285,9 +285,14 @@ class PerScopeIsolationIT extends PostgresSchemaTestBase {
     }
 
     private static void insertPost(Connection c, String sourceId, String uid, String title) throws SQLException {
+        // fetched_at is pinned inside a V30-provisioned partition (post_202607)
+        // rather than relying on the column's DEFAULT now(): the infochat-core
+        // test datasource never runs the collector's PartitionCreator, so a
+        // wall-clock fetched_at past the V30 horizon (>= '2026-08-01') would hit
+        // "no partition of relation post found for row" with no code change (M1-479).
         try (PreparedStatement stmt = c.prepareStatement(
-                "INSERT INTO post (uid, source_id, title) "
-                        + "VALUES (?, ?::uuid, ?)")) {
+                "INSERT INTO post (uid, source_id, title, fetched_at) "
+                        + "VALUES (?, ?::uuid, ?, '2026-07-15 00:00:00+00')")) {
             stmt.setString(1, uid);
             stmt.setString(2, sourceId);
             stmt.setString(3, title);
