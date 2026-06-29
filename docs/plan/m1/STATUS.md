@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 543 |
 | deferred | 9 |
-| **total** | **557** |
+| **total** | **558** |
 
 ---
 
@@ -29,6 +29,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-509 — Operator onboarding: simple (comic) + advanced admin guides (complexity: medium, risk: low)
 - M1-520 — Remove test-only no-arg AssetCommandFamilyOracle ctor (complexity: low, risk: low)
 - M1-522 — Free auto_joined_group slots when the bot leaves a group (complexity: high, risk: medium)
+- M1-524 — Unify the divergent outbox-IT awaitCursor poll helper into one fixture (complexity: low, risk: low)
 
 ---
 
@@ -731,4 +732,5 @@ M1-518 (done)
 M1-520 (pending) ← runnable
 M1-521 (done)
 M1-523 (done)
+M1-524 (pending) ← runnable
 ```
