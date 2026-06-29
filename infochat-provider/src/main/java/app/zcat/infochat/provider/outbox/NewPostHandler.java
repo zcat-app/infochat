@@ -94,7 +94,12 @@ public class NewPostHandler {
      *     cursor was already at or past the supplied value (duplicate or
      *     out-of-order arrival).
      */
-    @Transactional
+    // rollbackOn=SQLException is load-bearing, not decorative: Jakarta's default
+    // @Transactional COMMITS on a thrown checked exception, so without this a
+    // SQLException raised after the cursor advance (or after a T1-F pre-cursor
+    // side-effect write) would commit a partial transaction. Mirrors the
+    // deliberate annotation on the sibling QuarantineReviewListener (M1-487).
+    @Transactional(rollbackOn = SQLException.class)
     public boolean handle(UUID postId, Instant readyAt) throws SQLException {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
