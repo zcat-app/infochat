@@ -281,9 +281,16 @@ class QuarantineCommandHandlerTest {
         OutboundMessage reply = handler.handle(
                 new ScopeRef.Dm(admin), "/quarantine reject " + qId);
 
-        String expectedPrompt = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_QUARANTINE_REJECT),
-                Long.toString(confirmStateService.timeoutSeconds()));
+        // Literal expected string (not a re-run of MessageFormat.format on the same
+        // bundle value, which would tautologically pass even if {0} never substitutes):
+        // asserts the apostrophe renders as a single ' AND the {0} timeout token is
+        // replaced by the configured timeout. M1-488 — guards the apostrophe-escaping
+        // regression where a lone ' opened a literal region and swallowed {0}.
+        String expectedPrompt = "About to reject a BENIGN_CLOSED post, overriding the "
+                + "system's all-clear to keep it permanently redacted. This cannot be "
+                + "undone. Reply `/quarantine reject confirm` within "
+                + confirmStateService.timeoutSeconds()
+                + "s to proceed; any other input cancels.";
         assertEquals(expectedPrompt, reply.text(),
                 "first forensic reject must return the confirm prompt, not execute");
         assertEquals("BENIGN_CLOSED", quarantineStatus(qId),
