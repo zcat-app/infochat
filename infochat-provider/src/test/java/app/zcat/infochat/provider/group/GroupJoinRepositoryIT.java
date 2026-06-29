@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * and the ON CONFLICT idempotency the cap accounting relies on.
  */
 @QuarkusTest
-class GroupJoinRepositoryTest {
+class GroupJoinRepositoryIT {
 
     private static final String TEST_ADAPTER = "inmemory";
     private static final String CONTACT_PREFIX = "gjr-" + UUID.randomUUID() + "-";

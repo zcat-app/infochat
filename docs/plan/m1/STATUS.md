@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 542 |
+| done | 543 |
 | deferred | 9 |
-| **total** | **556** |
+| **total** | **557** |
 
 ---
 
@@ -64,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-523 | Rename DB-boot GroupJoinRepositoryTest to *IT (M1-519 naming-guard trunk-red fix) | 2026-06-29 | round 1 APPROVE |
 | M1-521 | Widen SafeLog.stripControls to the full bidi-control set (close log-line spoof gap) | 2026-06-29 | round 1 APPROVE |
 | M1-519 | Enforce D47 group-count caps on the auto-join surface | 2026-06-29 | round 1 APPROVE |
 | M1-518 | Remove vestigial SimpleX bot-queue-address derivation | 2026-06-29 | round 1 APPROVE |
@@ -73,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-514 | SimpleX groups: per-group memberId @-mention recognition | 2026-06-29 | round 1 APPROVE |
 | M1-512 | Production runtime resource harness: swap, container memory/CPU caps, dev-runtime teardown | 2026-06-29 | round 1 APPROVE |
 | M1-510 | SimpleX codec: align DM inbound/outbound/error decode with live v6.5.4.1 wire format | 2026-06-29 | round 1 APPROVE |
-| M1-501 | Stage-1-flagged posts can permanently evade Stage 2 after a crash | 2026-06-29 | round 1 APPROVE |
 
 ---
 
@@ -730,4 +730,5 @@ M1-517 (done)
 M1-518 (done)
 M1-520 (pending) ← runnable
 M1-521 (done)
+M1-523 (done)
 ```
