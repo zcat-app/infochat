@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-491 — Log-sanitization hardening: relay NOTICE control-strip + SafeLog bidi/line-sep (complexity: low, risk: low)
 - M1-494 — Production dead-code and defensive-check cleanup sweep (complexity: low, risk: low)
 - M1-495 — Integration/DB-boot tests named *Test run in the surefire (unit) phase (complexity: low, risk: low)
 - M1-496 — Test-integrity sweep: vacuous, ambient-gated, and over-permissive assertions (complexity: low, risk: low)
@@ -78,6 +77,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-501 | Stage-1-flagged posts can permanently evade Stage 2 after a crash | 2026-06-29 | round 1 APPROVE |
 | M1-497 | Test name/comment accuracy sweep: names and comments that contradict the body | 2026-06-29 | round 1 APPROVE |
 | M1-492 | Production javadoc/contract drift: stale or wrong SPI/handler contracts | 2026-06-29 | round 1 APPROVE |
+| M1-491 | Log-sanitization hardening: relay NOTICE control-strip + SafeLog bidi/line-sep | 2026-06-29 | round 1 APPROVE |
 | M1-490 | Reconcile §9 split-clock decision sites against the M1-447 backlog | 2026-06-29 | round 1 APPROVE |
 
 ---
@@ -702,7 +702,7 @@ M1-487 (done)
 M1-488 (done)
 M1-489 (done)
 M1-490 (done)
-M1-491 (pending) ← runnable
+M1-491 (done)
 M1-492 (done)
 M1-493 (deferred)
 M1-494 (pending) ← runnable

@@ -23,20 +23,30 @@ public final class SafeLog {
     private SafeLog() {}
 
     /**
-     * Replace every control character with a single space: C0
-     * (0x00–0x1F), DEL (0x7F), and C1 (0x80–0x9F). The C1 range
-     * matters because 0x9B is the single-byte CSI — it opens an ANSI
-     * escape sequence exactly like ESC-[ does, so stripping C0 alone
-     * leaves terminal-control forgery open. Full-range sweeps, not an
-     * enumerated blacklist: no control character has a legitimate
-     * place in a one-line log value, and replacing the whole ranges
-     * leaves no gaps.
+     * Replace every control or line-integrity-breaking character with a
+     * single space: C0 (0x00–0x1F), DEL (0x7F), C1 (0x80–0x9F), plus the
+     * Unicode bidi override U+202E and the line / paragraph separators
+     * U+2028 / U+2029. The C1 range matters because 0x9B is the single-byte
+     * CSI — it opens an ANSI escape sequence exactly like ESC-[ does, so
+     * stripping C0 alone leaves terminal-control forgery open. The three
+     * named Unicode codepoints are not ISO controls and so survive the
+     * C0/C1 sweep, yet each breaks one-line log integrity: U+202E (right-
+     * to-left override) visually reorders the remainder of the line to
+     * spoof it, and U+2028 / U+2029 are line / paragraph breaks many log
+     * viewers honour — the same line-splitting forgery CR/LF give. Full-
+     * range sweeps for the control bands, not an enumerated blacklist: no
+     * control character has a legitimate place in a one-line log value,
+     * and replacing the whole ranges leaves no gaps.
      */
     public static String stripControls(String s) {
         StringBuilder stripped = new StringBuilder(s.length());
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
-            boolean control = c < 0x20 || (c >= 0x7F && c <= 0x9F);
+            boolean control = c < 0x20
+                    || (c >= 0x7F && c <= 0x9F)
+                    || c == '\u202E'
+                    || c == '\u2028'
+                    || c == '\u2029';
             stripped.append(control ? ' ' : c);
         }
         return stripped.toString();

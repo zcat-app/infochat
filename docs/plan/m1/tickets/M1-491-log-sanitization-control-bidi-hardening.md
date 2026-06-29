@@ -1,9 +1,9 @@
 ---
 id: M1-491
 title: "Log-sanitization hardening: relay NOTICE control-strip + SafeLog bidi/line-sep"
-status: pending
+status: done
 created: 2026-06-27
-last_updated: 2026-06-27
+last_updated: 2026-06-29
 blocked_by: []
 files_budget: 5
 complexity: low
@@ -37,12 +37,43 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 196
+      removed: 22
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-29
+    verdict: CLEAN
+    base: 98944d1bf32589952c249585a048e45df7430a90
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-491-2026-06-29.md
+    out_of_model_count: 1
+    note: >-
+      CLEAN, no findings. One OUT-OF-MODEL: SafeLog.stripControls covers only
+      U+202E among bidi reorderers (plus U+2028/U+2029); U+202A-U+202D and
+      U+2066-U+2069 still pass through and can forge the same visual line
+      reordering. Out-of-model (security.md makes no bidi-sanitization promise)
+      and beyond M1-491's named codepoints — recommended as a follow-up
+      ticket, not folded into this commit.
+clarity_check:
+  date: 2026-06-29
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-491: Log-sanitization hardening: relay NOTICE control-strip + SafeLog bidi/line-sep

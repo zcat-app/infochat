@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.stream.nostr;
 
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -346,7 +347,11 @@ final class NostrRelayConnection {
             }
             case NostrMessage.Eose ignored -> markProductive();
             case NostrMessage.Notice notice ->
-                    LOG.debug("Nostr relay {} NOTICE: {}", relayUri, notice.message());
+                    // notice.message() is relay-authored, untrusted text; strip
+                    // controls/bidi before it reaches the log so it cannot forge
+                    // or split a log line, matching NostrMessage.summarize and the
+                    // other relay-byte log sites (M1-491).
+                    LOG.debug("Nostr relay {} NOTICE: {}", relayUri, SafeLog.stripControls(notice.message()));
         }
     }
 
