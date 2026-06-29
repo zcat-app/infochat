@@ -18,16 +18,19 @@ import java.util.List;
  * {@link #onGroupCandidate} for every group-scope {@code newChatItem}
  * frame the codec surfaces as {@link SimpleXMessageCodec.GroupCandidate}.
  *
- * <p>Bot mention is the D10 trust anchor for group mode per
+ * <p>Bot mention is the trust anchor for group mode per
  * {@code docs/spec/messaging.md} §Required SPI surface — Receive: a
- * group message reaches Provider only when the frame's mention list
- * carries a queue address that byte-equals the bot's per-adapter queue
- * address. {@link SimpleXMentionParser#botMentioned} owns the
+ * group message reaches Provider only when a {@code mentions{}} entry's
+ * {@code memberId} byte-equals the bot's own per-group {@code memberId}
+ * (carried on the candidate from {@code chatInfo.groupInfo.membership},
+ * decision D51). {@link SimpleXMentionParser#botMentioned} owns the
  * comparison; display-name matching is never used. The decision is
  * made exactly once, here — no other code path in this adapter
  * delivers a group-scope {@link InboundMessage}, so the silent-drop
  * path for un-mentioned group messages is the only escape from this
- * class.</p>
+ * class. A quote-reply to a bot message that carries no mention payload
+ * is therefore NOT delivered (it has no matching mention memberId), even
+ * though simplex would set {@code meta.userMention} on it.</p>
  *
  * <p>Membership-event surface: SimpleX's WebSocket bot API does not
  * expose a native user-joined / user-left signal in the surface
@@ -40,13 +43,9 @@ import java.util.List;
  */
 final class SimpleXGroupHandler {
 
-    private final SimpleXIdentity botIdentity;
     private final MessagingAdapter.InboundHandler inboundHandler;
 
     /**
-     * @param botIdentity    the bot's per-adapter SimpleX identity; its
-     *                       queue address is the D10 trust anchor for
-     *                       mention recognition. Never null.
      * @param inboundHandler the downstream callback that receives
      *                       mentioned group messages. Production wires
      *                       this to {@link SimpleXAdapter#onInbound},
@@ -56,9 +55,7 @@ final class SimpleXGroupHandler {
      *                       call after {@link SimpleXAdapter#start}
      *                       still routes correctly. Never null.
      */
-    SimpleXGroupHandler(SimpleXIdentity botIdentity,
-                        MessagingAdapter.InboundHandler inboundHandler) {
-        this.botIdentity = botIdentity;
+    SimpleXGroupHandler(MessagingAdapter.InboundHandler inboundHandler) {
         this.inboundHandler = inboundHandler;
     }
 
@@ -70,8 +67,7 @@ final class SimpleXGroupHandler {
      * pressure that reveals the bot is reading their messages.
      */
     void onGroupCandidate(SimpleXMessageCodec.GroupCandidate gc) {
-        if (!SimpleXMentionParser.botMentioned(gc.mentionQueueAddresses(),
-                botIdentity.queueAddress())) {
+        if (!SimpleXMentionParser.botMentioned(gc.mentionMemberIds(), gc.botMemberId())) {
             return;
         }
         Instant now = Instant.now();
@@ -91,17 +87,19 @@ final class SimpleXGroupHandler {
      * ("the mention is stripped before delivery"). Anchored to the
      * protocol mention segments the codec located inside the text —
      * never display-name text search, so a body that merely contains
-     * the bot's name as plain text is left intact. The codec's
-     * reconstruction guard ({@link SimpleXMessageCodec.GroupCandidate})
-     * means {@code mentionSpans} may be empty on a degenerate frame even
-     * though recognition fired; the text is then delivered unstripped —
-     * no span data exists that could locate the mention honestly.
+     * the bot's name as plain text is left intact. Only spans tagged with
+     * the bot's {@code memberId} are removed, so co-mentions of other
+     * members survive. The codec's reconstruction guard
+     * ({@link SimpleXMessageCodec.GroupCandidate}) means {@code mentionSpans}
+     * may be empty on a degenerate frame even though recognition fired;
+     * the text is then delivered unstripped — no span data exists that
+     * could locate the mention honestly.
      */
     private String stripBotMentions(SimpleXMessageCodec.GroupCandidate gc) {
         String text = gc.text();
         List<SimpleXMessageCodec.MentionSpan> botSpans = new ArrayList<>();
         for (SimpleXMessageCodec.MentionSpan span : gc.mentionSpans()) {
-            if (span.queueAddress().equals(botIdentity.queueAddress())) {
+            if (span.memberId().equals(gc.botMemberId())) {
                 botSpans.add(span);
             }
         }

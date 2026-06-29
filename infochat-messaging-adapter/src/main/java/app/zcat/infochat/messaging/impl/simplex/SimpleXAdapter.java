@@ -126,12 +126,14 @@ public final class SimpleXAdapter implements MessagingAdapter {
     private volatile @Nullable InboundHandler inboundHandler;
     private volatile @Nullable SimpleXSubprocess subprocess;
     private volatile @Nullable SimpleXWebSocketClient webSocket;
-    // Group-mention dispatch handler bound to the SimpleXIdentity derived
-    // from the running simplex-chat at start() and re-derived after each
-    // supervised restart (the D10 trust anchor — never operator-typed).
-    // Null until the first successful derivation; group candidates arriving
-    // earlier are dropped in onGroupCandidate. Volatile: written by the
-    // start()/reconnect threads, read on the WS inbound-dispatch thread.
+    // Group-candidate dispatch handler, (re)built when the bot's queue address
+    // is adopted at start() and after each supervised restart. Group @-mention
+    // recognition uses the per-group memberId carried in each frame (D51), not
+    // this handler's construction-time state; the handler is still gated on
+    // adoption so its lifecycle matches start/derivation. Null until the first
+    // successful adoption; group candidates arriving earlier are dropped in
+    // onGroupCandidate. Volatile: written by the start()/reconnect threads, read
+    // on the WS inbound-dispatch thread.
     private volatile @Nullable SimpleXGroupHandler groupHandler;
     // True from the moment the reconnect path starts tearing down the old
     // WebSocket client until a fresh one is swapped in. Sends during this
@@ -380,21 +382,25 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     /**
-     * Adopt a queue address derived from the running simplex-chat as the
-     * bot's D10 trust anchor: validate well-formedness (the same
-     * {@link SimpleXIdentity#isWellFormed} gate the registry applies to
-     * the bootstrap admin id — a malformed identity would let
-     * {@code SimpleXMentionParser.botMentioned} match a mention-list entry
-     * that decodes to empty/forged bytes, the class security.md §"What's
-     * intentionally NOT in v1" forever excludes), then bind a fresh
-     * {@link SimpleXGroupHandler} to it. No canonicalization, unlike
+     * Adopt the queue address derived from the running simplex-chat: validate
+     * its well-formedness (the same {@link SimpleXIdentity#isWellFormed} gate
+     * the registry applies to the bootstrap admin id — here a contract/health
+     * check that the running simplex-chat returns a well-formed self-address),
+     * then (re)build the group-candidate handler. Group @-mention recognition no
+     * longer uses this queue address — since v6.5.4.1 it is anchored to the
+     * bot's per-group memberId carried in each frame (D51) — but the handler is
+     * still built here so its lifecycle stays tied to a successful
+     * start/derivation (group candidates arriving before it is built are
+     * dropped, see {@link #onGroupCandidate}). The derivation is now
+     * consumer-less beyond this startup contract check; removing it is M1-518.
+     * No canonicalization, unlike
      * Signal's {@code adoptBotAci} — queue addresses are case-sensitive
-     * URL-safe base64. The failure message names the derivation source,
-     * never the value (D37: queue addresses are never logged raw).
+     * URL-safe base64. The failure message names the derivation source, never
+     * the value (D37: queue addresses are never logged raw).
      *
      * <p>Package-private seam, mirroring {@code SignalAdapter.adoptBotAci}:
-     * FakeSimpleXProcess-driven tests that need a routable anchor without
-     * a full derivation round-trip adopt one directly.</p>
+     * FakeSimpleXProcess-driven tests that need to drive the handler lifecycle
+     * without a full derivation round-trip adopt one directly.</p>
      */
     void adoptBotQueueAddress(String queueAddress) {
         if (!SimpleXIdentity.isWellFormed(queueAddress)) {
@@ -404,8 +410,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
                             + " simplex-chat may not match the modeled wire contract"
                             + " (length=" + queueAddress.length() + ")");
         }
-        SimpleXIdentity identity = new SimpleXIdentity(queueAddress);
-        this.groupHandler = new SimpleXGroupHandler(identity, this::onInbound);
+        this.groupHandler = new SimpleXGroupHandler(this::onInbound);
     }
 
     /**
@@ -754,14 +759,14 @@ public final class SimpleXAdapter implements MessagingAdapter {
 
     /**
      * Group-candidate entry point handed to the WebSocket client. Re-reads
-     * the volatile anchor-bound handler on every dispatch (mirroring
-     * {@link #onInbound}'s volatile re-read of {@code inboundHandler}) so
-     * routing always compares against the most recently derived identity.
-     * A candidate arriving in the window between the WebSocket coming up
-     * and the anchor being derived is dropped — lifecycle state, the same
+     * the volatile {@code groupHandler} on every dispatch (mirroring
+     * {@link #onInbound}'s volatile re-read of {@code inboundHandler}) so a
+     * handler rebuilt by a reconnect is picked up immediately. A candidate
+     * arriving in the window between the WebSocket coming up and the bot's
+     * queue address being adopted is dropped — lifecycle state, the same
      * shape as onInbound's no-handler drop. The recognised-but-unmentioned
      * drop inside {@link SimpleXGroupHandler} stays log-free by design;
-     * this DEBUG line covers only the no-anchor window.
+     * this DEBUG line covers only the not-yet-adopted window.
      */
     private void onGroupCandidate(SimpleXMessageCodec.GroupCandidate gc) {
         SimpleXGroupHandler handler = groupHandler;

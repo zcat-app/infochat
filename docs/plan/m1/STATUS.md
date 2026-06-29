@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 16 |
+| pending | 15 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 526 |
+| done | 527 |
 | deferred | 9 |
 | **total** | **551** |
 
@@ -36,7 +36,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-499 — Test fixture duplication → testsupport, plus a leaked registration teardown (complexity: low, risk: low)
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-509 — Operator onboarding: simple (comic) + advanced admin guides (complexity: medium, risk: low)
-- M1-514 — SimpleX groups: meta.userMention @-mention recognition (complexity: high, risk: high)
+- M1-515 — SimpleX groups: auto-accept invitations (registered-inviter gate) (complexity: high, risk: high)
 - M1-516 — approve_quarantine: guard new_post NOTIFY when post UPDATE matches zero rows (complexity: low, risk: low)
 - M1-517 — Schema: NOT NULL post.upstream_identifier + backfill 37 test fixtures (complexity: low, risk: medium)
 
@@ -55,7 +55,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-515 — blocked_by: M1-514 (pending)
+_(none)_
 
 ---
 
@@ -74,6 +74,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-514 | SimpleX groups: per-group memberId @-mention recognition | 2026-06-29 | round 1 APPROVE |
 | M1-512 | Production runtime resource harness: swap, container memory/CPU caps, dev-runtime teardown | 2026-06-29 | round 1 APPROVE |
 | M1-510 | SimpleX codec: align DM inbound/outbound/error decode with live v6.5.4.1 wire format | 2026-06-29 | round 1 APPROVE |
 | M1-501 | Stage-1-flagged posts can permanently evade Stage 2 after a crash | 2026-06-29 | round 1 APPROVE |
@@ -83,7 +84,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-486 | Signal inbound line cap equals body cap, collapsing two layers | 2026-06-29 | round 1 APPROVE |
 | M1-485 | Embedding batch retry has no backoff, unlike the sibling entity stage | 2026-06-29 | round 1 APPROVE |
 | M1-484 | Asset fetcher ignores SPI supported-asset/quote gate; dedup readBigDecimal | 2026-06-29 | round 1 APPROVE |
-| M1-483 | /group-timezone: missing-arg wrong error + zone work before the auth gate | 2026-06-29 | round 1 APPROVE |
 
 ---
 
@@ -731,8 +731,8 @@ M1-510 (done)
   └── M1-511 (deferred)
 M1-512 (done)
 M1-513 (draft)
-M1-514 (pending) ← runnable
-  └── M1-515 (pending)
+M1-514 (done)
+  └── M1-515 (pending) ← runnable
 M1-516 (pending) ← runnable
 M1-517 (pending) ← runnable
 ```

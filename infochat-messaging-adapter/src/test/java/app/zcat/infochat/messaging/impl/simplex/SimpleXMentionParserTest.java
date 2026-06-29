@@ -6,127 +6,109 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.List;
 
 /**
- * D10 trust-anchor tests for {@link SimpleXMentionParser}. The parser
- * decides whether one or more {@code formattedText} mentions refer to
- * the bot, and the comparison MUST be exact bytes of the queue-address
- * string — never display names, and with no decoding or canonicalization
- * (a canonicalizing compare is non-injective and lets distinct addresses
- * collide).
+ * Trust-anchor tests for {@link SimpleXMentionParser}. The parser decides
+ * whether one or more {@code mentions{}} memberIds refer to the bot, and the
+ * comparison MUST be exact bytes of the memberId string (D51) — never display
+ * names, and with no decoding or canonicalization (a canonicalizing compare is
+ * non-injective and lets distinct ids collide).
  */
 class SimpleXMentionParserTest {
 
+    // Real-shape per-group memberIds: simplex emits them as base64 (with
+    // padding), e.g. the captured "WE1sRTBSZlVvMS9WYXdFcQ==".
+    private static final String BOT_MEMBER_ID = "WE1sRTBSZlVvMS9WYXdFcQ==";
+    private static final String OTHER_MEMBER_ID = "SENEZlYxaVpZV3dPK2FGWQ==";
+
     /**
-     * Acceptance item: exact byte match of decoded queue addresses
-     * succeeds; a near-miss (one differing byte) fails. The base64
-     * fixtures used here are the URL-safe encoding of randomly chosen
-     * 16-byte arrays — the same shape SimpleX assigns real queue
-     * addresses.
+     * Acceptance: an exact byte match of the memberId string succeeds; a
+     * near-miss (one differing trailing char) fails.
      */
     @Test
-    void queueAddressByteEquality() {
-        byte[] botBytes = new byte[]{
-                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
-        byte[] nearMissBytes = botBytes.clone();
-        nearMissBytes[15] = (byte) 0xFF;
-
-        String botAddress = base64Url(botBytes);
-        String matchingAddress = base64Url(botBytes);
-        String nearMissAddress = base64Url(nearMissBytes);
+    void memberIdByteEquality() {
+        String matching = BOT_MEMBER_ID;
+        String nearMiss = BOT_MEMBER_ID.substring(0, BOT_MEMBER_ID.length() - 2) + "X=";
 
         assertTrue(
-                SimpleXMentionParser.botMentioned(List.of(matchingAddress), botAddress),
-                "byte-identical decoded queue address matches");
+                SimpleXMentionParser.botMentioned(List.of(matching), BOT_MEMBER_ID),
+                "byte-identical memberId matches");
         assertFalse(
-                SimpleXMentionParser.botMentioned(List.of(nearMissAddress), botAddress),
-                "one-byte difference must NOT match");
+                SimpleXMentionParser.botMentioned(List.of(nearMiss), BOT_MEMBER_ID),
+                "a one-char difference must NOT match");
     }
 
     /**
-     * Display-name strings are never queue addresses, never match the
-     * bot's address byte-equality. The parser receives the mention
-     * list the codec extracted from {@code formattedText.format.memberRef}
-     * — a display-name-only fixture (no queue-address mention) must
-     * still resolve to false.
+     * Display-name strings are never memberIds and never byte-equal the bot's
+     * memberId. The parser receives the memberIds the codec extracted from
+     * {@code mentions{}} — a display-name-only fixture must resolve to false.
      */
     @Test
-    void displayNameOnlyFixture_returnsFalse() {
-        String botAddress = "BOT-QUEUE-ADDR";
-        List<String> mentions = List.of("InfoChatBot", "@InfoChatBot");
+    void displayNameNeverMatchesMemberId() {
+        List<String> mentions = List.of("InfoChatBot", "@InfoChatBot", "Admin-Reno");
 
-        assertFalse(SimpleXMentionParser.botMentioned(mentions, botAddress),
+        assertFalse(SimpleXMentionParser.botMentioned(mentions, BOT_MEMBER_ID),
                 "display-name match never sufficient to mention the bot");
     }
 
     /**
-     * Multi-mention list: any one matching entry triggers true. Tests
-     * the iteration walks past the first non-matching entry.
+     * Multi-mention list: any one matching entry triggers true. Tests the
+     * iteration walks past non-matching entries (co-mentions of other members).
      */
     @Test
     void multipleMentions_anyMatchReturnsTrue() {
-        String botAddress = "BOT-QUEUE-ADDR";
-        List<String> mentions = List.of("alice-queue-addr", "bob-queue-addr", botAddress);
+        List<String> mentions = List.of(OTHER_MEMBER_ID, "QW5vdGhlck1lbWJlcg==", BOT_MEMBER_ID);
 
-        assertTrue(SimpleXMentionParser.botMentioned(mentions, botAddress),
+        assertTrue(SimpleXMentionParser.botMentioned(mentions, BOT_MEMBER_ID),
                 "any-match across the mention list returns true");
     }
 
     /**
-     * Regression for the removed non-injective canonicalization. The old
-     * implementation base64-decoded each operand before comparing, so the
-     * base64 string {@code "MTIzNDU="} (which decodes to the bytes of
-     * {@code "12345"}) and the literal {@code "12345"} (UTF-8 fallback)
-     * collapsed to the same bytes {@code [0x31..0x35]} and compared equal
-     * — yet they are distinct queue-address strings, both of which pass
-     * {@link SimpleXMessageCodec#isValidQueueAddressId} and therefore both
-     * reach the parser. Exact-bytes string comparison must keep them
-     * distinct: the colliding non-mention is NOT read as a mention, and a
-     * real (exact-string) mention of the bot is NOT suppressed.
+     * The compare is exact bytes with no decoding. A canonicalizing compare
+     * (base64-decode then compare bytes) would be non-injective: the base64
+     * string {@code "MTIzNDU="} decodes to the bytes of {@code "12345"}, so a
+     * decode-then-compare would read them equal — yet they are distinct
+     * memberId strings. Exact-bytes string comparison keeps them distinct: the
+     * colliding non-mention is NOT read as a mention, and a real (exact-string)
+     * mention of the bot is NOT suppressed.
      */
     @Test
     void collidingDecodedPair_notReadAsMention() {
-        String botAddress = "12345";
+        String botMemberId = "12345";
         String collidingNonMention = "MTIzNDU=";
 
         assertFalse(
-                SimpleXMentionParser.botMentioned(List.of(collidingNonMention), botAddress),
-                "distinct queue-address strings the old decode collided must NOT mention the bot");
+                SimpleXMentionParser.botMentioned(List.of(collidingNonMention), botMemberId),
+                "distinct memberId strings a decode would collide must NOT mention the bot");
         assertTrue(
-                SimpleXMentionParser.botMentioned(List.of(botAddress), botAddress),
+                SimpleXMentionParser.botMentioned(List.of(botMemberId), botMemberId),
                 "an exact-string mention of the bot is still recognised, not suppressed");
     }
 
     /**
-     * Non-base64 inputs (e.g. simplex-chat decimal DB row ids, which
-     * also live in the queue-address character set) fall back to UTF-8
-     * literal-string byte comparison. Two row ids "12345" still match;
-     * "12345" vs "12346" does not.
+     * The comparison is literal UTF-8 bytes regardless of whether the operand
+     * looks like base64. Two identical strings match; a one-char difference
+     * does not.
      */
     @Test
-    void nonBase64LiteralFallback() {
-        String rowId = "12345";
-        String differentRowId = "12346";
+    void literalByteComparison_noDecoding() {
+        String id = "12345";
+        String differentId = "12346";
 
-        assertTrue(SimpleXMentionParser.botMentioned(List.of(rowId), rowId),
-                "identical non-base64 row id matches via literal fallback");
-        assertFalse(SimpleXMentionParser.botMentioned(List.of(differentRowId), rowId),
-                "different non-base64 row ids must NOT match");
+        assertTrue(SimpleXMentionParser.botMentioned(List.of(id), id),
+                "identical literal id matches");
+        assertFalse(SimpleXMentionParser.botMentioned(List.of(differentId), id),
+                "different literal ids must NOT match");
 
-        byte[] expectedBytes = rowId.getBytes(StandardCharsets.UTF_8);
-        assertTrue(expectedBytes.length > 0, "fixture sanity: row id has bytes");
+        byte[] expectedBytes = id.getBytes(StandardCharsets.UTF_8);
+        assertTrue(expectedBytes.length > 0, "fixture sanity: id has bytes");
     }
 
     /** Empty mention list trivially returns false. */
     @Test
     void emptyMentionList_returnsFalse() {
-        assertFalse(SimpleXMentionParser.botMentioned(List.of(), "BOT-QUEUE-ADDR"),
+        assertFalse(SimpleXMentionParser.botMentioned(List.of(), BOT_MEMBER_ID),
                 "no mentions in the frame → bot not mentioned");
-    }
-
-    private static String base64Url(byte[] bytes) {
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 }

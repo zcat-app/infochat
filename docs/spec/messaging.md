@@ -52,8 +52,12 @@ Every adapter implements:
   may have multiple adapters configured per `deployment.md`
   §Topology, and each adapter has its own bot identity). Both v1
   adapters expose mention anchoring at the protocol layer —
-  SimpleX by queue address, Signal by ACI (the UUID Signal binds
-  to its identity keys; surfaced by `signal-cli` as
+  SimpleX by the bot's **per-group member id** (decision D51; the
+  queue address the mention payload carried before simplex-chat
+  v6.5.4.1 is gone, so the anchor is the cryptographic group
+  member id the mention resolves to, compared against the bot's
+  own `groupInfo.membership.memberId`), Signal by ACI (the UUID
+  Signal binds to its identity keys; surfaced by `signal-cli` as
   `mentionUuid`). Display-name matching is
   **never** sufficient — an attacker who can spoof or impersonate
   the bot's display name in a group must not be able to suppress
@@ -141,7 +145,8 @@ Every adapter implements:
   long-running requests.
 - `supportsMentionByContactId` — true when the adapter's protocol
   carries an `@mention` anchored to the mentioned user's
-  cryptographic contact id (SimpleX queue address, Signal ACI).
+  cryptographic contact id (SimpleX per-group member id per D51,
+  Signal ACI).
   Required-true for any adapter that exposes group mode in v1; an
   adapter with this flag false MUST disable its group SPI.
   Display-name string matching is never an acceptable fallback

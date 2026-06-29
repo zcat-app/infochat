@@ -24,36 +24,40 @@ import java.util.List;
  * resulting candidate is fed into the handler with a capturing
  * inbound handler.
  *
- * <p>The bot's queue address used throughout
- * ({@code "BOT-QUEUE-ADDR"}) is shorter than a real SimpleX
- * cryptographic identifier but still falls inside the queue-address
- * character set the codec accepts at the inbound trust boundary
- * (URL-safe base64 ∪ decimal — see
- * {@link SimpleXMessageCodec#isValidQueueAddressId}).</p>
+ * <p>Recognition is by the per-group {@code memberId} (D51): a bot @mention is
+ * a {@code mentions{}} entry whose {@code memberId} byte-equals the bot's own
+ * {@code chatInfo.groupInfo.membership.memberId}. The bot's memberId
+ * ({@link #BOT_MEMBER_ID}) is baked into every group frame's
+ * {@code groupInfo.membership}; the bot's display name in the group is
+ * {@link #BOT_DISPLAY}.</p>
  */
 class SimpleXGroupHandlerTest {
 
-    private static final String BOT_QUEUE_ADDR = "BOT-QUEUE-ADDR";
-    private static final SimpleXIdentity BOT_IDENTITY = new SimpleXIdentity(BOT_QUEUE_ADDR);
+    // Bot's own per-group memberId (the recognition anchor) and its display
+    // name in the group. Real simplex memberIds are base64 with padding.
+    private static final String BOT_MEMBER_ID = "WE1sRTBSZlVvMS9WYXdFcQ==";
+    private static final String BOT_DISPLAY = "bot";
+    private static final String ALICE_MEMBER_ID = "QWxpY2VNZW1iZXIxMjM0NTY=";
+    private static final String MALLORY_MEMBER_ID = "TWFsbG9yeU1lbWJlcjEyMzQ=";
 
     private final List<InboundMessage> delivered = new ArrayList<>();
-    private final SimpleXGroupHandler handler =
-            new SimpleXGroupHandler(BOT_IDENTITY, delivered::add);
+    private final SimpleXGroupHandler handler = new SimpleXGroupHandler(delivered::add);
 
     /**
-     * The canonical attack-scenario test: a peer mentions the bot via
-     * a queue-address-anchored formattedText entry, and the handler
-     * delivers the resulting {@link InboundMessage} with the right
-     * sender, body, group scope, and adapter message id.
+     * The canonical scenario: a peer mentions the bot (a {@code mentions{}}
+     * entry whose memberId is the bot's own), and the handler delivers the
+     * resulting {@link InboundMessage} with the right sender, body, group
+     * scope, and adapter message id.
      */
     @Test
-    void mentionByQueueAddress_delivered() {
+    void mentionByMemberId_delivered() {
         var candidate = decodeGroupFrame(groupFrame(
                 "group-7",
                 "alice-queue-addr",
                 "Alice",
                 "hi @bot",
-                mentions(BOT_QUEUE_ADDR),
+                mentionsObject(BOT_DISPLAY, BOT_MEMBER_ID),
+                nonReconstructingFt(BOT_DISPLAY),
                 "msg-101"));
 
         handler.onGroupCandidate(candidate);
@@ -68,11 +72,11 @@ class SimpleXGroupHandlerTest {
     }
 
     /**
-     * D10 trust anchor enforcement: an impersonator whose displayName
-     * matches the bot but whose formattedText mention points at the
-     * impersonator's own queue address (not the bot's) MUST NOT trigger
-     * delivery. This is the attack the queue-address byte-equality rule
-     * defends against — display-name matching is never sufficient.
+     * Trust anchor enforcement: an impersonator whose displayName matches the
+     * bot but whose mention points at the impersonator's own memberId (not the
+     * bot's) MUST NOT trigger delivery. This is the attack the memberId
+     * byte-equality rule defends against — display-name matching is never
+     * sufficient.
      */
     @Test
     void mentionByDisplayName_ignored() {
@@ -81,13 +85,14 @@ class SimpleXGroupHandlerTest {
                 "mallory-queue-addr",
                 "InfoChatBot",
                 "@InfoChatBot help",
-                mentions("mallory-queue-addr"),
+                mentionsObject("InfoChatBot", MALLORY_MEMBER_ID),
+                nonReconstructingFt("InfoChatBot"),
                 "msg-spoof"));
 
         handler.onGroupCandidate(candidate);
 
         assertEquals(0, delivered.size(),
-                "display-name match without bot queue-address mention MUST NOT deliver");
+                "display-name match without the bot's memberId MUST NOT deliver");
     }
 
     /** Group messages with no mentions at all are silently dropped. */
@@ -98,13 +103,60 @@ class SimpleXGroupHandlerTest {
                 "alice-queue-addr",
                 "Alice",
                 "general chatter, not addressed to bot",
-                mentions(),
+                mentionsObject(),
+                "[]",
                 "msg-quiet"));
 
         handler.onGroupCandidate(candidate);
 
         assertEquals(0, delivered.size(),
-                "no mention list → silent drop, no log spam");
+                "no mention of the bot → silent drop, no log spam");
+    }
+
+    /**
+     * Reply-to-bot is NOT delivered (D51). simplex sets {@code meta.userMention}
+     * on a quote-reply to a bot message even when it carries no @mention; the
+     * memberId rule deliberately ignores that — there is no {@code mentions{}}
+     * entry for the bot, so the message is dropped. Recognising on
+     * {@code userMention} would (incorrectly) deliver it.
+     */
+    @Test
+    void replyToBotWithoutMention_ignored() {
+        // userMention:true present on meta, but mentions{} is empty (a reply,
+        // not an @mention). The codec does not read userMention.
+        String frame = """
+                {
+                  "resp": {
+                    "type": "newChatItem",
+                    "chatItem": {
+                      "chatInfo": {
+                        "type": "group",
+                        "groupInfo": {
+                          "groupId": "group-7",
+                          "membership": {"memberId": "%s"}
+                        }
+                      },
+                      "chatItem": {
+                        "meta": {"itemId": "msg-reply", "userMention": true},
+                        "chatDir": {
+                          "groupMember": {
+                            "memberContactId": "alice-queue-addr",
+                            "localDisplayName": "Alice"
+                          }
+                        },
+                        "content": {"msgContent": {"type": "text", "text": "thanks!"}},
+                        "mentions": {},
+                        "formattedText": [{"text": "thanks!"}]
+                      }
+                    }
+                  }
+                }
+                """.formatted(BOT_MEMBER_ID);
+
+        handler.onGroupCandidate(decodeGroupFrame(frame));
+
+        assertEquals(0, delivered.size(),
+                "a reply-to-bot with no mention payload is NOT delivered (userMention ignored)");
     }
 
     /**
@@ -163,13 +215,15 @@ class SimpleXGroupHandlerTest {
                 "group-42",
                 "alice-queue-addr", "Alice",
                 "first @bot",
-                mentions(BOT_QUEUE_ADDR),
+                mentionsObject(BOT_DISPLAY, BOT_MEMBER_ID),
+                nonReconstructingFt(BOT_DISPLAY),
                 "msg-A"));
         var second = decodeGroupFrame(groupFrame(
                 "group-42",
                 "bob-queue-addr", "Bob",
                 "second @bot",
-                mentions(BOT_QUEUE_ADDR),
+                mentionsObject(BOT_DISPLAY, BOT_MEMBER_ID),
+                nonReconstructingFt(BOT_DISPLAY),
                 "msg-B"));
 
         handler.onGroupCandidate(first);
@@ -209,12 +263,10 @@ class SimpleXGroupHandlerTest {
      * decode time rather than surfaced as a {@link
      * SimpleXMessageCodec.GroupCandidate} whose senderContactId is
      * the non-cryptographic counter. Delivering such a frame would
-     * (a) let a globally-banned user evade Provider's ban check (the
-     * per-group memberId does not match the banned row keyed on the
-     * user's queue-address contactId) and (b) collide pre-contact
-     * members across distinct groups (memberId is a per-group counter
-     * — different real users in different groups routinely share the
-     * same value).
+     * (a) let a globally-banned user evade Provider's ban check and
+     * (b) collide pre-contact members across distinct groups. The
+     * frame carries a valid {@code groupInfo.membership} so the drop is
+     * attributed to the missing sender, not the missing membership.
      */
     @Test
     void memberIdOnlyGroupFrame_dropped() {
@@ -226,7 +278,8 @@ class SimpleXGroupHandlerTest {
                       "chatInfo": {
                         "type": "group",
                         "groupInfo": {
-                          "groupId": "group-7"
+                          "groupId": "group-7",
+                          "membership": {"memberId": "%s"}
                         }
                       },
                       "chatItem": {
@@ -243,12 +296,17 @@ class SimpleXGroupHandlerTest {
                             "text": "%s"
                           }
                         },
+                        "mentions": %s,
                         "formattedText": %s
                       }
                     }
                   }
                 }
-                """.formatted(jsonEscape("hello @bot"), mentions(BOT_QUEUE_ADDR));
+                """.formatted(
+                BOT_MEMBER_ID,
+                jsonEscape("hello @bot"),
+                mentionsObject(BOT_DISPLAY, BOT_MEMBER_ID),
+                nonReconstructingFt(BOT_DISPLAY));
 
         var decoded = SimpleXMessageCodec.decode(frame);
         var ignored = assertInstanceOf(SimpleXMessageCodec.Ignored.class, decoded,
@@ -273,6 +331,7 @@ class SimpleXGroupHandlerTest {
                 "alice-queue-addr",
                 "Alice",
                 "@bot summarise this",
+                mentionsObject(BOT_DISPLAY, BOT_MEMBER_ID),
                 decomposingBotMention("@bot", " summarise this"),
                 "msg-strip-1"));
 
@@ -293,6 +352,7 @@ class SimpleXGroupHandlerTest {
                 "alice-queue-addr",
                 "Alice",
                 "@bot say hello to bot",
+                mentionsObject(BOT_DISPLAY, BOT_MEMBER_ID),
                 decomposingBotMention("@bot", " say hello to bot"),
                 "msg-strip-2"));
 
@@ -310,6 +370,7 @@ class SimpleXGroupHandlerTest {
                 "alice-queue-addr",
                 "Alice",
                 "@bot /summary",
+                mentionsObject(BOT_DISPLAY, BOT_MEMBER_ID),
                 decomposingBotMention("@bot", " /summary"),
                 "msg-strip-3"));
 
@@ -323,10 +384,38 @@ class SimpleXGroupHandlerTest {
     }
 
     /**
+     * Multi-mention precision (D51): when the bot is co-mentioned alongside
+     * another member, ONLY the bot's span is stripped — the other member's
+     * mention survives in the delivered text.
+     */
+    @Test
+    void coMentionOfOtherMemberNotStripped() {
+        String formattedText = """
+                [{"text":"@bot","format":{"type":"mention","memberName":"bot"}},\
+                {"text":" "},\
+                {"text":"@Alice","format":{"type":"mention","memberName":"Alice"}},\
+                {"text":" hi"}]""";
+        var candidate = decodeGroupFrame(groupFrame(
+                "group-7",
+                "carol-queue-addr",
+                "Carol",
+                "@bot @Alice hi",
+                mentionsObject(BOT_DISPLAY, BOT_MEMBER_ID, "Alice", ALICE_MEMBER_ID),
+                formattedText,
+                "msg-comention"));
+
+        handler.onGroupCandidate(candidate);
+
+        assertEquals(1, delivered.size());
+        assertEquals("@Alice hi", delivered.get(0).text(),
+                "only the bot's mention is stripped; the co-mention of Alice stays");
+    }
+
+    /**
      * Reconstruction guard: when the formattedText segments do NOT
      * reconstruct the message text (the mention segment "@m" never
      * appears in the body), no protocol span can be located inside the
-     * text — recognition still fires (D10 reads the mention list, not
+     * text — recognition still fires (it reads {@code mentions{}}, not
      * the spans) but the text is delivered unstripped rather than
      * guessed at by display-name search.
      */
@@ -337,7 +426,8 @@ class SimpleXGroupHandlerTest {
                 "alice-queue-addr",
                 "Alice",
                 "hi @bot",
-                mentions(BOT_QUEUE_ADDR),
+                mentionsObject(BOT_DISPLAY, BOT_MEMBER_ID),
+                nonReconstructingFt(BOT_DISPLAY),
                 "msg-strip-4"));
 
         handler.onGroupCandidate(candidate);
@@ -358,16 +448,17 @@ class SimpleXGroupHandlerTest {
     }
 
     /**
-     * Synthesise a simplex-chat group {@code newChatItem} envelope
-     * with the given group id, sender, display name, body, mentions
-     * list, and item id. The shape mirrors what
-     * {@link SimpleXMessageCodec#decodeNewChatItem} expects (see the
-     * frame-path conventions documented on its group branch).
+     * Synthesise a simplex-chat group {@code newChatItem} envelope with the
+     * given group id, sender, display name, body, top-level {@code mentions{}}
+     * object, {@code formattedText}, and item id. The bot's own per-group
+     * memberId ({@link #BOT_MEMBER_ID}) is baked into
+     * {@code groupInfo.membership} as the recognition anchor.
      */
     private static String groupFrame(String groupId,
                                      String senderContactId,
                                      String senderDisplayName,
                                      String text,
+                                     String mentionsJson,
                                      String formattedTextJson,
                                      String itemId) {
         return """
@@ -378,7 +469,8 @@ class SimpleXGroupHandlerTest {
                       "chatInfo": {
                         "type": "group",
                         "groupInfo": {
-                          "groupId": "%s"
+                          "groupId": "%s",
+                          "membership": {"memberId": "%s"}
                         }
                       },
                       "chatItem": {
@@ -395,49 +487,74 @@ class SimpleXGroupHandlerTest {
                             "text": "%s"
                           }
                         },
+                        "mentions": %s,
                         "formattedText": %s
                       }
                     }
                   }
                 }
                 """.formatted(
-                groupId, itemId, senderContactId, senderDisplayName,
-                jsonEscape(text), formattedTextJson);
+                groupId, BOT_MEMBER_ID, itemId, senderContactId, senderDisplayName,
+                jsonEscape(text), mentionsJson, formattedTextJson);
     }
 
     /**
-     * Build a {@code formattedText} JSON array carrying one
-     * {@code format.type == "mention"} entry per queue address. An
-     * empty argument list produces the empty array (no mentions).
+     * Build a top-level {@code mentions{}} JSON object from
+     * (displayName, memberId) pairs. {@code mentionsObject()} (no pairs)
+     * produces the empty object (no mentions).
      */
-    private static String mentions(String... mentionQueueAddresses) {
-        if (mentionQueueAddresses.length == 0) {
-            return "[]";
+    private static String mentionsObject(String... displayNameMemberIdPairs) {
+        if (displayNameMemberIdPairs.length == 0) {
+            return "{}";
         }
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < mentionQueueAddresses.length; i++) {
+        StringBuilder sb = new StringBuilder("{");
+        for (int i = 0; i < displayNameMemberIdPairs.length; i += 2) {
             if (i > 0) {
                 sb.append(',');
             }
-            sb.append("""
-                    {"text":"@m","format":{"type":"mention","memberRef":"%s"}}"""
-                    .formatted(mentionQueueAddresses[i]));
+            sb.append("\"%s\":{\"memberId\":\"%s\"}"
+                    .formatted(displayNameMemberIdPairs[i], displayNameMemberIdPairs[i + 1]));
+        }
+        sb.append('}');
+        return sb.toString();
+    }
+
+    /**
+     * A {@code formattedText} array with one mention segment per memberName,
+     * each carrying the placeholder text {@code "@m"} that does NOT reconstruct
+     * a realistic body — so the codec's reconstruction guard voids the spans
+     * and the message is delivered unstripped (recognition still fires from
+     * {@code mentions{}}).
+     */
+    private static String nonReconstructingFt(String... memberNames) {
+        if (memberNames.length == 0) {
+            return "[]";
+        }
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < memberNames.length; i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append("{\"text\":\"@m\",\"format\":{\"type\":\"mention\",\"memberName\":\"%s\"}}"
+                    .formatted(memberNames[i]));
         }
         sb.append(']');
         return sb.toString();
     }
 
     /**
-     * Build a {@code formattedText} array that DECOMPOSES the message
-     * text the way real simplex-chat frames do: the bot-mention segment
-     * first, then one plain segment carrying the rest. The frame's
-     * {@code msgContent.text} must equal {@code mentionText + rest} or
-     * the codec's reconstruction guard discards the spans.
+     * Build a {@code formattedText} array that DECOMPOSES the message text the
+     * way real simplex-chat frames do: the bot-mention segment first, then one
+     * plain segment carrying the rest. The frame's {@code msgContent.text} must
+     * equal {@code mentionText + rest} or the codec's reconstruction guard
+     * discards the spans. The mention segment's {@code memberName} is
+     * {@link #BOT_DISPLAY}, which the frame's {@code mentions{}} maps to the
+     * bot's memberId.
      */
     private static String decomposingBotMention(String mentionText, String rest) {
         return """
-                [{"text":"%s","format":{"type":"mention","memberRef":"%s"}},{"text":"%s"}]"""
-                .formatted(jsonEscape(mentionText), BOT_QUEUE_ADDR, jsonEscape(rest));
+                [{"text":"%s","format":{"type":"mention","memberName":"%s"}},{"text":"%s"}]"""
+                .formatted(jsonEscape(mentionText), BOT_DISPLAY, jsonEscape(rest));
     }
 
     /**

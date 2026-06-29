@@ -289,18 +289,23 @@
   counts as an `@mention` of the bot is decided **only** by the
   cryptographic contact id of the mention target. Concretely:
 
-  - Each enabled adapter has its own bot identity material (per
-    [../spec/deployment.md](../spec/deployment.md) §Operator inputs
-    item 7) from which the bot's per-adapter contact id is derived
-    at adapter startup. SimpleX: the bot's queue address. Signal:
-    the bot's ACI (the UUID Signal binds to its identity keys;
-    `signal-cli` surfaces it as `mentionUuid`).
-  - The adapter's mention payload — SimpleX's mention metadata, the
-    Signal message envelope's mention list — references the
-    mentioned party's contact id. The adapter compares that id by
-    **byte-equality** against its own bot contact id; a match means
-    the message is delivered to `InboundHandler.onMessage` with the
-    mention payload stripped.
+  - Each enabled adapter knows the bot's own cryptographic contact id
+    for the group. **Signal**: the bot's ACI (the UUID Signal binds to
+    its identity keys; `signal-cli` surfaces it as `mentionUuid`),
+    derived once at adapter startup from the account store. **SimpleX**
+    (decision D51): the bot's **per-group member id**, read from each
+    inbound group frame at `chatInfo.groupInfo.membership.memberId` —
+    member ids are per-group, so there is no single startup-derived
+    value; the anchor travels in the frame. (The bot's queue address,
+    which the pre-v6.5.4.1 SimpleX mention payload carried, no longer
+    appears in that payload and is no longer the mention anchor.)
+  - The adapter's mention payload — SimpleX's top-level `mentions{}`
+    object (display name → `memberId`), the Signal message envelope's
+    mention list — references the mentioned party's contact id. The
+    adapter compares that id by **byte-equality** against the bot's own
+    contact id (SimpleX: `groupInfo.membership.memberId`; Signal: the
+    cached ACI); a match means the message is delivered to
+    `InboundHandler.onMessage` with the mention payload stripped.
   - Display-name string matching is **never** sufficient. An attacker
     who can spoof or impersonate the bot's display name in a group
     must not be able to suppress legitimate mentions or forge
@@ -336,7 +341,7 @@
   ### 6.3.3 @mention semantics in groups                                                                                                                                                                                                                    
                                                                                                                                                                                                                                                         
   - In a group, the adapter MUST only deliver messages that contain an @mention **of the bot's per-adapter cryptographic contact id** to InboundHandler.onMessage. Recognition is by byte-equality against the bot's contact id (§6.2.3), not by string matching the bot's display name.
-  - The mention is taken from the adapter's mention payload (SimpleX mention metadata; Signal envelope mention list). An inbound group message that has no mention payload referencing the bot is silently dropped, even if the message body textually contains a string that resembles the bot's display name.
+  - The mention is taken from the adapter's mention payload (SimpleX: the top-level `mentions{}` object resolved against `groupInfo.membership.memberId`, per D51 / §6.2.3; Signal: the envelope mention list). An inbound group message that has no mention payload referencing the bot is silently dropped, even if the message body textually contains a string that resembles the bot's display name (or, on SimpleX, only quote-replies to a bot message).
   - The adapter MUST strip the recognized mention payload (and the spans of the message body it covers) from the delivered text so the parser sees the user's actual command/message. Example: in a group, an inbound message whose body is "@infochat-bot /summary tech" — with the mention payload referencing the bot's contact id over the leading 14 characters — is delivered as "/summary tech".
   - An adapter that declares `supportsMentionByContactId = false` MUST refuse to start in a deployment that enables its group SPI; the registration-time check (§6.7) catches the mismatch.
   - DM messages are delivered as-is.                                                                                                                                                                                                                    
@@ -491,13 +496,13 @@
    
   - Connection: WebSocket to the local simplex-chat on a loopback port (default 5225), configured via infochat.adapters.simplex.ws-port; the simplex-chat executable is infochat.adapters.simplex.binary.
   - Authentication: none. The WebSocket bot API is a loopback channel to the co-located simplex-chat subprocess the adapter itself spawns, so there is no session, cookie, or token to present. The bot identity lives in the subprocess data-dir (infochat.adapters.simplex.data-dir) and is queried at start() per the Bot identity item below. Session-token auth is deferred for the v1 loopback-IPC transport (§6.4.6).
-  - **Bot identity** (per [../spec/deployment.md](../spec/deployment.md) §Operator inputs item 7): the bot's per-adapter contact id — the queue address the mention-recognition rule compares against (§6.2.3 / §6.10) — is **queried from the running simplex-chat over the adapter's own WebSocket at `start()`** (a `/show_address`-shaped self-address command; the bare queue id is extracted from the returned contact link) and re-derived on supervised subprocess restart so the post-restart anchor stays consistent with the process serving the frames. It is NOT an operator-typed property and is not parsed from disk — no identity-dir property exists. Query, decode, or extraction failure refuses *that adapter's* startup but does not abort the Provider (per-adapter resilience, §6.7).
+  - **Bot identity** (per [../spec/deployment.md](../spec/deployment.md) §Operator inputs item 7): the bot's queue address is **queried from the running simplex-chat over the adapter's own WebSocket at `start()`** (a `/show_address`-shaped self-address command; the bare queue id is extracted from the returned contact link) and re-derived on supervised subprocess restart. Since simplex-chat v6.5.4.1 the group mention payload no longer carries a queue address, so this derived value is **no longer the mention anchor** (decision D51 — group mentions resolve against the per-group `memberId`, see §Mention anchoring below); the `/show_address` derivation now serves only as a startup contract health-check (a malformed or absent self-address refuses *that adapter's* startup, per-adapter resilience §6.7) and is slated for removal (M1-518). It is NOT an operator-typed property and is not parsed from disk.
   - Identity: the SimpleX contact display ID (e.g., xftp://...); cryptographically bound. trustLevel = HIGH.
-  - **Mention anchoring:** SimpleX's group event payloads carry a structured mention list. The adapter compares the bot's queue address (derived from bot identity material above) byte-equal against the mention target's contact id; it does NOT scan the message body for the bot's display name. `supportsMentionByContactId = true`.
+  - **Mention anchoring (D51):** SimpleX's group `newChatItem` carries a top-level `mentions{}` object (display name → per-group `memberId`), and the bot's own per-group `memberId` is in the same frame at `chatInfo.groupInfo.membership.memberId`. The adapter recognises a bot @mention by **byte-equality of a `mentions{}` memberId against `groupInfo.membership.memberId`**; it does NOT scan the message body for the bot's display name. The bot's own mention span is located by resolving the matched memberId back to its `mentions{}` display-name key and stripping the `formattedText` segment(s) carrying that `memberName`, leaving co-mentions of other members intact. `supportsMentionByContactId = true`.
 
   ### 6.4.2 Capabilities (declared)                                                                                                                                                                                                                         
 
-  supportsMentionByContactId = true   // SimpleX mention payload references queue address (§6.2.3)
+  supportsMentionByContactId = true   // SimpleX mention resolves to a per-group memberId (D51, §6.2.3)
   supportsMembershipEvents   = false  // OPEN — SimpleX has a join event but no documented per-user
                                       //   left-group event at the bot-API layer. v1 ships false and
                                       //   relies on permanent-failure-driven cleanup (§6.3.6).
@@ -534,7 +539,7 @@
   SimplexEventDecoder maps SimpleX chatItem events to InboundMessage:                                                                                                                                                                                   
                                                                                    
   - event.kind == "newChatItem" and chatInfo.type == "direct" → ScopeRef.Dm(contact_id).                                                                                                                                                            
-  - event.kind == "newChatItem" and chatInfo.type == "group" → ScopeRef.Group(group_id). The decoder reads the SimpleX mention metadata on the chatItem; if any mention's target contact id matches the bot's per-adapter queue address byte-equal (§6.2.3 / §6.10), the mention spans are stripped from the rendered text and the message is delivered. Group messages without a mention payload referencing the bot are dropped — display-name string matching is forever-out-of-v1.
+  - event.kind == "newChatItem" and chatInfo.type == "group" → ScopeRef.Group(group_id). The decoder reads the chatItem's top-level `mentions{}` object (display name → `memberId`); if any mention's `memberId` byte-equals the bot's own `chatInfo.groupInfo.membership.memberId` (D51, §6.2.3 / §6.10), the bot's mention spans are stripped from the rendered text and the message is delivered. Group messages with no mention resolving to the bot are dropped — display-name string matching is forever-out-of-v1, and a quote-reply that sets `meta.userMention` but carries no bot mention is NOT delivered.
   - event.kind == "memberJoined" (group) → InboundHandler.onUserJoinedGroup(group_id, identity). (`supportsMembershipEvents = false` despite this — Provider does not rely on the join event for cleanup logic; per-user *left* events are the missing piece, see §6.4.2.)
   - Other event kinds: logged at DEBUG, dropped.                                                                                                                                                                                                        
                                                                                                                                                                                                                                                         
@@ -1028,12 +1033,12 @@
   ---                                                                                                                                                                                                                                                   
   ## 6.10 @mention rules in groups
 
-  Mention recognition is anchored to the bot's per-adapter cryptographic contact id (§6.2.3). There is **no operator-typed mention name** — the prior `infochat.adapter.bot-mention-name=@infochat-bot` property has been removed. The bot's per-adapter contact id is derived from the adapter's bot identity material at adapter startup (SimpleX queue address, queried from the running simplex-chat; Signal ACI / `mentionUuid`, read from the `signal-cli` identity store).
+  Mention recognition is anchored to the bot's cryptographic contact id (§6.2.3). There is **no operator-typed mention name** — the prior `infochat.adapter.bot-mention-name=@infochat-bot` property has been removed. The bot's contact id for mention recognition is: **SimpleX** — the bot's **per-group `memberId`**, read per-frame from `chatInfo.groupInfo.membership.memberId` (decision D51; the queue address the pre-v6.5.4.1 mention payload carried is gone); **Signal** — the ACI / `mentionUuid`, read once at adapter startup from the `signal-cli` identity store.
 
   The adapter must:
 
-  1. Read each inbound group message's mention payload (the structured list of `(target_contact_id, span_start, span_length)` records the protocol provides). For SimpleX this is the chatItem's mention metadata; for Signal it is `dataMessage.mentions`.
-  2. For each mention, compare `target_contact_id` byte-equal against the bot's cached per-adapter contact id. A match means the message is delivered.
+  1. Read each inbound group message's mention payload. For SimpleX this is the top-level `mentions{}` object (display name → `memberId`); for Signal it is `dataMessage.mentions` (`(mentionUuid, start, length)` records).
+  2. Compare each mention's contact id byte-equal against the bot's own contact id — SimpleX: a `mentions{}` `memberId` vs `groupInfo.membership.memberId`; Signal: a `mentionUuid` vs the cached ACI. A match means the message is delivered.
   3. Strip the matched mention's covered spans from the rendered text before delivery so the parser sees the user's actual command/message. A trailing space immediately after the stripped span is also removed.
   4. Drop messages without a matching mention silently.
 

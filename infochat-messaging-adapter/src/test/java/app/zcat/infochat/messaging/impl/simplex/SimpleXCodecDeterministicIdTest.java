@@ -51,7 +51,8 @@ class SimpleXCodecDeterministicIdTest {
                   "chatInfo": {
                     "type": "group",
                     "groupInfo": {
-                      "groupId": "group-7"
+                      "groupId": "group-7",
+                      "membership": {"memberId": "bot-member-id"}
                     }
                   },
                   "chatItem": {
