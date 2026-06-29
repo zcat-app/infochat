@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 546 |
+| done | 547 |
 | deferred | 10 |
 | **total** | **560** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-509 — Operator onboarding: simple (comic) + advanced admin guides (complexity: medium, risk: low)
 - M1-525 — Free auto_joined_group slots when the bot leaves a group (complexity: low, risk: low)
 
@@ -705,7 +704,7 @@ M1-496 (done)
 M1-497 (done)
 M1-498 (done)
 M1-499 (done)
-M1-500 (pending) ← runnable
+M1-500 (done)
 M1-501 (done)
 M1-502 (done)
 M1-503 (done)

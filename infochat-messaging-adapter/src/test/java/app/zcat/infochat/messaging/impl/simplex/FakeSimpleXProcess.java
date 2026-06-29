@@ -229,23 +229,18 @@ public final class FakeSimpleXProcess implements AutoCloseable {
         ByteArrayOutputStream lineBuffer = new ByteArrayOutputStream();
         String key = null;
         int b;
-        int consecutiveCrlf = 0;
         while ((b = in.read()) != -1) {
             lineBuffer.write(b);
             if (b == '\n') {
                 String line = lineBuffer.toString(StandardCharsets.US_ASCII).trim();
                 lineBuffer.reset();
                 if (line.isEmpty()) {
-                    consecutiveCrlf++;
-                    if (consecutiveCrlf >= 1) {
-                        break;
-                    }
-                } else {
-                    consecutiveCrlf = 0;
-                    if (line.regionMatches(true, 0, "Sec-WebSocket-Key:", 0,
-                            "Sec-WebSocket-Key:".length())) {
-                        key = line.substring("Sec-WebSocket-Key:".length()).trim();
-                    }
+                    // Blank line terminates the HTTP request headers.
+                    break;
+                }
+                if (line.regionMatches(true, 0, "Sec-WebSocket-Key:", 0,
+                        "Sec-WebSocket-Key:".length())) {
+                    key = line.substring("Sec-WebSocket-Key:".length()).trim();
                 }
             }
         }

@@ -75,7 +75,9 @@ class DigestWorkerTest {
         // group repo) are never exercised on these success/programming-error
         // paths. base-delay 0 keeps any (unused) back-off instant.
         worker.outboundDelivery = new OutboundDelivery(
-                new ThrottledAdminNotifier(), new GroupRepository(null), 3, 0L, 2.0, 3);
+                new ThrottledAdminNotifier(),
+                new GroupRepository(new StubGroupDataSource(ADAPTER_NAME, UPSTREAM_GROUP_ID, "en")),
+                3, 0L, 2.0, 3);
     }
 
     @Test

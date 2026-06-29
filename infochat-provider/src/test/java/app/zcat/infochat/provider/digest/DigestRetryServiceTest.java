@@ -106,21 +106,17 @@ class DigestRetryServiceTest {
                 SLOT_KIND, SLOT_FIRED_AT, EXPIRES_AT, false,
                 GROUP_TIMEZONE, deleteExecuted);
 
-        // First call succeeds
+        // First call succeeds and invokes the worker once.
         RetryResult first = service.retryDigest(GROUP_ID);
         assertEquals(RetryResult.SUCCESS, first);
+        assertEquals(1, digestWorker.executeCount);
 
-        // Now simulate concurrent: put a blocking entry in the inFlight map
-        // by using reflection (the map is private). Alternatively, use a
-        // slow DataSource, but that's fragile. Instead, test the contract
-        // indirectly: two sequential calls both succeed (proving the lock is
-        // released), then verify the ConcurrentHashMap rejects overlap via
-        // a stub that blocks.
-        service.dataSource = new BlockingDataSource(
-                stubDataSource(SLOT_KIND, SLOT_FIRED_AT, EXPIRES_AT, false,
-                        GROUP_TIMEZONE, new boolean[] { false }));
-
-        // Access internal maps via reflection to simulate overlap
+        // Simulate a concurrent retry already holding the per-group guard by
+        // seeding the (private) inFlight map directly — there is no non-reflective
+        // seam to inject a concurrent hold, since retryDigest releases the entry
+        // in its finally block. The non-circular proof of serialization is the
+        // observable below: the second retry must NOT invoke the worker again,
+        // not merely echo the injected flag back in its return value.
         try {
             // Clear cooldown so the rate limiter doesn't fire before inFlight
             var cooldownField = DigestRetryService.class.getDeclaredField("lastRetryAt");
@@ -138,6 +134,8 @@ class DigestRetryServiceTest {
             RetryResult concurrent = service.retryDigest(GROUP_ID);
             assertEquals(RetryResult.ALREADY_IN_PROGRESS, concurrent,
                     "second concurrent retry must be rejected");
+            assertEquals(1, digestWorker.executeCount,
+                    "the rejected retry must short-circuit before re-invoking the worker");
 
             // Clean up
             map.remove(GROUP_ID);
@@ -168,28 +166,6 @@ class DigestRetryServiceTest {
         public void onDigestSlot(DigestSlot slot) {
             // no-op: tests drive execute(...) directly
         }
-    }
-
-    /**
-     * Trivial wrapper that delegates all calls — used only as a
-     * marker type in the serialization test.
-     */
-    static class BlockingDataSource implements DataSource {
-        private final DataSource delegate;
-
-        BlockingDataSource(DataSource delegate) {
-            this.delegate = delegate;
-        }
-
-        @Override public Connection getConnection() throws java.sql.SQLException { return delegate.getConnection(); }
-        @Override public Connection getConnection(String u, String p) throws java.sql.SQLException { return delegate.getConnection(); }
-        @Override public PrintWriter getLogWriter() { throw new UnsupportedOperationException(); }
-        @Override public void setLogWriter(PrintWriter out) { throw new UnsupportedOperationException(); }
-        @Override public void setLoginTimeout(int seconds) { throw new UnsupportedOperationException(); }
-        @Override public int getLoginTimeout() { throw new UnsupportedOperationException(); }
-        @Override public Logger getParentLogger() throws SQLFeatureNotSupportedException { throw new SQLFeatureNotSupportedException(); }
-        @Override public <T> T unwrap(Class<T> iface) { throw new UnsupportedOperationException(); }
-        @Override public boolean isWrapperFor(Class<?> iface) { return false; }
     }
 
     /**

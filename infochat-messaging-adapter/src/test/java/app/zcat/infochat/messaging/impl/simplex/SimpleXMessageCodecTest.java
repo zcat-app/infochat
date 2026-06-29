@@ -25,8 +25,7 @@ class SimpleXMessageCodecTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Test
-    void encodesAndDecodesMessages() throws Exception {
-        // --- Encode: a fresh /_send to a DM, and verify the envelope shape.
+    void encodeSendCommand_buildsDmEnvelope() throws Exception {
         String sendFrame = SimpleXMessageCodec.encodeSendCommand(
                 "corr-1",
                 new ScopeRef.Dm("contact-abc"),
@@ -39,8 +38,10 @@ class SimpleXMessageCodecTest {
                 "DM send addresses the contact with @<id>: " + cmd);
         assertTrue(cmd.contains("\"text\":\"Hello, world\""),
                 "text-content msgContent payload appears in the cmd string: " + cmd);
+    }
 
-        // --- Encode: an in-place edit (live=on) and the terminal edit (live=off).
+    @Test
+    void encodeUpdateCommand_usesLiveOn() throws Exception {
         String updateFrame = SimpleXMessageCodec.encodeUpdateCommand(
                 "corr-2",
                 "chat-item-99",
@@ -49,7 +50,10 @@ class SimpleXMessageCodecTest {
         String updateCmd = MAPPER.readTree(updateFrame).get("cmd").asText();
         assertTrue(updateCmd.contains("/_update item @contact-abc chat-item-99 live=on"),
                 "in-place update uses live=on: " + updateCmd);
+    }
 
+    @Test
+    void encodeFinalizeCommand_usesLiveOff() throws Exception {
         String finalizeFrame = SimpleXMessageCodec.encodeFinalizeCommand(
                 "corr-3",
                 "chat-item-99",
@@ -58,9 +62,12 @@ class SimpleXMessageCodecTest {
         String finalizeCmd = MAPPER.readTree(finalizeFrame).get("cmd").asText();
         assertTrue(finalizeCmd.contains("live=off"),
                 "terminal edit uses live=off: " + finalizeCmd);
+    }
 
-        // --- Decode: an inbound direct-message newChatItem yields an Inbound
-        //     carrying the (contact_id, scope, body) tuple per acceptance item 7.
+    @Test
+    void decode_directMessageYieldsInbound() {
+        // An inbound direct-message newChatItem yields an Inbound carrying the
+        // (contact_id, scope, body) tuple per acceptance item 7.
         String inboundJson = """
                 {
                   "resp": {
@@ -94,8 +101,11 @@ class SimpleXMessageCodecTest {
         assertEquals("Inbound payload", inbound.message().text());
         assertInstanceOf(ScopeRef.Dm.class, inbound.message().scope());
         assertEquals("msg-77", inbound.message().adapterMessageId());
+    }
 
-        // --- Decode: a send-ack carrying the chat-item id (acceptance item 8).
+    @Test
+    void decode_sendAckCarriesChatItemId() {
+        // A send-ack carrying the chat-item id (acceptance item 8).
         String ackJson = """
                 {
                   "corrId": "corr-1",
@@ -110,14 +120,19 @@ class SimpleXMessageCodecTest {
                 SimpleXMessageCodec.decode(ackJson));
         assertEquals("corr-1", ack.corrId());
         assertEquals("msg-12345", ack.chatItemId());
+    }
 
-        // --- Decode: an unknown response type is Ignored, not an error.
+    @Test
+    void decode_unknownResponseTypeIsIgnored() {
+        // An unknown response type is Ignored, not an error.
         var ignored = assertInstanceOf(
                 SimpleXMessageCodec.Ignored.class,
                 SimpleXMessageCodec.decode("{\"resp\": {\"type\": \"contactConnected\"}}"));
         assertNotNull(ignored.reason());
+    }
 
-        // --- Decode: malformed frames throw MalformedFrameException.
+    @Test
+    void decode_malformedFrameThrows() {
         assertThrows(SimpleXMessageCodec.MalformedFrameException.class,
                 () -> SimpleXMessageCodec.decode("not json"));
         assertThrows(SimpleXMessageCodec.MalformedFrameException.class,
