@@ -853,6 +853,46 @@ The default rule in [../spec/deployment.md](../spec/deployment.md) §Bootstrap b
 
 The same shape applies to messaging-adapter startup ([06-messaging.md §6.7](06-messaging.md)): a connection failure on one adapter does not abort Provider startup, the Provider's readiness probe reports ready when **at least one** activated adapter is connected, and per-adapter connection state is exposed separately via metrics.
 
+### 7.8.7 Host resource hardening (swap, container caps, build isolation)
+
+Root cause of the 2026-06-28 resource-exhaustion incident was operational, not a code defect: the 4 vCPU / 15 GB **zero-swap** host ran `mvn verify` (which forks a test JVM per module) and `docker` image builds at the same time the live LLM inference stack (two llama.cpp servers + the eval pipeline) and several interactive sessions were running. The RAM overshoot had nowhere to page and the host thrashed. The measures below make a repeat degrade gracefully and stay contained to one container.
+
+**Host swap (required).** A production host MUST have swap configured so a memory overshoot degrades to paging instead of an OOM kill or a whole-host stall — the zero-swap state is what turned the incident's overshoot into a meltdown. Provision a swapfile as part of first-run bootstrap, sized relative to RAM: roughly **0.5× RAM on a RAM-rich box** (≥ 8 GB), **1× RAM on a smaller one**.
+
+```bash
+sudo fallocate -l 8G /swapfile          # ~0.5× the 15 GB reference host
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+# Persist across reboots:
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+# Prefer RAM; lean on swap only under real pressure (kernel default is 60):
+echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-infochat-swap.conf
+sudo sysctl --system
+```
+
+Swap is a safety margin, not a runtime the app should live in: the per-container caps below keep steady-state memory well under RAM, and swap only absorbs a transient overlap.
+
+**Per-container caps.** Every long-running prod service in `docker-compose.yml` (llamacpp, llamacpp-embeddings, collector, provider, postgres) declares a `deploy.resources` memory limit + reservation and a CPU limit; the sizing basis is commented in the Compose file. The memory limits are **blast-radius caps**: a runaway hits its own container's limit and is OOM-killed-and-restarted (`restart: unless-stopped`) rather than dragging down the host. The CPU limits **throttle** (never kill) — capping the generative llama.cpp server below the core count leaves a core for Postgres and the JVMs, directly countering the incident's all-cores-pegged inference. The two JVM services additionally pin a heap ceiling (`-XX:MaxRAMPercentage` via `JAVA_TOOL_OPTIONS`, **not** `JAVA_OPTS` — the `Dockerfile.jvm` ENTRYPOINT is a bare `java -jar` that does not expand `$JAVA_OPTS`) strictly **below** their container memory limit, so the JVM hits a managed, catchable heap limit before the cgroup OOM-killer SIGKILLs the container.
+
+**No second, unused local LLM runtime.** The host systemd `ollama.service` used by the `quarkus:dev` inner loop (D49, §7.7) MUST NOT run on a box whose production deployment is the **pure-llama.cpp shape** (shape a: `--profile llamacpp --profile llamacpp-embeddings`). It is a second local LLM runtime that needlessly reserves RAM and resident model weights with no consumer — a footgun under memory pressure. Tear it down on such a host:
+
+```bash
+sudo systemctl disable --now ollama.service
+```
+
+One-line check that no enabled local runtime is unused by the active Compose profile set — on a pure-llama.cpp box the running services do not include `ollama`, so an active host `ollama.service` is the unused second runtime:
+
+```bash
+systemctl is-active --quiet ollama.service \
+  && ! docker compose ps --services --filter status=running 2>/dev/null | grep -qx ollama \
+  && echo "WARN: host ollama.service is up but no running Compose service uses it — disable it"
+```
+
+(The Ollama-generative and llama.cpp-plus-Ollama-embeddings shapes legitimately run an `ollama` service; the check only flags Ollama running with no matching active profile.)
+
+**Do not build on the live prod host.** Builds (`mvn verify`, `docker` image builds) MUST NOT run on the prod host while the LLM stack is live: `mvn verify` forks a test JVM per module and an image build pegs all cores, stacking on the resident model weights with no swap to absorb the overshoot — exactly the 2026-06-28 trigger. Build elsewhere (a separate build host or CI runner) and ship only the built images / jars to the prod box. Standing up that separate build runner is an operator choice, out of scope here — this is the runbook prohibition only.
+
 ---
 
 ## 7.9 Bootstrap & first-run sequence

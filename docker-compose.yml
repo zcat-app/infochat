@@ -13,6 +13,33 @@
 # infochat owner + database and the two service roles WITH their env-driven
 # passwords (07-deployment.md §Database role bootstrap).
 
+# ── Production resource caps (M1-512) ──────────────────────────────────────
+# Every long-running prod service below declares deploy.resources: a memory
+# limit + reservation and a CPU limit. Compose v2 honours deploy.resources for
+# `docker compose up` — no swarm needed. These are BLAST-RADIUS caps, not
+# tuning: each ceiling sits ABOVE steady state with headroom so normal
+# operation never reaches it; a genuine runaway hits its own container's limit
+# and is OOM-killed-and-restarted (the llama services carry
+# restart: unless-stopped) instead of thrashing the whole host. Root cause of
+# the 2026-06-28 resource-exhaustion incident was an un-capped overshoot on a
+# zero-swap host (07-deployment.md §7.8.7).
+#
+# Sized for the reference prod host (4 vCPU / 15 GB, vps profile §7.8.3).
+# Memory RESERVATIONS sum well under host RAM so the scheduler can place every
+# container; memory LIMITS may sum above it because they are per-container
+# ceilings not all hit at once, and host swap absorbs a transient overlap
+# (07-deployment.md §7.8.7 "Host swap"). CPU limits only THROTTLE (never kill):
+# capping the generative llama.cpp server below the 4-core count keeps a core
+# free for Postgres + the JVMs, countering the incident's all-cores-pegged
+# inference. The two JVM services additionally pin a heap ceiling BELOW their
+# memory limit (see their JAVA_TOOL_OPTIONS) so the JVM hits a managed heap
+# limit before the cgroup OOM-killer fires. The numbers are starting points
+# above the model/JVM footprints, not measured optima — adjust per the actual
+# generative model. The `ollama` service is intentionally uncapped: it is not
+# one of the five always-on prod services and runs only in the dev inner loop
+# or the optional Ollama-embeddings shape (§7.8.7 tells the operator to tear
+# down an unused Ollama runtime).
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -41,6 +68,16 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
+    # Resource caps (M1-512; rationale above): Postgres steady-state RSS at this
+    # scale (~50 users) is a few hundred MB plus shared_buffers; 2g leaves ample
+    # headroom while still bounding a runaway query/connection storm.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 2g
+        reservations:
+          memory: 512m
 
   # --- prod-profile app services (M1-379) ------------------------------------
   # Collector and Provider run as built container images under the `prod`
@@ -77,6 +114,14 @@ services:
       # embeddings provider. Empty pass-through — blank for a local Ollama/llama.cpp
       # setup where no key is written (§7.7.2 "Runtime config delivery", §7.3).
       INFOCHAT_LLM_API_KEY: ${INFOCHAT_LLM_API_KEY:-}
+      # Heap ceiling BELOW the container memory limit (M1-512): the deploy limit
+      # below is 1536m; MaxRAMPercentage=60 caps the heap near ~920m so the JVM
+      # hits a managed OutOfMemoryError (GC pressure first) before the cgroup
+      # OOM-killer SIGKILLs the container. Set via JAVA_TOOL_OPTIONS, NOT
+      # JAVA_OPTS: the image ENTRYPOINT is a bare `java -jar quarkus-run.jar`
+      # (Dockerfile.jvm) that does not expand $JAVA_OPTS, whereas the JVM
+      # auto-reads JAVA_TOOL_OPTIONS regardless of launch form.
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=60.0"
     volumes:
       # Wizard-generated runtime config (§7.7.2 "Runtime config delivery"): mounted
       # read-only at config/application.properties relative to the fast-jar working
@@ -106,6 +151,17 @@ services:
       timeout: 5s
       retries: 18
       start_period: 40s
+    # Resource caps (M1-512; rationale above): a lean Quarkus JVM. The 1536m
+    # limit sits above heap (~920m, JAVA_TOOL_OPTIONS) + non-heap (metaspace,
+    # thread stacks, Netty direct buffers, code cache); the JVM hits its own
+    # heap ceiling before this cgroup limit.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1536m
+        reservations:
+          memory: 512m
 
   infochat-provider:
     profiles: [prod]
@@ -132,6 +188,12 @@ services:
       # the var MUST reach the container env or gate 7 fails "admin union empty".
       INFOCHAT_SIMPLEX_ADMIN_TOKEN: ${INFOCHAT_SIMPLEX_ADMIN_TOKEN:-}
       INFOCHAT_SIGNAL_ADMIN_CONTACT_ID: ${INFOCHAT_SIGNAL_ADMIN_CONTACT_ID:-}
+      # Heap ceiling BELOW the container memory limit (M1-512), same rationale as
+      # the Collector above: the deploy limit is 1536m; MaxRAMPercentage=60 caps
+      # the heap near ~920m so the JVM hits a managed OutOfMemoryError before the
+      # cgroup OOM-killer fires. JAVA_TOOL_OPTIONS (not JAVA_OPTS) because the
+      # bare `java -jar` ENTRYPOINT does not expand $JAVA_OPTS.
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=60.0"
     volumes:
       # Runtime config — same mount as the Collector (§7.7.2): carries the operator's
       # quarkus.profile, infochat.llm.*, infochat.adapters, and the per-adapter
@@ -164,6 +226,15 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+    # Resource caps (M1-512; rationale above): same envelope as the Collector —
+    # a lean Quarkus JVM whose heap ceiling sits below this cgroup limit.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1536m
+        reservations:
+          memory: 512m
 
   # --- LLM backend services (M1-380, M1-417) ---------------------------------
   # The operator picks a local LLM backend shape; the §7.7.2 wizard starts the
@@ -241,6 +312,19 @@ services:
       timeout: 5s
       retries: 30
       start_period: 60s
+    # Resource caps (M1-512; rationale above): the generative server is the
+    # dominant consumer — resident GGUF weights (vps-profile 3B-8B Q4 ≈ 2-5 GB)
+    # plus KV cache. 7g limit sits above that with headroom; 3g reservation
+    # guarantees placement. cpus 3.0 (of 4) is the key incident mitigation: it
+    # caps inference below the core count so a request burst cannot peg all
+    # cores and starve Postgres + the JVMs (the 2026-06-28 failure mode).
+    deploy:
+      resources:
+        limits:
+          cpus: "3.0"
+          memory: 7g
+        reservations:
+          memory: 3g
 
   # Second llama.cpp instance for the pure-llama.cpp embeddings shape (M1-417,
   # D49): one llama-server serves exactly one model, so the fixed 768-dim nomic
@@ -269,6 +353,18 @@ services:
       timeout: 5s
       retries: 30
       start_period: 60s
+    # Resource caps (M1-512; rationale above): the 768-dim nomic-class embedder
+    # is small (weights well under 1 GB) but CPU-bursty under an embedding
+    # backlog (1877 inference requests drove the 2026-06-28 window). 2g limit is
+    # generous headroom; cpus 1.5 caps the burst so it cannot pile onto the
+    # generative server's cores.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 2g
+        reservations:
+          memory: 512m
 
 volumes:
   infochat-pgdata:

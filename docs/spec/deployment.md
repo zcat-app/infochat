@@ -447,6 +447,16 @@ the generative model and a second fixed-dimension embedder. Embeddings
 stay 768-dim nomic-class in both shapes and never point at the
 generative model.
 
+**Resource isolation (invariant).** A production host runs the LLM
+stack, the database, and the Provider/Collector services **only** — it
+is not also a build host. **Swap is required** so a memory overshoot
+degrades to paging rather than an OOM kill or whole-host stall, and
+**per-container memory caps** bound the blast radius of a runaway to a
+single container. This adds **no operator input** — it is a
+deployment-shape constraint, not a configuration knob, so the operator
+wizard contract is unchanged. Design-note runbook: 07-deployment.md
+§7.8.7.
+
 The set of supported profiles is the spec-level commitment; the values                                                                                                                                                                                
 behind each profile are tuning.
 

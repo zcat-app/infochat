@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 514 |
+| done | 515 |
 | deferred | 8 |
-| **total** | **548** |
+| **total** | **549** |
 
 ---
 
@@ -84,6 +84,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-512 | Production runtime resource harness: swap, container memory/CPU caps, dev-runtime teardown | 2026-06-29 | round 1 APPROVE |
 | M1-510 | SimpleX codec: align DM inbound/outbound/error decode with live v6.5.4.1 wire format | 2026-06-29 | round 1 APPROVE |
 | M1-508 | SimpleX codec: decode newChatItems (plural) inbound (v6.5.4) | 2026-06-28 | round 1 APPROVE |
 | M1-507 | Operator tooling + docs for SimpleX claim-token bootstrap | 2026-06-28 | round 1 APPROVE |
@@ -93,7 +94,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-502 | RssFeedParser: tolerate leading whitespace before the XML declaration | 2026-06-27 | round 1 APPROVE |
 | M1-477 | upgrade.sh health gate: accept a running service that declares no healthcheck | 2026-06-27 | round 1 APPROVE |
 | M1-476 | upgrade.sh deploys the current checkout with zero operator config | 2026-06-27 | round 1 APPROVE |
-| M1-475 | Enforce D43 over non-constant bundle keys (en-keyset gate) | 2026-06-27 | round 1 APPROVE |
 
 ---
 
@@ -738,7 +738,7 @@ M1-508 (done)
 M1-509 (pending) ← runnable
 M1-510 (done)
   └── M1-511 (deferred)
-M1-512 (draft)
+M1-512 (done)
 M1-513 (draft)
 M1-514 (pending) ← runnable
   └── M1-515 (pending)

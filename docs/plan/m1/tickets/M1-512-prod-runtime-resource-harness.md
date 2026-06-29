@@ -1,9 +1,15 @@
 ---
 id: M1-512
 title: "Production runtime resource harness: swap, container memory/CPU caps, dev-runtime teardown"
-status: draft
+status: done
 created: 2026-06-29
 last_updated: 2026-06-29
+clarity_check:
+  date: 2026-06-29
+  verdict: WARN
+  warnings:
+    - "Acceptance item 6 still carries the 'or the nearest existing anchor' qualifier; the §Deployment scenarios anchor exists (docs/spec/deployment.md line 416). Implementer pins the note to §Deployment scenarios and drops the qualifier."
+  blockers: []
 blocked_by: []
 files_budget: 6
 files_scope:
@@ -95,13 +101,42 @@ notes: >-
   build-artifact mtimes in target/ and .scratch/.
 spec_refs:
   - "docs/spec/deployment.md §Deployment scenarios"
-  - "docs/design/07-deployment.md §7.7 (Compose profiles / LLM serve wiring)"
+  - "docs/design/07-deployment.md §7.7 Local and containerized stack"
 decision_refs:
   - D49
   - D46
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 174
+      removed: 7
 overrides: []
 escalations: []
+revisions:
+  - date: 2026-06-29
+    reason: clarity-fail rework
+    snapshot:
+      status: draft
+      clarity_check:
+        date: 2026-06-29
+        verdict: FAIL
+        blockers:
+          - "spec_refs entry 'docs/design/07-deployment.md §7.7 (Compose profiles / LLM serve wiring)' resolves to ANCHOR-NOT-FOUND; the actual heading is '7.7 Local and containerized stack (`docker-compose`)'."
+        warnings:
+          - "Acceptance item 6 'or the nearest existing anchor' qualifier introduces reviewer ambiguity (the §Deployment scenarios anchor resolves)."
+          - "Acceptance item 6 location qualifier unnecessary since the named anchor exists."
+      spec_refs_at_snapshot:
+        - "docs/spec/deployment.md §Deployment scenarios"
+        - "docs/design/07-deployment.md §7.7 (Compose profiles / LLM serve wiring)"
 ---
 
 ## Context
