@@ -25,7 +25,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-509 — Operator onboarding: simple (comic) + advanced admin guides (complexity: medium, risk: low)
-- M1-525 — Free auto_joined_group slots when the bot leaves a group (complexity: low, risk: low)
+- M1-525 — Free auto_joined_group slots when the bot leaves a group (complexity: high, risk: medium)
 
 ---
 
