@@ -27,9 +27,11 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.sql.Types;
 import java.text.MessageFormat;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -79,21 +81,24 @@ public class InviteCommandHandler implements CommandHandler {
     // The open-cap query is scoped to one adapter per spec §Invite-code
     // registration ("per-adapter open cap"). The expires_at filter
     // matches the spec's active-PENDING definition — codes whose TTL
-    // has passed do NOT count toward the cap.
+    // has passed do NOT count toward the cap. The cutoff is bound from
+    // the injected Clock (not SQL NOW()) so the cap gate shares one clock
+    // with the expires_at write (§9 / M1-490).
     private static final String COUNT_OPEN_PENDING_PER_ADAPTER_SQL =
             "SELECT count(*) FROM invite_code "
                     + "WHERE invite_type = 'OPEN_ADAPTER' "
                     + "  AND status = 'PENDING' "
                     + "  AND adapter = ? "
-                    + "  AND (expires_at IS NULL OR expires_at > NOW())";
+                    + "  AND (expires_at IS NULL OR expires_at > ?)";
 
     // The contact-cap query is global across adapters per spec
-    // §Invite-code registration ("global --contact cap").
+    // §Invite-code registration ("global --contact cap"). expires_at
+    // cutoff bound from the injected Clock, as above.
     private static final String COUNT_CONTACT_PENDING_GLOBAL_SQL =
             "SELECT count(*) FROM invite_code "
                     + "WHERE invite_type = 'CONTACT_BOUND' "
                     + "  AND status = 'PENDING' "
-                    + "  AND (expires_at IS NULL OR expires_at > NOW())";
+                    + "  AND (expires_at IS NULL OR expires_at > ?)";
 
     // Pre-mint the code via a separate SELECT gen_random_uuid() so the
     // audit row can be written FIRST (audit-before-effect, Invariant 7)
@@ -160,6 +165,18 @@ public class InviteCommandHandler implements CommandHandler {
 
     @Inject
     UserRepository userRepository;
+
+    // expires_at is written from this injected Clock and the open/contact cap
+    // counts compare expires_at against the same Clock (bound param, not SQL
+    // NOW()), so the invite-expiry cap gate reads and writes one clock — the
+    // app-vs-DB split §9 prohibits, made pinnable in InviteExpiryClockIT. The
+    // systemUTC() initializer keeps the field non-null for any hand-constructed
+    // instance; CDI injection overrides it in the managed bean. The consume-time
+    // expires_at > NOW() check in InviteCodeConsumer and the /invite list display
+    // filter intentionally stay on the DB clock — see docs/plan/m1/now-clock-audit.md.
+    // (M1-490, pattern from M1-444 ReEvaluationJob)
+    @Inject
+    Clock clock = Clock.systemUTC();
 
     @Override
     public String name() {
@@ -305,12 +322,15 @@ public class InviteCommandHandler implements CommandHandler {
         }
 
         String requestId = UUID.randomUUID().toString();
-        OffsetDateTime expiresAt = OffsetDateTime.now().plus(inviteTtl);
+        // Sample the injected Clock once so the cap-count cutoff and the
+        // expires_at write below share one instant (§9 / M1-490).
+        Instant now = clock.instant();
+        OffsetDateTime expiresAt = OffsetDateTime.ofInstant(now, ZoneOffset.UTC).plus(inviteTtl);
         UUID code;
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                long current = countContactBoundPending(conn);
+                long current = countContactBoundPending(conn, now);
                 if (current >= contactCap) {
                     conn.rollback();
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_CONTACT_CAP_MET, inboundContext.effectiveLanguage()));
@@ -354,12 +374,15 @@ public class InviteCommandHandler implements CommandHandler {
                                        String inboundAdapter,
                                        String targetAdapter) {
         String requestId = UUID.randomUUID().toString();
-        OffsetDateTime expiresAt = OffsetDateTime.now().plus(inviteTtl);
+        // Sample the injected Clock once so the cap-count cutoff and the
+        // expires_at write below share one instant (§9 / M1-490).
+        Instant now = clock.instant();
+        OffsetDateTime expiresAt = OffsetDateTime.ofInstant(now, ZoneOffset.UTC).plus(inviteTtl);
         UUID code;
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                long current = countOpenPendingForAdapter(conn, targetAdapter);
+                long current = countOpenPendingForAdapter(conn, targetAdapter, now);
                 if (current >= openCap) {
                     conn.rollback();
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_OPEN_CAP_MET, inboundContext.effectiveLanguage()));
@@ -394,9 +417,11 @@ public class InviteCommandHandler implements CommandHandler {
         return reply(scope, body);
     }
 
-    private long countOpenPendingForAdapter(Connection conn, String adapter) throws SQLException {
+    private long countOpenPendingForAdapter(Connection conn, String adapter, Instant now)
+            throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(COUNT_OPEN_PENDING_PER_ADAPTER_SQL)) {
             ps.setString(1, adapter);
+            ps.setObject(2, OffsetDateTime.ofInstant(now, ZoneOffset.UTC));
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getLong(1);
@@ -404,11 +429,13 @@ public class InviteCommandHandler implements CommandHandler {
         }
     }
 
-    private long countContactBoundPending(Connection conn) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement(COUNT_CONTACT_PENDING_GLOBAL_SQL);
-             ResultSet rs = ps.executeQuery()) {
-            rs.next();
-            return rs.getLong(1);
+    private long countContactBoundPending(Connection conn, Instant now) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(COUNT_CONTACT_PENDING_GLOBAL_SQL)) {
+            ps.setObject(1, OffsetDateTime.ofInstant(now, ZoneOffset.UTC));
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
         }
     }
 

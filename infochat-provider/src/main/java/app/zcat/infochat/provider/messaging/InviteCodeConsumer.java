@@ -112,8 +112,12 @@ public class InviteCodeConsumer {
     private static final String SELECT_USER_ID_SQL =
             "SELECT id FROM users WHERE adapter = ? AND contact_id = ?";
 
+    // attempted_at is stamped from the sampled app Clock (not the DB DEFAULT
+    // now()) so the brute-force window WRITE shares the clock the
+    // COUNT_ATTEMPTS_SQL cutoff READ already uses — closing the app-vs-DB split
+    // that left the window gate unpinnable (§9 / M1-490).
     private static final String INSERT_ATTEMPT_SQL =
-            "INSERT INTO invite_code_attempt (adapter, contact_id) VALUES (?, ?)";
+            "INSERT INTO invite_code_attempt (adapter, contact_id, attempted_at) VALUES (?, ?, ?)";
 
     static final String INVITE_CONSUME = AuditAction.INVITE_CONSUME.name();
     static final String INVITE_BRUTE_FORCE_BREACH = AuditAction.INVITE_BRUTE_FORCE_BREACH.name();
@@ -136,15 +140,17 @@ public class InviteCodeConsumer {
     @Inject
     RegisteredContactSet registeredContactSet;
 
-    // All Java-side decision-time reads (brute-force window count, breach-sweep
-    // gate/cutoff, breach mark, probation_until write) come from this injected
-    // Clock, sampled once per consume() so the in-memory breach mark and the
-    // sweep that reads it back share one instant — never split across two clocks
-    // (M1-444 rule). The systemUTC() initializer keeps the field non-null for
-    // hand-constructed instances (newLocalConsumer() in the eviction tests,
-    // which never goes through CDI); injection overrides it in the managed bean.
-    // The SQL expires_at > NOW() invite-expiry gate intentionally stays on the
-    // DB clock (intra-statement comparison) — see docs/plan/m1/now-clock-audit.md.
+    // All Java-side decision-time reads AND the brute-force window WRITE
+    // (window count, attempt-row attempted_at write, breach-sweep gate/cutoff,
+    // breach mark, probation_until write) come from this injected Clock, sampled
+    // once per consume() so the in-memory breach mark and the sweep that reads it
+    // back share one instant, and the attempt write shares the clock the window
+    // count reads — never split across two clocks (M1-444 rule; attempt-write
+    // split closed by M1-490). The systemUTC() initializer keeps the field
+    // non-null for hand-constructed instances (newLocalConsumer() in the eviction
+    // tests, which never goes through CDI); injection overrides it in the managed
+    // bean. The SQL expires_at > NOW() invite-expiry gate intentionally stays on
+    // the DB clock (intra-statement comparison) — see docs/plan/m1/now-clock-audit.md.
     // (M1-447, pattern from M1-444 ReEvaluationJob)
     @Inject
     Clock clock = Clock.systemUTC();
@@ -253,7 +259,7 @@ public class InviteCodeConsumer {
                         ? null
                         : tryConsume(conn, contactId, candidateCode, adapter);
                 if (inviteId == null) {
-                    insertAttempt(conn, adapter, contactId);
+                    insertAttempt(conn, adapter, contactId, now);
                     conn.commit();
                     recordInviteDrop();
                     return new Rejected();
@@ -383,11 +389,12 @@ public class InviteCodeConsumer {
         }
     }
 
-    private void insertAttempt(Connection conn, String adapter, String contactId)
+    private void insertAttempt(Connection conn, String adapter, String contactId, Instant now)
             throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(INSERT_ATTEMPT_SQL)) {
             ps.setString(1, adapter);
             ps.setString(2, contactId);
+            ps.setObject(3, OffsetDateTime.ofInstant(now, ZoneOffset.UTC));
             ps.executeUpdate();
         }
     }

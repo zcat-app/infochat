@@ -1,7 +1,7 @@
 ---
 id: M1-490
 title: "Reconcile §9 split-clock decision sites against the M1-447 backlog"
-status: pending
+status: done
 created: 2026-06-27
 last_updated: 2026-06-29
 blocked_by: []
@@ -60,7 +60,20 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 12
+      added: 456
+      removed: 54
 overrides: []
 revisions:
   - date: 2026-06-29
@@ -82,7 +95,25 @@ revisions:
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-29
+    verdict: CLEAN
+    base: 9b53aa2dd8014425612178c92ea1809f4446d81a
+    head: working-tree (uncommitted, pre-commit lifecycle)
+    verdict_file: docs/plan/m1/redteam/M1-490-2026-06-29.md
+    out_of_model_count: 1
+    note: >-
+      CLEAN, 0 findings. §9 split-clock reconciliation, production behaviour
+      byte-for-byte preserved under Clock.systemUTC(). One out-of-model item
+      (app-authored expires_at vs DB-side consume gate under operator host-clock
+      skew) predates the diff and is already documented as accepted in
+      now-clock-audit.md; host clock sync is trusted operator config outside the
+      threat model — no follow-up ticket.
+clarity_check:
+  date: 2026-06-29
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-490: Reconcile §9 split-clock decision sites against the M1-447 backlog

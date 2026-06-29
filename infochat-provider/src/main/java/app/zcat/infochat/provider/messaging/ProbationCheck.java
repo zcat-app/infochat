@@ -10,6 +10,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Clock;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 /**
@@ -45,17 +47,23 @@ public class ProbationCheck {
     private static final String SELECT_PROBATION_UNTIL_SQL =
             "SELECT probation_until FROM users WHERE id = ?";
 
+    // The graduation gate reads the injected Clock (bound param), never SQL
+    // NOW(), so clearIfPromoted shares one clock with inProbation's read and
+    // with InviteCodeConsumer's probation_until write — closing the last
+    // probation_until app-vs-DB split (§9 / M1-490; the M1-447 follow-up).
     private static final String CLEAR_IF_PROMOTED_SQL =
             "UPDATE users SET probation_until = NULL "
-                    + "WHERE id = ? AND probation_until IS NOT NULL AND probation_until <= NOW()";
+                    + "WHERE id = ? AND probation_until IS NOT NULL AND probation_until <= ?";
 
     @Inject
     DataSource dataSource;
 
-    // The probation-expiry read is gated on the injected Clock, never SQL
-    // NOW(), so the gate is deterministic under a fixed test clock
-    // (ProbationCheckClockIT) and the read shares one clock with
-    // InviteCodeConsumer's app-Clock write of probation_until (M1-447/M1-450).
+    // Both probation-expiry gates — the inProbation read AND the
+    // clearIfPromoted graduation UPDATE — are gated on the injected Clock,
+    // never SQL NOW(), so they are deterministic under a fixed test clock
+    // (ProbationCheckClockIT) and share one clock with InviteCodeConsumer's
+    // app-Clock write of probation_until (M1-447/M1-450; clearIfPromoted's
+    // read moved off NOW() by M1-490).
     // Field-injected with a systemUTC() initializer so the field stays non-null
     // for hand-constructed instances (NoopProbationCheck and InboundRouter tests
     // build subclasses directly, bypassing CDI); injection overrides it in the
@@ -93,10 +101,11 @@ public class ProbationCheck {
 
     /**
      * Opportunistic UPDATE that nulls {@code probation_until} for a
-     * row whose probation window has elapsed. The WHERE clause is
-     * the idempotency guard: the UPDATE matches zero rows after the
-     * first call (no harm to call repeatedly), and matches zero
-     * rows for a still-probation or never-probation row. Spec says
+     * row whose probation window has elapsed against the injected
+     * {@code Clock} (bound param, not SQL {@code NOW()}). The WHERE
+     * clause is the idempotency guard: the UPDATE matches zero rows
+     * after the first call (no harm to call repeatedly), and matches
+     * zero rows for a still-probation or never-probation row. Spec says
      * "no background job is required" — the next inbound from a
      * graduated user clears the column inline.
      */
@@ -104,6 +113,7 @@ public class ProbationCheck {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(CLEAR_IF_PROMOTED_SQL)) {
             ps.setObject(1, userId);
+            ps.setObject(2, OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC));
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException(

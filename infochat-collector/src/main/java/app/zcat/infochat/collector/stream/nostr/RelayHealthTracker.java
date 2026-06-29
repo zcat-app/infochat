@@ -151,6 +151,23 @@ final class RelayHealthTracker {
         return cooldownUntil.isAfter(now) ? cooldownUntil : now;
     }
 
+    /**
+     * Remaining time the {@code relay} worker should park before its next
+     * connect attempt: {@code cooldownUntil - now} while in cooldown, otherwise
+     * {@link Duration#ZERO}. Unlike a caller subtracting an external
+     * {@code Instant.now()} from {@link #nextAttemptTime}, the subtraction
+     * happens entirely against this tracker's injected {@code Clock}, so the
+     * cooldown park gate reads one clock end to end — no app-vs-wall-clock split,
+     * and pinnable under a fixed test clock (engineering-rules §9 / M1-490). The
+     * runLoop still takes {@code max(this, backoff)} so the per-attempt backoff
+     * floor still governs when the relay is not in cooldown (this returns ZERO).
+     */
+    synchronized Duration untilNextAttempt(URI relay) {
+        Instant now = clock.instant();
+        Instant cooldownUntil = stateOf(relay).cooldownUntil;
+        return cooldownUntil.isAfter(now) ? Duration.between(now, cooldownUntil) : Duration.ZERO;
+    }
+
     /** True once the cycle cap has been hit; the runLoop exits and the source is permanently failed. */
     synchronized boolean isTerminal() {
         return terminal;

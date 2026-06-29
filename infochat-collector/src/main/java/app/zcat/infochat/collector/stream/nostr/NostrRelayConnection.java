@@ -10,7 +10,6 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
@@ -238,12 +237,15 @@ final class NostrRelayConnection {
             try {
                 // Sleep at LEAST the backoff curve, but extend to the tracker's
                 // cooldown expiry when the relay is in cooldown. The floor is
-                // the backoff (so a tracker that returns "now" never produces
+                // the backoff (so a tracker that returns ZERO never produces
                 // a zero-sleep tight loop); the cooldown extends it when the
-                // relay must park longer than backoff alone would dictate.
+                // relay must park longer than backoff alone would dictate. The
+                // remaining cooldown is computed inside the tracker against its
+                // injected Clock (untilNextAttempt) rather than here against a
+                // wall-clock Instant.now(), so the park gate reads one clock
+                // (no app-vs-wall split, §9 / M1-490).
                 long backoffMs = backoffDelay(consecutiveFailures, backoffBase, backoffMax, ThreadLocalRandom.current()).toMillis();
-                long cooldownMs = Math.max(0L,
-                        Duration.between(Instant.now(), healthTracker.nextAttemptTime(relayUri)).toMillis());
+                long cooldownMs = healthTracker.untilNextAttempt(relayUri).toMillis();
                 Thread.sleep(Math.max(backoffMs, cooldownMs));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();

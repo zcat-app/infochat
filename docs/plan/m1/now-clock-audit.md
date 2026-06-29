@@ -59,6 +59,16 @@ they are excluded from this additive-only ticket.
 and `ThrottledAdminNotifier` itself (which also hosts the app-wide
 `@Produces @ApplicationScoped Clock systemUtcClock()`).
 
+> **M1-490 correction (Nostr cooldown park):** `NostrStreamSource`'s cursor-floor
+> is on the injected `Clock` (M1-452), but the per-relay reconnect park in
+> `NostrRelayConnection` computed `Duration.between(Instant.now(),
+> healthTracker.nextAttemptTime())` — the tracker's `nextAttemptTime` is on the
+> injected `Clock` but the subtracted `Instant.now()` was wall-clock, a split
+> this "already-correct" note missed. M1-490 added the single-clock
+> `RelayHealthTracker.untilNextAttempt(relay)` (subtraction inside the tracker
+> against its own `Clock`); `NostrRelayConnection` consumes it and no longer
+> reads `Instant.now()`. Pinned by `RelayHealthTrackerTest`.
+
 ## In-scope conversion detail (the trio)
 
 ### `AdminReviewTtlJob`
@@ -79,6 +89,12 @@ threaded to every Java-side decision read, so the in-memory breach mark and the
 sweep that reads it back share one instant (no two-clock split, M1-444 rule):
 - (A) `countAttempts()` cutoff: `OffsetDateTime.now().minus(bruteForceWindow)`
   → derived from the sampled `now`. Brute-force window.
+- (A) `insertAttempt()` write (**M1-490**): the brute-force window's READ (the
+  cutoff above) moved to the app `Clock` in M1-447, but the attempt rows it
+  counts were stamped by the DB `DEFAULT now()` — a half-migrated window (read on
+  app clock, write on DB clock). `INSERT_ATTEMPT_SQL` now binds the sampled `now`
+  for `attempted_at`, so the window's read and write share one clock. M1-490
+  closed this omission, completing row 1.
 - (A) `evictStaleBreachAudited()` gate + cutoff: `Instant.now()` → the sampled
   `now`. Sweep staleness.
 - (A) breach mark `breachAudited.put(key, Instant.now())` → `put(key, now)`. The
@@ -93,6 +109,15 @@ sweep that reads it back share one instant (no two-clock split, M1-444 rule):
   authorship. It stays on the DB clock, which is byte-for-byte equivalent to the
   production `Clock.systemUTC()`. A follow-up could bind a Java instant if a
   determinism need ever arises; none does today.
+  - **M1-490 correction**: `expires_at` is authored by `InviteCommandHandler`
+    (`INSERT_INVITE_SQL`), NOT the DB. M1-490 moved that write AND the
+    open/contact cap-count READs (`expires_at > NOW()` in
+    `COUNT_OPEN_PENDING_PER_ADAPTER_SQL` / `COUNT_CONTACT_PENDING_GLOBAL_SQL`)
+    onto the injected `Clock`, so the invite-expiry **cap** gate is single-clock
+    and pinnable (`InviteExpiryClockIT`). Only the `CONSUME_INVITE_SQL`
+    consume-time read and the `/invite list` display filter remain on the DB
+    clock — the intra-statement / display cases above, byte-for-byte equivalent
+    under `Clock.systemUTC()`.
 - (B) LEFT on DB clock: `used_at = NOW()` in the same UPDATE.
 
 ### Cross-component note: `probation_until` write/read split
@@ -105,6 +130,12 @@ ONLY because production `Clock` is `Clock.systemUTC()` ≈ DB `now()`, so
 behaviour is byte-for-byte preserved (ticket acceptance item 2). The follow-up
 ticket that converts `ProbationCheck` should move its read onto the same `Clock`
 to close the split; this audit records that the write side already moved.
+
+**Resolved by M1-490.** `ProbationCheck.clearIfPromoted` now binds the injected
+`Clock` (`probation_until <= ?`) instead of SQL `NOW()`; `inProbation` was
+already on the `Clock` (M1-450). The `probation_until` write
+(`InviteCodeConsumer`) and both `ProbationCheck` decision paths now share one
+clock, closing the split. Pinned by `ProbationCheckClockIT`.
 
 ## Audit-missed sites converted by M1-471
 

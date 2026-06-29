@@ -189,6 +189,42 @@ class RelayHealthTrackerTest {
                 "the post-recovery all-bad entry adds one ALL_RELAYS_BAD notification");
     }
 
+    @Test
+    void untilNextAttempt_isRemainingCooldownAgainstInjectedClock() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-05-31T00:00:00Z"));
+        RelayHealthTracker tracker = new RelayHealthTracker(
+                List.of(RELAY_A, RELAY_B),
+                FAILURE_THRESHOLD, COOLDOWN, /*cycleCap=*/5, clock, t -> { });
+
+        // Healthy relay: nothing to park for.
+        assertEquals(Duration.ZERO, tracker.untilNextAttempt(RELAY_A),
+                "a relay that never failed has no cooldown to wait out");
+
+        // Drive A into cooldown at T0 → remaining is the full cooldown window.
+        for (int i = 0; i < FAILURE_THRESHOLD; i++) {
+            tracker.recordFailure(RELAY_A);
+        }
+        assertEquals(COOLDOWN, tracker.untilNextAttempt(RELAY_A),
+                "a fresh cooldown parks for the whole cooldown duration");
+
+        // Advance the INJECTED clock partway; the remaining park shrinks by
+        // exactly that much. Under the wall clock this 2026-05-31 cooldown is
+        // already long expired (ZERO), so a non-ZERO remaining here can only come
+        // from the injected Clock governing the subtraction (the §9 single-clock
+        // property the old Duration.between(Instant.now(), ...) split lacked).
+        clock.advance(Duration.ofMinutes(2));
+        assertEquals(COOLDOWN.minus(Duration.ofMinutes(2)), tracker.untilNextAttempt(RELAY_A),
+                "remaining park is measured against the injected Clock, not Instant.now()");
+
+        // Advance past expiry → remaining floors at ZERO (the per-attempt backoff
+        // curve then governs the actual park in the run loop).
+        clock.advance(COOLDOWN);
+        assertEquals(Duration.ZERO, tracker.untilNextAttempt(RELAY_A),
+                "an expired cooldown yields ZERO; the backoff floor takes over");
+        assertEquals(Duration.ZERO, tracker.untilNextAttempt(RELAY_B),
+                "RELAY_B never failed → always ZERO");
+    }
+
     private static void driveBothIntoCooldown(RelayHealthTracker tracker) {
         for (int i = 0; i < FAILURE_THRESHOLD; i++) {
             tracker.recordFailure(RELAY_A);

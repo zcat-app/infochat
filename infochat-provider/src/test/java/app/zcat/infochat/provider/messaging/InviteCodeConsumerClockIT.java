@@ -24,12 +24,14 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Pins the injected {@link Clock} to a FIXED instant and asserts the two
- * Java-side decision reads M1-447 converted in {@link InviteCodeConsumer}
- * decide against that instant: the {@code probation_until} write and the
- * brute-force-window attempt count. Deterministic complement to
- * {@link InviteCodeConsumerTest}, whose fixtures are relative to the real
- * clock.
+ * Pins the injected {@link Clock} to a FIXED instant and asserts the
+ * Java-side decision reads and writes in {@link InviteCodeConsumer} decide
+ * against that instant: the {@code probation_until} write and the
+ * brute-force-window attempt count (M1-447), plus the brute-force attempt-row
+ * {@code attempted_at} write (M1-490 — the WRITE the window count compares
+ * against, previously left on the DB {@code DEFAULT now()}). Deterministic
+ * complement to {@link InviteCodeConsumerTest}, whose fixtures are relative to
+ * the real clock.
  *
  * <p>The SQL {@code expires_at > NOW()} invite-expiry gate is intentionally
  * NOT asserted here — it stays on the DB clock (intra-statement comparison)
@@ -121,6 +123,36 @@ class InviteCodeConsumerClockIT {
             "attempts dated inside the window relative to the injected now must be "
                 + "counted, tripping the brute-force threshold; under the wall clock "
                 + "they would be outside the window and the consume would be Rejected");
+    }
+
+    @Test
+    void attemptedAtWrite_usesInjectedClock() throws Exception {
+        String adapter = "inmemory";
+        String contactId = NAMESPACE + "attempt-write";
+        // A non-UUID body → Rejected → records one invite_code_attempt row. Its
+        // attempted_at must be stamped from the injected PINNED_NOW (2026-05-25),
+        // not the DB DEFAULT now() (the wall-clock run date), so the brute-force
+        // window WRITE shares the clock the window COUNT already reads — closing
+        // the app-vs-DB split (§9 / M1-490).
+        InviteCodeConsumer.Outcome outcome = consumer.consume(adapter, contactId, "not-a-uuid");
+
+        assertInstanceOf(InviteCodeConsumer.Rejected.class, outcome,
+            "a non-UUID body is Rejected and records a brute-force attempt");
+        assertEquals(PINNED_NOW, readSingleAttemptedAt(adapter, contactId),
+            "attempted_at must be the injected Clock instant, not DB now()");
+    }
+
+    private Instant readSingleAttemptedAt(String adapter, String contactId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT attempted_at FROM invite_code_attempt WHERE adapter = ? AND contact_id = ?")) {
+            ps.setString(1, adapter);
+            ps.setString(2, contactId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "a brute-force attempt row must exist after a Rejected consume");
+                return rs.getTimestamp("attempted_at").toInstant();
+            }
+        }
     }
 
     private void seedPendingInvite(UUID code, String adapter, String contactId) throws Exception {
