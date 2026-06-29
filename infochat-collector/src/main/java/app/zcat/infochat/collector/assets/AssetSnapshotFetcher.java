@@ -7,6 +7,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import javax.sql.DataSource;
@@ -167,9 +168,26 @@ public class AssetSnapshotFetcher {
             LOG.warnf("AssetSnapshotFetcher: no AssetDataSource bean for host=%s; skipping", host);
             return;
         }
+        // SPI support gate (M1-484): an asset/quote the source does not
+        // support is an operator misconfiguration, NOT an upstream-health
+        // failure. Reject it here so it never reaches fetchSnapshot or the
+        // D42 ladder in recordFailure — routing a config mismatch through
+        // the failure counters would wrongly degrade a healthy source. The
+        // SPI commits to exactly this gate (AssetDataSource#supportedAssets
+        // javadoc: "the fetcher MUST NOT call fetchSnapshot for an asset
+        // absent from this set"). The quote is lower-cased to match each
+        // impl's own internal vs check.
+        String vs = row.defaultQuoteCurrency();
+        if (!source.supportedAssets().contains(row.asset())
+                || !source.supportedQuoteCurrencies(row.asset()).contains(vs.toLowerCase(Locale.ROOT))) {
+            LOG.warnf("AssetSnapshotFetcher: source host=%s does not support asset=%s vs=%s; "
+                + "skipping pair (config mismatch, not an upstream failure)",
+                host, row.asset(), vs);
+            return;
+        }
         PriceSnapshot snapshot;
         try {
-            snapshot = source.fetchSnapshot(row.asset(), row.defaultQuoteCurrency());
+            snapshot = source.fetchSnapshot(row.asset(), vs);
         } catch (FetchException e) {
             recordFailure(row, e);
             return;

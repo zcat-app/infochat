@@ -11,8 +11,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-import org.jspecify.annotations.Nullable;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -136,12 +134,12 @@ public class BitfinexSnapshotSource implements AssetDataSource {
                 "BitfinexSnapshotSource: malformed array shape for " + pair);
         }
 
-        BigDecimal price = readBigDecimal(root.get(6));
+        BigDecimal price = JsonNumbers.readBigDecimal(root.get(6));
         if (price == null) {
             throw new FetchException(
                 "BitfinexSnapshotSource: missing lastPrice for " + pair);
         }
-        BigDecimal changeFraction = readBigDecimal(root.get(5));
+        BigDecimal changeFraction = JsonNumbers.readBigDecimal(root.get(5));
         BigDecimal change24hPct = changeFraction == null
             ? null
             : changeFraction.multiply(BigDecimal.valueOf(100L));
@@ -151,9 +149,9 @@ public class BitfinexSnapshotSource implements AssetDataSource {
             ID,
             vs.toLowerCase(Locale.ROOT),
             price,
-            readBigDecimal(root.get(7)),
-            readBigDecimal(root.get(8)),
-            readBigDecimal(root.get(9)),
+            JsonNumbers.readBigDecimal(root.get(7)),
+            JsonNumbers.readBigDecimal(root.get(8)),
+            JsonNumbers.readBigDecimal(root.get(9)),
             null,
             change24hPct,
             null,
@@ -167,19 +165,5 @@ public class BitfinexSnapshotSource implements AssetDataSource {
     public String attributionUrl(String asset, String vs) {
         String ticker = TICKERS.getOrDefault(asset, asset.toUpperCase(Locale.ROOT));
         return String.format("https://www.bitfinex.com/t/%s:%s", ticker, vs.toUpperCase(Locale.ROOT));
-    }
-
-    private static @Nullable BigDecimal readBigDecimal(JsonNode node) {
-        if (node == null || node.isNull() || node.isMissingNode()) {
-            return null;
-        }
-        if (!node.isNumber() && !node.isTextual()) {
-            return null;
-        }
-        try {
-            return new BigDecimal(node.asText());
-        } catch (NumberFormatException e) {
-            return null;
-        }
     }
 }

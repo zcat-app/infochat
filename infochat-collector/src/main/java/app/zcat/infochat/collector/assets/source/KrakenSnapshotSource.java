@@ -12,8 +12,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-import org.jspecify.annotations.Nullable;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -155,7 +153,7 @@ public class KrakenSnapshotSource implements AssetDataSource {
 
         // Kraken ticker schema: c=[last, lot_volume], v=[today, last24h],
         // h=[today, last24h], l=[today, last24h]. We use [1] (24h).
-        BigDecimal price = readBigDecimal(tickerNode.path("c").path(0));
+        BigDecimal price = JsonNumbers.readBigDecimal(tickerNode.path("c").path(0));
         if (price == null) {
             throw new FetchException(
                 "KrakenSnapshotSource: missing c[0] for " + pair);
@@ -166,9 +164,9 @@ public class KrakenSnapshotSource implements AssetDataSource {
             ID,
             vs.toLowerCase(Locale.ROOT),
             price,
-            readBigDecimal(tickerNode.path("v").path(1)),
-            readBigDecimal(tickerNode.path("h").path(1)),
-            readBigDecimal(tickerNode.path("l").path(1)),
+            JsonNumbers.readBigDecimal(tickerNode.path("v").path(1)),
+            JsonNumbers.readBigDecimal(tickerNode.path("h").path(1)),
+            JsonNumbers.readBigDecimal(tickerNode.path("l").path(1)),
             null,
             null,
             null,
@@ -198,19 +196,5 @@ public class KrakenSnapshotSource implements AssetDataSource {
             return stripped;
         }
         return stripped.substring(0, MAX_UPSTREAM_CHARS) + "…";
-    }
-
-    private static @Nullable BigDecimal readBigDecimal(JsonNode node) {
-        if (node == null || node.isNull() || node.isMissingNode()) {
-            return null;
-        }
-        if (!node.isNumber() && !node.isTextual()) {
-            return null;
-        }
-        try {
-            return new BigDecimal(node.asText());
-        } catch (NumberFormatException e) {
-            return null;
-        }
     }
 }

@@ -11,8 +11,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-import org.jspecify.annotations.Nullable;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -130,7 +128,7 @@ public class CoingeckoSnapshotSource implements AssetDataSource {
         }
 
         JsonNode marketData = root.path("market_data");
-        BigDecimal price = readBigDecimal(marketData.path("current_price").path(vsLower));
+        BigDecimal price = JsonNumbers.readBigDecimal(marketData.path("current_price").path(vsLower));
         if (price == null) {
             throw new FetchException(
                 "CoingeckoSnapshotSource: missing market_data.current_price." + vsLower
@@ -142,12 +140,12 @@ public class CoingeckoSnapshotSource implements AssetDataSource {
             ID,
             vsLower,
             price,
-            readBigDecimal(marketData.path("total_volume").path(vsLower)),
-            readBigDecimal(marketData.path("high_24h").path(vsLower)),
-            readBigDecimal(marketData.path("low_24h").path(vsLower)),
-            readBigDecimal(marketData.path("price_change_percentage_1h_in_currency").path(vsLower)),
-            readBigDecimal(marketData.path("price_change_percentage_24h_in_currency").path(vsLower)),
-            readBigDecimal(marketData.path("price_change_percentage_7d_in_currency").path(vsLower)),
+            JsonNumbers.readBigDecimal(marketData.path("total_volume").path(vsLower)),
+            JsonNumbers.readBigDecimal(marketData.path("high_24h").path(vsLower)),
+            JsonNumbers.readBigDecimal(marketData.path("low_24h").path(vsLower)),
+            JsonNumbers.readBigDecimal(marketData.path("price_change_percentage_1h_in_currency").path(vsLower)),
+            JsonNumbers.readBigDecimal(marketData.path("price_change_percentage_24h_in_currency").path(vsLower)),
+            JsonNumbers.readBigDecimal(marketData.path("price_change_percentage_7d_in_currency").path(vsLower)),
             Instant.now(),
             attributionUrl(asset, vsLower),
             body
@@ -158,19 +156,5 @@ public class CoingeckoSnapshotSource implements AssetDataSource {
     public String attributionUrl(String asset, String vs) {
         String slug = SLUGS.getOrDefault(asset, asset);
         return ATTRIBUTION_BASE + slug;
-    }
-
-    private static @Nullable BigDecimal readBigDecimal(JsonNode node) {
-        if (node == null || node.isNull() || node.isMissingNode()) {
-            return null;
-        }
-        if (!node.isNumber() && !node.isTextual()) {
-            return null;
-        }
-        try {
-            return new BigDecimal(node.asText());
-        } catch (NumberFormatException e) {
-            return null;
-        }
     }
 }

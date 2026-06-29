@@ -1,9 +1,9 @@
 ---
 id: M1-484
 title: "Asset fetcher ignores SPI supported-asset/quote gate; dedup readBigDecimal"
-status: pending
+status: done
 created: 2026-06-27
-last_updated: 2026-06-27
+last_updated: 2026-06-29
 blocked_by: []
 files_budget: 7
 complexity: low
@@ -39,12 +39,29 @@ test_plan:
 spec_refs: []
 decision_refs:
   - D42
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 329
+      removed: 74
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-29
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-484: Asset fetcher ignores SPI supported-asset/quote gate; dedup readBigDecimal
