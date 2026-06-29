@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 11 |
+| pending | 12 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 534 |
 | deferred | 9 |
-| **total** | **554** |
+| **total** | **555** |
 
 ---
 
@@ -34,6 +34,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-518 — Remove vestigial SimpleX bot-queue-address derivation (complexity: high, risk: medium)
 - M1-519 — Enforce D47 group-count caps on the auto-join surface (complexity: high, risk: high)
 - M1-520 — Remove test-only no-arg AssetCommandFamilyOracle ctor (complexity: low, risk: low)
+- M1-521 — Widen SafeLog.stripControls to the full bidi-control set (close log-line spoof gap) (complexity: low, risk: low)
 
 ---
 
@@ -734,4 +735,5 @@ M1-516 (done)
 M1-517 (done)
 M1-518 (pending) ← runnable
 M1-520 (pending) ← runnable
+M1-521 (pending) ← runnable
 ```
