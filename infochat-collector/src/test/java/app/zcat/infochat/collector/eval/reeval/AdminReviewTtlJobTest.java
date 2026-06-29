@@ -4,17 +4,23 @@ import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import org.junit.jupiter.api.Test;
+import org.postgresql.PGConnection;
+import org.postgresql.PGNotification;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
@@ -86,23 +92,83 @@ class AdminReviewTtlJobTest {
     @Test
     void quarantineReviewNotify_emittedOnTtlReject() throws Exception {
         // TTL auto-reject emits NOTIFY quarantine_review with payload
-        // ('quarantine', quarantine_id, 'REJECTED'). The observable effect
-        // is the quarantine row's transition and the pg_notify call inside
-        // the transaction (tested by verifying the transaction committed
-        // with the correct status).
+        // ('quarantine', quarantine_id, 'REJECTED'). A live LISTEN connection
+        // captures the emission so a regression that drops the NOTIFY fails
+        // here, not just on the status transition.
         SeededData data = seedPendingQuarantinePastTtl("ttl-notify");
 
-        ttlJob.rejectExpired(new AdminReviewTtlJob.TtlCandidate(
-            data.quarantineId, data.postId, data.fetchedAt));
+        try (Connection listenConn = dataSource.getConnection()) {
+            PGConnection pg = listenTo(listenConn, "quarantine_review");
 
-        assertQuarantineStatus(data.quarantineId, "REJECTED");
-        // NOTIFY quarantine_review was emitted in the same transaction
-        // as the REJECTED transition — correctness is that both committed
-        // together (no separate assertion needed; if the NOTIFY threw,
-        // the transaction would have rolled back and status would stay PENDING).
+            ttlJob.rejectExpired(new AdminReviewTtlJob.TtlCandidate(
+                data.quarantineId, data.postId, data.fetchedAt));
+
+            assertQuarantineStatus(data.quarantineId, "REJECTED");
+            assertQuarantineReviewNotify(pg, "quarantine", data.quarantineId, "REJECTED");
+        }
     }
 
     // ---------- helpers ----------
+
+    /**
+     * Establish a clean LISTEN on {@code channel} for the supplied
+     * connection. PostgreSQL only delivers a NOTIFY to connections that
+     * were already LISTENing when the emitting transaction commits, so the
+     * caller must hold this connection open across the job invocation. The
+     * {@code UNLISTEN *} + drain resets any registration the pooled
+     * connection carried from a prior test. Mirrors ReEvalVerdictNotifyIT.
+     */
+    private PGConnection listenTo(Connection conn, String channel) throws Exception {
+        conn.setAutoCommit(true);
+        try (Statement s = conn.createStatement()) {
+            s.execute("UNLISTEN *");
+            s.execute("LISTEN " + channel);
+        }
+        PGConnection pg = conn.unwrap(PGConnection.class);
+        pg.getNotifications();
+        return pg;
+    }
+
+    /** Poll until at least {@code minimum} notifications arrive or the 10s deadline lapses. */
+    private PGNotification[] awaitNotifications(PGConnection pg, int minimum) throws Exception {
+        long deadlineNanos = System.nanoTime() + 10_000_000_000L;
+        List<PGNotification> collected = new ArrayList<>();
+        while (System.nanoTime() < deadlineNanos) {
+            PGNotification[] batch = pg.getNotifications(500);
+            if (batch != null) {
+                for (PGNotification n : batch) {
+                    collected.add(n);
+                }
+                if (collected.size() >= minimum) {
+                    return collected.toArray(new PGNotification[0]);
+                }
+            }
+        }
+        return collected.isEmpty() ? null : collected.toArray(new PGNotification[0]);
+    }
+
+    /**
+     * Assert that exactly one quarantine_review NOTIFY arrived carrying the
+     * expected target_kind/target_id/new_status (the QuarantineNotifyEmitter
+     * JSON payload). A regression that drops the emission yields zero
+     * notifications and fails on assertNotNull; a wrong status/target fails
+     * the payload check.
+     */
+    private void assertQuarantineReviewNotify(PGConnection pg, String targetKind,
+                                              UUID targetId, String newStatus) throws Exception {
+        PGNotification[] notifications = awaitNotifications(pg, 1);
+        assertNotNull(notifications,
+            "expected a quarantine_review NOTIFY for " + targetKind + " " + targetId);
+        assertEquals(1, notifications.length,
+            "exactly one quarantine_review NOTIFY for the transition");
+        String payload = notifications[0].getParameter();
+        assertTrue(payload.contains("\"target_kind\":\"" + targetKind + "\""),
+            "NOTIFY payload target_kind must be " + targetKind + "; got: " + payload);
+        assertTrue(payload.contains("\"target_id\":\"" + targetId + "\""),
+            "NOTIFY payload target_id must be " + targetId + "; got: " + payload);
+        assertTrue(payload.contains("\"new_status\":\"" + newStatus + "\""),
+            "NOTIFY payload new_status must be " + newStatus + "; got: " + payload);
+    }
 
     private SeededData seedPendingQuarantinePastTtl(String slug) throws Exception {
         UUID sourceId = seedSource(slug);

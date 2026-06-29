@@ -64,9 +64,12 @@ class InboundRouterExportIT {
         adapter.deliverDm(contactId, "/export");
 
         List<OutboundMessage> sent = adapter.sentMessages();
-        assertTrue(sent.size() <= 2,
-                "rate limiter must drop requests beyond the per-minute cap;"
-                        + " got " + sent.size() + " replies for 3 requests");
+        // cap is 2/min: the first two /export replies in-band (one message
+        // each, per deliveredInBand), the third is silently dropped — so
+        // exactly two replies, never fewer.
+        assertEquals(2, sent.size(),
+                "rate limiter must allow exactly the per-minute cap (2) and drop"
+                        + " the rest; got " + sent.size() + " replies for 3 requests");
     }
 
     @Test

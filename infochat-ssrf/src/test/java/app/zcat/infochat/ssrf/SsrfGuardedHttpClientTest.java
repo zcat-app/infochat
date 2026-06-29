@@ -1186,11 +1186,14 @@ class SsrfGuardedHttpClientTest {
         // direct unit call (get() captures it before the redirect loop).
         SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
             () -> client.discardBounded(stallingBody, System.nanoTime()));
-        assertTrue(
-            ex.reason() == SsrfPolicyException.Reason.BODY_READ_TIMEOUT
-                || ex.reason() == SsrfPolicyException.Reason.BODY_READ_DEADLINE_EXCEEDED,
-            "a stalled redirect-body drain must abort with the typed read "
-            + "timeout/deadline reason, not block unbounded; got: " + ex.reason());
+        // The very first read stalls; its per-read watchdog (readTimeout 200ms)
+        // fires at ~200ms, far below the 1s body-read deadline, so the typed
+        // reason is deterministically BODY_READ_TIMEOUT. The deadline branch is
+        // unreachable under this config — assert the exact reason, not a
+        // disjunction that would also pass if the classification regressed.
+        assertEquals(SsrfPolicyException.Reason.BODY_READ_TIMEOUT, ex.reason(),
+            "a stalled redirect-body drain must abort with the per-read timeout "
+            + "reason (readTimeout fires before the deadline); got: " + ex.reason());
     }
 
     @Test

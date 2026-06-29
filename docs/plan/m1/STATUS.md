@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 12 |
+| pending | 10 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 534 |
+| done | 536 |
 | deferred | 9 |
 | **total** | **555** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-494 — Production dead-code and defensive-check cleanup sweep (complexity: low, risk: low)
 - M1-495 — Integration/DB-boot tests named *Test run in the surefire (unit) phase (complexity: low, risk: low)
-- M1-496 — Test-integrity sweep: vacuous, ambient-gated, and over-permissive assertions (complexity: low, risk: low)
 - M1-498 — Test fidelity & coverage gaps: copied lambdas, wrong arms, untested paths (complexity: medium, risk: low)
 - M1-499 — Test fixture duplication → testsupport, plus a leaked registration teardown (complexity: low, risk: low)
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
@@ -78,9 +77,8 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-510 | SimpleX codec: align DM inbound/outbound/error decode with live v6.5.4.1 wire format | 2026-06-29 | round 1 APPROVE |
 | M1-501 | Stage-1-flagged posts can permanently evade Stage 2 after a crash | 2026-06-29 | round 1 APPROVE |
 | M1-497 | Test name/comment accuracy sweep: names and comments that contradict the body | 2026-06-29 | round 1 APPROVE |
+| M1-496 | Test-integrity sweep: vacuous, ambient-gated, and over-permissive assertions | 2026-06-29 | round 1 APPROVE |
 | M1-492 | Production javadoc/contract drift: stale or wrong SPI/handler contracts | 2026-06-29 | round 1 APPROVE |
-| M1-491 | Log-sanitization hardening: relay NOTICE control-strip + SafeLog bidi/line-sep | 2026-06-29 | round 1 APPROVE |
-| M1-490 | Reconcile §9 split-clock decision sites against the M1-447 backlog | 2026-06-29 | round 1 APPROVE |
 
 ---
 
@@ -709,7 +707,7 @@ M1-492 (done)
 M1-493 (deferred)
 M1-494 (pending) ← runnable
 M1-495 (pending) ← runnable
-M1-496 (pending) ← runnable
+M1-496 (done)
 M1-497 (done)
 M1-498 (pending) ← runnable
 M1-499 (pending) ← runnable

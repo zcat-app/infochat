@@ -104,28 +104,48 @@ class AutoCompressTriggerTest {
         seedChatSessionWithTokens(userId, "dm", userId, aboveThreshold);
         seedChatMessage(userId, "dm", userId, 0, "user", "hello", aboveThreshold);
 
-        Optional<String> notice = trigger.checkAndCompress(userId, "dm", userId, "en");
-
-        assertTrue(notice.isPresent(), "Trigger should fire above threshold");
-
-        // If LLM failed, the session should be held at ceiling (unchanged).
-        if (notice.get().equals(bundleLoader.get(BundleKeys.ERROR_COMPRESS_FAILED))) {
-            try (Connection conn = dataSource.getConnection()) {
-                try (PreparedStatement ps = conn.prepareStatement(
-                        "SELECT token_count FROM chat_session "
-                                + "WHERE user_id = ? AND scope_kind = ? AND scope_id = ?")) {
-                    ps.setObject(1, userId);
-                    ps.setString(2, "dm");
-                    ps.setObject(3, userId);
-                    try (ResultSet rs = ps.executeQuery()) {
-                        assertTrue(rs.next());
-                        assertTrue(rs.getInt("token_count") >= compressAtThreshold,
-                                "On failure, session must be held at ceiling");
+        // Deterministic compress failure so the ceiling-hold assertion runs
+        // unconditionally — not gated on whether a live LLM happens to be down.
+        AutoCompressTrigger failTrigger = new AutoCompressTrigger(
+                compressAtThreshold, bundleLoader,
+                new CompressCommandHandler() {
+                    @Override
+                    public CompressResult compress(UUID u, String scopeKind,
+                                                   UUID scopeId, String scopeLanguage) {
+                        return new CompressResult.Failure();
                     }
-                }
+                }, dataSource);
+
+        // Read the ceiling AFTER seeding (the counter trigger folds the
+        // seeded message's tokens into session.token_count, so the value is
+        // not the literal seed) but BEFORE the failing compress.
+        int tokenCountAtCeiling = readTokenCount(userId);
+        assertTrue(tokenCountAtCeiling >= compressAtThreshold,
+                "test setup: session must start above the compress ceiling");
+
+        Optional<String> notice = failTrigger.checkAndCompress(userId, "dm", userId, "en");
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_COMPRESS_FAILED), notice.orElseThrow(),
+                "a deterministic compress failure above threshold must yield the failure notice");
+
+        // On failure the session is held at the ceiling: token_count unchanged.
+        assertEquals(tokenCountAtCeiling, readTokenCount(userId),
+                "On failure, session must be held at ceiling (token_count unchanged)");
+    }
+
+    private int readTokenCount(UUID userId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT token_count FROM chat_session "
+                             + "WHERE user_id = ? AND scope_kind = ? AND scope_id = ?")) {
+            ps.setObject(1, userId);
+            ps.setString(2, "dm");
+            ps.setObject(3, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                return rs.getInt("token_count");
             }
         }
-        // If LLM succeeded, the session is compressed (also valid).
     }
 
     @Test

@@ -18,7 +18,6 @@ import java.sql.ResultSet;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -147,6 +146,10 @@ class LangCommandHandlerTest {
         String groupId = "some-group-id-" + UUID.randomUUID();
         ScopeRef.Group scope = new ScopeRef.Group(groupId);
 
+        // Count BEFORE the calls so the assertion measures THIS test's own
+        // effect, not a global absolute another test's group row could mask.
+        long groupRowsBefore = countGroupScopePreferences();
+
         OutboundMessage replyCs = handler.handle(scope, "/lang cs");
         OutboundMessage replyXx = handler.handle(scope, "/lang xx");
         OutboundMessage replyBare = handler.handle(scope, "/lang");
@@ -159,11 +162,13 @@ class LangCommandHandlerTest {
         assertEquals(expected, replyBare.text(),
                 "group /lang (no arg) must surface the same short-circuit reply");
 
-        // Sanity — no row appears for any group-scope id (group scope_id
-        // is the adapterGroupId literal, not a UUID — the UPSERT can't
-        // even bind it; the short-circuit MUST happen first).
-        assertFalse(scopePreferencesExistsForGroup(groupId),
-                "group scope /lang must NOT touch scope_preferences");
+        // The three group /lang calls must add ZERO scope_preferences rows:
+        // the short-circuit happens before any UPSERT (group scope_id is the
+        // adapterGroupId literal, not a UUID — the UPSERT can't even bind it).
+        // A before/after delta, not a global count, so a group row left by
+        // another test cannot mask a write that slipped through here.
+        assertEquals(groupRowsBefore, countGroupScopePreferences(),
+                "group scope /lang must NOT write any scope_preferences row");
     }
 
     @Test
@@ -213,26 +218,14 @@ class LangCommandHandlerTest {
         }
     }
 
-    private boolean scopePreferencesExistsForGroup(String adapterGroupId) throws Exception {
-        // scope_id is UUID; an adapterGroupId String cannot bind to it,
-        // so the existence check uses a literal-string-cast SELECT to
-        // confirm no row was written. The query is essentially a no-op
-        // sanity check — if the handler short-circuited correctly,
-        // count_rows is 0 regardless of how the cast resolves.
+    /** Count all group-scope rows in scope_preferences (used for a before/after delta). */
+    private long countGroupScopePreferences() throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT count(*) FROM scope_preferences WHERE scope_kind = 'group'")) {
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
-                long n = rs.getLong(1);
-                // The cleanup() truncates dm rows by users.contact_id;
-                // group rows would NEVER be seeded by this test class,
-                // so any non-zero count here would mean a group-scope
-                // UPSERT slipped through the short-circuit. Loose
-                // assertion: the count must be zero across the whole
-                // test run, since no group rows are intentionally
-                // seeded.
-                return n > 0;
+                return rs.getLong(1);
             }
         }
     }

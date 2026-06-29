@@ -122,33 +122,32 @@ class CompressCommandHandlerTest {
         seedChatMessage(userId, "dm", userId, 0, "user", "hello", 5);
         seedChatMessage(userId, "dm", userId, 1, "assistant", "hi", 3);
 
-        // Use the compress() API directly with a known-bad language that
-        // triggers the failure path (the LLM call fails in test).
-        CompressCommandHandler.CompressResult result =
-                handler.compress(userId, "dm", userId, "en");
+        // Deterministic LLM failure (failing stub) so the preservation
+        // invariant is asserted unconditionally, not vacuously when a live
+        // LLM happens to be reachable.
+        CompressCommandHandler testHandler =
+                buildHandler(StubCompressLlmProvider.failing());
 
-        // Whether or not the LLM is reachable, verify the invariant:
-        // on failure the session is unchanged.
-        if (result instanceof CompressCommandHandler.CompressResult.Failure) {
-            try (Connection conn = dataSource.getConnection()) {
-                assertEquals(2, countMessages(conn, userId, "dm", userId),
-                        "On failure, messages must be preserved");
-                try (PreparedStatement ps = conn.prepareStatement(
-                        "SELECT token_count FROM chat_session "
-                                + "WHERE user_id = ? AND scope_kind = ? AND scope_id = ?")) {
-                    ps.setObject(1, userId);
-                    ps.setString(2, "dm");
-                    ps.setObject(3, userId);
-                    try (ResultSet rs = ps.executeQuery()) {
-                        assertTrue(rs.next());
-                        assertTrue(rs.getInt("token_count") > 0,
-                                "token_count should be preserved on failure");
-                    }
+        CompressCommandHandler.CompressResult result =
+                testHandler.compress(userId, "dm", userId, "en");
+
+        assertInstanceOf(CompressCommandHandler.CompressResult.Failure.class, result);
+        try (Connection conn = dataSource.getConnection()) {
+            assertEquals(2, countMessages(conn, userId, "dm", userId),
+                    "On failure, messages must be preserved");
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT token_count FROM chat_session "
+                            + "WHERE user_id = ? AND scope_kind = ? AND scope_id = ?")) {
+                ps.setObject(1, userId);
+                ps.setString(2, "dm");
+                ps.setObject(3, userId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals(8, rs.getInt("token_count"),
+                            "token_count must be preserved on failure (5 + 3 seeded tokens)");
                 }
             }
         }
-        // If the LLM is actually reachable (CI with Ollama), success is also fine —
-        // the invariant "failure preserves session" is vacuously true.
     }
 
     @Test

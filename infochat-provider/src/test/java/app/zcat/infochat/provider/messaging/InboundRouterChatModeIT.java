@@ -180,9 +180,15 @@ class InboundRouterChatModeIT {
         adapter.deliverDm(CONTACT_PREFIX + "user-3", "hello from probation");
 
         OutboundMessage reply = lastReply();
-        // Probation users get the error.probation.blocked reply, not the chat agent
-        assertTrue(reply.text().contains("probation") || reply.text().contains("full access"),
-                "Probation user should receive the probation-blocked reply");
+        // Probation users get the error.probation.blocked reply, not the chat
+        // agent. Assert via the bundle key (not English substring fragments):
+        // seeded probation_until = now + 24h, so formatTimeUntilUnlock truncates
+        // the strictly-under-24h remaining to the "~23h" {0} token.
+        String expected = java.text.MessageFormat.format(
+                bundleLoader.get("error.probation.blocked"), "~23h");
+        assertEquals(expected, reply.text(),
+                "Probation user must receive the error.probation.blocked reply "
+                        + "with the ~23h time-until-unlock interpolated");
         assertEquals(0, testLlmProvider.callCount(),
                 "LLM should NOT be called for probation user");
     }
