@@ -73,12 +73,13 @@ class PartitionInsertIT {
         UUID sourceId = seedSource();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "INSERT INTO post (uid, source_id, title, fetched_at) "
-                     + "VALUES (?, ?, ?, ?) RETURNING fetched_at")) {
+                 "INSERT INTO post (uid, source_id, title, fetched_at, upstream_identifier) "
+                     + "VALUES (?, ?, ?, ?, ?) RETURNING fetched_at")) {
             ps.setString(1, UID);
             ps.setObject(2, sourceId);
             ps.setString(3, "Partition IT title");
             ps.setTimestamp(4, Timestamp.from(JUNE_FETCHED_AT));
+            ps.setString(5, UID);
             try (ResultSet rs = ps.executeQuery()) {
                 assertTrue(rs.next(), "INSERT into the June partition must yield a row");
                 assertEquals(JUNE_FETCHED_AT, rs.getTimestamp(1).toInstant(),

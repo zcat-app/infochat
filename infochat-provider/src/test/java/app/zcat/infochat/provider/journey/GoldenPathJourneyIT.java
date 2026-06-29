@@ -372,9 +372,10 @@ class GoldenPathJourneyIT {
              PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO post (uid, source_id, title, body, url, published_at, "
                              + "fetched_at, ready_at, status, tags, "
-                             + "stage1_done, stage2_done, tagger_done, embedding_done) "
+                             + "stage1_done, stage2_done, tagger_done, embedding_done, "
+                             + "upstream_identifier) "
                              + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'READY', ?, "
-                             + "TRUE, TRUE, TRUE, TRUE)")) {
+                             + "TRUE, TRUE, TRUE, TRUE, ?)")) {
             Timestamp pub = Timestamp.from(publishedAt);
             ps.setString(1, uid);
             ps.setObject(2, sourceId);
@@ -385,6 +386,7 @@ class GoldenPathJourneyIT {
             ps.setTimestamp(7, pub);
             ps.setTimestamp(8, pub);
             ps.setArray(9, conn.createArrayOf("TEXT", new String[] { PREFIX + "news" }));
+            ps.setString(10, uid);
             ps.executeUpdate();
         }
     }

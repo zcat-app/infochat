@@ -270,8 +270,8 @@ class GetReferencesToolTest {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "INSERT INTO post (uid, source_id, title, body, url, published_at, "
-                     + "fetched_at, status, ready_at, tags) "
-                     + "VALUES (?, ?, ?, 'Body of ' || ?, ?, ?, ?, 'READY', ?, '{}') RETURNING id")) {
+                     + "fetched_at, status, ready_at, tags, upstream_identifier) "
+                     + "VALUES (?, ?, ?, 'Body of ' || ?, ?, ?, ?, 'READY', ?, '{}', ?) RETURNING id")) {
             ps.setString(1, PREFIX + slug);
             ps.setObject(2, sourceId);
             ps.setString(3, title);
@@ -280,6 +280,7 @@ class GetReferencesToolTest {
             ps.setTimestamp(6, Timestamp.from(FETCHED_AT));
             ps.setTimestamp(7, Timestamp.from(FETCHED_AT));
             ps.setTimestamp(8, Timestamp.from(FETCHED_AT));
+            ps.setString(9, PREFIX + slug);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return (UUID) rs.getObject(1);

@@ -44,12 +44,13 @@ class SoftDeletedSourceFkTest extends PostgresSchemaTestBase {
             String uid = UUID.randomUUID().toString().replace("-", "")
                     + UUID.randomUUID().toString().replace("-", "");
             try (PreparedStatement stmt = c.prepareStatement(
-                    "INSERT INTO post (uid, source_id, title, fetched_at) "
-                            + "VALUES (?, ?::uuid, ?, ?::timestamptz)")) {
+                    "INSERT INTO post (uid, source_id, title, fetched_at, upstream_identifier) "
+                            + "VALUES (?, ?::uuid, ?, ?::timestamptz, ?)")) {
                 stmt.setString(1, uid);
                 stmt.setString(2, sourceId);
                 stmt.setString(3, "in-flight post against soft-deleted source");
                 stmt.setString(4, IN_RANGE_FETCHED_AT);
+                stmt.setString(5, uid);
                 assertEquals(1, stmt.executeUpdate(),
                         "expected post INSERT against soft-deleted source to succeed");
             }

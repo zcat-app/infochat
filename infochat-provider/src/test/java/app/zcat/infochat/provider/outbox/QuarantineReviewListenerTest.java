@@ -311,13 +311,15 @@ class QuarantineReviewListenerTest {
         try (Connection conn = dataSource.getConnection()) {
             UUID postId;
             try (PreparedStatement ps = conn.prepareStatement(
-                    "INSERT INTO post (source_id, uid, title, body, fetched_at, status) "
-                            + "VALUES (?, ?, 'Test', 'body [REDACTED:ph-' || ? || ']', ?, 'QUARANTINED') "
+                    "INSERT INTO post (source_id, uid, title, body, fetched_at, status, "
+                            + "upstream_identifier) "
+                            + "VALUES (?, ?, 'Test', 'body [REDACTED:ph-' || ? || ']', ?, 'QUARANTINED', ?) "
                             + "RETURNING id")) {
                 ps.setObject(1, testSourceId);
                 ps.setString(2, postUid);
                 ps.setString(3, postUid);
                 ps.setObject(4, OffsetDateTime.ofInstant(FETCHED_AT, ZoneOffset.UTC));
+                ps.setString(5, postUid);
                 try (ResultSet rs = ps.executeQuery()) {
                     rs.next();
                     postId = rs.getObject("id", UUID.class);
@@ -351,13 +353,14 @@ class QuarantineReviewListenerTest {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO post (source_id, uid, title, body, fetched_at, status, "
-                             + "status_changed_at) "
-                             + "VALUES (?, ?, 'Test', 'body', ?, ?, now()) "
+                             + "status_changed_at, upstream_identifier) "
+                             + "VALUES (?, ?, 'Test', 'body', ?, ?, now(), ?) "
                              + "RETURNING id")) {
             ps.setObject(1, testSourceId);
             ps.setString(2, postUid);
             ps.setObject(3, OffsetDateTime.ofInstant(FETCHED_AT, ZoneOffset.UTC));
             ps.setString(4, status);
+            ps.setString(5, postUid);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getObject("id", UUID.class);

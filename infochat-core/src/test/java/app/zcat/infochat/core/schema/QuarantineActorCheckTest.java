@@ -203,13 +203,14 @@ class QuarantineActorCheckTest extends PostgresSchemaTestBase {
         // partition key.
         try (PreparedStatement ps = c.prepareStatement(
                 "INSERT INTO post (id, source_id, fetched_at, uid, title, "
-                        + "body, status, status_changed_at) "
+                        + "body, status, status_changed_at, upstream_identifier) "
                         + "VALUES (?, ?, '2026-07-15 00:00:00+00', ?, 'Test', ?, "
-                        + "'QUARANTINED', now())")) {
+                        + "'QUARANTINED', now(), ?)")) {
             ps.setObject(1, postId);
             ps.setObject(2, sourceId);
             ps.setString(3, "uid-" + postId);
             ps.setString(4, "[REDACTED:" + placeholderId + "]");
+            ps.setString(5, "uid-" + postId);
             ps.executeUpdate();
         }
 

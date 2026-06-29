@@ -576,8 +576,8 @@ class SaveCommandHandlerTest {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO post (source_id, uid, title, body, url, author, "
-                             + "published_at, fetched_at, status) "
-                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+                             + "published_at, fetched_at, status, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
             ps.setObject(1, sourceId);
             ps.setString(2, uid);
             ps.setString(3, title);
@@ -593,6 +593,7 @@ class SaveCommandHandlerTest {
             // (2026-05-01 .. 2026-06-01).
             ps.setObject(8, OffsetDateTime.parse("2026-05-15T00:00:00Z"));
             ps.setString(9, status);
+            ps.setString(10, uid);
             ps.executeUpdate();
         }
     }

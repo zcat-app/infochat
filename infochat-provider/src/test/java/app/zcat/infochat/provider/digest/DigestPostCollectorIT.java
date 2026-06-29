@@ -150,13 +150,15 @@ class DigestPostCollectorIT {
     private void insertPost(String uidSuffix, String title, Instant publishedAt) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO post (uid, source_id, title, body, published_at, status, tags) "
-                             + "VALUES (?, ?, ?, ?, ?, 'READY', '{}')")) {
+                     "INSERT INTO post (uid, source_id, title, body, published_at, status, tags, "
+                             + "upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, 'READY', '{}', ?)")) {
             ps.setString(1, PREFIX + uidSuffix);
             ps.setObject(2, sourceId);
             ps.setString(3, title);
             ps.setString(4, "Body for " + title);
             ps.setTimestamp(5, Timestamp.from(publishedAt));
+            ps.setString(6, PREFIX + uidSuffix);
             ps.executeUpdate();
         }
     }

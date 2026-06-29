@@ -248,14 +248,16 @@ class UnsaveCommandHandlerTest {
     private void seedReadyPost(UUID sourceId, String uid) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO post (source_id, uid, title, body, fetched_at, status) "
-                             + "VALUES (?, ?, ?, 'b', ?, 'READY')")) {
+                     "INSERT INTO post (source_id, uid, title, body, fetched_at, status, "
+                             + "upstream_identifier) "
+                             + "VALUES (?, ?, ?, 'b', ?, 'READY', ?)")) {
             ps.setObject(1, sourceId);
             ps.setString(2, uid);
             ps.setString(3, "title-" + uid);
             // fetched_at must fall inside the V7 bootstrap partition
             // (2026-05-01 .. 2026-06-01).
             ps.setObject(4, OffsetDateTime.parse("2026-05-15T00:00:00Z"));
+            ps.setString(5, uid);
             ps.executeUpdate();
         }
     }

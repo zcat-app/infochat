@@ -422,10 +422,11 @@ class DigestRoundtripIT {
         exec(conn,
                 "INSERT INTO post (id, uid, source_id, title, body, status,"
                         + " published_at, fetched_at, ready_at, tags,"
-                        + " stage1_done, stage2_done, tagger_done, embedding_done)"
+                        + " stage1_done, stage2_done, tagger_done, embedding_done,"
+                        + " upstream_identifier)"
                         + " VALUES (?, 'p-digestit-1', ?, 'Test Digest Post',"
                         + " 'Test post body.', 'READY', ?, ?, ?, ARRAY['crypto']::TEXT[],"
-                        + " TRUE, TRUE, TRUE, TRUE)"
+                        + " TRUE, TRUE, TRUE, TRUE, 'p-digestit-1')"
                         + " ON CONFLICT (id, fetched_at) DO NOTHING",
                 POST_1, SOURCE_1, Timestamp.from(seedTime),
                 Timestamp.from(seedTime), Timestamp.from(seedTime));

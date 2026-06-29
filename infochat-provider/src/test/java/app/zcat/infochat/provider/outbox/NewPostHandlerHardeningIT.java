@@ -137,13 +137,16 @@ class NewPostHandlerHardeningIT {
         Instant readyAt = READY_AT_BASE.plus(i, ChronoUnit.SECONDS);
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "INSERT INTO post (uid, source_id, title, status, fetched_at, ready_at) "
-                     + "VALUES (?, ?, ?, 'READY', ?, ?) RETURNING id")) {
-            ps.setString(1, TEST_UID_PREFIX + i + "-" + UUID.randomUUID());
+                 "INSERT INTO post (uid, source_id, title, status, fetched_at, ready_at, "
+                     + "upstream_identifier) "
+                     + "VALUES (?, ?, ?, 'READY', ?, ?, ?) RETURNING id")) {
+            String uid = TEST_UID_PREFIX + i + "-" + UUID.randomUUID();
+            ps.setString(1, uid);
             ps.setObject(2, testSourceId);
             ps.setString(3, "handler-hardening-it post " + i);
             ps.setTimestamp(4, Timestamp.from(FETCHED_AT));
             ps.setTimestamp(5, Timestamp.from(readyAt));
+            ps.setString(6, uid);
             try (ResultSet rs = ps.executeQuery()) {
                 assertTrue(rs.next(), "INSERT … RETURNING must yield the new id");
                 UUID id = rs.getObject("id", UUID.class);

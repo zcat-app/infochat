@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 15 |
+| pending | 14 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 528 |
+| done | 529 |
 | deferred | 9 |
 | **total** | **552** |
 
@@ -37,7 +37,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-509 — Operator onboarding: simple (comic) + advanced admin guides (complexity: medium, risk: low)
 - M1-515 — SimpleX groups: auto-accept invitations (registered-inviter gate) (complexity: high, risk: high)
-- M1-517 — Schema: NOT NULL post.upstream_identifier + backfill 37 test fixtures (complexity: low, risk: medium)
 - M1-518 — Remove vestigial SimpleX bot-queue-address derivation (complexity: high, risk: medium)
 
 ---
@@ -74,6 +73,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-517 | Schema: NOT NULL post.upstream_identifier + backfill 37 test fixtures | 2026-06-29 | round 1 APPROVE |
 | M1-516 | approve_quarantine: guard new_post NOTIFY when post UPDATE matches zero rows | 2026-06-29 | round 1 APPROVE |
 | M1-514 | SimpleX groups: per-group memberId @-mention recognition | 2026-06-29 | round 1 APPROVE |
 | M1-512 | Production runtime resource harness: swap, container memory/CPU caps, dev-runtime teardown | 2026-06-29 | round 1 APPROVE |
@@ -83,7 +83,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-488 | quarantine_reject prompt apostrophe breaks its own {0} MessageFormat token | 2026-06-29 | round 1 APPROVE |
 | M1-487 | NewPostHandler @Transactional does not roll back on SQLException | 2026-06-29 | round 1 APPROVE |
 | M1-486 | Signal inbound line cap equals body cap, collapsing two layers | 2026-06-29 | round 1 APPROVE |
-| M1-485 | Embedding batch retry has no backoff, unlike the sibling entity stage | 2026-06-29 | round 1 APPROVE |
 
 ---
 
@@ -734,6 +733,6 @@ M1-513 (draft)
 M1-514 (done)
   └── M1-515 (pending) ← runnable
 M1-516 (done)
-M1-517 (pending) ← runnable
+M1-517 (done)
 M1-518 (pending) ← runnable
 ```

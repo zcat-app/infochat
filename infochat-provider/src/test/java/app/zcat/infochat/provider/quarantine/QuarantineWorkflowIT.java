@@ -320,15 +320,17 @@ class QuarantineWorkflowIT {
                                        String ruleId) throws Exception {
         UUID postId;
         try (PreparedStatement ps = conn.prepareStatement(
-                "INSERT INTO post (source_id, uid, title, body, fetched_at, status) "
+                "INSERT INTO post (source_id, uid, title, body, fetched_at, status, "
+                        + "upstream_identifier) "
                         + "VALUES (?, ?, 'Test post', "
                         + "'safe prefix [REDACTED:' || ? || '] safe suffix', "
-                        + "?, 'QUARANTINED') "
+                        + "?, 'QUARANTINED', ?) "
                         + "RETURNING id")) {
             ps.setObject(1, sourceId);
             ps.setString(2, postUid);
             ps.setString(3, placeholderId);
             ps.setObject(4, OffsetDateTime.ofInstant(FETCHED_AT, ZoneOffset.UTC));
+            ps.setString(5, postUid);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 postId = rs.getObject("id", UUID.class);

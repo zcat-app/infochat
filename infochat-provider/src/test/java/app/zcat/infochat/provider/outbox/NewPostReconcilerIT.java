@@ -164,8 +164,9 @@ class NewPostReconcilerIT {
         List<SeededRow> result = new ArrayList<>(n);
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "INSERT INTO post (uid, source_id, title, status, fetched_at, ready_at) "
-                     + "VALUES (?, ?, ?, 'READY', ?, ?) "
+                 "INSERT INTO post (uid, source_id, title, status, fetched_at, ready_at, "
+                     + "upstream_identifier) "
+                     + "VALUES (?, ?, ?, 'READY', ?, ?, ?) "
                      + "RETURNING id")) {
             for (int i = 0; i < n; i++) {
                 Instant readyAt = READY_AT_BASE.plus(i, ChronoUnit.SECONDS);
@@ -175,6 +176,7 @@ class NewPostReconcilerIT {
                 ps.setString(3, "reconciler-it post " + i);
                 ps.setTimestamp(4, Timestamp.from(FETCHED_AT));
                 ps.setTimestamp(5, Timestamp.from(readyAt));
+                ps.setString(6, uid);
                 try (ResultSet rs = ps.executeQuery()) {
                     assertTrue(rs.next(), "INSERT … RETURNING must yield the new id");
                     UUID id = rs.getObject("id", UUID.class);
@@ -189,8 +191,9 @@ class NewPostReconcilerIT {
         List<SeededRow> result = new ArrayList<>(n);
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "INSERT INTO post (uid, source_id, title, status, fetched_at, ready_at) "
-                     + "VALUES (?, ?, ?, 'READY', ?, ?) "
+                 "INSERT INTO post (uid, source_id, title, status, fetched_at, ready_at, "
+                     + "upstream_identifier) "
+                     + "VALUES (?, ?, ?, 'READY', ?, ?, ?) "
                      + "RETURNING id")) {
             for (int i = n - 1; i >= 0; i--) {
                 Instant readyAt = READY_AT_BASE.plus(i, ChronoUnit.SECONDS);
@@ -200,6 +203,7 @@ class NewPostReconcilerIT {
                 ps.setString(3, "reconciler-it reversed post " + i);
                 ps.setTimestamp(4, Timestamp.from(FETCHED_AT));
                 ps.setTimestamp(5, Timestamp.from(readyAt));
+                ps.setString(6, uid);
                 try (ResultSet rs = ps.executeQuery()) {
                     assertTrue(rs.next());
                     UUID id = rs.getObject("id", UUID.class);

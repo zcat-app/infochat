@@ -1,0 +1,16 @@
+-- V54: make post.upstream_identifier NOT NULL (deep-review 19#F1; M1-517,
+-- split from M1-493).
+--
+-- V7__joins_post.sql:139 declares upstream_identifier as a nullable TEXT,
+-- contradicting docs/spec/schema.md §UID derivation: every Fetcher/
+-- StreamSource MUST produce a non-null upstream_identifier and ID-less items
+-- are rejected at the Fetcher boundary (the SPI type
+-- NormalizedPost.upstreamIdentifier is itself non-nullable). The gap is
+-- masked today by the non-null uid + UNIQUE(uid, fetched_at), but the storage
+-- layer did not back the contract. PostPersister (the only src/main inserter)
+-- already supplies it.
+--
+-- M1 is greenfield: migrations run against a fresh schema with no pre-existing
+-- rows, so no backfill is needed before the constraint. SET NOT NULL on the
+-- partitioned parent propagates to every partition (PG 12+).
+ALTER TABLE post ALTER COLUMN upstream_identifier SET NOT NULL;

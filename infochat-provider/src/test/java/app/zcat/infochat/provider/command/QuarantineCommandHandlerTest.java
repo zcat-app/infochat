@@ -491,13 +491,15 @@ class QuarantineCommandHandlerTest {
             // Seed the post with body containing the placeholder
             UUID postId;
             try (PreparedStatement ps = conn.prepareStatement(
-                    "INSERT INTO post (source_id, uid, title, body, fetched_at, status) "
-                            + "VALUES (?, ?, 'Test', 'some [REDACTED:' || ? || '] text', ?, 'QUARANTINED') "
+                    "INSERT INTO post (source_id, uid, title, body, fetched_at, status, "
+                            + "upstream_identifier) "
+                            + "VALUES (?, ?, 'Test', 'some [REDACTED:' || ? || '] text', ?, 'QUARANTINED', ?) "
                             + "RETURNING id")) {
                 ps.setObject(1, sourceId);
                 ps.setString(2, postUid);
                 ps.setString(3, placeholderId);
                 ps.setObject(4, FETCHED_AT);
+                ps.setString(5, postUid);
                 try (ResultSet rs = ps.executeQuery()) {
                     rs.next();
                     postId = (UUID) rs.getObject("id");

@@ -197,14 +197,16 @@ class NewPostListenerIT {
     private void seedReadyRow(UUID postId, Instant readyAt) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "INSERT INTO post (id, uid, source_id, title, status, fetched_at, ready_at) "
-                     + "VALUES (?, ?, ?, ?, 'READY', ?, ?)")) {
+                 "INSERT INTO post (id, uid, source_id, title, status, fetched_at, ready_at, "
+                     + "upstream_identifier) "
+                     + "VALUES (?, ?, ?, ?, 'READY', ?, ?, ?)")) {
             ps.setObject(1, postId);
             ps.setString(2, TEST_UID_PREFIX + postId);
             ps.setObject(3, testSourceId);
             ps.setString(4, "listener-it post " + postId);
             ps.setTimestamp(5, Timestamp.from(FETCHED_AT));
             ps.setTimestamp(6, Timestamp.from(readyAt));
+            ps.setString(7, TEST_UID_PREFIX + postId);
             ps.executeUpdate();
         }
     }

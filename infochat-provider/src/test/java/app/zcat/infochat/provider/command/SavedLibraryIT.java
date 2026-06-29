@@ -145,11 +145,13 @@ class SavedLibraryIT {
 
     private void seedReadyPost(Connection conn, UUID sourceId, String uid) throws Exception {
         try (PreparedStatement ps = conn.prepareStatement(
-                "INSERT INTO post (source_id, uid, title, body, fetched_at, status) "
-                        + "VALUES (?, ?, 'Roundtrip Title', 'Roundtrip Body', ?, 'READY')")) {
+                "INSERT INTO post (source_id, uid, title, body, fetched_at, status, "
+                        + "upstream_identifier) "
+                        + "VALUES (?, ?, 'Roundtrip Title', 'Roundtrip Body', ?, 'READY', ?)")) {
             ps.setObject(1, sourceId);
             ps.setString(2, uid);
             ps.setObject(3, OffsetDateTime.parse("2026-05-15T00:00:00Z"));
+            ps.setString(4, uid);
             ps.executeUpdate();
         }
     }

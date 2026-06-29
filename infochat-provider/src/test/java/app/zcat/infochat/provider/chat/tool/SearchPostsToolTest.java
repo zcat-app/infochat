@@ -433,8 +433,8 @@ class SearchPostsToolTest {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "INSERT INTO post (uid, source_id, title, body, url, published_at, "
-                     + "fetched_at, status, ready_at, tags) "
-                     + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, '{}')")) {
+                     + "fetched_at, status, ready_at, tags, upstream_identifier) "
+                     + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, '{}', ?)")) {
             ps.setString(1, PREFIX + slug);
             ps.setObject(2, sourceId);
             ps.setString(3, "Title " + slug);
@@ -443,6 +443,7 @@ class SearchPostsToolTest {
             ps.setTimestamp(6, Timestamp.from(publishedAt));
             ps.setTimestamp(7, Timestamp.from(FETCHED_AT));
             ps.setTimestamp(8, Timestamp.from(readyAt));
+            ps.setString(9, PREFIX + slug);
             ps.executeUpdate();
         }
     }
@@ -453,8 +454,8 @@ class SearchPostsToolTest {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "INSERT INTO post (uid, source_id, title, body, url, published_at, "
-                     + "fetched_at, status, ready_at, tags) "
-                     + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, ?::TEXT[])")) {
+                     + "fetched_at, status, ready_at, tags, upstream_identifier) "
+                     + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, ?::TEXT[], ?)")) {
             ps.setString(1, PREFIX + slug);
             ps.setObject(2, sourceId);
             ps.setString(3, "Title " + slug);
@@ -464,6 +465,7 @@ class SearchPostsToolTest {
             ps.setTimestamp(7, Timestamp.from(FETCHED_AT));
             ps.setTimestamp(8, Timestamp.from(readyAt));
             ps.setString(9, tagLiteral);
+            ps.setString(10, PREFIX + slug);
             ps.executeUpdate();
         }
     }
@@ -473,8 +475,8 @@ class SearchPostsToolTest {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "INSERT INTO post (uid, source_id, title, body, url, published_at, "
-                     + "fetched_at, status, ready_at, tags) "
-                     + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, '{}')")) {
+                     + "fetched_at, status, ready_at, tags, upstream_identifier) "
+                     + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, '{}', ?)")) {
             ps.setString(1, PREFIX + slug);
             ps.setObject(2, sourceId);
             ps.setString(3, title);
@@ -483,6 +485,7 @@ class SearchPostsToolTest {
             ps.setTimestamp(6, Timestamp.from(publishedAt));
             ps.setTimestamp(7, Timestamp.from(FETCHED_AT));
             ps.setTimestamp(8, Timestamp.from(readyAt));
+            ps.setString(9, PREFIX + slug);
             ps.executeUpdate();
         }
     }

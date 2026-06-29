@@ -1,7 +1,7 @@
 ---
 id: M1-517
 title: "Schema: NOT NULL post.upstream_identifier + backfill 37 test fixtures"
-status: pending
+status: done
 created: 2026-06-29
 last_updated: 2026-06-29
 blocked_by: []
@@ -48,6 +48,7 @@ test_plan:
     - "infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/SearchPostsToolClockTest.java"
     - "infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/SearchPostsToolTest.java"
     - "infochat-provider/src/test/java/app/zcat/infochat/provider/command/QuarantineCommandHandlerTest.java"
+    - "infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryCommandHandlerGroupScopeIT.java"
     - "infochat-provider/src/test/java/app/zcat/infochat/provider/command/SaveCapConcurrencyIT.java"
     - "infochat-provider/src/test/java/app/zcat/infochat/provider/command/SaveCommandHandlerTest.java"
     - "infochat-provider/src/test/java/app/zcat/infochat/provider/command/SavedLibraryIT.java"
@@ -79,12 +80,29 @@ test_plan:
 spec_refs:
   - docs/spec/schema.md §UID derivation
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 42
+      added: 269
+      removed: 102
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-29
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-517: NOT NULL post.upstream_identifier + backfill 37 test fixtures
@@ -142,6 +160,7 @@ Do NOT use a column DEFAULT or trigger to dodge the fixture edits.
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/SearchPostsToolClockTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/SearchPostsToolTest.java (x3 inserts)
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/QuarantineCommandHandlerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryCommandHandlerGroupScopeIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SaveCapConcurrencyIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SaveCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SavedLibraryIT.java
@@ -171,6 +190,14 @@ Do NOT use a column DEFAULT or trigger to dodge the fixture edits.
 - Each edit is mechanical: add `upstream_identifier` to the column list and a
   matching value (e.g. derived from the existing uid) to the VALUES. Re-run
   the grep before review to confirm zero remaining nullable inserts.
+- The "44 sites across 37 files" count in acceptance #2 was taken from a grep
+  on 2026-06-29 that predated M1-478 (merged the same day, 17:24), which added
+  a 38th omitting insert site in RetryCommandHandlerGroupScopeIT. That file is
+  fixed too — acceptance #2's operative clause ("every pre-existing INSERT INTO
+  post that omitted upstream_identifier is updated ... so all tests currently
+  green on main stay green") and `preserves` both mandate it, and the total
+  (1 migration + 1 IT + 38 fixtures = 40) stays within `files_budget: 42`. No
+  files_budget/files_scope/out_of_scope change.
 
 ## Pre-flight self-check (author-side)
 

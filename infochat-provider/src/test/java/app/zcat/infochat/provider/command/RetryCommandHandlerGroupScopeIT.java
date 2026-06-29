@@ -239,7 +239,7 @@ class RetryCommandHandlerGroupScopeIT {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO post (uid, source_id, title, body, url, published_at, "
-                             + "status, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")) {
+                             + "status, tags, upstream_identifier) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
             ps.setString(1, uid);
             ps.setObject(2, sourceId);
             ps.setString(3, title);
@@ -248,6 +248,7 @@ class RetryCommandHandlerGroupScopeIT {
             ps.setTimestamp(6, Timestamp.from(publishedAt));
             ps.setString(7, status);
             ps.setArray(8, conn.createArrayOf("TEXT", tags));
+            ps.setString(9, uid);
             ps.executeUpdate();
         }
     }

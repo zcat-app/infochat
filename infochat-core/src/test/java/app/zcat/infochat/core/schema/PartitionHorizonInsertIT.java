@@ -89,12 +89,13 @@ class PartitionHorizonInsertIT extends PostgresSchemaTestBase {
     private static UUID insertPost(Connection c, UUID sourceId) throws SQLException {
         UUID postId = UUID.randomUUID();
         try (PreparedStatement ps = c.prepareStatement(
-                "INSERT INTO post (id, source_id, fetched_at, uid, title) "
-                        + "VALUES (?, ?, ?::timestamptz, ?, 'Horizon')")) {
+                "INSERT INTO post (id, source_id, fetched_at, uid, title, upstream_identifier) "
+                        + "VALUES (?, ?, ?::timestamptz, ?, 'Horizon', ?)")) {
             ps.setObject(1, postId);
             ps.setObject(2, sourceId);
             ps.setString(3, BEYOND_HORIZON_FETCHED_AT);
             ps.setString(4, "uid-" + postId);
+            ps.setString(5, "uid-" + postId);
             ps.executeUpdate();
         }
         return postId;

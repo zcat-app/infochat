@@ -98,8 +98,8 @@ class PostPartitioningTest extends PostgresSchemaTestBase {
 
             SQLException ex;
             try (PreparedStatement stmt = c.prepareStatement(
-                    "INSERT INTO post (uid, source_id, title, status, fetched_at) "
-                            + "VALUES (?, ?::uuid, ?, 'EVALUATING', ?::timestamptz)")) {
+                    "INSERT INTO post (uid, source_id, title, status, fetched_at, upstream_identifier) "
+                            + "VALUES (?, ?::uuid, ?, 'EVALUATING', ?::timestamptz, 'ui-evaluating')")) {
                 stmt.setString(1, uniqueUid());
                 stmt.setString(2, sourceId);
                 stmt.setString(3, "test");
@@ -193,12 +193,13 @@ class PostPartitioningTest extends PostgresSchemaTestBase {
     private static void insertPost(Connection c, String sourceId, String uid,
                                    String fetchedAt) throws SQLException {
         try (PreparedStatement stmt = c.prepareStatement(
-                "INSERT INTO post (uid, source_id, title, fetched_at) "
-                        + "VALUES (?, ?::uuid, ?, ?::timestamptz)")) {
+                "INSERT INTO post (uid, source_id, title, fetched_at, upstream_identifier) "
+                        + "VALUES (?, ?::uuid, ?, ?::timestamptz, ?)")) {
             stmt.setString(1, uid);
             stmt.setString(2, sourceId);
             stmt.setString(3, "test post " + uid);
             stmt.setString(4, fetchedAt);
+            stmt.setString(5, uid);
             stmt.executeUpdate();
         }
     }

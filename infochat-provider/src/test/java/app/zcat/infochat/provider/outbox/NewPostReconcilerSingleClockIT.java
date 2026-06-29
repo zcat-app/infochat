@@ -149,13 +149,16 @@ class NewPostReconcilerSingleClockIT {
     private SeededRow seedDbClockedReadyRow(String slug) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "INSERT INTO post (uid, source_id, title, status, fetched_at, ready_at) "
-                     + "VALUES (?, ?, ?, 'READY', ?, now()) "
+                 "INSERT INTO post (uid, source_id, title, status, fetched_at, ready_at, "
+                     + "upstream_identifier) "
+                     + "VALUES (?, ?, ?, 'READY', ?, now(), ?) "
                      + "RETURNING id, ready_at")) {
-            ps.setString(1, TEST_UID_PREFIX + slug + "-" + UUID.randomUUID());
+            String uid = TEST_UID_PREFIX + slug + "-" + UUID.randomUUID();
+            ps.setString(1, uid);
             ps.setObject(2, testSourceId);
             ps.setString(3, "single-clock-it post " + slug);
             ps.setTimestamp(4, Timestamp.from(FETCHED_AT));
+            ps.setString(5, uid);
             try (ResultSet rs = ps.executeQuery()) {
                 assertTrue(rs.next(), "INSERT … RETURNING must yield the new row");
                 return new SeededRow(
@@ -168,13 +171,16 @@ class NewPostReconcilerSingleClockIT {
     private void seedReadyRowAt(String slug, Instant readyAt) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "INSERT INTO post (uid, source_id, title, status, fetched_at, ready_at) "
-                     + "VALUES (?, ?, ?, 'READY', ?, ?)")) {
-            ps.setString(1, TEST_UID_PREFIX + slug + "-" + UUID.randomUUID());
+                 "INSERT INTO post (uid, source_id, title, status, fetched_at, ready_at, "
+                     + "upstream_identifier) "
+                     + "VALUES (?, ?, ?, 'READY', ?, ?, ?)")) {
+            String uid = TEST_UID_PREFIX + slug + "-" + UUID.randomUUID();
+            ps.setString(1, uid);
             ps.setObject(2, testSourceId);
             ps.setString(3, "single-clock-it post " + slug);
             ps.setTimestamp(4, Timestamp.from(FETCHED_AT));
             ps.setTimestamp(5, Timestamp.from(readyAt));
+            ps.setString(6, uid);
             ps.executeUpdate();
         }
     }

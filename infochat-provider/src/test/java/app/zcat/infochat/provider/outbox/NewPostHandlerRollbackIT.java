@@ -198,13 +198,16 @@ class NewPostHandlerRollbackIT {
     private SeededRow seedReadyRow() throws Exception {
         try (Connection conn = seedDataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "INSERT INTO post (uid, source_id, title, status, fetched_at, ready_at) "
-                     + "VALUES (?, ?, ?, 'READY', ?, ?) RETURNING id")) {
-            ps.setString(1, TEST_UID_PREFIX + UUID.randomUUID());
+                 "INSERT INTO post (uid, source_id, title, status, fetched_at, ready_at, "
+                     + "upstream_identifier) "
+                     + "VALUES (?, ?, ?, 'READY', ?, ?, ?) RETURNING id")) {
+            String uid = TEST_UID_PREFIX + UUID.randomUUID();
+            ps.setString(1, uid);
             ps.setObject(2, testSourceId);
             ps.setString(3, "handler-rollback-it post");
             ps.setTimestamp(4, Timestamp.from(FETCHED_AT));
             ps.setTimestamp(5, Timestamp.from(READY_AT));
+            ps.setString(6, uid);
             try (ResultSet rs = ps.executeQuery()) {
                 assertTrue(rs.next(), "INSERT … RETURNING must yield the new id");
                 return new SeededRow(rs.getObject("id", UUID.class), READY_AT);

@@ -291,11 +291,12 @@ class PerScopeIsolationIT extends PostgresSchemaTestBase {
         // wall-clock fetched_at past the V30 horizon (>= '2026-08-01') would hit
         // "no partition of relation post found for row" with no code change (M1-479).
         try (PreparedStatement stmt = c.prepareStatement(
-                "INSERT INTO post (uid, source_id, title, fetched_at) "
-                        + "VALUES (?, ?::uuid, ?, '2026-07-15 00:00:00+00')")) {
+                "INSERT INTO post (uid, source_id, title, fetched_at, upstream_identifier) "
+                        + "VALUES (?, ?::uuid, ?, '2026-07-15 00:00:00+00', ?)")) {
             stmt.setString(1, uid);
             stmt.setString(2, sourceId);
             stmt.setString(3, title);
+            stmt.setString(4, uid);
             stmt.executeUpdate();
         }
     }

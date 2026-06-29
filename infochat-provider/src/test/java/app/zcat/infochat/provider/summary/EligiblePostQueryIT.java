@@ -164,14 +164,15 @@ class EligiblePostQueryIT {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO post (uid, source_id, title, body, published_at, status, "
-                             + "stage2_failed, tags) "
-                             + "VALUES (?, ?, ?, ?, ?, 'READY', TRUE, ?)")) {
+                             + "stage2_failed, tags, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, 'READY', TRUE, ?, ?)")) {
             ps.setString(1, PREFIX + "redact-1");
             ps.setObject(2, sourceId);
             ps.setString(3, "Redacted post");
             ps.setString(4, "Body with [REDACTED:abc123] placeholder.");
             ps.setTimestamp(5, Timestamp.from(now));
             ps.setArray(6, conn.createArrayOf("TEXT", new String[] { PREFIX + "news" }));
+            ps.setString(7, PREFIX + "redact-1");
             ps.executeUpdate();
         }
 
@@ -430,8 +431,9 @@ class EligiblePostQueryIT {
                              Instant publishedAt, String status, List<String> tags) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO post (uid, source_id, title, body, published_at, status, tags) "
-                             + "VALUES (?, ?, ?, ?, ?, ?, ?)")) {
+                     "INSERT INTO post (uid, source_id, title, body, published_at, status, tags, "
+                             + "upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)")) {
             ps.setString(1, PREFIX + uidSuffix);
             ps.setObject(2, sourceId);
             ps.setString(3, title);
@@ -439,6 +441,7 @@ class EligiblePostQueryIT {
             ps.setTimestamp(5, Timestamp.from(publishedAt));
             ps.setString(6, status);
             ps.setArray(7, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
+            ps.setString(8, PREFIX + uidSuffix);
             ps.executeUpdate();
         }
     }
