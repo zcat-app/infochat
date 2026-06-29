@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 15 |
+| pending | 16 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 526 |
-| deferred | 8 |
-| **total** | **549** |
+| deferred | 9 |
+| **total** | **551** |
 
 ---
 
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-490 — Reconcile §9 split-clock decision sites against the M1-447 backlog (complexity: medium, risk: medium)
 - M1-491 — Log-sanitization hardening: relay NOTICE control-strip + SafeLog bidi/line-sep (complexity: low, risk: low)
 - M1-492 — Production javadoc/contract drift: stale or wrong SPI/handler contracts (complexity: low, risk: low)
-- M1-493 — Schema hardening: NOT NULL upstream_identifier + approve_quarantine phantom NOTIFY (complexity: low, risk: low)
 - M1-494 — Production dead-code and defensive-check cleanup sweep (complexity: low, risk: low)
 - M1-495 — Integration/DB-boot tests named *Test run in the surefire (unit) phase (complexity: low, risk: low)
 - M1-496 — Test-integrity sweep: vacuous, ambient-gated, and over-permissive assertions (complexity: low, risk: low)
@@ -38,6 +37,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-500 — Test dead-code, dead-import, and structure cleanup sweep (complexity: low, risk: low)
 - M1-509 — Operator onboarding: simple (comic) + advanced admin guides (complexity: medium, risk: low)
 - M1-514 — SimpleX groups: meta.userMention @-mention recognition (complexity: high, risk: high)
+- M1-516 — approve_quarantine: guard new_post NOTIFY when post UPDATE matches zero rows (complexity: low, risk: low)
+- M1-517 — Schema: NOT NULL post.upstream_identifier + backfill 37 test fixtures (complexity: low, risk: medium)
 
 ---
 
@@ -91,9 +92,10 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 ### blocked-on-new-ticket (1)
 - M1-505 → M1-506
 
-### decomposed (3)
+### decomposed (4)
 - M1-034 → M1-034a
 - M1-318 → unspecified
+- M1-493 → unspecified
 - M1-511 → unspecified
 
 ### post-mvp-hardening (1)
@@ -707,7 +709,7 @@ M1-489 (done)
 M1-490 (pending) ← runnable
 M1-491 (pending) ← runnable
 M1-492 (pending) ← runnable
-M1-493 (pending) ← runnable
+M1-493 (deferred)
 M1-494 (pending) ← runnable
 M1-495 (pending) ← runnable
 M1-496 (pending) ← runnable
@@ -731,4 +733,6 @@ M1-512 (done)
 M1-513 (draft)
 M1-514 (pending) ← runnable
   └── M1-515 (pending)
+M1-516 (pending) ← runnable
+M1-517 (pending) ← runnable
 ```

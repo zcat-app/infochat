@@ -1,10 +1,11 @@
 ---
 id: M1-493
 title: "Schema hardening: NOT NULL upstream_identifier + approve_quarantine phantom NOTIFY"
-status: pending
+status: deferred
 created: 2026-06-27
-last_updated: 2026-06-27
+last_updated: 2026-06-29
 blocked_by: []
+deferred_reason: decomposed
 files_budget: 5
 complexity: low
 risk: low
@@ -38,11 +39,29 @@ test_plan:
 spec_refs: []
 decision_refs: []
 reviews: {}
+escalations:
+  - date: 2026-06-29
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (budget-breach). F1 (NOT NULL on post.upstream_identifier) breaks
+      44 INSERT INTO post sites across 37 existing test files that omit
+      upstream_identifier (verified by grep: production PostPersister supplies
+      it, only test fixtures take the shortcut). test_plan.preserves forbids
+      breaking them, so landing F1 requires editing ~37 files vs files_budget: 5.
+      No surgical shortcut: a column DEFAULT/trigger would mask the contract
+      (forbidden shim, defeats the constraint) and the inserts share no
+      chokepoint. F2 (approve_quarantine phantom NOTIFY guard) is independent
+      and in-budget (~2 files).
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-29
+  verdict: WARN
+  warnings:
+    - "COMPLEXITY-RISK-CALIBRATED: risk:low flagged as possibly under-calibrated for a migration_touch NOT NULL add. Premise (live production NULL rows) does not hold — M1 is greenfield, migrations run against a fresh schema with no pre-existing data; risk:low retained."
+  blockers: []
 ---
 
 # M1-493: Schema hardening — NOT NULL upstream_identifier + approve_quarantine phantom NOTIFY
