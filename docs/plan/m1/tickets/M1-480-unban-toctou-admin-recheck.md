@@ -1,9 +1,9 @@
 ---
 id: M1-480
 title: "/unban skips the in-transaction admin re-check its siblings perform"
-status: pending
+status: done
 created: 2026-06-27
-last_updated: 2026-06-27
+last_updated: 2026-06-29
 blocked_by: []
 files_budget: 3
 complexity: low
@@ -34,12 +34,44 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 243
+      removed: 16
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-29
+    verdict: CLEAN
+    base: origin/main (4edfef05)
+    head: working-tree (m1/M1-480 branch)
+    verdict_file: docs/plan/m1/redteam/M1-480-2026-06-29.md
+    out_of_model_count: 1
+    note: |
+      Adversarial audit of the in-transaction admin re-gate (both /unban legs)
+      ran CLEAN — no findings against the threat model. One out-of-model
+      advisory: the preban-vs-non-preban branch reads the target row
+      non-locking (only the actor row is locked FOR UPDATE), but preban has no
+      legal exit transition in v1 so the branch cannot be raced into the wrong
+      leg; pre-existing, not adversary-reachable, advisory only. No lifecycle
+      action for this ticket.
+clarity_check:
+  date: 2026-06-29
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-480: /unban skips the in-transaction admin re-check its siblings perform

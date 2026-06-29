@@ -193,8 +193,8 @@ public class UnbanCommandHandler implements CommandHandler {
 
         // Step 4 — preban carve-out.
         if ("preban".equals(target.registrationState)) {
-            executeDeletePrebanUser(adapter, targetContactId, target.id, actor.id, requestId);
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_UNBAN_PREBAN_DELETED, inboundContext.effectiveLanguage()));
+            return executeDeletePrebanUser(scope, adapter, actor.contactId,
+                    targetContactId, target.id, requestId);
         }
 
         // Step 4.5 — not-banned no-op. Nothing to unban: no UNBAN
@@ -211,6 +211,20 @@ public class UnbanCommandHandler implements CommandHandler {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
+                // In-tx admin gate — SELECT ... FOR UPDATE on the actor
+                // row (M1-046 TOCTOU-closure), authoritative for the
+                // mutation below: a /revoke-admin or /demote racing this
+                // /unban serializes behind the row lock, so a caller
+                // demoted between the dispatch-time read (Step 1) and
+                // this commit cannot complete the admin-only unban. The
+                // sibling handlers (Ban/Vouch/Grant/Revoke) all gate
+                // here; the dispatch-time read is no longer authoritative.
+                Optional<UserRow> lockedActorOpt =
+                        lookupUserForUpdate(conn, adapter, actor.contactId);
+                if (lockedActorOpt.isEmpty() || !lockedActorOpt.get().isAdmin) {
+                    conn.rollback();
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
+                }
                 try (PreparedStatement ps = conn.prepareStatement(
                         "SELECT set_config('infochat.actor_id', ?, true)")) {
                     ps.setString(1, actor.id.toString());
@@ -260,11 +274,12 @@ public class UnbanCommandHandler implements CommandHandler {
         return reply(scope, body);
     }
 
-    private void executeDeletePrebanUser(String adapter,
-                                         String targetContactId,
-                                         UUID targetId,
-                                         UUID actorId,
-                                         String requestId) {
+    private OutboundMessage executeDeletePrebanUser(ScopeRef scope,
+                                                    String adapter,
+                                                    String callerContactId,
+                                                    String targetContactId,
+                                                    UUID targetId,
+                                                    String requestId) {
         // The V5 procedure manages its own audit-INSERT + DELETE pair
         // atomically (SECURITY DEFINER). The handler's responsibility
         // here is the request_id propagation: set the GUC on the same
@@ -281,6 +296,20 @@ public class UnbanCommandHandler implements CommandHandler {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
+                // In-tx admin gate — SELECT ... FOR UPDATE on the actor
+                // row (M1-046 TOCTOU-closure), authoritative for the
+                // CALL below: a /revoke-admin or /demote racing this
+                // /unban serializes behind the row lock, so a caller
+                // demoted between the dispatch-time read (Step 1) and
+                // this commit cannot complete the admin-only delete. The
+                // locked row's id feeds the GUC + CALL.
+                Optional<UserRow> actorOpt =
+                        lookupUserForUpdate(conn, adapter, callerContactId);
+                if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
+                    conn.rollback();
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
+                }
+                UUID actorId = actorOpt.get().id;
                 try (PreparedStatement ps = conn.prepareStatement(
                         "SELECT set_config('infochat.actor_id', ?, true), "
                                 + "set_config('infochat.request_id', ?, true)")) {
@@ -294,6 +323,7 @@ public class UnbanCommandHandler implements CommandHandler {
                     cs.execute();
                 }
                 conn.commit();
+                return reply(scope, bundleLoader.get(BundleKeys.REPLY_UNBAN_PREBAN_DELETED, inboundContext.effectiveLanguage()));
             } catch (SQLException e) {
                 conn.rollback();
                 throw new IllegalStateException(
@@ -314,6 +344,20 @@ public class UnbanCommandHandler implements CommandHandler {
             return Optional.empty();
         }
         return userRepository.findByAdapterAndContactId(adapter, contactId)
+                .map(u -> new UserRow(u.id(), u.contactId(), u.isAdmin(),
+                        u.isBanned(), u.registrationState()));
+    }
+
+    /**
+     * {@code SELECT ... FOR UPDATE} lookup on the transaction connection
+     * — the row lock is held until the caller commits or rolls back, so
+     * the admin re-gate it feeds cannot be invalidated by a concurrent
+     * demote between the check and the effect (the M1-046 shape shared
+     * with the sibling admin handlers).
+     */
+    private Optional<UserRow> lookupUserForUpdate(Connection conn, String adapter,
+                                                  String contactId) throws SQLException {
+        return userRepository.findByAdapterAndContactIdForUpdate(conn, adapter, contactId)
                 .map(u -> new UserRow(u.id(), u.contactId(), u.isAdmin(),
                         u.isBanned(), u.registrationState()));
     }
