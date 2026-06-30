@@ -309,6 +309,15 @@ actions happened, never your message content).
   full privacy purge.
 - **`/compress`** checkpoints a long conversation's memory and trims the live
   context; the bot also does this automatically when a conversation gets long.
+- **Tag your saves.** `/save <id> -t tag1,tag2` attaches your own personal tags
+  to a bookmark (kept separate from the post's own tags); `/saved <tag>` then
+  filters your library by them.
+- **Asset price source & currency.** `/zcash` and `/monero` take an optional
+  exchange sub-verb and a `--vs <currency>` — e.g. `/zcash kraken --vs eur`
+  (supported currencies: `usd`, `eur`, `czk`, `btc`). Bare `/zcash` uses the
+  default source and currency your admin configured.
+- **Pagination.** `/saved`, `/get-sources`, and `/list-sources` accept `--page N`
+  (1-indexed) to step through long lists.
 - **Full command catalogue** (every command, every option, exact argument
   grammar): [docs/spec/commands.md](docs/spec/commands.md).
 

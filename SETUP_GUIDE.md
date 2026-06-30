@@ -16,6 +16,7 @@ downloading and building things while you wait).
 
 ## Table of contents
 
+- [Quickstart (the default path)](#quickstart-the-default-path)
 - [Before you start (prerequisites)](#before-you-start)
 - [The easy path: run the wizard](#the-easy-path-run-the-wizard)
 - [What the wizard asks you](#what-the-wizard-asks-you)
@@ -24,6 +25,30 @@ downloading and building things while you wait).
 - [Troubleshooting](#troubleshooting)
 - [Advanced (technical details)](#advanced-technical-details)
 - [Where to go next](#where-to-go-next)
+
+---
+
+## Quickstart (the default path)
+
+The most common setup — **SimpleX** (no phone number) + the free local **Ollama**
+AI, on one Linux machine — is essentially one command and two chat messages.
+Everything after this section is detail, options, and the Signal / remote-AI /
+advanced paths; read on only if you need them.
+
+1. **Clone** infochat and open a terminal in its folder.
+2. **Run the wizard**, pressing **Enter** at each prompt to take the defaults:
+   ```bash
+   ./prod/setup.sh
+   ```
+   At **step 6** it asks for a secret **claim-token** — type one and keep it safe.
+3. When **step 8** prints a green **healthy** summary, infochat is live.
+4. **Connect** to the bot (the wizard prints its contact link) and **DM it your
+   claim-token** — that first message makes you the admin.
+5. **Unset the token** afterward so it can't be reused (one line in
+   `secrets.env` + restart — see
+   [Connecting to the bot](#connecting-to-the-bot-for-the-first-time)).
+
+The only prerequisite is **Docker**. That's the whole happy path.
 
 ---
 
@@ -74,25 +99,47 @@ account on that app. How much you do by hand depends on which app you choose:
   > **Why auto-accept is safe:** it only opens the chat connection — it does
   > **not** bypass invite gating; an un-invited contact still gets the "you need
   > an invite" reply.
-- **Signal:** install `signal-cli` and register a **phone number** for the bot
-  (a spare number or one you control — Signal requires a phone number). This part
-  the wizard can't automate, because Signal may ask you to solve a captcha:
+- **Signal:** `signal-cli` ships **baked into infochat's container image** too,
+  exactly like `simplex-chat` — you do **not** install it on your host. The one
+  thing the wizard can't automate is **registering the bot's phone number** (a
+  spare number or one you control — Signal requires one), because Signal makes you
+  solve a captcha that can't be scripted. You register it once, out-of-band, by
+  running `signal-cli` against the bot's data directory. A **fresh** number needs
+  the `--captcha` step (a plain `register` errors, telling you to fetch a captcha
+  token first), then a `verify` with the code Signal SMSes you:
 
   ```bash
-  signal-cli -a +<bot-number> register       # follow the captcha link it prints
-  signal-cli -a +<bot-number> verify <code>  # <code> arrives by SMS
+  # uses the signal-cli baked into the Provider image (build it first if needed:
+  # `docker compose --profile prod build infochat-provider`)
+  docker compose --profile prod --env-file prod/runtime/secrets.env \
+    run --rm --no-deps --entrypoint /usr/local/bin/signal-cli infochat-provider \
+    -a +<bot-number> register --captcha <token-from-the-captcha-link>
+  # then, with the SMS code:
+  #   ... --entrypoint /usr/local/bin/signal-cli infochat-provider -a +<bot-number> verify <code>
   ```
 
-  The full procedure, including the captcha step, is in the signal-cli
-  Quickstart: https://github.com/AsamK/signal-cli/wiki/Quickstart
+  (A host-installed `signal-cli` works the same way — same `register --captcha`
+  / `verify` commands against the same data directory. The full procedure is in
+  the deployment notes, docs/design/07-deployment.md §7.7, and the signal-cli
+  Quickstart: https://github.com/AsamK/signal-cli/wiki/Quickstart)
 
-You can use either one, or both. For SimpleX you need nothing in advance; for
-Signal, register the number first and jot down where `signal-cli` lives, its data
-directory, and the bot's number, since the wizard asks for those in step 6.
+  **Two different values — don't mix them up.** The bot's **account** is its
+  **phone number** (the one you just registered). **Your** admin identity is your
+  Signal **contact id (ACI)** — a UUID, *not* a phone number — which you hand the
+  wizard at the step-6 admin prompt.
 
-> **Honest note:** for SimpleX, everything is automated by the wizard. The only
-> remaining manual step is registering a Signal phone number, because that
-> account belongs to Signal (and its captcha), not to us.
+You can use either one, or both. For SimpleX you need nothing in advance. For
+Signal, the wizard's step 6 captures the bot's data directory and number (the
+`signal-cli` binary path is already the in-image default — just press Enter); you
+complete the captcha registration out-of-band, either with a host `signal-cli` or
+with the bundled one once the image is built. The Provider reads the registered
+account from that data directory at startup, so it just needs to exist before the
+Signal adapter comes up.
+
+> **Honest note:** for SimpleX, everything is automated by the wizard. For Signal,
+> both client binaries are baked into the image, so the only remaining manual step
+> is registering the bot's phone number — that account belongs to Signal (and its
+> captcha), not to us.
 
 ---
 
@@ -147,10 +194,9 @@ differs by app, because the two apps prove identity differently:
 
 - **SimpleX** has no phone number or fixed address to point at, so you choose a
   **secret claim-token**. After the bot starts, you DM it that token from your
-  own SimpleX app, and that first message makes *you* the admin. Once you've
-  claimed admin, **unset the token** (the wizard writes it to
-  `prod/runtime/secrets.env` as `INFOCHAT_SIMPLEX_ADMIN_TOKEN`; blank it and
-  restart) so a leaked token can never re-claim admin later.
+  own SimpleX app, and that first message makes *you* the admin. Then you **unset
+  the token** so a leaked one can never re-claim admin later (exact one-line step
+  under [Connecting to the bot](#connecting-to-the-bot-for-the-first-time)).
 - **Signal** has a stable account, so you give the wizard your Signal **contact
   id** (ACI) directly and you are the admin from the first start — nothing to
   claim.
@@ -274,8 +320,8 @@ Bootstrap admin claim-token for simplex: <type a secret token — keep it safe>
 ```
 
 (The token is hidden as you type. After the bot is up, DM it this exact token
-from your own SimpleX app to become admin, then blank
-`INFOCHAT_SIMPLEX_ADMIN_TOKEN` in `prod/runtime/secrets.env` and restart.)
+from your own SimpleX app to become admin — then unset it, as described under
+[Connecting to the bot](#connecting-to-the-bot-for-the-first-time).)
 
 Everything else runs automatically. When step 8 prints a green "healthy"
 summary, you're done.
@@ -383,14 +429,16 @@ copies **encrypted at rest**. Three things matter:
 
 infochat ships a backup script that captures all three for you —
 `prod/scripts/backup.sh`. It writes a database dump plus a tar of the bot's
-messaging-identity directories into a backup folder (default `/backups`).
-Schedule it from cron, with two independent lines that delete backups older than
-two weeks:
+messaging-identity directories into a backup folder (default
+`prod/runtime/backups`; override with a positional argument or
+`$INFOCHAT_BACKUP_DIR`). Schedule it from cron — pass the backup directory
+**explicitly** so the rotation lines that delete backups older than two weeks
+target the **same** folder the dumps are written to:
 
 ```
-0 3 * * * /srv/infochat/prod/scripts/backup.sh
-0 4 * * * find /backups -name 'infochat-*.pgc' -mtime +14 -delete
-0 4 * * * find /backups -name 'adapters-*.tgz' -mtime +14 -delete
+0 3 * * * /srv/infochat/prod/scripts/backup.sh /srv/infochat/backups
+0 4 * * * find /srv/infochat/backups -name 'infochat-*.pgc' -mtime +14 -delete
+0 4 * * * find /srv/infochat/backups -name 'adapters-*.tgz' -mtime +14 -delete
 ```
 
 Keep the backup folder **encrypted at rest** — it holds the audit log and the
@@ -415,58 +463,16 @@ to keep a task as-is; pressing Enter for everything changes nothing. It never
 touches **embeddings** (the "match posts by meaning" model stays local and fixed,
 because changing it would break your stored posts).
 
-A sample session moving just the chat task to a cloud API:
-
-```text
-Backend for security (remote|ollama|llamacpp) [ollama]:    ⏎  (keep local)
-Backend for tagger (remote|ollama|llamacpp) [ollama]:      ⏎
-Backend for entity (remote|ollama|llamacpp) [ollama]:      ⏎
-Backend for summarizer (remote|ollama|llamacpp) [ollama]:  ⏎
-Backend for chat (remote|ollama|llamacpp) [ollama]:        remote
-  chat remote base-url (e.g. https://nano-gpt.com/api/v1): https://nano-gpt.com/api/v1
-  chat model [llama3.1:8b]:                                gpt-4o-mini
-Backend for translator (remote|ollama|llamacpp) [ollama]:  ⏎
-Remote LLM API key:                                        (paste, hidden)
-```
-
-Before writing anything it backs up your config and prints a **rollback**
-command, then prints a **privacy disclosure** naming exactly which tasks now go
-to the remote provider and what each one exposes — for the run above:
-
-```text
-Backed up before writing:
-  .../runtime/application.properties.bak.20260621-120000
-Rollback (undo this run):
-  cp '.../application.properties.bak.20260621-120000' '.../application.properties'
-
-PRIVACY DISCLOSURE — these tasks now call a REMOTE provider:
-  !! chat — YOUR PRIVATE MESSAGES to the bot are sent to the remote provider.
-           This is the most sensitive exposure: your direct conversations.
-```
-
-The disclosure is honest about the difference: **chat** sends your private
-messages to the provider (the loudest warning), while the ingest tasks
-(`security`/`tagger`/`entity`) only ever see the **public** posts infochat
-fetches — they expose your topic interests and source list, not private data.
-Finally it prints the command to apply the change (recreating the containers, so
-the new key takes effect):
-
-```bash
-docker compose -f docker-compose.yml --env-file prod/runtime/secrets.env --profile prod up -d infochat-collector infochat-provider
-```
-
-**Two worked examples:**
-
-- **All generative tasks remote, embeddings stay local.** Choose `remote` for
-  every prompt (`security` through `translator`), giving the same base-url, model,
-  and API key each time. Embeddings keep running on your machine — the switcher
-  doesn't ask about them. Best when you want top-quality summaries and chat but
-  are happy to keep the lightweight embedding model local.
-- **Raspberry Pi: everything remote except embeddings.** A Pi is too weak for a
-  good chat model, so route all six generative tasks to a cloud API as above. The
-  small 768-dimensional embedder still runs locally on the Pi (it's cheap), so
-  your stored posts and "match by meaning" search never leave the device, while
-  the heavy generation happens in the cloud.
+Before writing anything it **backs up** your config and prints a **rollback**
+command, then a **privacy disclosure** naming exactly which tasks now call the
+remote provider and what each one exposes — loudest for **chat** (it sends your
+private messages), versus the ingest tasks (`security`/`tagger`/`entity`), which
+only ever see the **public** posts infochat fetches (your topic interests and
+source list, not private data). Finally it prints the one command to apply the
+change, recreating the containers so the new key takes effect. The switcher is
+fully interactive and walks you through each task, so there is nothing to
+memorize; the per-task config it writes is documented in
+[docs/design/07-deployment.md](docs/design/07-deployment.md).
 
 ---
 

@@ -71,7 +71,7 @@ exists for testing and is never used in production.)
 | Axis | Options |
 |---|---|
 | **Where** | **Direct message** (private, full feature set) or **group chat** (the bot replies only when `@mentioned`, plus scheduled morning/evening digests) |
-| **How** | **Slash commands** (e.g. `/news`, `/summary`, `/add-source`) for precise, reproducible queries, or **chat mode** for natural-language questions and follow-ups |
+| **How** | **Slash commands** (e.g. `/summary`, `/saved`, `/add-source`) for precise, reproducible queries, or **chat mode** for natural-language questions and follow-ups |
 
 State, memory, and saved items are **isolated per user and per scope** — your
 DM history never leaks into a group, and one user's data never leaks to

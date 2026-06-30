@@ -40,20 +40,26 @@ can, *inside any group*.
 
 ## Becoming the first admin
 
-When you set infochat up, the [wizard](SETUP_GUIDE.md) asked for a **bootstrap
-admin contact id** for your messaging app (step 6). That's how *you* became the
-first bot admin: on startup, infochat marks that contact as an admin
-automatically.
+When you set infochat up, the [wizard](SETUP_GUIDE.md) (step 6) captured how
+*you* become the first bot admin. It works differently on the two apps, because
+they prove identity differently:
 
-- Your "contact id" is simply your identity on the messaging app — your SimpleX
-  address, or your Signal number/ID. It's the same value you gave the wizard.
-- **You don't need an invite code.** The bootstrap admin is registered
-  automatically and skips new-user probation, so you can talk to the bot as soon
-  as you've connected to it (Signal: message its number; SimpleX: connect to its
-  address — see
-  [Connecting to the bot](SETUP_GUIDE.md#connecting-to-the-bot-for-the-first-time)).
+- **SimpleX** uses a secret **claim-token** (there is no fixed address to point
+  at). You set the token in the wizard; the **first DM to the bot whose body is
+  exactly that token** registers your contact and flips it to admin. Afterwards
+  you **unset the token** so it can't be reused — see
+  [Connecting to the bot](SETUP_GUIDE.md#connecting-to-the-bot-for-the-first-time).
+- **Signal** uses your **contact id (ACI)** — the UUID that identifies your
+  Signal account, *not* your phone number. You give it to the wizard directly and
+  you are admin from the first start; nothing to claim.
+
+A few things hold for both:
+
+- **You don't need an invite code.** The bootstrap admin skips new-user
+  probation, so you can talk to the bot as soon as you've connected to it (Signal:
+  message the bot's number; SimpleX: connect to its address — see the link above).
 - At least one admin must always exist; the deployment refuses to start with
-  nobody in charge.
+  nobody in charge, and last-admin protection is **global across apps**.
 - You can add more admins later with `/grant-admin` (below).
 
 > Exact steps for finding your contact id on each app are in the
@@ -70,7 +76,9 @@ automatically.
   uses Signal, run `/ban` from your Signal account. (Inviting is the one
   exception — see [`/invite`](#inviting--registering-users).)
 - **Some actions ask you to confirm** before they take effect (the riskier
-  ones). You'll get a yes/no prompt.
+  ones). Confirmation is a two-step **keyword resend**, not a yes/no prompt: the
+  bot replies asking you to repeat the command with `confirm` on the end (e.g.
+  `/ban +15551234567 confirm`). Sending anything else cancels the pending action.
 - **Everything is logged.** Every admin action is recorded in an audit trail
   *before* it happens, so there's always a record of who did what.
 
@@ -323,6 +331,20 @@ worker pool is overloaded when a digest is due, it falls back to a plain
 headlines-and-links digest; `/retry --digest` regenerates the full version once
 load clears. Missed slots (bot was down) are skipped, not caught up, and
 recorded in the audit log.
+
+### Recovering the auto-join group pool
+
+The bot accepts only a bounded number of unsolicited group auto-joins (a D47
+anti-spam cap). A SimpleX group the bot was *added to* but never formally approved
+can occupy a slot in that pool with no `groups` row — so it won't appear in
+`/list-groups`, and if the bot is later removed from such a group there's no leave
+signal to free the slot automatically. `/recover-pool` (bot-admin, **DM only**)
+recovers those slots:
+
+| Command | What it does |
+|---|---|
+| `/recover-pool` | List the active pool — each entry's adapter, upstream group id, who invited the bot, and when it joined. |
+| `/recover-pool <adapter> <upstream-group-id>` | Free one slot by its natural key (read the adapter + id from the list above) so it stops counting against the cap. Audit-logged; a later re-join reactivates the slot. |
 
 ### Upgrading the bot
 

@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 549 |
+| done | 550 |
 | deferred | 10 |
-| **total** | **561** |
+| **total** | **562** |
 
 ---
 
@@ -24,8 +24,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-509 — Guide accuracy-v2 + de-verbosify pass across the four root guides (complexity: medium, risk: low)
 - M1-527 — Command-catalogue parity test: code CommandHandler set ↔ marked index in commands.md (complexity: medium, risk: low)
+- M1-528 — Implement -w window: /audit + forensic /quarantine list --all (complexity: medium, risk: medium)
 
 ---
 
@@ -62,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-526 | Bot-admin /recover-pool command to recover the auto_joined_group pool | 2026-06-30 | round 1 APPROVE |
+| M1-509 | Guide accuracy-v2 + de-verbosify pass across the four root guides | 2026-06-30 | round 1 APPROVE |
 | M1-525 | Free auto_joined_group slots when the bot leaves a group | 2026-06-29 | round 2 APPROVE |
 | M1-524 | Unify the divergent outbox-IT awaitCursor poll helper into one fixture | 2026-06-29 | round 1 APPROVE |
 | M1-523 | Rename DB-boot GroupJoinRepositoryTest to *IT (M1-519 naming-guard trunk-red fix) | 2026-06-29 | round 1 APPROVE |
@@ -70,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-519 | Enforce D47 group-count caps on the auto-join surface | 2026-06-29 | round 1 APPROVE |
 | M1-518 | Remove vestigial SimpleX bot-queue-address derivation | 2026-06-29 | round 1 APPROVE |
 | M1-517 | Schema: NOT NULL post.upstream_identifier + backfill 37 test fixtures | 2026-06-29 | round 1 APPROVE |
-| M1-516 | approve_quarantine: guard new_post NOTIFY when post UPDATE matches zero rows | 2026-06-29 | round 1 APPROVE |
 
 ---
 
@@ -714,7 +714,7 @@ M1-506 (done)
   └── M1-505 (deferred) [see above]
 M1-507 (done)
 M1-508 (done)
-M1-509 (pending) ← runnable
+M1-509 (done)
 M1-510 (done)
   └── M1-511 (deferred)
 M1-512 (done)
@@ -733,4 +733,5 @@ M1-524 (done)
 M1-525 (done)
   └── M1-526 (done)
 M1-527 (pending) ← runnable
+M1-528 (pending) ← runnable
 ```
