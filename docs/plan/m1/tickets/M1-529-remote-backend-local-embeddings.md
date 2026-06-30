@@ -75,12 +75,17 @@ test_plan:
   preserves:
     - all wizard wiring tests currently green on main
 spec_refs:
-  - "docs/spec/llm.md §Embeddings"
-  - "docs/spec/decisions.md D27"
+  - "docs/spec/llm.md §Embedding pipeline"
 decision_refs: []
 reviews: []
 escalations: []
-revisions: []
+revisions:
+  - date: 2026-06-30
+    reason: "clarity-fail rework (run bounded self-refine, prose-only) — clarity FAIL: SPEC-REFS-VALID blocker 'docs/spec/decisions.md D27' is ANCHOR-NOT-FOUND (D27 is a decisions-log table row, not an ATX heading, so the spec_refs anchor-resolution algorithm cannot resolve it). Verified D27 is the 'Hardware profiles' row (decisions.md:44), not the frozen-embedding invariant, and clarity's SELF-CONTAINED-CHECK passed (spec_refs are supplementary, not load-bearing), so dropping it loses no implementation-required context. Also tightened the imprecise 'docs/spec/llm.md §Embeddings' ref (resolved to the H1 title) to '§Embedding pipeline', the real section at llm.md:177 (clarity WARNING). No acceptance, out_of_scope, files_scope, files_budget, complexity, or intent change — spec_refs only."
+    prior_values: |
+      spec_refs (pre-refine):
+        - "docs/spec/llm.md §Embeddings"
+        - "docs/spec/decisions.md D27"
 overrides: []
 aborted_attempts: []
 reopens: []
