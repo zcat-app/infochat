@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 551 |
+| done | 552 |
 | deferred | 10 |
 | **total** | **562** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-527 — Command-catalogue parity test: code CommandHandler set ↔ marked index in commands.md (complexity: medium, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -61,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-528 | Implement -w window: /audit + forensic /quarantine list --all | 2026-06-30 | round 2 APPROVE |
+| M1-527 | Command-catalogue parity test: code CommandHandler set ↔ marked index in commands.md | 2026-06-30 | round 1 APPROVE |
 | M1-526 | Bot-admin /recover-pool command to recover the auto_joined_group pool | 2026-06-30 | round 1 APPROVE |
 | M1-509 | Guide accuracy-v2 + de-verbosify pass across the four root guides | 2026-06-30 | round 1 APPROVE |
 | M1-525 | Free auto_joined_group slots when the bot leaves a group | 2026-06-29 | round 2 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-521 | Widen SafeLog.stripControls to the full bidi-control set (close log-line spoof gap) | 2026-06-29 | round 1 APPROVE |
 | M1-520 | Remove test-only no-arg AssetCommandFamilyOracle ctor | 2026-06-29 | round 1 APPROVE |
 | M1-519 | Enforce D47 group-count caps on the auto-join surface | 2026-06-29 | round 1 APPROVE |
-| M1-518 | Remove vestigial SimpleX bot-queue-address derivation | 2026-06-29 | round 1 APPROVE |
 
 ---
 
@@ -731,6 +731,6 @@ M1-523 (done)
 M1-524 (done)
 M1-525 (done)
   └── M1-526 (done)
-M1-527 (pending) ← runnable
+M1-527 (done)
 M1-528 (done)
 ```

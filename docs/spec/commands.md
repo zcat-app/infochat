@@ -111,6 +111,65 @@ The catalogue below is the *spec-level commitment* — these commands exist in
 v1, with the listed permissions. Argument shapes, defaults, exact reply
 text, and output structure are in `docs/design/03-commands.md`.
 
+**Canonical command index.** The marker-delimited block below is the
+machine-checked source of truth for the static command surface. `CommandCatalogueParityTest`
+parses it (and *only* it — never the surrounding prose) and asserts it equals
+the runtime `Instance<CommandHandler>` `name()` set, reding the build on any
+divergence. One `/name` token per line, kept sorted. Add or remove a line
+whenever a `CommandHandler` bean is added, removed, or renamed — that is the
+one edit a command change must make here. Because the test reads exclusively
+between the markers, free prose elsewhere in this file (a URL path like
+`/feed.xml`, or a negative mention like "there is no `/list-users` command")
+cannot create a spurious match.
+
+Asset commands (`/zcash`, `/monero`, …) are deliberately **not** in the index:
+they are dynamic, deployment-configured commands dispatched via
+`AssetHandler`/`AssetRegistry` from `bootstrap-assets.json`, not
+`CommandHandler` beans, so they fall outside this static-parity set. Do not add
+them to the marked region — doing so would red the build.
+
+<!-- command-index:begin -->
+/add-source
+/approve-group
+/audit
+/ban
+/clear
+/compress
+/demote
+/digest
+/export
+/follow-tag
+/forget
+/get-sources
+/get-tags
+/grant-admin
+/group-timezone
+/help
+/invite
+/lang
+/list-groups
+/list-sources
+/promote
+/quarantine
+/recover-pool
+/reject-group
+/remove-source
+/retry
+/revoke-admin
+/save
+/saved
+/source-disable
+/source-enable
+/status
+/stop
+/summary
+/unban
+/unfollow-source
+/unfollow-tag
+/unsave
+/vouch
+<!-- command-index:end -->
+
 ### Discovery
 
 - `/help` — context-aware list of commands available to the caller.
