@@ -114,7 +114,7 @@ text, and output structure are in `docs/design/03-commands.md`.
 **Canonical command index.** The marker-delimited block below is the
 machine-checked source of truth for the static command surface. `CommandCatalogueParityTest`
 parses it (and *only* it — never the surrounding prose) and asserts it equals
-the runtime `Instance<CommandHandler>` `name()` set, reding the build on any
+the runtime `Instance<CommandHandler>` `name()` set, and reds the build on any
 divergence. One `/name` token per line, kept sorted. Add or remove a line
 whenever a `CommandHandler` bean is added, removed, or renamed — that is the
 one edit a command change must make here. Because the test reads exclusively
