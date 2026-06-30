@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 548 |
+| done | 549 |
 | deferred | 10 |
 | **total** | **560** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-509 — Operator onboarding: simple (comic) + advanced admin guides (complexity: medium, risk: low)
-- M1-526 — Bot-admin /recover-pool command to recover the auto_joined_group pool (complexity: low, risk: medium)
 
 ---
 
@@ -61,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-526 | Bot-admin /recover-pool command to recover the auto_joined_group pool | 2026-06-30 | round 1 APPROVE |
 | M1-525 | Free auto_joined_group slots when the bot leaves a group | 2026-06-29 | round 2 APPROVE |
 | M1-524 | Unify the divergent outbox-IT awaitCursor poll helper into one fixture | 2026-06-29 | round 1 APPROVE |
 | M1-523 | Rename DB-boot GroupJoinRepositoryTest to *IT (M1-519 naming-guard trunk-red fix) | 2026-06-29 | round 1 APPROVE |
@@ -70,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-518 | Remove vestigial SimpleX bot-queue-address derivation | 2026-06-29 | round 1 APPROVE |
 | M1-517 | Schema: NOT NULL post.upstream_identifier + backfill 37 test fixtures | 2026-06-29 | round 1 APPROVE |
 | M1-516 | approve_quarantine: guard new_post NOTIFY when post UPDATE matches zero rows | 2026-06-29 | round 1 APPROVE |
-| M1-515 | SimpleX groups: auto-accept invitations (registered-inviter gate) | 2026-06-29 | round 2 APPROVE |
 
 ---
 
@@ -731,5 +730,5 @@ M1-521 (done)
 M1-523 (done)
 M1-524 (done)
 M1-525 (done)
-  └── M1-526 (pending) ← runnable
+  └── M1-526 (done)
 ```

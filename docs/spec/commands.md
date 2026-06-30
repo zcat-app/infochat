@@ -1100,7 +1100,8 @@ cannot silently shrink across versions.
   `/quarantine approve`, `/quarantine reject`, `/audit`,
   `/remove-source`, `/source-enable`, `/source-disable`,
   `/list-sources --all`, `/list-sources --include-deleted`,
-  `/approve-group`, `/reject-group`, `/list-groups`.
+  `/approve-group`, `/reject-group`, `/list-groups`,
+  `/recover-pool`.
 - **Group-admin (or bot admin acting in the group):**
   `/add-source` in groups, `/unfollow-source` in groups,
   `/lang` in groups, `/group-timezone`, `/digest`,

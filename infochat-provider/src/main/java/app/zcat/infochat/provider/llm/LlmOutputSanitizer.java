@@ -122,6 +122,7 @@ public class LlmOutputSanitizer {
             "/approve-group",
             "/reject-group",
             "/list-groups",
+            "/recover-pool",
             // Group-admin (or bot admin acting in the group):
             "/add-source",
             "/unfollow-source",

@@ -1,7 +1,7 @@
 ---
 id: M1-526
 title: "Bot-admin /recover-pool command to recover the auto_joined_group pool"
-status: pending
+status: done
 created: 2026-06-29
 last_updated: 2026-06-30
 blocked_by:
@@ -73,7 +73,44 @@ decision_refs: []
 decomposed_from: M1-522
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-30
+    verdict: CLEAN
+    base: main
+    head: working-tree (m1/M1-526-admin-recover-auto-join-pool, uncommitted)
+    verdict_file: docs/plan/m1/redteam/M1-526-2026-06-30.md
+    out_of_model_count: 1
+    note: |
+      In-progress audit between review APPROVE and commit. No findings. One
+      out-of-model observation: /recover-pool frees by the user-supplied target
+      natural key, which may name a DIFFERENT adapter than the inbound admin row
+      (cross-adapter free) — intentional, since a residual join-only SimpleX
+      group must be recoverable from an admin on a working adapter. The spec
+      scopes /grant-admin and /revoke-admin to the inbound adapter and carves out
+      /invite create as cross-adapter, but is silent on /recover-pool. Advisory:
+      a follow-up spec note documenting /recover-pool's cross-adapter free as an
+      intentional carve-out (like /invite create) would close the gap; the actor
+      is trusted admin-tier and the op is audit-logged, so this is not an
+      adversary-reachable path. Not blocking this ticket.
+clarity_check:
+  date: 2026-06-30
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-06-30
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 859
+      removed: 9
 revisions:
   - date: 2026-06-30
     reason: clarity-fail rework

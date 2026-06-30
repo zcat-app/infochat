@@ -8,6 +8,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -64,6 +67,15 @@ public class GroupJoinRepository {
     // Freed slots excluded (M1-525), mirroring the per-inviter counter.
     private static final String COUNT_ALL =
             "SELECT COUNT(*) FROM auto_joined_group WHERE removed_at IS NULL";
+
+    // List the active (non-freed) pool for the bot-admin /recover-pool discovery
+    // path (M1-526). The natural key (adapter, upstream_group_id) is what the
+    // admin reads off to free a slot; inviter_user_id and joined_at give the
+    // operator context to decide which residual to free. Ordered oldest-first so
+    // a long-lived residual surfaces at the top.
+    private static final String SELECT_ACTIVE_POOL =
+            "SELECT adapter, upstream_group_id, inviter_user_id, joined_at "
+          + "FROM auto_joined_group WHERE removed_at IS NULL ORDER BY joined_at";
 
     // Free the slot for one group by its natural key, used by the native
     // BotRemoved path (the event carries the natural key directly). The
@@ -174,6 +186,55 @@ public class GroupJoinRepository {
     }
 
     /**
+     * Free the auto-join slot for the group identified by its natural key, on
+     * the caller's connection so the free is atomic with the caller's
+     * audit-before-effect transaction — the bot-admin {@code /recover-pool} free
+     * (M1-526) writes a {@code RECOVER_AUTO_JOINED_GROUP} audit row in the SAME
+     * transaction as this UPDATE. Same {@code removed_at IS NULL} guard and
+     * same-row semantics as {@link #markRemovedByNaturalKey(String, String)};
+     * the only difference is the caller-owned transaction (no commit here).
+     *
+     * @return {@code true} when a non-removed row was freed; {@code false} when
+     *         no matching non-removed row existed (unknown group, or already
+     *         freed) — the caller rolls back so the pre-written audit row is
+     *         discarded, leaving no trail for a no-op free.
+     */
+    public boolean markRemovedByNaturalKey(Connection conn, String adapter,
+                                           String upstreamGroupId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(MARK_REMOVED_BY_NATURAL_KEY)) {
+            ps.setString(1, adapter);
+            ps.setString(2, upstreamGroupId);
+            return ps.executeUpdate() > 0;
+        }
+    }
+
+    /**
+     * List the active (non-freed) auto-joined groups for the bot-admin
+     * {@code /recover-pool} discovery path (M1-526) — the rows with
+     * {@code removed_at IS NULL} that count against the D47 caps. Surfaces the
+     * residual join-only SimpleX group that has no {@code groups} row (so
+     * {@code /list-groups} cannot show it), letting the admin read off the
+     * natural key to free.
+     */
+    public List<ActivePoolEntry> listActivePool() {
+        List<ActivePoolEntry> entries = new ArrayList<>();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_ACTIVE_POOL);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                entries.add(new ActivePoolEntry(
+                        rs.getString("adapter"),
+                        rs.getString("upstream_group_id"),
+                        (UUID) rs.getObject("inviter_user_id"),
+                        rs.getTimestamp("joined_at").toInstant()));
+            }
+            return entries;
+        } catch (SQLException e) {
+            throw new IllegalStateException("listActivePool failed", e);
+        }
+    }
+
+    /**
      * Free the auto-join slot for the group identified by its {@code groups.id}
      * (M1-525). Runs on the caller's connection so the free is atomic with the
      * caller's audit-before-effect transaction — the {@code markRemoved(
@@ -186,4 +247,12 @@ public class GroupJoinRepository {
             ps.executeUpdate();
         }
     }
+
+    /**
+     * One active auto-joined-group row as surfaced by {@link #listActivePool()}:
+     * the natural key the admin frees by, plus the inviter and join time for
+     * operator context.
+     */
+    public record ActivePoolEntry(String adapter, String upstreamGroupId,
+                                  UUID inviterUserId, Instant joinedAt) {}
 }

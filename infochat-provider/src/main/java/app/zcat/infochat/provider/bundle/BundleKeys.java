@@ -1277,6 +1277,43 @@ public final class BundleKeys {
      */
     public static final String REPLY_CONFIRM_PROMPT_REJECT_GROUP = "reply.confirm.prompt.reject_group";
 
+    // ----- /recover-pool (M1-526) ---------------------------------------------
+    // Bot-admin in-band recovery of the auto_joined_group pool (remediates
+    // M1-519 redteam Finding 2). No-arg invocation lists the active pool;
+    // `/recover-pool <adapter> <upstream-group-id>` frees one slot by natural
+    // key. Plain text only, bare values — no markdown.
+
+    /** {@code /recover-pool} reply when the active auto-joined pool is empty. */
+    public static final String REPLY_RECOVER_POOL_EMPTY = "reply.recover_pool.empty";
+
+    /**
+     * Header line for {@code /recover-pool} list mode. Token {@code {0}} =
+     * number of active slots listed.
+     */
+    public static final String REPLY_RECOVER_POOL_HEADER = "reply.recover_pool.header";
+
+    /**
+     * Per-row template for {@code /recover-pool} list mode. Tokens:
+     * {@code {0}} = adapter, {@code {1}} = upstream group id,
+     * {@code {2}} = inviter user id (UUID), {@code {3}} = joined-at timestamp.
+     */
+    public static final String REPLY_RECOVER_POOL_LINE = "reply.recover_pool.line";
+
+    /**
+     * {@code /recover-pool <adapter> <upstream-group-id>} success reply. Tokens
+     * (command-argument order): {@code {0}} = adapter, {@code {1}} = upstream
+     * group id.
+     */
+    public static final String REPLY_RECOVER_POOL_FREED = "reply.recover_pool.freed";
+
+    /**
+     * {@code /recover-pool <adapter> <upstream-group-id>}: no active (non-freed)
+     * auto-join slot matches the supplied natural key (unknown group, or already
+     * freed). Tokens (command-argument order): {@code {0}} = adapter,
+     * {@code {1}} = upstream group id.
+     */
+    public static final String ERROR_RECOVER_POOL_NOT_FOUND = "error.recover_pool.not_found";
+
     // ----- /status (M1-114) ---------------------------------------------------
     // Per docs/spec/commands.md §Discovery (/status — runtime status; admin
     // view includes a count of pending groups for passive discovery). Plain

@@ -151,6 +151,16 @@ public enum AuditAction implements AuditVerb {
     LIST_GROUPS,
     MEMBER_LEFT,
     BOT_REMOVED,
+    // RECOVER_AUTO_JOINED_GROUP records a bot admin's /recover-pool free of one
+    // auto_joined_group slot by natural key (M1-526, remediates M1-519 redteam
+    // Finding 2): the manual in-band counterpart to the automatic MEMBER_LEFT /
+    // BOT_REMOVED slot-freeing, for the residual join-only SimpleX group that
+    // has no native leave signal. Written audit-before-effect in the SAME
+    // transaction as the removed_at UPDATE — a no-op free (unknown / already
+    // freed) rolls the row back, so only a successful free leaves a trail. Not
+    // confirm-gated (low-stakes, reversible via re-join reactivation), so no
+    // _INTENT counterpart.
+    RECOVER_AUTO_JOINED_GROUP,
     ADD_SOURCE,
     REMOVE_SOURCE,
     REMOVE_SOURCE_INTENT,
