@@ -1331,7 +1331,7 @@ Audit-logged (the row carries both transitions under `details_json`).
 but still DM-gated is a valid `/vouch` target (the command's purpose
 there is to lift the gate, not to clear probation).
 
-### `/quarantine list [-w 24h] [--all] [--page N]`
+### `/quarantine list [--all [-w …]] [--page N]`
 
 Lists quarantine items via the `quarantine_review_view`
 ([04-security.md](04-security.md) — no `original_html` exposed via
@@ -1342,6 +1342,16 @@ chat).
 `BENIGN_CLOSED`, `APPROVED`, and `REJECTED`. The review-status enum is
 `{PENDING, BENIGN_CLOSED, APPROVED, REJECTED}` ([02-schema.md](02-schema.md)
 §2.5.1 `quarantine`).
+
+The `-w <duration>` time window (§3.1 Time window flag) is valid **only
+with `--all`** — it filters the forensic view by `flagged_at`. On the
+default `PENDING` queue `-w` is **rejected** with a friendly boundary
+error (`error.quarantine.window_requires_all`): the active review queue
+is actioned **whole**, and a window — especially a generic 24h default —
+would hide stale-but-unreviewed items, reintroducing the "old entries
+invisible" hazard pagination already guards against. This is the
+never-drop-unreviewed invariant (D53). The cutoff is computed from the
+injected `Clock` (engineering-rules §9).
 
 `--all` is **not a tier-changing flag** — the whole `/quarantine list`
 command is bot-admin-only, so `--all` only changes the row filter, not

@@ -24,13 +24,19 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.text.MessageFormat;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -63,6 +69,13 @@ public class AuditCommandHandler implements CommandHandler {
     @Inject DataSource dataSource;
     @Inject InboundContext inboundContext;
     @Inject AuditLogWriter auditLogWriter;
+
+    // The /audit -w window cutoff is a decision-gate "now" (it gates which audit
+    // rows the admin sees), so it reads the injected Clock to stay pinnable in
+    // tests (engineering-rules §9 / M1-528). The reply/audit-write timestamps
+    // below stay on Instant.now(): they render/record, they gate nothing.
+    @Inject
+    Clock clock = Clock.systemUTC();
 
     @Inject
     @ConfigProperty(name = "infochat.provider.audit.page-size", defaultValue = "20")
@@ -162,6 +175,15 @@ public class AuditCommandHandler implements CommandHandler {
                 where.append("action = ?");
                 params.add(args.action.toUpperCase(Locale.ROOT));
             }
+            // -w window: always applied (default 24h per design 03 §/audit) and
+            // AND-combined with the optional --actor/--action predicates above.
+            // The cutoff reads the injected Clock — it gates which rows the admin
+            // sees, a decision on "now" (engineering-rules §9 / M1-528).
+            OffsetDateTime windowCutoff = OffsetDateTime.ofInstant(
+                    clock.instant().minus(args.window), ZoneOffset.UTC);
+            where.append(where.isEmpty() ? " WHERE " : " AND ");
+            where.append("created_at >= ?");
+            params.add(windowCutoff);
 
             long totalCount;
             try (PreparedStatement ps = conn.prepareStatement(
@@ -230,6 +252,8 @@ public class AuditCommandHandler implements CommandHandler {
                 ps.setString(i + 1, s);
             } else if (p instanceof Integer n) {
                 ps.setInt(i + 1, n);
+            } else if (p instanceof OffsetDateTime odt) {
+                ps.setObject(i + 1, odt);
             }
         }
     }
@@ -267,14 +291,28 @@ public class AuditCommandHandler implements CommandHandler {
 
     record ActorRow(UUID id, String contactId, boolean isAdmin) {}
 
-    record AuditArgs(@Nullable String actor, @Nullable String action, int page) {
-        // A malformed --page value returns null (the parse-failure marker) so the
+    record AuditArgs(@Nullable String actor, @Nullable String action, Duration window, int page) {
+
+        /**
+         * Default {@code -w} window per docs/design/03-commands.md §/audit —
+         * bare {@code /audit} lists the last 24h (D12, matching /summary's
+         * idiom). Single named constant so the default is not duplicated
+         * between the parser and the handler.
+         */
+        static final Duration DEFAULT_WINDOW = Duration.ofHours(24);
+
+        /** {@code -w <N><unit>} pattern; unit is one of {@code h}, {@code d}, {@code w} (D12). */
+        private static final Pattern WINDOW_PATTERN = Pattern.compile("^([0-9]+)([hdw])$");
+
+        // A malformed --page OR -w value returns null (the parse-failure marker) so the
         // handler renders ERROR_USAGE_MISSING_ARGUMENT, matching the convention in
-        // BanArgs / AssetHandler rather than silently falling back to page 1 (M1-343).
+        // BanArgs / AssetHandler rather than silently falling back (M1-343 for --page;
+        // M1-528 extends the same convention to -w).
         static @Nullable AuditArgs parse(String rawText) {
             List<String> tokens = CommandTokenizer.tokenize(rawText);
             String actor = null;
             String action = null;
+            Duration window = DEFAULT_WINDOW;
             int page = 1;
             int i = 1; // skip the command name token
             while (i < tokens.size()) {
@@ -291,6 +329,16 @@ public class AuditCommandHandler implements CommandHandler {
                 } else if (tok.startsWith("--action=")) {
                     action = tok.substring("--action=".length());
                     i++;
+                } else if (tok.equals("-w")) {
+                    if (i + 1 >= tokens.size()) {
+                        return null;
+                    }
+                    Duration parsed = parseWindow(tokens.get(i + 1));
+                    if (parsed == null) {
+                        return null;
+                    }
+                    window = parsed;
+                    i += 2;
                 } else if (tok.equals("--page") && i + 1 < tokens.size()) {
                     try {
                         page = Math.max(1, Integer.parseInt(tokens.get(i + 1)));
@@ -309,7 +357,44 @@ public class AuditCommandHandler implements CommandHandler {
                     i++;
                 }
             }
-            return new AuditArgs(actor, action, page);
+            return new AuditArgs(actor, action, window, page);
+        }
+
+        private static @Nullable Duration parseWindow(String raw) {
+            Matcher m = WINDOW_PATTERN.matcher(raw.toLowerCase(Locale.ROOT));
+            if (!m.matches()) {
+                return null;
+            }
+            long n;
+            try {
+                n = Long.parseLong(m.group(1));
+            } catch (NumberFormatException e) {
+                return null;
+            }
+            String unit = m.group(2);
+            // Bound the magnitude to the documented accepted ranges (design 03
+            // §Time window flag: 1–168h / 1–30d / 1–4w, mirroring SummaryArgs). An
+            // unbounded value would overflow Duration.ofDays (uncaught
+            // ArithmeticException) or let n*7 silently wrap to a negative window —
+            // a future cutoff that returns an empty view (M1-528 redteam finding).
+            if (!withinRange(unit, n)) {
+                return null;
+            }
+            return switch (unit) {
+                case "h" -> Duration.ofHours(n);
+                case "d" -> Duration.ofDays(n);
+                case "w" -> Duration.ofDays(n * 7);
+                default -> null;
+            };
+        }
+
+        private static boolean withinRange(String unit, long n) {
+            return switch (unit) {
+                case "h" -> n >= 1 && n <= 168;
+                case "d" -> n >= 1 && n <= 30;
+                case "w" -> n >= 1 && n <= 4;
+                default -> false;
+            };
         }
     }
 }

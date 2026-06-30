@@ -7,6 +7,7 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.messaging.RateCapBucket;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterEach;
@@ -18,10 +19,14 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.text.MessageFormat;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -37,6 +42,12 @@ class QuarantineCommandHandlerTest {
     private static final String ADAPTER = "inmemory";
     private static final OffsetDateTime FETCHED_AT =
             OffsetDateTime.parse("2026-05-15T00:00:00Z");
+
+    // Pinned "now" for the forensic -w window tests (M1-528). The cutoff is read
+    // from the injected Clock, pinned via QuarkusMock, so a row's flagged_at
+    // offset decides inclusion deterministically (engineering-rules §9).
+    private static final Instant PINNED_NOW = Instant.parse("2026-06-20T12:00:00Z");
+    private static final String WINDOW_REQUIRES_ALL_KEY = "error.quarantine.window_requires_all";
 
     @Inject QuarantineCommandHandler handler;
     @Inject @SeedDataSource DataSource dataSource;
@@ -137,6 +148,79 @@ class QuarantineCommandHandlerTest {
                 "list --all must include BENIGN_CLOSED rows");
         assertTrue(reply.text().contains("BENIGN_CLOSED"),
                 "list --all must show BENIGN_CLOSED status");
+    }
+
+    // ---- forensic -w window (M1-528) ----
+
+    @Test
+    void list_allWithWindow_filtersForensic() throws Exception {
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
+        String admin = PREFIX + "win-admin";
+        seedUser(admin, true, false, "vouched");
+
+        UUID recent = seedQuarantineRowAt("BENIGN_CLOSED", PREFIX + "win-recent",
+                PINNED_NOW.minusSeconds(24 * 3600));        // 1d ago — inside 7d
+        UUID old = seedQuarantineRowAt("BENIGN_CLOSED", PREFIX + "win-old",
+                PINNED_NOW.minusSeconds(30L * 24 * 3600));  // 30d ago — outside 7d
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(admin), "/quarantine list --all -w 7d");
+
+        assertTrue(reply.text().contains(recent.toString()),
+                "forensic --all -w 7d must include rows flagged within the window");
+        assertFalse(reply.text().contains(old.toString()),
+                "forensic --all -w 7d must exclude rows flagged older than the window");
+    }
+
+    @Test
+    void list_windowWithoutAll_rejected() throws Exception {
+        String admin = PREFIX + "win-noall-admin";
+        seedUser(admin, true, false, "vouched");
+        // A PENDING row that must NOT be windowed away — proves no window is applied.
+        seedQuarantineRow("PENDING", PREFIX + "win-noall-p1");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(admin), "/quarantine list -w 7d");
+
+        assertEquals(bundleLoader.get(WINDOW_REQUIRES_ALL_KEY), reply.text(),
+                "-w without --all must return the boundary error, never window the PENDING queue");
+    }
+
+    @Test
+    void list_defaultPending_noWindow() throws Exception {
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
+        String admin = PREFIX + "nowin-admin";
+        seedUser(admin, true, false, "vouched");
+
+        // A PENDING row flagged a year before the pinned now: it must still show
+        // in the default queue (the never-drop-unreviewed invariant). Adding -w
+        // parsing must not regress this.
+        UUID stale = seedQuarantineRowAt("PENDING", PREFIX + "nowin-stale",
+                PINNED_NOW.minusSeconds(365L * 24 * 3600));
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(admin), "/quarantine list");
+
+        assertTrue(reply.text().contains(stale.toString()),
+                "the default PENDING queue must show stale rows regardless of age (no window)");
+    }
+
+    @Test
+    void list_overRangeWindow_usageError() throws Exception {
+        String admin = PREFIX + "overwin-admin";
+        seedUser(admin, true, false, "vouched");
+
+        // Over-range -w (fits in a long, overflows Duration) must be rejected with
+        // the usage error, never an uncaught ArithmeticException or silent empty view
+        // (M1-528 redteam remediation).
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(admin), "/quarantine list --all -w 999999999999999d");
+
+        String expected = MessageFormat.format(
+                bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                "/quarantine list [--all] [--page N]");
+        assertEquals(expected, reply.text(),
+                "over-range -w must surface the usage error, not throw or silently empty the view");
     }
 
     @Test
@@ -517,6 +601,52 @@ class QuarantineCommandHandlerTest {
                 ps.setObject(3, FETCHED_AT);
                 ps.setString(4, placeholderId);
                 ps.setString(5, quarantineStatus);
+                try (ResultSet rs = ps.executeQuery()) {
+                    rs.next();
+                    return (UUID) rs.getObject("id");
+                }
+            }
+        }
+    }
+
+    /**
+     * Like {@link #seedQuarantineRow} but sets flagged_at explicitly so the
+     * forensic -w window tests control whether a row falls inside or outside the
+     * cutoff (M1-528). flagged_at is the timestamp the quarantine_review_view
+     * exposes and the -w predicate filters on.
+     */
+    private UUID seedQuarantineRowAt(String quarantineStatus, String postUid,
+                                     Instant flaggedAt) throws Exception {
+        String placeholderId = "ph-" + postUid;
+        try (Connection conn = dataSource.getConnection()) {
+            UUID postId;
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO post (source_id, uid, title, body, fetched_at, status, "
+                            + "upstream_identifier) "
+                            + "VALUES (?, ?, 'Test', 'some [REDACTED:' || ? || '] text', ?, 'QUARANTINED', ?) "
+                            + "RETURNING id")) {
+                ps.setObject(1, sourceId);
+                ps.setString(2, postUid);
+                ps.setString(3, placeholderId);
+                ps.setObject(4, FETCHED_AT);
+                ps.setString(5, postUid);
+                try (ResultSet rs = ps.executeQuery()) {
+                    rs.next();
+                    postId = (UUID) rs.getObject("id");
+                }
+            }
+
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO quarantine (post_id, post_uid, post_fetched_at, flagged_by, "
+                            + "rule_id, span_start, span_end, placeholder_id, original_html, status, flagged_at) "
+                            + "VALUES (?, ?, ?, 'stage1', 'rule-1', 0, 10, ?, '<b>original</b>', ?, ?) "
+                            + "RETURNING id")) {
+                ps.setObject(1, postId);
+                ps.setString(2, postUid);
+                ps.setObject(3, FETCHED_AT);
+                ps.setString(4, placeholderId);
+                ps.setString(5, quarantineStatus);
+                ps.setObject(6, OffsetDateTime.ofInstant(flaggedAt, ZoneOffset.UTC));
                 try (ResultSet rs = ps.executeQuery()) {
                     rs.next();
                     return (UUID) rs.getObject("id");

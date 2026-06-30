@@ -7,6 +7,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterEach;
@@ -18,6 +19,10 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.text.MessageFormat;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -36,6 +41,11 @@ class AuditCommandHandlerTest {
 
     private static final String PREFIX = "m1-081b-audit-";
     private static final String ADAPTER = "inmemory";
+
+    // Pinned "now" for the -w window tests (M1-528). The window cutoff is read
+    // from the injected Clock, pinned here via QuarkusMock so the seeded rows'
+    // created_at offsets decide inclusion deterministically (engineering-rules §9).
+    private static final Instant PINNED_NOW = Instant.parse("2026-06-20T12:00:00Z");
 
     @Inject AuditCommandHandler handler;
     @Inject @SeedDataSource DataSource dataSource;
@@ -213,6 +223,107 @@ class AuditCommandHandlerTest {
                 "malformed --page must surface the usage error, not silently fall back to page 1");
     }
 
+    // ---- -w window (M1-528) ----
+
+    @Test
+    void audit_windowFilter() throws Exception {
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
+        String admin = PREFIX + "win-admin";
+        UUID adminId = seedUser(admin, true, false, "vouched");
+
+        // Inside the 24h window; outside it.
+        seedAuditRowAt(adminId, admin, "BAN", "user", PREFIX + "win-inside",
+                PINNED_NOW.minusSeconds(3600));        // 1h ago
+        seedAuditRowAt(adminId, admin, "BAN", "user", PREFIX + "win-outside",
+                PINNED_NOW.minusSeconds(48 * 3600));   // 48h ago
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(admin), "/audit -w 24h");
+
+        assertTrue(reply.text().contains(PREFIX + "win-inside"),
+                "-w 24h must include rows within the window");
+        assertFalse(reply.text().contains(PREFIX + "win-outside"),
+                "-w 24h must exclude rows older than the window");
+    }
+
+    @Test
+    void audit_windowComposesWithActionFilter() throws Exception {
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
+        String admin = PREFIX + "compose-admin";
+        UUID adminId = seedUser(admin, true, false, "vouched");
+
+        // Matches both action AND window.
+        seedAuditRowAt(adminId, admin, "BAN", "user", PREFIX + "compose-match",
+                PINNED_NOW.minusSeconds(5L * 24 * 3600));     // 5d ago
+        // Matches action but OUTSIDE the 30d window.
+        seedAuditRowAt(adminId, admin, "BAN", "user", PREFIX + "compose-oldban",
+                PINNED_NOW.minusSeconds(40L * 24 * 3600));    // 40d ago
+        // Inside window but WRONG action.
+        seedAuditRowAt(adminId, admin, "VOUCH", "user", PREFIX + "compose-otheraction",
+                PINNED_NOW.minusSeconds(5L * 24 * 3600));     // 5d ago
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(admin), "/audit --action ban -w 30d");
+
+        assertTrue(reply.text().contains(PREFIX + "compose-match"),
+                "row matching both action and window must appear");
+        assertFalse(reply.text().contains(PREFIX + "compose-oldban"),
+                "the window predicate must AND-combine — a matching action outside the window is excluded");
+        assertFalse(reply.text().contains(PREFIX + "compose-otheraction"),
+                "the action predicate must AND-combine — a row inside the window with the wrong action is excluded");
+    }
+
+    @Test
+    void audit_windowDefault() throws Exception {
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
+        String admin = PREFIX + "wdefault-admin";
+        UUID adminId = seedUser(admin, true, false, "vouched");
+
+        seedAuditRowAt(adminId, admin, "BAN", "user", PREFIX + "wdefault-inside",
+                PINNED_NOW.minusSeconds(3600));        // 1h ago
+        seedAuditRowAt(adminId, admin, "BAN", "user", PREFIX + "wdefault-outside",
+                PINNED_NOW.minusSeconds(48 * 3600));   // 48h ago
+
+        // Bare /audit applies the documented default 24h window.
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(admin), "/audit");
+
+        assertTrue(reply.text().contains(PREFIX + "wdefault-inside"),
+                "bare /audit must include rows within the default 24h window");
+        assertFalse(reply.text().contains(PREFIX + "wdefault-outside"),
+                "bare /audit must exclude rows older than the default 24h window");
+    }
+
+    @Test
+    void audit_malformedWindow_usageError() throws Exception {
+        String admin = PREFIX + "badwin-admin";
+        seedUser(admin, true, false, "vouched");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(admin), "/audit -w abc");
+
+        String expected = MessageFormat.format(
+                bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                "/audit [--actor X] [--action Y] [--page N]");
+        assertEquals(expected, reply.text(),
+                "malformed -w must surface the usage error, not silently fall back to the default window");
+    }
+
+    @Test
+    void audit_overRangeWindow_usageError() throws Exception {
+        String admin = PREFIX + "overwin-admin";
+        seedUser(admin, true, false, "vouched");
+
+        // A value that fits in a long but overflows Duration must be rejected at the
+        // boundary with the usage error, never an uncaught ArithmeticException
+        // (M1-528 redteam remediation).
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(admin), "/audit -w 999999999999999d");
+
+        String expected = MessageFormat.format(
+                bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                "/audit [--actor X] [--action Y] [--page N]");
+        assertEquals(expected, reply.text(),
+                "over-range -w must surface the usage error, not throw or silently empty the view");
+    }
+
     // ---- Audit logging ----
 
     @Test
@@ -301,6 +412,27 @@ class AuditCommandHandlerTest {
             } else {
                 ps.setString(7, targetContactId);
             }
+            ps.executeUpdate();
+        }
+    }
+
+    // Like seedAuditRow but sets created_at explicitly so the -w window tests
+    // control whether a row falls inside or outside the cutoff (M1-528).
+    private void seedAuditRowAt(UUID actorUserId, String actorContactId,
+                                String action, String targetKind, String targetId,
+                                Instant createdAt) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO audit_log (actor_user_id, actor_contact_id, actor_adapter, "
+                             + "action, target_kind, target_id, created_at) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?)")) {
+            ps.setObject(1, actorUserId);
+            ps.setString(2, actorContactId);
+            ps.setString(3, ADAPTER);
+            ps.setString(4, action);
+            ps.setString(5, targetKind);
+            ps.setString(6, targetId);
+            ps.setObject(7, OffsetDateTime.ofInstant(createdAt, ZoneOffset.UTC));
             ps.executeUpdate();
         }
     }

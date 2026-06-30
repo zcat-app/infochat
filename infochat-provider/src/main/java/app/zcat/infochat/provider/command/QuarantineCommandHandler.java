@@ -22,12 +22,18 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.text.MessageFormat;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Bot-admin-only handler for {@code /quarantine list|approve|reject}.
@@ -59,11 +65,23 @@ public class QuarantineCommandHandler implements CommandHandler {
                     + "FROM quarantine_review_view "
                     + "ORDER BY flagged_at DESC";
 
+    // Forensic --all view bounded by the -w window. The window is valid ONLY on
+    // --all (never the default PENDING queue — D53 / M1-528); flagged_at is the
+    // forensic timestamp the cutoff filters on.
+    private static final String LIST_ALL_WINDOWED_SQL =
+            "SELECT id, post_uid, flagged_by, flagged_at, rule_id, status "
+                    + "FROM quarantine_review_view "
+                    + "WHERE flagged_at >= ? "
+                    + "ORDER BY flagged_at DESC";
+
     private static final String COUNT_PENDING_SQL =
             "SELECT count(*) FROM quarantine_review_view WHERE status = 'PENDING'";
 
     private static final String COUNT_ALL_SQL =
             "SELECT count(*) FROM quarantine_review_view";
+
+    private static final String COUNT_ALL_WINDOWED_SQL =
+            "SELECT count(*) FROM quarantine_review_view WHERE flagged_at >= ?";
 
     // Read via quarantine_review_view, not the raw quarantine table: the
     // infochat_provider role has NO grant on quarantine (the original_html
@@ -74,12 +92,22 @@ public class QuarantineCommandHandler implements CommandHandler {
 
     private static final String RATE_LIMIT_KEY = "error.quarantine.rate_limit";
 
+    // Raw-string bundle key (like RATE_LIMIT_KEY) so the new boundary error does
+    // not require a BundleKeys constant change outside this ticket's scope.
+    private static final String WINDOW_REQUIRES_ALL_KEY = "error.quarantine.window_requires_all";
+
     @Inject BundleLoader bundleLoader;
     @Inject DataSource dataSource;
     @Inject InboundContext inboundContext;
     @Inject RateCapBucket rateCapBucket;
     @Inject AuditLogWriter auditLogWriter;
     @Inject ConfirmStateService confirmStateService;
+
+    // The /quarantine list -w window cutoff is a decision-gate "now" (it gates
+    // which forensic rows the admin sees), so it reads the injected Clock to stay
+    // pinnable in tests (engineering-rules §9 / M1-528).
+    @Inject
+    Clock clock = Clock.systemUTC();
 
     @Override
     public String name() {
@@ -121,8 +149,32 @@ public class QuarantineCommandHandler implements CommandHandler {
                     bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT, inboundContext.effectiveLanguage()),
                     "/quarantine list [--all] [--page N]"));
         }
-        String countSql = args.showAll ? COUNT_ALL_SQL : COUNT_PENDING_SQL;
-        String dataSql = args.showAll ? LIST_ALL_SQL : LIST_PENDING_SQL;
+        // -w is forensic-only: a window over the PENDING review queue would hide
+        // stale-but-unreviewed items, breaking the never-drop-unreviewed
+        // invariant (D53 / M1-528). Reject -w without --all at the boundary; the
+        // default PENDING queue is NEVER windowed.
+        if (args.window != null && !args.showAll) {
+            return reply(scope, bundleLoader.get(WINDOW_REQUIRES_ALL_KEY, inboundContext.effectiveLanguage()));
+        }
+
+        // windowCutoff is non-null ONLY on the forensic --all-with-window path;
+        // its nullness drives both SQL selection and parameter binding below
+        // (args.window is dereferenced here, inside its own null check, so the
+        // contract is visible to NullAway).
+        String countSql;
+        String dataSql;
+        OffsetDateTime windowCutoff = null;
+        if (!args.showAll) {
+            countSql = COUNT_PENDING_SQL;
+            dataSql = LIST_PENDING_SQL;
+        } else if (args.window != null) {
+            countSql = COUNT_ALL_WINDOWED_SQL;
+            dataSql = LIST_ALL_WINDOWED_SQL;
+            windowCutoff = OffsetDateTime.ofInstant(clock.instant().minus(args.window), ZoneOffset.UTC);
+        } else {
+            countSql = COUNT_ALL_SQL;
+            dataSql = LIST_ALL_SQL;
+        }
 
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
@@ -155,10 +207,14 @@ public class QuarantineCommandHandler implements CommandHandler {
 
         try (Connection conn = dataSource.getConnection()) {
             long totalCount;
-            try (PreparedStatement ps = conn.prepareStatement(countSql);
-                 ResultSet rs = ps.executeQuery()) {
-                rs.next();
-                totalCount = rs.getLong(1);
+            try (PreparedStatement ps = conn.prepareStatement(countSql)) {
+                if (windowCutoff != null) {
+                    ps.setObject(1, windowCutoff);
+                }
+                try (ResultSet rs = ps.executeQuery()) {
+                    rs.next();
+                    totalCount = rs.getLong(1);
+                }
             }
 
             if (totalCount == 0) {
@@ -177,8 +233,12 @@ public class QuarantineCommandHandler implements CommandHandler {
                     String.valueOf(totalPages)));
 
             try (PreparedStatement ps = conn.prepareStatement(dataSql + " LIMIT ? OFFSET ?")) {
-                ps.setInt(1, pageSize);
-                ps.setInt(2, (page - 1) * pageSize);
+                int idx = 1;
+                if (windowCutoff != null) {
+                    ps.setObject(idx++, windowCutoff);
+                }
+                ps.setInt(idx++, pageSize);
+                ps.setInt(idx, (page - 1) * pageSize);
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
                         sb.append('\n');
@@ -440,12 +500,20 @@ public class QuarantineCommandHandler implements CommandHandler {
 
     record ActorRow(UUID id, String contactId, boolean isAdmin) {}
 
-    record ListArgs(boolean showAll, int page) {
-        // A malformed --page value returns null (the parse-failure marker) so the
+    record ListArgs(boolean showAll, @Nullable Duration window, int page) {
+
+        /** {@code -w <N><unit>} pattern; unit is one of {@code h}, {@code d}, {@code w} (D12). */
+        private static final Pattern WINDOW_PATTERN = Pattern.compile("^([0-9]+)([hdw])$");
+
+        // A malformed --page OR -w value returns null (the parse-failure marker) so the
         // handler renders ERROR_USAGE_MISSING_ARGUMENT, matching the convention in
-        // BanArgs / AssetHandler rather than silently falling back to page 1 (M1-343).
+        // BanArgs / AssetHandler rather than silently falling back to page 1 (M1-343;
+        // -w added M1-528). The -w-requires-all SEMANTIC check lives in the handler,
+        // not here — a syntactically valid window without --all is a boundary error,
+        // not a parse failure.
         static @Nullable ListArgs parse(String remainder) {
             boolean showAll = false;
+            Duration window = null;
             int page = 1;
             List<String> tokens = new ArrayList<>();
             for (String tok : remainder.trim().split("\\s+")) {
@@ -457,6 +525,16 @@ public class QuarantineCommandHandler implements CommandHandler {
                 if ("--all".equals(tok)) {
                     showAll = true;
                     i++;
+                } else if ("-w".equals(tok)) {
+                    if (i + 1 >= tokens.size()) {
+                        return null;
+                    }
+                    Duration parsed = parseWindow(tokens.get(i + 1));
+                    if (parsed == null) {
+                        return null;
+                    }
+                    window = parsed;
+                    i += 2;
                 } else if ("--page".equals(tok) && i + 1 < tokens.size()) {
                     try {
                         page = Math.max(1, Integer.parseInt(tokens.get(i + 1)));
@@ -475,7 +553,44 @@ public class QuarantineCommandHandler implements CommandHandler {
                     i++;
                 }
             }
-            return new ListArgs(showAll, page);
+            return new ListArgs(showAll, window, page);
+        }
+
+        private static @Nullable Duration parseWindow(String raw) {
+            Matcher m = WINDOW_PATTERN.matcher(raw.toLowerCase(Locale.ROOT));
+            if (!m.matches()) {
+                return null;
+            }
+            long n;
+            try {
+                n = Long.parseLong(m.group(1));
+            } catch (NumberFormatException e) {
+                return null;
+            }
+            String unit = m.group(2);
+            // Bound the magnitude to the documented accepted ranges (design 03
+            // §Time window flag: 1–168h / 1–30d / 1–4w, mirroring SummaryArgs). An
+            // unbounded value would overflow Duration.ofDays (uncaught
+            // ArithmeticException) or let n*7 silently wrap to a negative window —
+            // a future cutoff that returns an empty view (M1-528 redteam finding).
+            if (!withinRange(unit, n)) {
+                return null;
+            }
+            return switch (unit) {
+                case "h" -> Duration.ofHours(n);
+                case "d" -> Duration.ofDays(n);
+                case "w" -> Duration.ofDays(n * 7);
+                default -> null;
+            };
+        }
+
+        private static boolean withinRange(String unit, long n) {
+            return switch (unit) {
+                case "h" -> n >= 1 && n <= 168;
+                case "d" -> n >= 1 && n <= 30;
+                case "w" -> n >= 1 && n <= 4;
+                default -> false;
+            };
         }
     }
 }

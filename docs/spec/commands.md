@@ -1005,7 +1005,7 @@ contacts and contradict the registration-state model
   of, with `approval_status`, `activated_by` (redacted contact id),
   member count, and timezone. Bot-admin only. Useful for auditing
   which groups are pending/approved/rejected.
-- `/quarantine list [-w …] [--all] [--page N]` — bot-admin only
+- `/quarantine list [--all [-w …]] [--page N]` — bot-admin only
   (closed list below; the whole command is privileged, so `--all`
   is not a tier-changing flag — it changes the row filter, not
   the permission). The review-status enum is
@@ -1014,7 +1014,12 @@ contacts and contradict the registration-state model
   lists `PENDING` rows only — the active admin queue.
   `BENIGN_CLOSED` rows (Stage 2 cleared, redactions retained) are
   not surfaced by default; `--all` lists every status for
-  forensic / audit workflows.
+  forensic / audit workflows. The `-w …` time window is valid
+  **only with `--all`** (the forensic view); on the default
+  `PENDING` queue it is rejected with a friendly boundary error.
+  The active review queue is actioned **whole** — a window would
+  hide stale-but-unreviewed items, the never-drop-unreviewed
+  invariant (D53).
 - `/quarantine approve <id>` / `/quarantine reject <id>` — review
   action. Both run as stored procedures (`security.md` §DB roles)
   so the Provider role does not need `SELECT` on the raw-original

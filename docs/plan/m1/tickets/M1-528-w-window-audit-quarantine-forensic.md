@@ -1,9 +1,96 @@
 ---
 id: M1-528
 title: "Implement -w window: /audit + forensic /quarantine list --all"
-status: pending
+status: done
 created: 2026-06-30
 last_updated: 2026-06-30
+clarity_check:
+  date: 2026-06-30
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-06-30
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 12
+      added: 448
+      removed: 28
+  - round: 2
+    date: 2026-06-30
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 13
+      added: 667
+      removed: 28
+redteam_findings:
+  - date: 2026-06-30
+    category: DOS
+    severity: low
+    promise: |
+      §Threat model determinism boundary + boundary-validation posture: argument
+      parsing at a system boundary (the command parser) must reject malformed input
+      deterministically rather than throw; §DOS covers blocking the adapter event loop.
+    gap: |
+      The new -w parser validates shape but not magnitude. WINDOW_PATTERN's ([0-9]+)
+      is unbounded; parseWindow guards Long.parseLong but NOT the subsequent
+      Duration.ofHours/ofDays(n) / ofDays(n*7). A value that fits in a long but
+      overflows Duration's seconds field (e.g. 999999999999999d) makes Duration.ofDays
+      throw an uncaught ArithmeticException; downstream clock.instant().minus(window)
+      can throw DateTimeException. The `w` unit's n*7 is an unchecked long multiply →
+      silent overflow → negative Duration → future cutoff → silently-empty view.
+    repro: |
+      A (possibly compromised) bot admin sends `/audit -w 999999999999999d` or
+      `/quarantine list --all -w 999999999999999d`. The value passes the regex and
+      Long.parseLong, then Duration.ofDays throws ArithmeticException, never caught in
+      the handler. A correct boundary validator would reject the over-range window with
+      the same friendly usage error already returned for `-w abc`.
+    suggested_fix_class: input-sanitization
+redteam_audits:
+  - date: 2026-06-30
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-528-w-window-audit-quarantine-forensic
+    verdict_file: docs/plan/m1/redteam/M1-528-2026-06-30.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      One low-severity input-sanitization finding on the ticket's own new -w parsers
+      (unbounded magnitude → uncaught Duration overflow / silent n*7 overflow). Surfaced
+      pre-commit while in-review; user chose to refine in-branch. Out-of-model item (bare
+      /audit defaults to 24h) is the documented D53 trade-off, not a gap.
+  - date: 2026-06-30
+    verdict: CLEAN
+    base: main
+    head: m1/M1-528-w-window-audit-quarantine-forensic
+    verdict_file: docs/plan/m1/redteam/M1-528-2026-06-30-recheck.md
+    out_of_model_count: 2
+    note: |
+      Recheck after the magnitude-bound remediation (withinRange on both parseWindow
+      methods). The round-1 low-severity finding is closed — over-range -w returns the
+      usage error before any Duration overflow. CLEAN; only advisory out-of-model items.
+escalations:
+  - date: 2026-06-30
+    reason: redteam-finding
+    reviewer_verdict_excerpt: |
+      DOS / low / input-sanitization: the new -w parser validates shape but not
+      magnitude. A value like `999999999999999d` passes the regex + Long.parseLong,
+      then Duration.ofDays throws an uncaught ArithmeticException out of handle(); the
+      `w` unit's n*7 silent overflow yields a negative Duration → future cutoff →
+      silently-empty view. User chose refine: bound the magnitude in-branch.
 blocked_by: []
 files_budget: 10
 files_scope:
@@ -12,10 +99,27 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AuditCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/QuarantineCommandHandlerTest.java
   - infochat-provider/src/main/resources/bundles/en.properties
+  - infochat-provider/src/main/resources/bundles/cs.properties
   - docs/spec/commands.md
   - docs/design/03-commands.md
   - docs/spec/decisions.md
   - ADMIN_GUIDE.md
+revisions:
+  - date: 2026-06-30
+    change: >-
+      files_scope += cs.properties (user-approved refine mid-implementation).
+      The new bundle key error.quarantine.window_requires_all required by the
+      acceptance must be mirrored in cs.properties to satisfy D43's bilateral
+      keyset completeness (BundleLoaderTest.everyShippedBundleHasExactlyEnKeysetMinusTheEnOnlyProbe);
+      the original files_scope omitted the cs twin. Within files_budget (10th file).
+  - date: 2026-06-30
+    change: >-
+      Round-1 rework (user-accepted in-branch redteam remediation, finding above):
+      bound the -w magnitude in both parseWindow methods so an over-range value
+      (e.g. `-w 999999999999999d`) returns the existing friendly usage error instead
+      of throwing an uncaught Duration overflow / silently producing a future cutoff.
+      Adds one acceptance item + one regression test per handler. No files_scope change
+      — the fix lives in the two handlers and their tests already in scope.
 complexity: medium
 risk: medium
 round_cap: 2
@@ -50,6 +154,14 @@ acceptance:
     unparseable `-w` value returns the usage/error reply (matching the existing
     `--page` malformed-value convention in AuditArgs.parse), not a silent
     fallback.
+  - >-
+    AuditCommandHandlerTest.audit_overRangeWindow_usageError and
+    QuarantineCommandHandlerTest.list_overRangeWindow_usageError pass — an out-of-range
+    `-w` magnitude (e.g. `-w 999999999999999d`, which fits in a long but overflows
+    `Duration`) returns the same friendly usage error as a malformed `-w`, never an
+    uncaught `ArithmeticException`/`DateTimeException` and never a silent future-cutoff
+    empty view. The accepted ranges match the design Time-window table (1–168h / 1–30d /
+    1–4w), mirroring SummaryArgs. (Round-1 redteam remediation.)
   - >-
     QuarantineCommandHandlerTest.list_allWithWindow_filtersForensic passes —
     `/quarantine list --all -w 7d` lists every status BUT bounded to the window;

@@ -175,7 +175,7 @@ You review these:
 
 | Command | What it does |
 |---|---|
-| `/quarantine list [--all] [--page N]` | See posts awaiting review. By default shows only the ones needing attention; `--all` shows everything for auditing. |
+| `/quarantine list [--all [-w <window>]] [--page N]` | See posts awaiting review. By default shows only the ones needing attention; `--all` shows everything for auditing. The `-w` time window (e.g. `-w 7d`) is allowed **only with `--all`** (the forensic view) — the default review queue is always shown in full so nothing waiting for review is ever hidden. |
 | `/quarantine approve <id>` | Clear the post and restore any redacted text. It then appears to users normally. |
 | `/quarantine reject <id>` | Keep the post hidden/redacted permanently. |
 
@@ -201,7 +201,7 @@ removal and visibility:
 
 | Command | What it does |
 |---|---|
-| `/audit [--actor <contact>] [--action <verb>] [--page N]` | Browse the deployment-wide history of admin and system actions, filtered by who or what. |
+| `/audit [-w <window>] [--actor <contact>] [--action <verb>] [--page N]` | Browse the deployment-wide history of admin and system actions, filtered by who or what. The `-w` time window (e.g. `-w 30d`) defaults to `24h`, so a bare `/audit` shows the last day; widen it with `-w` as needed. |
 
 ---
 
