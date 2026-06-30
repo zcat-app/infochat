@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 549 |
 | deferred | 10 |
-| **total** | **560** |
+| **total** | **561** |
 
 ---
 
@@ -24,7 +24,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-509 — Operator onboarding: simple (comic) + advanced admin guides (complexity: medium, risk: low)
+- M1-509 — Guide accuracy-v2 + de-verbosify pass across the four root guides (complexity: medium, risk: low)
+- M1-527 — Command-catalogue parity test: code CommandHandler set ↔ marked index in commands.md (complexity: medium, risk: low)
 
 ---
 
@@ -731,4 +732,5 @@ M1-523 (done)
 M1-524 (done)
 M1-525 (done)
   └── M1-526 (done)
+M1-527 (pending) ← runnable
 ```
