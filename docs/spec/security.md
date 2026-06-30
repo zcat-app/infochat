@@ -644,6 +644,25 @@ should pick admin placement deliberately:
   PENDING caps and the audit trail bound the cross-adapter
   invite-issuance rate. This carve-out is what the "elevation
   vs registration" distinction above turns on.
+- **Cross-adapter `/recover-pool` is likewise intentionally
+  permitted.** `/recover-pool <adapter> <upstream-group-id>`
+  (`commands.md` §Permission model) frees an `auto_joined_group`
+  slot by the supplied **target** natural key, which may name any
+  enabled adapter regardless of the inbound one — a Signal admin can
+  free a SimpleX residual. This is required, not incidental: the
+  command's primary target is the residual join-only SimpleX group
+  that has no native leave signal (so M1-525's automatic freeing
+  never fires), and if SimpleX is the saturated adapter the admin may
+  only be reachable on another. The trade-off rests on a *different*
+  basis than `/invite create`: the free grants **neither registration
+  nor elevation** — it only clears `removed_at` on a slot the bot
+  already holds, and re-enabling an auto-join on the named adapter
+  still requires a genuine inbound group invitation there. The act is
+  bot-admin-only and audit-logged (`RECOVER_AUTO_JOINED_GROUP`). A
+  single-adapter admin compromise can therefore drop another adapter's
+  D47 cap count, but cannot mint membership, identity, or elevation on
+  it; per-adapter re-saturation still gates on real invitations
+  (M1-526; remediates M1-519 redteam Finding 2).
 
 ## User ban
 
