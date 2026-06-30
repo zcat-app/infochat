@@ -101,9 +101,12 @@ account on that app. How much you do by hand depends on which app you choose:
   > an invite" reply.
 - **Signal:** `signal-cli` ships **baked into infochat's container image** too,
   exactly like `simplex-chat` — you do **not** install it on your host. The one
-  thing the wizard can't automate is **registering the bot's phone number** (a
-  spare number or one you control — Signal requires one), because Signal makes you
-  solve a captcha that can't be scripted. You register it once, out-of-band, by
+  thing the wizard can't automate is **registering the bot's phone number**. This
+  must be a **dedicated** number — a spare SIM or a VoIP number that can receive an
+  SMS/voice code — and **not a number already used for your own personal Signal**,
+  because Signal allows only **one account per number** (pointing the bot at your
+  personal number would take it over). The wizard can't do this for you because
+  Signal makes you solve a captcha that can't be scripted. You register it once, out-of-band, by
   running `signal-cli` against the bot's data directory. A **fresh** number needs
   the `--captcha` step (a plain `register` errors, telling you to fetch a captcha
   token first), then a `verify` with the code Signal SMSes you:
@@ -141,6 +144,22 @@ Signal adapter comes up.
 > is registering the bot's phone number — that account belongs to Signal (and its
 > captcha), not to us.
 
+> **Advanced alternative (possible, but NOT recommended or supported): link
+> instead of register.** `signal-cli` can also run as a *linked secondary device*
+> of a number you registered in the normal Signal **phone app** — the same
+> mechanism as Signal Desktop: register the dedicated number on a phone, then
+> `signal-cli link` the bot to it (instead of `register`/`verify` above). This
+> works at the `signal-cli` level, but infochat does **not** test or support it —
+> the adapter assumes `signal-cli` is the account's **primary** device with the
+> identity keys in the data-dir. If you go this route anyway, know the trade-offs:
+> the **phone stays the primary device** and must remain registered (reset or
+> unregister it and the linked bot stops working); the account is **shared** —
+> every message lands on **both** the phone and the bot, so use it **only** with a
+> dedicated number, never your personal account; and a linked device only receives
+> messages sent **after** it was linked. Prefer the register-as-primary flow above
+> unless you specifically need the number usable on a phone as well; the wizard,
+> the runbook, and the data-dir contract all assume the primary-registration path.
+
 ---
 
 ## The easy path: run the wizard
@@ -176,7 +195,7 @@ their job and move on. Here's the whole journey in plain language:
 |---|---|---|
 | **0. Health check** | Confirms your computer has Docker, the disk space, and a free database port | No |
 | **1. Profile** | Picks settings to match your hardware | Yes — pick `laptop`, `vps`, `pi`, or `remote-llm` (default `laptop`) |
-| **2. Secrets** | Creates strong random passwords for the database | Optional — a remote AI key, only if you'll use one |
+| **2. Secrets** | Creates strong random passwords for the database | No |
 | **3. Database** | Starts the database and waits until it's ready | No |
 | **4. AI model** | Sets up the AI brain | Yes — pick `ollama`, `llamacpp`, or `remote` (default `ollama`) |
 | **5. Sources** | Installs a starter list of news/social sources | Optional — a custom sources file, and whether to enable the price commands (default Yes) |
@@ -306,7 +325,6 @@ Trying infochat on your own Linux laptop, using the free local AI and SimpleX:
 
 ```text
 Hardware profile [laptop]:            ⏎  (just press Enter)
-Remote LLM API key [blank]:           ⏎  (Enter — we're using local AI)
 LLM backend [ollama]:                 ⏎  (Enter — downloads a local model)
 Custom bootstrap-sources path [blank]: ⏎  (Enter — use the bundled sources)
 Enable crypto asset commands (zcash, monero)? [Yes/no]: ⏎  (Enter — Yes, the default)
@@ -547,7 +565,7 @@ Three things to know before you do:
 |---|---|---|
 | `prod/scripts/0-doctor.sh` | Preflight host checks (Docker, free ports, disk) | `--defaults` (no-op — no prompts) |
 | `prod/scripts/1-profile.sh` | Choose the hardware profile; writes `quarkus.profile` | `--defaults` (takes `laptop`) |
-| `prod/scripts/2-secrets.sh` | Generate the DB-role passwords; optional remote LLM API key | `--defaults` (leaves the API key blank) |
+| `prod/scripts/2-secrets.sh` | Generate the DB-role passwords | `--defaults` (no-op — no prompts) |
 | `prod/scripts/3-postgres.sh` | Start Postgres and wait until healthy | `--defaults` (no-op — no prompts) |
 | `prod/scripts/4-llm.sh` | Provision the LLM backend; write the LLM + embeddings config | `--defaults` (takes the profile's default backend) |
 | `prod/scripts/5-bootstrap.sh` | Seed `bootstrap-sources.json` and wire the asset (price) commands | `--defaults` (uses the bundled defaults) |

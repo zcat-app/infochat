@@ -31,6 +31,15 @@ case "${1:-}" in
   *) usage >&2; exit 2 ;;
 esac
 
+# Guard the standalone-run case: the wizard always runs step 2 first, but this
+# step can be invoked on its own (the guide documents that), and compose's
+# --env-file errors opaquely on a missing file. Fail with a pointer to step 2
+# instead, mirroring 4-llm.sh's missing-config guard.
+if [[ ! -f "$SECRETS_FILE" ]]; then
+  echo "FAIL: $SECRETS_FILE not found; run 2-secrets.sh (wizard step 2) first." >&2
+  exit 1
+fi
+
 # --env-file feeds the INFOCHAT_*_PASSWORD values to compose's dotenv parser
 # (M1-389) so postgres-init's ${VAR:?} bootstrap guards see the minted secrets;
 # the orchestrator no longer sources secrets.env into the environment.

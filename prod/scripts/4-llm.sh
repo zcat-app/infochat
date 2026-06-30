@@ -228,6 +228,16 @@ case "$backend" in
       echo "FAIL: profile '$profile' has no local models; choose the 'remote' backend." >&2
       exit 1
     fi
+    # Standalone-run guard: this branch's FIRST action is a compose call with
+    # --env-file "$SECRETS_FILE" and no prior set_secret (unlike the llamacpp/remote
+    # branches, which create secrets.env themselves), so a missing file errors
+    # opaquely. Fail with a pointer to the step that creates it (mirrors
+    # 3-postgres.sh). Branch-local on purpose — a top-level guard would wrongly
+    # reject the llamacpp/remote branches that mint secrets.env on the fly.
+    if [[ ! -f "$SECRETS_FILE" ]]; then
+      echo "FAIL: $SECRETS_FILE not found; run 2-secrets.sh (wizard step 2) first." >&2
+      exit 1
+    fi
     # --env-file feeds secrets.env to compose's dotenv parser (M1-389) — the
     # orchestrator no longer sources it into the environment; all compose calls
     # below carry it so the full file's ${INFOCHAT_*} interpolations resolve.
@@ -266,6 +276,15 @@ case "$backend" in
     # instance (pure-llama.cpp) or the Ollama nomic embedder running alongside.
     if [[ "$defaults" -eq 1 ]]; then
       echo "FAIL: --defaults cannot drive the interactive llamacpp wizard (embeddings-backend choice + GGUF overrides); run interactively." >&2
+      exit 1
+    fi
+    # llamacpp is a LOCAL backend, so — like the ollama branch's guard above — it is
+    # a mismatched choice on the remote-llm profile, which carries no local models
+    # (§5.7) and pairs with the remote backend. Reject it symmetrically so the
+    # documented invariant ("remote-llm profile must pick remote") is enforced on
+    # both local backends, not just ollama.
+    if [[ -z "$chat_model" ]]; then
+      echo "FAIL: profile '$profile' has no local models; choose the 'remote' backend." >&2
       exit 1
     fi
 
@@ -398,22 +417,27 @@ case "$backend" in
       exit 1
     fi
     # The API key is a secret, so it lives in secrets.env (§7.3 — secrets never
-    # enter application.properties), reusing any value 2-secrets.sh already
-    # minted. application.properties references it by env var for Quarkus to
+    # enter application.properties), reusing any value a prior step-4 run already
+    # recorded. application.properties references it by env var for Quarkus to
     # expand at boot.
     if grep -qE '^INFOCHAT_LLM_API_KEY=.+' "$SECRETS_FILE" 2>/dev/null; then
-      echo "using INFOCHAT_LLM_API_KEY from secrets.env (set at step 2)"
+      echo "using INFOCHAT_LLM_API_KEY from secrets.env (already recorded)"
     else
       read -rsp "Remote LLM API key: " llm_key
       echo
-      if [[ -n "$llm_key" ]]; then
-        touch "$SECRETS_FILE"
-        chmod 600 "$SECRETS_FILE"
-        # Quote the value for compose's --env-file dotenv parse (M1-389): a '#'
-        # or whitespace in the key is data, not a comment / field break.
-        printf 'INFOCHAT_LLM_API_KEY="%s"\n' "$(dotenv_escape "$llm_key")" >> "$SECRETS_FILE"
-        echo "+ recorded INFOCHAT_LLM_API_KEY in secrets.env"
+      # The remote backend authenticates with this key, so an empty one is a setup
+      # error we surface now — mirroring the base-url check above — rather than
+      # letting it boot and fail later as an opaque 401 from the provider.
+      if [[ -z "$llm_key" ]]; then
+        echo "FAIL: the remote backend requires an API key (none entered)." >&2
+        exit 1
       fi
+      touch "$SECRETS_FILE"
+      chmod 600 "$SECRETS_FILE"
+      # Quote the value for compose's --env-file dotenv parse (M1-389): a '#'
+      # or whitespace in the key is data, not a comment / field break.
+      printf 'INFOCHAT_LLM_API_KEY="%s"\n' "$(dotenv_escape "$llm_key")" >> "$SECRETS_FILE"
+      echo "+ recorded INFOCHAT_LLM_API_KEY in secrets.env"
     fi
     set_all_base_urls "$base_url"
     for task in $LLM_TASKS; do

@@ -37,6 +37,14 @@ case "${1:-}" in
   *) usage >&2; exit 2 ;;
 esac
 
+# Standalone-run guard: every compose call below passes --env-file "$SECRETS_FILE",
+# which errors opaquely on a missing file; fail with a pointer to the steps that
+# create it (mirrors 3-postgres.sh).
+if [[ ! -f "$SECRETS_FILE" ]]; then
+  echo "FAIL: $SECRETS_FILE not found; run the earlier wizard steps first (secrets.env is created in step 2, 2-secrets.sh)." >&2
+  exit 1
+fi
+
 # --env-file feeds secrets.env to compose's dotenv parser (M1-389) so the apps'
 # INFOCHAT_*_PASSWORD / *_API_KEY / *_ADMIN_CONTACT_ID interpolations and the
 # Provider environment passthroughs resolve; the orchestrator no longer sources

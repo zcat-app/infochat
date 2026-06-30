@@ -99,6 +99,12 @@ fi
 # Sources cannot be disabled — a deployment always needs a seed source list.
 custom_sources_path=""
 if [[ "$defaults" -eq 0 ]]; then
+  # This is the one wizard input resolved against the CALLER's shell CWD (every
+  # other wizard path derives from BASH_SOURCE), so state the base explicitly and
+  # offer the bundled template as a concrete copy-and-edit example.
+  echo "Custom sources file: an absolute path, or one relative to the directory you"
+  echo "ran setup.sh from (usually the repo root). To start from the bundled list,"
+  echo "copy prod/config/bootstrap-sources.json, edit it, and give that path."
   read -rp "Path to a custom bootstrap-sources.json (blank = bundled default): " custom_sources_path
 fi
 if [[ -n "$custom_sources_path" ]]; then
@@ -135,6 +141,10 @@ if [[ "$defaults" -eq 0 ]]; then
     *)    enable_assets=1 ;;
   esac
   if [[ "$enable_assets" -eq 1 ]]; then
+    # Same CWD-relative resolution as the sources path above — spell out the base.
+    echo "Custom assets file: an absolute path, or one relative to the directory you"
+    echo "ran setup.sh from (usually the repo root). Bundled example to copy and edit:"
+    echo "prod/config/bootstrap-assets.json."
     read -rp "Path to a custom bootstrap-assets.json (blank = bundled zcash+monero defaults): " custom_assets_path
   fi
 fi

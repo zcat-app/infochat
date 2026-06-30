@@ -38,6 +38,14 @@ case "${1:-}" in
   *) usage >&2; exit 2 ;;
 esac
 
+# Standalone-run guard: poll_health passes --env-file "$SECRETS_FILE" to compose,
+# which errors opaquely on a missing file; fail with a pointer to the steps that
+# create it (mirrors 3-postgres.sh).
+if [[ ! -f "$SECRETS_FILE" ]]; then
+  echo "FAIL: $SECRETS_FILE not found; run the earlier wizard steps first (secrets.env is created in step 2, 2-secrets.sh)." >&2
+  exit 1
+fi
+
 # Poll one service's /q/health from inside its container until curl sees an UP
 # (HTTP 200; `curl -f` fails on the 503 a not-yet-ready service returns) or the
 # per-service deadline passes. On success the UP body is echoed to stdout so the

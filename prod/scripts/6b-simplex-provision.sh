@@ -88,6 +88,13 @@ if [[ -z "$display_name" ]]; then
   echo "      Re-run the wizard's step 6 (6-adapter.sh) to choose a bot name." >&2
   exit 1
 fi
+# Standalone-run guard (reached only when simplex IS enabled): run_sx passes
+# --env-file "$SECRETS_FILE" to compose, which errors opaquely on a missing file;
+# fail with a pointer to the step that creates it (mirrors 3-postgres.sh).
+if [[ ! -f "$SECRETS_FILE" ]]; then
+  echo "FAIL: $SECRETS_FILE not found; run 2-secrets.sh (wizard step 2) first." >&2
+  exit 1
+fi
 
 # Ensure the data-dir exists so the bind mount has a source and the prefix DBs
 # can be written into it (the adapter's SimpleXConfig.validate() also requires an

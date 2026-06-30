@@ -170,6 +170,25 @@ adapters="$DEFAULT_ADAPTERS"
 if [[ "$defaults" -eq 0 ]]; then
   echo "(The in-memory adapter is test-only and is never offered here —"
   echo "production must not mix it, §7.7.)"
+  echo
+  echo "Prerequisites per adapter:"
+  echo "  simplex — nothing to prepare: the wizard provisions the bot's identity"
+  echo "            for you in step 7 (profile, address, auto-accept)."
+  echo "  signal  — requires a DEDICATED phone number (a spare SIM/VoIP that can"
+  echo "            receive an SMS/voice code, NOT one already used for your personal"
+  echo "            Signal — Signal allows only one account per number) that you have"
+  echo "            ALREADY registered AND verified with signal-cli out-of-band"
+  echo "            (captcha + SMS code). The wizard CANNOT create or verify it; it"
+  echo "            only points at the data dir where that registration already"
+  echo "            lives, so do it FIRST if you have not. How: SETUP_GUIDE.md"
+  echo "            \"Setting up the bot's chat account\" and docs/design/07-deployment.md §7.7."
+  echo
+  echo "To add or change an adapter later: re-run prod/scripts/6-adapter.sh and enter"
+  echo "your full adapter set (it is idempotent and never rotates existing secrets),"
+  echo "or hand-edit prod/runtime/application.properties (adapter config) and"
+  echo "prod/runtime/secrets.env (admin credential + data-dir), then"
+  echo "prod/scripts/apps.sh restart to pick it up."
+  echo
   read -rp "Adapters to enable — comma-separated for multiple (options: ${VALID_ADAPTERS// /, }) [${DEFAULT_ADAPTERS}]: " answer || true
   adapters="${answer:-$DEFAULT_ADAPTERS}"
 fi

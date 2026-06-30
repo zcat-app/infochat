@@ -19,9 +19,7 @@ COMPOSE_FILE="$REPO_ROOT/docker-compose.yml"
 # Full wizard step sequence (§7.7.2 "Structure"): the orchestrator is the single
 # place the step list is registered — leaf subscripts never self-register, so a
 # step is in the run iff it has an entry here. Adding a step is a two-part change:
-# the script under scripts/ AND its entry in this list. The 7-/8- scripts land
-# with M1-385 (blocked on this ticket); their entries are wired here so the list
-# is complete when those scripts arrive.
+# the script under scripts/ AND its entry in this list.
 STEPS=(
   "0-doctor.sh:Preflight host checks"
   "1-profile.sh:Select hardware profile"
@@ -100,6 +98,12 @@ print_handoff() {
         echo "           bot's contact address — the link the wizard printed during"
         echo "           setup (step 7, SimpleX provisioning); in the CLI:"
         echo "           /c <bot-address>. The bot auto-accepts the connection."
+        echo "           Then DM the bot your secret claim-token (the value you chose"
+        echo "           in step 6) — that first matching message makes YOU the admin."
+        echo "           It is NOT an invite code; you still must send it. Afterward,"
+        echo "           blank INFOCHAT_SIMPLEX_ADMIN_TOKEN in prod/runtime/secrets.env"
+        echo "           and run prod/scripts/apps.sh restart so the token can never"
+        echo "           re-claim admin."
         ;;
       signal)
         signal_account="$(grep -E '^infochat\.adapters\.signal\.account=' "$CONFIG_FILE" 2>/dev/null | head -n1 | cut -d= -f2-)"
@@ -110,7 +114,8 @@ print_handoff() {
   done
   echo
   echo "First moves once connected:"
-  echo "  1. Send  /help   — confirms the bot answers you."
+  echo "  1. Send  /help   — confirms the bot answers you. (SimpleX: send your"
+  echo "     claim-token FIRST to become admin — see the SimpleX note above.)"
   echo "  2. Invite someone:"
   echo "       /invite create --adapter <app> --contact <their id>"
   echo "     The bot replies with a one-time code. Send it to them; they connect"
