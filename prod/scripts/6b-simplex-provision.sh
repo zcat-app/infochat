@@ -113,8 +113,19 @@ db_prefix="$data_dir/$DB_PREFIX_BASENAME"
 # -y auto-confirms first-run DB migrations so they do not block on a prompt.
 #
 # Sets the global SX_OUT to the captured stdout+stderr. Aborts on a docker-level
-# failure (rc != 0); detects a simplex-level failure (rc 0 but a `bad chat
-# command` / error marker on stdout) and aborts there too.
+# failure (rc != 0); detects a simplex-level failure (rc 0 but a simplex-chat
+# error line on stdout) and aborts there too.
+#
+# simplex-chat's two real failure forms, both printed at column 0 (spike items 3, 5):
+# a rejected command -> `bad chat command: <detail>`; a fatal Haskell exception ->
+# `simplex-chat: <ctx>: <exception>` (e.g. the fresh-DB `hGetLine: end of file`).
+# The marker is ANCHORED to line start on purpose: the operator-supplied display
+# name is echoed back as `Current user: <name>` (M1-533), so a broad substring
+# like "error" would let a benign name ("Error Corp") false-trigger a provisioning
+# failure — an anchored form never matches operator content, which is never at
+# column 0. Shared by the detector and the diagnostic echo below so the two cannot
+# drift apart.
+SX_ERROR_MARKER='^bad chat command|^simplex-chat: '
 SX_OUT=""
 run_sx() {
   local label="$1"; shift
@@ -135,11 +146,11 @@ run_sx() {
   # Guarded inside `if` so a no-match grep does not trip errexit/pipefail. Echo
   # only the matched marker line(s) — never the full output (D37: simplex-chat
   # output can carry contact links / message envelopes).
-  if printf '%s' "$SX_OUT" | grep -qiE 'bad chat command|(^|[^a-z])error'; then
+  if printf '%s' "$SX_OUT" | grep -qiE "$SX_ERROR_MARKER"; then
     echo "FAIL: simplex-chat rejected the ${label} command — provisioning aborted." >&2
     echo "      (simplex-chat exits 0 even on a bad command, so this is caught by" >&2
     echo "       parsing its output, not its exit code.)" >&2
-    printf '%s\n' "$SX_OUT" | grep -iE 'bad chat command|error' >&2 || true
+    printf '%s\n' "$SX_OUT" | grep -iE "$SX_ERROR_MARKER" >&2 || true
     exit 1
   fi
 }

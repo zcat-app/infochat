@@ -116,6 +116,25 @@ class SimpleXProvisioningWiringTest {
                 "the failure message must name the rejected step:\n" + r.output());
     }
 
+    // --- operator content echoed on stdout must not false-trigger a failure (M1-533) ---
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void displayNameContainingErrorDoesNotFalseTriggerFailure(@TempDir Path tmp) throws Exception {
+        // The bot display name is operator input and simplex-chat echoes it back as
+        // `Current user: <name>` (spike items 3/5/6). A benign name containing the word
+        // "error" ("Error Corp") lands in the parsed stdout; the tightened marker keys
+        // off simplex-chat's own error line shapes, never operator content, so this must
+        // provision cleanly (exit 0, no FAIL). Under the old broad `(^|[^a-z])error`
+        // marker this exact scenario false-failed.
+        Result r = runProvision(tmp, false, Files.createDirectories(tmp.resolve("sxstate")), "Error Corp");
+        assertEquals(0, r.exit(),
+                "a display name containing \"error\" must not fail provisioning; output:\n" + r.output());
+        assertFalse(r.output().contains("FAIL"),
+                "operator content echoed on stdout must not false-trigger a provisioning failure:\n"
+                        + r.output());
+    }
+
     // --- the contact link is surfaced to the operator but never persisted (D37) ---
 
     @Test
@@ -143,8 +162,13 @@ class SimpleXProvisioningWiringTest {
         return runProvision(tmp, badAutoAccept, Files.createDirectories(tmp.resolve("sxstate")));
     }
 
-    /** Drive the real 6b script with a fake docker on PATH; return exit + output + recorded argv. */
     private Result runProvision(Path tmp, boolean badAutoAccept, Path state) throws Exception {
+        return runProvision(tmp, badAutoAccept, state, DISPLAY_NAME);
+    }
+
+    /** Drive the real 6b script with a fake docker on PATH; return exit + output + recorded argv. */
+    private Result runProvision(Path tmp, boolean badAutoAccept, Path state, String displayName)
+            throws Exception {
         Path repoRoot = repoRoot();
         Path runtime = Files.createDirectories(tmp.resolve("runtime"));
         Path dataDir = tmp.resolve("botdata");
@@ -154,13 +178,13 @@ class SimpleXProvisioningWiringTest {
                         + "infochat.adapters.simplex.binary=/usr/local/bin/simplex-chat\n"
                         + "infochat.adapters.simplex.data-dir=" + dataDir + "\n"
                         + "infochat.adapters.simplex.ws-port=5225\n"
-                        + "infochat.adapters.simplex.display-name=" + DISPLAY_NAME + "\n");
+                        + "infochat.adapters.simplex.display-name=" + displayName + "\n");
         // An empty secrets.env so the script's `--env-file` target exists.
         Files.writeString(runtime.resolve("secrets.env"), "");
 
         Path bin = Files.createDirectories(tmp.resolve("bin"));
         Path fakeDocker = bin.resolve("docker");
-        Files.writeString(fakeDocker, fakeDockerScript());
+        Files.writeString(fakeDocker, fakeDockerScript(displayName));
         fakeDocker.toFile().setExecutable(true);
 
         Path cmdLog = tmp.resolve("cmdlog.txt");
@@ -201,8 +225,12 @@ class SimpleXProvisioningWiringTest {
      * and emits the pinned-binary's responses, keyed on the -e command and a state
      * file so a second run reports an already-provisioned identity. A bad command
      * still exits 0 (spike item 5); $SX_BAD makes /auto_accept on emit that marker.
+     *
+     * <p>Echoes the operator display name back as {@code Current user: <name>}, exactly
+     * as the pinned binary does (spike items 3/5/6) — so a name containing "error" lands
+     * in the parsed stdout and exercises the M1-533 false-positive guard.
      */
-    private String fakeDockerScript() {
+    private String fakeDockerScript(String displayName) {
         return "#!/usr/bin/env bash\n"
                 + "if [ \"$1\" != \"compose\" ]; then exit 0; fi\n"
                 + "case \" $* \" in *\" run \"*) ;; *) exit 0 ;; esac\n"
@@ -221,21 +249,21 @@ class SimpleXProvisioningWiringTest {
                 + "case \"$cmd\" in\n"
                 + "  \"/show_address\")\n"
                 + "    if [ -f \"$SX_STATE/address\" ]; then\n"
-                + "      echo \"Current user: " + DISPLAY_NAME + "\"\n"
+                + "      echo \"Current user: " + displayName + "\"\n"
                 + "      echo \"Your chat address:\"; echo\n"
                 + "      echo \"" + FAKE_LINK + "\"\n"
                 + "      echo \"auto_accept on\"\n"
                 + "    else\n"
-                + "      echo \"Current user: " + DISPLAY_NAME + "\"\n"
+                + "      echo \"Current user: " + displayName + "\"\n"
                 + "      echo \"no chat address, to create: /ad\"\n"
                 + "    fi ;;\n"
                 + "  \"/ad\")\n"
                 + "    if [ -f \"$SX_STATE/address\" ]; then\n"
-                + "      echo \"Current user: " + DISPLAY_NAME + "\"\n"
+                + "      echo \"Current user: " + displayName + "\"\n"
                 + "      echo \"you already have chat address, to show: /sa\"\n"
                 + "    else\n"
                 + "      : > \"$SX_STATE/address\"\n"
-                + "      echo \"Current user: " + DISPLAY_NAME + "\"\n"
+                + "      echo \"Current user: " + displayName + "\"\n"
                 + "      echo \"Your new chat address is created!\"; echo\n"
                 + "      echo \"" + FAKE_LINK + "\"\n"
                 + "    fi ;;\n"
