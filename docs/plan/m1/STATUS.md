@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-530 — Stale bootstrap-admin credential left in secrets.env when an adapter is de-selected on re-run (complexity: medium, risk: low)
+- M1-530 — Wizard re-run leaves stale credentials on de-selection: bootstrap-admin (6-adapter.sh) + remote LLM api-key (4-llm.sh) (complexity: medium, risk: low)
 - M1-531 — Wizard step 5: directory given as a custom sources/assets path yields a raw cp error (complexity: low, risk: low)
 - M1-532 — Wizard step 5: optionally syntax-check a custom bootstrap JSON so a typo fails early, not at Collector boot (complexity: low, risk: low)
 - M1-533 — 6b SimpleX provisioning: tighten the stdout error-marker so operator-controlled output can't false-trigger a failure (complexity: low, risk: low)

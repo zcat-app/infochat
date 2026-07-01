@@ -1,14 +1,16 @@
 ---
 id: M1-530
-title: "Stale bootstrap-admin credential left in secrets.env when an adapter is de-selected on re-run"
+title: "Wizard re-run leaves stale credentials on de-selection: bootstrap-admin (6-adapter.sh) + remote LLM api-key (4-llm.sh)"
 status: pending
 created: 2026-06-30
-last_updated: 2026-06-30
+last_updated: 2026-07-01
 blocked_by: []
-files_budget: 2
+files_budget: 4
 files_scope:
   - prod/scripts/6-adapter.sh
   - infochat-provider/src/test/java/app/zcat/infochat/provider/wiring/AdapterAdminPromptWiringTest.java
+  - prod/scripts/4-llm.sh
+  - infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/wiring/LlamacppWiringTest.java
 complexity: medium
 risk: low
 round_cap: 2
@@ -19,6 +21,8 @@ out_of_scope:
   - "The collect_admin never-overwrite / skip-if-set idempotency for a STILL-CHOSEN adapter — a chosen adapter's existing admin must NOT be rotated or re-prompted. This ticket only removes creds for adapters NOT in the chosen set."
   - "Any change to the union gate, the per-adapter required/optional prompt logic, or the application.properties block writing."
   - "Rotating or changing an admin credential for a chosen adapter (that remains a documented hand-edit; see flaws.md F6)."
+  - "The `remote` branch of 4-llm.sh — M1-529 owns it (it clears the embeddings api-key and legitimately writes the generative api-keys). This ticket only adds cleanup to the `ollama`/`llamacpp` branches for the switch-AWAY-from-remote case; do not alter the remote branch's api-key writes."
+  - "switch-llm.sh — a separate script for moving individual tasks between backends at runtime; its credential handling is out of scope here (M1-529 confirmed it never touches embeddings). This ticket is about the 4-llm.sh full-backend re-run only."
 acceptance:
   - >-
     On every run, 6-adapter.sh removes the bootstrap-admin secret for any adapter
@@ -40,12 +44,35 @@ acceptance:
     (supplying its admin), then assert the resulting secrets.env contains
     INFOCHAT_SIGNAL_ADMIN_CONTACT_ID but NO INFOCHAT_SIMPLEX_ADMIN_TOKEN line.
   - >-
+    Sibling fix in 4-llm.sh (M1-529 redteam out-of-model item): when a re-run
+    switches the LLM backend AWAY from `remote` to a local backend, the `ollama`
+    and `llamacpp` branches remove the now-stale remote-LLM credentials. In each
+    of those two branches, before/at config-write, delete any
+    `infochat.llm.<task>.api-key` and `infochat.embeddings.api-key` lines from the
+    generated application.properties (local backends carry no api-key) AND delete
+    `INFOCHAT_LLM_API_KEY` from secrets.env (referenced by nothing once remote is
+    de-selected — mirrors this ticket's adapter-admin removal and the data-dir
+    reconcile). This does NOT touch the `remote` branch (M1-529 already clears the
+    embeddings api-key there and legitimately writes the generative api-keys).
+  - >-
+    A wiring test in infochat-llm-adapter (extend LlamacppWiringTest, mirroring
+    its drive-the-real-4-llm.sh pattern) covers the switch-away cleanup: seed a
+    runtime application.properties + secrets.env as a prior `remote` run left them
+    (six `infochat.llm.<task>.api-key=${INFOCHAT_LLM_API_KEY}` lines,
+    `infochat.embeddings.api-key`, and `INFOCHAT_LLM_API_KEY="..."` in
+    secrets.env), run 4-llm.sh choosing a local backend, then assert the generated
+    config contains NO `infochat.llm.*.api-key` / `infochat.embeddings.api-key`
+    lines and secrets.env contains NO `INFOCHAT_LLM_API_KEY`.
+  - >-
     `mvn -B -pl infochat-provider -am verify` exits 0; AdapterAdminPromptWiringTest
-    passes (the original 3 tests plus the new de-selection test), and the full
-    repo-root `mvn verify` reports no regressions.
+    passes (the original 3 tests plus the new de-selection test), the
+    infochat-llm-adapter wiring tests pass (LlamacppWiringTest with the new
+    switch-away case, plus SwitchLlmWiringTest / RemoteLlmWiringTest unchanged),
+    and the full repo-root `mvn verify` reports no regressions.
 test_plan:
   modifies:
-    - "infochat-provider/src/test/java/app/zcat/infochat/provider/wiring/AdapterAdminPromptWiringTest.java — add the de-selection cleanup @Test."
+    - "infochat-provider/src/test/java/app/zcat/infochat/provider/wiring/AdapterAdminPromptWiringTest.java — add the adapter de-selection cleanup @Test."
+    - "infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/wiring/LlamacppWiringTest.java — add the switch-away-from-remote api-key cleanup @Test (drive 4-llm.sh over a seeded prior-remote config)."
   preserves:
     - all wizard wiring tests currently green on main
 spec_refs:
@@ -66,7 +93,7 @@ clarity_check:
   blockers: []
 ---
 
-# M1-530: Reconcile bootstrap-admin secrets on adapter de-selection
+# M1-530: Reconcile stale wizard credentials on de-selection (adapter admin + remote LLM api-key)
 
 ## Context
 
@@ -82,6 +109,20 @@ de-selected (no property references it), but: (a) inconsistent with the data-dir
 handling, (b) a secret lingers at rest, and (c) if simplex is re-enabled later,
 `collect_admin`'s skip-if-set silently REUSES the stale token instead of
 prompting for a fresh one.
+
+**Sibling case in `4-llm.sh` (folded in per user, from the M1-529 redteam
+out-of-model item, 2026-07-01).** The exact same "stale credential on
+de-selection re-run" shape exists for the LLM backend: the `remote` branch
+writes `infochat.llm.<task>.api-key=${INFOCHAT_LLM_API_KEY}` (six tasks) plus
+`INFOCHAT_LLM_API_KEY` into `secrets.env`, but the `ollama` and `llamacpp`
+branches only ever *append* their own config — they never delete those remote
+credentials. So a run that chose `remote` and a later run that switches to
+`ollama`/`llamacpp` leaves the api-key property lines pointed at a now-local
+endpoint (semantically wrong, contradicts the local-only privacy posture) and
+the `INFOCHAT_LLM_API_KEY` secret at rest, referenced by nothing. This is the
+LLM-backend twin of the adapter-admin reconcile above; M1-529 already fixed the
+narrower embeddings-api-key case *inside the remote branch* but not the
+switch-away-from-remote direction.
 
 ## Acceptance
 
@@ -103,3 +144,15 @@ re-prompt a chosen adapter's existing secret every run — a regression.
   `chosen`, `sed -i '/^INFOCHAT_<X>_ADMIN_...=/d' "$SECRETS_FILE"`.
 - `secrets.env` is created with `touch` earlier in the script, so the sed target
   always exists.
+- For the `4-llm.sh` sibling: in the `ollama` and `llamacpp` branches, clear the
+  stale remote-LLM credentials before/at config-write — e.g.
+  `sed -i -e '/^infochat\.llm\..*\.api-key=/d' -e '/^infochat\.embeddings\.api-key=/d' "$CONFIG_FILE"`
+  and `sed -i '/^INFOCHAT_LLM_API_KEY=/d' "$SECRETS_FILE"`. `$CONFIG_FILE` exists
+  (checked at script top) and `$SECRETS_FILE` is `touch`-created; both `sed`s are
+  no-ops on a fresh run with no prior remote credentials. Reuse the existing
+  `set_prop`/`set_secret` idempotency idiom where it fits. M1-529's remote-branch
+  `sed` that clears `infochat.embeddings.api-key` is the reference pattern.
+- The `4-llm.sh` test can extend `LlamacppWiringTest` (it already drives the real
+  `4-llm.sh`): pre-write a runtime `application.properties`/`secrets.env` as a
+  prior `remote` run would, then drive the local branch and assert the stale
+  api-keys are gone.
