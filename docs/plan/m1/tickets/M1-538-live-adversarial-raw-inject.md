@@ -1,10 +1,47 @@
 ---
 id: M1-538
 title: "live-test: inject an adversarial RAW post so the real eval pipeline quarantines it"
-status: pending
+status: done
 created: 2026-07-01
 last_updated: 2026-07-01
 blocked_by: []
+clarity_check:
+  date: 2026-07-01
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 374
+      removed: 7
+redteam_findings: []
+redteam_audits:
+  - date: 2026-07-01
+    verdict: CLEAN
+    base: main (fork point 307c1dc6)
+    head: m1/M1-538-live-test-inject-an-adversaria
+    verdict_file: docs/plan/m1/redteam/M1-538-2026-07-01.md
+    out_of_model_count: 2
+    note: >-
+      Adversarial audit of the pre-commit branch working tree (--in-progress).
+      CLEAN — no threat-model gaps. Two out-of-model advisory items only: (1) the
+      non-READY assertion is intentionally conservative for the A1 injection but
+      would flag a spec-compliant Stage-2 BENIGN→READY-with-redaction outcome as a
+      gap (token-leak is still caught by assertion #3); (2) a single run leaves a
+      QUARANTINED post + quarantine row in the DB until the next run (host-access
+      operational hygiene, outside the threat model). Neither is a diff defect;
+      both are deliberately not fixed inline (assertion matches approved
+      acceptance item 3; the tool is TEST-deployment-only).
 files_budget: 4
 files_scope:
   - prod/live-inject-adversarial.sh

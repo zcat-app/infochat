@@ -217,6 +217,49 @@ prod/live-seed.sh --offset-minutes 1500  # posts ~25h old → OUTSIDE a 24h wind
   - A pre-existing preserved post is returned by `/summary` for a newly-registered,
     newly-subscribed user — proving the data-plane survived the reset.
 
+### Adversarial RAW injection (M1-538)
+
+The synthetic corpus above seeds `READY` posts and **bypasses** the eval
+pipeline. This is the opposite: it injects an adversarial post at the pre-eval
+`RAW` stage so the **real** Collector pipeline (Stage 1 deterministic scrub +
+redaction, Stage 2 LLM judge — D20/D22) runs on it and must quarantine it. It is
+the malicious-detection half of the data strategy and a `[real-LLM]` test
+(`adversarial-input-kit.md` §A, case A1) — the mocked-LLM suite cannot prove
+Stage 2's judge. Run it against a running deployment:
+
+```
+prod/live-inject-adversarial.sh                       # reaper trigger, waits up to 10m
+prod/live-inject-adversarial.sh --timeout-seconds 120 # after restarting the collector (fast path)
+```
+
+- **What it injects.** One self-contained adversarial RSS source (`disabled`, so
+  the fetch scheduler never tries to fetch its bogus identifier) and one `RAW`
+  post with the deterministic uid `m1-538-adversarial-a1`, whose body is the A1
+  ingest-side prompt injection carrying the verbatim `grantAdmin` token. It
+  upserts its own source, so it does not depend on the M1-537 seed.
+- **Trigger — reaper vs restart, not a mock clock.** A bare `RAW` insert is not
+  auto-enqueued (enqueue lives in `PostPersister`). The SQL backdates the row's
+  `status_changed_at` (`--backdate-minutes`, default 1440 = 24h) past the
+  `infochat.eval.stale-raw.age` (default 30m) so the real
+  `Stage1Worker.reEmitStaleRaw()` reaper (default every 5m) re-enqueues it
+  **without a restart** — the non-disruptive default. Restarting the collector is
+  the fast path: `OutboxRehydrator` (`@Startup`) re-enqueues every `RAW` row at
+  once. There is no NOTIFY path for eval enqueue.
+- **Expected quarantine outcome.** After a bounded polled wait the script asserts
+  the post reached a **non-READY terminal state** — `QUARANTINED` (D22) or
+  `NEEDS_REVIEW` if the LLM verdict is UNKNOWN — that a `quarantine` row exists,
+  and that the raw `grantAdmin` token appears in **no** retrievable `READY` post
+  body (Stage 1 replaced the flagged span with `[REDACTED:<id>]`). It exits
+  non-zero if the post is still `RAW` after the wait or if the payload is
+  retrievable. A post promoted to `READY` means the ingest defense did NOT
+  contain the injection — a real gap, and a separate remediation ticket (never an
+  inline fix to the pipeline).
+- **Idempotent + owner role.** Re-running upserts the source and delete-then-inserts
+  the `RAW` post by uid (clearing the prior run's quarantine row), resetting it
+  for a fresh re-evaluation. `post`/`source` are collector-owned; the tool runs
+  under the database owner (`infochat`), reached via `docker compose exec postgres`
+  the same way `live-seed.sh` and `live-reset.sh` do.
+
 ## Code-ticket plan (deliverables 2–5)
 
 These are code/tests, so each was an M1 ticket driven through `/m1-tick`
