@@ -3,7 +3,7 @@ id: M1-533
 title: "6b SimpleX provisioning: tighten the stdout error-marker so operator-controlled output can't false-trigger a failure"
 status: pending
 created: 2026-06-30
-last_updated: 2026-06-30
+last_updated: 2026-07-01
 blocked_by: []
 files_budget: 2
 files_scope:
@@ -19,12 +19,6 @@ out_of_scope:
   - "The provisioning command sequence (profile-create / /ad / /auto_accept on / /show_address), the idempotency behavior, or the D37 transient contact-link print."
   - "The data-dir / db-prefix handling."
 acceptance:
-  - >-
-    First confirm the trigger: determine (from .scratch/simplex-spike-findings.md
-    and/or a fake-docker probe) whether simplex-chat echoes the operator-supplied
-    --create-bot-display-name back on stdout. Record the finding in the ticket
-    notes / commit message. (If it does NOT echo, the fix is still warranted as
-    defense-in-depth; if it DOES, it is a confirmed false-positive vector.)
   - >-
     The failure-marker grep in 6b-simplex-provision.sh is tightened from the
     broad `bad chat command|(^|[^a-z])error` to match only simplex-chat's actual
@@ -52,11 +46,32 @@ test_plan:
   preserves:
     - all wizard wiring tests currently green on main
 spec_refs:
-  - "docs/spec/messaging.md §SimpleX adapter"
+  - "docs/spec/messaging.md §Per-adapter trust level and identity"
 decision_refs: []
 reviews: []
 escalations: []
-revisions: []
+revisions:
+  - date: 2026-07-01
+    reason: >-
+      clarity-fail rework — fix unresolvable spec_refs anchor and move the
+      investigation-only acceptance item 1 (verified-by-reading) into Notes.
+    snapshot:
+      status: pending
+      escalation_reason: clarity-fail
+      clarity_check:
+        date: 2026-07-01
+        verdict: FAIL
+        blockers:
+          - "SPEC-REFS-VALID: `docs/spec/messaging.md §SimpleX adapter` matches no heading in that file; the SimpleX-specific content is under `## Per-adapter trust level and identity` (line 214). Fix by changing the spec_ref to that heading."
+          - "ACCEPTANCE-RUNNABLE: acceptance item 1 is an investigation task whose only artifact is text in the commit/notes (verify-by-reading, a weak form). Move it into Context/Notes and let items 2–5 stand as the acceptance criteria."
+        warnings: []
+      spec_refs_at_snapshot:
+        - "docs/spec/messaging.md §SimpleX adapter"
+      acceptance_item_1_removed: >-
+        First confirm the trigger: determine (from .scratch/simplex-spike-findings.md
+        and/or a fake-docker probe) whether simplex-chat echoes the operator-supplied
+        --create-bot-display-name back on stdout. Record the finding in the ticket
+        notes / commit message.
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -67,6 +82,16 @@ clarity_check:
   warnings: []
   blockers: []
 ---
+
+<!--
+  Revision 2026-07-01 (clarity-fail rework, /m1-tick run bounded self-refine):
+  the former acceptance item 1 (an investigation-only "confirm whether simplex-chat
+  echoes the display name, record in notes" step, verified only by reading) was moved
+  out of the acceptance list into the Notes section below, where the confirmed finding
+  now lives. spec_refs anchor corrected from the nonexistent §SimpleX adapter to
+  §Per-adapter trust level and identity. See revisions: in frontmatter for the snapshot.
+-->
+
 
 # M1-533: Harden 6b's stdout error-marker against operator-controlled content
 
@@ -80,17 +105,21 @@ input that flows into `--create-bot-display-name "$display_name"` and may be
 echoed back, so a name containing the word "error" (e.g. "Error Corp") could
 false-trigger a provisioning failure.
 
-This is PLAUSIBLE, not yet confirmed — it depends on whether simplex-chat echoes
-the display name on stdout, which acceptance item 1 resolves first. Either way,
-keying the failure detector off a broad "error" substring that operator content
-can populate is a smell worth removing.
+CONFIRMED: simplex-chat echoes the profile's display name on stdout as
+`Current user: <display_name>` (spike `.scratch/simplex-spike-findings.md`, the
+`Current user: infobot` lines under items 3/5/6). So a display name like
+"Error Corp" surfaces as `Current user: Error Corp`, which the broad
+`(^|[^a-z])error` marker matches (the space before "Error" satisfies `[^a-z]`) and
+false-triggers a provisioning failure. This is a real false-positive vector, not
+merely a smell — keying the failure detector off a broad "error" substring that
+operator content can populate must be removed.
 
 ## Acceptance
 
-See the YAML `acceptance:` list. In prose: confirm the echo behavior, then
-tighten the marker to simplex-chat's real error forms, and add a test proving a
-benign display name containing "error" no longer fails provisioning while a real
-`bad chat command` still does.
+See the YAML `acceptance:` list. In prose: tighten the marker to simplex-chat's
+real error forms, and add a test proving a benign display name containing "error"
+no longer fails provisioning while a real `bad chat command` still does. (The echo
+behavior that motivates the fix is already confirmed — see Context above.)
 
 ## Out-of-scope
 
@@ -99,6 +128,9 @@ and stays; only the marker pattern tightens.
 
 ## Notes
 
+- Trigger confirmed (formerly acceptance item 1): simplex-chat echoes the display
+  name as `Current user: <name>` on stdout (spike, items 3/5/6), so the broad
+  marker is a confirmed false-positive vector — see Context.
 - Spike reference: `.scratch/simplex-spike-findings.md` (items 3, 5) documents the
   real error strings — `bad chat command` for a rejected command, and a Haskell
   `hGetLine: end of file` shape on the fresh-DB interactive-prompt path.
