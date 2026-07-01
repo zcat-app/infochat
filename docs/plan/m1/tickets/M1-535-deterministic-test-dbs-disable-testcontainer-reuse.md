@@ -23,14 +23,6 @@ out_of_scope:
   - "No change to any M1-529 file (that ticket is parked in-review; this fix unblocks its suite)."
 acceptance:
   - >-
-    ROOT CAUSE (recorded for the reviewer): all collector @QuarkusTest classes
-    share one Quarkus Dev Services Postgres. With the host
-    ~/.testcontainers.properties carrying reuse.enable=true, that container is
-    reused across runs/days and its `post` partition set drifts from the Flyway
-    baseline, so tests inserting into a pinned/`now()` month hit "no partition of
-    relation post found for row". On a fresh (migration-only) DB every affected
-    test passes (verified 2026-07-01). Fix = make every test run use a fresh DB.
-  - >-
     The parent pom (pom.xml) configures BOTH maven-surefire-plugin and
     maven-failsafe-plugin so the test JVMs run with Testcontainers container reuse
     DISABLED regardless of any host ~/.testcontainers.properties reuse.enable=true
@@ -72,11 +64,19 @@ test_plan:
     - "All wizard/adapter/provider tests green on main."
   modifies: []
 spec_refs:
-  - "docs/spec/verification.md"
+  - "docs/spec/verification.md §CI shape"
 decision_refs: []
 reviews: []
 escalations: []
-revisions: []
+revisions:
+  - date: 2026-07-01
+    reason: "clarity-fail rework (run bounded self-refine, prose-only) — clarity FAIL: SPEC-REFS-VALID blocker: 'docs/spec/verification.md' lacked a §<section> anchor. Added '§CI shape' (an existing heading in verification.md; the section on how the test suite runs — the relevant context for a test-determinism fix). Also addressed the ACCEPTANCE-RUNNABLE WARN by removing the non-checkable 'ROOT CAUSE (recorded for the reviewer)' item from acceptance — its content is duplicated verbatim in the ## Context section, so no information is lost. No scope/files_budget/intent change."
+    prior_values: |
+      spec_refs (pre-refine):
+        - "docs/spec/verification.md"
+      acceptance[0] (pre-refine, removed — duplicated ## Context): the
+      "ROOT CAUSE (recorded for the reviewer)" paragraph on reused-DB partition
+      drift ("no partition of relation post found for row"; fresh DB passes).
 overrides: []
 aborted_attempts: []
 reopens: []
