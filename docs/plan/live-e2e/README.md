@@ -173,16 +173,46 @@ tools are prod-side, owner-role, idempotent, and documented in
       `prod/sql/inject-adversarial-raw.sql`.
 
 ### Phase 4 — SimpleX live-smoke driver (full workflow)
+
+Split into **4a** (the CI-testable substrate — ticketed) and **4b** (the
+host-dependent live drive — needs real transports + real LLM, cannot be
+@QuarkusTest-covered).
+
+**Phase 4a — scenario runner substrate — TICKET DRAFTED (M1-539, 2026-07-01).**
+- [ ] **M1-539** (draft): backend-agnostic scenario format + runner core +
+      InMemory backend binding, proven by an IT that runs a golden-path smoke
+      scenario through `InMemoryAdapter` and captures per-step latency. Reuses the
+      InMemoryAdapter conversation shape so the SAME scenario runs on both
+      backends (caveat: in-memory is sync/`finalizedBodies()`, live is
+      async/observed client-side → the `ConversationBackend` SPI abstracts it with
+      a poll-until-match-or-timeout wait). D-live-4: build the runner first.
+
+**Phase 4b — SimpleX live drive on a host (not ticketed; needs the host).**
 - [ ] Provision 3 simplex-chat identities: **bot** + **admin client** + **user
       client** (admin becomes admin by DMing `admin-token`; not a pre-set address).
-- [ ] Scenario format: ordered `send → expect(match, timeout) `, + latency
-      capture. Reuse the InMemoryAdapter conversation shape so scenarios can run
-      on both backends (caveat: in-memory is sync/`finalizedBodies()`, live is
-      async/observed client-side).
-- [ ] Drive the full lifecycle on SimpleX.
+- [ ] Add the SimpleX `ConversationBackend` binding (drive the real simplex-chat
+      subprocess over the WS API; corrId command/response + async inbound).
+- [ ] Drive the full lifecycle on SimpleX (scope = the 7 transport-relevant
+      scenarios 3,4,7,10,11,12,15 per D-live-5).
 - [ ] Assert real LLM latency captured; embedding-retrieval assertion (ask about
       a topic covered by exactly one seeded post; assert that post is retrieved).
-- [ ] Assert readiness/liveness, per-adapter metrics, LLM-down degraded.
+- [ ] Assert readiness/liveness (`/q/health/ready`), per-adapter metrics
+      (`adapter.connection.status`), LLM-down degraded.
+- **Constrained-host model note.** On a 16 GB laptop, the default laptop/ollama
+      profile (llama3.1:8b for chat/tagger/summarizer/entity/translator ~4.7 GB +
+      llama3.2:3b judge ~2 GB + nomic-embed-text ~0.3 GB, plus the Postgres/Ollama
+      images + two JVMs) is tight. The model per task is a plain config property
+      (`infochat.llm.<task>.model`) and `prod/scripts/4-llm.sh` pulls whatever the
+      active profile records — so a live-smoke run can override the 8b tasks down
+      to `llama3.2:3b` (already pulled for the judge → zero extra download, one
+      model family) while **keeping** `nomic-embed-text` (retrieval-quality
+      assertions depend on the embedder). Trade-off: 3b summarizes/tags worse than
+      8b, so keep the smoke assertions behavioural (reply matched, latency
+      captured, injection contained), not production-grade output quality — which
+      is already the live-run posture (§1: latency/throughput + retrieval presence,
+      not quality scoring). Even leaner: the llama.cpp backend's gemma QAT-Q4 (§4a
+      of `prod/scripts/4-llm.sh`) but that switches backends — not needed for a
+      smoke run.
 
 ### Phase 5 — Signal delta verification (smaller)
 - [ ] Register bot + 1–2 test Signal accounts (manual; preserved dirs).
