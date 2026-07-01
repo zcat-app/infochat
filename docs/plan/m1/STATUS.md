@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 562 |
 | deferred | 10 |
-| **total** | **572** |
+| **total** | **573** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-539 — live-smoke scenario runner + InMemory backend (Phase 4a) (complexity: high, risk: low)
 
 ---
 
@@ -743,5 +743,5 @@ M1-535 (done)
 M1-536 (done)
   └── M1-537 (done)
 M1-538 (done)
-M1-539 (draft)
+M1-539 (pending) ← runnable
 ```

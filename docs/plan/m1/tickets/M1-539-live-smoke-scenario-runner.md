@@ -1,7 +1,7 @@
 ---
 id: M1-539
 title: "live-smoke scenario runner + InMemory backend (Phase 4a)"
-status: draft
+status: pending
 created: 2026-07-01
 last_updated: 2026-07-01
 blocked_by: []
