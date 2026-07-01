@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 562 |
 | deferred | 10 |
-| **total** | **573** |
+| **total** | **574** |
 
 ---
 
@@ -25,6 +25,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-539 — live-smoke scenario runner + InMemory backend (Phase 4a) (complexity: high, risk: low)
+- M1-540 — Fix MultiAdapterProductionIT signal-crash timing flake (complexity: low, risk: low)
 
 ---
 
@@ -744,4 +745,5 @@ M1-536 (done)
   └── M1-537 (done)
 M1-538 (done)
 M1-539 (pending) ← runnable
+M1-540 (pending) ← runnable
 ```
