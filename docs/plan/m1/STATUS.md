@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 560 |
+| done | 561 |
 | deferred | 10 |
 | **total** | **571** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-537 — live-test: seed a deterministic synthetic post corpus into a running deployment's database (complexity: medium, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-537 | live-test: seed a deterministic synthetic post corpus into a running deployment's database | 2026-07-01 | round 1 APPROVE |
 | M1-536 | live-test: workflow reset that clears the control-plane while preserving the fetched data-plane | 2026-07-01 | round 1 APPROVE |
 | M1-535 | Test DBs must be deterministic: disable Testcontainers reuse for test JVMs (fixes partition-horizon drift + container leak) | 2026-07-01 | round 1 APPROVE |
 | M1-533 | 6b SimpleX provisioning: tighten the stdout error-marker so operator-controlled output can't false-trigger a failure | 2026-07-01 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-534 | Setup-wizard dry-walkthrough review corrections (flaws.md F1/F4/F7/F8/F9/F10/F14/F16/F17/F19) | 2026-06-30 | — |
 | M1-529 | Remote LLM backend mis-configures embeddings (model left at nomic against a remote endpoint) | 2026-06-30 | round 1 APPROVE |
 | M1-528 | Implement -w window: /audit + forensic /quarantine list --all | 2026-06-30 | round 2 APPROVE |
-| M1-527 | Command-catalogue parity test: code CommandHandler set ↔ marked index in commands.md | 2026-06-30 | round 1 APPROVE |
 
 ---
 
@@ -741,5 +741,5 @@ M1-533 (done)
 M1-534 (done)
 M1-535 (done)
 M1-536 (done)
-  └── M1-537 (pending) ← runnable
+  └── M1-537 (done)
 ```

@@ -135,9 +135,11 @@ build:
   real DM would.
 - **Data.** The harness does no seeding (inserting posts needs owner privilege,
   which is test-only by design). For content commands to return rows, run the
-  collector against a live feed first, or load the M1-413 seed fixture
-  (`seed-ready-posts.sql`) into your dev database out of band — the same data
-  problem noted above and under Phase 1.
+  collector against a live feed first, or load the deterministic synthetic
+  corpus with `prod/live-seed.sh` (M1-537) — a first-class, idempotent,
+  owner-role loader that seeds an M1-413-shaped READY corpus into the running
+  deployment DB with window-relative timestamps. See §Synthetic corpus seed
+  below.
 
 ### Live-iteration reset (M1-536)
 
@@ -173,6 +175,39 @@ prod/live-reset.sh
   clears `audit_log`, which is **append-only in production** (Invariant 10 / D34).
   Wiping it is acceptable ONLY for a disposable live-test deployment where a clean
   audit slate per iteration is wanted; never run this against a real deployment.
+
+### Synthetic corpus seed (M1-537)
+
+A freshly-set-up (or freshly-reset) deployment has **no posts**, so the content
+commands (`/summary`, `/follow-tag`, `/save`→`/saved`, digests) return empty.
+`prod/live-seed.sh` loads a deterministic, already-evaluated corpus directly at
+the READY terminal state — the synthetic "future" half of the data strategy,
+composing with the M1-536 reset above (which preserves any once-fetched real
+corpus in place). Run it after a reset (or against a fresh DB):
+
+```
+prod/live-seed.sh                      # posts within the last hour (24h window)
+prod/live-seed.sh --offset-minutes 1500  # posts ~25h old → OUTSIDE a 24h window
+```
+
+- **What it seeds.** One active RSS source, a three-tag controlled vocabulary,
+  and 3 `READY` posts with deterministic `m1-537-…` uids (one with an embedding,
+  two with NULL embeddings to exercise the embedding-optional retrieval path),
+  plus a `RAW` and a `QUARANTINED` control post that retrieval must exclude. Row
+  shapes mirror the M1-413 fixture (`seed-ready-posts.sql`).
+- **Timestamps, not a mock clock.** The prod `Clock` is hardcoded
+  `Clock.systemUTC()`; time-window behaviour is controlled by the DATA.
+  `--offset-minutes N` (default 30) sets the seeded posts' `published_at`/`ready_at`
+  to `now() - N` minutes, so you place rows inside or outside a given `/summary`
+  window without touching the app clock.
+- **Idempotent + self-verifying.** Flat rows upsert on their natural keys and the
+  partitioned posts delete-then-insert by uid, so a second run neither duplicates
+  rows nor errors. After load it asserts the 3 READY posts are retrievable for the
+  subscribed `(dm, seed-user)` scope, the 2 non-READY posts are excluded, and 2
+  READY posts have a NULL embedding — exiting non-zero if any check fails.
+- **Owner role.** `post`/`source`/`tag` are collector-owned; the seed runs under
+  the database owner (`infochat`), reached via `docker compose exec postgres` the
+  same way `live-reset.sh` and `backup.sh` do.
 - **After a reset, restart the Provider** to re-seed. Expected post-conditions
   (manual verification for the live loop):
   - `AdminBootstrap` re-creates the configured bootstrap admin (`is_admin=true`).

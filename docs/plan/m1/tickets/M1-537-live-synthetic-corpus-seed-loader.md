@@ -1,9 +1,31 @@
 ---
 id: M1-537
 title: "live-test: seed a deterministic synthetic post corpus into a running deployment's database"
-status: pending
+status: done
 created: 2026-07-01
 last_updated: 2026-07-01
+clarity_check:
+  date: 2026-07-01
+  verdict: WARN
+  warnings:
+    - >-
+      FORWARD-REFERENCE-CHECK: M1-538 referenced in Notes ("propose M1-538") has
+      no ticket file yet — expected, it is a proposed future ticket.
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 379
+      removed: 10
 blocked_by:
   - M1-536
 files_budget: 4
