@@ -1,7 +1,7 @@
 ---
 id: M1-531
 title: "Wizard step 5: directory given as a custom sources/assets path yields a raw cp error"
-status: pending
+status: done
 created: 2026-06-30
 last_updated: 2026-07-01
 blocked_by: []
@@ -43,7 +43,20 @@ test_plan:
 spec_refs:
   - "docs/spec/deployment.md §Operator inputs"
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 9
+      removed: 11
 escalations: []
 revisions:
   - date: 2026-07-01
@@ -64,8 +77,8 @@ aborted_attempts: []
 reopens: []
 redteam_findings: []
 clarity_check:
-  date: ""
-  verdict: ""
+  date: 2026-07-01
+  verdict: PASS
   warnings: []
   blockers: []
 ---

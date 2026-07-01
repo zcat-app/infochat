@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 556 |
+| done | 557 |
 | deferred | 10 |
 | **total** | **569** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-531 — Wizard step 5: directory given as a custom sources/assets path yields a raw cp error (complexity: low, risk: low)
 - M1-532 — Wizard step 5: optionally syntax-check a custom bootstrap JSON so a typo fails early, not at Collector boot (complexity: low, risk: low)
 - M1-533 — 6b SimpleX provisioning: tighten the stdout error-marker so operator-controlled output can't false-trigger a failure (complexity: low, risk: low)
 
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-535 | Test DBs must be deterministic: disable Testcontainers reuse for test JVMs (fixes partition-horizon drift + container leak) | 2026-07-01 | round 1 APPROVE |
+| M1-531 | Wizard step 5: directory given as a custom sources/assets path yields a raw cp error | 2026-07-01 | round 1 APPROVE |
 | M1-530 | Wizard re-run leaves stale credentials on de-selection: bootstrap-admin (6-adapter.sh) + remote LLM api-key (4-llm.sh) | 2026-07-01 | round 1 APPROVE |
 | M1-534 | Setup-wizard dry-walkthrough review corrections (flaws.md F1/F4/F7/F8/F9/F10/F14/F16/F17/F19) | 2026-06-30 | — |
 | M1-529 | Remote LLM backend mis-configures embeddings (model left at nomic against a remote endpoint) | 2026-06-30 | round 1 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-526 | Bot-admin /recover-pool command to recover the auto_joined_group pool | 2026-06-30 | round 1 APPROVE |
 | M1-509 | Guide accuracy-v2 + de-verbosify pass across the four root guides | 2026-06-30 | round 1 APPROVE |
 | M1-525 | Free auto_joined_group slots when the bot leaves a group | 2026-06-29 | round 2 APPROVE |
-| M1-524 | Unify the divergent outbox-IT awaitCursor poll helper into one fixture | 2026-06-29 | round 1 APPROVE |
 
 ---
 
@@ -737,7 +736,7 @@ M1-527 (done)
 M1-528 (done)
 M1-529 (done)
 M1-530 (done)
-M1-531 (pending) ← runnable
+M1-531 (done)
 M1-532 (pending) ← runnable
 M1-533 (pending) ← runnable
 M1-534 (done)

@@ -111,7 +111,7 @@ if [[ -n "$custom_sources_path" ]]; then
   # Fail now on an unreadable path rather than letting the Collector fail-fast at
   # first boot. Overwrite the runtime copy so the single mounted path carries the
   # operator's content (mirrors the custom-assets path below).
-  if [[ ! -r "$custom_sources_path" ]]; then
+  if ! [[ -f "$custom_sources_path" && -r "$custom_sources_path" ]]; then
     echo "FAIL: custom bootstrap-sources.json not readable: $custom_sources_path" >&2
     exit 1
   fi
@@ -177,7 +177,7 @@ else
     # there. Copy it into the runtime location (overwriting the bundled default)
     # so the single mounted path carries the operator's content. Fail now on an
     # unreadable path rather than letting the Collector fail-fast at first boot.
-    if [[ ! -r "$custom_assets_path" ]]; then
+    if ! [[ -f "$custom_assets_path" && -r "$custom_assets_path" ]]; then
       echo "FAIL: custom bootstrap-assets.json not readable: $custom_assets_path" >&2
       exit 1
     fi
