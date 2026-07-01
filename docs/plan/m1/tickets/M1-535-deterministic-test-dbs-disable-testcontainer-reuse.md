@@ -1,15 +1,16 @@
 ---
 id: M1-535
 title: "Test DBs must be deterministic: disable Testcontainers reuse for test JVMs (fixes partition-horizon drift + container leak)"
-status: pending
+status: done
 created: 2026-07-01
 last_updated: 2026-07-01
 blocked_by: []
-files_budget: 3
+files_budget: 4
 files_scope:
   - pom.xml
   - scripts/verify-serialized.sh
   - infochat-collector/src/test/java/app/zcat/infochat/collector/partition/CurrentMonthPartitionBootIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/startup/HeartbeatSchedulerIT.java
 complexity: medium
 risk: medium
 round_cap: 2
@@ -31,15 +32,28 @@ acceptance:
     to both plugins. `grep -nE 'reuse' pom.xml` shows the disable in both the
     surefire and failsafe configurations.
   - >-
-    Under the disabled-reuse config a full `mvn clean verify` boots fresh Dev
-    Services containers (Ryuk reaper active) and the five integration tests that
-    failed on 2026-07-01 due to reused/drifted partition state — StreamSourceStopDrainIT,
-    Kind6HandlerIT, Kind6LinkingIT, Kind6RepostResolutionIT, NostrSinceCursorIT —
-    all pass.
+    HeartbeatSchedulerIT no longer resumes the globally-halted scheduler. The
+    true cause of the 2026-07-01 failures (proven by a 2-test repro:
+    HeartbeatSchedulerIT + Kind6HandlerIT): its `scheduler.resume()` un-halted the
+    shared Quarkus test app's scheduler and never restored it, so
+    PartitionPruner.onTick fired with the real clock and dropped the retention-
+    boundary month partition (post_202605 once "today" >= 2026-07-01), breaking
+    every later IT that seeds a fixed May-2026 fetched_at. The test now drives the
+    handler directly via heartbeatScheduler.tick() (package-visible; mirrors
+    FetchSchedulerIT's manual-tick pattern), so no @Scheduled bean — least of all
+    PartitionPruner — runs against the shared DB. `grep -n 'resume()' ...HeartbeatSchedulerIT.java`
+    returns nothing and the test invokes `heartbeatScheduler.tick()`.
   - >-
-    scripts/verify-serialized.sh, BEFORE it acquires the flock, removes orphaned
-    Quarkus test Dev Services containers (docker label
-    io.quarkus.devservice.launch-mode=TEST) left by hard-killed/OOM'd prior runs,
+    A full `mvn clean verify` (fresh Dev Services containers, Ryuk reaper active)
+    passes the five integration tests that failed on 2026-07-01 —
+    StreamSourceStopDrainIT, Kind6HandlerIT, Kind6LinkingIT,
+    Kind6RepostResolutionIT, NostrSinceCursorIT — with no partition-not-found
+    errors.
+  - >-
+    scripts/verify-serialized.sh, while HOLDING the flock (immediately after
+    acquiring it — reaping before the lock would race a concurrent verify and kill
+    its live DB), removes orphaned Quarkus test Dev Services containers (docker
+    label io.quarkus.devservice.launch-mode=TEST) left by hard-killed/OOM'd runs,
     so container accumulation can no longer re-trigger host OOM. The reap targets
     ONLY that label (never the operator's infochat-* compose stack), is a no-op
     when docker is absent or nothing matches, and never fails the verify (its exit
@@ -62,11 +76,25 @@ test_plan:
   preserves:
     - "The five previously-failing collector stream/Nostr ITs and all other collector tests currently green on a fresh DB."
     - "All wizard/adapter/provider tests green on main."
-  modifies: []
+  modifies:
+    - "infochat-collector/src/test/java/app/zcat/infochat/collector/startup/HeartbeatSchedulerIT.java — stop resuming the shared halted scheduler; drive heartbeatScheduler.tick() directly so PartitionPruner cannot fire and drop partitions sibling ITs depend on. Still asserts last_seen_at advances."
 spec_refs:
   - "docs/spec/verification.md §CI shape"
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 217
+      removed: 60
 escalations: []
 revisions:
   - date: 2026-07-01
@@ -77,13 +105,23 @@ revisions:
       acceptance[0] (pre-refine, removed — duplicated ## Context): the
       "ROOT CAUSE (recorded for the reviewer)" paragraph on reused-DB partition
       drift ("no partition of relation post found for row"; fresh DB passes).
+  - date: 2026-07-01
+    reason: "in-implementation correctness fix (not scope): acceptance item for the verify-serialized.sh reaper said 'BEFORE it acquires the flock', which would race a concurrent lock-holding verify and kill its live Dev Services DB. Corrected to 'while HOLDING the flock (immediately after acquiring it)' — the only safe placement, since holding the lock guarantees no concurrent verify from this clone. Behavior/scope unchanged; wording aligned to the safe implementation."
+    prior_values: |
+      acceptance reaper-item placement (pre-fix): "BEFORE it acquires the flock"
+  - date: 2026-07-01
+    reason: "USER-AUTHORIZED SCOPE FOLD (deep-investigation finding). The reuse-disable + reaper fix the container leak/OOM but do NOT fix the 2026-07-01 test failures — those persist on fresh DBs. Root cause proven by a 2-test repro (HeartbeatSchedulerIT + Kind6HandlerIT): HeartbeatSchedulerIT calls scheduler.resume() on the globally-halted shared test scheduler and never restores it, so PartitionPruner.onTick fires with the real clock and drops the retention-boundary May-2026 partition, breaking sibling ITs that seed fixed May dates. User chose to fold the real fix into M1-535. Added HeartbeatSchedulerIT.java to files_scope (drive tick() directly instead of resuming the shared scheduler), files_budget 3->4, added an acceptance item for the scheduler-leak fix, corrected acceptance item 2 (the 5 tests pass because of the scheduler fix, not reuse-disable), and corrected the ## Context to record the true root cause. The reuse-disable + reaper remain in scope (they fix the separate OOM/leak the user hit)."
+    prior_values: |
+      files_budget (pre-fold): 3
+      files_scope (pre-fold): pom.xml, scripts/verify-serialized.sh, CurrentMonthPartitionBootIT.java
+      acceptance (pre-fold) attributed the 5 tests passing to the disabled-reuse config (incorrect); no HeartbeatSchedulerIT item.
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
 clarity_check:
-  date: ""
-  verdict: ""
+  date: 2026-07-01
+  verdict: PASS
   warnings: []
   blockers: []
 ---
@@ -100,17 +138,34 @@ Kind6RepostResolutionIT, NostrSinceCursorIT). They were green on 2026-06-30.
 Investigation (see the M1-529 session): the `post` table is RANGE-partitioned by
 `fetched_at` with **no DEFAULT partition** (V7 Invariant 6). Flyway seeds May
 (V7) + June/July 2026 (V30). Production rolls partitions via `PartitionCreator`
-(`@Observes StartupEvent` + `@Scheduled`, current+next month) — it is fine. The
-failure is **test-only and not a missing migration**:
+(`@Observes StartupEvent` + `@Scheduled`, current+next month) and prunes aged
+ones via `PartitionPruner` (`@Scheduled`, 30-day retention) — production is fine.
+The failure is **test-only and not a missing migration**. Two distinct defects
+surfaced, both fixed here:
 
-- The host `~/.testcontainers.properties` has `reuse.enable=true`.
-- All collector `@QuarkusTest` classes share ONE Dev Services Postgres. With
-  reuse on, that container is **reused across runs and days** and its partition
-  set drifts from the migration baseline (also why ~86 containers leaked and
-  OOM-killed earlier — reuse suppresses the Ryuk reaper).
-- On a **fresh, migration-only DB** every affected test passes — verified twice
-  on 2026-07-01 (`Kind6HandlerIT` alone, and all five together, with
-  `-Dtestcontainers.reuse.enable=false`).
+- **Real cause of the 5 failures — a scheduler-state leak (proven).**
+  `%test.quarkus.scheduler.start-mode=halted` keeps `@Scheduled` beans quiet so
+  they don't mutate the DB shared across the collector's `@QuarkusTest` classes.
+  `HeartbeatSchedulerIT` breaks that: it calls `scheduler.resume()` (to watch the
+  heartbeat tick fire) and **never restores the halted state**. The now-running
+  `PartitionPruner.onTick` fires with the real clock; once "today" >= 2026-07-01
+  the 30-day cutoff (June 1) makes the May-2026 partition aged and it is
+  **dropped** (`Dropped aged partition post_202605`). Every later IT seeding a
+  fixed May-2026 `fetched_at` (Kind6*, StreamSourceStopDrain, NostrSinceCursor
+  stale) then hits "no partition found". Reproduced deterministically with just
+  `HeartbeatSchedulerIT + Kind6HandlerIT`; before 2026-07-01 May is still within
+  retention so nothing drops. Fix: drive `heartbeatScheduler.tick()` directly (it
+  is package-visible; mirrors `FetchSchedulerIT`), never resuming the shared
+  scheduler — so no `@Scheduled` bean runs against the shared DB.
+
+- **Separate defect — container reuse leak/OOM.** The host
+  `~/.testcontainers.properties` has `reuse.enable=true`, so Quarkus Dev Services
+  containers persist across runs and Ryuk is suppressed; ~86 leaked containers
+  accumulated and OOM-killed the build. Forcing reuse off (parent pom) makes every
+  run use a fresh, migration-defined DB and re-enables Ryuk; the
+  verify-serialized reaper sweeps any pre-existing debris. This does NOT by itself
+  fix the 5 failures (they still fail on a fresh DB via the scheduler leak above)
+  — it fixes the OOM/leak, which is why both changes are in this ticket.
 
 Prior monthly-style fixes (M1-121 June+July migration, M1-479 pinning core seeds
 to `2026-07-15`) treated symptoms; M1-479's own pin re-breaks after 2026-08-01.

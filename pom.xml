@@ -232,6 +232,42 @@
                     -->
                     <configuration>
                         <failIfNoTests>true</failIfNoTests>
+                        <!--
+                             Deterministic test DBs (M1-535). Force Testcontainers
+                             container reuse OFF for every test JVM, overriding any
+                             host ~/.testcontainers.properties reuse.enable=true.
+                             WHY: reused Quarkus Dev Services Postgres containers
+                             persist across runs and drift from the Flyway baseline
+                             (aged/dropped partitions), turning the suite red at date
+                             boundaries with no code change ("no partition of relation
+                             post found for row"); reuse also suppresses the Ryuk
+                             reaper, so hard-killed runs leak containers until the host
+                             OOMs. Fresh containers per run keep the DB migration-
+                             defined and Ryuk-reaped. Applied to surefire (@QuarkusTest
+                             unit) here and to failsafe (*IT) via the twin entry below;
+                             both merge into each module's own plugin config.
+                        -->
+                        <systemPropertyVariables>
+                            <testcontainers.reuse.enable>false</testcontainers.reuse.enable>
+                        </systemPropertyVariables>
+                    </configuration>
+                </plugin>
+                <!--
+                     maven-failsafe-plugin managed here (M1-535) solely to carry the
+                     same testcontainers.reuse.enable=false into the *IT JVMs — the
+                     integration tests that boot Dev Services. Each module still
+                     declares its own failsafe execution/config; Maven merges this
+                     systemPropertyVariables entry with the module's. Version matches
+                     the module pins (3.5.4).
+                -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-failsafe-plugin</artifactId>
+                    <version>3.5.4</version>
+                    <configuration>
+                        <systemPropertyVariables>
+                            <testcontainers.reuse.enable>false</testcontainers.reuse.enable>
+                        </systemPropertyVariables>
                     </configuration>
                 </plugin>
             </plugins>

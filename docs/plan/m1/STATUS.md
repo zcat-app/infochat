@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 553 |
+| done | 554 |
 | deferred | 10 |
 | **total** | **569** |
 
@@ -29,7 +29,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-531 — Wizard step 5: directory given as a custom sources/assets path yields a raw cp error (complexity: low, risk: low)
 - M1-532 — Wizard step 5: optionally syntax-check a custom bootstrap JSON so a typo fails early, not at Collector boot (complexity: low, risk: low)
 - M1-533 — 6b SimpleX provisioning: tighten the stdout error-marker so operator-controlled output can't false-trigger a failure (complexity: low, risk: low)
-- M1-535 — Test DBs must be deterministic: disable Testcontainers reuse for test JVMs (fixes partition-horizon drift + container leak) (complexity: medium, risk: medium)
 
 ---
 
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-535 | Test DBs must be deterministic: disable Testcontainers reuse for test JVMs (fixes partition-horizon drift + container leak) | 2026-07-01 | round 1 APPROVE |
 | M1-534 | Setup-wizard dry-walkthrough review corrections (flaws.md F1/F4/F7/F8/F9/F10/F14/F16/F17/F19) | 2026-06-30 | — |
 | M1-528 | Implement -w window: /audit + forensic /quarantine list --all | 2026-06-30 | round 2 APPROVE |
 | M1-527 | Command-catalogue parity test: code CommandHandler set ↔ marked index in commands.md | 2026-06-30 | round 1 APPROVE |
@@ -74,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-524 | Unify the divergent outbox-IT awaitCursor poll helper into one fixture | 2026-06-29 | round 1 APPROVE |
 | M1-523 | Rename DB-boot GroupJoinRepositoryTest to *IT (M1-519 naming-guard trunk-red fix) | 2026-06-29 | round 1 APPROVE |
 | M1-521 | Widen SafeLog.stripControls to the full bidi-control set (close log-line spoof gap) | 2026-06-29 | round 1 APPROVE |
-| M1-520 | Remove test-only no-arg AssetCommandFamilyOracle ctor | 2026-06-29 | round 1 APPROVE |
 
 ---
 
@@ -744,5 +743,5 @@ M1-531 (pending) ← runnable
 M1-532 (pending) ← runnable
 M1-533 (pending) ← runnable
 M1-534 (done)
-M1-535 (pending) ← runnable
+M1-535 (done)
 ```

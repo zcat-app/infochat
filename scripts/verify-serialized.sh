@@ -33,4 +33,22 @@ if ! flock --nonblock 9; then
     flock 9
 fi
 
+# Deterministic-DB hygiene (M1-535). We now HOLD the lock, so no other verify from
+# this clone is running — every Quarkus TEST Dev Services container present is
+# debris from a hard-killed / OOM'd prior run (reuse is forced off in the parent
+# pom, so live runs create and Ryuk-reap their own containers; nothing here is in
+# use). Reaping BEFORE the lock would race a lock-holding verify and kill its live
+# DB, so this must stay inside the lock. Remove the debris so a stale pile cannot
+# re-trigger the host OOM that motivated M1-535. Scoped strictly to the Quarkus
+# TEST label — never the operator's infochat-* compose stack. Best-effort: guarded
+# so set -e never turns a docker hiccup (or docker being absent) into a verify
+# failure; the verify's exit status stays mvn's.
+if command -v docker >/dev/null 2>&1; then
+    orphans="$(docker ps -aq --filter 'label=io.quarkus.devservice.launch-mode=TEST' 2>/dev/null || true)"
+    if [ -n "$orphans" ]; then
+        echo "verify-serialized: reaping orphaned Quarkus test DB container(s) from dead runs" >&2
+        docker rm -f $orphans >/dev/null 2>&1 || true
+    fi
+fi
+
 "$repo_root/mvnw" -B clean verify "$@"
