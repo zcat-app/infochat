@@ -183,14 +183,54 @@ class LlamacppWiringTest {
                 "the wizard's model volume must equal the project-independent real name compose pins");
     }
 
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void switchingAwayFromRemoteToLlamacppClearsStaleRemoteApiKeys(@TempDir Path tmp) throws Exception {
+        // Seed the runtime as a prior `remote` run left it: six generative api-key
+        // lines + an embeddings api-key in application.properties, and the
+        // INFOCHAT_LLM_API_KEY secret in secrets.env. Switching to a LOCAL backend
+        // (llamacpp) must clear all of them (M1-530) — a local backend carries no key.
+        Path runtime = Files.createDirectories(tmp.resolve("runtime"));
+        StringBuilder seed = new StringBuilder("quarkus.profile=vps\n");
+        for (String task : new String[] {"security", "tagger", "entity", "summarizer", "chat", "translator"}) {
+            seed.append("infochat.llm.").append(task).append(".api-key=${INFOCHAT_LLM_API_KEY}\n");
+        }
+        seed.append("infochat.embeddings.api-key=${INFOCHAT_LLM_API_KEY}\n");
+        Files.writeString(runtime.resolve("application.properties"), seed.toString());
+        Files.writeString(runtime.resolve("secrets.env"), "INFOCHAT_LLM_API_KEY=\"sk-prior-remote-key\"\n");
+
+        // backend=llamacpp, generative=pinned (Enter), embeddings=llamacpp (Enter),
+        // embeddings GGUF=pinned (Enter).
+        Map<String, String> props = runWizard(tmp, "llamacpp\n\n\n\n");
+
+        for (String key : props.keySet()) {
+            assertFalse(key.matches("infochat\\.llm\\..*\\.api-key"),
+                    "no generative api-key line may survive the switch to a local backend: " + key);
+        }
+        assertFalse(props.containsKey("infochat.embeddings.api-key"),
+                "the embeddings api-key must be cleared switching to a local backend");
+        // Sanity: the switch still produced a working local config.
+        assertEquals(GEN_GGUF, props.get("infochat.llm.chat.model"),
+                "the generative GGUF must still drive every LLM task after the switch");
+
+        String secrets = Files.readString(runtime.resolve("secrets.env"));
+        assertFalse(secrets.contains("INFOCHAT_LLM_API_KEY"),
+                "the stale remote API key secret must be removed from secrets.env:\n" + secrets);
+    }
+
     // --- helpers ----------------------------------------------------------------
 
     /** Run prod/scripts/4-llm.sh with a fake docker on PATH; return generated props. */
     private Map<String, String> runWizard(Path tmp, String stdin) throws Exception {
         Path repoRoot = repoRoot();
         Path runtime = Files.createDirectories(tmp.resolve("runtime"));
-        // Seed the profile 1-profile.sh would have written (vps has a nomic embedder).
-        Files.writeString(runtime.resolve("application.properties"), "quarkus.profile=vps\n");
+        // Seed the profile 1-profile.sh would have written (vps has a nomic embedder),
+        // but honor a config a test pre-staged (e.g. a prior `remote` run's api-keys,
+        // M1-530) — only write the bare profile when nothing is already seeded.
+        Path propsFile = runtime.resolve("application.properties");
+        if (!Files.exists(propsFile)) {
+            Files.writeString(propsFile, "quarkus.profile=vps\n");
+        }
 
         Path bin = Files.createDirectories(tmp.resolve("bin"));
         Path fakeDocker = bin.resolve("docker");

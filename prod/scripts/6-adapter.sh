@@ -212,6 +212,19 @@ if [[ "${#chosen[@]}" -eq 0 ]]; then
   exit 1
 fi
 
+# ── Reconcile stale bootstrap-admin secrets on de-selection (M1-530) ────
+# collect_admin only ever APPENDS an admin credential; nothing else deletes one.
+# So a prior run that enabled an adapter leaves its admin secret in secrets.env
+# after a later run drops that adapter — inert while de-selected, but a secret
+# lingering at rest, and collect_admin's skip-if-set would silently REUSE the
+# stale token if the adapter were re-enabled. Mirror the data-dir reconcile below:
+# delete the admin secret of any adapter NOT in the chosen set. The delete is
+# SELECTIVE (non-chosen only) — a chosen adapter's existing admin is left
+# untouched so collect_admin's skip-if-set idempotency still holds and its already
+# -set admin is never re-prompted. secrets.env exists (touch-created above).
+case " ${chosen[*]} " in *" simplex "*) ;; *) sed -i '/^INFOCHAT_SIMPLEX_ADMIN_TOKEN=/d' "$SECRETS_FILE" ;; esac
+case " ${chosen[*]} " in *" signal "*) ;; *) sed -i '/^INFOCHAT_SIGNAL_ADMIN_CONTACT_ID=/d' "$SECRETS_FILE" ;; esac
+
 # ── Per-adapter registration + capture ─────────────────────────────────
 # admin_union tallies how many chosen adapters supply a bootstrap admin; the gate
 # below refuses to proceed when it is zero. The binary / data-dir / port / account

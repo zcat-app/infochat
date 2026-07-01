@@ -1,7 +1,7 @@
 ---
 id: M1-530
 title: "Wizard re-run leaves stale credentials on de-selection: bootstrap-admin (6-adapter.sh) + remote LLM api-key (4-llm.sh)"
-status: pending
+status: done
 created: 2026-06-30
 last_updated: 2026-07-01
 blocked_by: []
@@ -79,17 +79,46 @@ spec_refs:
   - "docs/spec/security.md §Per-adapter admin threat profile"
   - "docs/spec/deployment.md §Operator inputs"
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 116
+      removed: 12
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-07-01
+    verdict: CLEAN
+    base: 6cfc541c5304e3b5539d978649ba810d8fb42d75
+    head: working-tree (uncommitted branch tip m1/M1-530-adapter-admin-secret-reconcile)
+    verdict_file: docs/plan/m1/redteam/M1-530-2026-07-01.md
+    out_of_model_count: 2
+    note: |
+      Pre-commit audit (security_relevant). No in-model findings. Two out-of-model
+      observations: (1) the whole diff is operator-tier trusted wizard tooling
+      outside the threat model's adversary reach; (2) a still-selected SimpleX
+      admin token is deliberately preserved by collect_admin skip-if-set (M1-530
+      out_of_scope) and could re-arm admin after /revoke-admin — already tracked as
+      accepted future work in security.md §Per-adapter admin threat profile, so no
+      new ticket filed.
 clarity_check:
-  date: ""
-  verdict: ""
-  warnings: []
+  date: 2026-07-01
+  verdict: WARN
+  warnings:
+    - "COMPLEXITY-RISK-CALIBRATED: risk: low under-calibrated — ticket deletes bootstrap-admin secrets (INFOCHAT_SIMPLEX_ADMIN_TOKEN, INFOCHAT_SIGNAL_ADMIN_CONTACT_ID) and LLM API keys (INFOCHAT_LLM_API_KEY) from secrets.env; consider risk: medium."
   blockers: []
 ---
 

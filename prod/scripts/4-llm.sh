@@ -132,6 +132,21 @@ set_secret() {
   printf '%s="%s"\n' "$key" "$(dotenv_escape "$value")" >> "$SECRETS_FILE"
 }
 
+# Remove the remote-backend credentials a prior `remote` run wrote, for a re-run
+# that switches AWAY to a local backend (M1-530): the six
+# infochat.llm.<task>.api-key lines + any infochat.embeddings.api-key from
+# application.properties (a local backend carries no key), and INFOCHAT_LLM_API_KEY
+# from secrets.env (referenced by nothing once remote is de-selected). Mirrors the
+# adapter-admin de-selection reconcile in 6-adapter.sh and the embeddings-api-key
+# clear M1-529 added inside the remote branch. Idempotent — a no-op on a fresh run
+# with no prior remote credentials. Both callers (ollama/llamacpp) reach this only
+# after secrets.env is guaranteed to exist (the ollama-branch guard / the llamacpp
+# set_secret); the remote branch legitimately writes these keys and must NOT call it.
+clear_remote_llm_creds() {
+  sed -i -e '/^infochat\.llm\..*\.api-key=/d' -e '/^infochat\.embeddings\.api-key=/d' "$CONFIG_FILE"
+  sed -i '/^INFOCHAT_LLM_API_KEY=/d' "$SECRETS_FILE"
+}
+
 # Point only the six LLM tasks (not embeddings) at one endpoint. The llamacpp
 # branch wires embeddings to a SEPARATE backend (a second llama.cpp instance or
 # Ollama), so unlike set_all_base_urls it leaves infochat.embeddings.base-url for
@@ -263,6 +278,9 @@ case "$backend" in
       echo "+ ollama pull $model"
       docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile ollama exec -T ollama ollama pull "$model"
     done
+    # Switch-away-from-remote reconcile (M1-530): drop any remote api-key config a
+    # prior `remote` run left — a local ollama backend carries no key.
+    clear_remote_llm_creds
     set_all_base_urls "$OLLAMA_URL"
     set_prop infochat.llm.security.model "$security_model"
     for task in tagger entity summarizer chat translator; do
@@ -379,6 +397,9 @@ case "$backend" in
     # --- Config. Generative GGUF on every LLM task; embeddings on its own
     # backend, NEVER the generative GGUF (acceptance 6). dimension pinned 768 so
     # the generated config is self-describing and matches allow-model-change=false. ---
+    # Switch-away-from-remote reconcile (M1-530): drop any remote api-key config a
+    # prior `remote` run left — a local llamacpp backend carries no key.
+    clear_remote_llm_creds
     set_llm_base_urls "$LLAMACPP_URL"
     for task in $LLM_TASKS; do
       set_prop "infochat.llm.${task}.model" "$gen_file"

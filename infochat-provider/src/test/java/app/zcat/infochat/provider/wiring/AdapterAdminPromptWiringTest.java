@@ -88,6 +88,37 @@ class AdapterAdminPromptWiringTest {
                 "the multi-adapter all-blank case must hit the union FAIL gate:\n" + r.output);
     }
 
+    // (d) de-selection cleanup: a re-run that drops an adapter removes its stale
+    //     bootstrap-admin secret, while the still-chosen adapter's secret is left
+    //     untouched (M1-530). Seed BOTH admin secrets as a prior two-adapter run
+    //     left them, then re-run choosing only signal.
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void deselectingAnAdapterRemovesItsStaleAdminSecretButPreservesTheChosenOne(@TempDir Path tmp)
+            throws Exception {
+        Path runtime = Files.createDirectories(tmp.resolve("runtime"));
+        Files.writeString(runtime.resolve("secrets.env"),
+                "INFOCHAT_SIMPLEX_ADMIN_TOKEN=\"seed-simplex-token\"\n"
+                        + "INFOCHAT_SIGNAL_ADMIN_CONTACT_ID=\"+15559999999\"\n",
+                StandardCharsets.UTF_8);
+
+        // Choose only signal: binary/data-dir defaults (blank), account required.
+        // The signal admin is already seeded, so collect_admin skips it (no admin
+        // stdin line) — which also exercises the skip-if-set preservation path.
+        RunResult r = runAdapter(tmp, "signal\n\n\n+15551234567\n");
+
+        assertEquals(0, r.exitCode,
+                "a re-run choosing only signal (its admin already set) must exit 0:\n" + r.output);
+
+        String secrets = Files.readString(runtime.resolve("secrets.env"), StandardCharsets.UTF_8);
+        assertTrue(secrets.contains("INFOCHAT_SIGNAL_ADMIN_CONTACT_ID="),
+                "the still-chosen signal adapter's admin secret must be preserved:\n" + secrets);
+        assertFalse(secrets.contains("INFOCHAT_SIMPLEX_ADMIN_TOKEN"),
+                "the de-selected simplex adapter's stale admin secret must be removed:\n" + secrets);
+        assertTrue(r.output.contains("skip INFOCHAT_SIGNAL_ADMIN_CONTACT_ID (already set)"),
+                "the chosen adapter's already-set admin must not be re-prompted:\n" + r.output);
+    }
+
     // --- helpers ----------------------------------------------------------------
 
     private record RunResult(int exitCode, String output) {}
