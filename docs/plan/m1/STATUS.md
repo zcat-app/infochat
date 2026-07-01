@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 560 |
 | deferred | 10 |
-| **total** | **570** |
+| **total** | **571** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-537 — live-test: seed a deterministic synthetic post corpus into a running deployment's database (complexity: medium, risk: low)
 
 ---
 
@@ -741,5 +741,5 @@ M1-533 (done)
 M1-534 (done)
 M1-535 (done)
 M1-536 (done)
-  └── M1-537 (draft)
+  └── M1-537 (pending) ← runnable
 ```

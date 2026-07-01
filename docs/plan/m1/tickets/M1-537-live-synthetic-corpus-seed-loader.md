@@ -1,7 +1,7 @@
 ---
 id: M1-537
 title: "live-test: seed a deterministic synthetic post corpus into a running deployment's database"
-status: draft
+status: pending
 created: 2026-07-01
 last_updated: 2026-07-01
 blocked_by:
