@@ -6,6 +6,9 @@ created: 2026-06-27
 last_updated: 2026-06-29
 blocked_by: []
 deferred_reason: decomposed
+decomposed_into:
+  - M1-516
+  - M1-517
 files_budget: 5
 complexity: low
 risk: low

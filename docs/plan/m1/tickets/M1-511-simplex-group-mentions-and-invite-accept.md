@@ -3,6 +3,9 @@ id: M1-511
 title: "SimpleX groups: v6.5.4.1 mention recognition + auto-accept group invitations"
 status: deferred
 deferred_reason: decomposed
+decomposed_into:
+  - M1-514
+  - M1-515
 created: 2026-06-28
 last_updated: 2026-06-29
 blocked_by:
