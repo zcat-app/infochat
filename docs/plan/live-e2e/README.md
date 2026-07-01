@@ -149,12 +149,20 @@ unit-tested). Cover, all on `laptop`:
 - [x] Capability flags captured (see §6 table) — SimpleX vs Signal differ on
       membership-events, typing, code-formatting, and edit-failure fallback.
 
-### Phase 3 — Reset & data harness
-- [ ] Author `reset-control-plane.sql` (preserve data-plane; handle audit_log +
-      FK order; run under admin role).
-- [ ] One-time real fetch → snapshot the "now" data-plane corpus.
-- [ ] Synthetic corpus fixtures: RAW-stage (pipeline/malicious) + READY-stage
-      (deterministic summary/embedding), with seeded timestamps.
+### Phase 3 — Reset & data harness — TICKETS DRAFTED (2026-07-01)
+Reconciled against `docs/testing/USER_TEST_PLAN.md` (7 delivered deliverables):
+the READY corpus (M1-413 `seed-ready-posts.sql`), dev harness (M1-414), golden
+path (M1-415), ingest smoke (M1-416), observability + adversarial-input kit
+already exist. `setup.sh --reset` is a FULL teardown; a preserve-data reset does
+not exist — that's the real gap. With in-place reset (option A) the fetched "now"
+corpus persists in the live DB, so no snapshot file is needed.
+- [ ] **M1-536** (draft): live workflow reset — clears control-plane, preserves
+      data-plane, FK-safe (no `TRUNCATE users CASCADE`), owner role, idempotent.
+- [ ] **M1-537** (draft, blocked_by M1-536): live synthetic-corpus seed loader —
+      idempotent, timestamp-parameterized, reuses M1-413 row shapes.
+- [ ] (follow-up) **M1-538** (not drafted): RAW-stage adversarial injection so
+      the real Stage-1/2 + real LLM quarantines hostile posts, fed from
+      `docs/testing/adversarial-input-kit.md`. Depends on the live eval pipeline.
 
 ### Phase 4 — SimpleX live-smoke driver (full workflow)
 - [ ] Provision 3 simplex-chat identities: **bot** + **admin client** + **user
