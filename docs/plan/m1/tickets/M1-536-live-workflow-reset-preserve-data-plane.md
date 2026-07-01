@@ -1,9 +1,49 @@
 ---
 id: M1-536
 title: "live-test: workflow reset that clears the control-plane while preserving the fetched data-plane"
-status: pending
+status: done
 created: 2026-07-01
 last_updated: 2026-07-01
+clarity_check:
+  date: 2026-07-01
+  verdict: WARN
+  warnings:
+    - >-
+      SECURITY-FLAG-CONSISTENT: the reset clears audit_log, which is append-only
+      (schema.md invariant 10, D34); security_relevant: false was inconsistent
+      with that. Resolved by setting security_relevant: true (see below).
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 287
+      removed: 8
+redteam_findings: []
+redteam_audits:
+  - date: 2026-07-01
+    verdict: CLEAN
+    base: main
+    head: m1/M1-536-live-workflow-reset-preserve-data-plane
+    verdict_file: docs/plan/m1/redteam/M1-536-2026-07-01.md
+    out_of_model_count: 2
+    note: |
+      In-progress audit of the branch tip before commit. CLEAN, no in-model
+      findings. Two advisory out-of-model items: (1) no runtime interlock
+      distinguishes a disposable live-test deployment from production before the
+      audit_log wipe / all-admin delete — but reaching the script requires the
+      DB owner password + host + docker, all trusted-operator surface the threat
+      model scopes out; (2) TRUNCATE bypasses the append-only audit trigger,
+      inherent to owner privilege and consistent with §DB roles. Neither is
+      adversary-reachable; no follow-up ticket filed.
 blocked_by: []
 files_budget: 4
 files_scope:
@@ -12,7 +52,7 @@ files_scope:
   - docs/testing/USER_TEST_PLAN.md
 complexity: medium
 risk: medium
-security_relevant: false
+security_relevant: true
 migration_touch: false
 out_of_scope:
   - >-
@@ -158,6 +198,12 @@ data-dirs, not LLM containers, not schema/Flyway, not the synthetic seed corpus
 - The reset intentionally clears `audit_log` for a clean test slate; note in
   USER_TEST_PLAN that this is a TEST-loop action and never a production
   procedure (audit_log is append-only in prod, D34).
+- **`security_relevant: true` is deliberate** (clarity WARN 2026-07-01): the
+  script overrides the append-only `audit_log` invariant (D34) and disables the
+  last-admin protection triggers around `DELETE FROM users`. Both are safe only
+  because this is prod-side *test-loop* tooling against a disposable live
+  deployment, never a production path — exactly the surface a `/redteam` pass
+  should confirm before merge.
 
 ## Pre-flight self-check (author-side)
 

@@ -139,6 +139,49 @@ build:
   (`seed-ready-posts.sql`) into your dev database out of band — the same data
   problem noted above and under Phase 1.
 
+### Live-iteration reset (M1-536)
+
+Iterating the live workflow (register → command → chat → group → digest) many
+times needs a **fast reset that does NOT re-fetch feeds**. Re-fetching every run
+is slow, non-deterministic, and impolite to public endpoints, so the loop resets
+only the *control-plane* (user / group / invite / chat / audit / provider state)
+and preserves the *data-plane* (the already-fetched, already-evaluated posts +
+embeddings). Run it between iterations:
+
+```
+prod/live-reset.sh
+```
+
+- **This is NOT `prod/setup.sh --reset`.** That path is the FULL teardown
+  (`docker compose down`, and per M1-395 the LLM services too) — it destroys the
+  containers and every fetched post. `live-reset.sh` leaves all containers and
+  the whole data-plane in place; only the control-plane rows go. Use the full
+  teardown to start over from nothing; use `live-reset.sh` to re-run the app
+  workflow against the same fetched corpus.
+- **What it does.** Runs the FK-safe data-only reset (`prod/sql/reset-control-plane.sql`)
+  under the database owner role — reached via `docker compose exec postgres`, the
+  same way `backup.sh` reaches Postgres. It clears every control-plane table
+  (`users`, `groups`, `group_membership`, `invite_code`, `chat_*`, `audit_log`,
+  `provider_state`, …) while leaving `source`, `tag`, `post` (+ partitions),
+  embeddings, entities, references, and price snapshots untouched. It captures the
+  `post` row count before and after and asserts it is unchanged, asserts every
+  control-plane table is empty, and exits non-zero if either check fails. It is
+  idempotent — running it twice leaves identical state.
+- **Adapter identities are never touched.** The SimpleX queue keypair and the
+  signal-cli account dir survive, so the bot keeps its address and contacts.
+- **TEST-loop only — never a production procedure.** The reset deliberately
+  clears `audit_log`, which is **append-only in production** (Invariant 10 / D34).
+  Wiping it is acceptable ONLY for a disposable live-test deployment where a clean
+  audit slate per iteration is wanted; never run this against a real deployment.
+- **After a reset, restart the Provider** to re-seed. Expected post-conditions
+  (manual verification for the live loop):
+  - `AdminBootstrap` re-creates the configured bootstrap admin (`is_admin=true`).
+  - The SimpleX admin-claim token re-arms — its single-use gate is the presence of
+    a `(simplex, is_admin)` row (D50), which the reset removed.
+  - A fresh invite → register cycle works from scratch.
+  - A pre-existing preserved post is returned by `/summary` for a newly-registered,
+    newly-subscribed user — proving the data-plane survived the reset.
+
 ## Code-ticket plan (deliverables 2–5)
 
 These are code/tests, so each was an M1 ticket driven through `/m1-tick`
