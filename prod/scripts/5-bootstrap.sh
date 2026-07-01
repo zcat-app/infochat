@@ -75,6 +75,22 @@ del_prop() {
   fi
 }
 
+# Best-effort JSON-syntax gate for an operator-supplied custom bootstrap file:
+# catch a gross typo (trailing comma, unclosed brace) HERE at step 5 rather than
+# at Collector boot (step 8), giving the custom-file path a faster feedback loop.
+# Syntax only — the Collector's BootstrapLoader still owns schema/tag validation,
+# so this never duplicates it (M1-532 out-of-scope). jq is intentionally NOT a
+# requirement (not in 0-doctor.sh REQUIRED_TOOLS); when it is absent the gate is
+# a silent no-op and the script behaves exactly as before.
+check_json_syntax() {
+  local path="$1"
+  command -v jq >/dev/null 2>&1 || return 0
+  if ! jq . "$path" >/dev/null; then
+    echo "FAIL: not valid JSON: $path" >&2
+    exit 1
+  fi
+}
+
 umask 077
 mkdir -p "$RUNTIME_DIR"
 
@@ -115,6 +131,7 @@ if [[ -n "$custom_sources_path" ]]; then
     echo "FAIL: custom bootstrap-sources.json not readable: $custom_sources_path" >&2
     exit 1
   fi
+  check_json_syntax "$custom_sources_path"
   echo "+ cp $custom_sources_path $SOURCES_RUNTIME"
   cp "$custom_sources_path" "$SOURCES_RUNTIME"
 elif [[ -f "$SOURCES_RUNTIME" ]]; then
@@ -181,6 +198,7 @@ else
       echo "FAIL: custom bootstrap-assets.json not readable: $custom_assets_path" >&2
       exit 1
     fi
+    check_json_syntax "$custom_assets_path"
     echo "+ cp $custom_assets_path $ASSETS_RUNTIME"
     cp "$custom_assets_path" "$ASSETS_RUNTIME"
   fi

@@ -1,7 +1,7 @@
 ---
 id: M1-532
 title: "Wizard step 5: optionally syntax-check a custom bootstrap JSON so a typo fails early, not at Collector boot"
-status: pending
+status: done
 created: 2026-06-30
 last_updated: 2026-07-01
 blocked_by: []
@@ -41,7 +41,20 @@ test_plan:
 spec_refs:
   - "docs/spec/deployment.md §Operator inputs"
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 25
+      removed: 9
 escalations: []
 revisions:
   - date: 2026-07-01
@@ -62,8 +75,8 @@ aborted_attempts: []
 reopens: []
 redteam_findings: []
 clarity_check:
-  date: ""
-  verdict: ""
+  date: 2026-07-01
+  verdict: PASS
   warnings: []
   blockers: []
 ---
