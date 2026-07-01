@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 561 |
 | deferred | 10 |
-| **total** | **571** |
+| **total** | **572** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-538 — live-test: inject an adversarial RAW post so the real eval pipeline quarantines it (complexity: medium, risk: low)
 
 ---
 
@@ -742,5 +742,5 @@ M1-534 (done)
 M1-535 (done)
 M1-536 (done)
   └── M1-537 (done)
-M1-538 (draft)
+M1-538 (pending) ← runnable
 ```

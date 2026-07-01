@@ -1,7 +1,7 @@
 ---
 id: M1-538
 title: "live-test: inject an adversarial RAW post so the real eval pipeline quarantines it"
-status: draft
+status: pending
 created: 2026-07-01
 last_updated: 2026-07-01
 blocked_by: []
