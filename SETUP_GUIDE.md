@@ -268,6 +268,14 @@ custom embeddings model must produce 768-dimensional vectors, so the wizard asks
 you to confirm); if you pick `ollama`, there is no model prompt. Either way,
 embeddings always run separately from the chat model.
 
+If you pick **remote**, the wizard asks for your provider's base URL and API key
+(the key is stored in `secrets.env`, never in plain config). Only the generative
+tasks — chat, summaries, tagging — use the remote provider; **embeddings always
+run locally**. The wizard starts a small Ollama alongside and downloads the nomic
+embedder for you, so your remote provider does **not** need to offer an
+embeddings model, and the post content used to match posts by meaning never
+leaves your machine.
+
 ### Step 5 — Your sources (optional customization)
 
 infochat comes with a starter list of news and social feeds, and the wizard

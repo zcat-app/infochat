@@ -11,8 +11,10 @@
 #              it from the llama.cpp instance at llamacpp:8080 (§7.4); embeddings
 #              run on a SEPARATE backend (a second llama.cpp instance or the
 #              co-running Ollama nomic embedder), never the generative GGUF (D49).
-#   remote   — collect a remote OpenAI-compatible base-url + API key (the key
-#              minted into secrets.env, §7.3); no local model pull.
+#   remote   — route the six generative tasks to a remote OpenAI-compatible
+#              endpoint (base-url + API key minted into secrets.env, §7.3);
+#              embeddings still run LOCALLY — a co-started Ollama nomic embedder
+#              is pulled, never the remote endpoint (D54).
 # Model names follow the active profile recorded by 1-profile.sh, never a
 # hard-coded profile (§5.7 is the canonical table). Re-running is idempotent:
 # `ollama pull` skips an already-present model and each property line is
@@ -393,13 +395,14 @@ case "$backend" in
     fi
     # Privacy disclosure BEFORE the operator commits to a remote endpoint: the
     # operator must see what leaves the machine before typing the URL/key, not
-    # after. At setup the remote backend routes EVERY generative task — chat
-    # included — plus embeddings to one endpoint (set_all_base_urls below), so
-    # every item below applies; switch-llm.sh can later move tasks back to local
-    # one at a time.
+    # after. At setup the remote backend routes the six GENERATIVE tasks — chat
+    # included — to the remote endpoint (set_llm_base_urls below); embeddings run
+    # LOCALLY on a co-started Ollama nomic embedder and never leave the machine
+    # (D54). switch-llm.sh can later move generative tasks back to local one at a
+    # time; embeddings are always local and switch-llm.sh never touches them.
     echo
-    echo "PRIVACY DISCLOSURE — choosing 'remote' sends ALL of the following to the"
-    echo "remote provider (every generative task and embeddings go to one endpoint):"
+    echo "PRIVACY DISCLOSURE — choosing 'remote' sends the following GENERATIVE tasks"
+    echo "to the remote provider (embeddings are NOT sent — see the last line):"
     echo "  !! chat — YOUR PRIVATE MESSAGES to the bot are sent to the remote provider."
     echo "           This is the most sensitive exposure: your direct conversations."
     echo "  -  security / tagger / entity — moderation, tagging and entity extraction"
@@ -407,9 +410,10 @@ case "$backend" in
     echo "     not private user data."
     echo "  -  summarizer — summaries of the posts you query; exposes which topics / posts you read."
     echo "  -  translator — translation of the bot's replies; exposes the bot-reply text (can echo your queries)."
-    echo "  -  embeddings — the PUBLIC post content infochat fetches, sent for vectorization."
-    echo "To keep chat (and any task) local, pick 'ollama'/'llamacpp' now, or route"
-    echo "tasks individually later with ./prod/switch-llm.sh."
+    echo "  -  embeddings — run LOCALLY: a small Ollama nomic embedder is started on"
+    echo "     this machine, so the post content for vectorization NEVER leaves it (D54)."
+    echo "To keep chat (and any generative task) local too, pick 'ollama'/'llamacpp'"
+    echo "now, or route generative tasks individually later with ./prod/switch-llm.sh."
     echo
     read -rp "Remote OpenAI-compatible base-url (e.g. https://nano-gpt.com/api/v1): " base_url
     if [[ -z "$base_url" ]]; then
@@ -439,11 +443,39 @@ case "$backend" in
       printf 'INFOCHAT_LLM_API_KEY="%s"\n' "$(dotenv_escape "$llm_key")" >> "$SECRETS_FILE"
       echo "+ recorded INFOCHAT_LLM_API_KEY in secrets.env"
     fi
-    set_all_base_urls "$base_url"
+    # Embeddings run locally even with a remote chat backend (D54): the embedding
+    # model is frozen 768-dim nomic (allow-model-change=false) and commercial
+    # remote endpoints don't serve nomic-embed-text at 768-dim, so route ONLY the
+    # six generative tasks remote and co-start a local Ollama nomic embedder. This
+    # mirrors the llamacpp branch's ollama-embeddings hook; it MUST run after the
+    # API-key block above, which guarantees secrets.env exists for --env-file.
+    echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod --profile ollama up -d ollama"
+    docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile ollama up -d ollama
+    echo "+ wait for ollama daemon (up to ${WAIT_TIMEOUT}s)"
+    deadline=$(( SECONDS + WAIT_TIMEOUT ))
+    until docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile ollama exec -T ollama ollama list >/dev/null 2>&1; do
+      if (( SECONDS >= deadline )); then
+        echo "FAIL: ollama daemon not ready after ${WAIT_TIMEOUT}s." >&2
+        exit 1
+      fi
+      sleep 2
+    done
+    echo "+ ollama pull $NOMIC_OLLAMA_MODEL"
+    docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile ollama exec -T ollama ollama pull "$NOMIC_OLLAMA_MODEL"
+
+    # Generative tasks → remote endpoint + API key; embeddings → local Ollama nomic.
+    set_llm_base_urls "$base_url"
     for task in $LLM_TASKS; do
       set_prop "infochat.llm.${task}.api-key" '${INFOCHAT_LLM_API_KEY}'
     done
-    set_prop infochat.embeddings.api-key '${INFOCHAT_LLM_API_KEY}'
-    echo "remote backend ready: endpoint $base_url"
+    # Drop any infochat.embeddings.api-key a prior (mis-wired) remote run wrote:
+    # embeddings now hit the local Ollama nomic endpoint and carry no key, so a
+    # lingering ${INFOCHAT_LLM_API_KEY} reference would be stale and contradict the
+    # local-embeddings disclosure above (D54). Idempotent, like set_prop.
+    sed -i '/^infochat\.embeddings\.api-key=/d' "$CONFIG_FILE"
+    set_prop infochat.embeddings.base-url "$OLLAMA_URL"
+    set_prop infochat.embeddings.model "$NOMIC_OLLAMA_MODEL"
+    set_prop infochat.embeddings.dimension "$EMBEDDINGS_DIMENSION"
+    echo "remote backend ready: generative tasks via $base_url; embeddings via local Ollama $OLLAMA_URL"
     ;;
 esac

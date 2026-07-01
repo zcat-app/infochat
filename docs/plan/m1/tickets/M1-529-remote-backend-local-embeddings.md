@@ -1,7 +1,7 @@
 ---
 id: M1-529
 title: "Remote LLM backend mis-configures embeddings (model left at nomic against a remote endpoint)"
-status: pending
+status: done
 created: 2026-06-30
 last_updated: 2026-06-30
 blocked_by: []
@@ -17,6 +17,7 @@ risk: medium
 round_cap: 3
 security_relevant: true
 migration_touch: false
+outline_file: target/m1-tick-outline-M1-529.md
 out_of_scope:
   - "Changing the embedding model/dimension contract itself (nomic-embed-text / 768 / allow-model-change=false). The frozen-embedding invariant and EmbeddingMetadataStartupGuard stay exactly as they are; this ticket changes only WHERE the fixed nomic embedder is hosted for the remote-chat case, never WHICH model embeds."
   - "The ollama and llamacpp branches of 4-llm.sh — they already host embeddings locally (same ollama instance, or the llamacpp-embeddings second instance). Untouched."
@@ -77,7 +78,20 @@ test_plan:
 spec_refs:
   - "docs/spec/llm.md §Embedding pipeline"
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-30
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 225
+      removed: 29
 escalations: []
 revisions:
   - date: 2026-06-30
@@ -90,10 +104,26 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-30
+    verdict: CLEAN
+    base: 5d94d2d12eae507ba2e4a1c940e7f1200915fdfd
+    head: "working-tree (m1/M1-529-remote-backend-local-embeddings, uncommitted)"
+    verdict_file: docs/plan/m1/redteam/M1-529-2026-06-30.md
+    out_of_model_count: 1
+    note: |
+      CLEAN — no findings. One out-of-model item: pre-existing backend-switch
+      secret-retention asymmetry in the ollama/llamacpp branches of 4-llm.sh
+      (a stale infochat.llm.<task>.api-key / INFOCHAT_LLM_API_KEY is not cleared
+      when switching back from remote). Operator-side, on a chmod-600 trusted
+      config file, not introduced by this diff. Sibling of pending M1-530;
+      recommend folding the symmetric 4-llm.sh cleanup into M1-530's scope rather
+      than a standalone ticket. Advisory only.
 clarity_check:
-  date: ""
-  verdict: ""
-  warnings: []
+  date: 2026-06-30
+  verdict: WARN
+  warnings:
+    - "complexity: high is slightly over-claimed; complexity: medium would be more accurate. Does not block."
   blockers: []
 ---
 
