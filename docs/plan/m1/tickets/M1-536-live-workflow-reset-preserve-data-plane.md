@@ -1,7 +1,7 @@
 ---
 id: M1-536
 title: "live-test: workflow reset that clears the control-plane while preserving the fetched data-plane"
-status: draft
+status: pending
 created: 2026-07-01
 last_updated: 2026-07-01
 blocked_by: []

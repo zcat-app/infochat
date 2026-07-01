@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 559 |
 | deferred | 10 |
-| **total** | **569** |
+| **total** | **570** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-536 — live-test: workflow reset that clears the control-plane while preserving the fetched data-plane (complexity: medium, risk: medium)
 
 ---
 
@@ -740,6 +740,6 @@ M1-532 (done)
 M1-533 (done)
 M1-534 (done)
 M1-535 (done)
-M1-536 (draft)
+M1-536 (pending) ← runnable
   └── M1-537 (draft)
 ```
