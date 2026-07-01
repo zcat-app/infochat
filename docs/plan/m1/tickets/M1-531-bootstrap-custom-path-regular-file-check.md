@@ -3,7 +3,7 @@ id: M1-531
 title: "Wizard step 5: directory given as a custom sources/assets path yields a raw cp error"
 status: pending
 created: 2026-06-30
-last_updated: 2026-06-30
+last_updated: 2026-07-01
 blocked_by: []
 files_budget: 1
 files_scope:
@@ -41,11 +41,24 @@ test_plan:
   preserves:
     - all tests currently green on main
 spec_refs:
-  - "docs/spec/deployment.md §Bootstrap sources"
+  - "docs/spec/deployment.md §Operator inputs"
 decision_refs: []
 reviews: []
 escalations: []
-revisions: []
+revisions:
+  - date: 2026-07-01
+    reason: clarity-fail rework — fix unresolvable spec_refs anchor
+    snapshot:
+      status: pending
+      escalation_reason: clarity-fail
+      clarity_check:
+        date: 2026-07-01
+        verdict: FAIL
+        blockers:
+          - "SPEC-REFS-VALID: `docs/spec/deployment.md §Bootstrap sources` does not match any heading in that file. The bootstrap sources content lives under `## Operator inputs` (line 56). Fix by changing the spec_ref to `docs/spec/deployment.md §Operator inputs`."
+        warnings: []
+      spec_refs_at_snapshot:
+        - "docs/spec/deployment.md §Bootstrap sources"
 overrides: []
 aborted_attempts: []
 reopens: []
