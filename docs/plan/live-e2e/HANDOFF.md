@@ -25,14 +25,30 @@ round-trip is DONE: admin DM → bot replied `Access requires an invitation.`
 (claim → invite fall-through routing, message no longer dropped).
 
 **Immediate next live actions:**
-1. LiveAdmin is NOT yet bot admin — the D50 claim token was never presented
-   (round-trip used plain text to avoid consuming the single-use token without
-   an explicit decision). Present it: DM the `INFOCHAT_SIMPLEX_ADMIN_TOKEN`
-   value (prod/runtime/secrets.env) from the admin client → expect the welcome
-   reply + `is_admin=true`.
-2. Then 4b-2: `SimpleXConversationBackend` behind the `ConversationBackend`
-   SPI, host-validated (D-live-9), reusing `SimpleXWebSocketClient` +
-   `SimpleXMessageCodec`.
+1. ~~Present the admin token~~ **DONE (2026-07-02):** LiveAdmin claimed
+   bootstrap admin via the D50 token — DB verified (`is_admin=t`, `vouched`,
+   `probation_until=NULL`). Operator hygiene per security.md §Per-adapter
+   admin threat profile: consider UNSETTING `INFOCHAT_SIMPLEX_ADMIN_TOKEN` in
+   `prod/runtime/secrets.env` now that the first admin exists (a still-set
+   token re-arms on `/revoke-admin`). NOT done — operator's call.
+2. ~~4b-2 `SimpleXConversationBackend`~~ **DONE (2026-07-02): M1-544 merged
+   (1a2be05e).** `LiveSimpleXClient` (provider test scope, simplex impl
+   package) composes SimpleXSubprocess + SimpleXWebSocketClient +
+   SimpleXMessageCodec; `SimpleXConversationBackend` binds scenario DM tokens
+   to live clients; `LiveSimpleXRoundTripIT` (gated
+   `-Dinfochat.live.simplex=true`, skips in CI) drove `/help` LiveAdmin→bot
+   through the unmodified ScenarioRunner: **matched in 591 ms, real relays.**
+   Host run: `mvn -pl infochat-provider test -Dtest=LiveSimpleXRoundTripIT
+   -Dinfochat.live.simplex=true` (client WS port 5226; needs stack UP and no
+   CLI one-shot holding the admin DB).
+3. **NEXT = 4b-3:** run the 7 transport-relevant scenarios (3,4,7,10,11,12,15)
+   over real SimpleX via the runner. Needs: GROUP binding in the backend
+   (currently DM-only, fails loudly), LiveUser joined to the bot (only
+   LiveAdmin is connected so far), and per-scenario user registration (invite
+   codes minted by the LiveAdmin admin). Also 4b-4 gotcha to solve when it
+   bites: progress-notified replies (e.g. /summary) finalize via item EDIT,
+   which the codec does not surface as a new inbound — the backend observes
+   plain replies only.
 
 **Repro command (stack is UP):**
 `prod/runtime/simplex-clients/bin/simplex-chat -d prod/runtime/simplex-clients/admin/simplex_v1 -y -t 6 -e "@Admin-Reno <text>"`
@@ -223,9 +239,34 @@ single live round-trip verification happens after BOTH fixes land. NOTE: the liv
   override weakens the "prod Clock = hardcoded `systemUTC`" property. Full rationale
   in README §8/§9.
 
+## Live findings (continued)
+
+### F-live-3 (LOW, transient — NOT yet investigated) — collector startup race under RAW backlog
+On 2026-07-02 22:08, restarting the collector after the M1-544 verify failed once:
+`Failed to start quarkus`, the `OutboxRehydrator` startup observer threw, and many
+`Stage1Worker: evaluation failed ... left RAW for re-enqueue` lines showed
+`IllegalStateException: ArC container not initialized ... or a wrong class loader
+was used` on `quarkus-virtual-thread-*` threads. The immediate retry booted clean
+(healthy). Hypothesis: the rehydrator re-enqueues a large RAW backlog during the
+startup event and Stage-1 virtual threads race deployment completion — and the
+"wrong class loader" wording smells adjacent to the F-live-1 TCCL family. Repro
+likely needs a large RAW backlog + restart. Un-ticketed; investigate before
+relying on unattended collector restarts.
+
 ## Running log
 
 ### 2026-07-02 (later)
+- **Admin token presented — LiveAdmin is bot admin** (D50 claim, DB-verified
+  bootstrap shape). Welcome reply's "probation ~24h" text is the shared bundle
+  string (reused per D50 by design); the admin row itself skips probation.
+- **M1-544 MERGED (1a2be05e) — Phase 4b-2 DONE, host-validated** (591 ms /help
+  round-trip via ScenarioRunner over real SimpleX; see START HERE item 2).
+  Full cycle: clarity PASS → verify green (stack stopped for it, min-avail
+  3.0 GiB, 5 DevServices leaks cleaned) → review r1 APPROVE → commit → merge.
+  Discovered en route: the production WS client completes corrId futures only
+  for send acks — fixture queries need a side socket (recorded in ticket).
+- **F-live-3 observed** (transient collector startup failure on restart under
+  RAW backlog; retry clean — see Live findings). Un-ticketed, low.
 - **M1-543 MERGED (8ed35718) — F-live-1 FIXED and live-verified** via
   `/m1-tick run M1-543`. Full cycle: clarity FAIL → bounded self-refine
   (provisional acceptance made binding, concrete out_of_scope,
