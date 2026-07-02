@@ -38,10 +38,15 @@ and no `SignalConversationBackend` yet** — that binding is the Phase 4b/5 boun
 1. [ ] **4b-1** — Provision 3 simplex-chat identities: bot + admin client + user
        client (admin becomes admin by DMing the `admin-token`; not a pre-set
        address). Host-side, needs the machine.
-2. [ ] **4b-2** — Write `SimpleXConversationBackend`: drive the real simplex-chat
-       subprocess over the WS API (corrId command/response + async inbound), behind
-       the existing `ConversationBackend` SPI. ← **first ticketable code chunk**
-       (becomes an M1 ticket; the "drive on a host" part stays un-ticketed).
+2. [ ] **4b-2** — Write `SimpleXConversationBackend` behind the existing
+       `ConversationBackend` SPI and **validate it against real simplex-chat on the
+       host** — drive the WS API (corrId command/response + async inbound), reusing
+       the reality-reconciled `SimpleXMessageCodec` / `SimpleXWebSocketClient` (one
+       wire-shape source of truth, no forked encoder). **Host-validated, NOT a
+       fake-backed CI ticket** (D-live-9): fakes have hidden real SimpleX bugs here
+       (M1-508/510/511), and the contact handshake + async-per-connection receive
+       are exactly what a fake can't model. A FakeSimpleXProcess regression IT is a
+       *later* ticket, seeded with frames captured on the first real run.
 3. [ ] **4b-3** — Run the 7 transport-relevant scenarios (3,4,7,10,11,12,15) over
        real SimpleX via the runner.
 4. [ ] **4b-4** — Assert real LLM latency captured; embedding-retrieval assertion
@@ -87,3 +92,10 @@ and no `SignalConversationBackend` yet** — that binding is the Phase 4b/5 boun
 - **Settled the scheduler-firing question → D-live-8** (no live clock; seeded
   timestamps + config-aimed windows). Recorded in README §8, §9 resolved.
 - Created this handoff file for simpler session-to-session tracking.
+- Drafted then **retracted** an M1-542 "SimpleXConversationBackend + fake-backed IT"
+  ticket. Falsification (the fake would pass green on the two behaviours most likely
+  to diverge — contact handshake + async-per-connection; fakes already hid
+  M1-508/510/511) showed a fake-backed CI IT gives false assurance on exactly the
+  fidelity risk the live run exists to catch. → **D-live-9**: the backend is
+  host-validated, reuses the reality-reconciled codec, and any fake regression IT is
+  a post-capture follow-up. M1-542 draft deleted; next ticket ID free again.

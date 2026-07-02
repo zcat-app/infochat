@@ -349,6 +349,20 @@ Behavioural — the real "hallucinated-reality" risk surface (verify live):
   need. Residual timezone/DST edge cases in the slot math, if ever a concern, get a
   pure unit test over `processSlot(Instant, ZoneId)` — not a live clock. (User +
   Claude, 2026-07-02)
+- **D-live-9:** The `SimpleXConversationBackend` (Phase 4b-2) is **host-validated,
+  NOT fake-backed-CI-tested.** A fake-backed IT was drafted (M1-542) and retracted:
+  hand-rolled SimpleX frame fixtures have already **hidden real bugs here (M1-508,
+  M1-510, M1-511)** — ground truth required capturing real WS frames from a live
+  simplex-chat — and the client-drive's risk surface is exactly what a fake cannot
+  model: the contact-request/accept handshake (§6) and async-delivery-per-connection
+  (received events go only to the controlling connection, never a passive second
+  probe). A fake would pass green on the two behaviours most likely to diverge (the
+  §1 hazard). So the backend is written AND proven against real simplex-chat on the
+  host, reusing the reality-reconciled `SimpleXMessageCodec` / `SimpleXWebSocketClient`
+  (one wire-shape source of truth — no second, drift-prone encoder). A
+  FakeSimpleXProcess-backed **regression** IT is a legitimate *later* ticket, seeded
+  with frames captured during the first real run — a post-reality guard, never a
+  first-contact validator. (User + Claude, 2026-07-02)
 
 ## 9. Open questions for the human
 
