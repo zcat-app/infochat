@@ -113,12 +113,22 @@ and no `SignalConversationBackend` yet** — that binding is the Phase 4b/5 boun
   (bot+admin+user). The ScenarioRunner can't automate the phone user's turns, so
   the *automated* multi-party Signal lifecycle still stays InMemory/IT-only;
   SimpleX carries the automated multi-party lifecycle.
-- **Constrained host (assumed 16 GB laptop):** default laptop/ollama profile is
-  tight (llama3.1:8b ×5 tasks + 3b judge + nomic-embed-text + Postgres/Ollama + 2
-  JVMs). Live-smoke override: drop the 8b tasks to `llama3.2:3b` (already pulled for
-  the judge → zero extra download) but **keep `nomic-embed-text`** (retrieval
-  assertions depend on it). Keep smoke assertions behavioural, not output-quality.
-  Full note: README §4b "Constrained-host model note". (Confirm actual host specs.)
+- **Constrained host — CONFIRMED specs (2026-07-02):** 4 vCPU / **15 GiB** / this
+  is the `vps` profile, NOT laptop, and the LLM runtime is **llama.cpp** (two baked
+  GGUF servers: chat `llamacpp:8080`, embeddings `llamacpp-embeddings:8080`), NOT
+  ollama. The laptop/ollama live-smoke override below is therefore moot for this
+  host — the vps stack is already what runs. Steady-state with all 5 containers
+  resident leaves ~8 GiB free, so RAM is not the pressure; CPU + iowait under
+  co-located builds is (see swap note). Retrieval assertions still depend on the
+  embeddings server staying up.
+- **Swap ENABLED (2026-07-02):** the host ran with **zero swap** — the exact
+  condition behind the 06-28 provider-throttle incident (M1-512). Now provisioned
+  per `07-deployment.md` §7.8.7: 8 GiB `/swapfile`, fstab-persisted,
+  `vm.swappiness=10` (so llama weights stay RAM-resident — swap is a transient
+  margin, NOT where the LLM lives). Operational rule that actually prevents a
+  repeat: **do NOT run image builds / `mvn verify` on this VPS while the live stack
+  is up** — that CPU+iowait co-location, not swap, is what got us throttled.
+  (Superseded live-smoke note: README §4b "Constrained-host model note".)
 
 ## Decisions settled here (canonical records in [`README.md`](README.md) §8)
 
@@ -149,6 +159,19 @@ and no `SignalConversationBackend` yet** — that binding is the Phase 4b/5 boun
 - **Settled the scheduler-firing question → D-live-8** (no live clock; seeded
   timestamps + config-aimed windows). Recorded in README §8, §9 resolved.
 - Created this handoff file for simpler session-to-session tracking.
+- **Phase 4b move 1 DONE — stack brought up on the host.** `7-apps.sh` rebuilt both
+  images, `6b` provisioned the SimpleX bot identity (profile + `/ad` address +
+  auto-accept), and all 5 containers are up: postgres/collector/provider healthy,
+  llamacpp + llamacpp-embeddings healthy. Provider `/q/health/ready` = **UP**
+  (`messaging-adapters.simplex=true`, DB UP) — the M1-541 SimpleX-connect barrier is
+  green. Collector→provider pipeline is live (real posts evaluated, cursor
+  advancing). Provider listens on **127.0.0.1:8081 inside the container** (mgmt port,
+  not host-published) — reach health via `docker exec … curl 127.0.0.1:8081/...`.
+  Fresh bot contact link surfaced by 6b (copy from the run; not persisted).
+- **Swap enabled + constrained-host specs confirmed** (see Environment facts above).
+  Host was zero-swap (the 06-28 incident condition); now 8 GiB swapfile +
+  swappiness=10, fstab-persisted. NEXT after move 1 = Phase 4b move 2 (provision the
+  2 client identities: admin + user).
 - Drafted then **retracted** an M1-542 "SimpleXConversationBackend + fake-backed IT"
   ticket. Falsification (the fake would pass green on the two behaviours most likely
   to diverge — contact handshake + async-per-connection; fakes already hid
