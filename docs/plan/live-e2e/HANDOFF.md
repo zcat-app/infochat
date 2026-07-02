@@ -13,47 +13,59 @@ Last updated: 2026-07-02 · Owner: ubuntu5 + Claude
 
 ## ▶ START HERE (fresh session — next step)
 
-**Next step = Phase 4b: SimpleX live drive on the host.** This is **host-validated
-work (D-live-9)** — it needs real simplex-chat identities + the app running, is NOT
-CI-testable, and has **no `/m1-tick` ticket to run**. Drive it directly; do not try
-to force it into a `mvn verify` ticket (that mistake was made and retracted — see
-the running log).
+**Next step = M1-543: fix F-live-1 (the first-inbound crash), CI-first.** Phase 4b
+moves 1–2 are DONE (stack up, clients provisioned, admin↔bot handshake + channel
+proven). The first real DM surfaced F-live-1 (inbound handler crashes at
+`SimpleXAdminClaim` bean creation, message silently dropped) and F-live-2 (the D37
+stack logger dropped the cause chain, masking F-live-1's cause). **F-live-2 is now
+FIXED — M1-542 merged (commit dfbb86ca).** So the diagnosis path is unblocked.
 
-**Load first (in order):** this file → `README.md` (full plan: §1 targeting
-principle, §Phase 4b checklist, §6 SimpleX↔Signal differences, §8 decisions) → the
-`simplex-live-frame-capture` memory (how to capture real WS frames; **async events
-go ONLY to the controlling connection**) → `.scratch/simplex-spike-findings.md`
-(real simplex-chat command quirks: exit-0-on-error, `/ad`, `/auto_accept`,
-idempotency) → the reuse targets: `SimpleXWebSocketClient` + `SimpleXMessageCodec`
-(infochat-messaging-adapter) and `ConversationBackend` / `ScenarioRunner` /
+**Per user direction ("fix both, run once"):** reproduce F-live-1 in a `@QuarkusTest`
+OFFLINE (no intermediate live deploy), fix it, then do ONE live round-trip
+verification at the end. Only if the repro can't be built cheaply do we deploy M1-542
+to read the live cause. M1-543 is a drafted skeleton (`blocked_by: M1-542`, now
+satisfied) — its acceptance is provisional until the cause is known; refine it once
+the repro reveals the cause.
+
+**Immediate first move:** `/m1-tick run M1-543` (or `start`), beginning with the
+reproduction attempt. The existing `SimpleXAdminClaimTokenTest` (`@QuarkusTest`,
+ARC-creates the bean) is GREEN, so the repro must capture whatever the LIVE container
+wiring does that the test env doesn't — that's both the diagnosis and M1-543's
+regression test. Falsified-already (don't re-chase): config expansion of
+`infochat.adapters.simplex.admin-token` (env present len 8, clean letters); injected
+beans (`RegisteredContactSet` is `@Startup`, boot succeeded).
+
+**Repro command (needs the live stack UP — currently PAUSED):**
+`prod/runtime/simplex-clients/bin/simplex-chat -d prod/runtime/simplex-clients/admin/simplex_v1 -y -t 6 -e "@Admin-Reno <text>"`
+then `docker logs --since 90s infochat-infochat-provider-1 | grep 'inbound handler threw'`.
+
+**HOST STATE:**
+- **App stack (collector + provider) is PAUSED** — stopped for the M1-542 verifies.
+  Restart before any live work: `docker compose -f docker-compose.yml --env-file prod/runtime/secrets.env --profile prod up -d infochat-collector && ... up -d infochat-provider` (postgres + llamacpp stay up). Health: `docker exec infochat-infochat-provider-1 sh -c 'curl -s 127.0.0.1:8081/q/health/ready'`.
+- **Swap enabled** (8 GiB, swappiness=10) — the missing 06-28 safety margin is in place.
+- **Clients provisioned:** `LiveAdmin` + `LiveUser` under `prod/runtime/simplex-clients/{admin,user}/` (native baked binary v6.5.4.1 at `.../bin/`). Admin is connected to the bot (contact "Admin-Reno"). Bot `/ad` link was transient (not saved); the clients are already joined, so re-query only if adding a new client.
+
+**Clean verify-monitoring (user wants a complete report next run):** the M1-542
+attempt's monitor subagent hung on a self-referential `pgrep -f 'verify-serialized.sh'`
+(its own cmdline matched the pattern → loop never exited). Next run, either (a) let a
+background bash sampler loop forever and **stop it from the main thread** on the
+verify's completion notification, or (b) bracket-trick the pattern (`pgrep -f '[c]lean verify'`)
+or poll the build log for `BUILD SUCCESS|FAILURE`. See `[[clean-verify-monitoring]]` memory.
+Also: `mvn verify` leaks ~5 DevServices Postgres containers each run — clean with
+`docker rm -f $(docker ps --filter label=org.testcontainers=true -q)` after; a
+DevServices-reuse optimization is a candidate follow-up ticket.
+
+**After M1-543 lands:** ONE live deploy (provider rebuilt with M1-542+M1-543) →
+re-send the admin DM → confirm the bot REPLIES (round-trip). That is the real
+acceptance; there is no green-CI substitute for the round-trip (D-live-9). Then
+resume the original Phase 4b: `SimpleXConversationBackend` + the 7 transport-relevant
+scenarios. Signal (3 numbers — bot + admin automatable + phone-driven user) is Phase 5.
+
+**Full plan / reuse targets (unchanged):** `README.md` (§1 targeting, §Phase 4b
+checklist, §6 differences, §8 decisions) → `simplex-live-frame-capture` memory →
+`.scratch/simplex-spike-findings.md` → `SimpleXWebSocketClient` + `SimpleXMessageCodec`
+(infochat-messaging-adapter) + `ConversationBackend`/`ScenarioRunner`/
 `InMemoryConversationBackend` (infochat-provider/src/test/.../live/).
-
-**First three moves:**
-1. **Bring the stack up on the host** [user/host]: `prod/setup.sh` (numbered
-   scripts 0→7). `6b-simplex-provision.sh` (run by `7-apps.sh`) provisions the
-   **bot** identity — profile + contact address (`/ad`) + `/auto_accept on`. Confirm
-   `/q/health/ready` is green and the bot surfaced a contact link. NOTE: the
-   simplex-chat binary lives **only inside the Provider image**, not on the host.
-2. **Provision the 2 client identities** (admin + user) [host — NEW tooling]:
-   `6b` covers the bot ONLY. The harness needs its own client simplex-chat
-   instances on **separate data-dirs + ws-ports**, using the baked binary
-   (extract from the image, or run a throwaway container). Establish the client→bot
-   channel via the bot's `/ad` contact link (bot auto-accepts). This handshake is
-   the first thing a fake could never prove (D-live-9).
-3. **Start `SimpleXConversationBackend`** [Claude + host]: reuse
-   `SimpleXWebSocketClient` for transport+decode and `SimpleXMessageCodec` for the
-   `/_send` shape (D-live-9: ONE wire-shape source of truth — do not fork a second
-   encoder). Drive one DM to the bot, capture the real reply frames (frame-capture
-   memory), and get a DM round-trip. That round-trip — over real simplex-chat — is
-   the acceptance for 4b-2; there is no green-CI substitute.
-
-Signal (2 numbers, bot + admin) is Phase 5, only after SimpleX proves out.
-
-**Definition of done for the next step (4b-2):** a `SimpleXConversationBackend`
-that, against a real client simplex-chat, sends a DM to the live bot and observes
-the bot's real reply (round-trip + captured latency), reusing the adapter's codec.
-Capture the real frame shapes seen — they seed the *later* FakeSimpleXProcess
-regression IT (a real ticket then, not now).
 
 ---
 
@@ -226,6 +238,16 @@ single live round-trip verification happens after BOTH fixes land. NOTE: the liv
   `unknown-resp-type` seen in the Provider log at connect time — the exact
   contact-lifecycle events a fake can't produce, D-live-9). Channel proven: admin DM →
   bot **intake reached** the Provider.
+- **M1-542 MERGED (commit dfbb86ca)** — F-live-2 fixed via `/m1-tick run M1-542`.
+  Full cycle: clarity WARN → impl → verify → review r1 APPROVE → redteam FINDINGS
+  (1 low DOS: unbounded cause-chain depth) → user chose refine → remediate (depth cap
+  5 + truncation marker) → verify → review r2 APPROVE → re-audit CLEAN → commit →
+  squash-merge. The D37 stack logger now walks the full cause chain (bounded, D37-safe),
+  so the next live-only inbound bug shows its real cause. NEXT: M1-543 (F-live-1).
+- The M1-542 r2-verify monitor subagent hung on a self-referential `pgrep` (its own
+  cmdline matched `verify-serialized.sh`); killed it, recovered the data (build min-avail
+  ~2.6 GB, swap absorbed it, no OOM). Lesson recorded → `[[clean-verify-monitoring]]`;
+  next verify uses the clean approach for a complete report.
 - **First real inbound surfaced F-live-1 + F-live-2** (see Live findings above): the
   inbound handler crashes at `SimpleXAdminClaim` bean creation and the DM is silently
   dropped; the cause is masked by the D37 stack logger dropping the cause chain. This is
