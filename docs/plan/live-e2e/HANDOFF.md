@@ -105,10 +105,14 @@ and no `SignalConversationBackend` yet** — that binding is the Phase 4b/5 boun
 
 ## Environment facts / constraints (host-side)
 
-- **Signal capacity: 2 numbers** → 1 bot + 1 admin client, **no spare user client**
-  (User, 2026-07-02). ⇒ Signal scope = bot↔admin round-trip + ACI-admin bootstrap +
-  §6 differences checklist. Multi-party Signal group scenarios stay InMemory/IT-only;
-  SimpleX carries the full multi-party lifecycle.
+- **Signal capacity: 3 numbers** → 1 bot + 1 admin client (harness-automatable) +
+  1 **user driven MANUALLY from the phone** (existing personal account, NOT
+  harness-scriptable) (User, 2026-07-02, revised). ⇒ Signal scope = bot↔admin
+  round-trip + ACI-admin bootstrap + §6 differences checklist, PLUS an optional
+  human-in-the-loop bot↔user round-trip and a minimal 3-party group
+  (bot+admin+user). The ScenarioRunner can't automate the phone user's turns, so
+  the *automated* multi-party Signal lifecycle still stays InMemory/IT-only;
+  SimpleX carries the automated multi-party lifecycle.
 - **Constrained host (assumed 16 GB laptop):** default laptop/ollama profile is
   tight (llama3.1:8b ×5 tasks + 3b judge + nomic-embed-text + Postgres/Ollama + 2
   JVMs). Live-smoke override: drop the 8b tasks to `llama3.2:3b` (already pulled for
@@ -137,7 +141,11 @@ and no `SignalConversationBackend` yet** — that binding is the Phase 4b/5 boun
   only (Phases 0–4a). SimpleX live drive, Signal delta, and real LLM/embedding
   evaluation are all still ahead.
 - **Signal capacity confirmed: 2 numbers** (bot + admin). Recorded in README §9 +
-  Phase 5.
+  Phase 5. **REVISED same day → 3 numbers:** a 3rd (existing personal account) is
+  usable as a **user, driven manually from the phone** — not harness-scriptable.
+  Adds an optional human-in-the-loop bot↔user round-trip + minimal 3-party group;
+  automated multi-party still SimpleX-only. Updated in README §9/Phase 5 + the
+  constraint above.
 - **Settled the scheduler-firing question → D-live-8** (no live clock; seeded
   timestamps + config-aimed windows). Recorded in README §8, §9 resolved.
 - Created this handoff file for simpler session-to-session tracking.

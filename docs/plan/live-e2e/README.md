@@ -222,11 +222,15 @@ host-dependent live drive — needs real transports + real LLM, cannot be
       smoke run.
 
 ### Phase 5 — Signal delta verification (smaller)
-- [ ] Register bot + 1 admin Signal account (manual; preserved dirs). Only 2
-      numbers available (D-live-8 context) → bot + admin, no user client; scope
-      is bot↔admin round-trip + ACI bootstrap + §6, not multi-party groups.
-- [ ] Prove comms round-trip + ACI-admin bootstrap.
+- [ ] Register bot + 1 admin Signal account (manual; preserved dirs). A 3rd
+      number (existing personal account) is available as a **user, driven
+      manually from the phone** — not harness-scriptable.
+- [ ] Prove comms round-trip + ACI-admin bootstrap (automated: bot↔admin).
 - [ ] Walk the §6 differences checklist.
+- [ ] (optional, human-in-the-loop) bot↔user round-trip + minimal 3-party
+      group (bot+admin+user) with the phone user typing turns by hand. Fully
+      automated multi-party Signal lifecycle stays IT-only (runner can't script
+      the phone user); SimpleX carries the automated multi-party path.
 
 ### Phase 6 — (optional) promote to `/testcase` skill
 - [ ] Only after 2–3 scenarios run cleanly. Skill wraps the Phase-4 runner
@@ -372,10 +376,14 @@ Behavioural — the real "hallucinated-reality" risk surface (verify live):
       cross-path coverage; the live fetch will exercise relay connect + Nostr
       signature/kind-filter + cross-relay dedup, not just HTTP fetch.
 - [x] Signal: how many test numbers can you register (bot + N clients)? —
-      **2 numbers available: 1 bot + 1 admin client, no spare user client**
-      (User, 2026-07-02). ⇒ Signal scope = bot↔admin round-trip + ACI-admin
-      bootstrap + §6 differences checklist; multi-party Signal group scenarios
-      stay InMemory/IT-only, SimpleX carries the full multi-party lifecycle.
+      **3 numbers: 1 bot + 1 admin client (harness-automatable) + 1 user
+      (existing personal account, driven MANUALLY from the phone — not
+      harness-scriptable)** (User, 2026-07-02, revised). ⇒ Signal scope =
+      bot↔admin round-trip + ACI-admin bootstrap + §6 differences checklist,
+      PLUS an optional human-in-the-loop bot↔user round-trip and a minimal
+      3-party group (bot+admin+user). The ScenarioRunner cannot automate the
+      phone user's turns, so full automated multi-party Signal lifecycle still
+      stays InMemory/IT-only; SimpleX carries the automated multi-party lifecycle.
 - [x] Do we need deterministic **scheduler-firing** tests (→ justifies a
       profile-gated live clock), or is seeded-timestamp state enough? —
       **seeded-timestamp state + config-aimed digest windows are enough; no live
