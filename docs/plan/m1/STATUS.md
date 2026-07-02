@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 567 |
+| done | 568 |
 | deferred | 10 |
 | **total** | **578** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-544 — SimpleX live ConversationBackend binding (Phase 4b-2) (complexity: medium, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-544 | SimpleX live ConversationBackend binding (Phase 4b-2) | 2026-07-02 | round 1 APPROVE |
 | M1-543 | Fix SimpleX first-inbound crash at SimpleXAdminClaim create | 2026-07-02 | round 1 APPROVE |
 | M1-542 | Include cause chain in D37 inbound-handler stack log | 2026-07-02 | round 2 APPROVE |
 | M1-541 | Harden signalCrashDoesNotAffectSimpleX readiness barrier | 2026-07-02 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-537 | live-test: seed a deterministic synthetic post corpus into a running deployment's database | 2026-07-01 | round 1 APPROVE |
 | M1-536 | live-test: workflow reset that clears the control-plane while preserving the fetched data-plane | 2026-07-01 | round 1 APPROVE |
 | M1-535 | Test DBs must be deterministic: disable Testcontainers reuse for test JVMs (fixes partition-horizon drift + container leak) | 2026-07-01 | round 1 APPROVE |
-| M1-533 | 6b SimpleX provisioning: tighten the stdout error-marker so operator-controlled output can't false-trigger a failure | 2026-07-01 | round 1 APPROVE |
 
 ---
 
@@ -748,5 +748,5 @@ M1-540 (done)
 M1-541 (done)
 M1-542 (done)
   └── M1-543 (done)
-        └── M1-544 (pending) ← runnable
+        └── M1-544 (done)
 ```

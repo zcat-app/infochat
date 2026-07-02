@@ -1,7 +1,7 @@
 ---
 id: M1-544
 title: SimpleX live ConversationBackend binding (Phase 4b-2)
-status: pending
+status: done
 created: 2026-07-02
 last_updated: 2026-07-02
 blocked_by:
@@ -46,12 +46,29 @@ spec_refs:
   - docs/spec/messaging.md §Required SPI surface
 decision_refs:
   - D-live-9
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 425
+      removed: 8
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-02
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-544: SimpleX live ConversationBackend binding (Phase 4b-2)
