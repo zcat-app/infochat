@@ -11,6 +11,52 @@ Last updated: 2026-07-02 · Owner: ubuntu5 + Claude
 
 ---
 
+## ▶ START HERE (fresh session — next step)
+
+**Next step = Phase 4b: SimpleX live drive on the host.** This is **host-validated
+work (D-live-9)** — it needs real simplex-chat identities + the app running, is NOT
+CI-testable, and has **no `/m1-tick` ticket to run**. Drive it directly; do not try
+to force it into a `mvn verify` ticket (that mistake was made and retracted — see
+the running log).
+
+**Load first (in order):** this file → `README.md` (full plan: §1 targeting
+principle, §Phase 4b checklist, §6 SimpleX↔Signal differences, §8 decisions) → the
+`simplex-live-frame-capture` memory (how to capture real WS frames; **async events
+go ONLY to the controlling connection**) → `.scratch/simplex-spike-findings.md`
+(real simplex-chat command quirks: exit-0-on-error, `/ad`, `/auto_accept`,
+idempotency) → the reuse targets: `SimpleXWebSocketClient` + `SimpleXMessageCodec`
+(infochat-messaging-adapter) and `ConversationBackend` / `ScenarioRunner` /
+`InMemoryConversationBackend` (infochat-provider/src/test/.../live/).
+
+**First three moves:**
+1. **Bring the stack up on the host** [user/host]: `prod/setup.sh` (numbered
+   scripts 0→7). `6b-simplex-provision.sh` (run by `7-apps.sh`) provisions the
+   **bot** identity — profile + contact address (`/ad`) + `/auto_accept on`. Confirm
+   `/q/health/ready` is green and the bot surfaced a contact link. NOTE: the
+   simplex-chat binary lives **only inside the Provider image**, not on the host.
+2. **Provision the 2 client identities** (admin + user) [host — NEW tooling]:
+   `6b` covers the bot ONLY. The harness needs its own client simplex-chat
+   instances on **separate data-dirs + ws-ports**, using the baked binary
+   (extract from the image, or run a throwaway container). Establish the client→bot
+   channel via the bot's `/ad` contact link (bot auto-accepts). This handshake is
+   the first thing a fake could never prove (D-live-9).
+3. **Start `SimpleXConversationBackend`** [Claude + host]: reuse
+   `SimpleXWebSocketClient` for transport+decode and `SimpleXMessageCodec` for the
+   `/_send` shape (D-live-9: ONE wire-shape source of truth — do not fork a second
+   encoder). Drive one DM to the bot, capture the real reply frames (frame-capture
+   memory), and get a DM round-trip. That round-trip — over real simplex-chat — is
+   the acceptance for 4b-2; there is no green-CI substitute.
+
+Signal (2 numbers, bot + admin) is Phase 5, only after SimpleX proves out.
+
+**Definition of done for the next step (4b-2):** a `SimpleXConversationBackend`
+that, against a real client simplex-chat, sends a DM to the live bot and observes
+the bot's real reply (round-trip + captured latency), reusing the adapter's codec.
+Capture the real frame shapes seen — they seed the *later* FakeSimpleXProcess
+regression IT (a real ticket then, not now).
+
+---
+
 ## Current state (one line)
 
 The substrate for the live run is **built and green** (Phases 0–4a done). **Nothing
@@ -35,9 +81,12 @@ and no `SignalConversationBackend` yet** — that binding is the Phase 4b/5 boun
 
 ## Next actions (in order)
 
-1. [ ] **4b-1** — Provision 3 simplex-chat identities: bot + admin client + user
-       client (admin becomes admin by DMing the `admin-token`; not a pre-set
-       address). Host-side, needs the machine.
+1. [ ] **4b-1** — Provision 3 simplex-chat identities. **Bot: scripted** via
+       `prod/scripts/6b-simplex-provision.sh` (run by `7-apps.sh`; profile + `/ad`
+       address + `/auto_accept on`). **Admin + user clients: NEW tooling** — the
+       harness needs its own client instances (separate data-dirs + ws-ports, baked
+       binary from the Provider image), joined to the bot via its `/ad` link. Admin
+       becomes admin by DMing the `admin-token` (not a pre-set address). Host-side.
 2. [ ] **4b-2** — Write `SimpleXConversationBackend` behind the existing
        `ConversationBackend` SPI and **validate it against real simplex-chat on the
        host** — drive the WS API (corrId command/response + async inbound), reusing
