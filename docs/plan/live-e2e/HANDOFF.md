@@ -126,7 +126,7 @@ inbound (18:42:09 and 18:49:12); ARC re-attempts create each inbound.
 - **Repro**: `prod/runtime/simplex-clients/bin/simplex-chat -d prod/runtime/simplex-clients/admin/simplex_v1 -y -t 6 -e "@Admin-Reno <text>"` then
   `docker logs --since 90s infochat-infochat-provider-1 | grep 'inbound handler threw'`.
 
-### F-live-2 (MEDIUM, diagnosability) — D37 stack logger drops the cause chain
+### F-live-2 (MEDIUM, diagnosability) — RESOLVED by M1-542 (merged 2026-07-02)
 `SimpleXAdapter.stackWithoutMessage()` renders only the top throwable's class + stack
 frames, NOT `getCause()` — so the real `Caused by:` of F-live-1 is absent from the log,
 leaving a bare `RuntimeException` with no reason. Cause class names + `StackTraceElement`s
@@ -139,6 +139,17 @@ append the content-free cause chain (reveals the root cause; standalone diagnosa
 win). (2) With the cause visible, reproduce F-live-1 in a `@QuarkusTest` that matches the
 live wiring (the current test is green, so the repro must capture whatever differs) and
 fix it + regression test. Both are green-CI-verifiable, so they go through `/m1-tick`.
+
+**STATUS (2026-07-02):** step (1) DONE — **M1-542 merged** (commit dfbb86ca). The D37 stack
+logger now walks the full cause chain (class names + content-free frames, "Caused by:"
+per level, depth-capped at 5 with a truncation marker, D37 suppression preserved). A
+redteam pass caught unbounded depth (low DOS); remediated in-branch with the cap, re-audit
+CLEAN. Step (2) = **M1-543** (F-live-1 fix, skeleton, blocked_by M1-542 now satisfied).
+Per user direction ("fix both, run once"), NEXT is to try reproducing F-live-1 in a
+`@QuarkusTest` offline; only if that fails do we deploy M1-542 to read the live cause. The
+single live round-trip verification happens after BOTH fixes land. NOTE: the live app stack
+(collector + provider) is currently PAUSED (stopped for the M1-542 verifies); restart via
+`docker compose ... --profile prod up -d` before the live verification.
 
 ## Environment facts / constraints (host-side)
 
