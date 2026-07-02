@@ -461,7 +461,7 @@ class MultiAdapterProductionIT {
                 // sx.start() returned the connect was issued — but the
                 // fake's accept handler runs on its own virtual thread
                 // and may not have completed the handshake bookkeeping).
-                sxFake.awaitClient(Duration.ofSeconds(2));
+                sxFake.awaitClient(Duration.ofSeconds(10));
 
                 // Crash Signal.
                 sgFake.close();

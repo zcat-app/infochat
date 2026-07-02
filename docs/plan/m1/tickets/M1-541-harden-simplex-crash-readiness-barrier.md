@@ -1,9 +1,28 @@
 ---
 id: M1-541
 title: Harden signalCrashDoesNotAffectSimpleX readiness barrier
-status: pending
+status: done
 created: 2026-07-02
 last_updated: 2026-07-02
+clarity_check:
+  date: 2026-07-02
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 12
+      removed: 8
 blocked_by: []
 files_budget: 1
 files_scope:

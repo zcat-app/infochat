@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 564 |
+| done | 565 |
 | deferred | 10 |
 | **total** | **575** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-541 — Harden signalCrashDoesNotAffectSimpleX readiness barrier (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-541 | Harden signalCrashDoesNotAffectSimpleX readiness barrier | 2026-07-02 | round 1 APPROVE |
 | M1-540 | Fix MultiAdapterProductionIT signal-crash timing flake | 2026-07-02 | round 1 APPROVE |
 | M1-539 | live-smoke scenario runner + InMemory backend (Phase 4a) | 2026-07-02 | round 1 APPROVE |
 | M1-538 | live-test: inject an adversarial RAW post so the real eval pipeline quarantines it | 2026-07-01 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-533 | 6b SimpleX provisioning: tighten the stdout error-marker so operator-controlled output can't false-trigger a failure | 2026-07-01 | round 1 APPROVE |
 | M1-532 | Wizard step 5: optionally syntax-check a custom bootstrap JSON so a typo fails early, not at Collector boot | 2026-07-01 | round 1 APPROVE |
 | M1-531 | Wizard step 5: directory given as a custom sources/assets path yields a raw cp error | 2026-07-01 | round 1 APPROVE |
-| M1-530 | Wizard re-run leaves stale credentials on de-selection: bootstrap-admin (6-adapter.sh) + remote LLM api-key (4-llm.sh) | 2026-07-01 | round 1 APPROVE |
 
 ---
 
@@ -745,5 +745,5 @@ M1-536 (done)
 M1-538 (done)
 M1-539 (done)
 M1-540 (done)
-M1-541 (pending) ← runnable
+M1-541 (done)
 ```
