@@ -386,6 +386,15 @@ class MultiAdapterProductionIT {
                 sx.start();
                 sg.start();
 
+                // Barrier on Signal's JSON-RPC connection being established (TCP
+                // probe + real connect = generation 2) before the liveness probe
+                // below, so its 2000 ms budget measures only the post-crash write,
+                // not the connect race. Under a loaded host the connect otherwise
+                // races the probe and nextOutbound times out (M1-540). The sibling
+                // signalCrashDoesNotAffectSimpleX barriers the same way via
+                // sxFake.awaitClient.
+                sgFake.awaitConnectionGeneration(2, 10_000);
+
                 // Crash SimpleX: close the fake's listener + active client
                 // socket. SimpleXAdapter's WebSocketClient observes the
                 // close and enters its degraded state.

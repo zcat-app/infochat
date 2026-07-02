@@ -134,7 +134,7 @@ public final class FakeSignalCli implements AutoCloseable {
      * connections — the reconnect tests' way of observing that the
      * adapter's post-restart connect actually arrived.
      */
-    void awaitConnectionGeneration(int atLeast, long timeoutMs) throws InterruptedException {
+    public void awaitConnectionGeneration(int atLeast, long timeoutMs) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
         while (connectionGeneration.get() < atLeast && System.nanoTime() < deadline) {
             Thread.sleep(10);

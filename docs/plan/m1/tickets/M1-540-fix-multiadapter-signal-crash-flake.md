@@ -1,10 +1,29 @@
 ---
 id: M1-540
 title: Fix MultiAdapterProductionIT signal-crash timing flake
-status: pending
+status: done
 created: 2026-07-01
-last_updated: 2026-07-01
+last_updated: 2026-07-02
 blocked_by: []
+clarity_check:
+  date: 2026-07-01
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 20
+      removed: 8
 files_budget: 2
 files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/MultiAdapterProductionIT.java
