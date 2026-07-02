@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 564 |
 | deferred | 10 |
-| **total** | **574** |
+| **total** | **575** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-541 — Harden signalCrashDoesNotAffectSimpleX readiness barrier (complexity: low, risk: low)
 
 ---
 
@@ -745,4 +745,5 @@ M1-536 (done)
 M1-538 (done)
 M1-539 (done)
 M1-540 (done)
+M1-541 (pending) ← runnable
 ```
