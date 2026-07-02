@@ -13,35 +13,37 @@ Last updated: 2026-07-02 · Owner: ubuntu5 + Claude
 
 ## ▶ START HERE (fresh session — next step)
 
-**Next step = M1-543: fix F-live-1 (the first-inbound crash), CI-first.** Phase 4b
-moves 1–2 are DONE (stack up, clients provisioned, admin↔bot handshake + channel
-proven). The first real DM surfaced F-live-1 (inbound handler crashes at
-`SimpleXAdminClaim` bean creation, message silently dropped) and F-live-2 (the D37
-stack logger dropped the cause chain, masking F-live-1's cause). **F-live-2 is now
-FIXED — M1-542 merged (commit dfbb86ca).** So the diagnosis path is unblocked.
+**Next step = resume the original Phase 4b: present the admin token, then 4b-2
+(`SimpleXConversationBackend`).** Both live findings are FIXED and live-verified:
+F-live-2 by M1-542 (dfbb86ca), **F-live-1 by M1-543 (merged 8ed35718,
+2026-07-02)** — root cause was the SimpleX inbound-dispatch virtual thread's
+foreign context classloader crashing the MicroProfile Config lookup at lazy ARC
+creation of `SimpleXAdminClaim` (`@ConfigProperty` resolution is TCCL-keyed);
+fixed by pinning the application classloader around every adapter callback in
+`AdapterRegistry` (one boundary, every adapter, every callback). The ONE live
+round-trip is DONE: admin DM → bot replied `Access requires an invitation.`
+(claim → invite fall-through routing, message no longer dropped).
 
-**Per user direction ("fix both, run once"):** reproduce F-live-1 in a `@QuarkusTest`
-OFFLINE (no intermediate live deploy), fix it, then do ONE live round-trip
-verification at the end. Only if the repro can't be built cheaply do we deploy M1-542
-to read the live cause. M1-543 is a drafted skeleton (`blocked_by: M1-542`, now
-satisfied) — its acceptance is provisional until the cause is known; refine it once
-the repro reveals the cause.
+**Immediate next live actions:**
+1. LiveAdmin is NOT yet bot admin — the D50 claim token was never presented
+   (round-trip used plain text to avoid consuming the single-use token without
+   an explicit decision). Present it: DM the `INFOCHAT_SIMPLEX_ADMIN_TOKEN`
+   value (prod/runtime/secrets.env) from the admin client → expect the welcome
+   reply + `is_admin=true`.
+2. Then 4b-2: `SimpleXConversationBackend` behind the `ConversationBackend`
+   SPI, host-validated (D-live-9), reusing `SimpleXWebSocketClient` +
+   `SimpleXMessageCodec`.
 
-**Immediate first move:** `/m1-tick run M1-543` (or `start`), beginning with the
-reproduction attempt. The existing `SimpleXAdminClaimTokenTest` (`@QuarkusTest`,
-ARC-creates the bean) is GREEN, so the repro must capture whatever the LIVE container
-wiring does that the test env doesn't — that's both the diagnosis and M1-543's
-regression test. Falsified-already (don't re-chase): config expansion of
-`infochat.adapters.simplex.admin-token` (env present len 8, clean letters); injected
-beans (`RegisteredContactSet` is `@Startup`, boot succeeded).
-
-**Repro command (needs the live stack UP — currently PAUSED):**
+**Repro command (stack is UP):**
 `prod/runtime/simplex-clients/bin/simplex-chat -d prod/runtime/simplex-clients/admin/simplex_v1 -y -t 6 -e "@Admin-Reno <text>"`
-then `docker logs --since 90s infochat-infochat-provider-1 | grep 'inbound handler threw'`.
+then `docker logs --since 90s infochat-infochat-provider-1 | grep 'inbound handler threw'` (expect NO hits post-M1-543).
 
 **HOST STATE:**
-- **App stack (collector + provider) is PAUSED** — stopped for the M1-542 verifies.
-  Restart before any live work: `docker compose -f docker-compose.yml --env-file prod/runtime/secrets.env --profile prod up -d infochat-collector && ... up -d infochat-provider` (postgres + llamacpp stay up). Health: `docker exec infochat-infochat-provider-1 sh -c 'curl -s 127.0.0.1:8081/q/health/ready'`.
+- **App stack is UP (all 5 containers)** — resumed 2026-07-02 21:20 for the
+  M1-543 round-trip with the provider image rebuilt from main (M1-542+M1-543).
+  Health: `docker exec infochat-infochat-provider-1 sh -c 'curl -s 127.0.0.1:8081/q/health/ready'`.
+- **Do NOT run image builds / `mvn verify` while the stack is up** (06-28
+  throttle condition); stop collector+provider first.
 - **Swap enabled** (8 GiB, swappiness=10) — the missing 06-28 safety margin is in place.
 - **Clients provisioned:** `LiveAdmin` + `LiveUser` under `prod/runtime/simplex-clients/{admin,user}/` (native baked binary v6.5.4.1 at `.../bin/`). Admin is connected to the bot (contact "Admin-Reno"). Bot `/ad` link was transient (not saved); the clients are already joined, so re-query only if adding a new client.
 
@@ -117,7 +119,27 @@ and no `SignalConversationBackend` yet** — that binding is the Phase 4b/5 boun
 
 ## Live findings (Phase 4b — real transport)
 
-### F-live-1 (HIGH) — first real inbound DM crashes the Provider inbound handler
+### F-live-1 (HIGH) — RESOLVED by M1-543 (merged 8ed35718, 2026-07-02)
+
+**Root cause (revealed by M1-542's cause-chain logger on a rebuilt-image live
+probe):** `Caused by: java.lang.IllegalArgumentException` at
+`SmallRyeConfigProviderResolver.get` — "no config for classloader". The
+`simplex-inbound-dispatch` virtual thread (created lazily by a JDK-internal
+HttpClient thread) carries a context classloader with no registered
+MicroProfile `Config`; `@ConfigProperty` injection at lazy ARC creation of
+`SimpleXAdminClaim` resolves Config by TCCL → throws → ARC wraps in a bare
+`RuntimeException` → D37 catch drops the message. Green in CI because every
+`@QuarkusTest` dispatches from the JUnit thread (TCCL = app classloader) — the
+D-live-9 thesis exactly. **Fix:** `AdapterRegistry` pins the application
+classloader (finally-restored) around all three adapter callback lambdas.
+Regression test: `InboundDispatchForeignContextClassLoaderTest` (red-before /
+green-after). Round-trip verified live 2026-07-02 21:22 (bot replied).
+Diagnosis gotcha for next time: overlaying a rebuilt jar into the provider
+image via bind mount does NOT take effect for classes present in
+`/app/quarkus/transformed-bytecode.jar` (fast-jar loads those first) — a
+full image rebuild was needed to run the M1-542 logger live.
+
+Original finding (for the record):
 On the FIRST DM ever sent to the bot over real simplex-chat, `InboundRouter.onMessage`
 (InboundRouter.java:504 → `SimpleXAdminClaim.claim(...)`) throws a bare
 `java.lang.RuntimeException` **at ARC bean instantiation** (`SimpleXAdminClaim_Bean.create`),
@@ -202,6 +224,25 @@ single live round-trip verification happens after BOTH fixes land. NOTE: the liv
   in README §8/§9.
 
 ## Running log
+
+### 2026-07-02 (later)
+- **M1-543 MERGED (8ed35718) — F-live-1 FIXED and live-verified** via
+  `/m1-tick run M1-543`. Full cycle: clarity FAIL → bounded self-refine
+  (provisional acceptance made binding, concrete out_of_scope,
+  security_relevant→true) → clarity WARN → diagnosis (live cause read via a
+  compose-run probe of a main-rebuilt image: TCCL/no-config-for-classloader at
+  `SimpleXAdminClaim` create) → repro test red → `AdapterRegistry` TCCL pin →
+  repro green → full verify green (8:19 min, min-avail 3.2 GiB, swap peak
+  2.2 GiB, no OOM — clean monitor report; 5 DevServices containers cleaned) →
+  review r1 APPROVE → redteam CLEAN (1 out-of-model advisory: nothing
+  structurally forces a FUTURE MessagingAdapter callback setter through the
+  registry pin — awareness note for SPI evolution) → commit → squash-merge.
+- **ONE live round-trip DONE (21:22):** stack resumed with the rebuilt image,
+  admin DM → bot replied `Access requires an invitation.` — routed, not
+  dropped. No `inbound handler threw` in the log. Stack left UP.
+- Jar-overlay diagnosis dead-end recorded: classes in
+  `transformed-bytecode.jar` shadow `lib/main`, so a bind-mounted rebuilt
+  module jar silently doesn't load — rebuild the image instead.
 
 ### 2026-07-02
 - M1-541 merged (last ticketed CI work; readiness-barrier hardening). `/m1-tick`
