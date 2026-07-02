@@ -6,7 +6,7 @@
 > `process:` commit prefix (no ticket) for this file; the harness code/tests it
 > describes are M1 tickets.
 
-Last updated: 2026-07-01 · Owner: ubuntu5 + Claude
+Last updated: 2026-07-02 · Owner: ubuntu5 + Claude
 
 ---
 
@@ -178,14 +178,21 @@ Split into **4a** (the CI-testable substrate — ticketed) and **4b** (the
 host-dependent live drive — needs real transports + real LLM, cannot be
 @QuarkusTest-covered).
 
-**Phase 4a — scenario runner substrate — TICKET DRAFTED (M1-539, 2026-07-01).**
-- [ ] **M1-539** (draft): backend-agnostic scenario format + runner core +
-      InMemory backend binding, proven by an IT that runs a golden-path smoke
-      scenario through `InMemoryAdapter` and captures per-step latency. Reuses the
-      InMemoryAdapter conversation shape so the SAME scenario runs on both
-      backends (caveat: in-memory is sync/`finalizedBodies()`, live is
+**Phase 4a — scenario runner substrate — DONE (M1-539, 2026-07-02).**
+- [x] **M1-539** (done): backend-agnostic scenario format + runner core +
+      InMemory backend binding, proven by `ScenarioRunnerIT` that runs a
+      golden-path smoke scenario through `InMemoryAdapter` and captures per-step
+      latency. Reuses the InMemoryAdapter conversation shape so the SAME scenario
+      runs on both backends (caveat: in-memory is sync/`finalizedBodies()`, live is
       async/observed client-side → the `ConversationBackend` SPI abstracts it with
       a poll-until-match-or-timeout wait). D-live-4: build the runner first.
+      Delivered: `Scenario` (line grammar + `parse`), `ConversationBackend` SPI,
+      `ScenarioRunner`, `InMemoryConversationBackend` (unions `sentMessages()` +
+      `finalizedBodies()` behind a per-step watermark), and
+      `scenarios/golden-path-smoke.scenario`. The M1-539 commit-safety re-run
+      surfaced a pre-existing timing flake in `MultiAdapterProductionIT`
+      (unrelated to this ticket) which was fixed separately in **M1-540**
+      (Signal connect-readiness barrier).
 
 **Phase 4b — SimpleX live drive on a host (not ticketed; needs the host).**
 - [ ] Provision 3 simplex-chat identities: **bot** + **admin client** + **user
