@@ -130,6 +130,24 @@ unit-tested). Cover, all on `laptop`:
       probation/invite/expiry have dedicated Clock-pinned ITs.
 - [x] Classify each. **8 transport-invisible** (1,2,5,6,8,9,13,14 — stay IT-only,
       NOT in the live run) / **7 transport-relevant** (3,4,7,10,11,12,15).
+- The enumeration itself (recovered 2026-07-02 from the audit-session
+  transcript — it was never persisted, and 4b-3 cannot run "scenarios by
+  number" without it):
+   1. Bootstrap admin exists with is_admin=true + audit row on startup (per adapter). *(invisible)*
+   2. Bootstrap sources loaded idempotently; vocabulary seeded. *(invisible)*
+   3. Invite code issued by admin (/invite), then unknown contact consumes it → user row created (probation). **(relevant)**
+   4. Un-invited / un-registered contact tries to DM → rejected (no access). **(relevant)**
+   5. Expired / revoked / replayed(USED) invite code → rejected. *(invisible; Clock ITs)*
+   6. Probation slow-start: write command/chat blocked; read-only allowed; /vouch graduates; expiry auto-promotes. *(invisible)*
+   7. Group: first @mention creates pending group; admin /approve-group; first eligible mention auto-promotes group admin. **(relevant)**
+   8. Group interaction before DM-registration → rejected (D47 ordering). *(invisible)*
+   9. Ban: /ban blocks at intake (fixed reply); /unban restores. *(invisible)*
+   10. Digest / summary: /summary returns deterministic post set + prose; periodic group digest. **(relevant)**
+   11. Asset command: /zcash returns snapshot with source + bare URL. **(relevant)**
+   12. Chat mode: non-slash message reaches the chat agent and gets a response. **(relevant)**
+   13. Embedding / RAG retrieval: chat query retrieves the relevant post. *(invisible; live 4b-4 asserts retrieval separately)*
+   14. Cross-adapter identity isolation: same contact_id on signal vs simplex are distinct users. *(invisible)*
+   15. Full first-time-user happy path end-to-end. **(relevant)**
 - [x] Fill logic gaps as ITs → **none needed** (no gaps).
 - **⇒ The live-run scenario set = the 7 transport-relevant ones, and only
   because they're currently proven against *InMemory*, not real transports.**
