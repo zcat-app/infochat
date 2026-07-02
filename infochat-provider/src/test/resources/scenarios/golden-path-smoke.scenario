@@ -1,0 +1,28 @@
+# M1-539 golden-path smoke scenario (live-e2e Phase 4a).
+#
+# Bootstrap-admin-only and DM-centric: it needs no DB seeding and no dynamic
+# value chaining, so the same steps run green on a fresh inmemory deployment in
+# CI and — via a later ConversationBackend binding — on a real SimpleX transport
+# in Phase 4b. It proves the RUNNER (ordered send->expect steps, both match
+# kinds, per-step latency capture), not lifecycle correctness, which stays in
+# GoldenPathJourneyIT and the per-scenario ITs (D-live-5).
+#
+# Grammar (see Scenario.java):
+#   send dm    <contactId> <text...>
+#   send group <groupId> <senderContactId> <text...>
+#   expect substring <timeoutMs> <literal text...>
+#   expect regex     <timeoutMs> <java regex...>
+#
+# The admin contact id below must match infochat.adapters.inmemory.admin in the
+# running deployment / test profile.
+
+# 1. The bootstrap admin lists commands -> proves DM send + reply on the sent
+#    channel, matched by a stable header substring.
+send dm scn-smoke-admin /help
+expect substring 5000 Available commands:
+
+# 2. The admin mints a targeted single-use invite -> proves a second ordered step
+#    matched by regex against the minted code (a UUID), a token that cannot rot
+#    the way localized reply prose can.
+send dm scn-smoke-admin /invite create --adapter inmemory --contact scn-smoke-invitee
+expect regex 5000 [0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}
