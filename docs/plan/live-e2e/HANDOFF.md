@@ -172,6 +172,18 @@ and no `SignalConversationBackend` yet** — that binding is the Phase 4b/5 boun
   Host was zero-swap (the 06-28 incident condition); now 8 GiB swapfile +
   swappiness=10, fstab-persisted. NEXT after move 1 = Phase 4b move 2 (provision the
   2 client identities: admin + user).
+- **FOLLOW-UP (surface swap to operators) — verified gap, not yet done.** Swap is a
+  *required* prod step per `docs/design/07-deployment.md` §7.8.7 (M1-512), but it is
+  only in the design tier: it is **absent from `SETUP_GUIDE.md` / `ADMIN_GUIDE.md` /
+  `README.md`** and **not checked by `prod/scripts/0-doctor.sh`** (which already
+  checks RAM/disk/ports). That is why THIS host passed setup and still went live with
+  zero swap — the exact 06-28 incident condition. Two concrete fixes, both cheap:
+  (1) add a swap recommendation to `SETUP_GUIDE.md` §"What kind of computer you need"
+  (it already covers disk + free memory — natural home) and a pointer in
+  `ADMIN_GUIDE.md`; (2) add a swap check to `0-doctor.sh` alongside the RAM/disk
+  checks so a zero-swap host WARNs at preflight with the §7.8.7 remedy. Fix (2) is the
+  one that would have actually caught this. Pure-doc for (1) → `process:` commit;
+  (2) touches a wizard script → real change (its own commit, doctor is shell only).
 - Drafted then **retracted** an M1-542 "SimpleXConversationBackend + fake-backed IT"
   ticket. Falsification (the fake would pass green on the two behaviours most likely
   to diverge — contact handshake + async-per-connection; fakes already hid
