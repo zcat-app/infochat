@@ -222,7 +222,9 @@ host-dependent live drive — needs real transports + real LLM, cannot be
       smoke run.
 
 ### Phase 5 — Signal delta verification (smaller)
-- [ ] Register bot + 1–2 test Signal accounts (manual; preserved dirs).
+- [ ] Register bot + 1 admin Signal account (manual; preserved dirs). Only 2
+      numbers available (D-live-8 context) → bot + admin, no user client; scope
+      is bot↔admin round-trip + ACI bootstrap + §6, not multi-party groups.
 - [ ] Prove comms round-trip + ACI-admin bootstrap.
 - [ ] Walk the §6 differences checklist.
 
@@ -327,6 +329,26 @@ Behavioural — the real "hallucinated-reality" risk surface (verify live):
 - **D-live-7:** Keep the SimpleX admin-token configured across resets so it
   re-arms each run (opposite of prod hygiene, correct for the test loop).
   (2026-07-01)
+- **D-live-8:** Deterministic scheduler behaviour in the live run uses **seeded
+  timestamps + config-aimed windows, NOT a profile-gated live clock.** The digest
+  is the only wall-clock-of-day job, and `DigestScheduler` is a poll-and-decide
+  loop: `@Scheduled(every=tick-interval)` → `tickAt(clock.instant())` fires a
+  group's slot when `now ∈ [windowStart, windowEnd)`, where the window is built
+  from the `morning-slot-hour` / `evening-slot-hour` / `window-width-minutes`
+  config in the group tz (idempotency via `summaryCacheRepository
+  .existsByGroupAndSlot`). A live digest is therefore fired by aiming those config
+  properties at the current wall-clock moment (slot-hour = current hour, widen the
+  window, shorten tick-interval) and seeding the corpus — no clock movement. Firing
+  *logic* is already deterministically IT-tested via the package-private
+  `tickAt(Instant)` + injected test clock; multi-slot/multi-day cadence
+  (skip-not-catch-up, already-fired, approval/pause carve-outs) is business logic
+  already IT-covered (Phase 1, D-live-5) and out of live-run scope. A movable prod
+  clock is rejected because time gates security decisions (ban/probation/invite)
+  and a prod-reachable clock override weakens the "prod Clock = hardcoded
+  `systemUTC`, unspoofable" property (§7) for test convenience the run does not
+  need. Residual timezone/DST edge cases in the slot math, if ever a concern, get a
+  pure unit test over `processSlot(Instant, ZoneId)` — not a live clock. (User +
+  Claude, 2026-07-02)
 
 ## 9. Open questions for the human
 
@@ -335,6 +357,12 @@ Behavioural — the real "hallucinated-reality" risk surface (verify live):
       StreamSource (WS relays), a different ingest path than RSS Fetchers — good
       cross-path coverage; the live fetch will exercise relay connect + Nostr
       signature/kind-filter + cross-relay dedup, not just HTTP fetch.
-- [ ] Signal: how many test numbers can you register (bot + N clients)?
-- [ ] Do we need deterministic **scheduler-firing** tests (→ justifies a
-      profile-gated live clock), or is seeded-timestamp state enough?
+- [x] Signal: how many test numbers can you register (bot + N clients)? —
+      **2 numbers available: 1 bot + 1 admin client, no spare user client**
+      (User, 2026-07-02). ⇒ Signal scope = bot↔admin round-trip + ACI-admin
+      bootstrap + §6 differences checklist; multi-party Signal group scenarios
+      stay InMemory/IT-only, SimpleX carries the full multi-party lifecycle.
+- [x] Do we need deterministic **scheduler-firing** tests (→ justifies a
+      profile-gated live clock), or is seeded-timestamp state enough? —
+      **seeded-timestamp state + config-aimed digest windows are enough; no live
+      clock.** Full rationale in **D-live-8** (§8). (User + Claude, 2026-07-02)
