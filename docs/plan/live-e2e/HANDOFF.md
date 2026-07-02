@@ -179,8 +179,9 @@ and no `SignalConversationBackend` yet** — that binding is the Phase 4b/5 boun
   checks RAM/disk/ports). That is why THIS host passed setup and still went live with
   zero swap — the exact 06-28 incident condition. Two concrete fixes, both cheap:
   (1) add a swap recommendation to `SETUP_GUIDE.md` §"What kind of computer you need"
-  (it already covers disk + free memory — natural home) and a pointer in
-  `ADMIN_GUIDE.md`; (2) add a swap check to `0-doctor.sh` alongside the RAM/disk
+  (it already covers disk + free memory — natural home). NOT `ADMIN_GUIDE.md`: swap
+  is host provisioning, a setup-role concern; admin is a runtime/user-management role
+  (User, 2026-07-02). (2) add a swap check to `0-doctor.sh` alongside the RAM/disk
   checks so a zero-swap host WARNs at preflight with the §7.8.7 remedy. Fix (2) is the
   one that would have actually caught this. Pure-doc for (1) → `process:` commit;
   (2) touches a wizard script → real change (its own commit, doctor is shell only).
