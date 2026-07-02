@@ -1,7 +1,7 @@
 ---
 id: M1-543
 title: Fix SimpleX first-inbound crash at SimpleXAdminClaim create
-status: pending
+status: done
 created: 2026-07-02
 last_updated: 2026-07-02
 blocked_by:
@@ -33,16 +33,29 @@ acceptance:
   - mvn verify is green.
 test_plan:
   adds:
-    - a @QuarkusTest reproducing the live-only SimpleXAdminClaim ARC-create
-      crash (red before the fix, green after; class name bound at
-      implementation)
+    - InboundDispatchForeignContextClassLoaderTest (@QuarkusTest reproducing
+      the live-only SimpleXAdminClaim ARC-create crash — red before the fix,
+      green after)
   preserves:
     - all tests currently green on main
 spec_refs:
   - docs/spec/security.md §Per-adapter admin threat profile
 decision_refs:
   - D50
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 227
+      removed: 15
 revisions:
   - date: 2026-07-02
     reason: clarity-fail rework (bounded self-refine via /m1-tick run)
@@ -82,7 +95,28 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-07-02
+    verdict: CLEAN
+    base: e097c0221d41ab1117bdb68dc55891fa16516113
+    head: working tree (branch m1/M1-543-simplex-inbound-claim-create-crash, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-543-2026-07-02.md
+    out_of_model_count: 1
+    note: |
+      Pre-commit audit of the TCCL-pin fix: CLEAN. The change is
+      availability-restoring (closes the F-live-1 silent-drop), alters no
+      D50/D44 gate, and the finally-restore preserves the adapter's D37
+      exception path. One out-of-model advisory: nothing structural forces a
+      FUTURE MessagingAdapter callback setter to be wired through the
+      registry pin — awareness note for SPI evolution, not exploitable here.
+clarity_check:
+  date: 2026-07-02
+  verdict: WARN
+  warnings:
+    - "COMPLEXITY-RISK-CALIBRATED: consider bumping risk to high given the
+      ticket operates inside the D50 admin-claim-token bootstrap path and
+      lists security invariants that must not regress. Not a blocker."
+  blockers: []
 ---
 
 # M1-543: Fix SimpleX first-inbound crash at SimpleXAdminClaim create

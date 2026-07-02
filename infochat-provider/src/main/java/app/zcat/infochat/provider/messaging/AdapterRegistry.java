@@ -366,13 +366,28 @@ public class AdapterRegistry {
         for (MessagingAdapter adapter : activating) {
             inboundRouter.setReplyTarget(adapter);
             String adapterName = adapter.name();
-            adapter.setInboundHandler(msg -> inboundRouter.onMessage(msg, adapterName));
-            adapter.setMembershipEventHandler(event -> dispatchMembershipEvent(event, adapterName));
+            // Every callback is pinned to the application classloader: adapter
+            // transports invoke these lambdas on threads they own (SimpleX's
+            // WS inbound-dispatch virtual thread is created lazily by a
+            // JDK-internal HttpClient thread), whose context classloader is
+            // NOT the application's. TCCL-keyed lookups in provider code —
+            // most notably the MicroProfile Config resolution that
+            // @ConfigProperty field injection performs at lazy ARC bean
+            // creation — then fail with SmallRye's no-config-for-classloader
+            // IllegalArgumentException, and the adapter's D37 catch drops the
+            // message (live finding F-live-1 / M1-543). These wiring lambdas
+            // are the single provider-side boundary where adapter threads
+            // enter provider code, so the pin lives here: one place, every
+            // adapter, every callback.
+            adapter.setInboundHandler(msg -> runWithApplicationClassLoader(
+                    () -> inboundRouter.onMessage(msg, adapterName)));
+            adapter.setMembershipEventHandler(event -> runWithApplicationClassLoader(
+                    () -> dispatchMembershipEvent(event, adapterName)));
             // The invitation lambda captures the adapter itself (not just its
             // name): Provider's gate calls joinGroup back on the inviting
             // adapter, so the source must reach dispatchGroupInvitation (M1-515).
-            adapter.setGroupInvitationHandler(
-                    invitation -> dispatchGroupInvitation(invitation, adapterName, adapter));
+            adapter.setGroupInvitationHandler(invitation -> runWithApplicationClassLoader(
+                    () -> dispatchGroupInvitation(invitation, adapterName, adapter)));
             // §6.12 observability: per-adapter gauges + the adapter's
             // transport-internal emission binding (AdapterMetrics javadoc).
             adapterMetrics.bindAdapter(adapter);
@@ -424,6 +439,31 @@ public class AdapterRegistry {
             groupInvitationHandler.handle(invitation, adapterName, source);
         } catch (MessagingException | RuntimeException e) {
             SafeLog.error(log, "group invitation dispatch failed adapter=" + adapterName, e);
+        }
+    }
+
+    /**
+     * Runs {@code work} with the application classloader as the thread
+     * context classloader, restoring the caller's afterwards. See the wiring
+     * loop in {@link #start()} for WHY every adapter callback is wrapped
+     * (F-live-1 / M1-543): the adapter-owned callback thread's context
+     * classloader has no registered MicroProfile {@code Config}, so any lazy
+     * ARC bean creation with a {@code @ConfigProperty} injection point
+     * crashes on it. {@code AdapterRegistry.class.getClassLoader()} IS the
+     * application classloader in every deployment shape (the fast-jar runner
+     * classloader in prod, the Quarkus classloader under {@code @QuarkusTest}),
+     * so the pinned loader is always the one the app's config is registered
+     * for. The restore is unconditional: the thread belongs to the adapter,
+     * which may rely on its own loader after the callback returns.
+     */
+    private static void runWithApplicationClassLoader(Runnable work) {
+        Thread thread = Thread.currentThread();
+        ClassLoader callerClassLoader = thread.getContextClassLoader();
+        thread.setContextClassLoader(AdapterRegistry.class.getClassLoader());
+        try {
+            work.run();
+        } finally {
+            thread.setContextClassLoader(callerClassLoader);
         }
     }
 
