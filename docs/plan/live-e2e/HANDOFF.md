@@ -71,7 +71,7 @@ has run against a real transport yet** — the first real live work is Phase 4b.
 | 2 — Load-bearing assumptions | admin-token re-arm, SSRF strict, FK trap, caps | ✅ DONE |
 | 3 — Reset & data harness | `prod/live-reset.sh`, `live-seed.sh`, `live-inject-adversarial.sh` | ✅ DONE (M1-536/537/538) |
 | **4a — scenario runner substrate** | `Scenario`, `ConversationBackend` SPI, `ScenarioRunner`, InMemory backend, `ScenarioRunnerIT` | ✅ DONE (M1-539) |
-| **4b — SimpleX live drive** | real simplex-chat drive + LLM latency + embedding retrieval | ❌ NOT STARTED |
+| **4b — SimpleX live drive** | real simplex-chat drive + LLM latency + embedding retrieval | 🔶 IN PROGRESS — stack up, clients provisioned, admin↔bot handshake done, channel proven; first inbound surfaced F-live-1 |
 | **5 — Signal delta** | round-trip + ACI bootstrap + §6 differences | ❌ NOT STARTED |
 | 6 — (optional) `/testcase` skill | wrap the runner once 2–3 scenarios pass | ❌ not started |
 
@@ -102,6 +102,43 @@ and no `SignalConversationBackend` yet** — that binding is the Phase 4b/5 boun
        (ask a topic covered by exactly one seeded post → assert it's retrieved);
        readiness/liveness, per-adapter metrics, LLM-down = degraded.
 5. [ ] **5** — Signal delta (bot + 1 admin; see constraint below).
+
+## Live findings (Phase 4b — real transport)
+
+### F-live-1 (HIGH) — first real inbound DM crashes the Provider inbound handler
+On the FIRST DM ever sent to the bot over real simplex-chat, `InboundRouter.onMessage`
+(InboundRouter.java:504 → `SimpleXAdminClaim.claim(...)`) throws a bare
+`java.lang.RuntimeException` **at ARC bean instantiation** (`SimpleXAdminClaim_Bean.create`),
+BEFORE `claim()` runs. `SimpleXAdapter.onInbound` catches it and **silently drops the
+message per D37** — the sender gets no reply. **Deterministic**: reproduced on every
+inbound (18:42:09 and 18:49:12); ARC re-attempts create each inbound.
+- **Live-only** (the D-live-9 thesis landing): `SimpleXAdminClaimTokenTest` is a
+  `@QuarkusTest` that injects `InboundRouter`, so ARC creates the SAME bean the SAME
+  way — and that suite is green on main. Green CI, live crash.
+- **Falsified hypotheses** (don't re-chase): (a) config-expansion of
+  `@ConfigProperty infochat.adapters.simplex.admin-token` — env `INFOCHAT_SIMPLEX_ADMIN_TOKEN`
+  IS present in the container (len 8) and passed through in docker-compose.yml:189, and
+  the token is 8 clean letters (no `$`/`{`/`}`/`:` metachars), so `${...}` expansion
+  can't fail; (b) injected beans — `RegisteredContactSet` is `@Startup` and boot
+  succeeded (so it was created OK at boot), `AuditLogWriter`/`DataSource` are fine (DB
+  health UP). By elimination the create-time work that throws is not any of these →
+  the true cause is masked (see F-live-2).
+- **Repro**: `prod/runtime/simplex-clients/bin/simplex-chat -d prod/runtime/simplex-clients/admin/simplex_v1 -y -t 6 -e "@Admin-Reno <text>"` then
+  `docker logs --since 90s infochat-infochat-provider-1 | grep 'inbound handler threw'`.
+
+### F-live-2 (MEDIUM, diagnosability) — D37 stack logger drops the cause chain
+`SimpleXAdapter.stackWithoutMessage()` renders only the top throwable's class + stack
+frames, NOT `getCause()` — so the real `Caused by:` of F-live-1 is absent from the log,
+leaving a bare `RuntimeException` with no reason. Cause class names + `StackTraceElement`s
+carry no user content (same D37 argument that already justifies logging the top frames),
+so the cause chain can be appended safely. Fixing this REVEALS F-live-1's root cause and
+every future inbound-handler bug. This is the natural first CI ticket.
+
+**Recommended fix path (CI tickets, not host work):** (1) fix `stackWithoutMessage` to
+append the content-free cause chain (reveals the root cause; standalone diagnosability
+win). (2) With the cause visible, reproduce F-live-1 in a `@QuarkusTest` that matches the
+live wiring (the current test is green, so the repro must capture whatever differs) and
+fix it + regression test. Both are green-CI-verifiable, so they go through `/m1-tick`.
 
 ## Environment facts / constraints (host-side)
 
@@ -168,6 +205,23 @@ and no `SignalConversationBackend` yet** — that binding is the Phase 4b/5 boun
   advancing). Provider listens on **127.0.0.1:8081 inside the container** (mgmt port,
   not host-published) — reach health via `docker exec … curl 127.0.0.1:8081/...`.
   Fresh bot contact link surfaced by 6b (copy from the run; not persisted).
+- **Phase 4b move 2 DONE — client identities + handshake.** Extracted the exact baked
+  simplex-chat (v6.5.4.1) from the running Provider image; it runs natively on the host
+  (client↔bot traffic is via SMP relays, so no docker-network coupling needed). Created
+  two client identities with the native binary — `LiveAdmin` and `LiveUser` — under
+  `prod/runtime/simplex-clients/{admin,user}/simplex_v1_*.db` (infochat-owned, not
+  root). Connected the admin client to the running bot via its `/ad` link; the bot
+  auto-accepted (bot-side handshake frames `newChatItems-without-items` /
+  `unknown-resp-type` seen in the Provider log at connect time — the exact
+  contact-lifecycle events a fake can't produce, D-live-9). Channel proven: admin DM →
+  bot **intake reached** the Provider.
+- **First real inbound surfaced F-live-1 + F-live-2** (see Live findings above): the
+  inbound handler crashes at `SimpleXAdminClaim` bean creation and the DM is silently
+  dropped; the cause is masked by the D37 stack logger dropping the cause chain. This is
+  the live run paying off in its first five minutes — a green-CI, live-only crash.
+  NEXT: user decides — pursue the fix now (CI ticket for F-live-2 then F-live-1) or keep
+  driving more live DMs first to batch findings. The reply-round-trip (4b-2 done-def) is
+  BLOCKED on F-live-1 (bot can't reply to a DM it drops).
 - **Swap enabled + constrained-host specs confirmed** (see Environment facts above).
   Host was zero-swap (the 06-28 incident condition); now 8 GiB swapfile +
   swappiness=10, fstab-persisted. NEXT after move 1 = Phase 4b move 2 (provision the
