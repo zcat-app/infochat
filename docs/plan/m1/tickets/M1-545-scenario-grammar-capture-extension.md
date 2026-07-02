@@ -41,7 +41,7 @@ test_plan:
   preserves:
     - all tests currently green on main, including ScenarioRunnerIT unchanged
 spec_refs:
-  - docs/spec/verification.md §Test tiers
+  - docs/spec/verification.md §Test layers
 decision_refs:
   - D-live-5
 reviews: {}
@@ -50,6 +50,25 @@ aborted_attempts: []
 reopens: []
 redteam_findings: []
 clarity_check: {}
+revisions:
+  - date: 2026-07-02
+    reason: clarity-fail rework (bounded self-refine via /m1-tick run)
+    snapshot:
+      spec_refs:
+        - "docs/spec/verification.md §Test tiers"
+      clarity_check:
+        date: 2026-07-02
+        verdict: FAIL
+        blockers:
+          - "spec_refs entry `docs/spec/verification.md §Test tiers` does not
+            resolve to any heading in that file; intended target is the
+            existing `## Test layers` heading (verification.md line 12)."
+        warnings:
+          - "SECURITY-FLAG-CONSISTENT: security_relevant false but the new
+            test drives the invite mint/consume lifecycle end to end
+            (test-only scope makes false defensible)."
+          - "FORWARD-REFERENCE-CHECK: out_of_scope references M1-546 which
+            does not exist on disk yet (expected forward boundary)."
 ---
 
 # M1-545: Scenario grammar capture/substitution extension
