@@ -1,7 +1,7 @@
 ---
 id: M1-542
 title: Include cause chain in D37 inbound-handler stack log
-status: pending
+status: done
 created: 2026-07-02
 last_updated: 2026-07-02
 blocked_by: []
@@ -35,6 +35,11 @@ acceptance:
     both classes still passes (top-level class+frames present, message absent).
   - A self-referential / cyclic cause chain terminates (no infinite loop);
     rendering is bounded.
+  - A cause chain deeper than the cap (5 levels) is depth-bounded: at most 5
+    levels render (4 "Caused by:" markers) followed by an explicit truncation
+    marker, and no level's message leaks — pinned by
+    stackRenderingDepthCapsCauseChain in both test classes. (redteam-finding
+    rework: bounds log size to the spec's SafeLog depth-5 precedent.)
   - mvn verify is green.
 test_plan:
   adds: []
@@ -47,12 +52,82 @@ spec_refs:
   - docs/spec/security.md §Secrets handling
 decision_refs:
   - D37
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 164
+      removed: 18
+  - round: 2
+    date: 2026-07-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 300
+      removed: 20
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-07-02
+    category: DOS
+    severity: low
+    promise: |
+      spec §"User content in exceptions": SafeLog truncates the cause chain to
+      class names, depth-capped at 5 (bounds exception-log size).
+    gap: |
+      The rewritten stackWithoutMessage walks the FULL cause chain with no depth
+      cap and emits every level's full stack frames. Cycle guard prevents infinite
+      loops but not unbounded depth on an acyclic chain.
+    repro: |
+      A deep-but-acyclic wrapped-exception chain renders every level's frames into
+      one log line, unbounded by the spec's depth-5 cap. Not attacker-driven
+      (nesting depth is internal call structure, not inbound content); no user
+      content leaks (frames are content-free, suppression proven by tests). A
+      defense-in-depth / resilience gap, not a reachable exploit.
+    suggested_fix_class: other
+redteam_audits:
+  - date: 2026-07-02
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-542-inbound-stacklog-cause-chain
+    verdict_file: docs/plan/m1/redteam/M1-542-2026-07-02.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      1 low DOS/defense-in-depth finding (unbounded cause-chain depth). Not a
+      content leak and not a strict spec violation (depth-5 binds SafeLog, not the
+      full-frame localization logger). User chose refine; remediated in-branch with
+      a depth cap (5) + truncation marker. Re-audited CLEAN (entry below).
+  - date: 2026-07-02
+    verdict: CLEAN
+    base: main
+    head: m1/M1-542-inbound-stacklog-cause-chain
+    verdict_file: docs/plan/m1/redteam/M1-542-2026-07-02-r2.md
+    out_of_model_count: 1
+    note: |
+      Post-remediation re-audit of the round-2 tip. CLEAN — the depth cap closed
+      the round-1 low finding; remediation is purely bounding (no new content path).
+clarity_check:
+  date: 2026-07-02
+  verdict: WARN
+  warnings:
+    - "Acceptance item 4 (cyclic cause chain terminates) does not name a test method/class verifying the cycle property; add a named method or fold it into item 1's test. Resolved in implementation via a named stackRenderingTerminatesOnCyclicCause test in both classes."
+  blockers: []
 ---
 
 # M1-542: Include cause chain in D37 inbound-handler stack log
@@ -92,6 +167,11 @@ every future inbound-handler failure.
   message absent).
 - A cyclic cause chain (a throwable that is its own cause, or an A→B→A cycle)
   terminates and renders a bounded string — no `StackOverflowError`/infinite loop.
+- A cause chain deeper than 5 levels is truncated: at most 5 levels render (4
+  "Caused by:" markers), then an explicit truncation marker; no level's message
+  leaks. Pinned by `stackRenderingDepthCapsCauseChain` in both test classes.
+  (Added on redteam-finding rework — the low DOS finding that unbounded depth
+  could bloat a log line; bounds it to the spec's SafeLog depth-5 precedent.)
 - `mvn verify` is green.
 
 ## Out-of-scope

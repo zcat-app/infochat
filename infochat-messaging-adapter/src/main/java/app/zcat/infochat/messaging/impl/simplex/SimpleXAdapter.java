@@ -23,10 +23,13 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -788,18 +791,52 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     /**
+     * Cause-chain render depth cap, mirroring the spec's SafeLog bound
+     * (security.md §"User content in exceptions", depth 5): stops an
+     * acyclic-but-deep chain from bloating a single log line (M1-542
+     * redteam finding).
+     */
+    private static final int MAX_CAUSE_CHAIN_DEPTH = 5;
+
+    /**
      * Render a throwable's class name and stack frames (class/method/file/
      * line) WITHOUT its message — {@link Throwable#getMessage()} /
      * {@code toString()} may carry inbound chat-mode body bytes (D37), but
      * {@link StackTraceElement} and class names never do. Lets an inbound
      * handler bug be localized from the log without leaking user content
-     * (M1-358). Package-private: the D37 "stack yes, message no" property
-     * is pinned directly in a unit test.
+     * (M1-358). The cause chain is walked and rendered the same way
+     * ("Caused by:" per level), so a wrapped failure whose real reason is a
+     * cause — not the top throwable — is diagnosable (M1-542 / live finding
+     * F-live-2); cause class names + frames are equally content-free, and
+     * every level's message stays suppressed. The walk is bounded to
+     * {@link #MAX_CAUSE_CHAIN_DEPTH} levels (with a truncation marker) so a
+     * deep acyclic chain cannot bloat the log line. Package-private: the D37
+     * "stack yes, message no" property is pinned directly in a unit test.
      */
     static String stackWithoutMessage(Throwable t) {
-        StringBuilder sb = new StringBuilder(t.getClass().getName());
-        for (StackTraceElement frame : t.getStackTrace()) {
-            sb.append("\n\tat ").append(frame);
+        StringBuilder sb = new StringBuilder();
+        // Identity-tracked so a self-referential or cyclic cause chain
+        // terminates instead of looping forever, exactly as
+        // Throwable.printStackTrace guards its own cause walk; the depth cap
+        // additionally bounds an acyclic-but-deep chain (M1-542).
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        Throwable current = t;
+        int depth = 0;
+        while (current != null && seen.add(current)) {
+            if (depth == MAX_CAUSE_CHAIN_DEPTH) {
+                sb.append("\n... (cause chain truncated at depth ")
+                        .append(MAX_CAUSE_CHAIN_DEPTH).append(')');
+                break;
+            }
+            if (current != t) {
+                sb.append("\nCaused by: ");
+            }
+            sb.append(current.getClass().getName());
+            for (StackTraceElement frame : current.getStackTrace()) {
+                sb.append("\n\tat ").append(frame);
+            }
+            current = current.getCause();
+            depth++;
         }
         return sb.toString();
     }
