@@ -13,18 +13,64 @@ Last updated: 2026-07-02 · Owner: ubuntu5 + Claude
 
 ## ▶ START HERE (fresh session — next step)
 
-**Next step = resume the original Phase 4b: present the admin token, then 4b-2
-(`SimpleXConversationBackend`).** Both live findings are FIXED and live-verified:
-F-live-2 by M1-542 (dfbb86ca), **F-live-1 by M1-543 (merged 8ed35718,
-2026-07-02)** — root cause was the SimpleX inbound-dispatch virtual thread's
-foreign context classloader crashing the MicroProfile Config lookup at lazy ARC
-creation of `SimpleXAdminClaim` (`@ConfigProperty` resolution is TCCL-keyed);
-fixed by pinning the application classloader around every adapter callback in
-`AdapterRegistry` (one boundary, every adapter, every callback). The ONE live
-round-trip is DONE: admin DM → bot replied `Access requires an invitation.`
-(claim → invite fall-through routing, message no longer dropped).
+**Next step = `/m1-tick run M1-545` (drafted, pending, clarity NOT yet run),
+then draft+run M1-546, then the live 4b-3 scenario run.** Phase 4b-3 is in
+progress; grounding, fixtures, and design are DONE (2026-07-02, this section):
 
-**Immediate next live actions:**
+- **The 15-scenario enumeration is now persisted** in `README.md` §Phase 1
+  (recovered from the audit transcript). Live set: S3 invite mint→consume,
+  S4 un-invited DM rejected, S7 group pending→approve→auto-promote,
+  S10 /summary + group digest, S11 /zcash, S12 chat mode, S15 full happy path.
+- **Host fixtures DONE:** LiveUser is now CONNECTED to the bot (bot appears as
+  contact "Admin-Reno" in BOTH client DBs — resolve by that display name).
+  Bot address re-queried via one-shot `/show_address` (provider stopped
+  briefly, then restarted; address in `.scratch/bot-address.txt`). LiveAdmin
+  is claimed bot admin. Stack UP and healthy.
+- **M1-545 (drafted, pending):** scenario grammar `capture <name> <regex>` +
+  `${name}` substitution in send text/addresses — S3/S15 need cross-step data
+  flow (invite code from a reply sent in a later step); the M1-539 grammar
+  cannot express it. CI-provable on InMemory (extend ScenarioRunnerIT with a
+  declarative invite mint→consume flow). Superset grammar; existing scenarios
+  unchanged.
+- **M1-546 (to draft next):** live backend v2, all test-scope —
+  (a) rework `LiveSimpleXClient` to a SINGLE raw java.net.http WebSocket
+  connection whose every frame is fed through the production
+  `SimpleXMessageCodec.decode()` (static, package-private — accessible from
+  the bridge's package) for everything the codec models (Inbound,
+  GroupCandidate, SendAck/corrId, CommandError); drop the
+  SimpleXWebSocketClient wrapper (its pending-futures complete ONLY on send
+  acks, and async events go to one connection only — the M1-544 side-socket
+  workaround does not scale to group/edit observation);
+  (b) harness-side parse of `chatItemUpdated` frames ONLY (the codec has no
+  case for it — bot-side never consumes edits; progress-notified replies
+  (/summary, chat, digest) finalize via item EDIT, so S10/S12/S15 are
+  unobservable without it — union it into awaitReply like
+  InMemoryConversationBackend#finalizedBodies);
+  (c) GROUP binding in `SimpleXConversationBackend` (scenario group tokens →
+  per-client group ids resolved via a raw corrId `/groups` query; group send =
+  codec `encodeSendCommand(ScopeRef.Group)`);
+  (d) a harness-side MENTION envelope for group sends: the bot's mention
+  recognition is STRUCTURED-ONLY (D51: `mentions{}` memberId must byte-equal
+  botMemberId — SimpleXGroupHandler.java:70; plain-text "@Name" is silently
+  dropped). The adapter encoder has no mention support (bot never mentions),
+  so the harness composes it; exact wire shape is a LIVE-discovery item —
+  best-guess in CI, validate/fix on the host;
+  (e) the 7 live `.scenario` resources + a gated suite IT (same
+  `-Dinfochat.live.simplex=true` gate as LiveSimpleXRoundTripIT).
+- **Live-run notes for after M1-546:** group fixtures via raw corrId commands
+  from the harness connection (`/g`, invite bot from LiveAdmin — the M1-515
+  provider gate decides the join); scenario timeouts must be generous (llama
+  on 4 vCPU: chat/summary can take 60-120 s); S3 needs an UNREGISTERED user →
+  run `prod/live-reset.sh` first (control-plane reset; admin-token re-arms by
+  design D-live-7, re-claim then drive); /summary needs seeded READY corpus
+  (`prod/live-seed.sh`) + a subscription.
+
+
+**Prior context (all DONE):** F-live-2 fixed by M1-542 (dfbb86ca); F-live-1
+fixed by M1-543 (8ed35718 — dispatch-thread TCCL vs `@ConfigProperty` at lazy
+ARC create; `AdapterRegistry` classloader pin) and live-verified (bot replies).
+
+**Completed live actions (kept for reference):**
 1. ~~Present the admin token~~ **DONE (2026-07-02):** LiveAdmin claimed
    bootstrap admin via the D50 token — DB verified (`is_admin=t`, `vouched`,
    `probation_until=NULL`). Operator hygiene per security.md §Per-adapter
@@ -41,14 +87,9 @@ round-trip is DONE: admin DM → bot replied `Access requires an invitation.`
    Host run: `mvn -pl infochat-provider test -Dtest=LiveSimpleXRoundTripIT
    -Dinfochat.live.simplex=true` (client WS port 5226; needs stack UP and no
    CLI one-shot holding the admin DB).
-3. **NEXT = 4b-3:** run the 7 transport-relevant scenarios (3,4,7,10,11,12,15)
-   over real SimpleX via the runner. Needs: GROUP binding in the backend
-   (currently DM-only, fails loudly), LiveUser joined to the bot (only
-   LiveAdmin is connected so far), and per-scenario user registration (invite
-   codes minted by the LiveAdmin admin). Also 4b-4 gotcha to solve when it
-   bites: progress-notified replies (e.g. /summary) finalize via item EDIT,
-   which the codec does not surface as a new inbound — the backend observes
-   plain replies only.
+3. 4b-3 IN PROGRESS — see §START HERE at the top (M1-545 pending, M1-546 to
+   draft, LiveUser now joined; the grammar-gap / GROUP / item-edit / mention
+   analysis lives there).
 
 **Repro command (stack is UP):**
 `prod/runtime/simplex-clients/bin/simplex-chat -d prod/runtime/simplex-clients/admin/simplex_v1 -y -t 6 -e "@Admin-Reno <text>"`
@@ -254,6 +295,18 @@ likely needs a large RAW backlog + restart. Un-ticketed; investigate before
 relying on unattended collector restarts.
 
 ## Running log
+
+### 2026-07-02 (4b-3 session)
+- **4b-3 grounding + fixtures done; substrate split into M1-545 + M1-546.**
+  Recovered and persisted the 15-scenario enumeration (README §Phase 1) from
+  the audit transcript — it had never been written down. Joined LiveUser to
+  the bot (one-shot `/show_address` with provider briefly stopped; `/c <link>`
+  from the user client; bot auto-accepted — contact "Admin-Reno" in both
+  client DBs). Identified and recorded the four substrate gaps for the live
+  scenario set (grammar capture, single-connection raw-WS client rework,
+  chatItemUpdated observation, structured-mention envelope) — details in
+  §START HERE. M1-545 drafted (pending, clarity not yet run); session ended
+  for a context clear before implementation.
 
 ### 2026-07-02 (later)
 - **Admin token presented — LiveAdmin is bot admin** (D50 claim, DB-verified
