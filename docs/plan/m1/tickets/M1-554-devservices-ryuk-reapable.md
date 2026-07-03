@@ -1,9 +1,34 @@
 ---
 id: M1-554
 title: Dev Services containers Ryuk-reaped — repo-tracked reuse=false, drop dead pom flag
-status: pending
+status: deferred
+deferred_on: M1-555
+deferred_reason: blocked-on-new-ticket
 created: 2026-07-03
 last_updated: 2026-07-03
+clarity_check:
+  date: 2026-07-03
+  verdict: PASS
+  warnings: []
+escalations:
+  - date: 2026-07-03
+    reason: loop
+    reviewer_verdict_excerpt: |
+      N/A — pre-review escalation. Second consecutive full-verify failure on
+      the same root cause: NostrStreamSourceTest.stopDrainsAndClosesConnections:161
+      "stop() flushed every buffered event" (attempt 2: expected 3 got 2;
+      attempt 3: expected 3 got 1). Pre-existing drain race in a unit test
+      with no Dev Services involvement; the M1-554 diff is config/comment-only
+      and passed this test on attempt 1 (which flaked on Stage1WatchdogIT
+      duration 101ms vs 100ms cap instead). Host under load (production
+      compose stack incl. two llama.cpp containers; load avg ~4.2).
+      Ryuk-reap proof succeeded on all three runs: zero
+      io.quarkus.devservice.launch-mode=TEST containers after each run with
+      ~/.testcontainers.properties reuse.enable=true (restored to false).
+      Falsification 2026-07-03: the same test failed 2 of 4 module-only
+      runs on UNMODIFIED main (same assertion, expected 3 got 2) while
+      infochat-llamacpp-1 ran at ~767% CPU on the 4-core host — the flake
+      is experimentally confirmed pre-existing and diff-independent.
 blocked_by: []
 files_budget: 5
 files_scope:

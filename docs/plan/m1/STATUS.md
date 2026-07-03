@@ -15,8 +15,8 @@
 | in-review | 0 |
 | escalated | 0 |
 | done | 575 |
-| deferred | 11 |
-| **total** | **588** |
+| deferred | 12 |
+| **total** | **589** |
 
 ---
 
@@ -25,7 +25,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-552 — Chat system prompt gains a max-tokens-derived brevity hint (complexity: low, risk: low)
-- M1-554 — Dev Services containers Ryuk-reaped — repo-tracked reuse=false, drop dead pom flag (complexity: low, risk: low)
+- M1-555 — NostrStreamSourceTest drain race: await arrival before stop (complexity: low, risk: low)
 
 ---
 
@@ -76,9 +76,10 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 ## Deferred
 
-### blocked-on-new-ticket (2)
+### blocked-on-new-ticket (3)
 - M1-505 → M1-506
 - M1-551 → M1-553
+- M1-554 → M1-555
 
 ### decomposed (5)
 - M1-034 → M1-034a
@@ -760,5 +761,6 @@ M1-550 (done)
 M1-552 (pending) ← runnable
 M1-553 (done)
   └── M1-551 (deferred)
-M1-554 (pending) ← runnable
+M1-555 (pending) ← runnable
+  └── M1-554 (deferred)
 ```
