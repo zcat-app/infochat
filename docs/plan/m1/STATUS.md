@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 569 |
 | deferred | 10 |
-| **total** | **579** |
+| **total** | **580** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-546 — SimpleX live backend v2 (Phase 4b-3 substrate) (complexity: high, risk: low)
 
 ---
 
@@ -750,4 +750,5 @@ M1-542 (done)
   └── M1-543 (done)
         └── M1-544 (done)
               └── M1-545 (done)
+                    └── M1-546 (pending) ← runnable
 ```
