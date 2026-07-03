@@ -1,9 +1,9 @@
 ---
 id: M1-545
 title: Scenario grammar capture/substitution extension
-status: pending
+status: done
 created: 2026-07-02
-last_updated: 2026-07-02
+last_updated: 2026-07-03
 blocked_by:
   - M1-544
 files_budget: 5
@@ -44,12 +44,35 @@ spec_refs:
   - docs/spec/verification.md §Test layers
 decision_refs:
   - D-live-5
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-03
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 385
+      removed: 15
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-02
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: security_relevant false while the new
+      mandated test drives the invite mint/consume lifecycle end-to-end;
+      defensible given test-only scope (no production invite-code logic
+      touched) but confirm deliberately."
+    - "FORWARD-REFERENCE-CHECK: out_of_scope references M1-546 which does
+      not exist on disk yet (documented forward boundary, not an
+      oversight)."
 revisions:
   - date: 2026-07-02
     reason: clarity-fail rework (bounded self-refine via /m1-tick run)

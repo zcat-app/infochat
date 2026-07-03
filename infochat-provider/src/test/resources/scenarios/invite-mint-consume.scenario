@@ -1,0 +1,18 @@
+# M1-545 capture/substitution scenario (live-e2e Phase 4b-3 substrate).
+#
+# Proves cross-step data flow: the invite code minted in step 1's reply is
+# captured and consumed by a DIFFERENT, previously-unknown contact in step 2 —
+# the shape live scenarios S3/S15 need. The admin contact id must match
+# infochat.adapters.inmemory.admin in the running deployment / test profile;
+# the fresh contact id must stay under ScenarioCaptureIT's cleanup prefix.
+
+# 1. The bootstrap admin mints a targeted single-use invite; the code (a UUID)
+#    is captured from the matched reply.
+send dm scn-smoke-admin /invite create --adapter inmemory --contact scn-cap-user
+expect substring 5000 Invite code:
+capture code ([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})
+
+# 2. The fresh contact registers by sending the captured code (D44 invite-code
+#    registration) and gets the probation welcome.
+send dm scn-cap-user ${code}
+expect substring 5000 Welcome! You're registered.
