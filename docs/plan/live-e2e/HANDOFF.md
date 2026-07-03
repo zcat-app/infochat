@@ -34,17 +34,21 @@ prefill + 143 s decode < 240 s timeout. The sizing invariant
    UNCLAIMED (D50 token re-armed), group/subscription fixtures gone.
    Before any live scenario work: re-claim via the admin token DM, then
    rebuild fixtures per the recipes below.
-2. Consider ticketing **F-live-5** (30s per-task LLM timeout default
-   unachievable on the 4-vCPU vps host — profile-default decision; host
-   carries runtime-config overrides chat+summarizer=240000 ms, kept) and
+2. **NEXT ACTION — decide whether to ticket the two remaining findings:**
+   **F-live-5** (30s per-task LLM timeout default unachievable on the
+   4-vCPU vps host — profile-default decision; host carries
+   runtime-config overrides chat+summarizer=240000 ms, kept) and
    **F-live-3** (4 observations, retry-clean each time; NOTE: two clean
    collector restarts on 2026-07-03 evening with a DRAINED RAW backlog —
-   consistent with the backlog-race hypothesis).
+   consistent with the backlog-race hypothesis). Both are decisions the
+   user makes; neither blocks 4b-4.
 3. Then **4b-4** (s10 latency evidence exists; s12 adds bounded-chat
    evidence; remaining: embedding-retrieval assertion — note the m1-537
    seed source has exactly ONE READY+embedded post, which is the shape the
    assertion needs — readiness/metrics/LLM-down checks) and **Phase 5**
-   (Signal delta).
+   (Signal delta). REMEMBER: any live drive first needs the post-M1-549
+   fixture rebuild — admin re-claim via the D50 token DM, then the
+   fixture recipes in this file (reset №/subscription lessons above).
 
 **s12 re-run lessons (2026-07-03, for future chat-scenario runs):**
 - The chat call is starved when the collector is chewing a RAW backlog
