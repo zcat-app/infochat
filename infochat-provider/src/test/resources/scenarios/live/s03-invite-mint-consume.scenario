@@ -3,12 +3,19 @@
 # The admin mints a single-use OPEN invite (no --contact: the consumer is
 # unknown to the bot before it consumes), the code is captured from the
 # reply, and the un-registered user consumes it (D44 registration).
+# The --open path is confirm-gated (spec §Admin: only --contact skips the
+# confirm because its blast radius is one identity) — live-discovered
+# 2026-07-03: the first call replies with the confirm prompt, the code is
+# minted only on the confirm call.
 #
 # Host preconditions (HANDOFF §Live-run notes): 'user' must be UNREGISTERED —
 # run prod/live-reset.sh first (the admin token re-arms by design D-live-7;
 # re-claim before driving). Run s04 before this scenario: s03 registers 'user'.
 
 send dm admin /invite create --adapter simplex --open
+expect substring 60000 About to mint an OPEN invite
+
+send dm admin /invite create --open confirm
 expect substring 60000 Invite code:
 capture code ([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})
 

@@ -7,8 +7,12 @@
 # also registers 'user', so reset between s03 and this scenario). The /zcash
 # step needs the public price endpoint reachable.
 
-# 1. Admin mints a single-use open invite; the code is captured.
+# 1. Admin mints a single-use open invite; the code is captured. The --open
+#    path is confirm-gated (spec §Admin; live-discovered 2026-07-03).
 send dm admin /invite create --adapter simplex --open
+expect substring 60000 About to mint an OPEN invite
+
+send dm admin /invite create --open confirm
 expect substring 60000 Invite code:
 capture code ([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})
 

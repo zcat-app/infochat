@@ -63,7 +63,7 @@ public final class LiveSimpleXClient implements AutoCloseable {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /** The bot's identity within one group, as recorded in THIS client's DB (D51 mention anchor). */
-    public record GroupMember(String memberId, String displayName) {}
+    public record GroupMember(long groupMemberId, String displayName) {}
 
     private final String label;
     private final int wsPort;
@@ -216,21 +216,21 @@ public final class LiveSimpleXClient implements AutoCloseable {
     /**
      * Resolve the group member whose {@code memberContactId} is {@code contactId}
      * in group {@code groupName}, via a corrId {@code /members} query — the D51
-     * mention envelope needs the BOT's per-group memberId and display name as
-     * recorded in THIS client's DB. The command form and response nesting are
-     * best-guess (declared live-discovery, M1-546); the parse tree-walks for
+     * mention envelope needs the BOT's sender-local numeric {@code groupMemberId}
+     * and display name as recorded in THIS client's DB. Command form and response
+     * nesting live-confirmed 2026-07-03 (4b-3 run); the parse tree-walks for
      * member objects like the other fixture queries.
      */
     public GroupMember resolveGroupMember(String groupName, String contactId) throws Exception {
         JsonNode response = rawQuery("/members " + groupName);
-        Map<String, String> displayNamesByMemberId = new LinkedHashMap<>();
-        collectGroupMembers(response, contactId, displayNamesByMemberId);
-        if (displayNamesByMemberId.size() != 1) {
+        Map<String, String> displayNamesByGroupMemberId = new LinkedHashMap<>();
+        collectGroupMembers(response, contactId, displayNamesByGroupMemberId);
+        if (displayNamesByGroupMemberId.size() != 1) {
             throw new IllegalStateException("[" + label + "] expected exactly one member with contact id '"
-                    + contactId + "' in group '" + groupName + "', found " + displayNamesByMemberId.size());
+                    + contactId + "' in group '" + groupName + "', found " + displayNamesByGroupMemberId.size());
         }
-        Map.Entry<String, String> member = displayNamesByMemberId.entrySet().iterator().next();
-        return new GroupMember(member.getKey(), member.getValue());
+        Map.Entry<String, String> member = displayNamesByGroupMemberId.entrySet().iterator().next();
+        return new GroupMember(Long.parseLong(member.getKey()), member.getValue());
     }
 
     /**
@@ -262,20 +262,21 @@ public final class LiveSimpleXClient implements AutoCloseable {
     /**
      * Compose a group send carrying a D51 structured mention: the production
      * codec's group-scope {@code /_send #<id> json [...]} form, plus a
-     * {@code mentions{}} object mirroring the INBOUND mention shape (display
-     * name → {@code {memberId}}). The exact placement is best-guess in CI,
-     * pinned by {@code LiveSimpleXHarnessFrameTest} and a declared
-     * live-discovery item for the 4b-3 host run (M1-546).
+     * {@code mentions{}} map of display name → the sender-local NUMERIC
+     * {@code groupMemberId} (simplex-chat resolves it to the wire memberId the
+     * bot byte-compares). Live-corrected 2026-07-03 on the 4b-3 run: the
+     * original best-guess {@code {memberId}} object value is rejected by
+     * v6.5.4.1 ("bad chat command: Failed reading: empty"); the numeric form
+     * was probe-confirmed via raw {@code /_send} on the real CLI. Pinned by
+     * {@code LiveSimpleXHarnessFrameTest}.
      */
     static String encodeMentionSendCommand(String corrId, String groupId, String text,
                                            GroupMember botMember) {
         ObjectNode msgContent = MAPPER.createObjectNode();
         msgContent.put("type", "text");
         msgContent.put("text", text);
-        ObjectNode mentioned = MAPPER.createObjectNode();
-        mentioned.put("memberId", botMember.memberId());
         ObjectNode mentions = MAPPER.createObjectNode();
-        mentions.set(botMember.displayName(), mentioned);
+        mentions.put(botMember.displayName(), botMember.groupMemberId());
         ObjectNode composed = MAPPER.createObjectNode();
         composed.set("msgContent", msgContent);
         composed.set("mentions", mentions);
@@ -414,14 +415,14 @@ public final class LiveSimpleXClient implements AutoCloseable {
     }
 
     private static void collectGroupMembers(JsonNode node, String contactId,
-                                            Map<String, String> displayNamesByMemberId) {
-        if (node.isObject() && node.hasNonNull("memberId")
+                                            Map<String, String> displayNamesByGroupMemberId) {
+        if (node.isObject() && node.hasNonNull("groupMemberId")
                 && contactId.equals(node.path("memberContactId").asText())) {
-            displayNamesByMemberId.putIfAbsent(
-                    node.get("memberId").asText(), node.path("localDisplayName").asText());
+            displayNamesByGroupMemberId.putIfAbsent(
+                    node.get("groupMemberId").asText(), node.path("localDisplayName").asText());
         }
         for (JsonNode child : node) {
-            collectGroupMembers(child, contactId, displayNamesByMemberId);
+            collectGroupMembers(child, contactId, displayNamesByGroupMemberId);
         }
     }
 

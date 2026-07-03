@@ -1,9 +1,34 @@
 ---
 id: M1-547
 title: Live 4b-3 harness corrections (D51 mention shape + confirm-gated mint scenarios)
-status: pending
+status: done
 created: 2026-07-03
 last_updated: 2026-07-03
+reviews:
+  - round: 1
+    date: 2026-07-03
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 63
+      removed: 39
+clarity_check:
+  date: 2026-07-03
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: consider security_relevant: true or a one-line
+      justification for false despite the invite-gate/admin-command surface
+      (the change is test-harness-only; no production code)"
+    - "SPEC-REFS-VALID: 'commands.md §Admin' has a second substring candidate
+      ('group-admin race'); tie-break resolves to 'Admin (bot admin)' l.937 —
+      consider tightening the anchor"
+  blockers: []
 blocked_by: []
 files_budget: 4
 complexity: low

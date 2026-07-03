@@ -5,10 +5,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -53,11 +51,10 @@ class LiveSimpleXHarnessFrameTest {
     }
 
     @Test
-    void mentionEnvelopeCarriesMemberIdByteEqualToBotMemberId() throws Exception {
-        String botMemberId = "b64memberid==";
+    void mentionEnvelopeCarriesNumericLocalGroupMemberId() throws Exception {
         String envelope = LiveSimpleXClient.encodeMentionSendCommand(
                 "live-user-3", "5", "@Admin-Reno /help",
-                new LiveSimpleXClient.GroupMember(botMemberId, "Admin-Reno"));
+                new LiveSimpleXClient.GroupMember(3, "Admin-Reno"));
 
         JsonNode root = MAPPER.readTree(envelope);
         assertEquals("live-user-3", root.get("corrId").asText());
@@ -70,11 +67,15 @@ class LiveSimpleXHarnessFrameTest {
         JsonNode composed = payload.get(0);
         assertEquals("text", composed.path("msgContent").path("type").asText());
         assertEquals("@Admin-Reno /help", composed.path("msgContent").path("text").asText());
-        // D51: recognition is BYTE-equality of a mentions{} memberId against the
-        // bot's per-group memberId — pin the bytes, not just string equality.
-        String sentMemberId = composed.path("mentions").path("Admin-Reno").path("memberId").asText();
-        assertArrayEquals(botMemberId.getBytes(StandardCharsets.UTF_8),
-                sentMemberId.getBytes(StandardCharsets.UTF_8));
+        // Live-corrected 2026-07-03 (4b-3 run): ComposedMessage.mentions maps
+        // display name -> the sender-local NUMERIC groupMemberId; simplex-chat
+        // translates it to the wire memberId the bot byte-compares (D51). The
+        // original {memberId} object value is rejected by v6.5.4.1 with
+        // "bad chat command: Failed reading: empty".
+        JsonNode mentionValue = composed.path("mentions").path("Admin-Reno");
+        assertTrue(mentionValue.isIntegralNumber(),
+                "mention value must be the numeric local groupMemberId, got: " + mentionValue);
+        assertEquals(3L, mentionValue.asLong());
     }
 
     @Test
@@ -83,7 +84,7 @@ class LiveSimpleXHarnessFrameTest {
                 "c1", new ScopeRef.Group("5"), "hello group");
         String mention = LiveSimpleXClient.encodeMentionSendCommand(
                 "c1", "5", "hello group",
-                new LiveSimpleXClient.GroupMember("mem==", "Admin-Reno"));
+                new LiveSimpleXClient.GroupMember(3, "Admin-Reno"));
 
         JsonNode productionRoot = MAPPER.readTree(production);
         JsonNode mentionRoot = MAPPER.readTree(mention);

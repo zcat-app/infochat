@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 570 |
+| done | 571 |
 | deferred | 10 |
-| **total** | **580** |
+| **total** | **581** |
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-547 | Live 4b-3 harness corrections (D51 mention shape + confirm-gated mint scenarios) | 2026-07-03 | round 1 APPROVE |
 | M1-546 | SimpleX live backend v2 (Phase 4b-3 substrate) | 2026-07-03 | round 2 APPROVE |
 | M1-545 | Scenario grammar capture/substitution extension | 2026-07-03 | round 1 APPROVE |
 | M1-544 | SimpleX live ConversationBackend binding (Phase 4b-2) | 2026-07-02 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-540 | Fix MultiAdapterProductionIT signal-crash timing flake | 2026-07-02 | round 1 APPROVE |
 | M1-539 | live-smoke scenario runner + InMemory backend (Phase 4a) | 2026-07-02 | round 1 APPROVE |
 | M1-538 | live-test: inject an adversarial RAW post so the real eval pipeline quarantines it | 2026-07-01 | round 1 APPROVE |
-| M1-537 | live-test: seed a deterministic synthetic post corpus into a running deployment's database | 2026-07-01 | round 1 APPROVE |
 
 ---
 
@@ -751,4 +751,5 @@ M1-542 (done)
         └── M1-544 (done)
               └── M1-545 (done)
                     └── M1-546 (done)
+M1-547 (done)
 ```
