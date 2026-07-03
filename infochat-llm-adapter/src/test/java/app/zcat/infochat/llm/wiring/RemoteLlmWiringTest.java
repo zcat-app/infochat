@@ -49,12 +49,18 @@ class RemoteLlmWiringTest {
     private static final String REMOTE_BASE_URL = "https://remote.example.com/v1";
     private static final String REMOTE_API_KEY = "sk-test-remote-key";
 
+    // Four Enter answers accepting the recommended values at M1-550's step-4
+    // prompt_timing reads (chat/summarizer × timeout-ms/max-tokens) — every
+    // wizard drive must supply them or the script dies at EOF under set -e.
+    private static final String ACCEPT_TIMING_DEFAULTS = "\n\n\n\n";
+
     @Test
     @EnabledOnOs(OS.LINUX)
     void remoteBackendWiresGenerativeRemoteButEmbeddingsLocal(@TempDir Path tmp) throws Exception {
         // stdin: backend=remote, then the base-url, then the API key (no key yet in
-        // secrets.env, so the branch reads it from stdin).
-        Map<String, String> props = runWizard(tmp, "remote\n" + REMOTE_BASE_URL + "\n" + REMOTE_API_KEY + "\n");
+        // secrets.env, so the branch reads it from stdin), timing defaults (4× Enter).
+        Map<String, String> props = runWizard(tmp,
+                "remote\n" + REMOTE_BASE_URL + "\n" + REMOTE_API_KEY + "\n" + ACCEPT_TIMING_DEFAULTS);
 
         // Generative tasks → remote endpoint + API-key reference.
         assertEquals(REMOTE_BASE_URL, props.get("infochat.llm.chat.base-url"),
@@ -71,6 +77,18 @@ class RemoteLlmWiringTest {
                 "embeddings dimension must stay 768");
         assertNotEquals(REMOTE_BASE_URL, props.get("infochat.embeddings.base-url"),
                 "embeddings must NEVER resolve to the remote endpoint (the F11/M1-529 bug)");
+
+        // Timing prompts accepted with Enter must write the backend-first remote
+        // recommendations (M1-550's table: a remote API answers prose in seconds
+        // regardless of profile, so the local-profile values never apply here).
+        assertEquals("60000", props.get("infochat.llm.chat.timeout-ms"),
+                "chat timeout-ms must be the remote-backend recommendation");
+        assertEquals("1024", props.get("infochat.llm.chat.max-tokens"),
+                "chat max-tokens must be the remote-backend recommendation");
+        assertEquals("60000", props.get("infochat.llm.summarizer.timeout-ms"),
+                "summarizer timeout-ms must be the remote-backend recommendation");
+        assertEquals("1024", props.get("infochat.llm.summarizer.max-tokens"),
+                "summarizer max-tokens must be the remote-backend recommendation");
 
         // The API key lives in secrets.env (never in application.properties).
         String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));

@@ -72,6 +72,11 @@ class LlamacppWiringTest {
     private static final String OLLAMA_URL = "http://ollama:11434/v1";
     private static final String OLLAMA_NOMIC = "nomic-embed-text";
 
+    // Four Enter answers accepting the recommended values at M1-550's step-4
+    // prompt_timing reads (chat/summarizer × timeout-ms/max-tokens) — every
+    // wizard drive must supply them or the script dies at EOF under set -e.
+    private static final String ACCEPT_TIMING_DEFAULTS = "\n\n\n\n";
+
     // --- Static compose wiring --------------------------------------------------
 
     @Test
@@ -128,11 +133,22 @@ class LlamacppWiringTest {
     void llamacppEmbeddingsShapePointsAtEmbeddingsServiceNeverGenerativeGguf(@TempDir Path tmp)
             throws Exception {
         // stdin: backend=llamacpp, generative=pinned (Enter), embeddings=llamacpp
-        // (Enter), embeddings GGUF=pinned (Enter).
-        Map<String, String> props = runWizard(tmp, "llamacpp\n\n\n\n");
+        // (Enter), embeddings GGUF=pinned (Enter), timing defaults (4× Enter).
+        Map<String, String> props = runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS);
 
         assertEquals(GEN_GGUF, props.get("infochat.llm.chat.model"),
                 "every LLM task must use the generative GGUF");
+
+        // Timing prompts accepted with Enter must write the local-backend vps
+        // recommendations (M1-550's table; the fixture seeds quarkus.profile=vps).
+        assertEquals("240000", props.get("infochat.llm.chat.timeout-ms"),
+                "chat timeout-ms must be the local-backend vps recommendation");
+        assertEquals("600", props.get("infochat.llm.chat.max-tokens"),
+                "chat max-tokens must be the local-backend vps recommendation");
+        assertEquals("240000", props.get("infochat.llm.summarizer.timeout-ms"),
+                "summarizer timeout-ms must be the local-backend vps recommendation");
+        assertEquals("400", props.get("infochat.llm.summarizer.max-tokens"),
+                "summarizer max-tokens must be the local-backend vps recommendation");
         assertEquals(LLAMACPP_URL, props.get("infochat.llm.chat.base-url"));
         assertEquals(LLAMACPP_EMBED_URL, props.get("infochat.embeddings.base-url"),
                 "embeddings must point at the second llama.cpp instance");
@@ -152,8 +168,9 @@ class LlamacppWiringTest {
     @Test
     @EnabledOnOs(OS.LINUX)
     void ollamaEmbeddingsShapePointsAtOllamaNomicEndpoint(@TempDir Path tmp) throws Exception {
-        // stdin: backend=llamacpp, generative=pinned (Enter), embeddings=ollama.
-        Map<String, String> props = runWizard(tmp, "llamacpp\n\nollama\n");
+        // stdin: backend=llamacpp, generative=pinned (Enter), embeddings=ollama,
+        // timing defaults (4× Enter).
+        Map<String, String> props = runWizard(tmp, "llamacpp\n\nollama\n" + ACCEPT_TIMING_DEFAULTS);
 
         assertEquals(GEN_GGUF, props.get("infochat.llm.chat.model"));
         assertEquals(LLAMACPP_URL, props.get("infochat.llm.chat.base-url"));
@@ -174,7 +191,7 @@ class LlamacppWiringTest {
         // real name the compose services mount. This is the assertion that would have
         // caught the M1-442 volume-name mismatch (the GGUFs landing in a volume the
         // servers never mount).
-        runWizard(tmp, "llamacpp\n\n\n\n");
+        runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS);
 
         String scriptVolume = modelVolumeFromDockerArgv(Files.readString(tmp.resolve("docker-argv.log")));
         assertEquals(MODEL_VOLUME, scriptVolume,
@@ -200,8 +217,8 @@ class LlamacppWiringTest {
         Files.writeString(runtime.resolve("secrets.env"), "INFOCHAT_LLM_API_KEY=\"sk-prior-remote-key\"\n");
 
         // backend=llamacpp, generative=pinned (Enter), embeddings=llamacpp (Enter),
-        // embeddings GGUF=pinned (Enter).
-        Map<String, String> props = runWizard(tmp, "llamacpp\n\n\n\n");
+        // embeddings GGUF=pinned (Enter), timing defaults (4× Enter).
+        Map<String, String> props = runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS);
 
         for (String key : props.keySet()) {
             assertFalse(key.matches("infochat\\.llm\\..*\\.api-key"),
