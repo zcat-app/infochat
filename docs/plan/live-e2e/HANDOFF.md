@@ -7,7 +7,7 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-03 (F-live-6 fixed, s12 GREEN — 7/7) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-03 (F-live-4 fixed by M1-549; control-plane RESET — admin unclaimed) · Owner: ubuntu5 + Claude
 
 ---
 
@@ -24,10 +24,16 @@ at exactly 600 tokens (cap fired, `finish_reason=length` path), 13.5 s
 prefill + 143 s decode < 240 s timeout. The sizing invariant
 (`cap × ~0.24 s + prefill < timeout-ms`) held as designed. Next steps:
 
-1. **Ticket F-live-4 — NEXT ACTION** (`live-reset.sh` truncates
-   `provider_state` but the V9/V21 sentinel rows never re-seed → provider
-   boot-loops after reset; manual re-seed SQL is in the running log, script
-   fix pending; also bit BOTH resets during the 4b-3 run).
+1. ~~Ticket F-live-4~~ **DONE — M1-549 merged (be75f18d, 2026-07-03):**
+   `provider_state` is now EXCLUDED from the reset (18-table list; the
+   sentinel rows survive and no manual re-seed is ever needed).
+   Host-validated live: reset from the branch → provider restart with NO
+   re-seed → readiness UP, 0 boot-loop signatures, reconcilers caught up
+   from the preserved cursor (no epoch page-through). **Side effect: the
+   live control-plane is WIPED again** (validation reset) — LiveAdmin is
+   UNCLAIMED (D50 token re-armed), group/subscription fixtures gone.
+   Before any live scenario work: re-claim via the admin token DM, then
+   rebuild fixtures per the recipes below.
 2. Consider ticketing **F-live-5** (30s per-task LLM timeout default
    unachievable on the 4-vCPU vps host — profile-default decision; host
    carries runtime-config overrides chat+summarizer=240000 ms, kept) and
@@ -318,7 +324,15 @@ single live round-trip verification happens after BOTH fixes land. NOTE: the liv
 
 ## Live findings (continued)
 
-### F-live-4 (MEDIUM, tooling) — live-reset.sh wipes provider_state; sentinel rows never re-seed
+### F-live-4 (MEDIUM, tooling) — RESOLVED by M1-549 (merged be75f18d, 2026-07-03)
+Fixed by EXCLUDING `provider_state` from the reset (the finding's first
+option): it is the Provider's cursor over the PRESERVED data-plane, its
+sentinel rows are Flyway-first-boot-only, and keeping it skips the epoch
+page-through — the re-seed alternative would have duplicated the V9/V21
+sentinel shape in a third place and broken the script's emptiness
+assertion. `CONTROL_PLANE_TABLES` is now 18 tables. Host-validated live
+(evidence in the ticket §Host validation). Original finding:
+
 Found on the first 4b-3 reset (2026-07-03): `prod/live-reset.sh` TRUNCATEs
 `provider_state` (it is in the 19-table control-plane list), but the
 `new_post` / `quarantine_review` sentinel rows are inserted only by Flyway
@@ -389,6 +403,35 @@ likely needs a large RAW backlog + restart. Un-ticketed; investigate before
 relying on unattended collector restarts.
 
 ## Running log
+
+### 2026-07-03 late evening (M1-549 — F-live-4 fixed; control-plane reset)
+- **M1-549 MERGED (be75f18d)** — live-reset preserves provider_state
+  (F-live-4) via `/m1-tick run M1-549`. Full cycle: draft (640939ef) →
+  clarity PASS (0/0) → implement (3 impl files exactly at files_budget:
+  provider_state out of the SQL TRUNCATE + why-preserved comment, out of
+  `CONTROL_PLANE_TABLES` (19→18), USER_TEST_PLAN.md cleared→preserved
+  move) → diff FULLY INERT (no Java/config/DB), mvn verify N/A per the
+  M1-379/M1-272 inert-diff gate (round logs carry the note) → review r1
+  REWORK (1 item: the host validation — by-design post-verify, M1-546
+  precedent) → **host validation GREEN** (see below) → review r2 APPROVE
+  (all checks PASS; must-shrink convergent — growth was the mandated
+  ticket-body evidence) → commit e788d7f1 → squash-merge be75f18d.
+  Board: done=573, pending=0.
+- **Host validation detail:** pre-reset both `provider_state` rows
+  present; `live-reset.sh` (branch) OK — 18 tables empty, 3764 posts
+  unchanged; rows SURVIVED the reset; provider restarted with NO manual
+  re-seed → single clean boot, readiness UP, 0
+  `IllegalStateException`/missing-row log hits;
+  `NewPostReconciler: caught up 0 posts in 1 page(s)` from the PRESERVED
+  cursor (no 3.7k epoch page-through — the designed benefit) and cursor
+  advancing live afterwards.
+- **Live-state consequence: control-plane is WIPED** (the validation
+  reset). LiveAdmin unclaimed (D50 token re-armed since
+  `INFOCHAT_SIMPLEX_ADMIN_TOKEN` is still set), groups/subscriptions
+  gone; transport-level client↔bot connections persist in the SimpleX
+  data-dirs. Re-claim + fixture recipes: §START HERE + the 4b-3 log.
+- Stack left UP and healthy (all 5 containers; provider restarted as part
+  of the validation, collector untouched — no F-live-3 window).
 
 ### 2026-07-03 evening (M1-548 + s12 GREEN — 7/7 COMPLETE)
 - **M1-548 MERGED (d9093c05)** — per-task max-tokens for
