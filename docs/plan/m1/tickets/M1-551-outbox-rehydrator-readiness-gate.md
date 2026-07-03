@@ -1,10 +1,53 @@
 ---
 id: M1-551
 title: OutboxRehydrator waits for eval-queue downstream readiness (F-live-3)
-status: pending
+status: deferred
 created: 2026-07-03
 last_updated: 2026-07-03
+clarity_check:
+  date: 2026-07-03
+  verdict: PASS
+  warnings: []
+escalations:
+  - date: 2026-07-03
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — pre-implementation developer finding: acceptance item 4
+      prescribes "a Mockito stub for EvalQueueProducer", but Mockito is
+      not on the collector test classpath and no module in the repo
+      declares it (verified via dependency:list and repo-wide grep).
+      Satisfying the acceptance literally requires adding a test-scope
+      dependency to infochat-collector/pom.xml — a 4th touched file
+      against files_budget: 3.
+  - date: 2026-07-03
+    reason: verify-blocked-by-main-regression
+    reviewer_verdict_excerpt: |
+      N/A — round-1 full-suite verify (target/m1-tick-test-M1-551-r1.log)
+      is red in infochat-llm-adapter: 5 failures (LlamacppWiringTest x4,
+      RemoteLlmWiringTest x1). Root cause is M1-550's four new 4-llm.sh
+      prompt_timing reads exhausting the tests' scripted stdin (EOF ->
+      exit 1 under set -e). Pre-existing on main: M1-550 merged under the
+      inert-diff rule without a verify run, and the module DAG builds
+      llm-adapter before collector, so M1-551's collector-only diff
+      cannot be implicated. Implementation itself is complete and
+      unit-green (checkpoint commit on the branch). User chose defer
+      onto M1-553 (the wiring-test fix).
+revisions:
+  - date: 2026-07-03
+    reason: budget-breach rework (user picked refine, hand-rolled-stub variant)
+    snapshot:
+      status: escalated
+      escalation_reason: budget-breach
+      acceptance_item_4_at_snapshot: |
+        New unit tests (field-injection seam — OutboxRehydrator's
+        package-private @Inject fields are assignable without CDI, with a
+        Mockito stub for EvalQueueProducer) cover, proceeds once
+        hasDownstreamRequests flips true after k polls; attempts exhausted
+        throws IllegalStateException whose message names both config keys; an
+        empty backlog never calls hasDownstreamRequests.
 blocked_by: []
+deferred_on: [M1-553]
+deferred_reason: blocked-on-new-ticket
 files_budget: 3
 complexity: medium
 risk: medium
@@ -44,7 +87,8 @@ acceptance:
     but with an actionable message instead of the opaque SRMSG00034.
   - New unit tests (field-injection seam — OutboxRehydrator's
     package-private @Inject fields are assignable without CDI, with a
-    Mockito stub for EvalQueueProducer) cover, proceeds once
+    hand-rolled stub for EvalQueueProducer — no new test dependency;
+    the repo's test-double convention is hand-rolled) cover, proceeds once
     hasDownstreamRequests flips true after k polls; attempts exhausted
     throws IllegalStateException whose message names both config keys; an
     empty backlog never calls hasDownstreamRequests.
