@@ -7,54 +7,50 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-03 (post 4b-3 live run) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-03 (F-live-6 fixed, s12 GREEN — 7/7) · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
 
-**The live 4b-3 scenario run EXECUTED 2026-07-03: 6 of 7 GREEN**
-(s04 1.3s · s03 3 steps ~1s each · s07 all 5 steps ~1s · s10 217s + 293s
-real-LLM · s11 322ms · s15 all 6 steps sub-second). **s12 (chat mode) is
-BLOCKED on F-live-6** (OpenAiCompatibleProvider sends no `max_tokens` →
-unbounded generation at ~4.5 tok/s can't finish inside any timeout; needs a
-CI ticket mirroring `AnthropicProvider.cfg.maxTokens()`). Next steps:
+**ALL 7 live scenarios are GREEN (2026-07-03).** F-live-6 fixed by **M1-548
+(merged d9093c05)**: `OpenAiCompatibleProvider` now reads per-task
+`infochat.llm.<task>.max-tokens` (optional Integer, default 1024 — a cap,
+not absent-means-uncapped) and sends it as `max_tokens`; host values set in
+`prod/runtime/application.properties` (chat=600, summarizer=400, next to the
+F-live-5 timeout overrides); both images rebuilt + stack restarted. **s12
+GREEN in 159.6 s** — llama task evidence: 236-token prompt, decode stopped
+at exactly 600 tokens (cap fired, `finish_reason=length` path), 13.5 s
+prefill + 143 s decode < 240 s timeout. The sizing invariant
+(`cap × ~0.24 s + prefill < timeout-ms`) held as designed. Next steps:
 
-1. **Ticket F-live-6 — NEXT ACTION (design settled with user 2026-07-03,
-   ticket NOT yet drafted).** Per-task `max-tokens` key for
-   `OpenAiCompatibleProvider` (`infochat.llm.<task>.max-tokens`, read in
-   `configFor` and sent as `max_tokens` in `doCall`'s request body),
-   mirroring the existing per-task `timeout-ms` pattern and
-   `AnthropicProvider.cfg.maxTokens()`. Design points agreed:
-   - **Per-task, not global** — chat can afford ~500-600 tokens; the
-     summarizer needs less (verified: the digest makes ONE LLM CALL PER
-     CLUSTER — `DigestRenderer` → `SummaryProseGenerator.generate` loops
-     clusters — and its system prompt demands ONLY the short summary
-     paragraph; all structural fields are deterministic Java, so a
-     400-token cap has generous headroom); tagger/entity need a handful.
-   - `max_tokens` caps OUTPUT only — digest/summary INPUT size (many
-     sources, lots of text) is unaffected.
-   - Sizing invariant the caps encode on this host (~4.5 tok/s decode):
-     `cap × ~0.22 s + prefill < task timeout-ms`. A `finish_reason=length`
-     truncation (cosmetic) beats the observed total loss (timeout after
-     1033+ tokens generated, user gets the unavailable-fallback).
-   - Decide in-ticket whether the key is optional (absent = today's
-     uncapped behavior) or required-with-default; optional matches the
-     `timeout-ms` orElse(30000) precedent... but an uncapped default is
-     exactly the F-live-6 failure mode, so lean required-or-defaulted.
-   Then land → set host values in `prod/runtime/application.properties` →
-   re-run s12 (fixture: none beyond a registered, non-probation sender —
-   'admin' still qualifies; collector may stay up once evals aren't doomed).
-2. **Ticket F-live-4** (`live-reset.sh` truncates `provider_state` but the
-   V9/V21 sentinel rows never re-seed → provider boot-loops after reset;
-   manual re-seed SQL is in the running log, script fix pending).
-3. Consider ticketing **F-live-3** (3rd observation) and **F-live-5**
-   (30s per-task LLM timeout default unachievable on the 4-vCPU vps host —
-   profile-default decision; host carries a runtime-config override for
-   chat+summarizer=240000 ms, kept deliberately).
-4. Then **4b-4** (real-LLM latency evidence exists from s10; remaining:
-   embedding-retrieval assertion, readiness/metrics/LLM-down checks) and
-   **Phase 5** (Signal delta).
+1. **Ticket F-live-4 — NEXT ACTION** (`live-reset.sh` truncates
+   `provider_state` but the V9/V21 sentinel rows never re-seed → provider
+   boot-loops after reset; manual re-seed SQL is in the running log, script
+   fix pending; also bit BOTH resets during the 4b-3 run).
+2. Consider ticketing **F-live-5** (30s per-task LLM timeout default
+   unachievable on the 4-vCPU vps host — profile-default decision; host
+   carries runtime-config overrides chat+summarizer=240000 ms, kept) and
+   **F-live-3** (4 observations, retry-clean each time; NOTE: two clean
+   collector restarts on 2026-07-03 evening with a DRAINED RAW backlog —
+   consistent with the backlog-race hypothesis).
+3. Then **4b-4** (s10 latency evidence exists; s12 adds bounded-chat
+   evidence; remaining: embedding-retrieval assertion — note the m1-537
+   seed source has exactly ONE READY+embedded post, which is the shape the
+   assertion needs — readiness/metrics/LLM-down checks) and **Phase 5**
+   (Signal delta).
+
+**s12 re-run lessons (2026-07-03, for future chat-scenario runs):**
+- The chat call is starved when the collector is chewing a RAW backlog
+  (3–4 llama slots on eval prefills at 0.45–12 tok/s) — the first post-fix
+  s12 attempt timed out on contention alone. Isolate: stop the collector,
+  wait for `all slots are idle`, run, restart collector after.
+- ChatAgent with NO subscribed sources produces a thin/garbage sub-80-char
+  reply (76 chars of gibberish observed) — the scenario's `(?s).{80,}`
+  match needs the s10 fixture: `source_subscription` row for the admin-DM
+  scope → m1-537 seed source (owner-role INSERT; reset №2 had wiped it).
+  With 1 READY embedded post of context the reply is substantive and s12
+  passes.
 
 Single-scenario drive command (surefire form used for the whole run —
 runs ONLY the suite class, no module unit tests co-located with the stack):
@@ -178,7 +174,7 @@ has run against a real transport yet** — the first real live work is Phase 4b.
 | 2 — Load-bearing assumptions | admin-token re-arm, SSRF strict, FK trap, caps | ✅ DONE |
 | 3 — Reset & data harness | `prod/live-reset.sh`, `live-seed.sh`, `live-inject-adversarial.sh` | ✅ DONE (M1-536/537/538) |
 | **4a — scenario runner substrate** | `Scenario`, `ConversationBackend` SPI, `ScenarioRunner`, InMemory backend, `ScenarioRunnerIT` | ✅ DONE (M1-539) |
-| **4b — SimpleX live drive** | real simplex-chat drive + LLM latency + embedding retrieval | 🔶 IN PROGRESS — **scenario run DONE 2026-07-03: 6/7 GREEN** (s12 blocked on F-live-6 ticket); remaining: s12 re-run post-ticket + 4b-4 assertions |
+| **4b — SimpleX live drive** | real simplex-chat drive + LLM latency + embedding retrieval | 🔶 IN PROGRESS — **all 7 scenarios GREEN 2026-07-03** (s12 green post-M1-548); remaining: 4b-4 assertions only |
 | **5 — Signal delta** | round-trip + ACI bootstrap + §6 differences | ❌ NOT STARTED |
 | 6 — (optional) `/testcase` skill | wrap the runner once 2–3 scenarios pass | ❌ not started |
 
@@ -351,7 +347,14 @@ slots busy with doomed prefills. **Host fix applied and KEPT:**
 `prod/runtime/application.properties`. **Decision pending (ticket):** raise
 the `%vps` profile defaults (or have the wizard size them from the profile).
 
-### F-live-6 (HIGH for chat, product) — OpenAiCompatibleProvider sends no max_tokens; chat generation is unbounded
+### F-live-6 (HIGH for chat, product) — RESOLVED by M1-548 (merged d9093c05, 2026-07-03)
+Fixed: per-task `infochat.llm.<task>.max-tokens` (optional, default 1024,
+`requirePositiveMaxTokens`-guarded) sent as `max_tokens` in the request
+body, mirroring `timeout-ms` and `AnthropicProvider`. Host values chat=600
+summarizer=400; s12 GREEN live (cap fired at exactly 600 tokens,
+143 s decode + 13.5 s prefill < 240 s). Original finding:
+
+Original: OpenAiCompatibleProvider sends no max_tokens; chat generation is unbounded
 s12 (chat mode) fails even at 240000 ms with an idle collector: llama.cpp
 logs show the chat task healthy at ~4.5 tok/s having generated 1033+ tokens
 (prompt 487) when the client timeout cancels it — the model simply never
@@ -386,6 +389,41 @@ likely needs a large RAW backlog + restart. Un-ticketed; investigate before
 relying on unattended collector restarts.
 
 ## Running log
+
+### 2026-07-03 evening (M1-548 + s12 GREEN — 7/7 COMPLETE)
+- **M1-548 MERGED (d9093c05)** — per-task max-tokens for
+  OpenAiCompatibleProvider (F-live-6) via `/m1-tick run M1-548`. Full
+  cycle: draft (d66b2c0e) → clarity PASS (0/0) → implement (3 impl files,
+  exactly at files_budget: configFor `orElse(1024)` +
+  `requirePositiveMaxTokens`, `root.put("max_tokens", ...)` in doCall,
+  TaskConfig gains maxTokens, 3 new wire-pinning tests, design-note doc) →
+  full verify green r1 (11:52, detached setsid + marker, collector+provider
+  stopped, 5 DevServices leaks cleaned) → review r1 APPROVE (all checks
+  PASS, 0 rework) → verify-reuse user-approved → commit 661cfdc1 →
+  squash-merge d9093c05. Board: done=572, pending=0. Known stale-comment
+  follow-up recorded in the commit body (AnthropicProviderTest's
+  "Anthropic-only" guard comment).
+- **Host deploy:** max-tokens keys added to
+  `prod/runtime/application.properties` (chat=600, summarizer=400 with the
+  sizing-invariant comment); both images rebuilt (compose build, apps
+  stopped); stack up healthy with `--env-file`. NO F-live-3 on either
+  collector restart (backlog drained — supports the RAW-backlog-race
+  hypothesis).
+- **s12 attempt 1 red (contention, not product):** collector chewing the
+  RAW backlog accumulated during the build window kept 3–4 llama slots on
+  eval prefills (0.45–12 tok/s); chat call starved past 240 s.
+- **s12 attempt 2 red (fixture, not product):** collector stopped, server
+  idle — the bot REPLIED in 14 s (22 tokens, truncated=0, M1-548 working)
+  but with 76 chars of gibberish: ChatAgent had zero subscribed sources
+  (reset №2 wiped the s10 `source_subscription` rows), so the scenario's
+  `(?s).{80,}` never matched. Re-inserted the admin-DM → m1-537-seed-source
+  subscription (owner role, user-approved).
+- **s12 attempt 3 GREEN (159.6 s):** llama task 63109 — prompt 236 tokens,
+  decode stopped at EXACTLY the 600-token cap (finish_reason=length path),
+  13.5 s prefill + 143 s decode. The cap converts the F-live-6 total loss
+  into a delivered reply, precisely the design intent. **All 7
+  transport-relevant scenarios now GREEN over real relays.**
+- Collector restarted, all 5 containers healthy, stack left UP.
 
 ### 2026-07-03 (THE LIVE 4b-3 SCENARIO RUN — 6/7 GREEN)
 - **First-ever live scenario drive over real SimpleX relays. Result: s04,
