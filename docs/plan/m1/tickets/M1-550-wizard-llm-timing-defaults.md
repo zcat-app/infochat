@@ -1,9 +1,28 @@
 ---
 id: M1-550
 title: Wizard step 4 writes profile-sized LLM timeout-ms + max-tokens (F-live-5)
-status: pending
+status: done
 created: 2026-07-03
 last_updated: 2026-07-03
+reviews:
+  - round: 1
+    date: 2026-07-03
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 83
+      removed: 8
+clarity_check:
+  date: 2026-07-03
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 3
 complexity: low

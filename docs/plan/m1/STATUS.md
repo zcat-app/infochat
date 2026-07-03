@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 573 |
+| done | 574 |
 | deferred | 10 |
-| **total** | **583** |
+| **total** | **586** |
 
 ---
 
@@ -24,7 +24,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-551 — OutboxRehydrator waits for eval-queue downstream readiness (F-live-3) (complexity: medium, risk: medium)
+- M1-552 — Chat system prompt gains a max-tokens-derived brevity hint (complexity: low, risk: low)
 
 ---
 
@@ -60,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-550 | Wizard step 4 writes profile-sized LLM timeout-ms + max-tokens (F-live-5) | 2026-07-03 | round 1 APPROVE |
 | M1-549 | live-reset preserves provider_state (F-live-4) | 2026-07-03 | round 2 APPROVE |
 | M1-548 | Per-task max-tokens for OpenAiCompatibleProvider (F-live-6) | 2026-07-03 | round 1 APPROVE |
 | M1-547 | Live 4b-3 harness corrections (D51 mention shape + confirm-gated mint scenarios) | 2026-07-03 | round 1 APPROVE |
@@ -69,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-543 | Fix SimpleX first-inbound crash at SimpleXAdminClaim create | 2026-07-02 | round 1 APPROVE |
 | M1-542 | Include cause chain in D37 inbound-handler stack log | 2026-07-02 | round 2 APPROVE |
 | M1-541 | Harden signalCrashDoesNotAffectSimpleX readiness barrier | 2026-07-02 | round 1 APPROVE |
-| M1-540 | Fix MultiAdapterProductionIT signal-crash timing flake | 2026-07-02 | round 1 APPROVE |
 
 ---
 
@@ -754,4 +755,7 @@ M1-542 (done)
 M1-547 (done)
 M1-548 (done)
 M1-549 (done)
+M1-550 (done)
+M1-551 (pending) ← runnable
+M1-552 (pending) ← runnable
 ```

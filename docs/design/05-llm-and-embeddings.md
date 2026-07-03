@@ -117,6 +117,15 @@ not absent-means-uncapped: an uncapped completion lets a slow local backend
 generate until the client `timeout-ms` cancels a finishable reply (F-live-6);
 a `finish_reason=length` truncation is the cheaper failure. Size per-task
 values so `cap × per-token decode time + prefill < timeout-ms` on the host.                                                                                                                                                           
+
+Every request also carries a client-side timeout, read from the per-task key
+`infochat.llm.<task>.timeout-ms` (optional, default 30000, must be positive).
+The default fits a fast backend; prose tasks (chat, summarizer) on a slow
+local host need far more (a timed-out call is cancelled client-side while the
+server keeps decoding, and the retries congest it — F-live-5). The setup
+wizard (step 4, `4-llm.sh`) collects both keys for chat and summarizer as a
+pair, with recommended defaults keyed on backend (remote vs local) then
+profile, per the invariant above.
                                                                                  
 AnthropicProvider                                                                                                                                                                                                                                     
                                                                                  

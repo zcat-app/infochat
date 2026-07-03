@@ -97,6 +97,23 @@ set_prop() {
   printf '%s=%s\n' "$key" "$value" >> "$CONFIG_FILE"
 }
 
+# Prompt for one per-task timing key (skipped under --defaults, which takes the
+# recommendation unchanged) and validate the answer as a positive integer — a
+# system-boundary check on interactive input, same posture as the backend
+# validation. The validated value lands in the variable named by $3.
+prompt_timing() {
+  local key="$1" default="$2" __var="$3" answer=""
+  if [[ "$defaults" -eq 0 ]]; then
+    read -rp "${key} [${default}]: " answer
+  fi
+  answer="${answer:-$default}"
+  if ! [[ "$answer" =~ ^[1-9][0-9]*$ ]]; then
+    echo "FAIL: ${key} must be a positive integer (got '${answer}')." >&2
+    exit 1
+  fi
+  printf -v "$__var" '%s' "$answer"
+}
+
 # Point every LLM task + embeddings at one endpoint base-url.
 set_all_base_urls() {
   local url="$1" task
@@ -500,3 +517,44 @@ case "$backend" in
     echo "remote backend ready: generative tasks via $base_url; embeddings via local Ollama $OLLAMA_URL"
     ;;
 esac
+
+# --- Per-task LLM timing: chat + summarizer timeout-ms / max-tokens (F-live-5).
+# The in-app defaults (timeout-ms 30000, max-tokens 1024) only fit a fast
+# backend: prose tasks on a slow local host need a longer timeout and a tighter
+# output cap, sized TOGETHER so max-tokens × per-token decode time + prompt
+# processing < timeout-ms (the M1-548 invariant) — otherwise the client cancels
+# a finishable reply and the doomed retries congest the shared server.
+# Recommendations are keyed backend-first (a remote API answers prose in
+# seconds regardless of profile; a 240 s timeout there would hide a real
+# outage for minutes), then profile for the local backends. The vps values are
+# host-proven (2026-07-03 live run: 600-token cap at 143 s decode + 13.5 s
+# prefill < 240 s); pi is provisional (~1 tok/s decode); laptop assumes
+# vps-class CPU. Only the two prose tasks are collected — eval-task outputs
+# are a handful of tokens and ride the in-app defaults.
+if [[ "$backend" == "remote" ]]; then
+  chat_timeout_default=60000;  chat_maxtok_default=1024
+  summ_timeout_default=60000;  summ_maxtok_default=1024
+else
+  case "$profile" in
+    pi) chat_timeout_default=480000; chat_maxtok_default=400
+        summ_timeout_default=480000; summ_maxtok_default=300 ;;
+    *)  chat_timeout_default=240000; chat_maxtok_default=600
+        summ_timeout_default=240000; summ_maxtok_default=400 ;;
+  esac
+fi
+if [[ "$defaults" -eq 0 ]]; then
+  echo
+  echo "Per-task LLM timing for the two prose tasks (chat, summarizer). Enter keeps"
+  echo "the recommended value for the '$backend' backend on the '$profile' profile;"
+  echo "size overrides so max-tokens × per-token decode time + prompt processing"
+  echo "stays under timeout-ms."
+fi
+prompt_timing infochat.llm.chat.timeout-ms       "$chat_timeout_default" chat_timeout
+prompt_timing infochat.llm.chat.max-tokens       "$chat_maxtok_default"  chat_maxtok
+prompt_timing infochat.llm.summarizer.timeout-ms "$summ_timeout_default" summ_timeout
+prompt_timing infochat.llm.summarizer.max-tokens "$summ_maxtok_default"  summ_maxtok
+set_prop infochat.llm.chat.timeout-ms "$chat_timeout"
+set_prop infochat.llm.chat.max-tokens "$chat_maxtok"
+set_prop infochat.llm.summarizer.timeout-ms "$summ_timeout"
+set_prop infochat.llm.summarizer.max-tokens "$summ_maxtok"
+echo "+ wrote LLM timing: chat ${chat_timeout} ms / ${chat_maxtok} tokens; summarizer ${summ_timeout} ms / ${summ_maxtok} tokens"
