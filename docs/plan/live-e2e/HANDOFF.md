@@ -7,53 +7,64 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-03 · Owner: ubuntu5 + Claude
+Last updated: 2026-07-03 (post 4b-3 live run) · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
 
-**Next step = the live 4b-3 scenario RUN.** The substrate is COMPLETE
-(M1-545 merged c8a6ff29 + M1-546 merged c9fcdc20, both 2026-07-03) and the
-stack is UP and healthy. Drive the 7 scenarios via the gated suite:
+**The live 4b-3 scenario run EXECUTED 2026-07-03: 6 of 7 GREEN**
+(s04 1.3s · s03 3 steps ~1s each · s07 all 5 steps ~1s · s10 217s + 293s
+real-LLM · s11 322ms · s15 all 6 steps sub-second). **s12 (chat mode) is
+BLOCKED on F-live-6** (OpenAiCompatibleProvider sends no `max_tokens` →
+unbounded generation at ~4.5 tok/s can't finish inside any timeout; needs a
+CI ticket mirroring `AnthropicProvider.cfg.maxTokens()`). Next steps:
+
+1. **Ticket F-live-6** (per-task `max-tokens` for the OpenAI-compatible
+   provider) → land → re-run s12 (fixture: none beyond a registered,
+   non-probation sender; collector may stay up once evals aren't doomed).
+2. **Ticket F-live-4** (`live-reset.sh` truncates `provider_state` but the
+   V9/V21 sentinel rows never re-seed → provider boot-loops after reset;
+   manual re-seed SQL is in the running log, script fix pending).
+3. Consider ticketing **F-live-3** (3rd observation) and **F-live-5**
+   (30s per-task LLM timeout default unachievable on the 4-vCPU vps host —
+   profile-default decision; host carries a runtime-config override for
+   chat+summarizer=240000 ms, kept deliberately).
+4. Then **4b-4** (real-LLM latency evidence exists from s10; remaining:
+   embedding-retrieval assertion, readiness/metrics/LLM-down checks) and
+   **Phase 5** (Signal delta).
+
+Single-scenario drive command (surefire form used for the whole run —
+runs ONLY the suite class, no module unit tests co-located with the stack):
 
 ```
-mvn -pl infochat-provider verify -Dit.test='LiveSimpleXScenarioSuiteIT#<method>' -Dinfochat.live.simplex=true
+mvn -pl infochat-provider test -Dtest='LiveSimpleXScenarioSuiteIT#<method>' -Dinfochat.live.simplex=true
 ```
 
-(suite @Order: s04 → s03 → s07 → s10 → s11 → s12 → s15; single-scenario
-selection exists because host fixtures/resets are needed BETWEEN scenarios).
-
-- **What M1-546 delivered (all test-scope):** single raw-WS
-  `LiveSimpleXClient` fed through the production codec — the M1-544
-  side-socket is gone; corrId fixture queries (`/contacts`, `/groups`,
-  `/members`) run on the one connection; harness `chatItemUpdated` parse
-  unioned into awaitReply (finalized bodies); GROUP binding + the `@bot `
-  mention convention (D51 envelope). **Declared live-discovery items** for
-  this run: the mention-envelope wire shape, the `chatItemUpdated` body path,
-  and the `/members <groupName>` command form + response nesting — all
-  best-guess, pinned by `LiveSimpleXHarnessFrameTest`; a live correction
-  lands there first. Host-validated: RoundTripIT green over the v2 client,
-  733 ms round-trip on real relays (M1-544 baseline: 591 ms).
-- **Host fixtures still to do (in rough order; host actions, un-ticketed):**
-  - S4+S3 need an UNREGISTERED user → `prod/live-reset.sh` (control-plane
-    reset; admin token re-arms by design D-live-7 — re-claim, then drive).
-    s03 registers 'user', so reset AGAIN before s15.
-  - S7 needs: a group whose display name is exactly `live-group` with bot +
-    both clients joined (raw corrId `/g` + invite bot from LiveAdmin — the
-    M1-515 provider gate decides the join); 'user' registered AND vouched
-    (auto-promote needs non-probation), NOT a bot admin; no group admin yet;
-    group unapproved.
-  - S10 needs seeded READY corpus (`prod/live-seed.sh`) + admin follows +
-    the digest window config-aimed at wall-clock now (D-live-8).
-  - Scenario timeouts are already generous (llama on 4 vCPU: 60-300 s).
+- **Live corrections landed (test-scope, see running log):** D51 mention
+  envelope = `mentions{<displayName>: <numeric local groupMemberId>}` (the
+  best-guess `{memberId}` object shape is REJECTED by v6.5.4.1); s03/s15
+  scenarios gained the `/invite create --open confirm` leg (the --open mint
+  is confirm-gated per spec §Admin; the InMemory twin used --contact which
+  isn't, so CI never saw it). `chatItemUpdated` body path and
+  `/members <groupName>` form were confirmed AS GUESSED (s10 matched both
+  finalized bodies live).
+- **Fixture recipes that worked (for re-runs):** see running log 2026-07-03
+  (live 4b-3 run) — reset→provider_state re-seed→restart→re-claim; group
+  build via one-shot CLI (`/g`, `/a`, `/j`, `/ms`); vouch via `/vouch <cid>`;
+  scope subscriptions via owner-role `source_subscription` INSERTs (the
+  `/add-source` path SSRF-probes the identifier, unusable for the synthetic
+  seed source); digest window aimed per D-live-8 with stagger computed from
+  `groups.id` msb (`staggerOffset = |msb % width|`).
 - **The 15-scenario enumeration is persisted** in `README.md` §Phase 1.
   Live set: S3 invite mint→consume, S4 un-invited DM rejected, S7 group
   pending→approve→auto-promote, S10 /summary + group digest, S11 /zcash,
   S12 chat mode, S15 full happy path.
-- **Client fixtures DONE:** LiveAdmin (claimed bot admin) + LiveUser are both
-  CONNECTED to the bot (contact "Admin-Reno" in BOTH client DBs — resolve by
-  that display name).
+- **Client fixtures:** LiveAdmin + LiveUser both CONNECTED to the bot
+  (contact "Admin-Reno" in BOTH client DBs) AND to each other; group
+  `live-group` exists in all three SimpleX client DBs (control-plane rows
+  were cleared by the pre-s15 reset — the bot's app-level group state is
+  gone, but transport-level membership persists in the data-dirs).
 
 
 **Prior context (all DONE):** F-live-2 fixed by M1-542 (dfbb86ca); F-live-1
@@ -145,7 +156,7 @@ has run against a real transport yet** — the first real live work is Phase 4b.
 | 2 — Load-bearing assumptions | admin-token re-arm, SSRF strict, FK trap, caps | ✅ DONE |
 | 3 — Reset & data harness | `prod/live-reset.sh`, `live-seed.sh`, `live-inject-adversarial.sh` | ✅ DONE (M1-536/537/538) |
 | **4a — scenario runner substrate** | `Scenario`, `ConversationBackend` SPI, `ScenarioRunner`, InMemory backend, `ScenarioRunnerIT` | ✅ DONE (M1-539) |
-| **4b — SimpleX live drive** | real simplex-chat drive + LLM latency + embedding retrieval | 🔶 IN PROGRESS — substrate COMPLETE (M1-544/545/546); v2 client host-validated 733 ms; next: the 7-scenario live run (fixtures + drive) |
+| **4b — SimpleX live drive** | real simplex-chat drive + LLM latency + embedding retrieval | 🔶 IN PROGRESS — **scenario run DONE 2026-07-03: 6/7 GREEN** (s12 blocked on F-live-6 ticket); remaining: s12 re-run post-ticket + 4b-4 assertions |
 | **5 — Signal delta** | round-trip + ACI bootstrap + §6 differences | ❌ NOT STARTED |
 | 6 — (optional) `/testcase` skill | wrap the runner once 2–3 scenarios pass | ❌ not started |
 
@@ -289,7 +300,53 @@ single live round-trip verification happens after BOTH fixes land. NOTE: the liv
 
 ## Live findings (continued)
 
+### F-live-4 (MEDIUM, tooling) — live-reset.sh wipes provider_state; sentinel rows never re-seed
+Found on the first 4b-3 reset (2026-07-03): `prod/live-reset.sh` TRUNCATEs
+`provider_state` (it is in the 19-table control-plane list), but the
+`new_post` / `quarantine_review` sentinel rows are inserted only by Flyway
+(V9/V21 first-boot INSERTs), which never re-runs — so the next Provider boot
+throws `IllegalStateException: provider_state row for channel='new_post' is
+missing` (`NewPostReconciler.runCatchUp`) and the container boot-loops. The
+reset script's own epilogue ("restart the Provider to re-seed") covers only
+the admin bootstrap. **Host workaround used (owner role):** re-INSERT both
+rows with the V9/V21 sentinel shape (`'epoch'::TIMESTAMPTZ, '', ''`,
+`ON CONFLICT DO NOTHING`) after every reset, before the Provider restart.
+The epoch cursor makes the reconciler page through the preserved data-plane
+posts once (~3.7k rows, no subscribers → no side effects). **Fix pending
+(ticket):** either exclude `provider_state` from the reset or have the reset
+SQL re-seed the sentinels itself.
+
+### F-live-5 (MEDIUM, config) — 30s per-task LLM timeout default unachievable on the vps host
+Both LLM providers default `infochat.llm.<task>.timeout-ms` to 30000 when the
+key is unset; only `security` sets it explicitly. On the 4-vCPU llama.cpp
+host, prose tasks (chat, summarizer) need 60-300 s — the documented scenario
+budgets — so every such call died in `HttpTimeoutException` before M1's first
+live prose ever completed (s12 first failure; DigestWorker degraded-path
+stacks). The failed calls also produce a **cancel storm**: the collector's
+30s eval calls time out against the shared server and retry, keeping all 4
+slots busy with doomed prefills. **Host fix applied and KEPT:**
+`infochat.llm.chat.timeout-ms=240000` + `summarizer` twin in
+`prod/runtime/application.properties`. **Decision pending (ticket):** raise
+the `%vps` profile defaults (or have the wizard size them from the profile).
+
+### F-live-6 (HIGH for chat, product) — OpenAiCompatibleProvider sends no max_tokens; chat generation is unbounded
+s12 (chat mode) fails even at 240000 ms with an idle collector: llama.cpp
+logs show the chat task healthy at ~4.5 tok/s having generated 1033+ tokens
+(prompt 487) when the client timeout cancels it — the model simply never
+finishes, because the request body is only `{model, messages}`
+(`OpenAiCompatibleProvider.doCall`) with no `max_tokens`, and `TaskConfig`
+has no such key to configure. `AnthropicProvider` already sends
+`cfg.maxTokens()` — the OpenAI-compatible path needs the same per-task
+`max-tokens` config. NOT a reasoning-cutoff (gemma-4 instruct, `peg-gemma4`
+format, no thinking channel; llama.cpp reports `truncated = 0` throughout).
+**s12 stays red until this lands; everything s12 uniquely exercises except
+the ChatAgent reply itself (finalized-edit observation) is already proven by
+s10.**
+
 ### F-live-3 (LOW, transient — NOT yet investigated) — collector startup race under RAW backlog
+**3rd observation 2026-07-03** (collector restart after ~15 min stopped for
+the s12 isolation test): identical signature, immediate retry booted clean.
+The pattern is now 3-for-3 → worth its ticket.
 **2nd observation 2026-07-03** (restart for the M1-546 host validation):
 identical signature — `OutboxRehydrator.onStartup` → `EvalQueueProducer.emit`
 → `SRMSG00034: Insufficient downstream requests to emit item`, exit 1;
@@ -307,6 +364,74 @@ likely needs a large RAW backlog + restart. Un-ticketed; investigate before
 relying on unattended collector restarts.
 
 ## Running log
+
+### 2026-07-03 (THE LIVE 4b-3 SCENARIO RUN — 6/7 GREEN)
+- **First-ever live scenario drive over real SimpleX relays. Result: s04,
+  s03, s07, s10, s11, s15 GREEN; s12 blocked on F-live-6.** Real-LLM latency
+  evidence captured (s10: /summary matched in 217 s, group digest in 293 s —
+  the 4b-4 latency item). Sequence and discoveries, in order:
+- **Reset №1** (s04/s03 fixture) surfaced **F-live-4**: provider boot-looped
+  on the truncated `provider_state`; re-seeded both sentinel rows manually
+  (SQL shape in the finding), restart clean, LiveAdmin re-claimed via the
+  D50 token (DB-verified `is_admin=t`, vouched).
+- **s04 GREEN** (1270 ms) on the first attempt.
+- **s03 first attempt red — scenario bug, not product:** `/invite create
+  --open` is confirm-gated (spec §Admin; only `--contact` mints immediately —
+  which is what the InMemory twin uses, so CI never exercised the gate). The
+  bot correctly replied with the confirm prompt; the scenario expected
+  `Invite code:` directly. **Fixed s03 + s15** (added the
+  `/invite create --open confirm` leg). **s03 GREEN** (3 steps, ~1 s each) —
+  M1-545 capture/substitution proven live across contacts.
+- **s07 fixture built via one-shot CLI:** `/vouch 7`; LiveAdmin↔LiveUser
+  connected (`/connect` + `/c <link>`, two online passes to complete the
+  async handshake); `/g live-group`; `/a live-group Admin-Reno` → **bot
+  auto-joined** (M1-515 registered-inviter gate, `auto_joined_group` row);
+  `/a live-group LiveUser` + `/j live-group` (join needs a prior online pass
+  to RECEIVE the invite event — a one-shot `/j` straight away sees
+  "no group").
+- **s07 first attempt red — D51 mention envelope live-corrected (the
+  declared discovery item landing):** the composed `mentions{name:
+  {memberId}}` object shape gets `commandError` ("bad chat command: Failed
+  reading: empty"). Probed raw `/_send` forms on the real CLI: the accepted
+  value is the **sender-local NUMERIC groupMemberId** (`mentions{"Admin-
+  Reno": 3}`); a WS probe of `/members live-group` confirmed member objects
+  carry `groupMemberId` alongside `memberId`. Fixed `LiveSimpleXClient`
+  (GroupMember record + collect + encode) and re-pinned
+  `LiveSimpleXHarnessFrameTest` (5/5 green hermetically). **s07 GREEN**
+  (all 5 steps ~1 s: pending reply → /list-groups capture → approve → group
+  reply → auto-promote observable via /group-timezone).
+- **s12 first attempt red → F-live-5:** ChatAgent `HttpTimeoutException` at
+  the 30 s default. Raised chat+summarizer to 240 s in
+  `prod/runtime/application.properties` (kept — see finding).
+- **s10 orchestration (D-live-8 in practice):** digest window aimed at
+  `evening-slot-hour=14`, `width=20` (stagger pre-computed from `groups.id`
+  msb → fire ≈13:51); `/digest off` first (approval had defaulted it ON —
+  an early fire would have been lost before step 2's watermark);
+  re-seeded with `--offset-minutes 0` at 13:50 because the digest collects
+  posts published SINCE windowStart (no prior boundary on a fresh control
+  plane) — the default 30-min-old seed rows would have yielded the no-posts
+  body. **s10 first attempt red — fixture gap, not product:** `/summary`
+  replied "No posts to summarize yet" instantly; tags only NARROW a
+  source-based set, and the seed subscribes only its own synthetic scope →
+  inserted `source_subscription` rows for the admin-DM and group scopes
+  (owner role; `/add-source` SSRF-probes the identifier so it can't
+  subscribe to the synthetic source). **s10 GREEN** (217 s / 293 s, both
+  bodies via the chatItemUpdated finalized-union path — discovery item
+  confirmed as guessed).
+- **s12 re-attempts red → F-live-6** (unbounded generation; evidence in the
+  finding). Verified NOT a reasoning cutoff (user hypothesis checked:
+  `truncated=0`, no thinking channel, task cancelled mid-healthy-decode).
+- **Reset №2** (F-live-4 workaround again) → re-claim → **s15 GREEN**
+  (all 6 steps sub-second; confirm-gated mint → capture → register →
+  /help → /zcash → empty-window /summary).
+- **s11 GREEN** (322 ms, source + bare URL attribution).
+- **F-live-3 3rd observation** on the collector restart after the s12
+  isolation stop; retry clean.
+- **Stack left UP and healthy** (collector + provider + postgres + 2×llama).
+  Digest-window aim REVERTED; LLM timeout override KEPT (F-live-5).
+  Uncommitted at session end: the 4 test-scope corrections
+  (`LiveSimpleXClient`, `LiveSimpleXHarnessFrameTest`, s03/s15 scenarios) —
+  commit path (ticket vs direct) to be decided.
 
 ### 2026-07-03 (M1-546 run + merge — 4b-3 substrate COMPLETE)
 - **M1-546 MERGED (c9fcdc20) — SimpleX live backend v2** via
