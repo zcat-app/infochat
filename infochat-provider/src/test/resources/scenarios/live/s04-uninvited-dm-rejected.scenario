@@ -1,0 +1,10 @@
+# S4 — un-invited DM rejected (live-e2e Phase 1 scenario 4, M1-546).
+#
+# An un-registered contact DMs the bot and gets the fixed D44 rejection —
+# the exact reply live-confirmed on 2026-07-02 (HANDOFF, M1-543 round-trip).
+#
+# Host preconditions: 'user' must be UNREGISTERED (prod/live-reset.sh) —
+# run this BEFORE any scenario that registers 'user' (s03, s15).
+
+send dm user /help
+expect substring 60000 Access requires an invitation.

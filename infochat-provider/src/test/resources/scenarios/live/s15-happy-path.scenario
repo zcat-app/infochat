@@ -1,0 +1,31 @@
+# S15 — full first-time-user happy path (live-e2e Phase 1 scenario 15,
+# M1-546). Invite mint -> consume -> the probation-allowed surface end to end
+# (free-form chat stays locked during probation by design, D45 — so the path
+# exercises /help, /zcash and /summary as the welcome text advertises).
+#
+# Host preconditions: 'user' must be UNREGISTERED (prod/live-reset.sh; s03
+# also registers 'user', so reset between s03 and this scenario). The /zcash
+# step needs the public price endpoint reachable.
+
+# 1. Admin mints a single-use open invite; the code is captured.
+send dm admin /invite create --adapter simplex --open
+expect substring 60000 Invite code:
+capture code ([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})
+
+# 2. The fresh user registers by sending the captured code (D44).
+send dm user ${code}
+expect substring 60000 Welcome! You're registered.
+
+# 3. Discovery works for the fresh (probation) user.
+send dm user /help
+expect substring 60000 Available commands:
+
+# 4. Asset command works during probation; the reply names its source + URL.
+send dm user /zcash
+expect regex 120000 (?s)source:.*https?://
+
+# 5. /summary from a fresh user with zero subscriptions returns the
+#    deterministic no-posts reply (commands.md §Content) — the pipeline ran
+#    end to end even though the set is empty.
+send dm user /summary -w 24h
+expect substring 240000 No posts to summarize yet

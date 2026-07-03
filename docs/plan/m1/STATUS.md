@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 569 |
+| done | 570 |
 | deferred | 10 |
 | **total** | **580** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-546 — SimpleX live backend v2 (Phase 4b-3 substrate) (complexity: high, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-546 | SimpleX live backend v2 (Phase 4b-3 substrate) | 2026-07-03 | round 2 APPROVE |
 | M1-545 | Scenario grammar capture/substitution extension | 2026-07-03 | round 1 APPROVE |
 | M1-544 | SimpleX live ConversationBackend binding (Phase 4b-2) | 2026-07-02 | round 1 APPROVE |
 | M1-543 | Fix SimpleX first-inbound crash at SimpleXAdminClaim create | 2026-07-02 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-539 | live-smoke scenario runner + InMemory backend (Phase 4a) | 2026-07-02 | round 1 APPROVE |
 | M1-538 | live-test: inject an adversarial RAW post so the real eval pipeline quarantines it | 2026-07-01 | round 1 APPROVE |
 | M1-537 | live-test: seed a deterministic synthetic post corpus into a running deployment's database | 2026-07-01 | round 1 APPROVE |
-| M1-536 | live-test: workflow reset that clears the control-plane while preserving the fetched data-plane | 2026-07-01 | round 1 APPROVE |
 
 ---
 
@@ -750,5 +750,5 @@ M1-542 (done)
   └── M1-543 (done)
         └── M1-544 (done)
               └── M1-545 (done)
-                    └── M1-546 (pending) ← runnable
+                    └── M1-546 (done)
 ```

@@ -1,0 +1,34 @@
+# S7 — group pending -> approve -> auto-promote (live-e2e Phase 1 scenario 7,
+# M1-546). Group texts opening with the literal "@bot " token are sent as D51
+# STRUCTURED mentions of the bot (SimpleXConversationBackend convention —
+# plain-text "@Name" is silently dropped by the bot).
+#
+# Host preconditions (HANDOFF §Live-run notes): group 'live-group' exists with
+# the bot and both clients joined (raw /g + invite from LiveAdmin; the M1-515
+# provider gate decides the bot's join); 'user' is registered AND vouched
+# (auto-promote eligibility requires non-probation), not a bot admin; the
+# group has no active group admin and is NOT yet approved.
+
+# 1. First eligible @mention while the group is unapproved -> the D47 pending
+#    reply is sent to the group; the group registers as pending.
+send group live-group user @bot /help
+expect substring 60000 awaiting administrator approval
+
+# 2. The admin lists groups in DM and captures the group's UUID for approval.
+send dm admin /list-groups
+expect substring 60000 Groups (
+capture gid ([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})
+
+# 3. Admin approves the pending group.
+send dm admin /approve-group ${gid}
+expect substring 60000 approved. Periodic digests will begin
+
+# 4. The next eligible mention gets a real reply (group approved) and silently
+#    auto-promotes the sender to group admin — observed in step 5.
+send group live-group user @bot /help
+expect substring 60000 Available commands in this group:
+
+# 5. Auto-promote observable: a group-admin-gated command from 'user' (who is
+#    NOT a bot admin) succeeds instead of the not-admin rejection.
+send group live-group user @bot /group-timezone UTC
+expect substring 60000 Group timezone set to

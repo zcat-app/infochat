@@ -1,7 +1,7 @@
 ---
 id: M1-546
 title: SimpleX live backend v2 (Phase 4b-3 substrate)
-status: pending
+status: done
 created: 2026-07-03
 last_updated: 2026-07-03
 blocked_by:
@@ -75,12 +75,47 @@ spec_refs:
 decision_refs:
   - D-live-9
   - D51
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-03
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PARTIAL
+    diff_stats:
+      files: 14
+      added: 878
+      removed: 118
+  - round: 2
+    date: 2026-07-03
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 14
+      added: 920
+      removed: 119
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+outline_file: target/m1-tick-outline-M1-546.md
+clarity_check:
+  date: 2026-07-03
+  verdict: WARN
+  warnings:
+    - "FILES-BUDGET-PLAUSIBLE: files_budget: 12 is tight against a plausible
+      minimum of 13-14 files (7 scenario resources + named test_plan.adds
+      items + LiveSimpleXClient + SimpleXConversationBackend); confirm the
+      budget or treat scenario resources as the cheap data files they are"
+  blockers: []
 ---
 
 # M1-546: SimpleX live backend v2 (Phase 4b-3 substrate)
@@ -134,3 +169,31 @@ SimpleX, and the M1-544 binding cannot carry them (analysis in
 - Host-validation ordering within the ticket: run `mvn verify` with the app
   stack stopped (06-28 throttle rule), then restart the stack for the
   LiveSimpleXRoundTripIT host evidence.
+
+## Host validation (acceptance item 5)
+
+**DONE 2026-07-03 — GREEN.** LiveSimpleXRoundTripIT re-run on the host over the
+reworked single-connection LiveSimpleXClient, against the deployed bot and real
+SMP relays (stack restarted after the r1 `mvn verify`, per the Notes ordering;
+provider `/q/health/ready` UP with `simplex: true` before the run):
+
+```
+mvn -pl infochat-provider test -Dtest=LiveSimpleXRoundTripIT -Dinfochat.live.simplex=true
+live step 1: matched in 733 ms
+Tests run: 1, Failures: 0, Errors: 0, Skipped: 0 — BUILD SUCCESS
+```
+
+The `/help` scenario ran through the unmodified ScenarioRunner over the v2
+client: raw single-connection WS, production-codec decode path, corrId ack
+routing — the M1-544 side-socket is gone and the round-trip still matches in
+sub-second time (M1-544 baseline: 591 ms).
+
+## Round 1 rework
+
+1. Complete acceptance item 5: re-run LiveSimpleXRoundTripIT on the host over
+   the reworked single-connection LiveSimpleXClient
+   (`-Dinfochat.live.simplex=true`, real relays, app stack restarted per the
+   ticket's own Notes ordering) and record the green evidence (date, command,
+   outcome) in this ticket's body. The reworked client's only CI coverage is
+   skipped ITs, so this host evidence is the acceptance-mandated proof the v2
+   transport works; the round-1 diff contained no such record.

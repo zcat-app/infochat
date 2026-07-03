@@ -1,0 +1,8 @@
+# S11 — /zcash asset snapshot (live-e2e Phase 1 scenario 11, M1-546).
+#
+# The reply names its data source and includes the source URL bare (per-source
+# ToS attribution; CLAUDE.md §Asset commands). The snapshot needs the public
+# price endpoint reachable from the host.
+
+send dm admin /zcash
+expect regex 120000 (?s)source:.*https?://

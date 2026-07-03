@@ -1,0 +1,14 @@
+# S12 — chat mode (live-e2e Phase 1 scenario 12, M1-546).
+#
+# A non-slash DM reaches the chat agent and gets an LLM response. The reply is
+# prose (no deterministic bundle string), so the match is a length floor: every
+# progress placeholder ("Working on it...", "Summarizing...", "Done.", …) is
+# under 80 chars, a real answer is not. The final body arrives via item EDIT —
+# the finalized-union path. Generous timeout: llama.cpp on 4 vCPU takes
+# 60-120 s (HANDOFF §Live-run notes).
+#
+# Host preconditions: 'admin' is registered and past probation (free-form chat
+# is probation-locked); the chat LLM is up.
+
+send dm admin What kinds of posts do you aggregate?
+expect regex 240000 (?s).{80,}

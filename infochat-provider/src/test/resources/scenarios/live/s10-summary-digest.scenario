@@ -1,0 +1,24 @@
+# S10 — /summary + periodic group digest (live-e2e Phase 1 scenario 10,
+# M1-546). Both replies are progress-notified: the final body arrives via an
+# item EDIT (chatItemUpdated), exercising the finalized-union observation path.
+# Timeouts are generous — llama.cpp on 4 vCPU takes 60-120 s for prose
+# (HANDOFF §Live-run notes).
+#
+# Host preconditions: seeded READY corpus (prod/live-seed.sh) and 'admin' has
+# followed sources/tags so the summary window is non-empty; group 'live-group'
+# approved with digests enabled; the digest window config-aimed at wall-clock
+# now (D-live-8: morning/evening-slot-hour + window-width-minutes) BEFORE this
+# scenario runs.
+
+# 1. On-demand /summary: the finalized body carries bare source URLs — the
+#    deterministic post set rendered (progress placeholders carry none).
+send dm admin /summary -w 24h
+expect substring 240000 http
+
+# 2. Periodic group digest: the digest fires on the config-aimed window, not
+#    in reply to this send — the send only opens the observation window; its
+#    own toggle reply ("Periodic digest resumed…"/"already on") contains no
+#    URL, so the expect can only be satisfied by the digest body. Last step,
+#    widest timeout.
+send group live-group admin @bot /digest on
+expect substring 300000 http
