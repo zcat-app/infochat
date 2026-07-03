@@ -1,11 +1,14 @@
 ---
 id: M1-554
 title: Dev Services containers Ryuk-reaped — repo-tracked reuse=false, drop dead pom flag
-status: deferred
-deferred_on: M1-555
-deferred_reason: blocked-on-new-ticket
+status: pending
 created: 2026-07-03
 last_updated: 2026-07-03
+reopens:
+  - date: 2026-07-03
+    prior_deferred_reason: blocked-on-new-ticket
+    prior_deferred_on: M1-555
+    reason: "M1-555 (the NostrStreamSourceTest drain-race de-flake blocking M1-554's full verify) merged to main as b318fd26."
 clarity_check:
   date: 2026-07-03
   verdict: PASS
