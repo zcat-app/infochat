@@ -7,56 +7,43 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-02 · Owner: ubuntu5 + Claude
+Last updated: 2026-07-03 · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
 
-**Next step = `/m1-tick run M1-545` (drafted, pending, clarity NOT yet run),
-then draft+run M1-546, then the live 4b-3 scenario run.** Phase 4b-3 is in
-progress; grounding, fixtures, and design are DONE (2026-07-02, this section):
+**Next step = `/m1-tick run M1-546` (drafted 2026-07-03, pending, clarity NOT
+yet run), then the live 4b-3 scenario run.** Phase 4b-3 is in progress;
+grounding, fixtures, design, and the grammar extension are DONE:
 
-- **The 15-scenario enumeration is now persisted** in `README.md` §Phase 1
-  (recovered from the audit transcript). Live set: S3 invite mint→consume,
-  S4 un-invited DM rejected, S7 group pending→approve→auto-promote,
-  S10 /summary + group digest, S11 /zcash, S12 chat mode, S15 full happy path.
-- **Host fixtures DONE:** LiveUser is now CONNECTED to the bot (bot appears as
+- **M1-545 DONE (merged c8a6ff29, 2026-07-03):** scenario grammar now has
+  `capture <name> <regex-with-one-group>` after an expect + `${name}`
+  substitution in send text AND address tokens, applied by the runner core;
+  unbound placeholder / capture no-match fail loudly before anything reaches
+  a transport. Proven declaratively on InMemory (`ScenarioCaptureIT` +
+  `invite-mint-consume.scenario`: mint → capture → register → welcome).
+  Strict superset — existing scenarios and ScenarioRunnerIT unchanged.
+- **M1-546 (drafted, pending — the whole v2 design lives in the ticket):**
+  `docs/plan/m1/tickets/M1-546-simplex-live-backend-v2.md`. All test-scope:
+  (a) single raw-WS `LiveSimpleXClient` fed through the production
+  `SimpleXMessageCodec.decode()` (drops the SimpleXWebSocketClient wrapper +
+  M1-544 side-socket — acks-only futures / async-to-one-connection don't
+  scale); (b) harness-side `chatItemUpdated` parse unioned into awaitReply
+  (S10/S12/S15 finalize via item EDIT); (c) GROUP binding via corrId
+  `/groups`; (d) harness-side D51 structured-mention envelope (wire shape =
+  live-discovery item, best-guess pinned in CI); (e) the 7 live `.scenario`
+  resources + gated suite IT (`-Dinfochat.live.simplex=true`).
+  `complexity: high` → plan-writer fires at start; host validation
+  (LiveSimpleXRoundTripIT live re-run over the v2 client) is an acceptance
+  item, so the stack must come back UP during that ticket (after its verify).
+- **The 15-scenario enumeration is persisted** in `README.md` §Phase 1.
+  Live set: S3 invite mint→consume, S4 un-invited DM rejected, S7 group
+  pending→approve→auto-promote, S10 /summary + group digest, S11 /zcash,
+  S12 chat mode, S15 full happy path.
+- **Host fixtures DONE:** LiveUser is CONNECTED to the bot (bot appears as
   contact "Admin-Reno" in BOTH client DBs — resolve by that display name).
-  Bot address re-queried via one-shot `/show_address` (provider stopped
-  briefly, then restarted; address in `.scratch/bot-address.txt`). LiveAdmin
-  is claimed bot admin. Stack UP and healthy.
-- **M1-545 (drafted, pending):** scenario grammar `capture <name> <regex>` +
-  `${name}` substitution in send text/addresses — S3/S15 need cross-step data
-  flow (invite code from a reply sent in a later step); the M1-539 grammar
-  cannot express it. CI-provable on InMemory (extend ScenarioRunnerIT with a
-  declarative invite mint→consume flow). Superset grammar; existing scenarios
-  unchanged.
-- **M1-546 (to draft next):** live backend v2, all test-scope —
-  (a) rework `LiveSimpleXClient` to a SINGLE raw java.net.http WebSocket
-  connection whose every frame is fed through the production
-  `SimpleXMessageCodec.decode()` (static, package-private — accessible from
-  the bridge's package) for everything the codec models (Inbound,
-  GroupCandidate, SendAck/corrId, CommandError); drop the
-  SimpleXWebSocketClient wrapper (its pending-futures complete ONLY on send
-  acks, and async events go to one connection only — the M1-544 side-socket
-  workaround does not scale to group/edit observation);
-  (b) harness-side parse of `chatItemUpdated` frames ONLY (the codec has no
-  case for it — bot-side never consumes edits; progress-notified replies
-  (/summary, chat, digest) finalize via item EDIT, so S10/S12/S15 are
-  unobservable without it — union it into awaitReply like
-  InMemoryConversationBackend#finalizedBodies);
-  (c) GROUP binding in `SimpleXConversationBackend` (scenario group tokens →
-  per-client group ids resolved via a raw corrId `/groups` query; group send =
-  codec `encodeSendCommand(ScopeRef.Group)`);
-  (d) a harness-side MENTION envelope for group sends: the bot's mention
-  recognition is STRUCTURED-ONLY (D51: `mentions{}` memberId must byte-equal
-  botMemberId — SimpleXGroupHandler.java:70; plain-text "@Name" is silently
-  dropped). The adapter encoder has no mention support (bot never mentions),
-  so the harness composes it; exact wire shape is a LIVE-discovery item —
-  best-guess in CI, validate/fix on the host;
-  (e) the 7 live `.scenario` resources + a gated suite IT (same
-  `-Dinfochat.live.simplex=true` gate as LiveSimpleXRoundTripIT).
+  LiveAdmin is claimed bot admin.
 - **Live-run notes for after M1-546:** group fixtures via raw corrId commands
   from the harness connection (`/g`, invite bot from LiveAdmin — the M1-515
   provider gate decides the join); scenario timeouts must be generous (llama
@@ -96,9 +83,12 @@ ARC create; `AdapterRegistry` classloader pin) and live-verified (bot replies).
 then `docker logs --since 90s infochat-infochat-provider-1 | grep 'inbound handler threw'` (expect NO hits post-M1-543).
 
 **HOST STATE:**
-- **App stack is UP (all 5 containers)** — resumed 2026-07-02 21:20 for the
-  M1-543 round-trip with the provider image rebuilt from main (M1-542+M1-543).
-  Health: `docker exec infochat-infochat-provider-1 sh -c 'curl -s 127.0.0.1:8081/q/health/ready'`.
+- **Collector + provider are STOPPED** (2026-07-03, for the M1-545 verify
+  window; postgres + both llamacpp containers stayed UP). Restart via
+  `docker compose --profile prod up -d` — but only when live work resumes;
+  M1-546's own verify needs them stopped again first, so the natural order is
+  verify M1-546 → restart stack → host-validate → live 4b-3 run.
+  Health once up: `docker exec infochat-infochat-provider-1 sh -c 'curl -s 127.0.0.1:8081/q/health/ready'`.
 - **Do NOT run image builds / `mvn verify` while the stack is up** (06-28
   throttle condition); stop collector+provider first.
 - **Swap enabled** (8 GiB, swappiness=10) — the missing 06-28 safety margin is in place.
@@ -295,6 +285,25 @@ likely needs a large RAW backlog + restart. Un-ticketed; investigate before
 relying on unattended collector restarts.
 
 ## Running log
+
+### 2026-07-03 (M1-545 run + M1-546 draft)
+- **M1-545 MERGED (c8a6ff29) — grammar capture/substitution extension** via
+  `/m1-tick run M1-545`. Full cycle: clarity FAIL (one prose blocker — a
+  mistyped spec_refs anchor "§Test tiers" → corrected to "§Test layers") →
+  bounded self-refine (4b7db7f4) → clarity WARN → implement (4 test-scope
+  files: Scenario.java capture directive + Step.captures, ScenarioRunner
+  ${name} substitution into text+addresses with loud unbound/no-match
+  failures, ScenarioCaptureIT 5 tests, invite-mint-consume.scenario) →
+  verify green (9:10 min; clean monitor report: min-avail 1199 MiB, swap
+  Δ ≈ 2.1 GiB over a 3.7 GiB pre-existing baseline, no OOM; 5 DevServices
+  leaks cleaned) → review r1 APPROVE (all checks PASS, 0 rework) → commit →
+  squash-merge. Stack's collector+provider stopped for the verify (left
+  stopped — see HOST STATE).
+- **M1-546 DRAFTED (ce3000c4)** — the full live-backend-v2 design moved from
+  this handoff into the ticket (single raw-WS codec-fed client, item-edit
+  observation, GROUP binding, D51 mention envelope, 7 gated live scenarios;
+  complexity: high, files_budget 12, round_cap 3). Clarity not yet run.
+  Next: `/m1-tick run M1-546`.
 
 ### 2026-07-02 (4b-3 session)
 - **4b-3 grounding + fixtures done; substrate split into M1-545 + M1-546.**
