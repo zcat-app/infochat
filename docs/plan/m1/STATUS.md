@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 575 |
+| done | 576 |
 | deferred | 12 |
 | **total** | **589** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-552 — Chat system prompt gains a max-tokens-derived brevity hint (complexity: low, risk: low)
-- M1-555 — NostrStreamSourceTest drain race: await arrival before stop (complexity: low, risk: low)
 
 ---
 
@@ -61,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-555 | NostrStreamSourceTest drain race: await arrival before stop | 2026-07-03 | round 1 APPROVE |
 | M1-553 | Wizard wiring tests answer M1-550's step-4 LLM timing prompts | 2026-07-03 | round 1 APPROVE |
 | M1-550 | Wizard step 4 writes profile-sized LLM timeout-ms + max-tokens (F-live-5) | 2026-07-03 | round 1 APPROVE |
 | M1-549 | live-reset preserves provider_state (F-live-4) | 2026-07-03 | round 2 APPROVE |
@@ -70,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-545 | Scenario grammar capture/substitution extension | 2026-07-03 | round 1 APPROVE |
 | M1-544 | SimpleX live ConversationBackend binding (Phase 4b-2) | 2026-07-02 | round 1 APPROVE |
 | M1-543 | Fix SimpleX first-inbound crash at SimpleXAdminClaim create | 2026-07-02 | round 1 APPROVE |
-| M1-542 | Include cause chain in D37 inbound-handler stack log | 2026-07-02 | round 2 APPROVE |
 
 ---
 
@@ -761,6 +760,6 @@ M1-550 (done)
 M1-552 (pending) ← runnable
 M1-553 (done)
   └── M1-551 (deferred)
-M1-555 (pending) ← runnable
+M1-555 (done)
   └── M1-554 (deferred)
 ```

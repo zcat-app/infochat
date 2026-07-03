@@ -121,6 +121,12 @@ public final class NostrStreamSource implements StreamSource {
     // is the audit surface, exposed via the same first+every-100th log pattern
     // used for droppedEvents.
     private final AtomicLong failedSig = new AtomicLong();
+    // Cumulative count of successfully enqueued inbound events. Observation-
+    // only test seam (M1-555): monotonic, so a test can await "every sent
+    // event is buffered in the source" before stop() — awaiting queue depth
+    // instead would race the concurrently-polling delivery loop. Never read
+    // by production code.
+    private final AtomicLong arrived = new AtomicLong();
 
     private volatile boolean delivering;
     // deliveryThread and deliver are set in start(); null only in the
@@ -237,6 +243,7 @@ public final class NostrStreamSource implements StreamSource {
         // (PostPersister's WHERE NOT EXISTS uid pre-filter + ON CONFLICT
         // (source_id, upstream_identifier, fetched_at) DO NOTHING).
         dedupFilter.record(eventId);
+        arrived.incrementAndGet();
         return true;
     }
 
@@ -250,6 +257,11 @@ public final class NostrStreamSource implements StreamSource {
     /** Package-private accessor for the failed-sig counter used by the IT. */
     long failedSigCount() {
         return failedSig.get();
+    }
+
+    /** Package-private accessor for the arrival counter used by the drain test (M1-555). */
+    long arrivedCount() {
+        return arrived.get();
     }
 
     @Override

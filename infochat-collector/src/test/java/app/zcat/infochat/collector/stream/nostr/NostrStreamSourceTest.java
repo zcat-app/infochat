@@ -152,8 +152,14 @@ class NostrStreamSourceTest {
         relay.sendEvent(NostrSignedEventFixtures.VALID_KIND_1_DRAIN_A_EVENT);
         relay.sendEvent(NostrSignedEventFixtures.VALID_KIND_1_DRAIN_B_EVENT);
         relay.sendEvent(NostrSignedEventFixtures.VALID_KIND_1_DRAIN_C_EVENT);
-        // Wait until the first delivery starts; the remaining events are now queued.
+        // Await BOTH gates before stop(): delivery has started AND all three
+        // events are buffered in the source. Awaiting delivery alone raced
+        // stop() against the WebSocket transit of B/C on a saturated host —
+        // "sent by the relay" is not "buffered in the source", and the drain
+        // guarantee only covers buffered events (M1-555).
         assertTrue(awaitSize(delivered, 1), "delivery started while running");
+        assertTrue(awaitCondition(() -> source.arrivedCount() == 3),
+                "all three drain events arrived in the inbound queue");
 
         source.stop();
         source = null; // already stopped; skip the @AfterEach stop
