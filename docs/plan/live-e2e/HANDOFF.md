@@ -7,7 +7,7 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-03 (F-live-4 fixed by M1-549; control-plane RESET — admin unclaimed) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-03 (F-live-5/F-live-3 decided → M1-550/551 drafted, + M1-552 chat brevity; control-plane still RESET — admin unclaimed) · Owner: ubuntu5 + Claude
 
 ---
 
@@ -34,14 +34,24 @@ prefill + 143 s decode < 240 s timeout. The sizing invariant
    UNCLAIMED (D50 token re-armed), group/subscription fixtures gone.
    Before any live scenario work: re-claim via the admin token DM, then
    rebuild fixtures per the recipes below.
-2. **NEXT ACTION — decide whether to ticket the two remaining findings:**
-   **F-live-5** (30s per-task LLM timeout default unachievable on the
-   4-vCPU vps host — profile-default decision; host carries
-   runtime-config overrides chat+summarizer=240000 ms, kept) and
-   **F-live-3** (4 observations, retry-clean each time; NOTE: two clean
-   collector restarts on 2026-07-03 evening with a DRAINED RAW backlog —
-   consistent with the backlog-race hypothesis). Both are decisions the
-   user makes; neither blocks 4b-4.
+2. ~~Decide F-live-5 / F-live-3~~ **DONE — both decided 2026-07-03, three
+   tickets drafted (pending, clarity not yet run):**
+   - **M1-550** (F-live-5): wizard step 4 prompts for chat+summarizer
+     `timeout-ms` + `max-tokens` pairs with backend/profile-sized
+     recommended defaults (user decision: wizard-visible values, not baked
+     `%vps` profile defaults; in-app defaults 30000/1024 stay).
+   - **M1-551** (F-live-3): ROOT-CAUSED — `@PostConstruct` rehydration
+     races Stage1Worker's async `@Incoming` subscription; SmallRye default
+     bounded BUFFER (128) throws SRMSG00034 when the race is lost and the
+     backlog exceeds it (explains retry-always-clean AND
+     drained-backlog-never-fails). Fix: attempt-counted
+     `Emitter.hasRequests()` readiness gate before the first emit.
+   - **M1-552** (F-live-6 follow-up): `CHAT_SYSTEM_PROMPT` gains a brevity
+     hint derived from `infochat.llm.chat.max-tokens` (~45% of the cap in
+     words, rendered once at construction) so replies finish
+     `finish_reason=stop` under the cap instead of truncating at it (s12
+     decoded to EXACTLY 600 — no length instruction exists today).
+   **NEXT ACTION: `/m1-tick run` the three tickets.** None blocks 4b-4.
 3. Then **4b-4** (s10 latency evidence exists; s12 adds bounded-chat
    evidence; remaining: embedding-retrieval assertion — note the m1-537
    seed source has exactly ONE READY+embedded post, which is the shape the
@@ -407,6 +417,34 @@ likely needs a large RAW backlog + restart. Un-ticketed; investigate before
 relying on unattended collector restarts.
 
 ## Running log
+
+### 2026-07-03 night (F-live-5/3 decisions + M1-550/551/552 drafted)
+- **F-live-5 decided (user):** wizard-collected with recommended defaults →
+  **M1-550 drafted (264cdd4e)**. Recommendations keyed backend-then-profile
+  (local vps/laptop: 240000/600 chat, 240000/400 summarizer — host-proven;
+  pi provisional 480000; remote: 60000/1024 so outages aren't hidden).
+  Timeout + max-tokens collected as a pair (sizing invariant).
+- **F-live-3 investigated (user chose investigate-first) and ROOT-CAUSED**
+  via code survey: `OutboxRehydrator` `@PostConstruct` emits the RAW
+  backlog synchronously while `Stage1Worker`'s `@Incoming("eval-queue")`
+  subscription wires up asynchronously; the emitter has no `@OnOverflow`
+  and no `mp.messaging.*` config → SmallRye default bounded BUFFER (128)
+  throws SRMSG00034 when the race is lost and backlog > ~128. Explains all
+  observations: retry-always-clean (re-rolled race), drained-backlog-clean
+  (can't overflow), ArC/classloader noise = teardown fallout. Severity:
+  operational only, zero data risk (outbox at-least-once). →
+  **M1-551 drafted (d358bf7c)**: attempt-counted `Emitter.hasRequests()`
+  readiness gate (100 × 100 ms) before the first emit, loud ISE on
+  exhaustion; unbounded-buffer and priority-reorder alternatives rejected
+  in the ticket.
+- **M1-552 drafted (b2929243)** (F-live-6 UX follow-up, user-approved
+  design): chat brevity hint derived from `max-tokens` (placeholder
+  template rendered once; integer-only, injection surface untouched;
+  600 → "under about 270 words"). Derive-don't-add-a-knob: the M1-550
+  wizard value automatically sizes the prompt.
+- Stack untouched this session (still UP; control-plane still wiped,
+  admin still unclaimed — fixture rebuild remains a pre-req for any live
+  drive).
 
 ### 2026-07-03 late evening (M1-549 — F-live-4 fixed; control-plane reset)
 - **M1-549 MERGED (be75f18d)** — live-reset preserves provider_state
