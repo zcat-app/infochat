@@ -429,9 +429,16 @@ relying on unattended collector restarts.
   isolation stop; retry clean.
 - **Stack left UP and healthy** (collector + provider + postgres + 2×llama).
   Digest-window aim REVERTED; LLM timeout override KEPT (F-live-5).
-  Uncommitted at session end: the 4 test-scope corrections
-  (`LiveSimpleXClient`, `LiveSimpleXHarnessFrameTest`, s03/s15 scenarios) —
-  commit path (ticket vs direct) to be decided.
+- **M1-547 MERGED (f073e37d)** — the 4 test-scope live corrections went
+  through the full `/m1-tick` cycle per user choice: clarity WARN (2
+  advisory: security_relevant justification, spec_ref anchor tightening) →
+  implementation restored from stash onto the branch → full verify green
+  (r1, detached setsid + marker pattern, stack apps stopped, 5 DevServices
+  leaks cleaned) → review r1 APPROVE (all checks PASS, 0 rework) →
+  verify-reuse user-approved (log postdates all candidates) → commit
+  e00056e9 → squash-merge f073e37d. Board: done=571, pending=0.
+  F-live-3 hit TWICE more on collector restarts during this cycle (3rd and
+  4th observations; SRMSG00034 each time, immediate retry clean each time).
 
 ### 2026-07-03 (M1-546 run + merge — 4b-3 substrate COMPLETE)
 - **M1-546 MERGED (c9fcdc20) — SimpleX live backend v2** via
