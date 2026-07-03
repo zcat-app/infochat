@@ -20,9 +20,31 @@ BLOCKED on F-live-6** (OpenAiCompatibleProvider sends no `max_tokens` →
 unbounded generation at ~4.5 tok/s can't finish inside any timeout; needs a
 CI ticket mirroring `AnthropicProvider.cfg.maxTokens()`). Next steps:
 
-1. **Ticket F-live-6** (per-task `max-tokens` for the OpenAI-compatible
-   provider) → land → re-run s12 (fixture: none beyond a registered,
-   non-probation sender; collector may stay up once evals aren't doomed).
+1. **Ticket F-live-6 — NEXT ACTION (design settled with user 2026-07-03,
+   ticket NOT yet drafted).** Per-task `max-tokens` key for
+   `OpenAiCompatibleProvider` (`infochat.llm.<task>.max-tokens`, read in
+   `configFor` and sent as `max_tokens` in `doCall`'s request body),
+   mirroring the existing per-task `timeout-ms` pattern and
+   `AnthropicProvider.cfg.maxTokens()`. Design points agreed:
+   - **Per-task, not global** — chat can afford ~500-600 tokens; the
+     summarizer needs less (verified: the digest makes ONE LLM CALL PER
+     CLUSTER — `DigestRenderer` → `SummaryProseGenerator.generate` loops
+     clusters — and its system prompt demands ONLY the short summary
+     paragraph; all structural fields are deterministic Java, so a
+     400-token cap has generous headroom); tagger/entity need a handful.
+   - `max_tokens` caps OUTPUT only — digest/summary INPUT size (many
+     sources, lots of text) is unaffected.
+   - Sizing invariant the caps encode on this host (~4.5 tok/s decode):
+     `cap × ~0.22 s + prefill < task timeout-ms`. A `finish_reason=length`
+     truncation (cosmetic) beats the observed total loss (timeout after
+     1033+ tokens generated, user gets the unavailable-fallback).
+   - Decide in-ticket whether the key is optional (absent = today's
+     uncapped behavior) or required-with-default; optional matches the
+     `timeout-ms` orElse(30000) precedent... but an uncapped default is
+     exactly the F-live-6 failure mode, so lean required-or-defaulted.
+   Then land → set host values in `prod/runtime/application.properties` →
+   re-run s12 (fixture: none beyond a registered, non-probation sender —
+   'admin' still qualifies; collector may stay up once evals aren't doomed).
 2. **Ticket F-live-4** (`live-reset.sh` truncates `provider_state` but the
    V9/V21 sentinel rows never re-seed → provider boot-loops after reset;
    manual re-seed SQL is in the running log, script fix pending).
