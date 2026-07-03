@@ -13,44 +13,47 @@ Last updated: 2026-07-03 · Owner: ubuntu5 + Claude
 
 ## ▶ START HERE (fresh session — next step)
 
-**Next step = `/m1-tick run M1-546` (drafted 2026-07-03, pending, clarity NOT
-yet run), then the live 4b-3 scenario run.** Phase 4b-3 is in progress;
-grounding, fixtures, design, and the grammar extension are DONE:
+**Next step = the live 4b-3 scenario RUN.** The substrate is COMPLETE
+(M1-545 merged c8a6ff29 + M1-546 merged c9fcdc20, both 2026-07-03) and the
+stack is UP and healthy. Drive the 7 scenarios via the gated suite:
 
-- **M1-545 DONE (merged c8a6ff29, 2026-07-03):** scenario grammar now has
-  `capture <name> <regex-with-one-group>` after an expect + `${name}`
-  substitution in send text AND address tokens, applied by the runner core;
-  unbound placeholder / capture no-match fail loudly before anything reaches
-  a transport. Proven declaratively on InMemory (`ScenarioCaptureIT` +
-  `invite-mint-consume.scenario`: mint → capture → register → welcome).
-  Strict superset — existing scenarios and ScenarioRunnerIT unchanged.
-- **M1-546 (drafted, pending — the whole v2 design lives in the ticket):**
-  `docs/plan/m1/tickets/M1-546-simplex-live-backend-v2.md`. All test-scope:
-  (a) single raw-WS `LiveSimpleXClient` fed through the production
-  `SimpleXMessageCodec.decode()` (drops the SimpleXWebSocketClient wrapper +
-  M1-544 side-socket — acks-only futures / async-to-one-connection don't
-  scale); (b) harness-side `chatItemUpdated` parse unioned into awaitReply
-  (S10/S12/S15 finalize via item EDIT); (c) GROUP binding via corrId
-  `/groups`; (d) harness-side D51 structured-mention envelope (wire shape =
-  live-discovery item, best-guess pinned in CI); (e) the 7 live `.scenario`
-  resources + gated suite IT (`-Dinfochat.live.simplex=true`).
-  `complexity: high` → plan-writer fires at start; host validation
-  (LiveSimpleXRoundTripIT live re-run over the v2 client) is an acceptance
-  item, so the stack must come back UP during that ticket (after its verify).
+```
+mvn -pl infochat-provider verify -Dit.test='LiveSimpleXScenarioSuiteIT#<method>' -Dinfochat.live.simplex=true
+```
+
+(suite @Order: s04 → s03 → s07 → s10 → s11 → s12 → s15; single-scenario
+selection exists because host fixtures/resets are needed BETWEEN scenarios).
+
+- **What M1-546 delivered (all test-scope):** single raw-WS
+  `LiveSimpleXClient` fed through the production codec — the M1-544
+  side-socket is gone; corrId fixture queries (`/contacts`, `/groups`,
+  `/members`) run on the one connection; harness `chatItemUpdated` parse
+  unioned into awaitReply (finalized bodies); GROUP binding + the `@bot `
+  mention convention (D51 envelope). **Declared live-discovery items** for
+  this run: the mention-envelope wire shape, the `chatItemUpdated` body path,
+  and the `/members <groupName>` command form + response nesting — all
+  best-guess, pinned by `LiveSimpleXHarnessFrameTest`; a live correction
+  lands there first. Host-validated: RoundTripIT green over the v2 client,
+  733 ms round-trip on real relays (M1-544 baseline: 591 ms).
+- **Host fixtures still to do (in rough order; host actions, un-ticketed):**
+  - S4+S3 need an UNREGISTERED user → `prod/live-reset.sh` (control-plane
+    reset; admin token re-arms by design D-live-7 — re-claim, then drive).
+    s03 registers 'user', so reset AGAIN before s15.
+  - S7 needs: a group whose display name is exactly `live-group` with bot +
+    both clients joined (raw corrId `/g` + invite bot from LiveAdmin — the
+    M1-515 provider gate decides the join); 'user' registered AND vouched
+    (auto-promote needs non-probation), NOT a bot admin; no group admin yet;
+    group unapproved.
+  - S10 needs seeded READY corpus (`prod/live-seed.sh`) + admin follows +
+    the digest window config-aimed at wall-clock now (D-live-8).
+  - Scenario timeouts are already generous (llama on 4 vCPU: 60-300 s).
 - **The 15-scenario enumeration is persisted** in `README.md` §Phase 1.
   Live set: S3 invite mint→consume, S4 un-invited DM rejected, S7 group
   pending→approve→auto-promote, S10 /summary + group digest, S11 /zcash,
   S12 chat mode, S15 full happy path.
-- **Host fixtures DONE:** LiveUser is CONNECTED to the bot (bot appears as
-  contact "Admin-Reno" in BOTH client DBs — resolve by that display name).
-  LiveAdmin is claimed bot admin.
-- **Live-run notes for after M1-546:** group fixtures via raw corrId commands
-  from the harness connection (`/g`, invite bot from LiveAdmin — the M1-515
-  provider gate decides the join); scenario timeouts must be generous (llama
-  on 4 vCPU: chat/summary can take 60-120 s); S3 needs an UNREGISTERED user →
-  run `prod/live-reset.sh` first (control-plane reset; admin-token re-arms by
-  design D-live-7, re-claim then drive); /summary needs seeded READY corpus
-  (`prod/live-seed.sh`) + a subscription.
+- **Client fixtures DONE:** LiveAdmin (claimed bot admin) + LiveUser are both
+  CONNECTED to the bot (contact "Admin-Reno" in BOTH client DBs — resolve by
+  that display name).
 
 
 **Prior context (all DONE):** F-live-2 fixed by M1-542 (dfbb86ca); F-live-1
@@ -74,32 +77,42 @@ ARC create; `AdapterRegistry` classloader pin) and live-verified (bot replies).
    Host run: `mvn -pl infochat-provider test -Dtest=LiveSimpleXRoundTripIT
    -Dinfochat.live.simplex=true` (client WS port 5226; needs stack UP and no
    CLI one-shot holding the admin DB).
-3. 4b-3 IN PROGRESS — see §START HERE at the top (M1-545 pending, M1-546 to
-   draft, LiveUser now joined; the grammar-gap / GROUP / item-edit / mention
-   analysis lives there).
+3. ~~4b-3 substrate~~ **DONE (2026-07-03): M1-545 (grammar capture) +
+   M1-546 (live backend v2) both merged** — see §START HERE and the running
+   log. What remains of 4b-3 is the live scenario RUN itself (host fixtures
+   + drive), which is deliberately un-ticketed host work.
 
 **Repro command (stack is UP):**
 `prod/runtime/simplex-clients/bin/simplex-chat -d prod/runtime/simplex-clients/admin/simplex_v1 -y -t 6 -e "@Admin-Reno <text>"`
 then `docker logs --since 90s infochat-infochat-provider-1 | grep 'inbound handler threw'` (expect NO hits post-M1-543).
 
 **HOST STATE:**
-- **Collector + provider are STOPPED** (2026-07-03, for the M1-545 verify
-  window; postgres + both llamacpp containers stayed UP). Restart via
-  `docker compose --profile prod up -d` — but only when live work resumes;
-  M1-546's own verify needs them stopped again first, so the natural order is
-  verify M1-546 → restart stack → host-validate → live 4b-3 run.
+- **Stack is UP — all 5 containers healthy** (2026-07-03, restarted for the
+  M1-546 host validation and left up for the live 4b-3 run). **The restart
+  command REQUIRES the env-file** (the bare `--profile prod up -d` form fails:
+  collector exits 1 with SCRAM/no-password because the DB secrets live in
+  `prod/runtime/secrets.env`, fed via `--env-file` by every wizard script):
+  `docker compose --env-file prod/runtime/secrets.env --profile prod up -d --wait --wait-timeout 300`.
+  F-live-3 recurred on this restart (2nd observation: OutboxRehydrator
+  SRMSG00034 under RAW backlog; immediate retry booted clean — still
+  un-ticketed, pattern holds).
   Health once up: `docker exec infochat-infochat-provider-1 sh -c 'curl -s 127.0.0.1:8081/q/health/ready'`.
 - **Do NOT run image builds / `mvn verify` while the stack is up** (06-28
   throttle condition); stop collector+provider first.
 - **Swap enabled** (8 GiB, swappiness=10) — the missing 06-28 safety margin is in place.
 - **Clients provisioned:** `LiveAdmin` + `LiveUser` under `prod/runtime/simplex-clients/{admin,user}/` (native baked binary v6.5.4.1 at `.../bin/`). Admin is connected to the bot (contact "Admin-Reno"). Bot `/ad` link was transient (not saved); the clients are already joined, so re-query only if adding a new client.
 
-**Clean verify-monitoring (user wants a complete report next run):** the M1-542
-attempt's monitor subagent hung on a self-referential `pgrep -f 'verify-serialized.sh'`
-(its own cmdline matched the pattern → loop never exited). Next run, either (a) let a
-background bash sampler loop forever and **stop it from the main thread** on the
-verify's completion notification, or (b) bracket-trick the pattern (`pgrep -f '[c]lean verify'`)
-or poll the build log for `BUILD SUCCESS|FAILURE`. See `[[clean-verify-monitoring]]` memory.
+**Clean verify-monitoring (2026-07-03 update — M1-546 lessons):** harness
+*background tasks* running the verify were KILLED twice mid-build (whole
+process tree died; no OOM, memory healthy — cause harness-side, unknown).
+Working pattern: launch fully DETACHED —
+`setsid nohup bash -c 'scripts/verify-serialized.sh > .scratch/<log> 2>&1; ec=$?; mkdir -p target && cp .scratch/<log> target/<log>; echo VERIFY_EXIT=$ec >> .scratch/<marker>' &`
+— then watch the marker file with a Monitor until-loop. Remember the
+`mkdir -p target` INSIDE the detached wrapper (the build's clean deletes root
+`target/`; the M1-546 wrapper omitted it and the copy silently failed). The
+sampler-kill step also re-hit the self-match trap in *pkill* form
+(`pkill -f <pattern>` matched the killing shell's own cmdline → exit 144):
+kill the sampler by PID only. See `[[clean-verify-monitoring]]` memory.
 Also: `mvn verify` leaks ~5 DevServices Postgres containers each run — clean with
 `docker rm -f $(docker ps --filter label=org.testcontainers=true -q)` after; a
 DevServices-reuse optimization is a candidate follow-up ticket.
@@ -132,23 +145,26 @@ has run against a real transport yet** — the first real live work is Phase 4b.
 | 2 — Load-bearing assumptions | admin-token re-arm, SSRF strict, FK trap, caps | ✅ DONE |
 | 3 — Reset & data harness | `prod/live-reset.sh`, `live-seed.sh`, `live-inject-adversarial.sh` | ✅ DONE (M1-536/537/538) |
 | **4a — scenario runner substrate** | `Scenario`, `ConversationBackend` SPI, `ScenarioRunner`, InMemory backend, `ScenarioRunnerIT` | ✅ DONE (M1-539) |
-| **4b — SimpleX live drive** | real simplex-chat drive + LLM latency + embedding retrieval | 🔶 IN PROGRESS — stack up, clients provisioned, admin↔bot handshake done, channel proven; first inbound surfaced F-live-1 |
+| **4b — SimpleX live drive** | real simplex-chat drive + LLM latency + embedding retrieval | 🔶 IN PROGRESS — substrate COMPLETE (M1-544/545/546); v2 client host-validated 733 ms; next: the 7-scenario live run (fixtures + drive) |
 | **5 — Signal delta** | round-trip + ACI bootstrap + §6 differences | ❌ NOT STARTED |
 | 6 — (optional) `/testcase` skill | wrap the runner once 2–3 scenarios pass | ❌ not started |
 
-**Concrete "done vs not" marker:** the only `ConversationBackend` implementation on
-disk is `InMemoryConversationBackend`. There is **no `SimpleXConversationBackend`
-and no `SignalConversationBackend` yet** — that binding is the Phase 4b/5 boundary.
+**Concrete "done vs not" marker:** `SimpleXConversationBackend` exists and is
+host-validated (M1-544 DM-only → M1-546 GROUP + finalized-union), with the 7
+live `.scenario` resources on disk behind `-Dinfochat.live.simplex=true`. What
+does NOT exist yet: any completed live run of those 7 scenarios (the 4b-3 run
+is the next step), and **no `SignalConversationBackend`** (the Phase 5
+boundary).
 
 ## Next actions (in order)
 
-1. [ ] **4b-1** — Provision 3 simplex-chat identities. **Bot: scripted** via
+1. [x] **4b-1** — Provision 3 simplex-chat identities. **Bot: scripted** via
        `prod/scripts/6b-simplex-provision.sh` (run by `7-apps.sh`; profile + `/ad`
        address + `/auto_accept on`). **Admin + user clients: NEW tooling** — the
        harness needs its own client instances (separate data-dirs + ws-ports, baked
        binary from the Provider image), joined to the bot via its `/ad` link. Admin
        becomes admin by DMing the `admin-token` (not a pre-set address). Host-side.
-2. [ ] **4b-2** — Write `SimpleXConversationBackend` behind the existing
+2. [x] **4b-2** — Write `SimpleXConversationBackend` behind the existing
        `ConversationBackend` SPI and **validate it against real simplex-chat on the
        host** — drive the WS API (corrId command/response + async inbound), reusing
        the reality-reconciled `SimpleXMessageCodec` / `SimpleXWebSocketClient` (one
@@ -158,7 +174,8 @@ and no `SignalConversationBackend` yet** — that binding is the Phase 4b/5 boun
        are exactly what a fake can't model. A FakeSimpleXProcess regression IT is a
        *later* ticket, seeded with frames captured on the first real run.
 3. [ ] **4b-3** — Run the 7 transport-relevant scenarios (3,4,7,10,11,12,15) over
-       real SimpleX via the runner.
+       real SimpleX via the runner. **Substrate DONE (M1-545 + M1-546); the
+       run itself is next — see §START HERE.**
 4. [ ] **4b-4** — Assert real LLM latency captured; embedding-retrieval assertion
        (ask a topic covered by exactly one seeded post → assert it's retrieved);
        readiness/liveness, per-adapter metrics, LLM-down = degraded.
@@ -273,6 +290,11 @@ single live round-trip verification happens after BOTH fixes land. NOTE: the liv
 ## Live findings (continued)
 
 ### F-live-3 (LOW, transient — NOT yet investigated) — collector startup race under RAW backlog
+**2nd observation 2026-07-03** (restart for the M1-546 host validation):
+identical signature — `OutboxRehydrator.onStartup` → `EvalQueueProducer.emit`
+→ `SRMSG00034: Insufficient downstream requests to emit item`, exit 1;
+immediate retry booted clean. The retry-clean pattern holds; still
+un-ticketed.
 On 2026-07-02 22:08, restarting the collector after the M1-544 verify failed once:
 `Failed to start quarkus`, the `OutboxRehydrator` startup observer threw, and many
 `Stage1Worker: evaluation failed ... left RAW for re-enqueue` lines showed
@@ -285,6 +307,30 @@ likely needs a large RAW backlog + restart. Un-ticketed; investigate before
 relying on unattended collector restarts.
 
 ## Running log
+
+### 2026-07-03 (M1-546 run + merge — 4b-3 substrate COMPLETE)
+- **M1-546 MERGED (c9fcdc20) — SimpleX live backend v2** via
+  `/m1-tick run M1-546`. Full cycle: clarity WARN (files_budget 12 tight vs
+  13-14 plausible — final diff landed at exactly 12 implementation files) →
+  plan-writer outline PASS (6 risks) → implement (LiveSimpleXClient single
+  raw-WS rework, SimpleXConversationBackend GROUP + finalized-union,
+  LiveSimpleXHarnessFrameTest, LiveScenarioParseTest, gated
+  LiveSimpleXScenarioSuiteIT, 7 live .scenario resources) → verify r1 green
+  (11:02 min; clean monitor report: min-avail 1850 MiB, swap Δ ≈ +325 MiB
+  over baseline, no OOM; 5 DevServices leaks cleaned) → review r1 REWORK
+  (1 item: the host validation — by-design post-verify) → stack restarted
+  (--env-file lesson + F-live-3 recurrence, both recorded in §HOST STATE) →
+  **host validation GREEN: LiveSimpleXRoundTripIT over the v2
+  single-connection client, matched in 733 ms on real relays** → evidence in
+  ticket body → review r2 APPROVE (verify reuse user-approved,
+  blob-hash-verified unchanged testable tree) → commit 3ff4c5f8 →
+  squash-merge c9fcdc20. Board: done=570, pending=0.
+- **Verify-runner lesson:** harness background tasks running the verify were
+  killed twice mid-build; detached `setsid` + marker-file Monitor worked
+  (details in §Clean verify-monitoring). `pkill -f` self-match trap re-hit
+  (kill the sampler by PID only).
+- **Stack left UP** for the live 4b-3 run — next session starts at
+  §START HERE (host fixtures, then drive the 7 scenarios).
 
 ### 2026-07-03 (M1-545 run + M1-546 draft)
 - **M1-545 MERGED (c8a6ff29) — grammar capture/substitution extension** via
