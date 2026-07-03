@@ -1,7 +1,7 @@
 ---
 id: M1-554
 title: Dev Services containers Ryuk-reaped — repo-tracked reuse=false, drop dead pom flag
-status: pending
+status: done
 created: 2026-07-03
 last_updated: 2026-07-03
 reopens:
@@ -13,6 +13,20 @@ clarity_check:
   date: 2026-07-03
   verdict: PASS
   warnings: []
+reviews:
+  - round: 1
+    date: 2026-07-03
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 28
+      removed: 39
 escalations:
   - date: 2026-07-03
     reason: loop

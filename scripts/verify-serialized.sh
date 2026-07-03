@@ -35,9 +35,12 @@ fi
 
 # Deterministic-DB hygiene (M1-535). We now HOLD the lock, so no other verify from
 # this clone is running — every Quarkus TEST Dev Services container present is
-# debris from a hard-killed / OOM'd prior run (reuse is forced off in the parent
-# pom, so live runs create and Ryuk-reap their own containers; nothing here is in
-# use). Reaping BEFORE the lock would race a lock-holding verify and kill its live
+# debris from a prior run whose Ryuk died with a hard-killed docker daemon.
+# Repo-level quarkus.datasource.devservices.reuse=false (M1-554) makes live runs'
+# containers carry org.testcontainers.sessionId and be Ryuk-reaped at session end
+# — even for hard-killed JVMs (Ryuk triggers on heartbeat loss) — so this sweep
+# remains only as the backstop for those daemon-level failures; nothing here is in
+# use. Reaping BEFORE the lock would race a lock-holding verify and kill its live
 # DB, so this must stay inside the lock. Remove the debris so a stale pile cannot
 # re-trigger the host OOM that motivated M1-535. Scoped strictly to the Quarkus
 # TEST label — never the operator's infochat-* compose stack. Best-effort: guarded
