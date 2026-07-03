@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 572 |
+| done | 573 |
 | deferred | 10 |
-| **total** | **582** |
+| **total** | **583** |
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-549 | live-reset preserves provider_state (F-live-4) | 2026-07-03 | round 2 APPROVE |
 | M1-548 | Per-task max-tokens for OpenAiCompatibleProvider (F-live-6) | 2026-07-03 | round 1 APPROVE |
 | M1-547 | Live 4b-3 harness corrections (D51 mention shape + confirm-gated mint scenarios) | 2026-07-03 | round 1 APPROVE |
 | M1-546 | SimpleX live backend v2 (Phase 4b-3 substrate) | 2026-07-03 | round 2 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-542 | Include cause chain in D37 inbound-handler stack log | 2026-07-02 | round 2 APPROVE |
 | M1-541 | Harden signalCrashDoesNotAffectSimpleX readiness barrier | 2026-07-02 | round 1 APPROVE |
 | M1-540 | Fix MultiAdapterProductionIT signal-crash timing flake | 2026-07-02 | round 1 APPROVE |
-| M1-539 | live-smoke scenario runner + InMemory backend (Phase 4a) | 2026-07-02 | round 1 APPROVE |
 
 ---
 
@@ -753,4 +753,5 @@ M1-542 (done)
                     └── M1-546 (done)
 M1-547 (done)
 M1-548 (done)
+M1-549 (done)
 ```

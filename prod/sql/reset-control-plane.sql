@@ -1,7 +1,7 @@
 -- prod/sql/reset-control-plane.sql — live-run "workflow reset" (M1-536).
 --
--- Clears ALL control-plane rows (users / groups / invites / chat / audit /
--- provider state) while leaving the fetched-and-evaluated DATA-plane (source,
+-- Clears ALL control-plane rows (users / groups / invites / chat / audit)
+-- while leaving the fetched-and-evaluated DATA-plane (source,
 -- tag, post + partitions, embeddings, entities, references, price snapshots,
 -- asset_config, bootstrap_meta, embedding_metadata) byte-for-byte intact, so
 -- the live-e2e loop can re-run the chat-app workflow from "scratch" app state
@@ -58,10 +58,19 @@ ALTER TABLE users DISABLE TRIGGER trg_users_last_admin_delete;
 -- the about-to-be-deleted users is nulled. WHERE keeps the second run a no-op.
 UPDATE tag SET created_by = NULL WHERE created_by IS NOT NULL;
 
--- Every control-plane table EXCEPT users. Nothing outside this set references
--- into it, so no CASCADE is needed or wanted (CASCADE is the trap above). All
--- are truncated simultaneously, so intra-set FKs (group_membership->groups,
--- chat_memory->chat_session, summary_cache->groups, ...) are satisfied.
+-- Every control-plane table EXCEPT users (deleted below) and EXCEPT
+-- provider_state (preserved). provider_state is the Provider's cursor over
+-- the PRESERVED data-plane (cursor_high / cursor_low_id reference post rows),
+-- and its new_post / quarantine_review sentinel rows are inserted only by the
+-- first-boot Flyway migrations V9 / V21, which never re-run — truncating it
+-- boot-loops the next Provider start on the missing-row IllegalStateException
+-- in the channel reconcilers (F-live-4). Preserving it also matches V9's
+-- REVOKE-DELETE posture (the row is upserted, never deleted) and skips a
+-- pointless catch-up page-through of the preserved posts on the next boot.
+-- Nothing outside this set references into it, so no CASCADE is needed or
+-- wanted (CASCADE is the trap above). All are truncated simultaneously, so
+-- intra-set FKs (group_membership->groups, chat_memory->chat_session,
+-- summary_cache->groups, ...) are satisfied.
 TRUNCATE TABLE
     groups,
     group_membership,
@@ -79,7 +88,6 @@ TRUNCATE TABLE
     audit_log,
     quarantine,
     admin_notification_state,
-    provider_state,
     auto_joined_group;
 
 -- Now safe: the only remaining references to users are source's SET-NULL columns

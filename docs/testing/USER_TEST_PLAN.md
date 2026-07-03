@@ -164,8 +164,11 @@ prod/live-reset.sh
   under the database owner role — reached via `docker compose exec postgres`, the
   same way `backup.sh` reaches Postgres. It clears every control-plane table
   (`users`, `groups`, `group_membership`, `invite_code`, `chat_*`, `audit_log`,
-  `provider_state`, …) while leaving `source`, `tag`, `post` (+ partitions),
-  embeddings, entities, references, and price snapshots untouched. It captures the
+  …) while leaving `source`, `tag`, `post` (+ partitions), embeddings,
+  entities, references, price snapshots — and `provider_state`, the Provider's
+  cursor over that preserved data (its sentinel rows are seeded only by
+  first-boot migrations, so clearing it would boot-loop the next Provider
+  start) — untouched. It captures the
   `post` row count before and after and asserts it is unchanged, asserts every
   control-plane table is empty, and exits non-zero if either check fails. It is
   idempotent — running it twice leaves identical state.

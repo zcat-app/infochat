@@ -1,9 +1,41 @@
 ---
 id: M1-549
 title: live-reset preserves provider_state (F-live-4)
-status: pending
+status: done
 created: 2026-07-03
 last_updated: 2026-07-03
+reviews:
+  - round: 1
+    date: 2026-07-03
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PARTIAL
+    diff_stats:
+      files: 5
+      added: 38
+      removed: 19
+  - round: 2
+    date: 2026-07-03
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 94
+      removed: 19
+clarity_check:
+  date: 2026-07-03
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 3
 complexity: low
@@ -106,6 +138,48 @@ The finding offered two fixes; exclusion wins on every axis checked:
   example list names `provider_state` (l.167).
 - Boot-loop site: `NewPostReconciler.runCatchUp` (and the
   `QuarantineReviewReconciler` sibling) — unchanged by this ticket.
+
+## Round 1 rework
+
+1. Complete acceptance item 4 and record the evidence in the ticket body
+   (a "## Host validation" section, per the M1-546 precedent the item
+   cites): on the live deployment, run prod/live-reset.sh from this
+   branch, restart the Provider WITHOUT any manual sentinel re-INSERT,
+   and paste the observed evidence — readiness UP (no
+   provider_state-missing boot-loop) and the post-reset provider_state
+   query output showing the new_post and quarantine_review rows survived.
+   No code change is required; the round-2 diff should grow only by the
+   ticket-body evidence (the ticket file is lifecycle-exempt).
+
+## Host validation (2026-07-03, acceptance item 4 — round 1 rework)
+
+Performed on the live vps deployment (all 5 containers up) from this
+branch, with NO manual sentinel re-INSERT at any point:
+
+1. **Pre-reset:** Provider readiness UP; `provider_state` held both rows
+   (`new_post` at a real cursor `2026-07-03 17:12:24.018703+00` /
+   `cursor_low_kind='post'`, `quarantine_review` at the epoch sentinel).
+2. **`prod/live-reset.sh` (this branch) succeeded:**
+   `live-reset OK: control-plane cleared (18 tables empty); data-plane
+   preserved (3764 posts unchanged).`
+3. **Rows survived the reset:** `SELECT channel FROM provider_state`
+   returned `new_post` + `quarantine_review` before the restart.
+4. **Provider restart, no re-seed:** single clean boot (`Up 35 seconds`,
+   no restart loop); readiness UP
+   (`messaging-adapters: UP` incl. simplex, DB `UP`); `docker logs`
+   grep for `IllegalStateException` / `provider_state row .* is missing`
+   over the boot window: **0 hits**.
+5. **Reconcilers ran against the preserved cursor:**
+   `NewPostReconciler: caught up 0 posts in 1 page(s) from
+   cursor=(ready_at=2026-07-03T17:13:29.022651Z, ...)` — no epoch
+   page-through of the 3.7k preserved posts (the designed benefit) —
+   and `QuarantineReviewReconciler: caught up 0 events in 2 page(s)`.
+6. **Post-restart:** both rows present; `new_post` cursor advancing live
+   (`2026-07-03 17:14:34` — LISTEN worker processing fresh collector
+   posts), `quarantine_review` sentinel intact. `users` empty
+   (`admin_rows=0`) as expected post-reset — the D50 admin-claim token
+   re-armed per the script's epilogue; admin re-claim is live-fixture
+   work outside this ticket.
 
 ## Not security_relevant — justification
 

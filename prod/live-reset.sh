@@ -1,8 +1,8 @@
 #!/bin/bash
 # prod/live-reset.sh — live-run "workflow reset" (M1-536).
 #
-# Clears the CONTROL-plane (users / groups / invites / chat / audit / provider
-# state) of a RUNNING compose deployment while PRESERVING the DATA-plane (the
+# Clears the CONTROL-plane (users / groups / invites / chat / audit) of a
+# RUNNING compose deployment while PRESERVING the DATA-plane (the
 # already-fetched, already-evaluated source / tag / post + embeddings / entities
 # / references / price snapshots). This is the fast-iteration reset for the
 # live-e2e loop (docs/plan/live-e2e/README.md): re-run the whole chat-app
@@ -39,14 +39,17 @@ SECRETS_FILE="$RUNTIME_DIR/secrets.env"
 COMPOSE_FILE="$REPO_ROOT/docker-compose.yml"
 SQL_FILE="$PROD_DIR/sql/reset-control-plane.sql"
 
-# The 19 control-plane tables cleared by reset-control-plane.sql — the single
+# The 18 control-plane tables cleared by reset-control-plane.sql — the single
 # source of truth for the post-reset emptiness assertion below. Keep in sync
-# with the TRUNCATE/DELETE set in that SQL file.
+# with the TRUNCATE/DELETE set in that SQL file. provider_state is deliberately
+# NOT here: the reset preserves it (it is the Provider's cursor over the
+# preserved data-plane, and its V9/V21 sentinel rows never re-seed — F-live-4),
+# so the emptiness assertion must not flag its rows.
 CONTROL_PLANE_TABLES=(
   users groups group_membership invite_code invite_code_attempt
   source_subscription scope_tag scope_preferences chat_session chat_message
   chat_memory summary_anchor summary_cache saved_post audit_log
-  quarantine admin_notification_state provider_state auto_joined_group
+  quarantine admin_notification_state auto_joined_group
 )
 
 usage() {
