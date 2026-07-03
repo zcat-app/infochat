@@ -1,9 +1,28 @@
 ---
 id: M1-548
 title: Per-task max-tokens for OpenAiCompatibleProvider (F-live-6)
-status: pending
+status: done
 created: 2026-07-03
 last_updated: 2026-07-03
+reviews:
+  - round: 1
+    date: 2026-07-03
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 87
+      removed: 9
+clarity_check:
+  date: 2026-07-03
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 3
 complexity: low

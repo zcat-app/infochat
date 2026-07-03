@@ -31,6 +31,7 @@ import java.util.NoSuchElementException;
  * <pre>{@code
  * {
  *   "model": "<model-id>",
+ *   "max_tokens": <output-cap>,
  *   "messages": [
  *     {"role": "system", "content": "<systemPrompt>"},
  *     {"role": "user",   "content": "<userPrompt>"}
@@ -45,7 +46,7 @@ import java.util.NoSuchElementException;
  * an error — token metrics simply don't increment for that call.
  *
  * <h2>Per-task config</h2>
- * <p>Reads {@code (base-url, api-key, model, timeout-ms)} per
+ * <p>Reads {@code (base-url, api-key, model, timeout-ms, max-tokens)} per
  * {@link ModelTask} for all six tasks, dynamically via {@link Config}
  * — the same pattern as {@link AnthropicProvider}. The property key
  * pattern is {@code infochat.llm.<taskKeySegment>.<property>}. A task
@@ -166,7 +167,13 @@ public class OpenAiCompatibleProvider implements LlmProvider {
             String model = config.getValue(prefix + "model", String.class);
             long timeoutMs = config.getOptionalValue(prefix + "timeout-ms", Long.class).orElse(30000L);
             LlmHttpSupport.requirePositiveTimeoutMs(timeoutMs, prefix + "timeout-ms");
-            return new TaskConfig(baseUrl, apiKey, model, timeoutMs);
+            // Defaulted, not uncapped, when absent: an uncapped completion is
+            // the F-live-6 failure mode — a local model generates until the
+            // client timeout cancels it, turning a finishable reply into a
+            // total loss. 1024 bounds every v1 task's legitimate output.
+            int maxTokens = config.getOptionalValue(prefix + "max-tokens", Integer.class).orElse(1024);
+            LlmHttpSupport.requirePositiveMaxTokens(maxTokens, prefix + "max-tokens");
+            return new TaskConfig(baseUrl, apiKey, model, timeoutMs, maxTokens);
         } catch (NoSuchElementException e) {
             throw new LlmProvider.TaskConfigUnresolvableException(
                 "OpenAiCompatibleProvider: missing required per-task config for " + task, e);
@@ -182,6 +189,7 @@ public class OpenAiCompatibleProvider implements LlmProvider {
         try {
             ObjectNode root = LlmHttpSupport.JSON.createObjectNode();
             root.put("model", cfg.model());
+            root.put("max_tokens", cfg.maxTokens());
             ArrayNode messages = root.putArray("messages");
             ObjectNode system = messages.addObject();
             system.put("role", "system");
@@ -244,6 +252,7 @@ public class OpenAiCompatibleProvider implements LlmProvider {
     }
 
     /** Per-task config snapshot extracted by {@link #configFor}. */
-    private record TaskConfig(String baseUrl, String apiKey, String model, long timeoutMs) {
+    private record TaskConfig(String baseUrl, String apiKey, String model, long timeoutMs,
+                              int maxTokens) {
     }
 }

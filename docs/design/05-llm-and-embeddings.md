@@ -108,7 +108,15 @@ infochat.llm.summarizer.base-url=https://nano-gpt.com/api/v1
 infochat.llm.summarizer.api-key=${NANOGPT_API_KEY}
 infochat.llm.summarizer.model=llama-3.1-70b-instruct                                                                                                                                                                                                  
 ```                                                                                   
-The provider key ollama is a thin alias of openai-compatible with the local URL pre-filled.                                                                                                                                                           
+The provider key ollama is a thin alias of openai-compatible with the local URL pre-filled.
+
+Every request carries `max_tokens`, read from the per-task key
+`infochat.llm.<task>.max-tokens` (optional, default 1024, must be positive).
+It caps OUTPUT only — prompt/input size is unaffected. The default is a cap,
+not absent-means-uncapped: an uncapped completion lets a slow local backend
+generate until the client `timeout-ms` cancels a finishable reply (F-live-6);
+a `finish_reason=length` truncation is the cheaper failure. Size per-task
+values so `cap × per-token decode time + prefill < timeout-ms` on the host.                                                                                                                                                           
                                                                                  
 AnthropicProvider                                                                                                                                                                                                                                     
                                                                                  

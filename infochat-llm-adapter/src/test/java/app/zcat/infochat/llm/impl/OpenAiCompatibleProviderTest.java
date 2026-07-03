@@ -43,6 +43,8 @@ class OpenAiCompatibleProviderTest {
     private String baseUrl;
     /** Model field of each request body the mock server received, in order. */
     private List<String> receivedModels;
+    /** Raw request bodies the mock server received, in order. */
+    private List<String> receivedBodies;
     /**
      * Canned reply the mock server returns for every call. Defaults to a
      * minimal text-only reply (no root {@code model}, no {@code usage} block);
@@ -55,9 +57,11 @@ class OpenAiCompatibleProviderTest {
         mockServer = HttpServer.create(new InetSocketAddress(0), 0);
         baseUrl = "http://localhost:" + mockServer.getAddress().getPort();
         receivedModels = new CopyOnWriteArrayList<>();
+        receivedBodies = new CopyOnWriteArrayList<>();
         responseBody = "{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}";
         mockServer.createContext("/chat/completions", exchange -> {
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            receivedBodies.add(body);
             receivedModels.add(JSON.readTree(body).path("model").asText());
             byte[] resp = responseBody.getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, resp.length);
@@ -173,6 +177,58 @@ class OpenAiCompatibleProviderTest {
             "usage.prompt_tokens maps to TokenUsage.inputTokens");
         assertEquals(7, response.usage().outputTokens(),
             "usage.completion_tokens maps to TokenUsage.outputTokens");
+    }
+
+    @Test
+    void generateSendsConfiguredMaxTokensInRequestBody() throws Exception {
+        // F-live-6: the request body must carry max_tokens so a local
+        // llama.cpp/Ollama backend stops generating instead of running
+        // until the client timeout cancels a finishable reply.
+        OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(new StubConfig(Map.of(
+            "infochat.llm.chat.base-url", baseUrl,
+            "infochat.llm.chat.api-key", "",
+            "infochat.llm.chat.model", "model-chat",
+            "infochat.llm.chat.max-tokens", "600")));
+
+        provider.generate(ModelTask.CHAT_AGENT, "sys", "usr");
+
+        assertEquals(600, JSON.readTree(receivedBodies.get(0)).path("max_tokens").asInt(),
+            "the configured per-task max-tokens must be sent as max_tokens");
+    }
+
+    @Test
+    void absentMaxTokensDefaultsTo1024InRequestBody() throws Exception {
+        // Defaulted, not uncapped: with the key unset the body still carries
+        // a cap — an absent-means-uncapped default would re-create the
+        // F-live-6 failure mode on every deployment that doesn't set the key.
+        OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(new StubConfig(Map.of(
+            "infochat.llm.chat.base-url", baseUrl,
+            "infochat.llm.chat.api-key", "",
+            "infochat.llm.chat.model", "model-chat")));
+
+        provider.generate(ModelTask.CHAT_AGENT, "sys", "usr");
+
+        assertEquals(1024, JSON.readTree(receivedBodies.get(0)).path("max_tokens").asInt(),
+            "an absent max-tokens key must default to 1024 in the request body");
+    }
+
+    @Test
+    void failsStartupScanOnNonPositiveMaxTokensNamingTheProperty() {
+        // Sibling of AnthropicProviderTest's guard (M1-412 pattern): a
+        // non-positive explicit max-tokens must fail the startup scan
+        // naming the offending property, not reach the backend on the
+        // first live call.
+        String property = "infochat.llm.chat.max-tokens";
+        OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(new StubConfig(Map.of(
+            "infochat.llm.chat.base-url", baseUrl,
+            "infochat.llm.chat.model", "model-chat",
+            property, "0")));
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+            () -> provider.assertTaskConfigResolvable(ModelTask.CHAT_AGENT),
+            "the startup scan must fail on a non-positive max-tokens");
+        assertTrue(ex.getMessage().contains(property),
+            "failure must name the offending property; got: " + ex.getMessage());
     }
 
     @Test
