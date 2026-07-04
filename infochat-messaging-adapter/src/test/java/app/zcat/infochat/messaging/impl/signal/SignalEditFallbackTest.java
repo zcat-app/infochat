@@ -1,8 +1,10 @@
 package app.zcat.infochat.messaging.impl.signal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import jakarta.json.Json;
@@ -23,14 +25,17 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Pins the M1-285 edit-failure fallback at the Signal JSON-RPC surface: an
- * {@code updateMessage}/{@code finalize} that signal-cli rejects as
+ * edit frame ({@code send} carrying {@code editTimestamp} — signal-cli has
+ * no {@code updateMessage} method, F-live-11) that signal-cli rejects as
  * non-recoverable (edit window expired, message deleted — any non-{@code
- * -32603} JSON-RPC error → PERMANENT) falls back to a fresh {@code send}
- * carrying the new body and the original {@code correlationId}, re-addressed
- * to the original recipient (design 06-messaging.md §6.3.8 / §6.5.7). Same
- * producer-thread harness as {@link SignalJsonRpcClientTest}: a thread issues
- * the blocking call while the test thread runs {@link FakeSignalCli}'s
- * accept-then-respond protocol.
+ * -32603} JSON-RPC error → PERMANENT) falls back to a PLAIN {@code send} (no
+ * {@code editTimestamp}) carrying the new body and the original
+ * {@code correlationId}, re-addressed to the original recipient (design
+ * 06-messaging.md §6.3.8 / §6.5.7). The edit-vs-fallback distinction keys on
+ * {@code editTimestamp} presence, never on the method name — both frames are
+ * {@code send}. Same producer-thread harness as
+ * {@link SignalJsonRpcClientTest}: a thread issues the blocking call while
+ * the test thread runs {@link FakeSignalCli}'s accept-then-respond protocol.
  */
 class SignalEditFallbackTest {
 
@@ -56,16 +61,18 @@ class SignalEditFallbackTest {
                 // (edit window expired / message deleted): a non-(-32603) code,
                 // which classifies PERMANENT.
                 JsonObject editReq = fake.nextOutbound(QUEUE_WAIT_MS);
-                assertEquals("updateMessage", editReq.getString("method"),
-                        "the first update must attempt an in-place edit");
+                assertEquals("send", editReq.getString("method"));
+                assertTrue(editReq.getJsonObject("params").containsKey("editTimestamp"),
+                        "the first update must attempt an in-place edit (send WITH editTimestamp)");
                 fake.respondError(editReq.getString("id"), -32602, "edit window expired");
 
                 // The adapter must fall back to a fresh send of the new body,
                 // re-addressed to the original recipient.
                 JsonObject sendReq = fake.nextOutbound(QUEUE_WAIT_MS);
-                assertEquals("send", sendReq.getString("method"),
-                        "an unrecoverable edit must fall back to a fresh send");
+                assertEquals("send", sendReq.getString("method"));
                 JsonObject params = sendReq.getJsonObject("params");
+                assertFalse(params.containsKey("editTimestamp"),
+                        "an unrecoverable edit must fall back to a PLAIN fresh send — no editTimestamp");
                 assertEquals("edited body", params.getString("message"));
                 assertEquals(RECIPIENT, params.getJsonArray("recipient").getString(0),
                         "the fresh send must re-address the original recipient");
@@ -77,12 +84,13 @@ class SignalEditFallbackTest {
                         "the edit fallback must not surface an exception: " + failure.get());
 
                 // After the fallback the handle is in fresh-send mode: a
-                // subsequent update fresh-sends directly — no further
-                // updateMessage may reach the transport.
+                // subsequent update fresh-sends directly — no further edit
+                // frame (send WITH editTimestamp) may reach the transport.
                 Thread updater2 = runAsync("fallback-updater-2",
                         () -> client.update(handle, "edited again"), failure);
                 JsonObject sendReq2 = fake.nextOutbound(QUEUE_WAIT_MS);
-                assertEquals("send", sendReq2.getString("method"),
+                assertEquals("send", sendReq2.getString("method"));
+                assertFalse(sendReq2.getJsonObject("params").containsKey("editTimestamp"),
                         "after the fallback, subsequent updates fresh-send and never edit again");
                 assertEquals("edited again", sendReq2.getJsonObject("params").getString("message"));
                 fake.respondSuccess(sendReq2.getString("id"),
@@ -110,12 +118,15 @@ class SignalEditFallbackTest {
                         () -> client.finalizeHandle(handle, "final body"), failure);
 
                 JsonObject editReq = fake.nextOutbound(QUEUE_WAIT_MS);
-                assertEquals("updateMessage", editReq.getString("method"));
+                assertEquals("send", editReq.getString("method"));
+                assertTrue(editReq.getJsonObject("params").containsKey("editTimestamp"),
+                        "finalize must first attempt an in-place edit (send WITH editTimestamp)");
                 fake.respondError(editReq.getString("id"), -32602, "message deleted");
 
                 JsonObject sendReq = fake.nextOutbound(QUEUE_WAIT_MS);
-                assertEquals("send", sendReq.getString("method"),
-                        "an unrecoverable finalize edit must fall back to a fresh send");
+                assertEquals("send", sendReq.getString("method"));
+                assertFalse(sendReq.getJsonObject("params").containsKey("editTimestamp"),
+                        "an unrecoverable finalize edit must fall back to a PLAIN fresh send");
                 assertEquals("final body", sendReq.getJsonObject("params").getString("message"));
                 fake.respondSuccess(sendReq.getString("id"),
                         Json.createObjectBuilder().add("timestamp", 1700000021000L).build());
@@ -144,7 +155,9 @@ class SignalEditFallbackTest {
                         () -> client.update(handle, "group edit"), failure);
 
                 JsonObject editReq = fake.nextOutbound(QUEUE_WAIT_MS);
-                assertEquals("updateMessage", editReq.getString("method"));
+                assertEquals("send", editReq.getString("method"));
+                assertTrue(editReq.getJsonObject("params").containsKey("editTimestamp"),
+                        "the group update must attempt an in-place edit (send WITH editTimestamp)");
                 fake.respondError(editReq.getString("id"), -32602, "edit window expired");
 
                 // The fresh fallback send must re-address the group by groupId,
@@ -152,6 +165,8 @@ class SignalEditFallbackTest {
                 JsonObject sendReq = fake.nextOutbound(QUEUE_WAIT_MS);
                 assertEquals("send", sendReq.getString("method"));
                 JsonObject params = sendReq.getJsonObject("params");
+                assertFalse(params.containsKey("editTimestamp"),
+                        "a group edit fallback must be a PLAIN fresh send — no editTimestamp");
                 assertEquals("group-9", params.getString("groupId"),
                         "a group fallback send must re-address by groupId");
                 assertEquals("group edit", params.getString("message"));
@@ -195,12 +210,15 @@ class SignalEditFallbackTest {
                 // The edit is rejected non-recoverably (PERMANENT), forcing the
                 // fresh-send fallback — a second wire frame.
                 JsonObject editReq = fake.nextOutbound(QUEUE_WAIT_MS);
-                assertEquals("updateMessage", editReq.getString("method"));
+                assertEquals("send", editReq.getString("method"));
+                assertTrue(editReq.getJsonObject("params").containsKey("editTimestamp"),
+                        "the update must attempt an in-place edit (send WITH editTimestamp)");
                 fake.respondError(editReq.getString("id"), -32602, "edit window expired");
 
                 JsonObject sendReq = fake.nextOutbound(QUEUE_WAIT_MS);
-                assertEquals("send", sendReq.getString("method"),
-                        "an unrecoverable edit must fall back to a fresh send");
+                assertEquals("send", sendReq.getString("method"));
+                assertFalse(sendReq.getJsonObject("params").containsKey("editTimestamp"),
+                        "an unrecoverable edit must fall back to a PLAIN fresh send");
                 fake.respondSuccess(sendReq.getString("id"),
                         Json.createObjectBuilder().add("timestamp", 1700000041000L).build());
 

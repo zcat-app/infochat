@@ -12,7 +12,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
  * {@link MessageHandle} record stays the opaque return type, and this
  * record holds the signal-cli-only state ({@code timestamp} echoed back
  * from the {@code send} response + the destination identifier) that the
- * adapter needs to apply subsequent {@code updateMessage} edits
+ * adapter needs to encode subsequent edit-shaped {@code send} frames
  * deterministically.
  *
  * <p>The opacity invariant from {@code docs/spec/messaging.md}
@@ -21,15 +21,17 @@ import app.zcat.infochat.messaging.OutboundMessage;
  * escapes the {@code impl.signal} package (it is package-private). The
  * SignalJsonRpcClient maintains an internal map keyed by the SPI
  * handle's {@code opaqueValue} string to look this record up before
- * issuing the JSON-RPC {@code updateMessage} request.</p>
+ * encoding an edit ({@code send} + {@code editTimestamp} — signal-cli
+ * has no {@code updateMessage} method, F-live-11).</p>
  *
- * @param timestamp the {@code timestamp} field signal-cli returns in
- *                  the send response; reused as
- *                  {@code targetSentTimestamp} on subsequent edits.
+ * @param timestamp latest revision timestamp — the original send's,
+ *                  then refreshed by each successful edit; reused as
+ *                  {@code editTimestamp} on the next edit so an edit
+ *                  chain targets the latest revision.
  * @param recipient the destination identifier (Signal ACI as
  *                  lowercase UUID, or E.164 phone) signal-cli requires
- *                  on every {@code updateMessage} request — the
- *                  protocol does not derive it from the timestamp.
+ *                  on every edit frame — the protocol does not derive
+ *                  it from the timestamp.
  * @param original  the original outbound message — carries the scope and
  *                  the {@code correlationId} the edit-failure fresh-send
  *                  fallback reuses (design §6.5.7).
@@ -43,5 +45,14 @@ record SignalMessageHandle(long timestamp, String recipient, OutboundMessage ori
     /** A copy of this handle switched into fresh-send fallback mode. */
     SignalMessageHandle asFallenBack() {
         return new SignalMessageHandle(timestamp, recipient, original, true);
+    }
+
+    /**
+     * A copy of this handle re-targeted at {@code latestTimestamp} — the
+     * fresh {@code timestamp} a successful edit's send response returned —
+     * so the next edit on this handle targets the latest revision.
+     */
+    SignalMessageHandle withTimestamp(long latestTimestamp) {
+        return new SignalMessageHandle(latestTimestamp, recipient, original, fellBack);
     }
 }

@@ -31,16 +31,22 @@ class SignalMessageCodecTest {
         assertEquals("+15557654321", sendParams.getJsonArray("recipient").getString(0));
         assertEquals("Hello, world!", sendParams.getString("message"));
 
-        // Outbound `updateMessage` — edit a prior message identified by
-        // its signal-cli send timestamp.
-        String editEnvelope = codec.encodeUpdateMessage(
+        // Outbound edit — a `send` carrying editTimestamp, targeting the
+        // edited revision's send timestamp: signal-cli has no updateMessage
+        // method (its jsonRpc surface mirrors the CLI, whose edit is
+        // `send --edit-timestamp`; F-live-11).
+        String editEnvelope = codec.encodeEditSend(
                 43L, "+15551234567", "+15557654321", 1700000000123L, "Hello, edited!");
         JsonObject editObj = parse(editEnvelope);
-        assertEquals("updateMessage", editObj.getString("method"));
+        assertEquals("send", editObj.getString("method"),
+                "an edit rides the send method — signal-cli has no updateMessage");
         JsonObject editParams = editObj.getJsonObject("params");
         assertEquals(1700000000123L,
-                editParams.getJsonNumber("targetSentTimestamp").longValueExact());
+                editParams.getJsonNumber("editTimestamp").longValueExact());
         assertEquals("Hello, edited!", editParams.getString("message"));
+        assertEquals("+15557654321", editParams.getJsonArray("recipient").getString(0));
+        assertFalse(editParams.containsKey("targetSentTimestamp"),
+                "targetSentTimestamp belongs to the nonexistent updateMessage method");
 
         // Outbound `sendTyping` — start typing.
         String typingStart = codec.encodeSendTyping(
@@ -123,6 +129,27 @@ class SignalMessageCodecTest {
         assertEquals("42", err.id());
         assertEquals(-32603, err.code());
         assertEquals("Internal error", err.message());
+    }
+
+    @Test
+    void groupEditEncodesAsSendWithEditTimestamp() {
+        // Group edit frame shape (F-live-11 twin of the DM pin above):
+        // method `send`, addressed by groupId, editTimestamp present,
+        // no targetSentTimestamp.
+        String envelope = codec.encodeGroupEditSend(
+                50L, "+15551234567", "group-1", 1700000000123L, "group edit");
+        JsonObject obj = parse(envelope);
+        assertEquals("send", obj.getString("method"),
+                "a group edit rides the send method — signal-cli has no updateMessage");
+        JsonObject params = obj.getJsonObject("params");
+        assertEquals("group-1", params.getString("groupId"));
+        assertFalse(params.containsKey("recipient"),
+                "group edit must not carry a recipient array — groupId replaces it");
+        assertEquals(1700000000123L,
+                params.getJsonNumber("editTimestamp").longValueExact());
+        assertEquals("group edit", params.getString("message"));
+        assertFalse(params.containsKey("targetSentTimestamp"),
+                "targetSentTimestamp belongs to the nonexistent updateMessage method");
     }
 
     @Test

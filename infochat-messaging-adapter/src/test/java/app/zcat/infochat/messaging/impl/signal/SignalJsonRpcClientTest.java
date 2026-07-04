@@ -120,7 +120,7 @@ class SignalJsonRpcClientTest {
 
                 // Subsequent update() on the same handle must target the
                 // original send's timestamp. Drive another round-trip and
-                // verify FakeSignalCli sees targetSentTimestamp=1700000002500.
+                // verify FakeSignalCli sees editTimestamp=1700000002500.
                 Thread updater = new Thread(() -> {
                     try {
                         client.update(handle, "hello world (edited)");
@@ -131,12 +131,13 @@ class SignalJsonRpcClientTest {
                 updater.start();
 
                 JsonObject editRequest = fake.nextOutbound(QUEUE_WAIT_MS);
-                assertEquals("updateMessage", editRequest.getString("method"));
+                assertEquals("send", editRequest.getString("method"),
+                        "an edit is a send carrying editTimestamp — signal-cli has no updateMessage");
                 JsonObject editParams = editRequest.getJsonObject("params");
                 assertEquals(
                         1700000002500L,
-                        editParams.getJsonNumber("targetSentTimestamp").longValueExact(),
-                        "updateMessage must target the timestamp returned by the original send");
+                        editParams.getJsonNumber("editTimestamp").longValueExact(),
+                        "the first edit must target the timestamp returned by the original send");
                 assertEquals("hello world (edited)", editParams.getString("message"));
                 fake.respondSuccess(editRequest.getString("id"),
                         Json.createObjectBuilder().add("timestamp", 1700000003000L).build());
@@ -472,6 +473,63 @@ class SignalJsonRpcClientTest {
     }
 
     @Test
+    void successiveEditsTargetLatestRevisionTimestamp() throws Exception {
+        // The edit chain must follow the LATEST revision (F-live-11 fix):
+        // the first edit targets the original send's timestamp, and each
+        // successful edit's response timestamp becomes the next edit's
+        // editTimestamp — official Signal clients accept a chain targeting
+        // the latest revision.
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), "+15551111111", new SignalMessageCodec(), TEST_RESPONSE_TIMEOUT);
+            client.connect();
+            try {
+                MessageHandle handle = sendOneAndAck(client, fake, 1700000060000L);
+
+                AtomicReference<Exception> failure = new AtomicReference<>();
+                Thread first = new Thread(() -> {
+                    try {
+                        client.update(handle, "revision 2");
+                    } catch (MessagingException e) {
+                        failure.set(e);
+                    }
+                }, "chain-updater-1");
+                first.start();
+                JsonObject edit1 = fake.nextOutbound(QUEUE_WAIT_MS);
+                assertEquals("send", edit1.getString("method"));
+                assertEquals(1700000060000L,
+                        edit1.getJsonObject("params").getJsonNumber("editTimestamp").longValueExact(),
+                        "the first edit targets the original send's timestamp");
+                fake.respondSuccess(edit1.getString("id"),
+                        Json.createObjectBuilder().add("timestamp", 1700000061000L).build());
+                first.join(QUEUE_WAIT_MS);
+                assertNull(failure.get(), "first update failed: " + failure.get());
+
+                Thread second = new Thread(() -> {
+                    try {
+                        client.update(handle, "revision 3");
+                    } catch (MessagingException e) {
+                        failure.set(e);
+                    }
+                }, "chain-updater-2");
+                second.start();
+                JsonObject edit2 = fake.nextOutbound(QUEUE_WAIT_MS);
+                assertEquals("send", edit2.getString("method"));
+                assertEquals(1700000061000L,
+                        edit2.getJsonObject("params").getJsonNumber("editTimestamp").longValueExact(),
+                        "the second edit targets the FIRST edit's response timestamp"
+                                + " — the latest revision");
+                fake.respondSuccess(edit2.getString("id"),
+                        Json.createObjectBuilder().add("timestamp", 1700000062000L).build());
+                second.join(QUEUE_WAIT_MS);
+                assertNull(failure.get(), "second update failed: " + failure.get());
+            } finally {
+                client.disconnect();
+            }
+        }
+    }
+
+    @Test
     void handlerExceptionDoesNotKillReader() throws Exception {
         // A10: a RuntimeException thrown by the InboundHandler must be caught
         // in dispatchNotification (mirroring SimpleXAdapter.onInbound) so the
@@ -637,14 +695,15 @@ class SignalJsonRpcClientTest {
                 }, "group-updater");
                 updater.start();
                 JsonObject editRequest = fake.nextOutbound(QUEUE_WAIT_MS);
-                assertEquals("updateMessage", editRequest.getString("method"));
+                assertEquals("send", editRequest.getString("method"),
+                        "a group edit is a send carrying editTimestamp — signal-cli has no updateMessage");
                 JsonObject editParams = editRequest.getJsonObject("params");
                 assertEquals("group-7", editParams.getString("groupId"),
                         "group update must re-address by groupId");
                 assertFalse(editParams.containsKey("recipient"),
                         "group update must not carry a recipient array");
                 assertEquals(1700000002500L,
-                        editParams.getJsonNumber("targetSentTimestamp").longValueExact(),
+                        editParams.getJsonNumber("editTimestamp").longValueExact(),
                         "group update must target the timestamp returned by the original group send");
                 fake.respondSuccess(editRequest.getString("id"),
                         Json.createObjectBuilder().add("timestamp", 1700000003000L).build());
@@ -663,9 +722,14 @@ class SignalJsonRpcClientTest {
                 }, "group-finalizer");
                 finalizer.start();
                 JsonObject finalRequest = fake.nextOutbound(QUEUE_WAIT_MS);
-                assertEquals("updateMessage", finalRequest.getString("method"));
+                assertEquals("send", finalRequest.getString("method"));
                 assertEquals("group-7", finalRequest.getJsonObject("params").getString("groupId"),
                         "group finalize must re-address by groupId");
+                assertEquals(1700000003000L,
+                        finalRequest.getJsonObject("params")
+                                .getJsonNumber("editTimestamp").longValueExact(),
+                        "the finalize edit must target the FIRST edit's response timestamp"
+                                + " — the latest revision, not the original send");
                 fake.respondSuccess(finalRequest.getString("id"),
                         Json.createObjectBuilder().add("timestamp", 1700000003500L).build());
                 finalizer.join(QUEUE_WAIT_MS);

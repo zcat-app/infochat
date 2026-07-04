@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 589 |
+| done | 590 |
 | deferred | 10 |
-| **total** | **599** |
+| **total** | **600** |
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-566 | Signal edit frames use the real signal-cli encoding (send+editTimestamp) | 2026-07-04 | round 1 APPROVE |
 | M1-565 | Base64 shape gate on the Signal group-id scope key | 2026-07-04 | round 1 APPROVE |
 | M1-564 | Exclude prod/runtime from the app-image build context | 2026-07-04 | round 1 APPROVE |
 | M1-563 | Leave-cleanup posture for membership-event-less adapters | 2026-07-04 | round 2 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-559 | ChatAgent intercepts the structured refusal marker before delivery (F-live-9) | 2026-07-04 | round 1 APPROVE |
 | M1-558 | Prometheus metrics export — registry dependency makes /q/metrics real (F-live-7) | 2026-07-04 | round 1 APPROVE |
 | M1-557 | SignalReconnectTest inbound push absorbs reconnect wiring gap | 2026-07-04 | round 1 APPROVE |
-| M1-556 | Stage1WatchdogIT upper wall-clock band widens to 50x cap | 2026-07-04 | round 1 APPROVE |
 
 ---
 
@@ -770,4 +770,5 @@ M1-562 (done)
 M1-563 (done)
 M1-564 (done)
 M1-565 (done)
+M1-566 (done)
 ```

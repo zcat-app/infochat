@@ -1,11 +1,28 @@
 ---
 id: M1-566
 title: Signal edit frames use the real signal-cli encoding (send+editTimestamp)
-status: pending
+status: done
 created: 2026-07-04
 last_updated: 2026-07-04
-reviews: []
-clarity_check: null
+reviews:
+  - round: 1
+    date: 2026-07-04
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 215
+      removed: 66
+clarity_check:
+  date: 2026-07-04
+  verdict: PASS
+  warnings: []
+  blockers: []
 redteam_findings: []
 redteam_audits: []
 blocked_by: []

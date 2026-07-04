@@ -28,8 +28,8 @@ import org.jspecify.annotations.Nullable;
  * <p>signal-cli speaks line-delimited JSON on its TCP daemon endpoint:
  * each JSON-RPC envelope (request, response, notification) is one
  * object terminated by a literal {@code "\n"}. {@link #encodeSend},
- * {@link #encodeGroupSend}, {@link #encodeUpdateMessage},
- * {@link #encodeGroupUpdateMessage}, and {@link #encodeSendTyping} emit
+ * {@link #encodeGroupSend}, {@link #encodeEditSend},
+ * {@link #encodeGroupEditSend}, and {@link #encodeSendTyping} emit
  * the object WITHOUT the trailing newline — the caller frames at the
  * stream layer. {@link #decode} accepts a single line (one object).</p>
  *
@@ -97,32 +97,40 @@ final class SignalMessageCodec {
         return encodeRequest(rpcId, "send", params);
     }
 
-    String encodeUpdateMessage(long rpcId, String account, String recipient,
-                               long targetSentTimestamp, String message) {
+    /**
+     * Edit of a prior DM, encoded as a {@code send} carrying
+     * {@code editTimestamp}: signal-cli's jsonRpc methods mirror its CLI
+     * command surface, and the CLI edit is {@code send --edit-timestamp} —
+     * there is no {@code updateMessage} method, so 0.14.5 rejects that
+     * spelling as method-not-found and every edit silently degraded to the
+     * fresh-send fallback on real wire (F-live-11 / M1-566).
+     */
+    String encodeEditSend(long rpcId, String account, String recipient,
+                          long editTimestamp, String message) {
         JsonObject params = Json.createObjectBuilder()
                 .add("account", account)
                 .add("recipient", Json.createArrayBuilder().add(recipient))
-                .add("targetSentTimestamp", targetSentTimestamp)
                 .add("message", message)
+                .add("editTimestamp", editTimestamp)
                 .build();
-        return encodeRequest(rpcId, "updateMessage", params);
+        return encodeRequest(rpcId, "send", params);
     }
 
     /**
-     * Group variant of {@link #encodeUpdateMessage}: edits a prior
-     * group message addressed by {@code groupId} instead of the
-     * {@code recipient} array, targeting the {@code targetSentTimestamp}
-     * signal-cli returned for the original group send.
+     * Group variant of {@link #encodeEditSend}: edits a prior group
+     * message addressed by {@code groupId} instead of the
+     * {@code recipient} array, targeting the {@code editTimestamp} of
+     * the revision being replaced.
      */
-    String encodeGroupUpdateMessage(long rpcId, String account, String groupId,
-                                    long targetSentTimestamp, String message) {
+    String encodeGroupEditSend(long rpcId, String account, String groupId,
+                               long editTimestamp, String message) {
         JsonObject params = Json.createObjectBuilder()
                 .add("account", account)
                 .add("groupId", groupId)
-                .add("targetSentTimestamp", targetSentTimestamp)
                 .add("message", message)
+                .add("editTimestamp", editTimestamp)
                 .build();
-        return encodeRequest(rpcId, "updateMessage", params);
+        return encodeRequest(rpcId, "send", params);
     }
 
     String encodeSendTyping(long rpcId, String account, String recipient, boolean typing) {

@@ -460,7 +460,7 @@ class SignalJsonRpcClient {
             return;
         }
         try {
-            editMessage(internal, body);
+            editMessage(handle, internal, body);
         } catch (MessagingException e) {
             // TRANSIENT (write failure, response timeout, closed-before-ack)
             // must propagate so the Provider retries the same edit; only an
@@ -482,7 +482,7 @@ class SignalJsonRpcClient {
             recordFallbackSend(internal);
         } else {
             try {
-                editMessage(internal, body);
+                editMessage(handle, internal, body);
             } catch (MessagingException e) {
                 if (e.category() != FailureCategory.PERMANENT) {
                     throw e;
@@ -556,18 +556,35 @@ class SignalJsonRpcClient {
         }
     }
 
-    private void editMessage(SignalMessageHandle internal, String body) throws MessagingException {
+    private void editMessage(MessageHandle handle, SignalMessageHandle internal, String body)
+            throws MessagingException {
         long rpcId = rpcIdGen.incrementAndGet();
         // internal.recipient() is the address the original send targeted — a
         // contact id for DM, an adapter group id for group. The original
         // scope selects which signal-cli addressing field that identifier
         // rides in: the `recipient` array (DM) or the `groupId` string.
         String request = internal.original().scope() instanceof ScopeRef.Group
-                ? codec.encodeGroupUpdateMessage(
+                ? codec.encodeGroupEditSend(
                         rpcId, account, internal.recipient(), internal.timestamp(), body)
-                : codec.encodeUpdateMessage(
+                : codec.encodeEditSend(
                         rpcId, account, internal.recipient(), internal.timestamp(), body);
-        pacedCall(rpcId, request);
+        SignalMessageCodec.JsonRpcMessage.Response response = pacedCall(rpcId, request);
+        // An edit is itself a send, so its response carries a FRESH timestamp
+        // for the new revision. Refresh the stored handle so the NEXT edit on
+        // it targets that latest revision: official Signal clients accept an
+        // edit chain targeting the latest revision, and targeting-latest also
+        // works where implementations accept the original's timestamp, so it
+        // is the dominant strategy under either chain semantic (live probe
+        // 2026-07-04 proved only a single edit hop; F-live-11 / M1-566).
+        long latestTimestamp = extractLong(response.result(), "timestamp", "send");
+        // A concurrent eviction/finalize may have removed the handle;
+        // re-put only if still present (same guard as fallbackSend).
+        synchronized (handles) {
+            SignalMessageHandle present = handles.get(handle.opaqueValue());
+            if (present != null) {
+                handles.put(handle.opaqueValue(), present.withTimestamp(latestTimestamp));
+            }
+        }
     }
 
     private static String destination(ScopeRef scope) {
