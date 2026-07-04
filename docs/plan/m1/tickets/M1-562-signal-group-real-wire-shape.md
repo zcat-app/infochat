@@ -1,15 +1,39 @@
 ---
 id: M1-562
 title: Signal group inbound parses the real signal-cli wire shape
-status: pending
+status: done
 created: 2026-07-04
 last_updated: 2026-07-04
+escalations:
+  - date: 2026-07-04
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (developer-discovered, pre-review): acceptance item 5's
+      constructor change (SignalGroupHandler loses the membershipHandler
+      parameter) breaks compilation of four 4-arg call-site test files
+      OUTSIDE files_scope — SignalGroupTimestampGuardTest (2 sites),
+      SignalAciValidationTest (2), SignalInboundByteCapTest (2),
+      SignalGroupSpanTypeTest (2) — two of which out_of_scope declares
+      "must keep passing unmodified". RecordingMembership.java is also
+      fully orphaned by the change (only surviving users are those call
+      sites) and must be deleted per the surgical-cleanup rule. Needs
+      files_scope +5 / files_budget 11 -> 16, or a reframed item 5.
+  - date: 2026-07-04
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      N/A (developer-discovered, pre-review): acceptance item 8 claims
+      SignalMessageCodec's group-exclusion guard comment (~line 233) has
+      "legacy/current labels inverted versus the observed wire". The
+      actual comment reads "Group messages carry groupInfo / groupV2 —
+      skip (not a DM); the group route handles them." — it carries no
+      such labels and is accurate as-is. There is nothing to correct;
+      the item is unsatisfiable as framed. All other acceptance premises
+      were re-verified against the code and hold.
 blocked_by: []
-files_budget: 12
+files_budget: 16
 files_scope:
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalGroupHandler.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalAdapter.java
-  - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalMessageCodec.java
   - docs/design/06-messaging.md
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalGroupHandlerTest.java
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalAdapterSkeletonTest.java
@@ -19,6 +43,11 @@ files_scope:
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/MembershipDispatchShapeTest.java
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalMembershipAciGateTest.java
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalGroupHandlerMembershipIsolationTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalGroupTimestampGuardTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalGroupSpanTypeTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalAciValidationTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalInboundByteCapTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/RecordingMembership.java
 complexity: medium
 risk: medium
 round_cap: 2
@@ -41,8 +70,10 @@ out_of_scope:
     spec §Required SPI surface (they fire whether or not
     supportsMembershipEvents is true); not touched here
   - SignalGroupTimestampGuardTest, SignalGroupSpanTypeTest — their
-    groupV2 fixtures remain valid because the groupV2 spelling stays
-    accepted; they must keep passing unmodified
+    groupV2 fixtures and assertions remain valid because the groupV2
+    spelling stays accepted; only their SignalGroupHandler constructor
+    call sites are updated (4-arg → 3-arg, see the authorized-changes
+    ledger); every fixture and assertion stays byte-identical
   - the s07-over-Signal live run and the image rebuild (host work after
     merge, tracked in docs/plan/live-e2e/HANDOFF.md)
 acceptance:
@@ -75,7 +106,12 @@ acceptance:
     and a false-declaring adapter MUST NOT call the membership handler
     (design 06-messaging.md §6.5.4 wiring rule). SignalAdapterSkeletonTest
     and SignalGroupHandlerTest capability assertions are updated to pin
-    false."
+    false. The four 4-arg constructor call-site tests
+    (SignalGroupTimestampGuardTest, SignalGroupSpanTypeTest,
+    SignalAciValidationTest, SignalInboundByteCapTest) are updated
+    mechanically to the 3-arg form — fixtures and assertions
+    byte-identical — and the orphaned RecordingMembership fixture is
+    deleted."
   - "The Signal membership-dispatch test files are deleted and
     SignalInboundDispatchTest's memberLeft routing case is removed —
     authorized test removals/edits enumerated in §Out-of-scope prose."
@@ -86,10 +122,6 @@ acceptance:
     currently 'memberJoined/memberLeft ACI arrays in groupV2 update
     envelopes') documents groupInfo{groupId} as the signal-cli 0.14.5
     receive shape with groupV2{id} retained for route symmetry."
-  - "SignalMessageCodec's group-exclusion guard comment (~line 233) is
-    corrected — its legacy/current labels are inverted versus the observed
-    wire (0.14.5 emits groupInfo, not groupV2); the guard logic itself
-    stays byte-identical."
   - mvn verify is green.
 test_plan:
   adds: []
@@ -99,14 +131,20 @@ test_plan:
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalGroupInboundRobustnessTest.java
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalInboundDispatchTest.java
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalAdapterSkeletonTest.java
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalGroupTimestampGuardTest.java
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalGroupSpanTypeTest.java
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalAciValidationTest.java
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalInboundByteCapTest.java
   deletes:
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/MembershipDispatchShapeTest.java
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalMembershipAciGateTest.java
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalGroupHandlerMembershipIsolationTest.java
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/RecordingMembership.java
   preserves:
     - all tests currently green on main, in particular
       SignalGroupTimestampGuardTest and SignalGroupSpanTypeTest (groupV2
-      fixtures stay valid, unmodified) and the provider-side
+      fixtures and assertions byte-identical; only constructor call
+      sites updated) and the provider-side
       MembershipDispatchIsolationTest (InMemory-driven path unchanged)
 spec_refs:
   - docs/spec/messaging.md §Required SPI surface
@@ -114,9 +152,77 @@ spec_refs:
   - docs/spec/messaging.md §Identity and groups
 decision_refs:
   - D10
-reviews: {}
-clarity_check: {}
+redteam_findings: []
+redteam_audits:
+  - date: 2026-07-04
+    verdict: CLEAN
+    base: a9a110c94a5622ad5969bee4996a12cc8c744b7f
+    head: m1/M1-562-signal-group-inbound-parses-th (working tree, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-562-2026-07-04.md
+    out_of_model_count: 2
+    note: |
+      Pre-commit audit of the working-tree diff. CLEAN — the dual-shape
+      parse preserves the D10 mention gate on both spellings and the
+      capability flip matches the spec mandate. Two advisory out-of-model
+      items: (1) leave-driven group_membership / is_group_admin cleanup
+      is now uncovered on BOTH v1 adapters (per-user leaves have no
+      delivery-failure trigger; spec only commits to refill after
+      demotion/ban) — candidate spec clarification or follow-up ticket;
+      (2) the group-id scope key is accepted without a base64-shape gate
+      (pre-existing posture, daemon stream is a loopback trust boundary)
+      — cheap defense-in-depth only if the model ever hardens that
+      boundary.
+reviews:
+  - round: 1
+    date: 2026-07-04
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 18
+      added: 346
+      removed: 776
+clarity_check:
+  date: 2026-07-04
+  verdict: PASS
+  warnings: []
 revisions:
+  - date: 2026-07-04
+    reason: budget-breach rework (user-approved refine via escalation menu)
+    snapshot:
+      files_budget: 11
+      files_scope_added:
+        - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalGroupTimestampGuardTest.java
+        - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalGroupSpanTypeTest.java
+        - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalAciValidationTest.java
+        - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalInboundByteCapTest.java
+        - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/RecordingMembership.java
+      note: |
+        Acceptance item 5's constructor change (membershipHandler
+        parameter removed) requires mechanical 4-arg → 3-arg updates at
+        four out-of-scope test call sites and deletion of the orphaned
+        RecordingMembership fixture. out_of_scope wording for
+        TimestampGuard/SpanType relaxed from "must keep passing
+        unmodified" to "fixtures and assertions byte-identical; only
+        constructor call sites updated". See escalations[0]
+        (budget-breach).
+  - date: 2026-07-04
+    reason: premise-fail rework (user-approved refine via escalation menu)
+    snapshot:
+      files_budget: 12
+      files_scope_removed:
+        - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalMessageCodec.java
+      acceptance_removed: |
+        "SignalMessageCodec's group-exclusion guard comment (~line 233) is
+        corrected — its legacy/current labels are inverted versus the
+        observed wire (0.14.5 emits groupInfo, not groupV2); the guard
+        logic itself stays byte-identical." — removed: the premise is
+        false; the actual comment carries no legacy/current labels and is
+        accurate as-is (see escalations[0]).
   - date: 2026-07-04
     reason: clarity-fail rework (bounded self-refine via /m1-tick run)
     snapshot:
@@ -192,9 +298,7 @@ Mirrors the YAML `acceptance:` list:
    memberLeft case removed (authorized edits, see §Out-of-scope).
 7. `docs/design/06-messaging.md` reconciled (capability table + group
    wire-shape prose).
-8. `SignalMessageCodec` exclusion-guard comment labels corrected; guard
-   logic byte-identical.
-9. `mvn verify` is green.
+8. `mvn verify` is green.
 
 ## Out-of-scope
 
@@ -234,6 +338,15 @@ not listed here is drift):
   using a message-bearing group envelope.
 - `SignalGroupEndToEndTest` — the `memberLeft` leg (~line 95) is removed;
   gains the groupInfo end-to-end case.
+- `SignalGroupTimestampGuardTest`, `SignalGroupSpanTypeTest`,
+  `SignalAciValidationTest`, `SignalInboundByteCapTest` — mechanical
+  constructor call-site updates only (4-arg → 3-arg after the
+  membershipHandler parameter is removed); every fixture and assertion
+  stays byte-identical.
+- DELETE `RecordingMembership.java` — the fixture is fully orphaned by
+  this diff (its only surviving users are the updated call sites and
+  the deleted membership tests); cleanup of an orphan this change
+  creates, per the surgical-changes rule.
 
 NOT changed: `SignalGroupTimestampGuardTest`, `SignalGroupSpanTypeTest`
 (groupV2 fixtures remain a supported spelling), everything under

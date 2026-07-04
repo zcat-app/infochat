@@ -33,7 +33,7 @@ class SignalGroupSpanTypeTest {
         // delivered — but the malformed span is skipped, leaving the
         // body unstripped, and no exception escapes handleReceive.
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null, AdapterMetrics.noop());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
 
         assertDoesNotThrow(() -> handler.handleReceive(parse("""
                 {
@@ -61,7 +61,7 @@ class SignalGroupSpanTypeTest {
     @Test
     void wellFormedSpanStrippedAsBefore() {
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null, AdapterMetrics.noop());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
 
         handler.handleReceive(parse("""
                 {

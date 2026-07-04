@@ -65,9 +65,8 @@ class SignalInboundByteCapTest {
     void groupPathDropsOversizeBodyAndCountsAndWarns() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         RecordingInbound inbound = new RecordingInbound();
-        // Membership handler unused — message frames never hit that branch.
         SignalGroupHandler handler = new SignalGroupHandler(
-                BOT_ACI, inbound, null, new AdapterMetrics(registry));
+                BOT_ACI, inbound, new AdapterMetrics(registry));
         CapturingLogHandler log = CapturingLogHandler.attach(SignalGroupHandler.class);
         try {
             handler.handleReceive(groupParams(OVERSIZE_BODY));
@@ -94,7 +93,7 @@ class SignalInboundByteCapTest {
                 "a body under the cap must extract on the DM path");
 
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null, AdapterMetrics.noop());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
         handler.handleReceive(groupParams("@bot summarise"));
         assertEquals(1, inbound.messages.size(),
                 "a body under the cap with a bot mention must deliver on the group path");

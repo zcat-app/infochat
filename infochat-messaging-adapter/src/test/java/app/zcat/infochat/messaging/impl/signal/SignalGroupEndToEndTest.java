@@ -16,7 +16,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 import app.zcat.infochat.messaging.InboundMessage;
-import app.zcat.infochat.messaging.MembershipEvent;
 import app.zcat.infochat.messaging.ScopeRef;
 
 /**
@@ -46,28 +45,38 @@ class SignalGroupEndToEndTest {
                     fake.endpoint());
             adapter.adoptBotAci(BOT_ACI);
             LinkedBlockingQueue<InboundMessage> inbound = new LinkedBlockingQueue<>();
-            LinkedBlockingQueue<MembershipEvent> membership = new LinkedBlockingQueue<>();
             adapter.setInboundHandler(inbound::add);
-            adapter.setMembershipEventHandler(membership::add);
             SignalJsonRpcClient client = new SignalJsonRpcClient(
                     fake.endpoint(), "+15551111111", new SignalMessageCodec(), TEST_RESPONSE_TIMEOUT);
             client.connect();
             try {
                 adapter.attachClient(client);
 
-                // Group mention → InboundMessage with Group scope.
+                // Group mention in the real signal-cli 0.14.5 wire shape
+                // (groupInfo{groupId}, F-live-10 — the exact frame class
+                // that silently dropped live; shape-faithful
+                // reconstruction with synthetic identifiers) →
+                // InboundMessage with Group scope.
                 fake.pushNotification("receive", parse("""
                         {
                           "envelope": {
                             "sourceUuid": "AABBCCDD-1111-2222-3333-444455556666",
+                            "sourceName": "LiveUser",
                             "timestamp": 1700000001000,
                             "dataMessage": {
                               "timestamp": 1700000001000,
                               "message": "@bot summarise this",
-                              "groupV2": {"id": "Z3JvdXBJZEJhc2U2NEVuY29kZWQ="},
                               "mentions": [
-                                {"uuid": "11112222-3333-4444-5555-666677778888", "start": 0, "length": 4}
-                              ]
+                                {"name": "+15550000000", "number": "+15550000000",
+                                 "uuid": "11112222-3333-4444-5555-666677778888",
+                                 "start": 0, "length": 4}
+                              ],
+                              "groupInfo": {
+                                "groupId": "Z3JvdXBJZEJhc2U2NEVuY29kZWQ=",
+                                "groupName": "live-signal-group",
+                                "revision": 10,
+                                "type": "DELIVER"
+                              }
                             }
                           }
                         }
@@ -82,7 +91,8 @@ class SignalGroupEndToEndTest {
                 assertEquals("summarise this", msg.text(),
                         "bot mention span must be stripped before delivery");
 
-                // Group update → MembershipEvent through the registered handler.
+                // The groupV2 spelling still dispatches through the same
+                // route (route symmetry with the DM exclusion guard).
                 fake.pushNotification("receive", parse("""
                         {
                           "envelope": {
@@ -90,20 +100,21 @@ class SignalGroupEndToEndTest {
                             "timestamp": 1700000002000,
                             "dataMessage": {
                               "timestamp": 1700000002000,
-                              "groupV2": {
-                                "id": "Z3JvdXBJZEJhc2U2NEVuY29kZWQ=",
-                                "memberLeft": ["CCDDEEFF-3333-4444-5555-666677778888"]
-                              }
+                              "message": "@bot ping",
+                              "groupV2": {"id": "Z3JvdXBJZEJhc2U2NEVuY29kZWQ="},
+                              "mentions": [
+                                {"uuid": "11112222-3333-4444-5555-666677778888", "start": 0, "length": 4}
+                              ]
                             }
                           }
                         }
                         """));
-                MembershipEvent event = membership.poll(QUEUE_WAIT_MS, TimeUnit.MILLISECONDS);
-                assertNotNull(event,
-                        "membership event must reach the adapter's MembershipHandler within " + QUEUE_WAIT_MS + " ms");
-                MembershipEvent.UserLeft left = assertInstanceOf(MembershipEvent.UserLeft.class, event);
-                assertEquals(GROUP_V2_ID, left.adapterGroupId());
-                assertEquals("ccddeeff-3333-4444-5555-666677778888", left.contactId());
+                InboundMessage viaGroupV2 = inbound.poll(QUEUE_WAIT_MS, TimeUnit.MILLISECONDS);
+                assertNotNull(viaGroupV2,
+                        "a groupV2-shaped mention must still reach the InboundHandler");
+                assertEquals(GROUP_V2_ID,
+                        assertInstanceOf(ScopeRef.Group.class, viaGroupV2.scope()).adapterGroupId());
+                assertEquals("ping", viaGroupV2.text());
             } finally {
                 client.disconnect();
             }

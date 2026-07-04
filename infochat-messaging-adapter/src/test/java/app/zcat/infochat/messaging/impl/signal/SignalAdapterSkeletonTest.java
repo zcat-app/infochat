@@ -22,7 +22,8 @@ class SignalAdapterSkeletonTest {
 
         CapabilityFlags caps = adapter.capabilities();
         assertTrue(caps.supportsMentionByContactId(), "Signal mentionUuid = ACI");
-        assertTrue(caps.supportsMembershipEvents(), "Signal exposes native membership events");
+        assertFalse(caps.supportsMembershipEvents(),
+                "F-live-10: no native per-user membership signal on the signal-cli 0.14.5 wire");
         assertTrue(caps.supportsCodeFormatting(), "design §6.5.2: Signal renders monospace");
         assertFalse(caps.supportsMarkdownLinks(), "v1 adapters MUST declare supportsMarkdownLinks=false");
         assertEquals(16_384, caps.maxInboundMessageBytes());

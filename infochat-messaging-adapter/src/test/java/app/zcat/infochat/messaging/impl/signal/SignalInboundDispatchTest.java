@@ -95,12 +95,12 @@ class SignalInboundDispatchTest {
     }
 
     @Test
-    void onMessageAndOnEventRunOffReaderThread() throws Exception {
+    void onMessageRunsOffReaderThreadOnDmAndGroupPaths() throws Exception {
         // Drives the production receive wiring through the package-private
         // attachClient seam (same entry as SignalGroupEndToEndTest) so the
-        // thread assertion binds both SPI callbacks: DM inbound →
-        // InboundHandler.onMessage, group member delta →
-        // MembershipHandler.onEvent.
+        // thread assertion binds InboundHandler.onMessage on BOTH routes:
+        // DM inbound via the codec, group bot-mention via the
+        // group-notification route (SignalGroupHandler).
         try (FakeSignalCli fake = new FakeSignalCli()) {
             SignalAdapter adapter = new SignalAdapter(
                     "/usr/bin/signal-cli",
@@ -109,11 +109,8 @@ class SignalInboundDispatchTest {
                     fake.endpoint());
             adapter.adoptBotAci(BOT_ACI);
             LinkedBlockingQueue<String> onMessageThreads = new LinkedBlockingQueue<>();
-            LinkedBlockingQueue<String> onEventThreads = new LinkedBlockingQueue<>();
             adapter.setInboundHandler(
                     msg -> onMessageThreads.add(Thread.currentThread().getName()));
-            adapter.setMembershipEventHandler(
-                    event -> onEventThreads.add(Thread.currentThread().getName()));
             SignalJsonRpcClient client = new SignalJsonRpcClient(
                     fake.endpoint(), "+15551111111", new SignalMessageCodec(), TEST_RESPONSE_TIMEOUT);
             client.connect();
@@ -121,21 +118,22 @@ class SignalInboundDispatchTest {
                 adapter.attachClient(client);
 
                 fake.pushNotification("receive", receiveParams("dm body", 1700000003000L));
-                fake.pushNotification("receive", memberLeft(1700000004000L));
+                fake.pushNotification("receive", groupMention(1700000004000L));
 
-                String onMessageThread = onMessageThreads.poll(QUEUE_WAIT_MS, TimeUnit.MILLISECONDS);
-                assertNotNull(onMessageThread, "InboundHandler.onMessage must be invoked");
-                assertNotEquals("signal-jsonrpc-reader", onMessageThread,
+                String dmThread = onMessageThreads.poll(QUEUE_WAIT_MS, TimeUnit.MILLISECONDS);
+                assertNotNull(dmThread, "InboundHandler.onMessage must be invoked for the DM");
+                assertNotEquals("signal-jsonrpc-reader", dmThread,
                         "onMessage must not run on the transport reader thread");
-                assertEquals("signal-inbound-dispatch", onMessageThread,
+                assertEquals("signal-inbound-dispatch", dmThread,
                         "onMessage must run on the dedicated inbound-dispatch thread");
 
-                String onEventThread = onEventThreads.poll(QUEUE_WAIT_MS, TimeUnit.MILLISECONDS);
-                assertNotNull(onEventThread, "MembershipHandler.onEvent must be invoked");
-                assertNotEquals("signal-jsonrpc-reader", onEventThread,
-                        "onEvent must not run on the transport reader thread");
-                assertEquals("signal-inbound-dispatch", onEventThread,
-                        "onEvent must run on the dedicated inbound-dispatch thread");
+                String groupThread = onMessageThreads.poll(QUEUE_WAIT_MS, TimeUnit.MILLISECONDS);
+                assertNotNull(groupThread,
+                        "InboundHandler.onMessage must be invoked for the group mention");
+                assertNotEquals("signal-jsonrpc-reader", groupThread,
+                        "group-route onMessage must not run on the transport reader thread");
+                assertEquals("signal-inbound-dispatch", groupThread,
+                        "group-route onMessage must run on the dedicated inbound-dispatch thread");
             } finally {
                 client.disconnect();
             }
@@ -206,17 +204,29 @@ class SignalInboundDispatchTest {
                 .build();
     }
 
-    private static JsonObject memberLeft(long timestamp) {
+    /**
+     * A group bot-mention in the real signal-cli 0.14.5 wire shape
+     * ({@code groupInfo{groupId}}, F-live-10) — exercises the non-DM
+     * routing into the group handler with a message-bearing envelope.
+     */
+    private static JsonObject groupMention(long timestamp) {
         return Json.createObjectBuilder()
                 .add("envelope", Json.createObjectBuilder()
                         .add("sourceUuid", "AABBCCDD-1111-2222-3333-444455556666")
                         .add("timestamp", timestamp)
                         .add("dataMessage", Json.createObjectBuilder()
                                 .add("timestamp", timestamp)
-                                .add("groupV2", Json.createObjectBuilder()
-                                        .add("id", GROUP_V2_ID)
-                                        .add("memberLeft", Json.createArrayBuilder()
-                                                .add("CCDDEEFF-3333-4444-5555-666677778888")))))
+                                .add("message", "@bot ping")
+                                .add("mentions", Json.createArrayBuilder()
+                                        .add(Json.createObjectBuilder()
+                                                .add("uuid", BOT_ACI)
+                                                .add("start", 0)
+                                                .add("length", 4)))
+                                .add("groupInfo", Json.createObjectBuilder()
+                                        .add("groupId", GROUP_V2_ID)
+                                        .add("groupName", "test-group")
+                                        .add("revision", 1)
+                                        .add("type", "DELIVER"))))
                 .build();
     }
 }

@@ -2,6 +2,7 @@ package app.zcat.infochat.messaging.impl.signal;
 
 import static app.zcat.infochat.messaging.impl.signal.SignalTestJson.parse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -12,7 +13,6 @@ import jakarta.json.JsonObject;
 import org.junit.jupiter.api.Test;
 
 import app.zcat.infochat.messaging.InboundMessage;
-import app.zcat.infochat.messaging.MembershipEvent;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
@@ -24,8 +24,7 @@ class SignalGroupHandlerTest {
     @Test
     void mentionByAci_delivered() {
         RecordingInbound inbound = new RecordingInbound();
-        RecordingMembership membership = new RecordingMembership();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership, AdapterMetrics.noop());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
 
         JsonObject params = parse("""
                 {
@@ -56,7 +55,52 @@ class SignalGroupHandlerTest {
                 "sender ACI must be canonicalized to lowercase");
         assertEquals("summarise this", msg.text(),
                 "bot mention span must be stripped before delivery");
-        assertEquals(0, membership.events.size(), "no membership events for a regular message");
+    }
+
+    @Test
+    void groupInfoWireShape_delivered() {
+        // F-live-10: the shape real signal-cli 0.14.5 emits — the group
+        // stanza is groupInfo{groupId, groupName, revision, type}, NOT
+        // groupV2{id}. The pre-fix handler gated on groupV2 and silently
+        // dropped every live group message. Shape-faithful reconstruction
+        // of the live-captured envelope (synthetic identifiers — the real
+        // capture holds private phone numbers and never enters the repo).
+        RecordingInbound inbound = new RecordingInbound();
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
+
+        handler.handleReceive(parse("""
+                {
+                  "envelope": {
+                    "sourceUuid": "AABBCCDD-1111-2222-3333-444455556666",
+                    "sourceName": "LiveUser",
+                    "timestamp": 1700000030000,
+                    "dataMessage": {
+                      "timestamp": 1700000030000,
+                      "message": "@bot summarise this",
+                      "mentions": [
+                        {"name": "+15550000000", "number": "+15550000000",
+                         "uuid": "11112222-3333-4444-5555-666677778888",
+                         "start": 0, "length": 4}
+                      ],
+                      "groupInfo": {
+                        "groupId": "Z3JvdXBJZEJhc2U2NEVuY29kZWQ=",
+                        "groupName": "live-signal-group",
+                        "revision": 10,
+                        "type": "DELIVER"
+                      }
+                    }
+                  }
+                }
+                """));
+
+        assertEquals(1, inbound.messages.size(),
+                "the real 0.14.5 groupInfo shape MUST dispatch (F-live-10 regression)");
+        InboundMessage msg = inbound.messages.get(0);
+        assertInstanceOf(ScopeRef.Group.class, msg.scope());
+        assertEquals(GROUP_V2_ID, ((ScopeRef.Group) msg.scope()).adapterGroupId(),
+                "group id MUST be the signal-cli groupInfo.groupId (base64)");
+        assertEquals("summarise this", msg.text(),
+                "bot mention span must be stripped before delivery");
     }
 
     @Test
@@ -66,7 +110,7 @@ class SignalGroupHandlerTest {
         // the mentions entry) may be removed — a display-name text
         // search would also eat the trailing "bot".
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership(), AdapterMetrics.noop());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
 
         handler.handleReceive(parse("""
                 {
@@ -93,7 +137,7 @@ class SignalGroupHandlerTest {
     @Test
     void groupSlashCommandParseableAfterStrip() {
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership(), AdapterMetrics.noop());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
 
         handler.handleReceive(parse("""
                 {
@@ -124,7 +168,7 @@ class SignalGroupHandlerTest {
         // Mention in the middle of the body: removing the span must not
         // leave the surrounding spaces doubled.
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership(), AdapterMetrics.noop());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
 
         handler.handleReceive(parse("""
                 {
@@ -156,8 +200,7 @@ class SignalGroupHandlerTest {
         // cross the adapter boundary. The message must be silently
         // dropped.
         RecordingInbound inbound = new RecordingInbound();
-        RecordingMembership membership = new RecordingMembership();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership, AdapterMetrics.noop());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
 
         JsonObject params = parse("""
                 {
@@ -180,7 +223,6 @@ class SignalGroupHandlerTest {
 
         assertEquals(0, inbound.messages.size(),
                 "display-name mention without ACI mention MUST be silently dropped");
-        assertEquals(0, membership.events.size());
     }
 
     @Test
@@ -189,8 +231,7 @@ class SignalGroupHandlerTest {
         // mentioned. Silent drop per spec ("Group messages arrive only
         // when the bot is @mentioned").
         RecordingInbound inbound = new RecordingInbound();
-        RecordingMembership membership = new RecordingMembership();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership, AdapterMetrics.noop());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
 
         JsonObject params = parse("""
                 {
@@ -210,95 +251,14 @@ class SignalGroupHandlerTest {
 
         assertEquals(0, inbound.messages.size(),
                 "group message without a bot mention MUST be silently dropped");
-        assertEquals(0, membership.events.size());
-    }
-
-    @Test
-    void memberJoinedEvent_surfaced() {
-        // signal-cli group update notification carrying memberJoined —
-        // mapped to MembershipEvent.UserJoined for each ACI.
-        RecordingInbound inbound = new RecordingInbound();
-        RecordingMembership membership = new RecordingMembership();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership, AdapterMetrics.noop());
-
-        JsonObject params = parse("""
-                {
-                  "envelope": {
-                    "sourceUuid": "AABBCCDD-1111-2222-3333-444455556666",
-                    "timestamp": 1700000004000,
-                    "dataMessage": {
-                      "timestamp": 1700000004000,
-                      "groupV2": {
-                        "id": "Z3JvdXBJZEJhc2U2NEVuY29kZWQ=",
-                        "memberJoined": ["BBCCDDEE-2222-3333-4444-555566667777"]
-                      }
-                    }
-                  }
-                }
-                """);
-
-        handler.handleReceive(params);
-
-        assertEquals(0, inbound.messages.size(),
-                "group update is not an inbound message");
-        assertEquals(1, membership.events.size(), "exactly one membership event expected");
-        MembershipEvent event = membership.events.get(0);
-        MembershipEvent.UserJoined joined = assertInstanceOf(
-                MembershipEvent.UserJoined.class, event,
-                "memberJoined ACI maps to MembershipEvent.UserJoined");
-        assertEquals(GROUP_V2_ID, joined.adapterGroupId(),
-                "membership event carries the signal-cli groupV2.id");
-        assertEquals("bbccddee-2222-3333-4444-555566667777", joined.contactId(),
-                "joined ACI must be canonicalized to lowercase");
-    }
-
-    @Test
-    void memberLeftEvent_surfaced() {
-        // signal-cli group update notification carrying memberLeft —
-        // mapped to MembershipEvent.UserLeft for each ACI.
-        RecordingInbound inbound = new RecordingInbound();
-        RecordingMembership membership = new RecordingMembership();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership, AdapterMetrics.noop());
-
-        JsonObject params = parse("""
-                {
-                  "envelope": {
-                    "sourceUuid": "AABBCCDD-1111-2222-3333-444455556666",
-                    "timestamp": 1700000005000,
-                    "dataMessage": {
-                      "timestamp": 1700000005000,
-                      "groupV2": {
-                        "id": "Z3JvdXBJZEJhc2U2NEVuY29kZWQ=",
-                        "memberLeft": [
-                          {"uuid": "CCDDEEFF-3333-4444-5555-666677778888"}
-                        ]
-                      }
-                    }
-                  }
-                }
-                """);
-
-        handler.handleReceive(params);
-
-        assertEquals(0, inbound.messages.size());
-        assertEquals(1, membership.events.size());
-        MembershipEvent event = membership.events.get(0);
-        MembershipEvent.UserLeft left = assertInstanceOf(
-                MembershipEvent.UserLeft.class, event,
-                "memberLeft ACI maps to MembershipEvent.UserLeft");
-        assertEquals(GROUP_V2_ID, left.adapterGroupId());
-        assertEquals("ccddeeff-3333-4444-5555-666677778888", left.contactId(),
-                "left ACI must be canonicalized to lowercase");
     }
 
     @Test
     void adapterGroupHandlerWiresBotAciAndCallbacks() {
         // The SignalAdapter.groupHandler() factory must propagate the
-        // bot ACI and the currently-registered inbound/membership
-        // callbacks so the group surface delivered through Provider's
-        // wiring is anchored against the right identity. Acceptance
-        // items 3 + 4: SignalAdapter surfaces the group id and the
-        // membership events through this factory.
+        // bot ACI and the currently-registered inbound callback so the
+        // group surface delivered through Provider's wiring is anchored
+        // against the right identity.
         java.net.InetSocketAddress endpoint =
                 new java.net.InetSocketAddress("127.0.0.1", 0);
         SignalAdapter adapter = new SignalAdapter(
@@ -308,15 +268,13 @@ class SignalGroupHandlerTest {
                 endpoint);
         adapter.adoptBotAci(BOT_ACI);
         RecordingInbound inbound = new RecordingInbound();
-        RecordingMembership membership = new RecordingMembership();
         adapter.setInboundHandler(inbound);
-        adapter.setMembershipEventHandler(membership);
 
         SignalGroupHandler wired = adapter.groupHandler();
         assertNotNull(wired);
 
         // Drive a group mention through the wired handler — confirms
-        // both callbacks reach the adapter-built group handler.
+        // the callback reaches the adapter-built group handler.
         wired.handleReceive(parse("""
                 {
                   "envelope": {
@@ -337,29 +295,13 @@ class SignalGroupHandlerTest {
                 "adapter-built group handler must dispatch inbound through the wired callback");
         assertTrue(inbound.messages.get(0).scope() instanceof ScopeRef.Group);
 
-        // Drive a member-left event through the wired handler too.
-        wired.handleReceive(parse("""
-                {
-                  "envelope": {
-                    "sourceUuid": "AABBCCDD-1111-2222-3333-444455556666",
-                    "timestamp": 1700000008000,
-                    "dataMessage": {
-                      "timestamp": 1700000008000,
-                      "groupV2": {
-                        "id": "Z3JvdXBJZEJhc2U2NEVuY29kZWQ=",
-                        "memberLeft": ["DDEEFF00-4444-5555-6666-777788889999"]
-                      }
-                    }
-                  }
-                }
-                """));
-        assertEquals(1, membership.events.size(),
-                "adapter-built group handler must dispatch membership through the wired callback");
-        // Item-5 anchor: the capability flag must stay true after the
-        // group wiring (it was true on the skeleton; group support
-        // delivery does not regress it).
-        assertTrue(adapter.capabilities().supportsMembershipEvents(),
-                "supportsMembershipEvents MUST remain true per spec");
+        // F-live-10: signal-cli 0.14.5 exposes no native per-user
+        // membership signal in its receive stream, so the capability
+        // MUST be false (spec messaging.md §Required SPI surface —
+        // Membership events) and Provider uses the delivery-failure
+        // fallback, the SimpleX posture.
+        assertFalse(adapter.capabilities().supportsMembershipEvents(),
+                "supportsMembershipEvents MUST be false — no native signal on the 0.14.5 wire");
     }
 
     @Test
@@ -372,7 +314,7 @@ class SignalGroupHandlerTest {
         // per-message DoS of group functionality. The (long)-widened guard
         // must skip the overflow span and still dispatch the message.
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership(), AdapterMetrics.noop());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
 
         handler.handleReceive(parse("""
                 {
@@ -403,7 +345,7 @@ class SignalGroupHandlerTest {
         // U-21: the inbound Identity's displayName (informational only,
         // D10) is taken from the envelope's sourceName on the group path.
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership(), AdapterMetrics.noop());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
 
         handler.handleReceive(parse("""
                 {
@@ -426,87 +368,6 @@ class SignalGroupHandlerTest {
         assertEquals(1, inbound.messages.size());
         assertEquals("Alice", inbound.messages.get(0).sender().displayName(),
                 "group sender displayName must come from the envelope sourceName");
-    }
-
-    @Test
-    void coDeliveredDeltaAndMention_bothDispatched() {
-        // M1-408: a single notification carrying BOTH a membership delta
-        // (memberJoined) AND a chat body that @mentions the bot. Before
-        // the fix, dispatching the membership delta early-returned and the
-        // bot mention was silently dropped. After removing the early
-        // return, the delta is dispatched AND the mention is handled.
-        RecordingInbound inbound = new RecordingInbound();
-        RecordingMembership membership = new RecordingMembership();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership, AdapterMetrics.noop());
-
-        handler.handleReceive(parse("""
-                {
-                  "envelope": {
-                    "sourceUuid": "AABBCCDD-1111-2222-3333-444455556666",
-                    "timestamp": 1700000020000,
-                    "dataMessage": {
-                      "timestamp": 1700000020000,
-                      "message": "@bot summarise this",
-                      "groupV2": {
-                        "id": "Z3JvdXBJZEJhc2U2NEVuY29kZWQ=",
-                        "memberJoined": ["BBCCDDEE-2222-3333-4444-555566667777"]
-                      },
-                      "mentions": [
-                        {"uuid": "11112222-3333-4444-5555-666677778888", "start": 0, "length": 4}
-                      ]
-                    }
-                  }
-                }
-                """));
-
-        assertEquals(1, membership.events.size(),
-                "the co-delivered membership delta must still be dispatched");
-        MembershipEvent.UserJoined joined = assertInstanceOf(
-                MembershipEvent.UserJoined.class, membership.events.get(0),
-                "memberJoined ACI maps to MembershipEvent.UserJoined");
-        assertEquals("bbccddee-2222-3333-4444-555566667777", joined.contactId());
-
-        assertEquals(1, inbound.messages.size(),
-                "a bot mention co-delivered with a membership delta MUST NOT be dropped");
-        InboundMessage msg = inbound.messages.get(0);
-        assertInstanceOf(ScopeRef.Group.class, msg.scope());
-        assertEquals(GROUP_V2_ID, ((ScopeRef.Group) msg.scope()).adapterGroupId());
-        assertEquals("summarise this", msg.text(),
-                "the bot mention span must be stripped before delivery");
-    }
-
-    @Test
-    void memberDeltaOnly_noBody_messagePathIsNoOp() {
-        // M1-408: the complement of the co-delivered case. A
-        // membership-delta-only notification (no message body) must behave
-        // exactly as before the fall-through change — the delta is
-        // dispatched and the message/mention path is a no-op, with no
-        // spurious inbound dispatch.
-        RecordingInbound inbound = new RecordingInbound();
-        RecordingMembership membership = new RecordingMembership();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership, AdapterMetrics.noop());
-
-        handler.handleReceive(parse("""
-                {
-                  "envelope": {
-                    "sourceUuid": "AABBCCDD-1111-2222-3333-444455556666",
-                    "timestamp": 1700000021000,
-                    "dataMessage": {
-                      "timestamp": 1700000021000,
-                      "groupV2": {
-                        "id": "Z3JvdXBJZEJhc2U2NEVuY29kZWQ=",
-                        "memberLeft": ["CCDDEEFF-3333-4444-5555-666677778888"]
-                      }
-                    }
-                  }
-                }
-                """));
-
-        assertEquals(1, membership.events.size(),
-                "the membership delta must be dispatched");
-        assertInstanceOf(MembershipEvent.UserLeft.class, membership.events.get(0));
-        assertEquals(0, inbound.messages.size(),
-                "a delta-only notification must not produce a spurious inbound dispatch");
     }
 
 }

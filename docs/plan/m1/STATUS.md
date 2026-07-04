@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 585 |
+| done | 586 |
 | deferred | 10 |
-| **total** | **595** |
+| **total** | **596** |
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-562 | Signal group inbound parses the real signal-cli wire shape | 2026-07-04 | round 1 APPROVE |
 | M1-561 | Refusal-marker intercept runs on post-strip terminal text | 2026-07-04 | round 2 APPROVE |
 | M1-560 | llamacpp serves with reasoning off — token caps buy visible output (F-live-8) | 2026-07-04 | round 1 APPROVE |
 | M1-559 | ChatAgent intercepts the structured refusal marker before delivery (F-live-9) | 2026-07-04 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-552 | Chat system prompt gains a max-tokens-derived brevity hint | 2026-07-04 | round 1 APPROVE |
 | M1-551 | OutboxRehydrator waits for eval-queue downstream readiness (F-live-3) | 2026-07-04 | round 1 APPROVE |
 | M1-555 | NostrStreamSourceTest drain race: await arrival before stop | 2026-07-03 | round 1 APPROVE |
-| M1-554 | Dev Services containers Ryuk-reaped — repo-tracked reuse=false, drop dead pom flag | 2026-07-03 | round 1 APPROVE |
 
 ---
 
@@ -766,4 +766,5 @@ M1-558 (done)
 M1-559 (done)
 M1-560 (done)
 M1-561 (done)
+M1-562 (done)
 ```

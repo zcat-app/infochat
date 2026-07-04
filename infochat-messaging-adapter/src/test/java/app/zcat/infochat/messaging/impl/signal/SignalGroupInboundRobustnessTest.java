@@ -3,7 +3,6 @@ package app.zcat.infochat.messaging.impl.signal;
 import static app.zcat.infochat.messaging.impl.signal.SignalTestJson.parse;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import jakarta.json.Json;
 import jakarta.json.JsonArrayBuilder;
@@ -12,7 +11,6 @@ import jakarta.json.JsonObject;
 
 import org.junit.jupiter.api.Test;
 
-import app.zcat.infochat.messaging.MembershipEvent;
 import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 /**
@@ -95,13 +93,13 @@ class SignalGroupInboundRobustnessTest {
 
     @Test
     void wrongTypedFieldsDropCleanlyWithoutException() {
-        // Each of envelope / dataMessage / groupV2 / mentions /
-        // memberJoined / memberLeft, present but wrong-typed, must drop
-        // into the same branch as an absent field — no ClassCastException
-        // escapes handleReceive or botMentioned.
+        // Each of envelope / dataMessage / groupV2 / groupInfo /
+        // groupId / mentions, present but wrong-typed (or a group stanza
+        // missing its id), must drop into the same branch as an absent
+        // field — no ClassCastException escapes handleReceive or
+        // botMentioned.
         RecordingInbound inbound = new RecordingInbound();
-        RecordingMembership membership = new RecordingMembership();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership, AdapterMetrics.noop());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
 
         assertDoesNotThrow(() -> handler.handleReceive(parse(
                 "{\"envelope\": \"x\"}")),
@@ -112,6 +110,15 @@ class SignalGroupInboundRobustnessTest {
         assertDoesNotThrow(() -> handler.handleReceive(parse(
                 "{\"envelope\": {\"dataMessage\": {\"groupV2\": 5}}}")),
                 "groupV2 present but a number");
+        assertDoesNotThrow(() -> handler.handleReceive(parse(
+                "{\"envelope\": {\"dataMessage\": {\"groupInfo\": 5}}}")),
+                "groupInfo present but a number");
+        assertDoesNotThrow(() -> handler.handleReceive(parse(
+                "{\"envelope\": {\"dataMessage\": {\"groupInfo\": {\"groupName\": \"g\"}}}}")),
+                "groupInfo present but missing groupId");
+        assertDoesNotThrow(() -> handler.handleReceive(parse(
+                "{\"envelope\": {\"dataMessage\": {\"groupInfo\": {\"groupId\": 5}}}}")),
+                "groupInfo.groupId present but a number");
         assertDoesNotThrow(() -> handler.handleReceive(parse("""
                 {
                   "envelope": {
@@ -127,42 +134,15 @@ class SignalGroupInboundRobustnessTest {
                 }
                 """)),
                 "mentions present but a string (reached via botMentioned)");
-        assertDoesNotThrow(() -> handler.handleReceive(parse(
-                "{\"envelope\": {\"dataMessage\": {\"groupV2\": {\"id\": \""
-                        + GROUP_V2_ID + "\", \"memberJoined\": \"x\"}}}}")),
-                "memberJoined present but a string");
-        assertDoesNotThrow(() -> handler.handleReceive(parse(
-                "{\"envelope\": {\"dataMessage\": {\"groupV2\": {\"id\": \""
-                        + GROUP_V2_ID + "\", \"memberLeft\": 5}}}}")),
-                "memberLeft present but a number");
 
         assertEquals(0, inbound.messages.size(),
                 "no wrong-typed frame produces an inbound dispatch");
-        assertEquals(0, membership.events.size(),
-                "no wrong-typed frame produces a membership event");
     }
 
     @Test
     void wellFormedFramesBehaveUnchanged() {
         RecordingInbound inbound = new RecordingInbound();
-        RecordingMembership membership = new RecordingMembership();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership, AdapterMetrics.noop());
-
-        handler.handleReceive(parse("""
-                {
-                  "envelope": {
-                    "dataMessage": {
-                      "groupV2": {
-                        "id": "Z3JvdXBJZEJhc2U2NEVuY29kZWQ=",
-                        "memberJoined": ["AABBCCDD-1111-2222-3333-444455556666"]
-                      }
-                    }
-                  }
-                }
-                """));
-        assertEquals(1, membership.events.size(),
-                "a well-formed memberJoined array still dispatches one event");
-        assertInstanceOf(MembershipEvent.UserJoined.class, membership.events.get(0));
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
 
         handler.handleReceive(parse("""
                 {
@@ -196,7 +176,7 @@ class SignalGroupInboundRobustnessTest {
      */
     private String deliveredText(String body, JsonObject... mentionSpans) {
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null, AdapterMetrics.noop());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
         JsonArrayBuilder mentions = Json.createArrayBuilder();
         for (JsonObject span : mentionSpans) {
             mentions.add(span);

@@ -28,9 +28,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * daemon child process via {@link SignalSubprocess}, demultiplexes
  * the daemon's wire protocol via {@link SignalJsonRpcClient}, and
  * delivers inbound DM and group-mention messages through the SPI's
- * {@link MessagingAdapter.InboundHandler} and membership events
- * through the registered {@link MessagingAdapter.MembershipHandler}
- * (group-scope envelopes route via {@link SignalGroupHandler}).
+ * {@link MessagingAdapter.InboundHandler} (group-scope envelopes
+ * route via {@link SignalGroupHandler}).
  *
  * <p>Signal's contact id is the ACI (Account Credential Identifier),
  * the UUID signal-cli surfaces as {@code mentionUuid} — the D10 trust
@@ -73,10 +72,14 @@ public final class SignalAdapter implements MessagingAdapter {
     // maxSendsPerSecond 5 (conservative; Signal's per-account ceiling is
     // higher but the v1 LLM concurrency cap is the binding constraint),
     // minEditInterval 600ms (ProgressNotifier coalescing floor, matching
-    // SimpleX).
+    // SimpleX). supportsMembershipEvents false: signal-cli 0.14.5 exposes
+    // no native per-user member-joined/left signal in its receive stream
+    // (F-live-10), and spec messaging.md §Required SPI surface mandates
+    // false absent a native signal — Provider falls back to
+    // permanent-delivery-failure cleanup, the SimpleX posture.
     private static final CapabilityFlags CAPABILITIES = new CapabilityFlags(
             /* supportsMentionByContactId */ true,
-            /* supportsMembershipEvents   */ true,
+            /* supportsMembershipEvents   */ false,
             /* supportsCodeFormatting     */ true,
             /* supportsMarkdownLinks      */ false,
             /* maxInboundMessageBytes     */ SignalMessageCodec.MAX_INBOUND_TEXT_BYTES,
@@ -112,7 +115,6 @@ public final class SignalAdapter implements MessagingAdapter {
     @Nullable private volatile SignalSubprocess subprocess;
     @Nullable private volatile SignalJsonRpcClient client;
     @Nullable private volatile InboundHandler handler;
-    @Nullable private volatile MembershipHandler membershipHandler;
     // Single-flight latch: two restart notifications must not run two
     // concurrent reconnects (overlapping disconnect/connect would race the
     // reader/dispatcher teardown). A failed attempt simply ends; the next
@@ -454,19 +456,11 @@ public final class SignalAdapter implements MessagingAdapter {
         }
     }
 
-    /**
-     * Capture Provider's membership-event callback. Signal exposes
-     * member-joined / member-left natively at the group v2 protocol
-     * layer (capability flag {@code supportsMembershipEvents=true}),
-     * so the adapter surfaces these events directly rather than
-     * synthesising them from delivery failures. The dispatch path is
-     * built by {@link #groupHandler()}, which the JSON-RPC client's
-     * group-notification route drives (wired in {@link #attachClient}).
-     */
-    @Override
-    public void setMembershipEventHandler(MembershipHandler handler) {
-        this.membershipHandler = handler;
-    }
+    // No setMembershipEventHandler override: supportsMembershipEvents is
+    // false (signal-cli 0.14.5 has no native per-user membership signal,
+    // F-live-10), and design §6.5.4 forbids a false-declaring adapter
+    // from invoking the membership handler — the interface's no-op
+    // default is exactly that contract, mirroring SimpleX.
 
     /**
      * Wire a JSON-RPC client into this adapter: store it, register the
@@ -571,7 +565,7 @@ public final class SignalAdapter implements MessagingAdapter {
 
     /**
      * Build a {@link SignalGroupHandler} that carries the bot's ACI and
-     * the currently-registered inbound and membership callbacks. Returns
+     * the currently-registered inbound callback. Returns
      * a fresh handler each call so a Provider that re-registers
      * callbacks at runtime sees the latest references; the handler is
      * stateless so allocation is cheap.
@@ -592,7 +586,7 @@ public final class SignalAdapter implements MessagingAdapter {
         // metrics is the adapter's bound emission point (volatile read of
         // the late-bound field) so the group handler's §6.3.10 oversize-drop
         // counter lands on the deployment registry, not the noop.
-        return new SignalGroupHandler(anchor, handler, membershipHandler, metrics);
+        return new SignalGroupHandler(anchor, handler, metrics);
     }
 
     private SignalJsonRpcClient requireConnected(String op) throws MessagingException {

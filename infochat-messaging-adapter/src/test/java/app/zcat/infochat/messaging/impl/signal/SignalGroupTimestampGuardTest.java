@@ -34,7 +34,7 @@ class SignalGroupTimestampGuardTest {
     @Test
     void wellFormedFrameDelivered() {
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership(), AdapterMetrics.noop());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
 
         handler.handleReceive(parse("""
                 {
@@ -149,7 +149,7 @@ class SignalGroupTimestampGuardTest {
 
     private static void assertDroppedCleanly(String frameJson) {
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership(), AdapterMetrics.noop());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
         JsonObject params = parse(frameJson);
         assertDoesNotThrow(() -> handler.handleReceive(params),
                 "an unusable group timestamp must not throw out of handleReceive");

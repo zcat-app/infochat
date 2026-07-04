@@ -794,9 +794,12 @@
   ### 6.5.2 Capabilities (declared)
 
   supportsMentionByContactId = true   // Signal mention payload references ACI (mentionUuid) — §6.2.3
-  supportsMembershipEvents   = true   // Signal exposes group-join and group-leave events at the
-                                      //   protocol layer; the adapter surfaces them through
-                                      //   InboundHandler.onUserJoinedGroup / onUserLeftGroup.
+  supportsMembershipEvents   = false  // signal-cli 0.14.5 exposes no per-user member-joined/left
+                                      //   signal in its receive stream (live finding F-live-10);
+                                      //   spec/messaging.md §Required SPI surface mandates false
+                                      //   absent a native signal. Provider falls back to
+                                      //   permanent-delivery-failure cleanup (§6.3.6) — the
+                                      //   SimpleX posture (§6.4.2).
   supportsCodeFormatting     = true   // Signal renders monospace via its formatting metadata
   supportsMarkdownLinks      = false  // hard-asserted at startup (§6.2.1); v1 keeps URLs bare
                                       //   on Signal even though the protocol could carry link
@@ -857,10 +860,10 @@
 
   SignalEventDecoder maps `signal-cli` JSON-RPC envelopes to InboundMessage:
 
-  - `envelope.dataMessage` with no `groupV2` field → `ScopeRef.Dm(senderACI)`. Body is `dataMessage.message`; mentions are decoded for completeness but DM mentions don't gate delivery.
-  - `envelope.dataMessage` with a `groupV2` field → `ScopeRef.Group(groupV2.id)`. The decoder reads `dataMessage.mentions` (a list of `{mentionUuid, start, length}` records) and checks any `mentionUuid` for byte-equality against the bot's cached ACI. A match strips the mention spans from the rendered text and delivers; no match drops the message silently. Display-name matching is forever-out-of-v1 (§6.10).
+  - `envelope.dataMessage` with neither a `groupInfo` nor a `groupV2` field → `ScopeRef.Dm(senderACI)`. Body is `dataMessage.message`; mentions are decoded for completeness but DM mentions don't gate delivery.
+  - `envelope.dataMessage` with a group stanza → `ScopeRef.Group(<base64 group id>)`. The stanza signal-cli 0.14.5 emits on the real wire is `groupInfo{groupId, groupName, revision, type}` (live finding F-live-10 — the `groupV2{id}` spelling assumed pre-live came from fakes and was never observed); the group parser accepts BOTH spellings, `groupInfo.groupId` first, keeping route symmetry with the DM-side exclusion guard so no shape falls between the two complementary filters. The decoder reads `dataMessage.mentions` (a list of `{mentionUuid, start, length}` records) and checks any `mentionUuid` for byte-equality against the bot's cached ACI. A match strips the mention spans from the rendered text and delivers; no match drops the message silently. Display-name matching is forever-out-of-v1 (§6.10).
   - `envelope.typingMessage` → ignored on the inbound side (we only *send* typing indicators).
-  - `envelope.dataMessage.groupV2.revision` increments with `members` deltas → `InboundHandler.onUserJoinedGroup` / `onUserLeftGroup` per the diff. Both directions are exposed natively (`supportsMembershipEvents = true`).
+  - Group membership deltas: NONE are exposed in signal-cli 0.14.5's receive stream — `groupInfo` carries no `memberJoined`/`memberLeft` arrays (F-live-10). `supportsMembershipEvents = false` (§6.5.2); Provider relies on permanent-delivery-failure-driven cleanup, as on SimpleX.
   - `envelope.editMessage` (a remote edit of an inbound message) → ignored in v1; the bot does not re-process edited inbound messages.
   - Other envelope kinds (sync messages, receipts, story messages, call messages): logged at DEBUG, dropped.
 
@@ -1187,7 +1190,7 @@
 
   ### (b) `SignalGroupHandler` unwired producer / group-envelope decode — verdict: **wire**
 
-  Per spec/messaging.md §Required SPI surface — Membership events, Signal exposes member-joined / member-left natively (`memberJoined`/`memberLeft` ACI arrays in `groupV2` update envelopes) and declares `supportsMembershipEvents = true`, so its group path is spec-live, not vestigial. `SignalJsonRpcClient` routes every `receive` notification that is not DM-scope to a group-notification route, which `SignalAdapter` wires to its `groupHandler()` factory when attaching the connected client. The envelope decode is split, not duplicated: `SignalMessageCodec.extractDm` keeps only DM-scope envelopes and `SignalGroupHandler.handleReceive` keeps only group-scope ones — complementary filters over the same notification stream.
+  Signal's group path is spec-live, not vestigial: group bot-mentions are the D10 group-mode surface. (The original wire assumption here — `memberJoined`/`memberLeft` ACI arrays in `groupV2` update envelopes, `supportsMembershipEvents = true` — was falsified live by F-live-10: signal-cli 0.14.5 emits the group stanza as `groupInfo{groupId}` and no membership arrays at all, so the flag is now false per spec/messaging.md §Required SPI surface — Membership events, and the membership dispatch loop is removed; see §6.5.2/§6.5.6.) `SignalJsonRpcClient` routes every `receive` notification that is not DM-scope to a group-notification route, which `SignalAdapter` wires to its `groupHandler()` factory when attaching the connected client. The envelope decode is split, not duplicated: `SignalMessageCodec.extractDm` keeps only DM-scope envelopes and `SignalGroupHandler.handleReceive` keeps only group-scope ones — complementary filters over the same notification stream.
 
   ### (c) `ProgressNotifier` — verdict: **wired (M1-212)**
 

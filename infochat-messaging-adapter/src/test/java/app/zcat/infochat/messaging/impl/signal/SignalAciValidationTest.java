@@ -63,7 +63,7 @@ class SignalAciValidationTest {
     @Test
     void uuidGroupSenderDelivered() {
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null, AdapterMetrics.noop());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
         handler.handleReceive(groupParams(CANONICAL_UUID));
         assertEquals(1, inbound.messages.size(),
                 "a group message from a canonical-UUID sender must deliver");
@@ -73,7 +73,7 @@ class SignalAciValidationTest {
     @Test
     void nonUuidGroupSenderDropped() {
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null, AdapterMetrics.noop());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
         handler.handleReceive(groupParams("not-a-uuid"));
         assertEquals(0, inbound.messages.size(),
                 "a group message from a non-UUID sender must drop at decode");

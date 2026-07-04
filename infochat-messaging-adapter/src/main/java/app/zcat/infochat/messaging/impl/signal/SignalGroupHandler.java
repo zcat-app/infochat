@@ -5,7 +5,6 @@ import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.messaging.Identity;
 import app.zcat.infochat.messaging.InboundMessage;
-import app.zcat.infochat.messaging.MembershipEvent;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.messaging.metrics.AdapterMetrics;
@@ -22,7 +21,7 @@ import java.util.Locale;
 
 /**
  * Translates signal-cli group-scope notifications into the
- * {@link MessagingAdapter} SPI's inbound and membership-event surfaces.
+ * {@link MessagingAdapter} SPI's inbound-message surface.
  * Pure dispatch — no I/O, no threading; the {@link SignalJsonRpcClient}
  * reader is the upstream that drives this class through its
  * group-notification route ({@code SignalAdapter.attachClient} wires
@@ -37,21 +36,22 @@ import java.util.Locale;
  * {@link SignalMentionParser#botMentioned} owns the comparison;
  * display-name matching is never used.</p>
  *
- * <p>The stable per-group id is Signal's group v2 base64 identifier
- * (surfaced by signal-cli as {@code envelope.dataMessage.groupV2.id})
- * — see {@code docs/spec/messaging.md} §Identity and groups, which
+ * <p>The stable per-group id is Signal's group v2 base64 identifier —
+ * see {@code docs/spec/messaging.md} §Identity and groups, which
  * requires "a stable per-group id (cryptographic where possible)".
- * The base64 form is opaque to Provider and survives signal-cli
- * restarts.</p>
+ * signal-cli 0.14.5 surfaces it on the real wire as
+ * {@code envelope.dataMessage.groupInfo.groupId} (F-live-10 — the
+ * {@code groupV2.id} spelling this handler originally gated on came
+ * from fakes and silently dropped every live group message); both
+ * spellings are parsed, see {@link #extractGroupId}. The base64 form
+ * is opaque to Provider and survives signal-cli restarts.</p>
  *
- * <p>Membership-event surface: Signal exposes member-joined / member-left
- * natively in group update events, so {@code supportsMembershipEvents}
- * is true (declared on {@link SignalAdapter}). signal-cli surfaces the
- * delta as {@code memberJoined} / {@code memberLeft} ACI arrays inside
- * the dataMessage's {@code groupV2} object on update notifications; the
- * handler maps each ACI to one {@link MembershipEvent.UserJoined} /
- * {@link MembershipEvent.UserLeft} dispatched through the registered
- * {@link MessagingAdapter.MembershipHandler}.</p>
+ * <p>No membership-event surface: signal-cli 0.14.5 exposes no native
+ * per-user member-joined / member-left signal in its receive stream
+ * (F-live-10, second leg), so {@link SignalAdapter} declares
+ * {@code supportsMembershipEvents=false} and Provider falls back to
+ * permanent-delivery-failure-driven cleanup — the SimpleX posture, per
+ * {@code docs/design/06-messaging.md} §6.3.6/§6.5.4.</p>
  */
 final class SignalGroupHandler {
 
@@ -59,52 +59,38 @@ final class SignalGroupHandler {
 
     private final String botAci;
     private final MessagingAdapter.@Nullable InboundHandler inboundHandler;
-    private final MessagingAdapter.@Nullable MembershipHandler membershipHandler;
     private final AdapterMetrics metrics;
 
     /**
-     * @param botAci            the bot's per-adapter ACI (UUID string)
-     *                          used as the D10 trust anchor for mention
-     *                          recognition; never null.
-     * @param inboundHandler    Provider's inbound-message callback;
-     *                          null means group inbound messages are
-     *                          dropped (early-boot wiring case — the
-     *                          warning logs identify it).
-     * @param membershipHandler Provider's membership-event callback;
-     *                          null means membership events are dropped
-     *                          (early-boot wiring case).
-     * @param metrics           the adapter metrics emission point for the
-     *                          §6.3.10 oversize-drop counter; never null
-     *                          (the adapter passes its bound instance, or
-     *                          a noop for unit tests).
+     * @param botAci         the bot's per-adapter ACI (UUID string)
+     *                       used as the D10 trust anchor for mention
+     *                       recognition; never null.
+     * @param inboundHandler Provider's inbound-message callback;
+     *                       null means group inbound messages are
+     *                       dropped (early-boot wiring case — the
+     *                       warning logs identify it).
+     * @param metrics        the adapter metrics emission point for the
+     *                       §6.3.10 oversize-drop counter; never null
+     *                       (the adapter passes its bound instance, or
+     *                       a noop for unit tests).
      */
     SignalGroupHandler(String botAci,
                        MessagingAdapter.@Nullable InboundHandler inboundHandler,
-                       MessagingAdapter.@Nullable MembershipHandler membershipHandler,
                        AdapterMetrics metrics) {
         this.botAci = botAci.toLowerCase(Locale.ROOT);
         this.inboundHandler = inboundHandler;
-        this.membershipHandler = membershipHandler;
         this.metrics = metrics;
     }
 
     /**
      * Translate one signal-cli {@code receive} notification carrying a
-     * group v2 dataMessage. Branches on shape:
-     * <ul>
-     *   <li>{@code memberJoined} / {@code memberLeft} present →
-     *       dispatched as {@link MembershipEvent.UserJoined} /
-     *       {@link MembershipEvent.UserLeft}.</li>
-     *   <li>independently, if dataMessage has a {@code message} body →
-     *       mention-checked; if the bot is ACI-mentioned, dispatched
-     *       as an {@link InboundMessage} with {@link ScopeRef.Group}.
-     *       Group messages without a bot mention are silently dropped
-     *       (spec rule: "Group messages arrive only when the bot is
-     *       @mentioned").</li>
-     * </ul>
-     * Envelopes with neither shape (typing-only, receipts, DMs, group
-     * updates carrying neither member delta nor body) return without
-     * dispatch.
+     * group dataMessage: if it has a {@code message} body, it is
+     * mention-checked; if the bot is ACI-mentioned, it is dispatched
+     * as an {@link InboundMessage} with {@link ScopeRef.Group}. Group
+     * messages without a bot mention are silently dropped (spec rule:
+     * "Group messages arrive only when the bot is @mentioned").
+     * Envelopes without a group stanza and body (typing-only, receipts,
+     * DMs, body-less group updates) return without dispatch.
      *
      * @param receiveParams the {@code params} object from a JSON-RPC
      *                      {@code receive} notification; never null.
@@ -113,10 +99,10 @@ final class SignalGroupHandler {
         // instanceof doubles as the null-check and the type-check (the
         // codec's discipline, SignalMessageCodec.decode/extractDm): the
         // daemon stream is a trust boundary, so a present-but-wrong-typed
-        // envelope/dataMessage/groupV2 (untrusted Signal-peer wire data)
-        // collapses into the same drop branch as an absent field rather
-        // than throwing CCE out of the typed getJsonObject accessor —
-        // making the boundary guard intrinsic here, not resting on the
+        // envelope/dataMessage/group-stanza (untrusted Signal-peer wire
+        // data) collapses into the same drop branch as an absent field
+        // rather than throwing CCE out of the typed getJsonObject accessor
+        // — making the boundary guard intrinsic here, not resting on the
         // incidental catch(RuntimeException) in dispatchGroupNotification.
         if (!(receiveParams.get("envelope") instanceof JsonObject envelope)) {
             return;
@@ -124,34 +110,16 @@ final class SignalGroupHandler {
         if (!(envelope.get("dataMessage") instanceof JsonObject dataMessage)) {
             return;
         }
-        if (!(dataMessage.get("groupV2") instanceof JsonObject groupV2)) {
-            // DM scope or non-group notification — owned by
-            // SignalMessageCodec.extractDm via SignalJsonRpcClient.
-            return;
-        }
-        String groupId = groupV2.getString("id", null);
+        String groupId = extractGroupId(dataMessage);
         if (groupId == null) {
-            // groupV2 stanza without its base64 id is malformed —
-            // cannot anchor a stable per-group scope.
+            // DM scope, non-group notification (owned by
+            // SignalMessageCodec.extractDm via SignalJsonRpcClient), or a
+            // group stanza without its base64 id — malformed, cannot
+            // anchor a stable per-group scope.
             return;
         }
 
-        // Membership update branch — dispatch one event per ACI in the
-        // memberJoined / memberLeft arrays. Both arrays may be present
-        // on the same update (a mod swap, an admin reshuffle); the spec
-        // models them as independent per-user events.
-        dispatchMembership(groupId, arrayOrNull(groupV2, "memberJoined"), true);
-        dispatchMembership(groupId, arrayOrNull(groupV2, "memberLeft"), false);
-        // Fall through to the message branch rather than returning after a
-        // membership delta. memberJoined/Left and the chat `message` body are
-        // independent dataMessage fields, and nothing in this handler, the
-        // codec, or the protocol forces them to be mutually exclusive — at an
-        // untrusted-peer boundary, an early return would silently drop a
-        // bot-mention co-delivered with a delta. The message branch is a no-op
-        // for a delta-only notification (no `message` → early drop below), so
-        // well-behaved traffic is unaffected. (M1-408)
-
-        // Inbound group-message branch — requires sender ACI + body +
+        // Inbound group-message path — requires sender ACI + body +
         // bot-mention. Anything missing → silent drop per spec.
         String sourceUuid = envelope.getString("sourceUuid", null);
         if (sourceUuid == null || !SignalMessageCodec.isAcceptableAci(sourceUuid)) {
@@ -296,70 +264,31 @@ final class SignalGroupHandler {
         return stripped.toString().strip();
     }
 
-    private void dispatchMembership(String groupId, @Nullable JsonArray acis, boolean joined) {
-        if (acis == null || acis.isEmpty()) {
-            return;
+    /**
+     * Extract the base64 group id from either wire spelling of the
+     * group stanza, or null when the dataMessage carries no usable
+     * group scope. {@code groupInfo.groupId} is checked first — the
+     * shape real signal-cli 0.14.5 emits (F-live-10; the {@code
+     * groupV2.id} spelling came from fakes and was never observed on
+     * the live wire). {@code groupV2.id} stays accepted for route
+     * symmetry with {@code SignalMessageCodec.extractDm}, which
+     * excludes BOTH spellings from the DM route — every shape the DM
+     * filter rejects must be one this parser handles, or that envelope
+     * silently falls between the two complementary filters (exactly the
+     * F-live-10 failure). First match wins, deterministically.
+     * instanceof doubles as the null-check and the type-check (the
+     * codec's discipline): a wrong-typed stanza or id collapses into
+     * the same null → drop branch as an absent one.
+     */
+    private static @Nullable String extractGroupId(JsonObject dataMessage) {
+        if (dataMessage.get("groupInfo") instanceof JsonObject groupInfo
+                && groupInfo.get("groupId") instanceof JsonString groupId) {
+            return groupId.getString();
         }
-        MessagingAdapter.MembershipHandler handler = membershipHandler;
-        if (handler == null) {
-            LOG.debugf("Signal membership event dropped — no MembershipHandler set");
-            return;
+        if (dataMessage.get("groupV2") instanceof JsonObject groupV2
+                && groupV2.get("id") instanceof JsonString id) {
+            return id.getString();
         }
-        for (JsonValue entry : acis) {
-            String aci = aciFromArrayEntry(entry);
-            if (aci == null) {
-                continue;
-            }
-            MembershipEvent event = joined
-                    ? new MembershipEvent.UserJoined(groupId, aci)
-                    : new MembershipEvent.UserLeft(groupId, aci);
-            try {
-                handler.onEvent(event);
-            } catch (RuntimeException e) {
-                // Per-event isolation: one failing event must not drop
-                // the sibling entries in the same member-delta array.
-                // Class name only (the SafeLog pattern — this module has
-                // no infochat-core dependency): no ACI (it is a contact
-                // id), no exception message, no throwable object may
-                // reach the log.
-                LOG.errorf("Signal membership event dispatch failed group=%s exception=%s",
-                        groupId, e.getClass().getName());
-            }
-        }
-    }
-
-    private static @Nullable JsonArray arrayOrNull(JsonObject object, String name) {
-        // instanceof doubles as the null-check and the type-check (the
-        // codec's discipline): a present-but-wrong-typed memberJoined /
-        // memberLeft field (untrusted wire data) collapses into the same
-        // 'absent -> not usable' branch as a missing one rather than
-        // throwing CCE out of the typed getJsonArray accessor.
-        return object.get(name) instanceof JsonArray array ? array : null;
-    }
-
-    private static @Nullable String aciFromArrayEntry(JsonValue entry) {
-        // signal-cli's member-delta arrays surface either bare UUID
-        // strings or full {uuid, ...} objects depending on version;
-        // accept both shapes so a future signal-cli upgrade does not
-        // silently drop the event.
-        String raw = switch (entry.getValueType()) {
-            case STRING -> ((JsonString) entry).getString();
-            case OBJECT -> ((JsonObject) entry).getString("uuid", null);
-            default -> null;
-        };
-        // Gate the member-delta ACI exactly as the DM (extractDm) and
-        // group-message (handleReceive) paths do: an entry that is not a
-        // canonical UUID is dropped at decode rather than becoming a
-        // (adapter, contact_id) join key. Provider keys group_membership
-        // row operations on that tuple, so a non-canonical memberLeft
-        // entry could otherwise mutate authorization-adjacent state it
-        // can never reconcile against a real users.contact_id.
-        if (raw == null || !SignalMessageCodec.isAcceptableAci(raw)) {
-            return null;
-        }
-        // isAcceptableAci lower-cases internally for the match; emit the
-        // lower-cased canonical form only after the gate passes, matching
-        // the other inbound paths' join-key shape.
-        return raw.toLowerCase(Locale.ROOT);
+        return null;
     }
 }
