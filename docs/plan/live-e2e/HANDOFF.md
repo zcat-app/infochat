@@ -7,11 +7,37 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-04 late night (**PHASE 5 DONE — §6 checklist fully walked live; F-live-11 found (no `updateMessage` on signal-cli 0.14.5 — every edit silently falls back to fresh sends) and its fix ticket M1-566 DRAFTED; board 589 done / 1 pending; NEXT = /m1-tick run M1-566, then image rebuild + the ticket's live host validation**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-04 late night (**LIVE-E2E PLAN COMPLETE — M1-566 merged (96f6ef09), images rebuilt, F-live-11 host validation GREEN: live /summary edits in place (1 dataMessage + 2 editMessage revisions, two-hop latest-revision chain), zero fallback_send; board 590 done / 0 pending; Phase 6 (/testcase skill) stays optional**) · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
+
+**THE LIVE-E2E PLAN IS COMPLETE (2026-07-04 late night).** M1-566 (the
+F-live-11 fix, the last open finding) is merged @ 96f6ef09, both app
+images are rebuilt from it, and the ticket's host validation is GREEN
+(see the running-log entry): live `/summary -w 48h` from the signal
+user DM delivered ONE message that edited in place — placeholder
+dataMessage → `Translating...` editMessage targeting the placeholder →
+final-summary editMessage targeting the FIRST EDIT's timestamp (the
+latest-revision chain live-proven, two hops) — with
+`adapter_outbound_update_total{outcome="ok"} 2`, `coalesced 3`, and NO
+`fallback_send`/`update_fail` counters at all (the pre-fix flow read
+`update_fail 1, fallback_send 2`). Typing STARTED/STOPPED correct.
+
+**No open findings. Board: 590 done / 0 pending.** Remaining option:
+Phase 6 (`/testcase` skill wrap of the ScenarioRunner) — deliberately
+optional, user's call. One new low-priority observation recorded:
+F-live-12 below (reEmitStaleRaw startup SRMSG00034, self-healing).
+
+**NEXT ACTION:** none mandatory. Push is the user's call (`main` is
+~22 commits ahead of origin). If a future session drives group
+scenarios, remember `live-signal-group` is APPROVED with the user as
+group admin (clear the groups row or build a fresh group for a re-run).
+
+---
+
+## ▶ previous START HERE (2026-07-04 late night — Phase 5 done, kept for context)
 
 **PHASE 5 IS DONE (2026-07-04 late night).** The §6 differences
 checklist is fully walked — every behavioural item is ticked in
@@ -595,12 +621,11 @@ checklist, §6 differences, §8 decisions) → `simplex-live-frame-capture` memo
 
 ## Current state (one line)
 
-Phases 0–5 ALL DONE (SimpleX 2026-07-03; Signal 2026-07-04 — s07 GREEN
-+ §6 checklist fully walked). One open finding: **F-live-11** (Signal
-edit RPC `updateMessage` doesn't exist on 0.14.5; fallback masks it;
-fix `send`+`editTimestamp` proven live) — fix ticket **M1-566 drafted,
-pending run**. Phase 6 (/testcase skill) optional. Board: 589 done /
-1 pending (M1-566).
+Phases 0–5 ALL DONE and ALL live findings CLOSED (F-live-11 fixed by
+M1-566 @ 96f6ef09, host-validated 2026-07-04: live /summary edits in
+place, latest-revision chain proven, zero fallback_send). Phase 6
+(/testcase skill) optional. Board: 590 done / 0 pending. Only
+observation left: F-live-12 (low, self-healing startup noise).
 
 ## Where we are
 
@@ -933,7 +958,20 @@ notable: the refusal itself was spurious (3B model over-triggering on the
 untrusted-content framing) — a model-quality data point for F-live-8's
 default-model discussion.
 
-### F-live-11 (MEDIUM, adapter bug, UX-degrading not correctness) — Signal edit path never edits on real wire; fallback masks it
+### F-live-11 (MEDIUM, adapter bug) — RESOLVED by M1-566 (merged 96f6ef09, 2026-07-04) and HOST-VALIDATED same night
+
+**RESOLVED:** DM+group edit frames re-encoded as `send`+`editTimestamp`
+(encoders renamed encodeEditSend/encodeGroupEditSend); each successful
+edit's response timestamp refreshes the stored handle so edit chains
+target the LATEST revision; fakes/tests reconciled with edit-vs-fallback
+keyed on `editTimestamp` presence, fallback suite coverage intact.
+Host validation GREEN post-rebuild: live `/summary -w 48h` (signal user
+DM) = 1 placeholder dataMessage + 2 editMessage revisions (second edit
+targeted the first edit's timestamp — two-hop chain proven), metrics
+`ok 2 / coalesced 3`, NO fallback_send or update_fail counters.
+Original finding below, kept for the record:
+
+### F-live-11 original record (MEDIUM, adapter bug, UX-degrading not correctness) — Signal edit path never edits on real wire; fallback masks it
 
 Found by the §6 edit-fallback probe (2026-07-04 late night): the Signal
 adapter encodes message edits as JSON-RPC method `updateMessage`
@@ -1002,9 +1040,63 @@ shape (uuid/start/length) matches the parser's expectation — only the
 group stanza is wrong. DMs unaffected. s07-over-Signal blocked until
 fixed; the 3-party group fixture is already built and waiting.
 
+### F-live-12 (LOW, operational noise, self-healing) — reEmitStaleRaw scheduled task hits SRMSG00034 at startup under RAW backlog
+
+Observed on the 2026-07-04 22:23 collector boot (first boot of the
+M1-566 image, 1090-post RAW backlog): the M1-551 rehydrator gate held
+(re-enqueue clean), but the `Stage1Worker#reEmitStaleRaw` SCHEDULED
+task (IntervalTrigger 300000 ms) also fired ~4 s after boot, emitted
+into the buffer the rehydrator had just filled, and threw
+`SRMSG00034` (2 ERROR-level stack traces via StatusEmitterInvoker).
+Self-healing by design: the scheduler retries in 5 min, the outbox is
+at-least-once, the collector stayed healthy, and the NEXT boot (22:31,
+1089 backlog) was 0-SRMSG00034 clean — the race is lost only when the
+tick lands inside the post-rehydration saturation window. Impact is
+log noise (ERROR + stack) that could page an operator. Possible fix
+shape if ever ticketed: route reEmitStaleRaw's emits through the same
+per-emit readiness gate M1-551 gave the rehydrator, or delay the
+task's first execution past startup. NOT ticketed — user's call.
+
 ## Running log
 
-### 2026-07-04 late night, latest (§6 checklist walked — Phase 5 DONE; F-live-11 found)
+### 2026-07-04 late night, LATEST (M1-566 run+merge; rebuild; F-live-11 host validation GREEN — live-e2e plan complete)
+
+- **M1-566 MERGED (96f6ef09)** via `/m1-tick run M1-566` — the
+  F-live-11 fix. Full cycle: clarity PASS (0/0) → implement (exactly
+  the 6 files_scope files; adapter module 315/0 green first) → full
+  verify green r1 (stack paused per the co-location rule, detached
+  setsid+marker, DevServices leaks cleaned, 227 provider tests) →
+  review r1 APPROVE (all 6 checks PASS, 0 rework) → redteam skipped
+  (security_relevant false) → verify-reuse user-approved → commit
+  1ea4370e → squash-merge 96f6ef09. Board: 590 done / 0 pending.
+- **Images rebuilt from main @ 96f6ef09** (apps paused, detached
+  build, BUILD_EXIT=0; collector cc60783f47de, provider 2e1925dd35e1),
+  restarted collector-first: readiness UP both, gauges 1.0 both
+  adapters.
+- **Host validation GREEN (the ticket §Notes recipe):** single
+  held-open jsonRpc session (user role; recipe = docker run with
+  signal-private.env + a mounted probe script piping the send request
+  then `sleep 300` into `signal-cli jsonRpc` — no number touches argv)
+  sent `/summary -w 48h` to the bot and captured the reply envelopes:
+  profile-key null-body dataMessage, placeholder dataMessage
+  (`Working on it...`, ts …932112), typing STARTED, editMessage
+  targeting …932112 (`Translating...`, ts …954267), editMessage
+  targeting …954267 (final summary — the LATEST-REVISION chain, second
+  hop live-proven), typing STOPPED. ONE user-visible message, edited
+  in place; zero extra dataMessages. Metrics after the flow:
+  `adapter_outbound_update_total ok 2 / coalesced 3`, NO
+  fallback_send, NO update_fail (pre-fix: `update_fail 1,
+  fallback_send 2`). Collector paused for the LLM-bound turn and
+  restarted after (22:31 boot clean, 0 SRMSG00034).
+- **New observation F-live-12** (see §Live findings): the 22:23 boot's
+  `Stage1Worker#reEmitStaleRaw` startup tick lost the buffer race under
+  the 1090 RAW backlog — 2 ERROR SRMSG00034 traces, self-healed;
+  rehydrator gate (M1-551) held on both boots. Not ticketed.
+- Stack at session end: all 5 containers healthy on the new images.
+  **Every phase and every live finding is closed; Phase 6 (/testcase)
+  remains the only optional item. Not pushed (~22 commits ahead).**
+
+### 2026-07-04 late night (§6 checklist walked — Phase 5 DONE; F-live-11 found)
 
 - **Probe tooling that worked (reuse):** single signal-cli `jsonRpc`
   stdin session via `docker run -i --env-file signal-private.env`
