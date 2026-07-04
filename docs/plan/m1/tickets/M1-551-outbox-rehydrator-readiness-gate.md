@@ -11,10 +11,6 @@ reopens:
     reason: M1-553 (wiring-test fix) is done, unblocking verify; mid-drain
       SRMSG00034 evidence (2 occurrences) now filed in the ticket body for
       the design decision at review.
-clarity_check:
-  date: 2026-07-03
-  verdict: PASS
-  warnings: []
 escalations:
   - date: 2026-07-03
     reason: budget-breach
@@ -40,6 +36,24 @@ escalations:
       unit-green (checkpoint commit on the branch). User chose defer
       onto M1-553 (the wiring-test fix).
 revisions:
+  - date: 2026-07-04
+    reason: design extension at reopen — user chose the per-emit readiness
+      gate ("Extend: per-emit gate", 2026-07-04) after two mid-drain
+      SRMSG00034 occurrences falsified the "has requests once" premise
+      (see §Mid-drain flake evidence)
+    snapshot:
+      status: pending
+      acceptance_item_2_at_snapshot: |
+        OutboxRehydrator.rehydrate() gates its FIRST emit on downstream
+        readiness — the gate runs only after the first non-empty chunk
+        loads (an empty backlog never polls), and polls
+        hasDownstreamRequests() up to readiness-max-attempts (default 100)
+        times with a fixed readiness-poll-millis (default 100) sleep
+        between attempts.
+      design_premise_at_snapshot: |
+        Once the subscriber is active its virtual-thread dispatch requests
+        continuously, so "has requests once" is a faithful readiness
+        signal for the whole drain.
   - date: 2026-07-03
     reason: budget-breach rework (user picked refine, hand-rolled-stub variant)
     snapshot:
@@ -78,25 +92,28 @@ out_of_scope:
 acceptance:
   - EvalQueueProducer exposes a hasDownstreamRequests() method delegating
     to the injected Emitter's hasRequests().
-  - OutboxRehydrator.rehydrate() gates its FIRST emit on downstream
-    readiness — the gate runs only after the first non-empty chunk loads
-    (an empty backlog never polls), and polls
-    hasDownstreamRequests() up to
+  - OutboxRehydrator.rehydrate() gates EVERY emit on downstream
+    readiness: before each emit, when hasDownstreamRequests() is false,
+    it polls hasDownstreamRequests() up to
     infochat.collector.outbox.readiness-max-attempts (default 100) times
     with a fixed
     infochat.collector.outbox.readiness-poll-millis (default 100) sleep
-    between attempts. The loop is attempt-counted, never a wall-clock
+    between attempts. An empty backlog performs no emits and therefore
+    no polls. The loop is attempt-counted, never a wall-clock
     comparison, so the injectable-Clock rule is untriggered.
-  - Exhausting the attempts throws IllegalStateException naming the
-    eval-queue channel and both config keys — startup still fails loudly,
-    but with an actionable message instead of the opaque SRMSG00034.
+  - Exhausting the attempts (on any emit) throws IllegalStateException
+    naming the eval-queue channel and both config keys — startup still
+    fails loudly, but with an actionable message instead of the opaque
+    SRMSG00034.
   - New unit tests (field-injection seam — OutboxRehydrator's
     package-private @Inject fields are assignable without CDI, with a
     hand-rolled stub for EvalQueueProducer — no new test dependency;
-    the repo's test-double convention is hand-rolled) cover, proceeds once
-    hasDownstreamRequests flips true after k polls; attempts exhausted
-    throws IllegalStateException whose message names both config keys; an
-    empty backlog never calls hasDownstreamRequests.
+    the repo's test-double convention is hand-rolled) cover: proceeds once
+    hasDownstreamRequests flips true after k polls; a mid-drain stall
+    (readiness false again at a later emit) is waited out by the same
+    bounded poll; attempts exhausted throws IllegalStateException whose
+    message names both config keys; an empty backlog never calls
+    hasDownstreamRequests.
   - OutboxRehydratorIT, OutboxRehydratorPaginationIT, and
     Stage1WorkerEmitterThreadIT are preserved unchanged and green.
   - mvn verify is green.
@@ -104,6 +121,8 @@ test_plan:
   adds:
     - "OutboxRehydratorReadinessTest: emit proceeds after readiness flips
       true on the k-th poll (k < max-attempts)"
+    - "OutboxRehydratorReadinessTest: a mid-drain stall (readiness drops
+      false before a later emit) is waited out by the same bounded poll"
     - "OutboxRehydratorReadinessTest: attempts exhausted → ISE naming
       readiness-max-attempts and readiness-poll-millis"
     - "OutboxRehydratorReadinessTest: empty RAW backlog performs zero
@@ -150,11 +169,18 @@ untrustworthy exactly after a stop under heavy ingest.
 
 ## Design
 
-Gate the rehydrator's first emit on subscriber readiness via the
-MicroProfile `Emitter.hasRequests()` API, polled in a bounded
-attempt-counted loop. Once the subscriber is active its virtual-thread
-dispatch requests continuously, so "has requests once" is a faithful
-readiness signal for the whole drain.
+Gate EVERY emit of the rehydration drain on subscriber readiness via the
+MicroProfile `Emitter.hasRequests()` API: before each emit, if the
+subscriber has no outstanding requests, poll in a bounded attempt-counted
+loop. The healthy-path cost is one cheap readiness check per emit (true →
+zero sleeps); a stalled consumer is waited out instead of overflowing the
+128-item default buffer.
+
+Originally the gate ran only before the FIRST emit, justified by "once
+the subscriber is active its virtual-thread dispatch requests
+continuously" — falsified 2026-07-03/04 by two mid-drain SRMSG00034
+occurrences under full-suite host load (§Mid-drain flake evidence);
+extended to per-emit at reopen (user decision 2026-07-04).
 
 Rejected alternatives:
 
@@ -167,9 +193,10 @@ Rejected alternatives:
   the buffer already holds 128 items by the time it fires. Polling
   `hasRequests()` before the first emit is precise and API-supported.
 
-Defaults 100 attempts × 100 ms cap the wait at ~10 s — orders of magnitude
-above the observed race window (subscription completes within the same
-startup second) while still failing a genuinely-broken wiring loudly.
+Defaults 100 attempts × 100 ms cap the wait at ~10 s per stalled emit —
+orders of magnitude above the observed race window (subscription completes
+within the same startup second) while still failing a genuinely-broken
+wiring loudly.
 
 ## Implementation anchors (surveyed 2026-07-03)
 
@@ -219,3 +246,8 @@ review: either extend the design (escalate → refine; e.g. per-emit
 readiness or bounded retry on overflow) or explicitly accept the residual
 mid-drain flake and file a follow-up ticket for it. The ticket must not
 merge implying the first-emit gate fully closes F-live-3.
+
+**Resolution (2026-07-04, reopen):** the user chose to extend the design —
+the gate now runs per emit (refine recorded under `revisions:`, design and
+acceptance updated above). The accept-residual-flake path was declined;
+no follow-up ticket is needed.
