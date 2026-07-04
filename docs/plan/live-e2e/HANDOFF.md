@@ -7,7 +7,7 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-04 night (**M1-558 MERGED (848559b4) — /q/metrics real; F-live-7 metrics leg code-RESOLVED, live after next image rebuild**; remaining: M1-559/560, image rebuild, Phase 5 Signal) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-04 night (**M1-559 MERGED (509f7a6c) + M1-561 MERGED (5c998451) — F-live-9 refusal intercept code-RESOLVED and redteam-hardened (prefix-only, post-strip)**; remaining: M1-560, image rebuild, Phase 5 Signal) · Owner: ubuntu5 + Claude
 
 ---
 
@@ -76,16 +76,35 @@ after; details + re-apply recipe in the running log.
   verbatim to the user. `SummaryProseGenerator:119` intercepts + degrades
   ("never surface the marker"); chat needs the same. security_relevant.
 
-**NEXT (fresh session):** run the two remaining drafted tickets —
-`/m1-tick run M1-559` (refusal intercept), `M1-560` (reasoning-off in
-compose) — then an **image rebuild** (the running images predate M1-558,
-so live `/q/metrics` stays 404 until then; fold M1-559/560 into the same
-rebuild), then Phase 5 (Signal delta — needs the user for the
-phone-driven side). **M1-558 DONE (merged 848559b4, 2026-07-04 night):**
+**NEXT (fresh session):** run the last drafted ticket — `/m1-tick run
+M1-560` (reasoning-off in compose; inert-diff candidate, M1-549
+precedent) — then an **image rebuild** (the running images predate
+M1-558/559/561, so live `/q/metrics` stays 404 and the chat refusal
+intercept is not live until then; fold M1-560 into the same rebuild;
+remember M1-560's merge deletes the override file, so the rebuild's
+compose commands change), then Phase 5 (Signal delta — needs the user
+for the phone-driven side).
+**M1-558 DONE (merged 848559b4, 2026-07-04 night):**
 `quarkus-micrometer-registry-prometheus` in both service poms +
 endpoint-pinning MetricsEndpointITs (provider IT pins
 `adapter_connection_status`); F-live-7's metrics leg is code-resolved —
 the `/q/health/llm` leg was out of scope and still needs its own ticket.
+**M1-559 DONE (merged 509f7a6c) + M1-561 DONE (merged 5c998451), both
+2026-07-04:** F-live-9 is code-resolved — ChatAgent intercepts the D21
+refusal marker before sanitize/persist/delivery (deterministic
+`error.chat.refused` bundle reply en+cs, null commit, D37 userId-only
+WARN). M1-561 remediated the M1-559 redteam out-of-model item: the
+intercept now runs on the POST-stripToolCalls text with a PREFIX-ONLY
+predicate (`startsWith("[REFUSAL:")`, no endsWith conjunct) — the
+in-branch redteam audit showed strip's unbalanced-fragment drop-through
+eats the marker's closing `]` (`[REFUSAL: TOOL_CALL: foo]` →
+`[REFUSAL: `), so two-sided anchoring leaks; prefix-only also catches
+an unterminated marker. Re-audit CLEAN
+(docs/plan/m1/redteam/M1-561-2026-07-04{,-reaudit}.md). Two advisory
+out-of-model residuals recorded there (mid-prose marker delivery —
+deliberate anchored-not-substring design; Unicode-lookalike prefix
+evasion) — no tickets unless the marker-suppression guarantee gets
+promoted to spec level.
 
 **⚠ Compose-override trap until M1-560 lands:** the RUNNING llamacpp has
 `LLAMA_ARG_REASONING=off` only via an override file, now at
@@ -98,11 +117,11 @@ the prod stack must carry BOTH `-f` files:
 (`docker stop`/`docker start` of individual containers is safe — the trap
 is only compose re-creation.) M1-560's merge deletes the override file.
 
-**Verify note for the ticket runs:** M1-559 needs full `mvn verify` —
-pause collector+provider first (co-location rule), use the detached
-setsid+marker pattern, clean the ~5 DevServices leaks after
-(`[[clean-verify-monitoring]]` memory). M1-560 is compose+docs only
-(inert-diff gate candidate, M1-549 precedent).
+**Verify note for M1-560:** compose+docs only (inert-diff gate
+candidate, M1-549 precedent) — no full `mvn verify` expected. If any
+testable file does end up in the diff: pause collector+provider first
+(co-location rule), detached setsid+marker pattern, clean the ~5
+DevServices leaks after (`[[clean-verify-monitoring]]` memory).
 
 **Fixture state after this session:** LiveAdmin CLAIMED (`is_admin=t`,
 vouched), admin-DM → m1-537-seed-source `source_subscription` row present,
@@ -291,8 +310,9 @@ checklist, §6 differences, §8 decisions) → `simplex-live-frame-capture` memo
 
 Phases 0–4b DONE (all 7 live SimpleX scenarios GREEN 2026-07-03; 4b-4
 assertions DONE 2026-07-04; ollama + remote-LLM (DeepSeek) backends both
-verified live). Remaining: M1-559/560 (F-live-9/8), image rebuild (running
-images predate M1-558 — live /q/metrics still 404), Phase 5 (Signal delta).
+verified live). Remaining: M1-560 (F-live-8 compose flag), image rebuild
+(running images predate M1-558/559/561 — live /q/metrics still 404, chat
+refusal intercept not yet live), Phase 5 (Signal delta).
 
 ## Where we are
 
@@ -599,7 +619,17 @@ better-behaved default GGUF, and/or a per-task `temperature` key in
 TaskConfig (F-live-6 / M1-548 family). The friendly-error path behaved
 correctly on every failure (bundle reply delivered, D37 cause chain logged).
 
-### F-live-9 (MEDIUM, security-relevant) — chat path delivers the structured refusal marker verbatim
+### F-live-9 (MEDIUM, security-relevant) — RESOLVED by M1-559 (509f7a6c) + hardened by M1-561 (5c998451), both 2026-07-04
+**RESOLVED:** ChatAgent intercepts the D21 marker before
+sanitize/persist/delivery (deterministic `error.chat.refused` bundle
+reply en+cs, null pendingCommit — nothing persisted, D37 userId-only
+WARN). M1-561 (remediation of the M1-559 redteam out-of-model item)
+moved the check to the post-stripToolCalls text and hardened the
+predicate to prefix-only after an in-branch redteam FINDINGS→refine→
+CLEAN cycle showed two-sided anchoring leaks when strip eats the
+marker's closing `]`. Live from the next image rebuild (running
+provider image predates both). Original finding:
+
 Live ollama turn (2026-07-04): a benign question ("Tell me about the recent
 security advisory from my sources") made `llama3.2:3b` emit the D21
 structured refusal — and the user received the raw protocol string
@@ -614,6 +644,41 @@ untrusted-content framing) — a model-quality data point for F-live-8's
 default-model discussion.
 
 ## Running log
+
+### 2026-07-04 night, later (M1-559 + M1-561 merged — F-live-9 closed)
+
+- **M1-559 MERGED (509f7a6c)** — ChatAgent refusal-marker intercept
+  (F-live-9): anchored check on the tool-loop terminal text, new
+  `error.chat.refused` bundle key (en+cs, D43 twin), degrade like the
+  unavailable path (null commit, nothing persisted), D37 userId-only
+  WARN. Its pre-commit redteam audit was CLEAN with one out-of-model
+  item — the pre-strip placement — which was verified real and drafted
+  as M1-561 (2908a71e).
+- **M1-561 MERGED (5c998451)** — intercept relocated to post-strip via
+  `/m1-tick run M1-561`. Full cycle worth recording: clarity PASS (0/0)
+  → implement (relocation + 3 mixed-output tests) → verify green r1 →
+  review r1 APPROVE → **pre-commit redteam FINDINGS (1 medium
+  INFO-LEAK)**: the relocated two-sided anchor is itself leaky —
+  strip's unbalanced-fragment drop-through eats the closing `]`
+  (`[REFUSAL: TOOL_CALL: foo]` → `[REFUSAL: `), delivering the secret
+  prefix; an input the pre-diff check caught (regression) → user chose
+  **escalate refine**: predicate hardened to PREFIX-ONLY on post-strip
+  text (dual raw+stripped two-sided check rejected — evadable by
+  `[REFUSAL: TOOL_CALL: foo]\nTOOL_CALL: bar`); also closes the
+  unterminated-marker case → re-implement (+2 tests, 7/7) → verify
+  green r2 → review r2 APPROVE (must-shrink convergent, files held 4)
+  → **redteam re-audit CLEAN** → commit dc6fd425 → squash-merge
+  5c998451. Audit records:
+  `docs/plan/m1/redteam/M1-561-2026-07-04{,-reaudit}.md`. Two advisory
+  out-of-model residuals (mid-prose marker delivery = deliberate
+  anchored-not-substring design; Unicode-lookalike prefix evasion) —
+  parked unless marker-suppression becomes a spec commitment. Board:
+  done=584, pending=1 (M1-560).
+- **Verify protocol held both rounds:** collector+provider paused,
+  detached setsid+marker launches (r1 9:51, r2 ~10 min), stack
+  restarted after each; all 5 containers healthy at session end.
+  Running images predate M1-558/559/561 — rebuild still pending (fold
+  M1-560 in).
 
 ### 2026-07-04 night (M1-558 merged — /q/metrics real)
 
