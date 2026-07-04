@@ -174,20 +174,25 @@ class Stage1WatchdogIT {
         // assertions above are the load-bearing checks; this band
         // catches gross drift (e.g. watchdog never fired, or the
         // process took 100× the cap because something other than the
-        // matcher was the bottleneck). The upper bound is 10× cap:
+        // matcher was the bottleneck). The upper bound is 50× cap:
         // the 5× band flaked twice on main (51ms during M1-040 round-2
         // on 2026-05-19; 78ms then 52ms during M1-049 round-1 on
-        // 2026-05-22) under normal CI noise, so the band widens to
-        // 10× to keep the load-bearing assertions usable without
-        // suppressing the test.
+        // 2026-05-22) under normal CI noise and M1-049 widened it to
+        // 10×; the 10× band then flaked twice in two days (101ms
+        // during M1-552 round-1 full-suite verify on 2026-07-03;
+        // 102ms during M1-551 round-1 full-suite verify on
+        // 2026-07-04), both on unmodified stage-1 code under
+        // full-suite host load, so the band widens to 50× (M1-556)
+        // — ~5× above the worst noise ever observed — to keep the
+        // load-bearing assertions usable without suppressing the test.
         assertTrue(durationMs >= TEST_CAP_MS,
             "Stage1Pipeline.process duration was " + durationMs + "ms — "
                 + "expected at least " + TEST_CAP_MS + "ms (the watchdog "
                 + "cannot have fired against the matcher in less than its cap).");
-        assertTrue(durationMs <= TEST_CAP_MS * 10,
+        assertTrue(durationMs <= TEST_CAP_MS * 50,
             "Stage1Pipeline.process duration was " + durationMs + "ms — "
-                + "expected at most " + (TEST_CAP_MS * 10) + "ms "
-                + "(10× cap, CI-tolerance band per M1-049 refine).");
+                + "expected at most " + (TEST_CAP_MS * 50) + "ms "
+                + "(50× cap, CI-tolerance band per M1-556 refine).");
     }
 
     private UUID seedRssSource(String identifier, String displayName) throws Exception {

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 579 |
+| done | 580 |
 | deferred | 10 |
 | **total** | **590** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-556 — Stage1WatchdogIT upper wall-clock band widens to 50x cap (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-556 | Stage1WatchdogIT upper wall-clock band widens to 50x cap | 2026-07-04 | round 1 APPROVE |
 | M1-552 | Chat system prompt gains a max-tokens-derived brevity hint | 2026-07-04 | round 1 APPROVE |
 | M1-551 | OutboxRehydrator waits for eval-queue downstream readiness (F-live-3) | 2026-07-04 | round 1 APPROVE |
 | M1-555 | NostrStreamSourceTest drain race: await arrival before stop | 2026-07-03 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-549 | live-reset preserves provider_state (F-live-4) | 2026-07-03 | round 2 APPROVE |
 | M1-548 | Per-task max-tokens for OpenAiCompatibleProvider (F-live-6) | 2026-07-03 | round 1 APPROVE |
 | M1-547 | Live 4b-3 harness corrections (D51 mention shape + confirm-gated mint scenarios) | 2026-07-03 | round 1 APPROVE |
-| M1-546 | SimpleX live backend v2 (Phase 4b-3 substrate) | 2026-07-03 | round 2 APPROVE |
 
 ---
 
@@ -760,5 +760,5 @@ M1-552 (done)
 M1-553 (done)
 M1-554 (done)
 M1-555 (done)
-M1-556 (pending) ← runnable
+M1-556 (done)
 ```
