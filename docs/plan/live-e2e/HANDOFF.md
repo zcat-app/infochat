@@ -7,7 +7,7 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-04 afternoon (**4b-4 DONE** — retrieval assertion GREEN over ollama, LLM-down degraded verified, readiness/liveness verified; admin RE-CLAIMED + admin-DM subscription re-seeded; ollama backend VERIFIED live incl. tool loop; three new findings F-live-7/8/9; remote-LLM leg blocked on a real API key) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-04 evening (**4b-4 DONE; ollama AND remote-LLM (DeepSeek) backends both VERIFIED live; images rebuilt — M1-551/552 deployed & live-validated**; F-live-8 root-caused → reasoning-off live; M1-558/559/560 drafted, clarity not yet run; remaining: Phase 5 Signal + the three tickets) · Owner: ubuntu5 + Claude
 
 ---
 
@@ -47,12 +47,12 @@ sudo is interactive-only, so the compose service ran with a port override
 (host 11435; container-network reach is what matters). Reverted after; the
 `infochat-ollama` volume KEEPS the pulled model for future runs.
 
-**Remote-LLM leg NOT done — blocked on operator input:** secrets.env's
-`INFOCHAT_LLM_API_KEY` is a 9-char placeholder, no real remote credential
-exists on the host. Wizard remote branch = OpenAI-compatible remote endpoint
-for the six generative tasks, embeddings stay local (D54). Needs a real
-endpoint + key from the user; the ollama-leg recipe above is the template
-(override one task's base-url/model, restart provider, drive a DM).
+**Remote-LLM leg DONE (2026-07-04 evening — user provided a DeepSeek key):**
+chat task pointed at `https://api.deepseek.com` (OpenAI-compatible;
+`deepseek-chat`; `api-key` prop fed by the existing compose env
+passthrough) → tag-pinned retrieval question answered in ~10 s with a
+correct grounded reply over real relays. Reverted to the llamacpp baseline
+after; details + re-apply recipe in the running log.
 
 **New findings (all ticket candidates, see §Live findings):**
 - **F-live-7** — no metrics export: `quarkus-micrometer` is in the poms but
@@ -579,6 +579,40 @@ untrusted-content framing) — a model-quality data point for F-live-8's
 default-model discussion.
 
 ## Running log
+
+### 2026-07-04 evening (remote-LLM leg DONE; images rebuilt — M1-551/552 live-validated)
+
+- **Remote-LLM leg DONE (user provided a DeepSeek key in secrets.env):**
+  endpoint decision — the app's remote path is OpenAI-compatible
+  (OpenAiCompatibleProvider joins base-url + `/chat/completions`), so
+  `base-url=https://api.deepseek.com` + `model=deepseek-chat` +
+  `infochat.llm.chat.api-key=${INFOCHAT_LLM_API_KEY}` (compose already
+  passes the env through, docker-compose.yml:116/183); DeepSeek's
+  `/anthropic` endpoint would target the separate AnthropicProvider — not
+  the product's remote shape, unused. **Result: tag-pinned retrieval
+  question answered in ~10 s, tool loop + correct grounded reply**
+  ("The search found one post … 'Seed: security advisory'") — the same
+  assertion the local model needed 3 attempts and a reasoning fix for.
+  Reply carried `**bold**` markdown (cosmetic note: LLM prose is rendered
+  raw; the plain-text convention is enforced for deterministic strings
+  only). Config REVERTED to the llamacpp baseline after the test (chat-only
+  -remote is not a wizard shape); re-apply = those 3 property lines.
+- **Images rebuilt from main (fdd7…/M1-551+M1-552 now deployed) and
+  live-validated:** trigger was F-live-3 breaking its retry-clean pattern —
+  THREE consecutive collector boot-loops (SRMSG00034, ~1526 RAW backlog) on
+  the pre-M1-551 image. Post-rebuild: collector booted HEALTHY first try
+  through the same backlog ("re-enqueued 1526 RAW posts", 0 SRMSG00034) —
+  **M1-551's readiness gate live-proven**. M1-552 validated mechanically
+  (idle-server DM completed in ~120 s, finished under the cap, no error;
+  reply content still hallucinated junk — the F-live-8 abliterated-model
+  residual, M1-560's out-of-scope model-choice concern). One
+  contention-starved chat timeout (240 s HttpTimeoutException with the
+  collector chewing backlog) re-confirmed the s12 isolation lesson on the
+  new image.
+- **Stack at session end: all 5 containers healthy**, new images, chat on
+  the llamacpp baseline, reasoning-off override still active via the
+  scratchpad compose override (M1-560 commits it). RAW backlog draining
+  with reasoning off.
 
 ### 2026-07-04 later (F-live-8 root-caused + fixed live; M1-558/559/560 drafted)
 
