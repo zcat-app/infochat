@@ -7,7 +7,7 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-04 night (**M1-559 MERGED (509f7a6c) + M1-561 MERGED (5c998451) — F-live-9 refusal intercept code-RESOLVED and redteam-hardened (prefix-only, post-strip)**; remaining: M1-560, image rebuild, Phase 5 Signal) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-04 late night (**M1-560 MERGED (d9e5c95e) — reasoning-off committed in compose, override file DELETED, trap closed; F-live-8 serving-config leg RESOLVED**; remaining: image rebuild, Phase 5 Signal) · Owner: ubuntu5 + Claude
 
 ---
 
@@ -76,14 +76,28 @@ after; details + re-apply recipe in the running log.
   verbatim to the user. `SummaryProseGenerator:119` intercepts + degrades
   ("never surface the marker"); chat needs the same. security_relevant.
 
-**NEXT (fresh session):** run the last drafted ticket — `/m1-tick run
-M1-560` (reasoning-off in compose; inert-diff candidate, M1-549
-precedent) — then an **image rebuild** (the running images predate
-M1-558/559/561, so live `/q/metrics` stays 404 and the chat refusal
-intercept is not live until then; fold M1-560 into the same rebuild;
-remember M1-560's merge deletes the override file, so the rebuild's
-compose commands change), then Phase 5 (Signal delta — needs the user
-for the phone-driven side).
+**NEXT (fresh session):** **image rebuild** — the running app images
+predate M1-558/559/561, so live `/q/metrics` stays 404 and the chat
+refusal intercept is not live until then (pause collector+provider for
+the build per the co-location rule; plain
+`docker compose -f docker-compose.yml --env-file prod/runtime/secrets.env --profile prod <cmd>`
+now suffices — the override file is gone, see below) — then Phase 5
+(Signal delta — needs the user for the phone-driven side).
+
+**M1-560 DONE (merged d9e5c95e, 2026-07-04 late night):**
+`LLAMA_ARG_REASONING: "off"` is committed in docker-compose.yml (+ WHY
+comment); design notes (07-deployment §7.7.2 D49 bullet,
+05-llm §max-tokens sizing invariant) document the flag; operator note on
+both surfaces (SETUP_GUIDE step 4 + 4-llm.sh custom-GGUF prompt echo).
+Host validation from the COMMITTED compose file: force-recreate with no
+override (`config_files` label = docker-compose.yml alone,
+`LLAMA_ARG_REASONING=off` in env) → live DM delivered a non-empty
+625-char reply in ~150 s (prev. 4/4-failing shape; prose quality still
+the abliterated-quant residual, out of scope per D49). **The override
+file `prod/runtime/llamacpp-reasoning-off.override.yml` is DELETED and
+the trap below is CLOSED** — single `-f docker-compose.yml` is safe
+again. F-live-8's serving-config leg is fully resolved; what remains of
+F-live-8 is only the operator model-choice concern.
 **M1-558 DONE (merged 848559b4, 2026-07-04 night):**
 `quarkus-micrometer-registry-prometheus` in both service poms +
 endpoint-pinning MetricsEndpointITs (provider IT pins
@@ -106,22 +120,12 @@ deliberate anchored-not-substring design; Unicode-lookalike prefix
 evasion) — no tickets unless the marker-suppression guarantee gets
 promoted to spec level.
 
-**⚠ Compose-override trap until M1-560 lands:** the RUNNING llamacpp has
-`LLAMA_ARG_REASONING=off` only via an override file, now at
-`prod/runtime/llamacpp-reasoning-off.override.yml` (gitignored, stable —
-moved out of the session scratchpad). Any compose up/restart that omits it
-RECREATES llamacpp WITHOUT the flag and silently re-breaks chat (F-live-8).
-Until M1-560 puts the env in docker-compose.yml, every compose command for
-the prod stack must carry BOTH `-f` files:
-`docker compose -f docker-compose.yml -f prod/runtime/llamacpp-reasoning-off.override.yml --env-file prod/runtime/secrets.env --profile prod <cmd>`.
-(`docker stop`/`docker start` of individual containers is safe — the trap
-is only compose re-creation.) M1-560's merge deletes the override file.
-
-**Verify note for M1-560:** compose+docs only (inert-diff gate
-candidate, M1-549 precedent) — no full `mvn verify` expected. If any
-testable file does end up in the diff: pause collector+provider first
-(co-location rule), detached setsid+marker pattern, clean the ~5
-DevServices leaks after (`[[clean-verify-monitoring]]` memory).
+**~~⚠ Compose-override trap~~ CLOSED by M1-560 (2026-07-04 late night):**
+the flag lives in the committed docker-compose.yml, the running llamacpp
+was recreated from it (provenance-pinned), and the override file is
+deleted. Compose commands are back to the single-file form:
+`docker compose -f docker-compose.yml --env-file prod/runtime/secrets.env --profile prod <cmd>`
+(the `--env-file` remains REQUIRED — DB secrets live in secrets.env).
 
 **Fixture state after this session:** LiveAdmin CLAIMED (`is_admin=t`,
 vouched), admin-DM → m1-537-seed-source `source_subscription` row present,
@@ -310,9 +314,10 @@ checklist, §6 differences, §8 decisions) → `simplex-live-frame-capture` memo
 
 Phases 0–4b DONE (all 7 live SimpleX scenarios GREEN 2026-07-03; 4b-4
 assertions DONE 2026-07-04; ollama + remote-LLM (DeepSeek) backends both
-verified live). Remaining: M1-560 (F-live-8 compose flag), image rebuild
-(running images predate M1-558/559/561 — live /q/metrics still 404, chat
-refusal intercept not yet live), Phase 5 (Signal delta).
+verified live; board fully drained — 585 done / 0 pending). Remaining:
+image rebuild (running app images predate M1-558/559/561 — live
+/q/metrics still 404, chat refusal intercept not yet live), Phase 5
+(Signal delta).
 
 ## Where we are
 
@@ -579,8 +584,10 @@ test asserts either endpoint exists. Fix shape: add the registry-prometheus
 dependency to both service poms (+ a readiness-style IT pinning the
 endpoint); decide /q/health/llm separately.
 
-### F-live-8 — ROOT-CAUSED 2026-07-04 afternoon: llama.cpp reasoning auto-detect, NOT model flakiness
-**Ticket M1-560 drafted (a28c7ab1).** Direct probes against the running
+### F-live-8 — serving-config leg RESOLVED by M1-560 (merged d9e5c95e, 2026-07-04); model-choice residual stays an operator concern
+**ROOT-CAUSED 2026-07-04 afternoon: llama.cpp reasoning auto-detect, NOT
+model flakiness. M1-560 committed `LLAMA_ARG_REASONING=off` in compose,
+host-validated from the committed file, override file deleted.** Direct probes against the running
 server found the mechanism: the Gemma 4 template has an optional thinking
 channel (`<|channel>thought…<channel|>`), llama.cpp's `--reasoning` default
 `auto` detects it and turns thinking ON, so every task has been thinking
@@ -644,6 +651,39 @@ untrusted-content framing) — a model-quality data point for F-live-8's
 default-model discussion.
 
 ## Running log
+
+### 2026-07-04 late night (M1-560 merged — reasoning-off committed, trap closed)
+
+- **M1-560 MERGED (d9e5c95e)** via `/m1-tick run M1-560`. Full cycle:
+  clarity PASS (0/0) → implement (exactly the 5 files_scope files:
+  compose env key + WHY comment, two design-note mentions, SETUP_GUIDE
+  step-4 sentence, 4-llm.sh decision-time echo) → **host validation
+  BEFORE review r1** (saved the M1-546/549-style rework round):
+  force-recreated llamacpp from the committed compose file alone
+  (`config_files` label = docker-compose.yml, no override;
+  `LLAMA_ARG_REASONING=off` in env; collector stopped for the turn per
+  the s12 contention lesson) → live DM (LiveAdmin → bot) delivered a
+  non-empty 625-char reply in ~150 s, persisted (chat_message seq 15)
+  AND received by the client (chat_items id 128), llama.cpp clean
+  (truncated=0, no 500s) — the previously 4/4-failing shape completes;
+  evidence in the ticket body → diff fully INERT (no Java/pom/resources;
+  mvn verify N/A per the M1-379 gate, round log notes baseline f471142f)
+  → review r1 APPROVE (all checks PASS, 0 rework) → commit 68a3a488 →
+  squash-merge d9e5c95e. Board: done=585, pending=0.
+- **Host cleanup rider executed:**
+  `prod/runtime/llamacpp-reasoning-off.override.yml` DELETED (compose
+  change landed + service recreated from it — both rider conditions
+  met). The §START HERE compose-override trap is CLOSED; single-file
+  compose commands are safe again.
+- **One-shot client gotcha (new):** a bare receive pass
+  (`simplex-chat -t N` with no `-e`) crashes without a TTY
+  (`Prelude.undefined` in System.Terminal.Platform) — silently, when
+  output is redirected. Use `-e "/contacts"` (any harmless command) to
+  force one-shot mode for receive-only passes.
+- Stack at session end: all 5 containers healthy; llamacpp running from
+  the committed compose config; collector restarted after the chat turn.
+  Reply-prose quality residual (abliterated quant) remains an operator
+  model-choice concern (D49) — no ticket.
 
 ### 2026-07-04 night, later (M1-559 + M1-561 merged — F-live-9 closed)
 
