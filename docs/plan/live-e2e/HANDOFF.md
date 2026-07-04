@@ -7,11 +7,54 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-04 night (**M1-563 MERGED (8908e3b5) — leave-cleanup non-commitment posture now consistent across security/messaging/schema specs + both design mirrors; board down to 1 pending (M1-565), then s07**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-04 night (**M1-565 MERGED (8495c882) — base64 shape gate on the Signal group-id scope key; board 0 pending, all Phase-5 tickets drained; NEXT = s07 group flow over Signal (needs an image rebuild to go live) + §6 differences**) · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
+
+**M1-565 is DONE + MERGED (2026-07-04, commit 8495c882).** The last
+Phase-5 ticket shipped: a band-bounded base64 shape gate on the Signal
+group-id scope key (M1-562 redteam out-of-model item 2). New shared
+`SignalMessageCodec.isAcceptableGroupId` — strict `Base64.getDecoder()`
+decode + a [16,64]-byte length BAND (not an exact pin: live id is 32
+bytes, fixtures decode to 20; an exact pin is F-live-10 in reverse) —
+mirrors `isAcceptableAci`; `SignalGroupHandler.extractGroupId` applies
+it to whichever spelling matched and drops a rejected frame with an
+observable, value-free WARN (encoded LENGTH + `signal-<ts>`
+adapterMessageId token only, never the id value — D37). Defense-in-depth
+(the id is trusted loopback today), so the gate matters only if that
+boundary is ever redrawn. Full cycle: clarity PASS (0/0) → 4 files
+(exactly files_scope) → verify RED once on the documented
+`MultiAdapterProductionIT` co-location flake (2000 ms outbound-DM probe,
+causally disjoint from a group-inbound diff) → GREEN on the quiet-host
+re-run (227 tests) → redteam CLEAN (2 advisory out-of-model, both gated
+on a future trust-boundary redraw: validate-but-don't-canonicalize the
+base64 spelling; per-frame unthrottled WARN — no tickets) → review
+APPROVE r1 (0 rework) → squash-merge. Not pushed.
+
+**⚠ Image rebuild pending before the gate is LIVE.** M1-565 touched
+`SignalGroupHandler`/`SignalMessageCodec`; the running provider image
+predates the merge, so the shape gate is code-resolved but not yet
+deployed. Fold into the next image rebuild — **s07 does NOT depend on
+it** (the F-live-10 groupInfo parse already went live in the
+2026-07-04-night rebuild).
+
+**Board: 0 pending — every Phase-5 ticket is drained** (M1-562/563/564/
+565). Phase 5 remaining is host work, no tickets: s07 group flow over
+Signal + the §6 differences checklist.
+
+**NEXT ACTION:** s07 group flow over Signal — the 3-party
+`live-signal-group` fixture is READY (admin creator + bot + user, all
+full members via the invite-link path; direct-add unusable on 0.14.5).
+Then the remaining §6 differences items (edit fallback, rate pacing,
+reconnect/daemon-down, 16 KB cap). REMEMBER the verify co-location rule
+still binds any future full verify — pause collector+provider first
+(`[[clean-verify-monitoring]]`).
+
+---
+
+## ▶ previous START HERE (2026-07-04 night — M1-563 merged, kept for context)
 
 **M1-563 is DONE + MERGED (2026-07-04, commit 8908e3b5).** The
 leave-cleanup posture amendment shipped: on membership-event-less
@@ -26,21 +69,7 @@ remediation. In-cycle redteam caught the round-1 diff leaving schema.md
 carrying the pre-narrowing promise (MEDIUM PERM-ESCAL — an internal
 spec contradiction); escalate→refine widened scope (files_budget 3→5,
 +schema.md +02-schema.md) to reconcile it, review APPROVE r2, re-audit
-CLEAN. Doc-only (no code), `mvn verify` inert per M1-379. Not pushed.
-
-**Board: 1 pending — M1-565** (Base64 shape gate on the Signal
-group-id scope key). It touches SignalGroupHandler/SignalMessageCodec →
-it has a TESTABLE surface, so the full `mvn verify` applies and the
-live app stack (collector+provider) MUST be paused first per the
-co-location rule (`[[clean-verify-monitoring]]`). After merge, an image
-rebuild is needed before its gate is live (fold into the next rebuild;
-s07 does NOT depend on M1-565).
-
-**NEXT ACTION:** `/m1-tick run M1-565` (pause the live stack for the
-verify), then s07 group flow over Signal — the 3-party
-`live-signal-group` fixture is ready (invite-link path; direct-add
-unusable on 0.14.5). Then the remaining §6 differences items (edit
-fallback, rate pacing, reconnect/daemon-down, 16 KB cap).
+CLEAN. Doc-only (no code), `mvn verify` inert per M1-379.
 
 ---
 
@@ -492,9 +521,10 @@ assertions DONE 2026-07-04). Phase 5 IN PROGRESS: registrations,
 round-trip, ACI bootstrap, user leg, dual-adapter tests all GREEN;
 F-live-10 RESOLVED (M1-562) and LIVE on rebuilt images (2026-07-04
 night); M1-563 (leave-cleanup non-commitment spec/design amendment)
-MERGED (8908e3b5, 2026-07-04); remaining: s07 group flow over Signal
-(fixture ready) + §6 differences checklist. Board: 588 done / 1 pending
-(M1-565).
+MERGED (8908e3b5); M1-565 (base64 group-id shape gate) MERGED
+(8495c882) — code-resolved, needs an image rebuild to go live.
+Remaining: s07 group flow over Signal (fixture ready) + §6 differences
+checklist. Board: 589 done / 0 pending.
 
 ## Where we are
 
@@ -506,7 +536,7 @@ MERGED (8908e3b5, 2026-07-04); remaining: s07 group flow over Signal
 | 3 — Reset & data harness | `prod/live-reset.sh`, `live-seed.sh`, `live-inject-adversarial.sh` | ✅ DONE (M1-536/537/538) |
 | **4a — scenario runner substrate** | `Scenario`, `ConversationBackend` SPI, `ScenarioRunner`, InMemory backend, `ScenarioRunnerIT` | ✅ DONE (M1-539) |
 | **4b — SimpleX live drive** | real simplex-chat drive + LLM latency + embedding retrieval | ✅ DONE — all 7 scenarios GREEN 2026-07-03; **4b-4 assertions DONE 2026-07-04** (retrieval GREEN over ollama; metrics gap = F-live-7) |
-| **5 — Signal delta** | round-trip + ACI bootstrap + §6 differences | 🔶 IN PROGRESS — round-trip + ACI bootstrap GREEN 2026-07-04; §6 checklist + user leg remain |
+| **5 — Signal delta** | round-trip + ACI bootstrap + §6 differences | 🔶 IN PROGRESS — round-trip + ACI bootstrap + user leg (S3/S4) + dual-adapter all GREEN 2026-07-04; F-live-10 fixed+live (M1-562); all Phase-5 tickets drained (M1-562…565); s07 group flow over Signal + §6 checklist remain (host work, no tickets) |
 | 6 — (optional) `/testcase` skill | wrap the runner once 2–3 scenarios pass | ❌ not started |
 
 **Concrete "done vs not" marker:** `SimpleXConversationBackend` exists and is
@@ -864,6 +894,47 @@ group stanza is wrong. DMs unaffected. s07-over-Signal blocked until
 fixed; the 3-party group fixture is already built and waiting.
 
 ## Running log
+
+### 2026-07-04 night, latest (M1-565 merged — base64 group-id shape gate; board drained)
+
+- **M1-565 MERGED (8495c882)** via `/m1-tick run M1-565` — the last
+  Phase-5 ticket (M1-562 redteam out-of-model item 2). Shared
+  `SignalMessageCodec.isAcceptableGroupId`: strict `Base64.getDecoder()`
+  decode + a [16,64]-byte length BAND (band-not-pin WHY comment — live
+  id 32 bytes, fixtures 20; an exact pin is the F-live-10
+  overstrict-assumption failure in reverse), mirroring `isAcceptableAci`.
+  `SignalGroupHandler.extractGroupId` gained the envelope param so it can
+  emit, on a gate-reject, an observable value-free WARN carrying only the
+  encoded id LENGTH + the `signal-<ts>` adapterMessageId token (never the
+  id value — D37, it names a private group); a rejected frame drops
+  instead of the F-live-10-style silent drop. Exactly 4 files
+  (files_scope): codec + handler + the two group tests
+  (`malformedGroupIdDroppedWithObservableWarn` via the existing
+  `CapturingLogHandler`; garbage/empty/oversize robustness cases).
+- **Cycle notes worth keeping:** clarity PASS (0/0). **Verify RED on r1,
+  GREEN on the re-run** — the r1 failure was
+  `MultiAdapterProductionIT.simpleXCrashDoesNotAffectSignal` "no outbound
+  JSON-RPC within 2000 ms", the documented co-location flake (M1-556
+  family): it probes Signal *outbound*/DM liveness, causally disjoint
+  from a group-*inbound* diff, and the messaging-adapter module (mine)
+  was green — a clean-host re-run passed 227/0 untouched, confirming the
+  flake diagnosis rather than a real regression. Redteam CLEAN (2
+  advisory out-of-model, both gated on a FUTURE signal-cli
+  trust-boundary redraw: (1) `Base64.getDecoder()` isn't RFC-strict and
+  the raw string, not a canonical decode-re-encode, becomes the scope
+  key — a distrusted channel could fragment one group into multiple
+  scope keys; canonicalize if the boundary is ever redrawn; (2) the
+  shape-gate WARN is per-frame and upstream of every rate cap — revisit
+  log-rate bounding on the same redraw. No tickets filed — advisory
+  only; recorded in `docs/plan/m1/redteam/M1-565-2026-07-04.md`). Review
+  APPROVE r1 (0 rework, all 6 checks PASS).
+- **Verify protocol held:** collector+provider paused for both verify
+  runs (the stop was denied once by the auto-mode classifier reading the
+  earlier "stop before redteam" as a scope limit → user-approved on
+  re-ask), detached setsid+marker launches, stack restarted after
+  (all 5 containers healthy). **Running provider image predates the
+  merge → the shape gate is code-resolved, not yet live; fold the
+  rebuild into the next one. s07 does NOT depend on it.**
 
 ### 2026-07-04 night (F-live-10 fixed — M1-562/563/564/565; rebuild; stack live on new images)
 
