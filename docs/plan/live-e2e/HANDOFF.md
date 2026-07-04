@@ -7,7 +7,7 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-04 night (**M1-565 MERGED (8495c882) — base64 shape gate on the Signal group-id scope key; board 0 pending, all Phase-5 tickets drained; NEXT = s07 group flow over Signal (needs an image rebuild to go live) + §6 differences**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-04 late night (**image rebuild DONE — M1-565 shape gate is LIVE (both images rebuilt from main @ c4e7093e, stack healthy); board 0 pending; NEXT = s07 group flow over Signal + §6 differences**) · Owner: ubuntu5 + Claude
 
 ---
 
@@ -33,12 +33,15 @@ on a future trust-boundary redraw: validate-but-don't-canonicalize the
 base64 spelling; per-frame unthrottled WARN — no tickets) → review
 APPROVE r1 (0 rework) → squash-merge. Not pushed.
 
-**⚠ Image rebuild pending before the gate is LIVE.** M1-565 touched
-`SignalGroupHandler`/`SignalMessageCodec`; the running provider image
-predates the merge, so the shape gate is code-resolved but not yet
-deployed. Fold into the next image rebuild — **s07 does NOT depend on
-it** (the F-live-10 groupInfo parse already went live in the
-2026-07-04-night rebuild).
+**~~⚠ Image rebuild pending~~ DONE (2026-07-04 late night):** both app
+images rebuilt from main @ c4e7093e (apps paused per the co-location
+rule, detached setsid+marker launch, BUILD_EXIT=0) and restarted
+collector-first. Live-verified: readiness UP both services,
+`adapter_connection_status` 1.0 for BOTH adapters, 0 SRMSG00034 on the
+collector boot, containers confirmed on the fresh image IDs. **The
+M1-565 shape gate is LIVE** — s07 now exercises the merged
+`extractGroupId` path including the gate (live 32-byte id is in-band,
+so s07 doubles as the gate's accept-path live validation).
 
 **Board: 0 pending — every Phase-5 ticket is drained** (M1-562/563/564/
 565). Phase 5 remaining is host work, no tickets: s07 group flow over

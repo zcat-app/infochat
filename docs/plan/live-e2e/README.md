@@ -271,12 +271,13 @@ Confirmed from spec/code (design differs by construction):
       signal.{binary,data-dir,account,endpoint,allow-non-loopback-endpoint,admin}.
 
 Declared capability flags (verified 2026-07-01 — hardcoded constants, not
-runtime-derived):
+runtime-derived; Signal membership-events flipped to false by M1-562,
+2026-07-04 — signal-cli 0.14.5 emits no per-user membership signal):
 
 | Capability | SimpleX | Signal | InMemory |
 |---|---|---|---|
 | supportsMentionByContactId | true | true | true |
-| supportsMembershipEvents | **false** | **true** | true |
+| supportsMembershipEvents | **false** | **false** (M1-562) | true |
 | supportsCodeFormatting | **false** | **true** | true |
 | supportsMarkdownLinks | false | false | false |
 | supportsMessageEdit | true | true | true |
@@ -286,8 +287,10 @@ runtime-derived):
 | minEditInterval | 600 ms | 600 ms | 0 ms |
 
 Behavioural — the real "hallucinated-reality" risk surface (verify live):
-- [ ] **Membership events:** SimpleX declares `false`, Signal `true` → group
-      join/leave detection flows differently; verify group state tracking on each.
+- [x] **Membership events:** BOTH now declare `false` (Signal flipped by
+      M1-562 — no per-user membership signal on the 0.14.5 wire); both use the
+      delivery-failure fallback posture, leave-cleanup is a stated
+      non-commitment (M1-563).
 - [ ] **Typing / code-formatting:** SimpleX `false`, Signal `true` → progress
       rendering + code-block output differ; confirm the degraded path on SimpleX.
 - [ ] **Message-edit fallback:** both declare edit=true, but Signal has a
