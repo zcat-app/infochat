@@ -236,19 +236,36 @@ public class ChatAgent {
         String finalText = runToolLoop(provider, augmentedSystemPrompt, baseSystemPrompt,
                 prompt.userPrompt(), userId, scopeKind, scopeId);
 
-        // 5. Strip any residual TOOL_CALL fragments that leaked past the
+        // 5. Intercept the D21 structured refusal marker BEFORE persistence
+        // and delivery (security.md §Prompt-injection defenses; same anchored
+        // predicate as SummaryProseGenerator). The marker is protocol
+        // surface: delivering it verbatim leaks the injection-defense
+        // convention to the counterparty it defends against, and lets the
+        // LLM author what looks like bot-authoritative bracketed status
+        // text. Degrade exactly like the unavailable path — deterministic
+        // bundle string, null commit so no chat_message rows persist. The
+        // refusal reason is LLM-authored text derived from untrusted
+        // content and MUST NOT be logged (D37): userId only.
+        String trimmedFinalText = finalText.trim();
+        if (trimmedFinalText.startsWith("[REFUSAL:") && trimmedFinalText.endsWith("]")) {
+            log.warn("CHAT_AGENT returned refusal marker for userId={}; degrading turn", userId);
+            return new ChatTurnResult(
+                    bundleLoader.get(BundleKeys.ERROR_CHAT_REFUSED, scopeLanguage), null);
+        }
+
+        // 6. Strip any residual TOOL_CALL fragments that leaked past the
         // iteration cap — they are internal protocol, not user-visible.
         // A fragment with balanced braces (possibly nested / multi-line) is
         // removed whole; a partial or unbalanced fragment is removed through
         // end-of-text so a malformed multi-line call cannot leak.
         finalText = stripToolCalls(finalText);
 
-        // 6. Sanitize BEFORE persist so admin commands never enter the DB
+        // 7. Sanitize BEFORE persist so admin commands never enter the DB
         String sanitized = outputSanitizer.sanitize(finalText);
         int userTokens = ChatSessionRepository.estimateTokens(userMessage);
         int assistantTokens = ChatSessionRepository.estimateTokens(sanitized);
 
-        // 7. Translate if scope language is non-en. The persisted assistant
+        // 8. Translate if scope language is non-en. The persisted assistant
         // turn is the untranslated `sanitized` text (chat memory is
         // English-canonical, like source post bodies); only the delivered
         // reply is translated.
@@ -259,7 +276,7 @@ public class ChatAgent {
             reply = sanitized;
         }
 
-        // 8. Defer persistence + auto-compress to a post-delivery commit.
+        // 9. Defer persistence + auto-compress to a post-delivery commit.
         // Honoring spec messaging.md §Failure handling requires that a
         // permanent delivery failure leave the context window "as if the
         // message was never generated, and chat_memory is not written" —

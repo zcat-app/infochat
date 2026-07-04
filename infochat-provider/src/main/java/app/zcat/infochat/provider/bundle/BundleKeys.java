@@ -926,6 +926,9 @@ public final class BundleKeys {
     /** Per-user LLM-triggering rate cap exceeded (infochat.chat.llm-rate-cap-per-minute). */
     public static final String ERROR_CHAT_LLM_RATE_CAP = "error.chat.llm_rate_cap";
 
+    /** Chat LLM emitted the D21 structured refusal marker; this deterministic notice replaces it — the marker is protocol surface and is never delivered (security.md §Prompt-injection defenses). */
+    public static final String ERROR_CHAT_REFUSED = "error.chat.refused";
+
     // ----- Progress notifier stage strings (M1-212) --------------------------
     // Per docs/spec/messaging.md §Progress notifications + decision D43.
     // One key per ProgressStage value; the ProgressNotifier renders each

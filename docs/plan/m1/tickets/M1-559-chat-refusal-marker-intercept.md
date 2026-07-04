@@ -1,9 +1,43 @@
 ---
 id: M1-559
 title: ChatAgent intercepts the structured refusal marker before delivery (F-live-9)
-status: pending
+status: done
 created: 2026-07-04
 last_updated: 2026-07-04
+clarity_check:
+  date: 2026-07-04
+  verdict: PASS
+  warnings: []
+reviews:
+  - round: 1
+    date: 2026-07-04
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 240
+      removed: 11
+redteam_findings: []
+redteam_audits:
+  - date: 2026-07-04
+    verdict: CLEAN
+    base: b324759d2167bf08f51e8c97573d62c64522d706
+    head: m1/M1-559-chatagent-intercepts-the-struc (working tree, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-559-2026-07-04.md
+    out_of_model_count: 1
+    note: |
+      Pre-commit audit of the working-tree diff (branch had no commits yet;
+      base is the fork point). CLEAN — the intercept closes the F-live-9
+      marker leak as promised. One advisory out-of-model item: a post-cap
+      final response mixing a refusal marker with a trailing tool-call
+      fragment evades the anchored predicate (stripToolCalls then leaves the
+      bare marker); candidate low-priority follow-up ticket, not a
+      threat-model commitment.
 blocked_by: []
 files_budget: 5
 files_scope:
