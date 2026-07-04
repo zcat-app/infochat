@@ -7,7 +7,7 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-04 late night (**M1-560 MERGED (d9e5c95e) — reasoning-off committed in compose, override file DELETED, trap closed; F-live-8 serving-config leg RESOLVED**; remaining: image rebuild, Phase 5 Signal) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-04 late night (**M1-560 MERGED (d9e5c95e) + IMAGE REBUILD DONE — /q/metrics LIVE on both services, refusal intercept deployed; only Phase 5 Signal remains**) · Owner: ubuntu5 + Claude
 
 ---
 
@@ -76,13 +76,25 @@ after; details + re-apply recipe in the running log.
   verbatim to the user. `SummaryProseGenerator:119` intercepts + degrades
   ("never surface the marker"); chat needs the same. security_relevant.
 
-**NEXT (fresh session):** **image rebuild** — the running app images
-predate M1-558/559/561, so live `/q/metrics` stays 404 and the chat
-refusal intercept is not live until then (pause collector+provider for
-the build per the co-location rule; plain
-`docker compose -f docker-compose.yml --env-file prod/runtime/secrets.env --profile prod <cmd>`
-now suffices — the override file is gone, see below) — then Phase 5
-(Signal delta — needs the user for the phone-driven side).
+**NEXT (fresh session):** **Phase 5 (Signal delta)** — needs the user
+for the phone-driven side. Everything else is done and deployed.
+
+**IMAGE REBUILD DONE (2026-07-04 late night, from main @ 56e0a910):**
+both app images rebuilt (apps paused for the build per the co-location
+rule, detached setsid+marker launch) and restarted collector-first.
+Live-verified on the new images:
+- **`/q/metrics` 200 on BOTH services** (F-live-7 metrics leg LIVE):
+  provider mgmt :8081 serves `adapter_connection_status{adapter="simplex"} 1.0`
+  (the §7.14 runbook's first diagnostic), collector :8080 serves
+  Prometheus text. The 404 era is over.
+- **Refusal intercept deployed** (M1-559/561): `error.chat.refused`
+  present in the baked provider bundle (verified via docker cp +
+  zipfile — the image has NO `unzip`, remember that for future
+  in-container jar checks).
+- **Collector boot clean through a 1395-row RAW backlog** — 0
+  SRMSG00034 (M1-551 gate holding), readiness UP both services, all 5
+  containers healthy, llamacpp still on the committed reasoning-off
+  config.
 
 **M1-560 DONE (merged d9e5c95e, 2026-07-04 late night):**
 `LLAMA_ARG_REASONING: "off"` is committed in docker-compose.yml (+ WHY
@@ -314,10 +326,9 @@ checklist, §6 differences, §8 decisions) → `simplex-live-frame-capture` memo
 
 Phases 0–4b DONE (all 7 live SimpleX scenarios GREEN 2026-07-03; 4b-4
 assertions DONE 2026-07-04; ollama + remote-LLM (DeepSeek) backends both
-verified live; board fully drained — 585 done / 0 pending). Remaining:
-image rebuild (running app images predate M1-558/559/561 — live
-/q/metrics still 404, chat refusal intercept not yet live), Phase 5
-(Signal delta).
+verified live; board fully drained — 585 done / 0 pending; images
+rebuilt from main @ 56e0a910 with /q/metrics live and the refusal
+intercept deployed). Remaining: Phase 5 (Signal delta) only.
 
 ## Where we are
 
@@ -559,7 +570,7 @@ startup event and Stage-1 virtual threads race deployment completion — and the
 likely needs a large RAW backlog + restart. Un-ticketed; investigate before
 relying on unattended collector restarts.
 
-### F-live-7 (MEDIUM, observability) — metrics leg RESOLVED by M1-558 (merged 848559b4, 2026-07-04); /q/health/llm leg still open
+### F-live-7 (MEDIUM, observability) — metrics leg RESOLVED by M1-558 and LIVE-VERIFIED post-rebuild (2026-07-04 late night: /q/metrics 200 both services, adapter_connection_status exported); /q/health/llm leg still open
 **RESOLVED (metrics leg):** `quarkus-micrometer-registry-prometheus` added
 to both service poms (BOM-managed) + two new `MetricsEndpointIT`s pinning
 `GET /q/metrics` (provider IT additionally pins `adapter_connection_status`
@@ -651,6 +662,27 @@ untrusted-content framing) — a model-quality data point for F-live-8's
 default-model discussion.
 
 ## Running log
+
+### 2026-07-04 late night, later (IMAGE REBUILD — M1-558/559/560/561 all live)
+
+- **Both app images rebuilt from main @ 56e0a910** (collector+provider
+  stopped for the build; detached setsid+marker launch, BUILD_EXIT=0)
+  and restarted collector-first per 7-apps.sh order (`up -d --wait`
+  collector, then provider; single-file compose + `--env-file`, the
+  M1-560 world).
+- **Live verification on the new images:**
+  - Provider mgmt :8081 `/q/metrics` → **200**, exports
+    `adapter_connection_status{adapter="simplex"} 1.0`; collector :8080
+    `/q/metrics` → **200** (Prometheus text). F-live-7's metrics leg is
+    now LIVE, not just code-resolved.
+  - Readiness UP on both services.
+  - Collector booted clean through a **1395-row RAW backlog, 0
+    SRMSG00034** — second consecutive live proof of the M1-551 gate.
+  - `error.chat.refused` bundle key confirmed inside the baked provider
+    jar (M1-559/561 refusal intercept deployed). Gotcha: the app images
+    ship NO `unzip` — inspect jars via `docker cp` + python zipfile.
+- Stack at session end: all 5 containers healthy, llamacpp on the
+  committed reasoning-off config. **Only Phase 5 (Signal) remains.**
 
 ### 2026-07-04 late night (M1-560 merged — reasoning-off committed, trap closed)
 
