@@ -9,3 +9,10 @@ target/
 **/target/
 .git/
 .claude/
+# Runtime state, never a build input (M1-564): operator secrets
+# (secrets.env, signal-private.env) and messenger identity stores must
+# not enter the build context, and the signal-cli daemon's root-owned
+# data dir breaks the classic builder's context walk outright
+# ("checking context: can't stat") on any host with a provisioned
+# Signal adapter.
+prod/runtime/

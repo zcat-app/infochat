@@ -1,9 +1,27 @@
 ---
 id: M1-564
 title: Exclude prod/runtime from the app-image build context
-status: pending
+status: done
 created: 2026-07-04
 last_updated: 2026-07-04
+reviews:
+  - round: 1
+    date: 2026-07-04
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 30
+      removed: 7
+clarity_check:
+  date: 2026-07-04
+  verdict: PASS
+  warnings: []
 blocked_by: []
 files_budget: 1
 files_scope:
@@ -85,3 +103,14 @@ the context — the exclusion is the correct direction). See frontmatter.
   is what makes the exclusion sufficient to avoid the stat.
 - Nothing in the in-image reactor build reads `prod/runtime` — it is
   runtime state, bind-mounted by compose at run time.
+
+## Host validation (2026-07-04, acceptance item 2)
+
+The exact previously-failing command, run from this branch's tree with
+the root-owned `prod/runtime/signal-cli/data` present: BUILD_EXIT=0,
+`Successfully built 4330b57751d4` / tagged
+`infochat-infochat-collector:latest` and `Successfully built
+75f9b3b6dd09` / tagged `infochat-infochat-provider:latest`; zero
+"can't stat" occurrences in the log (`.scratch/rebuild-m1564.log`).
+Pre-fix the same command failed during context preparation with
+`checking context: can't stat '<repo>/prod/runtime/signal-cli/data'`.
