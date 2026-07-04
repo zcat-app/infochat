@@ -1059,6 +1059,42 @@ task's first execution past startup. NOT ticketed — user's call.
 
 ## Running log
 
+### 2026-07-04 late night, LATEST +1 (LLM backend latency comparison — user-requested; DeepSeek decision recorded)
+
+- **Four-leg latency comparison over real Signal** (same 3 chat
+  questions + `/summary -w 96h` from the user DM per leg; per-turn
+  deltas from wire envelope timestamps; collector paused throughout;
+  adaptive FIFO-fed jsonRpc driver in `.scratch/llmcmp-*.sh`):
+  | turn | llamacpp gemma-4 | ollama llama3.2:3b | ds-v4-flash (think ON) | ds-chat alias (think OFF) |
+  |---|---|---|---|---|
+  | q1 short | 32.8 s | 46.2 s (tool loop) | 4.9 s | 3.6 s |
+  | q2 tool loop | 29.6 s | 22.1 s (refusal) | 7.0 s | 3.2 s |
+  | q3 ~100 words | 31.5 s | 22.2 s (refusal) | 3.3 s | 1.7 s |
+  | summary final edit | 21.3 s | 19.9 s | 7.5 s | 4.7 s |
+  Correctness: DeepSeek 4/4 correct on BOTH modes; gemma garbage (D49);
+  llama3.2 spurious-refused 2/3. History caveat: chat_message not
+  cleared between legs (prod-DB access needs user approval), ordering
+  llamacpp→ollama→deepseek means the DeepSeek gap is understated.
+- **DeepSeek naming facts (API-verified):** `deepseek-chat` alias is
+  SERVED BY `deepseek-v4-flash` (response `model` field) with thinking
+  OFF; explicit `deepseek-v4-flash` = same engine, thinking ON
+  (default; `thinking:{"type":"disabled"}` request param exists,
+  `reasoning_effort` high|max). Aliases `deepseek-chat` /
+  `deepseek-reasoner` are DEPRECATED 2026-07-24 — after that the app
+  can only reach v4-flash with thinking ON (OpenAiCompatibleProvider
+  sends only model/messages/max_tokens; no extra-body config).
+- **USER DECISION (2026-07-04): live with reasoning-on.** 3–7.5 s
+  turns are acceptable and quality was 4/4 correct, so NO
+  thinking-parameter ticket is drafted. If that ever changes, the
+  sized change is: TaskConfig field + getOptionalValue + putObject in
+  OpenAiCompatibleProvider (~10 impl lines, wire-pinning test trio,
+  05-llm design note; M1-548 pattern; AnthropicProvider out of scope —
+  different thinking wire shape).
+- Everything reverted after: application.properties byte-identical to
+  the llamacpp baseline (verified via diff), provider+collector
+  restarted healthy, ollama container removed (`infochat-ollama`
+  volume KEEPS llama3.2:3b), all 5 containers healthy at session end.
+
 ### 2026-07-04 late night, LATEST (M1-566 run+merge; rebuild; F-live-11 host validation GREEN — live-e2e plan complete)
 
 - **M1-566 MERGED (96f6ef09)** via `/m1-tick run M1-566` — the
