@@ -83,13 +83,20 @@
         </dependency>
         <!--
              quarkus-micrometer supplies the CDI MeterRegistry that
-             infochat-llm-adapter's LlmMetrics injects (M1-321). No
-             registry exporter extension in v1 — the default composite
-             registry is the committed surface.
+             infochat-llm-adapter's LlmMetrics injects (M1-321).
         -->
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-micrometer</artifactId>
+        </dependency>
+        <!--
+             quarkus-micrometer-registry-prometheus exports that registry
+             at /q/metrics — micrometer-core alone registers meters that
+             nothing exports, leaving the endpoint a 404 (F-live-7).
+        -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-micrometer-registry-prometheus</artifactId>
         </dependency>
         <!--
              Migrations live in infochat-core (M1-017); both services see them

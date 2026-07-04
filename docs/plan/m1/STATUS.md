@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 581 |
+| done | 582 |
 | deferred | 10 |
-| **total** | **591** |
+| **total** | **594** |
 
 ---
 
@@ -24,7 +24,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-559 — ChatAgent intercepts the structured refusal marker before delivery (F-live-9) (complexity: low, risk: low)
+- M1-560 — llamacpp serves with reasoning off — token caps buy visible output (F-live-8) (complexity: low, risk: low)
 
 ---
 
@@ -60,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-558 | Prometheus metrics export — registry dependency makes /q/metrics real (F-live-7) | 2026-07-04 | round 1 APPROVE |
 | M1-557 | SignalReconnectTest inbound push absorbs reconnect wiring gap | 2026-07-04 | round 1 APPROVE |
 | M1-556 | Stage1WatchdogIT upper wall-clock band widens to 50x cap | 2026-07-04 | round 1 APPROVE |
 | M1-552 | Chat system prompt gains a max-tokens-derived brevity hint | 2026-07-04 | round 1 APPROVE |
@@ -69,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-553 | Wizard wiring tests answer M1-550's step-4 LLM timing prompts | 2026-07-03 | round 1 APPROVE |
 | M1-550 | Wizard step 4 writes profile-sized LLM timeout-ms + max-tokens (F-live-5) | 2026-07-03 | round 1 APPROVE |
 | M1-549 | live-reset preserves provider_state (F-live-4) | 2026-07-03 | round 2 APPROVE |
-| M1-548 | Per-task max-tokens for OpenAiCompatibleProvider (F-live-6) | 2026-07-03 | round 1 APPROVE |
 
 ---
 
@@ -762,4 +763,7 @@ M1-554 (done)
 M1-555 (done)
 M1-556 (done)
 M1-557 (done)
+M1-558 (done)
+M1-559 (pending) ← runnable
+M1-560 (pending) ← runnable
 ```

@@ -1,9 +1,34 @@
 ---
 id: M1-558
 title: Prometheus metrics export — registry dependency makes /q/metrics real (F-live-7)
-status: pending
+status: done
 created: 2026-07-04
 last_updated: 2026-07-04
+reviews:
+  - round: 1
+    date: 2026-07-04
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 169
+      removed: 13
+clarity_check:
+  date: 2026-07-04
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 2: 'on the management interface' is
+      inconsistent with shipped defaults (no quarkus.management.enabled=true
+      in either module) and with the existing ProviderReadinessEndpointIT
+      pattern (main test port). Resolve: either name the @TestProfile that
+      enables the management port, or drop the phrase and assert against the
+      main test port like item 3 does."
+  blockers: []
 blocked_by: []
 files_budget: 4
 files_scope:
