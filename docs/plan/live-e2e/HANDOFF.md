@@ -7,7 +7,7 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-04 late night (**M1-560 MERGED (d9e5c95e) + IMAGE REBUILD DONE — /q/metrics LIVE on both services, refusal intercept deployed; only Phase 5 Signal remains**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-04 (**PHASE 5 STARTED — 3 Signal accounts registered + PIN-locked, adapter live in `simplex,signal` dual mode, bot↔admin ROUND-TRIP GREEN, ACI-admin bootstrap verified; remaining: §6 differences checklist + optional user leg**) · Owner: ubuntu5 + Claude
 
 ---
 
@@ -76,8 +76,38 @@ after; details + re-apply recipe in the running log.
   verbatim to the user. `SummaryProseGenerator:119` intercepts + degrades
   ("never surface the marker"); chat needs the same. security_relevant.
 
-**NEXT (fresh session):** **Phase 5 (Signal delta)** — needs the user
-for the phone-driven side. Everything else is done and deployed.
+**PHASE 5 IN PROGRESS (2026-07-04, this session):** the two core automated
+objectives are GREEN — see the running-log entry for full detail:
+
+- **3 Signal accounts registered** (bot / admin / user) on smspva-rented
+  numbers via the image-baked signal-cli 0.14.5; **registration-lock PIN set
+  on all three** (mandatory for rented numbers — blocks takeover when the
+  number recycles; PIN + numbers live ONLY in gitignored
+  `prod/runtime/signal-private.env`, driven via the masking wrapper
+  `prod/runtime/signal-run.sh` so numbers never hit argv/transcripts/logs).
+  Data-dirs: bot `prod/runtime/signal-cli`, clients
+  `prod/runtime/signal-clients/{admin,user}`. The user client is
+  harness-drivable (3rd rented number), so the "user leg is phone-only"
+  constraint is LIFTED.
+- **Adapter live in dual mode:** `infochat.adapters=simplex,signal` +
+  signal block in `prod/runtime/application.properties`;
+  `INFOCHAT_SIGNAL_{ADMIN_CONTACT_ID,DATA_DIR}` in secrets.env (compose
+  passthrough + mount pre-existed). Provider recreated: SignalConfig
+  validate passed, daemon endpoint 127.0.0.1:7654, readiness UP,
+  `adapter_connection_status{adapter="signal"} 1.0` AND simplex 1.0.
+- **ACI-admin bootstrap VERIFIED (D50 Signal leg):** `AdminBootstrap`
+  logged `bootstrap admin ensured: adapter=signal`; `users` row
+  (adapter=signal, contact_id=admin ACI, is_admin=t).
+- **bot↔admin ROUND-TRIP GREEN:** `/help` DM over real Signal answered in
+  ~7 s with the admin-tier command list (sender recognized as admin);
+  reply arrived sealed-sender from the bot's ACI, delivery receipts flow.
+
+**NEXT:** §6 differences checklist walk (README §6) + optional user leg
+(un-invited-DM rejection, invite mint→consume, minimal 3-party group —
+now fully automatable). Registration lessons: 403 on register = expired
+captcha (they die in ~2-5 min; paste-then-fire immediately); verify 404 =
+registration session expired (redo register with fresh captcha, paste SMS
+code fast); smspva codes appear on the rental row (envelope icon).
 
 **IMAGE REBUILD DONE (2026-07-04 late night, from main @ 56e0a910):**
 both app images rebuilt (apps paused for the build per the co-location
@@ -325,10 +355,10 @@ checklist, §6 differences, §8 decisions) → `simplex-live-frame-capture` memo
 ## Current state (one line)
 
 Phases 0–4b DONE (all 7 live SimpleX scenarios GREEN 2026-07-03; 4b-4
-assertions DONE 2026-07-04; ollama + remote-LLM (DeepSeek) backends both
-verified live; board fully drained — 585 done / 0 pending; images
-rebuilt from main @ 56e0a910 with /q/metrics live and the refusal
-intercept deployed). Remaining: Phase 5 (Signal delta) only.
+assertions DONE 2026-07-04; board fully drained — 585 done / 0 pending).
+Phase 5 IN PROGRESS (2026-07-04): 3 Signal accounts registered, dual
+`simplex,signal` mode live, bot↔admin round-trip + ACI bootstrap GREEN;
+remaining: §6 differences checklist + optional (now automatable) user leg.
 
 ## Where we are
 
@@ -340,7 +370,7 @@ intercept deployed). Remaining: Phase 5 (Signal delta) only.
 | 3 — Reset & data harness | `prod/live-reset.sh`, `live-seed.sh`, `live-inject-adversarial.sh` | ✅ DONE (M1-536/537/538) |
 | **4a — scenario runner substrate** | `Scenario`, `ConversationBackend` SPI, `ScenarioRunner`, InMemory backend, `ScenarioRunnerIT` | ✅ DONE (M1-539) |
 | **4b — SimpleX live drive** | real simplex-chat drive + LLM latency + embedding retrieval | ✅ DONE — all 7 scenarios GREEN 2026-07-03; **4b-4 assertions DONE 2026-07-04** (retrieval GREEN over ollama; metrics gap = F-live-7) |
-| **5 — Signal delta** | round-trip + ACI bootstrap + §6 differences | ❌ NOT STARTED |
+| **5 — Signal delta** | round-trip + ACI bootstrap + §6 differences | 🔶 IN PROGRESS — round-trip + ACI bootstrap GREEN 2026-07-04; §6 checklist + user leg remain |
 | 6 — (optional) `/testcase` skill | wrap the runner once 2–3 scenarios pass | ❌ not started |
 
 **Concrete "done vs not" marker:** `SimpleXConversationBackend` exists and is
@@ -662,6 +692,55 @@ untrusted-content framing) — a model-quality data point for F-live-8's
 default-model discussion.
 
 ## Running log
+
+### 2026-07-04 (PHASE 5 — Signal registration + round-trip GREEN)
+
+- **Privacy tooling first (user constraint: numbers must never hit argv,
+  transcripts, or logs):** `prod/runtime/signal-private.env` (chmod 600,
+  gitignored) holds the 3 numbers + registration-lock PIN;
+  `prod/runtime/signal-run.sh` wrapper runs signal-cli from the baked
+  provider image with docker `--env-file` (numbers reach the process via
+  env, not argv) and masks every `+E.164` in output
+  (`sed 's/\+[0-9]{6,15}/+REDACTED/'`) on both streams. Roles: `bot`
+  (data-dir `prod/runtime/signal-cli` — the wizard-default path compose
+  mounts), `admin` / `user` (`prod/runtime/signal-clients/{admin,user}`).
+  Captcha links + SMS codes are non-sensitive (no number inside) and were
+  pasted via chat for speed.
+- **3 smspva-rented numbers registered** with the image-baked signal-cli
+  0.14.5 (`docker run --entrypoint sh` + env-file). Lessons: register
+  `[403] Authorization failed` = EXPIRED CAPTCHA (~2-5 min TTL — solve,
+  paste, fire within seconds); verify `StatusCode: 404` = registration
+  session expired (re-register with fresh captcha, paste the SMS code
+  immediately); smspva shows codes on the rental row (envelope icon).
+  **Registration-lock PIN set on all 3 right after verify** — mandatory
+  for rented numbers (next renter re-registers and seizes the account
+  otherwise; lock holds while the account stays active, 7-day lapse
+  forfeits). Rentals are now disposable — accounts never need SMS again.
+- **Config wiring:** `infochat.adapters=simplex,signal` + signal block
+  (binary/data-dir/account/admin) appended to
+  `prod/runtime/application.properties` via sourced env (account number
+  never echoed); `INFOCHAT_SIGNAL_ADMIN_CONTACT_ID` (admin ACI
+  56212115-…, extracted from the admin data-dir accounts.json) +
+  `INFOCHAT_SIGNAL_DATA_DIR` added to secrets.env. Compose already had
+  the env passthrough + data-dir mount (M1-391 world) — zero compose
+  edits needed.
+- **Provider recreated (`up -d --wait` single service):** SignalConfig
+  eager validation passed, `Signal adapter started; daemon
+  endpoint=/127.0.0.1:7654`, `bootstrap admin ensured: adapter=signal`
+  (users row adapter=signal, contact_id=admin ACI, is_admin=t — the D50
+  Signal pre-seeded-ACI leg VERIFIED), readiness UP,
+  `adapter_connection_status` 1.0 for BOTH adapters (dual-mode gauge).
+- **ROUND-TRIP GREEN:** admin client `/help` DM → bot replied in ~7 s
+  with the ADMIN-tier command list (grant-admin/ban present ⇒ sender
+  recognized as the bootstrapped admin). Reply arrived sealed-sender
+  from the bot's ACI; delivery receipts flow both ways. signal-cli
+  gotchas: a fresh account WARNs "No profile name set" (cosmetic — set
+  via updateProfile later if desired); receive-only passes work fine
+  through the wrapper (no TTY crash — unlike the simplex one-shot).
+- Remaining Phase 5 work: §6 differences checklist walk; optional user
+  leg (un-invited-DM rejection → invite mint/consume → minimal 3-party
+  group) — the 3rd rented number makes ALL of it automatable, no phone
+  needed.
 
 ### 2026-07-04 late night, later (IMAGE REBUILD — M1-558/559/560/561 all live)
 
