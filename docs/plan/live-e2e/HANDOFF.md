@@ -102,9 +102,18 @@ objectives are GREEN — see the running-log entry for full detail:
   ~7 s with the admin-tier command list (sender recognized as admin);
   reply arrived sealed-sender from the bot's ACI, delivery receipts flow.
 
-**NEXT:** §6 differences checklist walk (README §6) + optional user leg
-(un-invited-DM rejection, invite mint→consume, minimal 3-party group —
-now fully automatable). Registration lessons: 403 on register = expired
+**LATER THE SAME SESSION (see the evening running-log entry):** user leg
+GREEN (S4 rejection + S3 invite mint→consume + vouch); dual-adapter
+`/zcash` + LLM-chat test GREEN on both adapters; **F-live-10 found
+(HIGH): Signal group inbound dead on real wire** (`groupV2` vs
+`groupInfo` wire-shape mismatch; membership arrays likewise absent) —
+s07-over-Signal is BLOCKED on its fix ticket. 3-party group fixture
+built and ready (invite-link path; direct-add unusable on 0.14.5).
+
+**NEXT:** (1) draft + run the F-live-10 fix ticket; (2) after the fix +
+image rebuild: s07 group flow over Signal (fixture ready); (3) rest of
+§6 checklist (edit fallback, rate pacing, reconnect, 16 KB cap).
+Registration lessons: 403 on register = expired
 captcha (they die in ~2-5 min; paste-then-fire immediately); verify 404 =
 registration session expired (redo register with fresh captcha, paste SMS
 code fast); smspva codes appear on the rental row (envelope icon).
@@ -692,6 +701,76 @@ untrusted-content framing) — a model-quality data point for F-live-8's
 default-model discussion.
 
 ## Running log
+
+### 2026-07-04 evening (PHASE 5 cont. — user leg, F-live-10 group bug, dual-adapter LLM test)
+
+- **User leg (automated, 3rd rented number):** S4 twin GREEN — un-invited
+  Signal DM → fixed `Access requires an invitation.` reply, ZERO users
+  rows created (blocked at intake, never reached LLM/storage; the
+  "anyone can message a number" acceptance-model checklist item held).
+  S3 twin GREEN — `/invite create --adapter signal --open` is
+  confirm-gated exactly like SimpleX, code minted on confirm, user
+  consumed it → `Welcome! You're registered.`, users row
+  (registration_state=invited, D45 probation set). Admin `/vouch <aci>`
+  cleared probation ("User vouched. Probation cleared.").
+- **F-live-10 (HIGH for Signal groups, adapter bug — ticket candidate):
+  Signal group inbound is DEAD on real wire.** signal-cli 0.14.5 emits
+  the group stanza as `dataMessage.groupInfo{groupId,groupName,revision,
+  type}` but `SignalGroupHandler` gates on `dataMessage.get("groupV2")`
+  and reads `id` — every real group message silently drops at the first
+  guard (spec-permitted silent-drop path makes it invisible). The DM
+  codec's exclusion guard (`SignalMessageCodec:235`) already knows BOTH
+  spellings — the group-side parser was never reality-reconciled
+  (D-live-9 thesis, Signal edition). Also: 0.14.5's `groupInfo` carries
+  NO `memberJoined`/`memberLeft` arrays, so the membership-event surface
+  (`supportsMembershipEvents=true`) is likely unfulfillable as coded —
+  the fix ticket must decide (parse both shapes; flip the capability or
+  derive deltas by revision-diff). Evidence: live envelope JSON captured
+  via bot-CLI `--output=json receive` (provider stopped), in this log's
+  probe section. The s07 group scenario is BLOCKED on the fix.
+- **Signal group fixture built (for the post-fix run):** 3-party
+  `live-signal-group` exists — admin (creator/ADMIN) + bot ACI + user
+  ACI all full members. Getting there was rough (all signal-cli 0.14.5
+  lessons): direct-add by number ALWAYS degraded to a pending invite in
+  our fresh-account matrix (profile names set + profile keys exchanged
+  did NOT unlock it); invitee-side accept (`updateGroup -g <id>` bare)
+  fails `Cannot find service ID for self to accept invite` for
+  number-addressed invites; the WORKING path is a **group invite link**
+  (`updateGroup --link enabled` → `joinGroup --uri`) — user joined
+  instantly, bot joined the same way with the provider briefly stopped
+  (its CLI needs the daemon-locked data-dir). Bot has a profile name
+  now ("Jarvis Bot"). Stale number-addressed pending-invite ghosts
+  remain on the group (harmless). Bot profile/identity ACIs:
+  bot [REDACTED-ACI],
+  user [REDACTED-ACI].
+- **Dual-adapter live test (user request) — BOTH adapters GREEN on the
+  same deployment, same LLM backend:**
+  - `/zcash`: Signal admin DM → full price card delivered (~5 s).
+    SimpleX LiveAdmin DM → bot received + replied in 1 s
+    (itemId 193 `sndRcvd/ok`).
+  - LLM chat ("In one sentence, what is Zcash?"): Signal → user+assistant
+    chat_message rows committed atomically, reply delivered (~2 min,
+    collector paused per the s12 contention lesson). SimpleX → same
+    (1878-token prefill 70 s + decode; reply `directSnd/sndSent`).
+    Reply CONTENT was abliterated-quant garbage on BOTH — consistent
+    cross-adapter, confirming the residual is model-side (D49 operator
+    concern), not adapter-side.
+- **False-alarm lessons (do NOT re-chase):**
+  `SimpleXWebSocketClient "frame ignored: unknown-resp-type"` DEBUG
+  lines at message-arrival time are BENIGN (send-status update events
+  the codec deliberately ignores) — NOT evidence of dropped inbound.
+  The simplex one-shot client (`-e "@Contact msg" -t N`) does NOT
+  reliably render inbound replies; verify via the bot-side chat DB
+  instead: `.scratch/WsProbe.java` (host-compiled java.net.http WS
+  probe, docker-cp'd class into the provider container) sends corrId
+  commands like `/tail @LiveAdmin 3` to the subprocess WS :5225 —
+  command responses arrive on any connection (async events stay on the
+  adapter's), per the `simplex-live-frame-capture` memory.
+- Stack at session end: all 5 containers healthy (collector restarted
+  after the chat turns), dual `simplex,signal` mode live. Phase 5
+  remaining: F-live-10 fix ticket → s07 group scenario over Signal;
+  rest of §6 checklist (edit fallback, rate pacing, reconnect,
+  16 KB cap); optional 3-party group drive post-fix.
 
 ### 2026-07-04 (PHASE 5 — Signal registration + round-trip GREEN)
 
