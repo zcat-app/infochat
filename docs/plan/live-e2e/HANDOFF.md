@@ -7,7 +7,7 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-04 evening (**4b-4 DONE; ollama AND remote-LLM (DeepSeek) backends both VERIFIED live; images rebuilt — M1-551/552 deployed & live-validated**; F-live-8 root-caused → reasoning-off live; M1-558/559/560 drafted, clarity not yet run; remaining: Phase 5 Signal + the three tickets) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-04 night (**M1-558 MERGED (848559b4) — /q/metrics real; F-live-7 metrics leg code-RESOLVED, live after next image rebuild**; remaining: M1-559/560, image rebuild, Phase 5 Signal) · Owner: ubuntu5 + Claude
 
 ---
 
@@ -76,11 +76,16 @@ after; details + re-apply recipe in the running log.
   verbatim to the user. `SummaryProseGenerator:119` intercepts + degrades
   ("never surface the marker"); chat needs the same. security_relevant.
 
-**NEXT (fresh session):** run the three drafted tickets —
-`/m1-tick run M1-558` (metrics export), `M1-559` (refusal intercept),
-`M1-560` (reasoning-off in compose) — then Phase 5 (Signal delta — needs
-the user for the phone-driven side). Image rebuild: DONE 2026-07-04 evening
-(M1-551/552 deployed + live-validated). Remote-LLM leg: DONE (DeepSeek).
+**NEXT (fresh session):** run the two remaining drafted tickets —
+`/m1-tick run M1-559` (refusal intercept), `M1-560` (reasoning-off in
+compose) — then an **image rebuild** (the running images predate M1-558,
+so live `/q/metrics` stays 404 until then; fold M1-559/560 into the same
+rebuild), then Phase 5 (Signal delta — needs the user for the
+phone-driven side). **M1-558 DONE (merged 848559b4, 2026-07-04 night):**
+`quarkus-micrometer-registry-prometheus` in both service poms +
+endpoint-pinning MetricsEndpointITs (provider IT pins
+`adapter_connection_status`); F-live-7's metrics leg is code-resolved —
+the `/q/health/llm` leg was out of scope and still needs its own ticket.
 
 **⚠ Compose-override trap until M1-560 lands:** the RUNNING llamacpp has
 `LLAMA_ARG_REASONING=off` only via an override file, now at
@@ -93,7 +98,7 @@ the prod stack must carry BOTH `-f` files:
 (`docker stop`/`docker start` of individual containers is safe — the trap
 is only compose re-creation.) M1-560's merge deletes the override file.
 
-**Verify note for the ticket runs:** M1-558/559 need full `mvn verify` —
+**Verify note for the ticket runs:** M1-559 needs full `mvn verify` —
 pause collector+provider first (co-location rule), use the detached
 setsid+marker pattern, clean the ~5 DevServices leaks after
 (`[[clean-verify-monitoring]]` memory). M1-560 is compose+docs only
@@ -285,9 +290,9 @@ checklist, §6 differences, §8 decisions) → `simplex-live-frame-capture` memo
 ## Current state (one line)
 
 Phases 0–4b DONE (all 7 live SimpleX scenarios GREEN 2026-07-03; 4b-4
-assertions DONE 2026-07-04; ollama backend verified live). Remaining:
-Phase 5 (Signal delta), remote-LLM leg (needs an API key from the user),
-image rebuild (M1-551/552 not yet deployed), tickets for F-live-7/8/9.
+assertions DONE 2026-07-04; ollama + remote-LLM (DeepSeek) backends both
+verified live). Remaining: M1-559/560 (F-live-9/8), image rebuild (running
+images predate M1-558 — live /q/metrics still 404), Phase 5 (Signal delta).
 
 ## Where we are
 
@@ -529,7 +534,17 @@ startup event and Stage-1 virtual threads race deployment completion — and the
 likely needs a large RAW backlog + restart. Un-ticketed; investigate before
 relying on unattended collector restarts.
 
-### F-live-7 (MEDIUM, observability) — no metrics export at all
+### F-live-7 (MEDIUM, observability) — metrics leg RESOLVED by M1-558 (merged 848559b4, 2026-07-04); /q/health/llm leg still open
+**RESOLVED (metrics leg):** `quarkus-micrometer-registry-prometheus` added
+to both service poms (BOM-managed) + two new `MetricsEndpointIT`s pinning
+`GET /q/metrics` (provider IT additionally pins `adapter_connection_status`
+— the §7.14 runbook's first diagnostic is now testable). The ITs assert the
+main test port (shipped defaults enable no management-interface split; the
+ticket's clarity WARN resolution). NOTE: the running live images predate
+the merge — live `/q/metrics` stays 404 until the next image rebuild. The
+`GET /q/health/llm` leg was explicitly out of scope and still needs its own
+ticket. Original finding:
+
 Found by the 4b-4 per-adapter-metrics check (2026-07-04): `/q/metrics`
 returns 404 on the provider (mgmt :8081) and collector (:8080). Root cause:
 every module ships `quarkus-micrometer` (CDI `MeterRegistry`; AdapterMetrics
@@ -599,6 +614,32 @@ untrusted-content framing) — a model-quality data point for F-live-8's
 default-model discussion.
 
 ## Running log
+
+### 2026-07-04 night (M1-558 merged — /q/metrics real)
+
+- **M1-558 MERGED (848559b4)** — Prometheus metrics export (F-live-7
+  metrics leg) via `/m1-tick run M1-558`. Full cycle: clarity WARN
+  (acceptance item 2's "on the management interface" contradicted shipped
+  defaults — no `quarkus.management.enabled=true` anywhere; resolved by
+  asserting the main test port like the readiness ITs, symmetric with the
+  collector item) → implement (exactly the 4 files_scope files: the
+  registry-prometheus dependency in both service poms, + trimming the
+  now-false "No registry exporter extension in v1" comment sentence — an
+  orphan the change created; two new MetricsEndpointITs pinning the
+  endpoint) → full verify green r1 (12:18, stack paused per the
+  co-location rule, detached setsid+marker, DevServices leaks cleaned) →
+  review r1 APPROVE (all checks PASS, 0 rework) → verify-reuse
+  user-approved → commit 4c4720b8 → squash-merge 848559b4. Board:
+  done=582, pending=2 (M1-559/560).
+- **Comment nit deferred (outside ticket scope):**
+  `AdapterMetricsWiringTest` (~line 107) still says "v1 ships no exporter
+  extension" — false since M1-558; the test itself is unaffected
+  (delta-based observer reads). Fold into the next ticket touching that
+  file (memory note: `adaptermetricswiringtest-comment-nit`).
+- **Live impact pending rebuild:** the running images predate the merge,
+  so live `/q/metrics` still 404s until the next image rebuild.
+- Stack untouched beyond the verify pause/unpause; all 5 containers
+  healthy at session end.
 
 ### 2026-07-04 evening (remote-LLM leg DONE; images rebuilt — M1-551/552 live-validated)
 
