@@ -525,7 +525,26 @@ test asserts either endpoint exists. Fix shape: add the registry-prometheus
 dependency to both service poms (+ a readiness-style IT pinning the
 endpoint); decide /q/health/llm separately.
 
-### F-live-8 (HIGH for chat UX, model/product) — shipped host chat model unreliable at chat-format output
+### F-live-8 — ROOT-CAUSED 2026-07-04 afternoon: llama.cpp reasoning auto-detect, NOT model flakiness
+**Ticket M1-560 drafted (a28c7ab1).** Direct probes against the running
+server found the mechanism: the Gemma 4 template has an optional thinking
+channel (`<|channel>thought…<channel|>`), llama.cpp's `--reasoning` default
+`auto` detects it and turns thinking ON, so every task has been thinking
+since deploy and the M1-548 caps (sized for visible output) get eaten by
+thought tokens — 3/3 probes at default temp put ALL 200 tokens in
+`reasoning_content` with EMPTY content. With `LLAMA_ARG_REASONING=off`:
+3/3 probes clean at default temperature (temperature exonerated) and a
+live DM round-trip delivered a 438-char reply in ~90 s (content quality
+still mediocre — abliterated-quant residual, operator model-choice
+concern). **HOST STATE: the running llamacpp has the flag active via a
+scratchpad compose override** (applied 2026-07-04 ~11:45 for the
+verification and KEPT — chat is unusable without it); M1-560 makes it
+repo-permanent in docker-compose.yml. Expected side benefit: eval tasks
+stop paying the hidden thinking tax (faster RAW-backlog chew). Original
+finding below, kept for the record; its "sampling flakiness" framing is
+superseded.
+
+### F-live-8 original record (HIGH for chat UX, model/product) — shipped host chat model unreliable at chat-format output
 2026-07-04: 4/4 chat-mode turns against the baked
 `gemma-4-E4B-it-OBLITERATED-Q4_K_M.gguf` (llama.cpp, peg-gemma4 format)
 failed: two returned llama.cpp 500 "The model produced output that does not
@@ -560,6 +579,39 @@ untrusted-content framing) — a model-quality data point for F-live-8's
 default-model discussion.
 
 ## Running log
+
+### 2026-07-04 later (F-live-8 root-caused + fixed live; M1-558/559/560 drafted)
+
+- **F-live-8 investigation** (user-requested): compared request shapes
+  (the tool loop is a TEXTUAL protocol — `runToolLoop` regex-parses plain
+  text; no `tools` field ever leaves `OpenAiCompatibleProvider`, so the
+  failures were pure model-output pathology), pulled the Gemma 4 chat
+  template via `/props` (thinking channel + `strip_thinking` macro +
+  `enable_thinking` kwarg), probed directly: default temp 3/3 → ALL tokens
+  in `reasoning_content`, content EMPTY; `enable_thinking:false` →
+  finish=stop, real content. Server-level fix `LLAMA_ARG_REASONING=off`
+  (llama.cpp default is `auto` = detect-from-template) verified: 3/3 clean
+  probes + a live bot DM delivering 438 chars in ~90 s. Details in the
+  F-live-8 root-cause section above. The override is LIVE on the running
+  server (scratchpad compose override, kept); M1-560 commits it properly.
+- **Tickets drafted (all pending, clarity not yet run):** M1-558
+  (e7daa6d2, F-live-7 — quarkus-micrometer-registry-prometheus in both
+  service poms + endpoint-pinning ITs; /q/health/llm and
+  Prometheus-in-compose explicitly out of scope), M1-559 (6de7ffea,
+  F-live-9 — anchored `[REFUSAL:` intercept on the chat terminal text,
+  new error.chat.refused bundle key en+cs, degraded-turn handling,
+  content-free WARN log), M1-560 (a28c7ab1, F-live-8 — the compose flag +
+  design-note mirrors + host validation).
+- **Prometheus-in-repo question (user):** answered from design
+  07-deployment.md §7.13 — the observability stack is deliberately
+  operator-deployed, NOT a repo compose service ("Nothing in this
+  subsection adds configuration"); the repo's obligation is the /q/metrics
+  endpoint (M1-558). Adding an optional `observability` compose profile
+  would be a design amendment — parked unless the user wants it.
+- 208 collector LLM failures observed in the hour around the earlier
+  LLM-down test were 503s from MY llamacpp stop/start window (plus a few
+  entity-extraction releases-without-entities — the designed degradation),
+  not steady-state errors.
 
 ### 2026-07-04 afternoon (4b-4 DONE; ollama backend verified; F-live-7/8/9 found)
 
