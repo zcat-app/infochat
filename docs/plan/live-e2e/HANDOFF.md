@@ -7,7 +7,7 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-03 (F-live-5/F-live-3 decided → M1-550/551 drafted, + M1-552 chat brevity; control-plane still RESET — admin unclaimed) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-04 (ticket board DRAINED — M1-550…557 all merged & pushed through ce6e21d0; F-live-3 RESOLVED by M1-551; two co-location verify flakes → both tests hardened; control-plane still RESET — admin unclaimed) · Owner: ubuntu5 + Claude
 
 ---
 
@@ -51,7 +51,13 @@ prefill + 143 s decode < 240 s timeout. The sizing invariant
      words, rendered once at construction) so replies finish
      `finish_reason=stop` under the cap instead of truncating at it (s12
      decoded to EXACTLY 600 — no length instruction exists today).
-   **NEXT ACTION: `/m1-tick run` the three tickets.** None blocks 4b-4.
+   **DONE 2026-07-04: all three merged** — M1-550 (507c7bea, + M1-553
+   wiring tests 31b93042), M1-551 (1a842496 — F-live-3 fix; the running
+   collector image predates it, applies at next rebuild), M1-552
+   (b469cf38). The board also drained M1-554/555 (test-infra,
+   2026-07-03) and M1-556/557 (flake-band + harness hardening,
+   2026-07-04). **Ticket board: 0 pending — NEXT ACTION is item 3
+   (admin re-claim + fixture rebuild, then 4b-4).**
 3. Then **4b-4** (s10 latency evidence exists; s12 adds bounded-chat
    evidence; remaining: embedding-retrieval assertion — note the m1-537
    seed source has exactly ONE READY+embedded post, which is the shape the
@@ -182,8 +188,10 @@ checklist, §6 differences, §8 decisions) → `simplex-live-frame-capture` memo
 
 ## Current state (one line)
 
-The substrate for the live run is **built and green** (Phases 0–4a done). **Nothing
-has run against a real transport yet** — the first real live work is Phase 4b.
+Substrate built and green (Phases 0–4a done); **all 7 live SimpleX scenarios
+GREEN (2026-07-03)**; ticket board drained (2026-07-04: 581 done / 0 pending).
+Remaining: 4b-4 assertions (needs the post-M1-549 fixture rebuild + admin
+re-claim first) and Phase 5 (Signal delta).
 
 ## Where we are
 
@@ -396,7 +404,14 @@ format, no thinking channel; llama.cpp reports `truncated = 0` throughout).
 the ChatAgent reply itself (finalized-edit observation) is already proven by
 s10.**
 
-### F-live-3 (LOW, transient — NOT yet investigated) — collector startup race under RAW backlog
+### F-live-3 (LOW, transient) — RESOLVED by M1-551 (merged 1a842496, 2026-07-04) — collector startup race under RAW backlog
+**RESOLVED:** root cause confirmed as drafted — `@PostConstruct` rehydration
+races Stage1Worker's async `@Incoming` subscription; SmallRye's bounded
+BUFFER (128) throws SRMSG00034 when the race is lost and the backlog exceeds
+it. Fix: `OutboxRehydrator` waits on an attempt-counted **per-emit**
+`Emitter.hasRequests()` readiness gate (per-emit extension per the M1-551
+refine). NOTE: the running live-stack collector image predates the fix — it
+applies from the next image rebuild. History below kept for reference.
 **3rd observation 2026-07-03** (collector restart after ~15 min stopped for
 the s12 isolation test): identical signature, immediate retry booted clean.
 The pattern is now 3-for-3 → worth its ticket.
@@ -417,6 +432,38 @@ likely needs a large RAW backlog + restart. Un-ticketed; investigate before
 relying on unattended collector restarts.
 
 ## Running log
+
+### 2026-07-04 (board drained: M1-550…557 merged; F-live-3 fixed; co-location rule re-learned)
+
+- **All pending tickets landed and pushed** (origin at ce6e21d0): M1-550
+  (wizard LLM timing prompts, 507c7bea) + M1-553 (its wiring tests,
+  31b93042); **M1-551 (F-live-3 fix, 1a842496)** — OutboxRehydrator
+  per-emit `hasRequests()` readiness gate; M1-552 (chat brevity hint,
+  b469cf38); M1-554 (Dev Services container leak: repo-tracked
+  `quarkus.datasource.devservices.reuse=false`, f386acb2); M1-555
+  (Nostr drain race, b318fd26); M1-556 (Stage1WatchdogIT band 10×→50×
+  after 101/102 ms flakes, e1135504); M1-557 (SignalReconnectTest
+  inbound push retry, ce6e21d0). Board: 581 done / 10 deferred /
+  0 pending.
+- **Co-location rule violated, then re-learned:** two M1-556 verify
+  attempts ran WITH the live stack up (against §Environment facts'
+  "do NOT run builds while the live stack is up") and flaked two
+  *different* signal-fake tests (MultiAdapterProductionIT 2000 ms probe
+  timeout; SignalReconnectTest `SocketException: Socket closed`) at
+  ~29 min wall; quiet-host re-runs were green in 12:19–12:32. Claude's
+  memory index now surfaces the pause-first rule at verify launch. Both
+  flaky tests are hardened (M1-556 band; M1-557 push retry — analysis
+  confirmed test-harness-only: the production reconnect path
+  catches/classifies all transport IOExceptions, max-restart exhaustion
+  degrades to FAILED adapter + admin notify, no whole-app crash path).
+- **Live stack:** collector+provider paused for each verify, restarted
+  after; all 5 containers up & healthy at session end. NOTE: running
+  images predate today's merges — M1-551's startup fix and M1-552's
+  brevity hint apply from the next image rebuild. Control plane
+  unchanged today: still RESET, LiveAdmin UNCLAIMED.
+- **NEXT (fresh session):** admin re-claim via the D50 token DM →
+  fixture rebuild per the recipes above → 4b-4 assertions; then
+  Phase 5 (Signal delta).
 
 ### 2026-07-03 night (F-live-5/3 decisions + M1-550/551/552 drafted)
 - **F-live-5 decided (user):** wizard-collected with recommended defaults →
