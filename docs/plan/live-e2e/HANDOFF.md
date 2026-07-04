@@ -39,11 +39,16 @@ Last updated: 2026-07-04 night (**F-live-10 RESOLVED — M1-562 merged + images 
   band-bounded base64 shape gate on the group-id scope key, observable
   WARN on rejection).
 
-**NEXT ACTION:** s07 group flow over Signal — the 3-party
-`live-signal-group` fixture is ready (see the fixture entry in the
-running log); then the remaining §6 differences items (edit fallback,
-rate pacing, reconnect/daemon-down, 16 KB cap). M1-563/M1-565 are
-runnable whenever.
+**NEXT ACTION (user decision 2026-07-04, session end):** drain the two
+pending tickets first — `/m1-tick run M1-563` (spec amendment, doc-only)
+then `/m1-tick run M1-565` (group-id shape gate; needs full verify —
+pause the live stack per the co-location rule). THEN s07 group flow over
+Signal — the 3-party `live-signal-group` fixture is ready (see the
+fixture entry in the running log); then the remaining §6 differences
+items (edit fallback, rate pacing, reconnect/daemon-down, 16 KB cap).
+Note for M1-565: it touches SignalGroupHandler/SignalMessageCodec — an
+image rebuild after merge is needed before its gate is live (fold into
+the next rebuild; s07 does NOT depend on it).
 
 ---
 
