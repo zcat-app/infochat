@@ -183,3 +183,34 @@ startup second) while still failing a genuinely-broken wiring loudly.
 No trust boundary is touched: the change orders two internal startup
 components of the Collector (no user-facing API). Failure mode remains
 fail-fast at boot; no input parsing, no authorization, no data exposure.
+
+## Mid-drain flake evidence — MUST be surfaced at reopen, before review
+
+The first-emit readiness gate this ticket implements does NOT fully close
+F-live-3. Two independent full-suite runs have shown `SRMSG00034:
+Insufficient downstream requests` firing MID-DRAIN — at test-method time,
+with the subscriber long live — which a gate that polls
+`hasDownstreamRequests()` only before the FIRST emit cannot prevent:
+
+1. **2026-07-03**, M1-553 round-1 verify, on unmodified `main` collector
+   code: `OutboxRehydratorPaginationIT.
+   rehydratesLargeRawBacklogWithoutUnboundedListAllocation` errored with
+   SRMSG00034 thrown from `EvalQueueProducer.emit` (2017-row backlog; the
+   consumer lagged the tight emit loop under full-suite host load). Red
+   log preserved at `.scratch/m1-tick-test-M1-553-r1-flake-attempt1.log`.
+2. **2026-07-04**, M1-552 round-1 verify, again on unmodified `main`
+   collector code (the M1-552 diff touches only infochat-provider + docs):
+   the same test errored with the same SRMSG00034 drain-backpressure
+   failure. The red log was overwritten by the green re-run at the same
+   round path, so the record is the failure diagnosis from that session
+   (failing test + SRMSG00034 message confirmed from the failsafe report
+   before the re-run); the re-run passed with zero code changes.
+
+Design implication: "has requests once" was justified by "the
+virtual-thread consumer requests continuously" — true at startup pace,
+but a saturated host can stall the consumer long enough for the 128-item
+default buffer to fill mid-drain. At reopen, before implementation
+review: either extend the design (escalate → refine; e.g. per-emit
+readiness or bounded retry on overflow) or explicitly accept the residual
+mid-drain flake and file a follow-up ticket for it. The ticket must not
+merge implying the first-emit gate fully closes F-live-3.
