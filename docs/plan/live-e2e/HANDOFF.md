@@ -7,11 +7,44 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-04 night (**F-live-10 RESOLVED — M1-562 merged + images rebuilt + stack live on them; s07-over-Signal is UNBLOCKED, fixture ready**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-04 night (**M1-563 MERGED (8908e3b5) — leave-cleanup non-commitment posture now consistent across security/messaging/schema specs + both design mirrors; board down to 1 pending (M1-565), then s07**) · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
+
+**M1-563 is DONE + MERGED (2026-07-04, commit 8908e3b5).** The
+leave-cleanup posture amendment shipped: on membership-event-less
+adapters (BOTH v1 production adapters) per-user leave cleanup is now a
+stated NON-COMMITMENT across security.md §Authorization model,
+messaging.md (§Required SPI surface — Membership events + §Failure
+handling — "User left group"), schema.md §Identity and access, and the
+two design mirrors (06-messaging §6.3.6, 02-schema §2.1.4). A departed
+group admin keeps the slot (auto-promote does not fire), silently
+resumes admin on rejoin, and bot-admin `/demote` is the documented
+remediation. In-cycle redteam caught the round-1 diff leaving schema.md
+carrying the pre-narrowing promise (MEDIUM PERM-ESCAL — an internal
+spec contradiction); escalate→refine widened scope (files_budget 3→5,
++schema.md +02-schema.md) to reconcile it, review APPROVE r2, re-audit
+CLEAN. Doc-only (no code), `mvn verify` inert per M1-379. Not pushed.
+
+**Board: 1 pending — M1-565** (Base64 shape gate on the Signal
+group-id scope key). It touches SignalGroupHandler/SignalMessageCodec →
+it has a TESTABLE surface, so the full `mvn verify` applies and the
+live app stack (collector+provider) MUST be paused first per the
+co-location rule (`[[clean-verify-monitoring]]`). After merge, an image
+rebuild is needed before its gate is live (fold into the next rebuild;
+s07 does NOT depend on M1-565).
+
+**NEXT ACTION:** `/m1-tick run M1-565` (pause the live stack for the
+verify), then s07 group flow over Signal — the 3-party
+`live-signal-group` fixture is ready (invite-link path; direct-add
+unusable on 0.14.5). Then the remaining §6 differences items (edit
+fallback, rate pacing, reconnect/daemon-down, 16 KB cap).
+
+---
+
+## ▶ previous START HERE (2026-07-04 night — F-live-10 fix, kept for context)
 
 **F-live-10 is FIXED AND LIVE (2026-07-04 night).** Where things stand:
 
@@ -458,8 +491,10 @@ Phases 0–4b DONE (all 7 live SimpleX scenarios GREEN 2026-07-03; 4b-4
 assertions DONE 2026-07-04). Phase 5 IN PROGRESS: registrations,
 round-trip, ACI bootstrap, user leg, dual-adapter tests all GREEN;
 F-live-10 RESOLVED (M1-562) and LIVE on rebuilt images (2026-07-04
-night); remaining: s07 group flow over Signal (fixture ready) + §6
-differences checklist. Board: 587 done / 2 pending (M1-563, M1-565).
+night); M1-563 (leave-cleanup non-commitment spec/design amendment)
+MERGED (8908e3b5, 2026-07-04); remaining: s07 group flow over Signal
+(fixture ready) + §6 differences checklist. Board: 588 done / 1 pending
+(M1-565).
 
 ## Where we are
 
