@@ -136,6 +136,37 @@ public class OutboxRehydrator {
      */
     static final String CONFIG_KEY_PAGE_SIZE = "infochat.collector.outbox.rehydrate-page-size";
 
+    /**
+     * Operator-facing configuration keys for the eval-queue readiness
+     * gate (M1-551 / F-live-3). {@code Stage1Worker}'s
+     * {@code @Incoming("eval-queue")} subscription wires up
+     * asynchronously during the same startup window this bean's
+     * {@code @PostConstruct} runs in; emitting a >128-row backlog before
+     * the subscriber is active fills SmallRye's default bounded buffer
+     * and the next send throws SRMSG00034 out of {@code @PostConstruct},
+     * failing boot. Before EVERY emit the rehydrator polls
+     * {@link EvalQueueProducer#hasDownstreamRequests()} up to
+     * {@code readiness-max-attempts} times with a fixed
+     * {@code readiness-poll-millis} sleep between attempts (an empty
+     * backlog performs no emits and therefore no polls). Per-emit, not
+     * first-emit-only: "once the subscriber requests it requests
+     * continuously" was falsified by two mid-drain SRMSG00034
+     * occurrences under full-suite host load (2026-07-03/04) — a
+     * saturated host can stall the consumer long enough to fill the
+     * buffer mid-drain, so every emit re-checks demand (one cheap
+     * positive poll on the healthy path, no sleep). The loop is
+     * attempt-counted, never a wall-clock comparison, so the
+     * injectable-Clock rule is untriggered. Defaults (100 × 100 ms,
+     * ~10 s cap per stalled emit) sit orders of magnitude above the
+     * observed race window (the subscription completes within the same
+     * startup second) while still failing a genuinely-broken wiring
+     * loudly.
+     */
+    static final String CONFIG_KEY_READINESS_MAX_ATTEMPTS =
+        "infochat.collector.outbox.readiness-max-attempts";
+    static final String CONFIG_KEY_READINESS_POLL_MILLIS =
+        "infochat.collector.outbox.readiness-poll-millis";
+
     @Inject
     DataSource dataSource;
 
@@ -144,6 +175,12 @@ public class OutboxRehydrator {
 
     @ConfigProperty(name = CONFIG_KEY_PAGE_SIZE, defaultValue = "500")
     int rehydratePageSize;
+
+    @ConfigProperty(name = CONFIG_KEY_READINESS_MAX_ATTEMPTS, defaultValue = "100")
+    int readinessMaxAttempts;
+
+    @ConfigProperty(name = CONFIG_KEY_READINESS_POLL_MILLIS, defaultValue = "100")
+    long readinessPollMillis;
 
     /**
      * Test seam backing field: the maximum chunk size observed during
@@ -198,6 +235,13 @@ public class OutboxRehydrator {
             // Back-pressure on eval-queue now blocks only this chunk's
             // emit, not the next chunk's DB acquire.
             for (PostPersister.PersistedPostKey key : chunk) {
+                // Gate EVERY emit, not just the first: a saturated host
+                // can stall the consumer mid-drain until the 128-item
+                // buffer fills (two SRMSG00034 occurrences 2026-07-03/04
+                // falsified "has requests once covers the whole drain").
+                // Healthy path is one positive poll, no sleep
+                // (M1-551 / F-live-3).
+                awaitDownstreamReadiness();
                 evalQueueProducer.emit(key);
             }
             PostPersister.PersistedPostKey tail = chunk.get(chunk.size() - 1);
@@ -228,6 +272,50 @@ public class OutboxRehydrator {
      */
     int lastObservedMaxChunkSize() {
         return lastObservedMaxChunkSize;
+    }
+
+    /**
+     * Poll {@link EvalQueueProducer#hasDownstreamRequests()} until the
+     * eval-queue subscriber signals demand, sleeping
+     * {@link #readinessPollMillis} between attempts. Called before every
+     * emit; a ready subscriber returns on the first poll with no sleep.
+     * Attempt-counted, never a wall-clock comparison — the
+     * injectable-Clock rule is untriggered (see
+     * {@link #CONFIG_KEY_READINESS_MAX_ATTEMPTS}).
+     *
+     * @throws IllegalStateException when all
+     *         {@link #readinessMaxAttempts} polls report no demand —
+     *         the eval-queue wiring is genuinely broken or the consumer
+     *         is stalled beyond the configured window, so startup still
+     *         fails loudly, but with the channel and both tunables
+     *         named instead of the opaque SRMSG00034.
+     */
+    private void awaitDownstreamReadiness() {
+        for (int attempt = 1; attempt <= readinessMaxAttempts; attempt++) {
+            if (evalQueueProducer.hasDownstreamRequests()) {
+                return;
+            }
+            if (attempt < readinessMaxAttempts) {
+                try {
+                    Thread.sleep(readinessPollMillis);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(
+                        "OutboxRehydrator: interrupted while waiting for the "
+                            + "eval-queue subscriber to become ready",
+                        e);
+                }
+            }
+        }
+        throw new IllegalStateException(
+            "OutboxRehydrator: eval-queue subscriber reported no downstream "
+                + "requests after " + readinessMaxAttempts + " attempts "
+                + readinessPollMillis + " ms apart. The @Incoming(\"eval-queue\") "
+                + "subscription never became active or its consumer stalled "
+                + "mid-drain; emitting now would fail "
+                + "with SRMSG00034. Tune " + CONFIG_KEY_READINESS_MAX_ATTEMPTS
+                + " / " + CONFIG_KEY_READINESS_POLL_MILLIS
+                + " if startup legitimately needs a longer window.");
     }
 
     /**

@@ -60,4 +60,18 @@ public class EvalQueueProducer {
     public void emit(PostPersister.PersistedPostKey key) {
         emitter.send(key);
     }
+
+    /**
+     * Whether the {@code eval-queue} subscriber side currently signals
+     * outstanding demand ({@link Emitter#hasRequests()}). {@code false}
+     * until the {@code @Incoming("eval-queue")} subscription finishes
+     * its asynchronous startup wiring — emitting before then fills
+     * SmallRye's default 128-item buffer and the next {@code send}
+     * throws SRMSG00034. {@link OutboxRehydrator} polls this before its
+     * first emit so a startup-time RAW backlog cannot race the
+     * subscriber wiring and crash boot (M1-551 / F-live-3).
+     */
+    public boolean hasDownstreamRequests() {
+        return emitter.hasRequests();
+    }
 }
