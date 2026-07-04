@@ -299,9 +299,12 @@ Behavioural — the real "hallucinated-reality" risk surface (verify live):
 - [ ] **Contact-acceptance model:** SimpleX explicit contact-request + auto-accept
       vs Signal "anyone can message a number" (no request) — how the invite gate
       + un-invited-rejection behaves on each.
-- [ ] **Mention encoding:** Signal ACI + body-range offsets vs SimpleX's own rep.
-- [ ] **Group model:** creation, admin/roles, `upstream_group_id` mapping,
-      in-group mention semantics.
+- [x] **Mention encoding:** Signal ACI + body-range offsets verified live
+      (s07 2026-07-04: `--mention start:length:<aci>` parsed, span stripped,
+      command extracted); SimpleX D51 rep verified 2026-07-03.
+- [x] **Group model:** verified live via s07 over Signal (2026-07-04):
+      `upstream_group_id` mapping (base64 id → groups row), pending→approve
+      lifecycle, auto-promote + group-admin gate, in-group mention semantics.
 - [ ] **Inbound size cap / attachments** (both 16 KB inbound; confirm behaviour
       at the cap).
 - [ ] **Async receive model & ordering / dedup.**

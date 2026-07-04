@@ -7,11 +7,46 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-04 late night (**image rebuild DONE — M1-565 shape gate is LIVE (both images rebuilt from main @ c4e7093e, stack healthy); board 0 pending; NEXT = s07 group flow over Signal + §6 differences**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-04 late night (**s07 GREEN over real Signal — all 5 steps (pending reply → /list-groups → /approve-group → approved /help → auto-promote /group-timezone); M1-565 gate accept-path validated live (32-byte id in-band); NEXT = remaining §6 items: edit fallback, rate pacing, reconnect/daemon-down, 16 KB cap**) · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
+
+**s07 GROUP FLOW OVER SIGNAL IS GREEN (2026-07-04 late night).** All five
+scenario steps passed over real relays against the rebuilt images (see
+the running-log entry for evidence detail):
+
+1. Unapproved-group `@bot /help` (structured mention: signal-cli
+   `--mention "0:4:<botAci>"` on the base64 group id) → D47 pending
+   reply delivered to the group, `groups` row created
+   `approval_status=pending`, ADMIN-NOTIFY WARN emitted with the
+   approve command (log+row IS the designed delivery — no DM leg,
+   ThrottledAdminNotifier javadoc says push SPI is out of scope).
+2. Admin DM `/list-groups` → `Groups (1 rows…` with the gid.
+3. Admin DM `/approve-group <gid>` → "approved. Periodic digests will
+   begin", group notified, DB `approved` + `activated_by` set.
+4. Next eligible mention → "Available commands in this group:" +
+   silent auto-promote (`group_membership.is_group_admin=t` for the
+   user, who is NOT a bot admin).
+5. `@bot /group-timezone UTC` from the auto-promoted user →
+   "Group timezone set to `UTC`." (group-admin gate satisfied).
+
+Bonus validation: the live 32-byte group id flowed through the M1-565
+shape gate's ACCEPT path on the new images — F-live-10 parse + gate
+both proven on real wire. Eligibility note for future fixtures:
+auto-promote gates only on `is_banned=false` + probation expiry;
+`registration_state='invited'` counts as registered.
+
+**NEXT ACTION:** remaining §6 differences items (host work, no
+tickets): message-edit fallback, outbound rate pacing (5 sends/sec),
+reconnect/daemon-down semantics, 16 KB inbound cap. REMEMBER the
+verify co-location rule still binds any future full verify — pause
+collector+provider first (`[[clean-verify-monitoring]]`).
+
+---
+
+## ▶ previous START HERE (2026-07-04 night — M1-565 merged + rebuilt, kept for context)
 
 **M1-565 is DONE + MERGED (2026-07-04, commit 8495c882).** The last
 Phase-5 ticket shipped: a band-bounded base64 shape gate on the Signal
@@ -520,14 +555,12 @@ checklist, §6 differences, §8 decisions) → `simplex-live-frame-capture` memo
 ## Current state (one line)
 
 Phases 0–4b DONE (all 7 live SimpleX scenarios GREEN 2026-07-03; 4b-4
-assertions DONE 2026-07-04). Phase 5 IN PROGRESS: registrations,
-round-trip, ACI bootstrap, user leg, dual-adapter tests all GREEN;
-F-live-10 RESOLVED (M1-562) and LIVE on rebuilt images (2026-07-04
-night); M1-563 (leave-cleanup non-commitment spec/design amendment)
-MERGED (8908e3b5); M1-565 (base64 group-id shape gate) MERGED
-(8495c882) — code-resolved, needs an image rebuild to go live.
-Remaining: s07 group flow over Signal (fixture ready) + §6 differences
-checklist. Board: 589 done / 0 pending.
+assertions DONE 2026-07-04). Phase 5 NEARLY DONE: registrations,
+round-trip, ACI bootstrap, user leg, dual-adapter tests, and **s07
+group flow all GREEN over real Signal** (2026-07-04 late night, on
+images carrying M1-562+M1-565 — gate accept-path validated live).
+Remaining: §6 differences items (edit fallback, rate pacing,
+reconnect/daemon-down, 16 KB cap). Board: 589 done / 0 pending.
 
 ## Where we are
 
@@ -539,7 +572,7 @@ checklist. Board: 589 done / 0 pending.
 | 3 — Reset & data harness | `prod/live-reset.sh`, `live-seed.sh`, `live-inject-adversarial.sh` | ✅ DONE (M1-536/537/538) |
 | **4a — scenario runner substrate** | `Scenario`, `ConversationBackend` SPI, `ScenarioRunner`, InMemory backend, `ScenarioRunnerIT` | ✅ DONE (M1-539) |
 | **4b — SimpleX live drive** | real simplex-chat drive + LLM latency + embedding retrieval | ✅ DONE — all 7 scenarios GREEN 2026-07-03; **4b-4 assertions DONE 2026-07-04** (retrieval GREEN over ollama; metrics gap = F-live-7) |
-| **5 — Signal delta** | round-trip + ACI bootstrap + §6 differences | 🔶 IN PROGRESS — round-trip + ACI bootstrap + user leg (S3/S4) + dual-adapter all GREEN 2026-07-04; F-live-10 fixed+live (M1-562); all Phase-5 tickets drained (M1-562…565); s07 group flow over Signal + §6 checklist remain (host work, no tickets) |
+| **5 — Signal delta** | round-trip + ACI bootstrap + §6 differences | 🔶 NEARLY DONE — round-trip + ACI bootstrap + user leg (S3/S4) + dual-adapter + **s07 group flow** all GREEN (2026-07-04, on M1-562+565 images); remaining: §6 items edit fallback / rate pacing / reconnect / 16 KB cap (host work, no tickets) |
 | 6 — (optional) `/testcase` skill | wrap the runner once 2–3 scenarios pass | ❌ not started |
 
 **Concrete "done vs not" marker:** `SimpleXConversationBackend` exists and is
@@ -898,7 +931,40 @@ fixed; the 3-party group fixture is already built and waiting.
 
 ## Running log
 
-### 2026-07-04 night, latest (M1-565 merged — base64 group-id shape gate; board drained)
+### 2026-07-04 late night, latest (image rebuild + s07 GREEN over Signal)
+
+- **Image rebuild (user decision: rebuild before s07 so the run
+  exercises the merged code):** both app images rebuilt detached from
+  main @ c4e7093e (BUILD_EXIT=0, apps paused per the co-location rule),
+  restarted collector-first — readiness UP both, gauges 1.0 both
+  adapters, 0 SRMSG00034, containers verified on the fresh image IDs.
+  **M1-565 shape gate now LIVE.** Doc sync committed (ca247331):
+  HANDOFF rebuild-pending closed; README §6 membership-events rows
+  reconciled with M1-562/563 (table said Signal `true` — stale).
+- **s07 drive detail (all GREEN, first try, no code changes needed):**
+  group id from admin `raw listGroups`
+  (`/tNyW6lovgkfmcXVosMngNAlJmFZBH8DC/HTWU57aT4=`, 32 bytes decoded —
+  in the [16,64] M1-565 band); user-leg sends via
+  `signal-run.sh user raw 'send -g "<gid>" -m "@bot /help" --mention
+  "0:4:<botAci>"'` — signal-cli accepts the ACI as the mention
+  recipient, and `SignalMentionParser` strips the span and extracts
+  the command exactly as coded. Replies read via `user|admin receive`
+  (bodies matched the scenario expects verbatim). DB evidence:
+  `groups` 99b4e0a5-… pending→approved with `activated_by`;
+  `group_membership.is_group_admin=t` after step 4; step-5
+  `/group-timezone` succeeded for the non-bot-admin user.
+- **Non-finding (do NOT re-chase):** no admin DM for the pending-group
+  notification is EXPECTED — `ThrottledAdminNotifier` javadoc:
+  "Delivery today is the WARN log line + the persisted row"; push SPI
+  out of scope. The group reply's "administrator has been notified"
+  wording refers to that log+row leg.
+- Stack at session end: all 5 containers healthy on the new images,
+  dual `simplex,signal` mode live, `live-signal-group` now an APPROVED
+  group with the user as group admin (remember this state when
+  planning future group-scenario drives — a re-run of s07 needs the
+  groups row cleared or a fresh group).
+
+### 2026-07-04 night (M1-565 merged — base64 group-id shape gate; board drained)
 
 - **M1-565 MERGED (8495c882)** via `/m1-tick run M1-565` — the last
   Phase-5 ticket (M1-562 redteam out-of-model item 2). Shared
