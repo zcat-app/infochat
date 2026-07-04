@@ -5,11 +5,13 @@ status: pending
 created: 2026-07-04
 last_updated: 2026-07-04
 blocked_by: []
-files_budget: 3
+files_budget: 5
 files_scope:
   - docker-compose.yml
   - docs/design/07-deployment.md
   - docs/design/05-llm-and-embeddings.md
+  - SETUP_GUIDE.md
+  - prod/scripts/4-llm.sh
 complexity: low
 risk: low
 round_cap: 2
@@ -44,14 +46,25 @@ acceptance:
     (07-deployment.md §7.4/D49 wiring; 05-llm-and-embeddings.md sizing
     invariant, if it states one) mention the flag and that the cap/timeout
     sizing invariant assumes non-thinking generation.
+  - "Operator-visible note, both surfaces (user request 2026-07-04): (a)
+    SETUP_GUIDE.md's step-4 llamacpp paragraph (the one describing the
+    pinned default + custom GGUF override, ~line 261) gains one plain-
+    language sentence: thinking/reasoning is disabled on the llama.cpp
+    server — a reasoning-tuned model will run but will not 'think', and
+    the wizard's timeout/token recommendations assume that; (b) the
+    4-llm.sh llamacpp branch prints an equivalent one-line note at the
+    custom-GGUF override prompt, so the operator sees it at decision time
+    even without the guide open. Guide tone matches the surrounding
+    non-technical style."
   - "Host validation recorded in the ticket body: with the flag active,
     the previously 4/4-failing live chat DM completes with non-empty
     content (the 2026-07-04 investigation already proved this exact flag
     live: 3/3 direct probes returned finish=stop/content at default
     temperature, and a live DM round-trip delivered a 438-char reply —
     re-run once from the committed compose file to pin provenance)."
-  - mvn verify is green (expected inert for Java — compose + docs only;
-    the M1-549 inert-diff precedent applies if the gate agrees).
+  - mvn verify is green (no Java in the diff — compose + docs + guide +
+    a wizard echo line; the M1-549 inert-diff precedent covered a shell
+    script too and applies if the gate agrees).
 test_plan:
   adds: []
   preserves:
@@ -90,6 +103,15 @@ direct probes against the running server:
 
 This corrects F-live-6's "no thinking channel" note — the channel exists;
 it was invisible until output-format failures forced a direct look.
+
+Not custom-model-specific: the wizard's curated default GGUF
+(`gemma-4-E4B-it-qat-UD-Q4_K_XL`, 4-llm.sh:55) is also Gemma 4 with the
+same thinking-capable template, so `--reasoning auto` bites the untouched
+default path too — this host merely found it first via its OBLITERATED
+override. Hence the operator note on both surfaces (guide + wizard
+prompt): with the flag committed, a reasoning-tuned custom GGUF will run
+but never think, which is exactly what the M1-550 timeout/max-tokens
+recommendations assume.
 
 Host cleanup rider (not a repo diff): the running stack carries the flag
 via `prod/runtime/llamacpp-reasoning-off.override.yml` (gitignored; see

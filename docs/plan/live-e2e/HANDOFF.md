@@ -655,7 +655,10 @@ default-model discussion.
   F-live-9 — anchored `[REFUSAL:` intercept on the chat terminal text,
   new error.chat.refused bundle key en+cs, degraded-turn handling,
   content-free WARN log), M1-560 (a28c7ab1, F-live-8 — the compose flag +
-  design-note mirrors + host validation).
+  design-note mirrors + host validation; extended 2026-07-04 evening per
+  user: operator-visible reasoning-off note in SETUP_GUIDE.md step 4 AND
+  at the wizard's custom-GGUF prompt — the curated default GGUF is also
+  Gemma 4, so the flag affects the untouched default path too).
 - **Prometheus-in-repo question (user):** answered from design
   07-deployment.md §7.13 — the observability stack is deliberately
   operator-deployed, NOT a repo compose service ("Nothing in this
