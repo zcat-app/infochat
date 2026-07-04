@@ -39,10 +39,16 @@ detail):
 row → m1-537 seed source (user-approved INSERT, kept); `live-signal-group`
 is approved with the user as group admin.
 
-**NEXT ACTION:** draft + run the F-live-11 fix ticket (re-encode Signal
-edit as `send`+`editTimestamp`, DM+group, reconcile fakes; needs image
-rebuild after merge to go live). Then the live-e2e plan is complete —
-Phase 6 (/testcase skill) stays optional.
+**NEXT ACTION:** `/m1-tick run M1-566` — the F-live-11 fix ticket is
+DRAFTED (docs/plan/m1/tickets/M1-566-signal-edit-real-wire-encoding.md:
+re-encode Signal edit as `send`+`editTimestamp` DM+group, refresh the
+handle timestamp per edit so chains target the latest revision,
+reconcile fakes without weakening the fallback suite). Full verify
+needed → pause collector+provider per the co-location rule. Needs an
+image rebuild after merge; host validation recipe is in the ticket
+§Notes (live /summary must edit in place, fallback_send must not
+increment). Then the live-e2e plan is complete — Phase 6 (/testcase
+skill) stays optional.
 
 ---
 
