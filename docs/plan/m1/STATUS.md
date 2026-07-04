@@ -10,12 +10,12 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 578 |
-| deferred | 11 |
+| deferred | 10 |
 | **total** | **589** |
 
 ---
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-551 — OutboxRehydrator waits for eval-queue downstream readiness (F-live-3) (complexity: medium, risk: medium)
 
 ---
 
@@ -75,9 +75,8 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 ## Deferred
 
-### blocked-on-new-ticket (2)
+### blocked-on-new-ticket (1)
 - M1-505 → M1-506
-- M1-551 → M1-553
 
 ### decomposed (5)
 - M1-034 → M1-034a
@@ -756,9 +755,9 @@ M1-547 (done)
 M1-548 (done)
 M1-549 (done)
 M1-550 (done)
+M1-551 (pending) ← runnable
 M1-552 (done)
 M1-553 (done)
-  └── M1-551 (deferred)
 M1-554 (done)
 M1-555 (done)
 ```

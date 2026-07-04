@@ -1,9 +1,16 @@
 ---
 id: M1-551
 title: OutboxRehydrator waits for eval-queue downstream readiness (F-live-3)
-status: deferred
+status: pending
 created: 2026-07-03
-last_updated: 2026-07-03
+last_updated: 2026-07-04
+reopens:
+  - date: 2026-07-04
+    prior_deferred_reason: blocked-on-new-ticket
+    prior_deferred_on: [M1-553]
+    reason: M1-553 (wiring-test fix) is done, unblocking verify; mid-drain
+      SRMSG00034 evidence (2 occurrences) now filed in the ticket body for
+      the design decision at review.
 clarity_check:
   date: 2026-07-03
   verdict: PASS
@@ -46,8 +53,6 @@ revisions:
         throws IllegalStateException whose message names both config keys; an
         empty backlog never calls hasDownstreamRequests.
 blocked_by: []
-deferred_on: [M1-553]
-deferred_reason: blocked-on-new-ticket
 files_budget: 3
 complexity: medium
 risk: medium
