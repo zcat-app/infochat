@@ -196,8 +196,14 @@ CREATE TABLE group_membership (
   is_group_admin  BOOLEAN NOT NULL DEFAULT FALSE,
   joined_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   removed_at      TIMESTAMPTZ,                       -- nullable; set on user_left_group adapter
-                                                     -- event or permanent send failure; cleared
-                                                     -- on rejoin. Per-(user, group) chat_memory,
+                                                     -- event (supportsMembershipEvents=true
+                                                     -- adapters only — neither v1 production
+                                                     -- adapter; on membership-event-less
+                                                     -- adapters per-user leave cleanup is a v1
+                                                     -- non-commitment and the row persists,
+                                                     -- spec messaging.md §Failure handling —
+                                                     -- User left group); cleared on rejoin.
+                                                     -- Per-(user, group) chat_memory,
                                                      -- chat_session, summary_anchor rows are
                                                      -- preserved across the soft-clear.
   PRIMARY KEY (group_id, user_id)

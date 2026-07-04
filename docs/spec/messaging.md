@@ -91,10 +91,15 @@ Every adapter implements:
   `schema.md` §Identity and access (Group membership) and §Failure
   handling below. Adapters without a native left-group signal MUST
   set `supportsMembershipEvents = false` (capability flag) and
-  MUST NOT synthesise a left-group event from inactivity; Provider
-  falls back to permanent-delivery-failure-driven cleanup
-  (§Failure handling — "User left group"). The bot-removed and
-  group-deleted events are separate from per-user membership
+  MUST NOT synthesise a left-group event from inactivity. On such
+  adapters — **both v1 production adapters** — per-user leave
+  cleanup is an explicit **non-commitment** in v1: a group-scope
+  send is addressed to the group, not to an individual member, so a
+  departure produces no per-user permanent delivery failure to fall
+  back on, and the permanent-delivery-failure-driven cleanup path
+  (§Failure handling — "User left group") covers only the
+  bot-removed-from-group and group-deleted cases. The bot-removed
+  and group-deleted events are separate from per-user membership
   events and continue to flow through their existing adapter
   signals.
 - **Inbound message size cap.** Adapters SHOULD enforce a
@@ -153,10 +158,11 @@ Every adapter implements:
   for mention recognition (see §Required SPI surface — Receive).
 - `supportsMembershipEvents` — true when the adapter exposes a
   native `user_joined_group` / `user_left_group` signal at the
-  protocol layer. When false, Provider uses
-  permanent-delivery-failure-driven cleanup (§Failure handling —
-  "User left group") and does not synthesise membership events
-  from inactivity.
+  protocol layer. When false, per-user leave cleanup is a v1
+  non-commitment (§Failure handling — "User left group"): Provider
+  does not synthesise membership events from inactivity, and the
+  permanent-delivery-failure-driven cleanup path covers only the
+  bot-removed / group-deleted cases, not per-user leaves.
 
 Future flags (richer attachments, voice, reactions, etc.) extend this                                                                                                                                                                                 
 list; v1 ships only the above. Provider must treat an unknown flag as                                                                                                                                                                                 
@@ -371,8 +377,7 @@ Provider produces plain text per decision D30. The adapter:
   not distinguished to users or in the scheduler, only in the
   adapter-side log; the same v2 cleanup command will sweep both.
 - **User left group.** When the adapter exposes a "user X left
-  group Y" signal (or surfaces a permanent send failure to a
-  specific user), Provider soft-clears the
+  group Y" signal, Provider soft-clears the
   `group_membership` row by setting `removed_at = NOW()` per
   `schema.md` §Identity and access. The row, the user's
   per-(user, group) `chat_memory` / `chat_session` /
@@ -385,11 +390,22 @@ Provider produces plain text per decision D30. The adapter:
   `removed_at IS NOT NULL` is **not eligible** as a first-mention
   auto-promote winner — the user must rejoin (clearing
   `removed_at`) before the slot can be refilled by their
-  @mention. Adapters that do not expose a left-group signal
-  (some transports cannot tell) MUST NOT synthesise one from
-  inactivity; in that case the row stays `removed_at IS NULL`
-  and the membership is cleaned up only on explicit
-  bot-removed-from-group / group-deleted signals.
+  @mention.
+  **On adapters with `supportsMembershipEvents = false` there is no
+  such signal, and per-user leave cleanup is an explicit
+  non-commitment in v1.** Bot output to a group is addressed to the
+  group scope, so a member's departure generates no per-user
+  permanent send failure that Provider could use as a proxy for a
+  leave — the permanent-delivery-failure-driven cleanup path covers
+  only the bot-removed-from-group and group-deleted cases above,
+  never a per-user leave. Such adapters MUST NOT synthesise a
+  left-group event from inactivity; the row stays `removed_at IS
+  NULL`, and both the membership and any `is_group_admin` flag
+  persist. A **departed group admin therefore still counts as the
+  active admin** (auto-promote does not fire) and silently resumes
+  admin on rejoin; the documented remediation is a bot-admin
+  `/demote` of the stale group admin (`security.md`
+  §Authorization model).
 
 ## What lives in design notes
 

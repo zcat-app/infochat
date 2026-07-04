@@ -1,15 +1,148 @@
 ---
 id: M1-563
 title: Leave-cleanup posture for membership-event-less adapters
-status: pending
+status: done
 created: 2026-07-04
 last_updated: 2026-07-04
+escalations:
+  - date: 2026-07-04
+    reason: redteam-finding
+    reviewer_verdict_excerpt: |
+      Redteam MEDIUM (PERM-ESCAL), verified against the live text: "This
+      diff narrows that commitment in two spec files but leaves schema.md
+      carrying the pre-narrowing promise, so the spec set is now
+      internally contradictory ... (1) docs/spec/schema.md:143 still
+      lists 'a permanent send failure to that specific user surfaced by
+      the adapter' as a leave-cleanup trigger — the exact branch the diff
+      DELETED ... (2) docs/spec/schema.md:160-162 promises a rejoining
+      former admin does NOT reclaim is_group_admin; the diff's own new
+      text ... states the opposite." Falsification pass additionally
+      found the same stale trigger clause in the design twin
+      docs/design/02-schema.md:198-200 (removed_at DDL comment).
+reviews:
+  - round: 1
+    date: 2026-07-04
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 72
+      removed: 23
+  - round: 2
+    date: 2026-07-04
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 301
+      removed: 30
+redteam_findings:
+  - date: 2026-07-04
+    category: PERM-ESCAL
+    severity: medium
+    promise: |
+      schema.md §Identity and access (Group membership), the enforcement
+      mirror security.md names ("Invariants (also enforced in
+      `schema.md`)"), still promises the departed-group-admin defense
+      verbatim (docs/spec/schema.md:141-162): a user_left_group event OR
+      a permanent send failure to that specific user soft-clears the row
+      and also clears is_group_admin, and a rejoining former admin does
+      NOT automatically reclaim is_group_admin.
+    gap: |
+      This diff narrows that commitment in security.md / messaging.md /
+      design-06 but leaves schema.md carrying the pre-narrowing promise,
+      so the spec set is now internally contradictory: (1) schema.md:143
+      still lists "a permanent send failure to that specific user" as a
+      leave-cleanup trigger — the branch this diff deleted as unfireable;
+      (2) schema.md:160-162 promises no silent admin reclaim on rejoin,
+      while the new security.md:445-449 states the opposite for both v1
+      production adapters (silent resume). Delivered behavior matches the
+      amended security.md; schema.md is the stale over-promise.
+    repro: |
+      An operator/implementer reading schema.md §Group membership believes
+      a group admin who leaves is soft-cleared (slot freed) and cannot
+      silently reclaim admin on rejoin. On both v1 production adapters
+      (supportsMembershipEvents=false) none of that happens: admin A
+      leaves, no left-group signal / per-user PERMANENT failure fires, A's
+      is_group_admin row persists, auto-promote never refills the slot,
+      and A silently resumes admin on rejoin. schema.md said this could
+      not happen; security.md now says it does.
+    suggested_fix_class: other
+redteam_audits:
+  - date: 2026-07-04
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-563-leave-cleanup-posture
+    verdict_file: docs/plan/m1/redteam/M1-563-2026-07-04.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      1 medium (PERM-ESCAL): the amendment left docs/spec/schema.md
+      §Identity and access (Group membership) — security.md's named
+      enforcement mirror, and in this ticket's spec_refs but outside
+      files_scope/files_budget=3 — carrying the pre-narrowing
+      leave-cleanup promise, contradicting the amended files. Fix needs
+      escalate -> refine to widen scope (add docs/spec/schema.md,
+      budget 3 -> 4). Out-of-model item is advisory (the silent-resume
+      behavior is now a documented, accepted non-commitment); no action.
+  - date: 2026-07-04
+    verdict: CLEAN
+    base: main
+    head: m1/M1-563-leave-cleanup-posture
+    verdict_file: docs/plan/m1/redteam/M1-563-2026-07-04-reaudit.md
+    out_of_model_count: 1
+    note: |
+      Re-audit after the in-branch remediation (refine widened scope to
+      schema.md + 02-schema.md; round-2 diff reconciled both). CLEAN —
+      the internal contradiction is resolved; the re-audit also verified
+      commands.md:957 stays consistent and that /demote's precondition
+      (removed_at IS NULL on the stale admin row) is satisfied, so the
+      documented remediation is executable. Out-of-model: the
+      silent-resume privilege-retention surface itself — documented,
+      accepted v1 non-commitment with /demote remediation; no follow-up
+      ticket (the closing mechanism, member-list polling, was already
+      rejected once per the ticket's Out-of-scope and stays a v2
+      feature decision).
+clarity_check:
+  date: 2026-07-04
+  verdict: WARN
+  warnings:
+    - "COMPLEXITY-RISK-CALIBRATED: risk: low claimed for a ticket whose
+      subject is the Authorization model's admin auto-promote /
+      rejoin-resumes-admin behavior; doc-only scope (out_of_scope bars
+      any Java/test/migration change) makes it defensible but the ticket
+      does not state that inline."
+  blockers: []
+revisions:
+  - date: 2026-07-04
+    reason: redteam-finding refine — the amendment left schema.md (and
+      its design twin 02-schema.md) carrying the pre-narrowing
+      leave-cleanup promise; widened to reconcile them
+    prior:
+      files_budget: 3
+      files_scope:
+        - docs/spec/security.md
+        - docs/spec/messaging.md
+        - docs/design/06-messaging.md
+      acceptance_items: 4
 blocked_by: []
-files_budget: 3
+files_budget: 5
 files_scope:
   - docs/spec/security.md
   - docs/spec/messaging.md
+  - docs/spec/schema.md
   - docs/design/06-messaging.md
+  - docs/design/02-schema.md
 complexity: low
 risk: low
 round_cap: 2
@@ -49,6 +182,23 @@ acceptance:
     same posture, replacing the 'or surfaces a PERMANENT send failure to
     a specific user in the group' clause with the non-commitment
     statement and the /demote remediation pointer."
+  - "docs/spec/schema.md §Identity and access (Group membership) —
+    User-departure lifecycle is reconciled with the amended posture
+    (redteam-finding refine): the 'or a permanent send failure to that
+    specific user surfaced by the adapter' trigger is removed (a
+    group-scope send carries no per-user failure, so the trigger can
+    never fire); the soft-clear lifecycle is qualified as available only
+    on adapters with a native left-group signal
+    (supportsMembershipEvents=true — neither v1 production adapter);
+    and the 'rejoins does not automatically reclaim is_group_admin'
+    promise is qualified with the membership-event-less non-commitment
+    (row and is_group_admin persist, departed admin still counts as
+    active, silent resume on rejoin, /demote remediation pointer)."
+  - "docs/design/02-schema.md §2.1.4 group_membership.removed_at DDL
+    comment drops the 'or permanent send failure' trigger clause and
+    reflects that the soft-clear fires only on
+    supportsMembershipEvents=true adapters (per-user leave cleanup is a
+    v1 non-commitment on both production adapters)."
   - "The diff is doc-only (no *.java / pom.xml / src resources), so mvn
     verify is inert per the M1-379 gate; the round log records the
     inert-N/A note."
@@ -101,7 +251,12 @@ Mirrors the YAML list: (1) security.md §Authorization model states the
 leave-gap, its auto-promote consequence, the rejoin-resumes-admin
 consequence, and the /demote remediation; (2) messaging.md qualifies
 the delivery-failure fallback to bot-removed/group-deleted and states
-the per-user non-commitment; (3) design §6.3.6 mirrors it; (4) doc-only
+the per-user non-commitment; (3) design §6.3.6 mirrors it; (4)
+schema.md §Group membership User-departure lifecycle drops the
+unfireable per-user permanent-send-failure trigger and qualifies the
+no-reclaim-on-rejoin promise with the non-commitment (redteam-finding
+refine — the round-1 diff left schema.md contradicting the amended
+files); (5) design §2.1.4 removed_at comment mirrors it; (6) doc-only
 diff, mvn verify inert per M1-379.
 
 ## Out-of-scope

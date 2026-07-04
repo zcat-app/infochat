@@ -139,9 +139,11 @@ connect with (see decision D34 and `security.md`).
   admin flag. Schema must enforce *at most one* group admin per
   group at any time (decision D9).
   **User-departure lifecycle.** When the messaging adapter signals
-  that a user has left a group (a `user_left_group` adapter event,
-  or a permanent send failure to that specific user surfaced by
-  the adapter), the row is **soft-cleared, not deleted**: a
+  that a user has left a group (a `user_left_group` adapter event —
+  available only on adapters with `supportsMembershipEvents = true`,
+  which is **neither v1 production adapter**; see `messaging.md`
+  §Required SPI surface — Membership events), the row is
+  **soft-cleared, not deleted**: a
   nullable `removed_at` timestamp is set, mirroring the
   `groups.removed_at` semantics for the bot's own membership. The
   row is preserved against accidental leave/rejoin cycles (the
@@ -160,6 +162,16 @@ connect with (see decision D34 and `security.md`).
   admins. A user who left and rejoins as a regular member does
   **not** automatically reclaim `is_group_admin`; the slot is
   refilled by the standard mechanisms.
+  **On membership-event-less adapters this lifecycle never fires
+  (v1 non-commitment).** There is no left-group event, and a
+  group-scope send produces no per-user permanent delivery failure
+  that could stand in for one (`messaging.md` §Failure handling —
+  "User left group"), so a leaver's row — including any
+  `is_group_admin` flag — persists untouched: a departed group
+  admin still counts as the active admin (the auto-promote path
+  does not fire) and silently resumes admin on rejoin. The
+  documented remediation is a bot-admin `/demote` of the stale
+  admin (security.md §Authorization model).
   **Eligibility for the auto-promote.** A row with
   `removed_at IS NOT NULL` is **not eligible** as a "first
   @mention" winner — the auto-promote only fires when the user

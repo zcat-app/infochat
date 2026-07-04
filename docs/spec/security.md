@@ -427,6 +427,31 @@ Invariants (also enforced in `schema.md`):
   standard non-admin response for whatever command they sent.
   `/promote` demotes the existing group admin in the same
   transaction.
+  - **Leaves do not free the slot on membership-event-less adapters
+    (v1 non-commitment).** The auto-promote trigger list above —
+    demotion or ban — deliberately omits a member *leaving*. On
+    adapters without a native per-user membership signal, where
+    `supportsMembershipEvents = false` (**both v1 production
+    adapters**; see `messaging.md` §Required SPI surface — Membership
+    events), a member who leaves a group does **not** have their
+    `group_membership` row or their `is_group_admin` flag
+    soft-cleared: there is no left-group event, and a group-scope send
+    carries no per-user delivery-failure carrier from which one could
+    be inferred (`messaging.md` §Failure handling — "User left
+    group"). Two consequences follow, and both are stated
+    NON-COMMITMENTS rather than threat-model violations — v1 never
+    committed to leave-driven cleanup on these adapters. (1) A
+    **departed group admin still counts as the active admin**: the
+    group's `is_group_admin` row count stays non-zero, so the
+    auto-promote path does not fire and the group is *not* treated as
+    admin-less. (2) If that departed admin later rejoins, they
+    **silently resume group admin**, because their row was never
+    cleared. The documented remediation is a bot-admin **`/demote`** of
+    the stale admin (`commands.md` §Admin): the departed member's row
+    is still active (`removed_at IS NULL`), which is exactly what
+    `/demote` requires of its target, and clearing it frees the
+    partial-unique-index slot for the next eligible first-mention
+    auto-promote or an explicit `/promote`.
 - **Banned-admin lockout escape hatch.** If the existing group admin is
   banned (their `is_group_admin` row remains but is unreachable per §User
   ban), a bot admin can `/promote` a different group member; the demote
