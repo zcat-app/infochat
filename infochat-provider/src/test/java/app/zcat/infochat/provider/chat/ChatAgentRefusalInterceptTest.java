@@ -31,6 +31,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
  * delivered or persisted — the user gets the deterministic bundle string
  * instead — while text that merely contains the substring mid-prose passes
  * through unchanged (the predicate is anchored, not a substring scan).
+ * Since M1-561 the intercept runs prefix-only on the post-stripToolCalls
+ * text, so a marker mixed with a tool-call fragment is intercepted too —
+ * including one whose closing bracket the strip's unbalanced-fragment
+ * drop-through eats, and an unterminated marker with no bracket at all.
  */
 class ChatAgentRefusalInterceptTest {
 
@@ -86,6 +90,89 @@ class ChatAgentRefusalInterceptTest {
         result.pendingCommit().commit();
         assertEquals(2, sessionPersistCalls,
                 "a non-refused turn persists the user + assistant rows as usual");
+    }
+
+    @Test
+    void markerWithBracelessFragmentInterceptedAfterStrip() {
+        // TOOL_CALL_PATTERN requires an opening brace, so a brace-less
+        // fragment does not dispatch — this is ordinary in-loop terminal
+        // text. It evades the pre-strip anchor (text no longer ends with
+        // ']') but strips down to the bare marker.
+        llmProvider.response = new LlmResponse("[REFUSAL: x]\nTOOL_CALL: searchPosts");
+
+        ChatAgent.ChatTurnResult result =
+                agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "tell me about the advisory");
+
+        assertEquals(1, llmProvider.generateCalls,
+                "a brace-less fragment must not dispatch — the mixed text is in-loop terminal text");
+        assertRefusedTurnDegraded(result);
+    }
+
+    @Test
+    void postCapMarkerThenBalancedFragmentIntercepted() {
+        // A balanced fragment dispatches every loop iteration, so this text
+        // comes back as the post-cap response, which skips tool-call parsing.
+        llmProvider.response = new LlmResponse(
+                "[REFUSAL: x]\nTOOL_CALL: getPost {\"uid\": \"u-1\"}");
+
+        ChatAgent.ChatTurnResult result =
+                agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "tell me about the advisory");
+
+        assertEquals(ChatAgent.MAX_TOOL_ITERATIONS + 1, llmProvider.generateCalls,
+                "the mixed text must be the post-iteration-cap response");
+        assertRefusedTurnDegraded(result);
+    }
+
+    @Test
+    void postCapBalancedFragmentThenMarkerIntercepted() {
+        llmProvider.response = new LlmResponse(
+                "TOOL_CALL: getPost {\"uid\": \"u-1\"}\n[REFUSAL: x]");
+
+        ChatAgent.ChatTurnResult result =
+                agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "tell me about the advisory");
+
+        assertEquals(ChatAgent.MAX_TOOL_ITERATIONS + 1, llmProvider.generateCalls,
+                "the mixed text must be the post-iteration-cap response");
+        assertRefusedTurnDegraded(result);
+    }
+
+    @Test
+    void embeddedFragmentInsideMarkerIntercepted() {
+        // The redteam repro (M1-561 audit): strip's unbalanced-fragment
+        // drop-through eats the marker's closing ']', so only a
+        // prefix-anchored check catches the stripped "[REFUSAL: ". No
+        // brace → in-loop terminal text.
+        llmProvider.response = new LlmResponse("[REFUSAL: TOOL_CALL: foo]");
+
+        ChatAgent.ChatTurnResult result =
+                agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "tell me about the advisory");
+
+        assertEquals(1, llmProvider.generateCalls,
+                "a brace-less fragment must not dispatch — the mixed text is in-loop terminal text");
+        assertRefusedTurnDegraded(result);
+    }
+
+    @Test
+    void unterminatedMarkerIntercepted() {
+        // No closing bracket at all — this evaded the two-sided anchor
+        // both before and after M1-559; the prefix-only predicate closes it.
+        llmProvider.response = new LlmResponse("[REFUSAL: x");
+
+        ChatAgent.ChatTurnResult result =
+                agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "tell me about the advisory");
+
+        assertRefusedTurnDegraded(result);
+    }
+
+    private void assertRefusedTurnDegraded(ChatAgent.ChatTurnResult result) {
+        assertEquals(BundleKeys.ERROR_CHAT_REFUSED, result.reply(),
+                "a refused turn must deliver the deterministic bundle string");
+        assertFalse(result.reply().contains("[REFUSAL:"),
+                "no part of the refusal marker may reach the delivered text");
+        assertNull(result.pendingCommit(),
+                "a refused turn is degraded like ERROR_CHAT_UNAVAILABLE — no turn to commit");
+        assertEquals(0, sessionPersistCalls,
+                "no user/assistant chat_message rows may be persisted for a refused turn");
     }
 
     // --- factory + test subclass (mirrors ChatAgentTest's harness) ---
@@ -196,9 +283,11 @@ class ChatAgentRefusalInterceptTest {
 
     static class StubLlmProvider implements LlmProvider {
         LlmResponse response = new LlmResponse("default response");
+        int generateCalls;
 
         @Override
         public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
+            generateCalls++;
             return response;
         }
     }

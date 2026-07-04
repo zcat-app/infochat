@@ -236,29 +236,37 @@ public class ChatAgent {
         String finalText = runToolLoop(provider, augmentedSystemPrompt, baseSystemPrompt,
                 prompt.userPrompt(), userId, scopeKind, scopeId);
 
-        // 5. Intercept the D21 structured refusal marker BEFORE persistence
-        // and delivery (security.md §Prompt-injection defenses; same anchored
-        // predicate as SummaryProseGenerator). The marker is protocol
-        // surface: delivering it verbatim leaks the injection-defense
-        // convention to the counterparty it defends against, and lets the
-        // LLM author what looks like bot-authoritative bracketed status
-        // text. Degrade exactly like the unavailable path — deterministic
-        // bundle string, null commit so no chat_message rows persist. The
-        // refusal reason is LLM-authored text derived from untrusted
-        // content and MUST NOT be logged (D37): userId only.
-        String trimmedFinalText = finalText.trim();
-        if (trimmedFinalText.startsWith("[REFUSAL:") && trimmedFinalText.endsWith("]")) {
-            log.warn("CHAT_AGENT returned refusal marker for userId={}; degrading turn", userId);
-            return new ChatTurnResult(
-                    bundleLoader.get(BundleKeys.ERROR_CHAT_REFUSED, scopeLanguage), null);
-        }
-
-        // 6. Strip any residual TOOL_CALL fragments that leaked past the
+        // 5. Strip any residual TOOL_CALL fragments that leaked past the
         // iteration cap — they are internal protocol, not user-visible.
         // A fragment with balanced braces (possibly nested / multi-line) is
         // removed whole; a partial or unbalanced fragment is removed through
         // end-of-text so a malformed multi-line call cannot leak.
         finalText = stripToolCalls(finalText);
+
+        // 6. Intercept the D21 structured refusal marker BEFORE persistence
+        // and delivery (security.md §Prompt-injection defenses). The marker
+        // is protocol surface: delivering it verbatim leaks the
+        // injection-defense convention to the counterparty it defends
+        // against, and lets the LLM author what looks like
+        // bot-authoritative bracketed status text. The check runs on the
+        // POST-strip text and is prefix-only (M1-561) — unlike
+        // SummaryProseGenerator's two-sided anchor — because strip's
+        // unbalanced-fragment drop-through can eat the marker's closing
+        // ']' ("[REFUSAL: TOOL_CALL: foo]" strips to "[REFUSAL: "), so an
+        // endsWith conjunct would re-open the leak. Prefix-only is
+        // fail-closed: trimmed text leading with the protocol token is
+        // never deliverable regardless of what follows, and since strip
+        // only deletes text, a post-strip prefix match cannot arise from a
+        // mid-prose quotation. Degrade exactly like the unavailable path —
+        // deterministic bundle string, null commit so no chat_message rows
+        // persist. The refusal reason is LLM-authored text derived from
+        // untrusted content and MUST NOT be logged (D37): userId only.
+        String trimmedFinalText = finalText.trim();
+        if (trimmedFinalText.startsWith("[REFUSAL:")) {
+            log.warn("CHAT_AGENT returned refusal marker for userId={}; degrading turn", userId);
+            return new ChatTurnResult(
+                    bundleLoader.get(BundleKeys.ERROR_CHAT_REFUSED, scopeLanguage), null);
+        }
 
         // 7. Sanitize BEFORE persist so admin commands never enter the DB
         String sanitized = outputSanitizer.sanitize(finalText);
