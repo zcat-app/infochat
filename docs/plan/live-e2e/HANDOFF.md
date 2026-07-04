@@ -7,11 +7,88 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-04 (ticket board DRAINED — M1-550…557 all merged & pushed through ce6e21d0; F-live-3 RESOLVED by M1-551; two co-location verify flakes → both tests hardened; control-plane still RESET — admin unclaimed) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-04 afternoon (**4b-4 DONE** — retrieval assertion GREEN over ollama, LLM-down degraded verified, readiness/liveness verified; admin RE-CLAIMED + admin-DM subscription re-seeded; ollama backend VERIFIED live incl. tool loop; three new findings F-live-7/8/9; remote-LLM leg blocked on a real API key) · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
+
+**4b-4 is DONE (2026-07-04 afternoon).** All five assertion items have live
+evidence (see the running log for detail):
+
+1. **Real LLM latency** — prior s10 (217 s / 293 s) + s12 (159.6 s) evidence
+   stands; today's ollama-backed chat turns added 20–40 s samples.
+2. **Retrieval assertion GREEN** — but reframed honestly first: v1 has **no
+   embedding/RAG retrieval in chat** (spec llm.md:19 "Retrieval is always
+   SQL", D19; embeddings feed only the collector's `LinkingJob`). The README
+   scenario-13 "RAG retrieval" wording was a mis-assumption. What WAS
+   asserted live: chat agent → `searchPosts` tool (2 real
+   `/v1/chat/completions` calls = a genuine tool loop) → deterministic SQL
+   retrieved the exactly-one seeded post → reply named its title
+   ("Seed: security advisory"). Real-embedding evidence separately:
+   `embedding_metadata` = nomic-embed-text-v1.5/768 real identity row, 2165
+   vectors, LinkingJob produced 388 semantic links (avg cosine 0.877).
+3. **Readiness/liveness** — UP on both services (provider mgmt :8081,
+   collector :8080).
+4. **Per-adapter metrics** — **F-live-7 (gap, ticket candidate):**
+   `/q/metrics` is 404 on BOTH services.
+5. **LLM-down = degraded** — verified live: chat LLM container stopped →
+   user received the friendly bundle reply ("The chat assistant is
+   unavailable right now…"), full content-free cause chain in the log
+   (`ConnectException > UnresolvedAddressException` — the M1-542 logger
+   paying off), readiness stayed UP (spec deployment.md degraded-not-dead),
+   no crash, clean recovery on container start.
+
+**Ollama backend VERIFIED live (user-requested check):** compose `ollama`
+service (0.30.8) + `llama3.2:3b` (the vps wizard default), chat task pointed
+at `http://ollama:11434/v1` → full turn + tool loop + delivery green over
+real relays. Setup notes: the native host ollama holds 127.0.0.1:11434 and
+sudo is interactive-only, so the compose service ran with a port override
+(host 11435; container-network reach is what matters). Reverted after; the
+`infochat-ollama` volume KEEPS the pulled model for future runs.
+
+**Remote-LLM leg NOT done — blocked on operator input:** secrets.env's
+`INFOCHAT_LLM_API_KEY` is a 9-char placeholder, no real remote credential
+exists on the host. Wizard remote branch = OpenAI-compatible remote endpoint
+for the six generative tasks, embeddings stay local (D54). Needs a real
+endpoint + key from the user; the ollama-leg recipe above is the template
+(override one task's base-url/model, restart provider, drive a DM).
+
+**New findings (all ticket candidates, see §Live findings):**
+- **F-live-7** — no metrics export: `quarkus-micrometer` is in the poms but
+  no `quarkus-micrometer-registry-prometheus`, so AdapterMetrics/LlmMetrics
+  register into a registry nothing exports; `/q/metrics` 404s (design
+  07-deployment.md:1059 promises it; spec deployment.md's "per-adapter
+  connection state is exposed separately via metrics" is unreachable).
+  `GET /q/health/llm` (design 07-deployment.md:1058) is also unimplemented.
+- **F-live-8** — the shipped host chat model
+  (`gemma-4-E4B-it-OBLITERATED-Q4_K_M.gguf`) is unreliable at chat: 4/4
+  turns today failed (2× llama.cpp 500 "does not match peg-gemma4 format"
+  on `<|channel>`-marker/degenerate output; 1× parsed-but-EMPTY reply —
+  all 600 cap tokens burned in a non-content channel, user received a blank
+  DM; 1× fast-500). Contradicts the F-live-6 note "no thinking channel";
+  yesterday's s12 green was a favorable sample. Provider sends no
+  `temperature` (llama.cpp default ~0.8) — a possible knob. Model-choice /
+  sampling follow-up, F-live-6 family.
+- **F-live-9** — chat path leaks the structured refusal marker:
+  `ChatPromptBuilder:44` instructs `[REFUSAL: <reason>]` but nothing in the
+  chat path intercepts it — a live ollama turn delivered the raw marker
+  verbatim to the user. `SummaryProseGenerator:119` intercepts + degrades
+  ("never surface the marker"); chat needs the same. security_relevant.
+
+**NEXT:** Phase 5 (Signal delta — needs the user for the phone-driven
+side), the pending image rebuild (running images predate M1-551/552), the
+remote-LLM leg (needs API key), and tickets for F-live-7/8/9.
+
+**Fixture state after this session:** LiveAdmin CLAIMED (`is_admin=t`,
+vouched), admin-DM → m1-537-seed-source `source_subscription` row present,
+`chat_message` has 8 rows from today's drives. Group/LiveUser fixtures NOT
+rebuilt (4b-4 didn't need them — rebuild per the recipes below before any
+future group-scenario drive).
+
+---
+
+## ▶ previous START HERE (2026-07-04 morning, kept for context)
 
 **ALL 7 live scenarios are GREEN (2026-07-03).** F-live-6 fixed by **M1-548
 (merged d9093c05)**: `OpenAiCompatibleProvider` now reads per-task
@@ -188,10 +265,10 @@ checklist, §6 differences, §8 decisions) → `simplex-live-frame-capture` memo
 
 ## Current state (one line)
 
-Substrate built and green (Phases 0–4a done); **all 7 live SimpleX scenarios
-GREEN (2026-07-03)**; ticket board drained (2026-07-04: 581 done / 0 pending).
-Remaining: 4b-4 assertions (needs the post-M1-549 fixture rebuild + admin
-re-claim first) and Phase 5 (Signal delta).
+Phases 0–4b DONE (all 7 live SimpleX scenarios GREEN 2026-07-03; 4b-4
+assertions DONE 2026-07-04; ollama backend verified live). Remaining:
+Phase 5 (Signal delta), remote-LLM leg (needs an API key from the user),
+image rebuild (M1-551/552 not yet deployed), tickets for F-live-7/8/9.
 
 ## Where we are
 
@@ -202,7 +279,7 @@ re-claim first) and Phase 5 (Signal delta).
 | 2 — Load-bearing assumptions | admin-token re-arm, SSRF strict, FK trap, caps | ✅ DONE |
 | 3 — Reset & data harness | `prod/live-reset.sh`, `live-seed.sh`, `live-inject-adversarial.sh` | ✅ DONE (M1-536/537/538) |
 | **4a — scenario runner substrate** | `Scenario`, `ConversationBackend` SPI, `ScenarioRunner`, InMemory backend, `ScenarioRunnerIT` | ✅ DONE (M1-539) |
-| **4b — SimpleX live drive** | real simplex-chat drive + LLM latency + embedding retrieval | 🔶 IN PROGRESS — **all 7 scenarios GREEN 2026-07-03** (s12 green post-M1-548); remaining: 4b-4 assertions only |
+| **4b — SimpleX live drive** | real simplex-chat drive + LLM latency + embedding retrieval | ✅ DONE — all 7 scenarios GREEN 2026-07-03; **4b-4 assertions DONE 2026-07-04** (retrieval GREEN over ollama; metrics gap = F-live-7) |
 | **5 — Signal delta** | round-trip + ACI bootstrap + §6 differences | ❌ NOT STARTED |
 | 6 — (optional) `/testcase` skill | wrap the runner once 2–3 scenarios pass | ❌ not started |
 
@@ -233,9 +310,11 @@ boundary).
 3. [ ] **4b-3** — Run the 7 transport-relevant scenarios (3,4,7,10,11,12,15) over
        real SimpleX via the runner. **Substrate DONE (M1-545 + M1-546); the
        run itself is next — see §START HERE.**
-4. [ ] **4b-4** — Assert real LLM latency captured; embedding-retrieval assertion
-       (ask a topic covered by exactly one seeded post → assert it's retrieved);
-       readiness/liveness, per-adapter metrics, LLM-down = degraded.
+4. [x] **4b-4** — DONE 2026-07-04 (see §START HERE): latency evidence stands;
+       retrieval assertion GREEN over ollama (reframed — SQL-via-tool per D19,
+       not RAG); readiness/liveness UP; LLM-down degraded verified live;
+       per-adapter metrics = **F-live-7 gap** (`/q/metrics` 404, no
+       Prometheus registry dependency).
 5. [ ] **5** — Signal delta (bot + 1 admin; see constraint below).
 
 ## Live findings (Phase 4b — real transport)
@@ -431,7 +510,102 @@ startup event and Stage-1 virtual threads race deployment completion — and the
 likely needs a large RAW backlog + restart. Un-ticketed; investigate before
 relying on unattended collector restarts.
 
+### F-live-7 (MEDIUM, observability) — no metrics export at all
+Found by the 4b-4 per-adapter-metrics check (2026-07-04): `/q/metrics`
+returns 404 on the provider (mgmt :8081) and collector (:8080). Root cause:
+every module ships `quarkus-micrometer` (CDI `MeterRegistry`; AdapterMetrics
+/ LlmMetrics register meters) but NO module declares
+`quarkus-micrometer-registry-prometheus`, so there is no export endpoint —
+the meters are write-only. Design 07-deployment.md:1059 promises
+`GET /q/metrics` (Micrometer/Prometheus); spec deployment.md §Health says
+per-adapter connection state "is exposed separately via metrics" — currently
+unreachable by any operator. The design's `GET /q/health/llm` (:1058) is
+likewise unimplemented (404, no code references). Green in CI because no
+test asserts either endpoint exists. Fix shape: add the registry-prometheus
+dependency to both service poms (+ a readiness-style IT pinning the
+endpoint); decide /q/health/llm separately.
+
+### F-live-8 (HIGH for chat UX, model/product) — shipped host chat model unreliable at chat-format output
+2026-07-04: 4/4 chat-mode turns against the baked
+`gemma-4-E4B-it-OBLITERATED-Q4_K_M.gguf` (llama.cpp, peg-gemma4 format)
+failed: two returned llama.cpp 500 "The model produced output that does not
+match the expected peg-gemma4 format" (decode ran to the 600 cap emitting
+`<|channel>`-marker garbage / degenerate repetition); one PARSED but with
+EMPTY content — all 600 cap tokens burned in a non-content channel, and the
+empty reply was DELIVERED as a blank DM (client DB item 109); one 500'd
+within ~8 s on an immediate malformed channel token (also under a 1200-token
+experiment cap, so "cap too small" alone doesn't explain it). This
+contradicts the F-live-6 note "no thinking channel" — the live outputs show
+channel-structured emissions. Yesterday's s12 GREEN (600 tokens of plain
+prose truncated at the cap, ≥80 chars delivered) was a favorable sample, not
+proof of reliability. Contributing knob: `OpenAiCompatibleProvider` sends no
+`temperature`, so llama.cpp's default (~0.8) applies — high for a Q4
+abliterated 4B-class model. Follow-up options (operator/model tier): pick a
+better-behaved default GGUF, and/or a per-task `temperature` key in
+TaskConfig (F-live-6 / M1-548 family). The friendly-error path behaved
+correctly on every failure (bundle reply delivered, D37 cause chain logged).
+
+### F-live-9 (MEDIUM, security-relevant) — chat path delivers the structured refusal marker verbatim
+Live ollama turn (2026-07-04): a benign question ("Tell me about the recent
+security advisory from my sources") made `llama3.2:3b` emit the D21
+structured refusal — and the user received the raw protocol string
+`[REFUSAL: unable to assist with untrusted source information]` as the bot
+reply (chat_message seq 3 + client DB). `ChatPromptBuilder:44` instructs the
+marker, but the chat path has no interception; `SummaryProseGenerator:119`
+intercepts the same marker and degrades, with a comment citing security.md
+§Prompt-injection defenses "never surface the marker … to the user". The
+chat agent needs the same intercept (friendly bundle reply + log). Also
+notable: the refusal itself was spurious (3B model over-triggering on the
+untrusted-content framing) — a model-quality data point for F-live-8's
+default-model discussion.
+
 ## Running log
+
+### 2026-07-04 afternoon (4b-4 DONE; ollama backend verified; F-live-7/8/9 found)
+
+- **Admin re-claim + minimal fixture rebuild:** D50 token DM → `is_admin=t`,
+  vouched, probation NULL (single users row). Re-inserted the admin-DM →
+  m1-537-seed-source `source_subscription` row (owner-role INSERT, scope_id
+  = users.id — `AddSourceCommandHandler:155` confirms the dm-scope shape).
+  Group/LiveUser fixtures deliberately NOT rebuilt (4b-4 needs none of them).
+  Data-plane intact: 2165 READY (all embedded), ~1.55k RAW backlog, 46
+  QUARANTINED; `provider_state` survived with a live cursor (M1-549 benefit
+  observed: no epoch page-through on any of today's 3 provider restarts).
+- **4b-4 sweep** (evidence summarized in §START HERE): readiness/liveness UP
+  both services; `/q/metrics` 404 both services → **F-live-7**;
+  real-embedding evidence via `embedding_metadata` + 388 LinkingJob semantic
+  links; LLM-down check GREEN (llamacpp stopped → friendly bundle reply
+  received by the client, `ConnectException > UnresolvedAddressException`
+  cause chain in the log, readiness stayed UP, clean recovery).
+- **Local-model chat attempts all failed → F-live-8** (4/4: two peg-parse
+  500s, one parsed-but-empty blank DM, one fast-500; a 600→1200 max-tokens +
+  240→420 s timeout experiment did not help and was REVERTED — prod config
+  is back at the M1-550-recommended 240000/600). s12's green was a favorable
+  sample; collector stopped/restarted around each attempt per the s12
+  contention lesson.
+- **Ollama backend verified live (user-requested):** native host ollama
+  occupies 127.0.0.1:11434 (loopback-only, so unusable from containers;
+  sudo needs interactive auth → couldn't stop it) → started the compose
+  `ollama` service (0.30.8) with a scratchpad port override
+  (`ports: !override → 127.0.0.1:11435:11434`; container-network reach is
+  what the apps use), `ollama pull llama3.2:3b` (the §5.7 vps default),
+  pointed ONLY `infochat.llm.chat.{base-url,model}` at it, provider
+  restart. Results: turn 1 delivered the raw `[REFUSAL: …]` marker →
+  **F-live-9**; turn 2 ("search my posts for security topics") ran a REAL
+  2-call tool loop but honestly found nothing (model chose tag `security`;
+  the seed post carries only `m1-537-security` — both are in the
+  vocabulary); turn 3 (tag pinned) → **retrieval assertion GREEN**: reply
+  named "Seed: security advisory", ~20 s wall. Everything REVERTED after
+  (chat back on llamacpp/gemma, ollama container removed; the
+  `infochat-ollama` volume keeps the model).
+- **Remote-LLM leg blocked:** `INFOCHAT_LLM_API_KEY` is a 9-char
+  placeholder; no real remote credential on the host. Needs user input
+  (endpoint + key); recipe = the ollama leg above with a remote base-url +
+  `api-key` prop.
+- **Stack at session end:** 5 containers up & healthy, config reverted to
+  documented values, collector booted clean (0 SRMSG00034 on both restarts
+  today — pre-M1-551 image, race just won). Images still predate
+  M1-551/552 — rebuild still pending.
 
 ### 2026-07-04 (board drained: M1-550…557 merged; F-live-3 fixed; co-location rule re-learned)
 
