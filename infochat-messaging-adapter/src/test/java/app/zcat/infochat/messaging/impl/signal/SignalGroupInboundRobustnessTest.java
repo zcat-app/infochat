@@ -8,6 +8,7 @@ import jakarta.json.Json;
 import jakarta.json.JsonArrayBuilder;
 import jakarta.json.JsonObject;
 
+import java.util.Base64;
 
 import org.junit.jupiter.api.Test;
 
@@ -164,6 +165,45 @@ class SignalGroupInboundRobustnessTest {
                 "a well-formed bot mention is still delivered");
         assertEquals("hello", inbound.messages.get(0).text(),
                 "the mention span is stripped as before");
+    }
+
+    // ---- base64 group-id shape gate (M1-565) ----
+
+    @Test
+    void malformedGroupIdsDropCleanlyWithoutDispatch() {
+        // A group stanza whose id is present as a JSON string but fails the
+        // SignalMessageCodec.isAcceptableGroupId shape gate: non-base64
+        // garbage, empty, or decoding to over the 64-byte band ceiling.
+        // Each carries an otherwise well-formed bot mention, so the gate is
+        // the sole reason for the drop — it must reject the scope key
+        // without throwing and without dispatch.
+        assertGroupIdDropsCleanly("not valid base64 @@@");
+        assertGroupIdDropsCleanly("");
+        // 65 zero bytes → over the [16, 64]-byte band ceiling.
+        assertGroupIdDropsCleanly(Base64.getEncoder().encodeToString(new byte[65]));
+    }
+
+    private static void assertGroupIdDropsCleanly(String groupId) {
+        RecordingInbound inbound = new RecordingInbound();
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
+        JsonObject frame = Json.createObjectBuilder()
+                .add("envelope", Json.createObjectBuilder()
+                        .add("sourceUuid", SENDER)
+                        .add("timestamp", 1700000001000L)
+                        .add("dataMessage", Json.createObjectBuilder()
+                                .add("timestamp", 1700000001000L)
+                                .add("message", "@bot summarise this")
+                                .add("groupInfo", Json.createObjectBuilder().add("groupId", groupId))
+                                .add("mentions", Json.createArrayBuilder()
+                                        .add(Json.createObjectBuilder()
+                                                .add("uuid", BOT_ACI)
+                                                .add("start", 0)
+                                                .add("length", 4)))))
+                .build();
+        assertDoesNotThrow(() -> handler.handleReceive(frame),
+                "a group id failing the base64 shape gate must not throw out of handleReceive");
+        assertEquals(0, inbound.messages.size(),
+                "a group id failing the base64 shape gate must drop, not dispatch");
     }
 
     // ---- helpers ----

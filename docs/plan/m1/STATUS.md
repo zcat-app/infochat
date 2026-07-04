@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 588 |
+| done | 589 |
 | deferred | 10 |
 | **total** | **599** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-565 — Base64 shape gate on the Signal group-id scope key (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-565 | Base64 shape gate on the Signal group-id scope key | 2026-07-04 | round 1 APPROVE |
 | M1-564 | Exclude prod/runtime from the app-image build context | 2026-07-04 | round 1 APPROVE |
 | M1-563 | Leave-cleanup posture for membership-event-less adapters | 2026-07-04 | round 2 APPROVE |
 | M1-562 | Signal group inbound parses the real signal-cli wire shape | 2026-07-04 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-558 | Prometheus metrics export — registry dependency makes /q/metrics real (F-live-7) | 2026-07-04 | round 1 APPROVE |
 | M1-557 | SignalReconnectTest inbound push absorbs reconnect wiring gap | 2026-07-04 | round 1 APPROVE |
 | M1-556 | Stage1WatchdogIT upper wall-clock band widens to 50x cap | 2026-07-04 | round 1 APPROVE |
-| M1-552 | Chat system prompt gains a max-tokens-derived brevity hint | 2026-07-04 | round 1 APPROVE |
 
 ---
 
@@ -769,5 +769,5 @@ M1-561 (done)
 M1-562 (done)
 M1-563 (done)
 M1-564 (done)
-M1-565 (pending) ← runnable
+M1-565 (done)
 ```

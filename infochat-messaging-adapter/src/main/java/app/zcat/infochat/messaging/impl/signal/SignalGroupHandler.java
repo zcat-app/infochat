@@ -110,12 +110,13 @@ final class SignalGroupHandler {
         if (!(envelope.get("dataMessage") instanceof JsonObject dataMessage)) {
             return;
         }
-        String groupId = extractGroupId(dataMessage);
+        String groupId = extractGroupId(envelope, dataMessage);
         if (groupId == null) {
             // DM scope, non-group notification (owned by
             // SignalMessageCodec.extractDm via SignalJsonRpcClient), or a
-            // group stanza without its base64 id — malformed, cannot
-            // anchor a stable per-group scope.
+            // group stanza whose id is absent or fails the base64 shape
+            // gate (extractGroupId WARNs on that last case) — cannot anchor
+            // a stable per-group scope.
             return;
         }
 
@@ -279,16 +280,40 @@ final class SignalGroupHandler {
      * instanceof doubles as the null-check and the type-check (the
      * codec's discipline): a wrong-typed stanza or id collapses into
      * the same null → drop branch as an absent one.
+     *
+     * <p>Whichever spelling matches, the raw id is passed through the
+     * {@link SignalMessageCodec#isAcceptableGroupId} shape gate (mirroring
+     * the sender-ACI gate) before it can anchor a scope; an id that fails
+     * the gate drops the frame with an observable WARN — see the gate
+     * application below.</p>
      */
-    private static @Nullable String extractGroupId(JsonObject dataMessage) {
+    private static @Nullable String extractGroupId(JsonObject envelope, JsonObject dataMessage) {
+        String rawId;
         if (dataMessage.get("groupInfo") instanceof JsonObject groupInfo
                 && groupInfo.get("groupId") instanceof JsonString groupId) {
-            return groupId.getString();
-        }
-        if (dataMessage.get("groupV2") instanceof JsonObject groupV2
+            rawId = groupId.getString();
+        } else if (dataMessage.get("groupV2") instanceof JsonObject groupV2
                 && groupV2.get("id") instanceof JsonString id) {
-            return id.getString();
+            rawId = id.getString();
+        } else {
+            return null;
         }
-        return null;
+        if (!SignalMessageCodec.isAcceptableGroupId(rawId)) {
+            // A group stanza matched but its id fails the base64 shape gate
+            // (mirrors the sender-ACI gate on the same envelope). Drop it —
+            // but observably: F-live-10 stayed invisible precisely because
+            // the group-drop path was spec-permitted silence, so a
+            // shape-gate rejection is an anomaly worth surfacing. D37: the
+            // id names a private group, so the WARN carries only its encoded
+            // LENGTH and the adapterMessageId timestamp token, never the
+            // value.
+            Long timestamp = SignalMessageCodec.usableTimestamp(envelope, dataMessage);
+            LOG.warnf("inbound group message dropped — group id fails base64 shape gate;"
+                            + " encoded length %d adapterMessageId %s",
+                    rawId.length(),
+                    timestamp == null ? "signal-unknown" : "signal-" + timestamp);
+            return null;
+        }
+        return rawId;
     }
 }

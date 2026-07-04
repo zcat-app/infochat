@@ -12,6 +12,7 @@ import jakarta.json.JsonReader;
 import jakarta.json.JsonValue;
 
 import java.io.StringReader;
+import java.util.Base64;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
@@ -316,6 +317,33 @@ final class SignalMessageCodec {
      */
     static boolean isAcceptableAci(String aci) {
         return CANONICAL_UUID.matcher(aci.toLowerCase(Locale.ROOT)).matches();
+    }
+
+    /**
+     * True when {@code groupId} is acceptable as a v1 group scope key: it
+     * strict-{@link Base64} decodes AND the decoded length falls within the
+     * [16, 64]-byte band. Mirrors {@link #isAcceptableAci} — the group
+     * route's admission gate on the scope key, so a malformed or unbounded
+     * group id never becomes a {@code ScopeRef.Group} key. Defense-in-depth
+     * (M1-565): the value arrives from the co-located signal-cli over a
+     * loopback channel the threat model trusts today, but if that boundary
+     * is ever redrawn the scope key is already shape-gated, exactly as the
+     * sender ACI is.
+     *
+     * <p>The bounds are deliberately a BAND, not an exact pin: the
+     * live-observed group v2 id is 32 bytes and the existing test fixtures
+     * decode to 20 — an exact-length gate is the F-live-10
+     * overstrict-assumption failure mode (a too-narrow shape assumption
+     * silently dropping real traffic) in reverse.</p>
+     */
+    static boolean isAcceptableGroupId(String groupId) {
+        byte[] decoded;
+        try {
+            decoded = Base64.getDecoder().decode(groupId);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+        return decoded.length >= 16 && decoded.length <= 64;
     }
 
     /** Decoded JSON-RPC 2.0 envelope. Sealed for exhaustive dispatch. */

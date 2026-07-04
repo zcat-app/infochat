@@ -1,9 +1,45 @@
 ---
 id: M1-565
 title: Base64 shape gate on the Signal group-id scope key
-status: pending
+status: done
 created: 2026-07-04
 last_updated: 2026-07-04
+reviews:
+  - round: 1
+    date: 2026-07-04
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 228
+      removed: 16
+clarity_check:
+  date: 2026-07-04
+  verdict: PASS
+  warnings: []
+  blockers: []
+redteam_findings: []
+redteam_audits:
+  - date: 2026-07-04
+    verdict: CLEAN
+    base: main@07c32745
+    head: working-tree (pre-commit, branch m1/M1-565-signal-group-id-shape-gate)
+    verdict_file: docs/plan/m1/redteam/M1-565-2026-07-04.md
+    out_of_model_count: 2
+    note: |
+      In-cycle audit of the uncommitted branch diff (user-approved
+      working-tree resolution). CLEAN, no in-model findings. Two advisory
+      out-of-model items, both gated on a future signal-cli trust-boundary
+      redraw: (1) the gate validates but does not canonicalize the base64
+      spelling, so a distrusted channel could fragment one group into
+      multiple scope keys — canonicalize if the boundary is redrawn;
+      (2) the shape-gate WARN is per-frame and upstream of all rate caps —
+      revisit log-rate bounding on the same redraw. No tickets filed.
 blocked_by: []
 files_budget: 4
 files_scope:

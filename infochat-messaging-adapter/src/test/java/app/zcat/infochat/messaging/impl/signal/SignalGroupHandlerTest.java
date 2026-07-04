@@ -370,4 +370,50 @@ class SignalGroupHandlerTest {
                 "group sender displayName must come from the envelope sourceName");
     }
 
+    @Test
+    void malformedGroupIdDroppedWithObservableWarn() {
+        // M1-565: a group stanza whose groupId is present as a JSON string
+        // but is not valid base64 fails the SignalMessageCodec shape gate.
+        // The frame drops (no dispatch) — but observably, unlike an
+        // F-live-10-style silent drop: a WARN carrying ONLY the encoded
+        // id's LENGTH and the adapterMessageId timestamp token, never the
+        // id value itself (D37 — the id names a private group).
+        String malformedId = "!!!!not-base64-group-id!!!!";
+        RecordingInbound inbound = new RecordingInbound();
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, AdapterMetrics.noop());
+        CapturingLogHandler log = CapturingLogHandler.attach(SignalGroupHandler.class);
+        try {
+            handler.handleReceive(parse("""
+                    {
+                      "envelope": {
+                        "sourceUuid": "AABBCCDD-1111-2222-3333-444455556666",
+                        "timestamp": 1700000009000,
+                        "dataMessage": {
+                          "timestamp": 1700000009000,
+                          "message": "@bot summarise this",
+                          "groupInfo": {"groupId": "!!!!not-base64-group-id!!!!"},
+                          "mentions": [
+                            {"uuid": "11112222-3333-4444-5555-666677778888", "start": 0, "length": 4}
+                          ]
+                        }
+                      }
+                    }
+                    """));
+        } finally {
+            log.detach();
+        }
+
+        assertEquals(0, inbound.messages.size(),
+                "a group id that fails the base64 shape gate must drop, not dispatch");
+        String logged = log.formatted();
+        assertTrue(logged.contains("WARN"),
+                "the shape-gate rejection must be observable at WARN");
+        assertTrue(logged.contains("signal-1700000009000"),
+                "the WARN must carry the adapterMessageId timestamp token");
+        assertTrue(logged.contains(String.valueOf(malformedId.length())),
+                "the WARN must carry the encoded id's length");
+        assertFalse(logged.contains(malformedId),
+                "the WARN must NOT carry the group id value (D37 — it names a private group)");
+    }
+
 }
