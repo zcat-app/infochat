@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 580 |
+| done | 581 |
 | deferred | 10 |
-| **total** | **590** |
+| **total** | **591** |
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-557 | SignalReconnectTest inbound push absorbs reconnect wiring gap | 2026-07-04 | round 1 APPROVE |
 | M1-556 | Stage1WatchdogIT upper wall-clock band widens to 50x cap | 2026-07-04 | round 1 APPROVE |
 | M1-552 | Chat system prompt gains a max-tokens-derived brevity hint | 2026-07-04 | round 1 APPROVE |
 | M1-551 | OutboxRehydrator waits for eval-queue downstream readiness (F-live-3) | 2026-07-04 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-550 | Wizard step 4 writes profile-sized LLM timeout-ms + max-tokens (F-live-5) | 2026-07-03 | round 1 APPROVE |
 | M1-549 | live-reset preserves provider_state (F-live-4) | 2026-07-03 | round 2 APPROVE |
 | M1-548 | Per-task max-tokens for OpenAiCompatibleProvider (F-live-6) | 2026-07-03 | round 1 APPROVE |
-| M1-547 | Live 4b-3 harness corrections (D51 mention shape + confirm-gated mint scenarios) | 2026-07-03 | round 1 APPROVE |
 
 ---
 
@@ -761,4 +761,5 @@ M1-553 (done)
 M1-554 (done)
 M1-555 (done)
 M1-556 (done)
+M1-557 (done)
 ```

@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import jakarta.json.Json;
 import jakarta.json.JsonObject;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -151,8 +152,8 @@ class SignalReconnectTest {
                 fake.killClientConnection();
                 sp.restartHung();
                 fake.awaitConnectionGeneration(generationBeforeKill + 2, 10_000);
-                fake.pushNotification("receive",
-                        receiveParams("after-reconnect", 1700000099000L));
+                pushUntilAccepted(fake, "receive",
+                        receiveParams("after-reconnect", 1700000099000L), 10_000);
                 InboundMessage first = delivered.poll(5_000, TimeUnit.MILLISECONDS);
                 assertNotNull(first,
                         "inbound pushed after the reconnect must reach the handler");
@@ -191,6 +192,38 @@ class SignalReconnectTest {
         }
         throw new AssertionError("send did not succeed within " + timeoutMs
                 + " ms of the supervised restart; last failure: " + last);
+    }
+
+    /**
+     * Retry the inbound push until the fake's write succeeds or the
+     * deadline passes. {@code awaitConnectionGeneration} proves the fake
+     * has ACCEPTED the reconnect's socket, not that the adapter's
+     * {@code connect()} has finished wiring its writer/reader — the same
+     * microseconds-wide gap {@link #sendUntilSuccess} documents for the
+     * outbound path. Under co-located host load the gap stretched and a
+     * bare push flushed into a socket the client side was still tearing
+     * down ({@code SocketException: Socket closed}, full-suite verify
+     * 2026-07-04; M1-540 hardened the sibling MultiAdapterProductionIT
+     * probe against the same race class, M1-557 this one). Retrying ONLY
+     * on {@link IOException} cannot introduce a duplicate: a throwing
+     * push was never consumed by the client's (dead) side of that
+     * socket, so the exactly-once assertion keeps its full force.
+     */
+    private static void pushUntilAccepted(FakeSignalCli fake, String method,
+            JsonObject params, long timeoutMs) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        IOException last = null;
+        while (System.nanoTime() < deadline) {
+            try {
+                fake.pushNotification(method, params);
+                return;
+            } catch (IOException e) {
+                last = e;
+                Thread.sleep(50);
+            }
+        }
+        throw new AssertionError("inbound push did not succeed within " + timeoutMs
+                + " ms of the supervised restart; last failure: " + last, last);
     }
 
     /**
