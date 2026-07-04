@@ -117,6 +117,11 @@ not absent-means-uncapped: an uncapped completion lets a slow local backend
 generate until the client `timeout-ms` cancels a finishable reply (F-live-6);
 a `finish_reason=length` truncation is the cheaper failure. Size per-task
 values so `cap × per-token decode time + prefill < timeout-ms` on the host.
+The invariant assumes NON-THINKING generation: the compose `llamacpp`
+service pins `LLAMA_ARG_REASONING=off`, because llama.cpp's default
+`--reasoning auto` enables a thinking-capable template's channel and the
+thought tokens silently consume the cap before any visible output
+(F-live-8).
 The chat system prompt derives its brevity hint from this key — "Keep replies
 under about N words", N = max(50, round(max-tokens × 0.45)) — so operators
 sizing the chat cap resize the prompt's word target automatically.                                                                                                                                                           

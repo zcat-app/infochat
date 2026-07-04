@@ -326,6 +326,10 @@ case "$backend" in
     fi
 
     # --- Generative GGUF: pinned default (Enter) or custom override URL. ---
+    # Decision-time twin of the SETUP_GUIDE.md step-4 note (F-live-8): the
+    # compose service pins LLAMA_ARG_REASONING=off, so a reasoning-tuned GGUF
+    # runs but never thinks — and the timeout/token recommendations assume that.
+    echo "Note: thinking/reasoning is disabled on the llama.cpp server — a reasoning-tuned model will run but will not 'think', and the timeout/token recommendations below assume that."
     read -rp "Generative GGUF — paste a full download URL, or press Enter for the pinned default ($LLAMACPP_GEN_GGUF_FILE): " gen_override
     if [[ -n "$gen_override" ]]; then
       gen_url="$gen_override"

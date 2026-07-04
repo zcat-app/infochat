@@ -1,9 +1,28 @@
 ---
 id: M1-560
 title: llamacpp serves with reasoning off — token caps buy visible output (F-live-8)
-status: pending
+status: done
 created: 2026-07-04
 last_updated: 2026-07-04
+clarity_check:
+  date: 2026-07-04
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-04
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 53
+      removed: 9
 blocked_by: []
 files_budget: 5
 files_scope:
@@ -123,6 +142,27 @@ Expected side benefit: eval tasks (tagger/entity/security/summarizer) have
 been paying the same hidden thinking tax per call on a 4-vCPU host; with
 reasoning off the RAW-backlog chew rate should improve. Not an acceptance
 criterion — noted so the next backlog observation isn't misattributed.
+
+## Host validation (2026-07-04, from the committed compose file)
+
+Provenance pinned per acceptance item 4 — the service was force-recreated
+from the branch's committed compose file ALONE (no override file):
+
+- `docker compose -f docker-compose.yml --env-file prod/runtime/secrets.env
+  --profile prod --profile llamacpp up -d --force-recreate --wait llamacpp`
+  → Healthy. Container label
+  `com.docker.compose.project.config_files=/home/infochat/infochat/docker-compose.yml`
+  (single file — the gitignored override was NOT part of the config) and
+  `LLAMA_ARG_REASONING=off` present in the container env.
+- Live chat DM over real relays (LiveAdmin → bot, 15:02:40Z, collector
+  stopped for the turn per the s12 contention lesson, restarted after):
+  assistant reply persisted (`chat_message` seq 15, **625 chars, non-empty**)
+  at 15:05:11Z (~150 s wall) and DELIVERED to the client
+  (`chat_items` id 128, 625 chars, same timestamp). llama.cpp released the
+  task cleanly (`truncated = 0`), no 500s, no peg-format errors — the
+  previously 4/4-failing shape completes.
+- Reply prose is degenerate junk — the abliterated-quant model-quality
+  residual, explicitly out_of_scope (D49 model choice).
 
 ## Why security_relevant is false
 

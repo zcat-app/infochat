@@ -300,6 +300,13 @@ services:
       LLAMA_ARG_MODEL: /models/${INFOCHAT_LLAMACPP_GGUF:-}
       LLAMA_ARG_HOST: 0.0.0.0
       LLAMA_ARG_PORT: "8080"
+      # Reasoning stays OFF: llama.cpp's default --reasoning auto detects the
+      # Gemma 4 template's thinking channel and turns it ON, so per-task
+      # max-tokens caps (M1-548, sized for visible output) are consumed by
+      # <|channel>thought tokens — empty or format-broken replies (F-live-8,
+      # host-proven 2026-07-04). Applies to any thinking-capable GGUF, the
+      # pinned default included.
+      LLAMA_ARG_REASONING: "off"
     volumes:
       - infochat-llamacpp-models:/models
     healthcheck:

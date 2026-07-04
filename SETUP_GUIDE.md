@@ -260,7 +260,10 @@ choose **remote** here.)
 
 If you pick **llamacpp**, the wizard first offers a pinned, checksum-verified
 default chat model — a gemma "GGUF". Press Enter to accept it, or paste your own
-GGUF URL to override (a custom chat model is unrestricted). It then asks how to
+GGUF URL to override (a custom chat model is unrestricted). One thing to know:
+thinking/reasoning is switched off on the llama.cpp server — a model tuned for
+step-by-step "thinking" will still run, it just won't think, and the wizard's
+timeout and token-limit recommendations later in this step assume that. It then asks how to
 run **embeddings** (the part that lets the bot match posts by meaning): a second
 llama.cpp model (`llamacpp`, the default) or Ollama running alongside (`ollama`).
 If you keep `llamacpp`, it offers a pinned nomic embeddings model the same way (a
