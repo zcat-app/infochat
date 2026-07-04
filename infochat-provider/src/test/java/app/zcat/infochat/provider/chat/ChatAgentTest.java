@@ -418,7 +418,8 @@ class ChatAgentTest {
                     }
                 },
                 new ChatSessionRepository(null),
-                16384) {
+                16384,
+                1024) {
             @Override
             public BuiltPrompt build(UUID u, String sk, UUID si, String msg) {
                 promptBuilderCalls++;

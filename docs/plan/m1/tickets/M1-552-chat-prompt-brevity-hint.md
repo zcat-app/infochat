@@ -1,11 +1,66 @@
 ---
 id: M1-552
 title: Chat system prompt gains a max-tokens-derived brevity hint
-status: pending
+status: done
 created: 2026-07-03
-last_updated: 2026-07-03
+last_updated: 2026-07-04
+reviews:
+  - round: 1
+    date: 2026-07-04
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 119
+      removed: 24
+revisions:
+  - date: 2026-07-03
+    reason: budget-breach refine, applied by the developer at the user's
+      explicit direction ("1 — apply the refine yourself as recommended",
+      2026-07-03) — the ticket missed ChatAgentTest.java:412's direct
+      construction of ChatPromptBuilder, which cannot compile once the
+      constructor gains the mandated @ConfigProperty max-tokens parameter
+    snapshot:
+      status: escalated
+      escalation_reason: budget-breach
+      files_budget: 3
+      acceptance_item_3: "ChatPromptBuilderTest pins the rendering —
+        max-tokens 600 → the system prompt contains 'under about 270 words';
+        the default (1024) → 'under about 461 words' — and all existing
+        prompt-shape tests pass unchanged."
+      test_plan_preserves_entry: "ChatAgentTest and the chat suite untouched
+        and green"
+escalations:
+  - date: 2026-07-03
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — pre-implementation budget-breach: acceptance mandates a new
+      @ConfigProperty constructor parameter on ChatPromptBuilder (render-once
+      in constructor), but ChatAgentTest.java:412 constructs ChatPromptBuilder
+      directly (anonymous subclass, 3-arg call) and fails to compile without a
+      4th argument. Touching ChatAgentTest exceeds files_budget: 3 and
+      contradicts test_plan.preserves "ChatAgentTest ... untouched and green".
+clarity_check:
+  date: 2026-07-03
+  verdict: PASS
+  warnings:
+    - "Procedural note, not a check finding: the clarity-prompt stub named
+      the ticket path as
+      docs/plan/m1/tickets/M1-552-chat-system-prompt-gains-a-max-tokens-derived-brevity-hint.md,
+      which does not exist. The actual file is
+      docs/plan/m1/tickets/M1-552-chat-prompt-brevity-hint.md (frontmatter
+      id: M1-552, confirmed unique via Glob for M1-552*.md). This evaluation
+      proceeded against the actual file since the frontmatter id matches the
+      prompt's stated ticket id; worth tightening the prompt-generation
+      step's slug so the stub path and the on-disk filename agree."
+  blockers: []
 blocked_by: []
-files_budget: 3
+files_budget: 4
 complexity: low
 risk: low
 round_cap: 2
@@ -41,7 +96,11 @@ acceptance:
     evidence: decode ran to exactly the 600-token cap).
   - ChatPromptBuilderTest pins the rendering — max-tokens 600 → the system
     prompt contains "under about 270 words"; the default (1024) → "under
-    about 461 words" — and all existing prompt-shape tests pass unchanged.
+    about 461 words" — and all existing prompt-shape assertions pass
+    unchanged. Direct-construction call sites of ChatPromptBuilder
+    (ChatPromptBuilderTest helpers and ChatAgentTest.buildAgent) gain only
+    the new constructor argument, passing 1024 (the default) so their
+    observed behavior is identical.
   - docs/design/05-llm-and-embeddings.md's max-tokens paragraph gains a
     sentence noting the chat system prompt derives its brevity hint
     (~45% of the cap, in words) from this key, so operators sizing the cap
@@ -56,7 +115,9 @@ test_plan:
   preserves:
     - all existing ChatPromptBuilderTest tests (untrusted-content wrapper
       shape, memory/history blocks, marker randomness)
-    - ChatAgentTest and the chat suite untouched and green
+    - ChatAgentTest assertions unchanged and green — its buildAgent factory
+      gains only the new constructor argument (1024); the rest of the chat
+      suite untouched and green
 spec_refs:
   - docs/spec/commands.md §Chat mode
   - docs/spec/llm.md §Prompt-injection-aware prompt shape
