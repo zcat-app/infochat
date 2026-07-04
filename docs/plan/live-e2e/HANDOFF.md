@@ -7,7 +7,7 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-04 late night (**PHASE 5 DONE — §6 checklist fully walked: 16 KB cap, rate pacing, reconnect, edit-fallback all verified live; NEW FINDING F-live-11 (Signal edit RPC is `updateMessage` which 0.14.5 doesn't have — fallback masks it; fix `send`+`editTimestamp` proven live). NEXT = draft the F-live-11 fix ticket**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-04 late night (**PHASE 5 DONE — §6 checklist fully walked live; F-live-11 found (no `updateMessage` on signal-cli 0.14.5 — every edit silently falls back to fresh sends) and its fix ticket M1-566 DRAFTED; board 589 done / 1 pending; NEXT = /m1-tick run M1-566, then image rebuild + the ticket's live host validation**) · Owner: ubuntu5 + Claude
 
 ---
 
@@ -598,8 +598,9 @@ checklist, §6 differences, §8 decisions) → `simplex-live-frame-capture` memo
 Phases 0–5 ALL DONE (SimpleX 2026-07-03; Signal 2026-07-04 — s07 GREEN
 + §6 checklist fully walked). One open finding: **F-live-11** (Signal
 edit RPC `updateMessage` doesn't exist on 0.14.5; fallback masks it;
-fix `send`+`editTimestamp` proven live) — fix ticket is the NEXT
-action. Phase 6 (/testcase skill) optional. Board: 589 done / 0 pending.
+fix `send`+`editTimestamp` proven live) — fix ticket **M1-566 drafted,
+pending run**. Phase 6 (/testcase skill) optional. Board: 589 done /
+1 pending (M1-566).
 
 ## Where we are
 
@@ -1046,6 +1047,18 @@ fixed; the 3-party group fixture is already built and waiting.
   true edit on the admin client). Full finding: §F-live-11.
 - Collector paused for both LLM-bound turns and restarted after; stack
   healthy at session end.
+- **M1-566 DRAFTED (6334e8fa)** — the F-live-11 fix ticket
+  (docs/plan/m1/tickets/M1-566-signal-edit-real-wire-encoding.md):
+  re-encode DM+group edit frames as `send`+`editTimestamp` (rename
+  encode methods to match), refresh the handle timestamp from each
+  edit response so chains target the LATEST revision (dominant under
+  either chain semantic; single hop live-proven), reconcile the three
+  test files' fakes to the new frame shape WITHOUT weakening the
+  fallback suite (2-frame accounting, correlationId reuse, fellBack
+  latching all preserved). 6 files, complexity low, round_cap 2, not
+  security-relevant. Host-validation recipe in the ticket §Notes
+  (post-merge rebuild: live `/summary -w 48h` from the signal user must
+  edit in place with zero `fallback_send` increments).
 
 ### 2026-07-04 late night (image rebuild + s07 GREEN over Signal)
 
