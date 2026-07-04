@@ -116,6 +116,27 @@ decision_refs:
   - D10
 reviews: {}
 clarity_check: {}
+revisions:
+  - date: 2026-07-04
+    reason: clarity-fail rework (bounded self-refine via /m1-tick run)
+    snapshot:
+      body_change: |
+        §Out-of-scope "Authorized pre-existing test changes" ledger lacked
+        a bullet for SignalGroupInboundRobustnessTest although
+        test_plan.modifies and acceptance item 4 both name it. Added the
+        bullet (gains groupInfo malformed-stanza cases; loses its
+        membership-array cases ~lines 99–164 with the removed branch).
+        No frontmatter field changed.
+      clarity_check:
+        date: 2026-07-04
+        verdict: FAIL
+        blockers:
+          - "TEST-CHANGES-AUTHORIZED: test_plan.modifies includes
+            SignalGroupInboundRobustnessTest.java, but the §Out-of-scope
+            'Authorized pre-existing test changes' list — which the ticket
+            itself declares exhaustive — does not enumerate it. Add a
+            bullet naming the specific edit."
+        warnings: []
 ---
 
 # M1-562: Signal group inbound parses the real signal-cli wire shape
@@ -200,6 +221,13 @@ not listed here is drift):
   false); gains the groupInfo cases.
 - `SignalAdapterSkeletonTest` (~line 25) — capability assertion flips to
   `false`.
+- `SignalGroupInboundRobustnessTest` — gains groupInfo-spelling
+  malformed-stanza cases (wrong-typed stanza, missing/wrong-typed
+  `groupId`) mirroring its existing groupV2 cases; its
+  membership-array cases (~lines 99–164: wrong-typed
+  `memberJoined`/`memberLeft` drops and the well-formed
+  `memberJoined` dispatch) are removed with the membership branch.
+  The surviving groupV2 message-path cases stay unmodified.
 - `SignalInboundDispatchTest` — the `memberLeft` routing case (~lines
   124, 209–218) is removed; its routing concern (non-DM envelopes reach
   the group route) must stay covered by a surviving or reworked case
