@@ -239,16 +239,15 @@ host-dependent live drive — needs real transports + real LLM, cannot be
       of `prod/scripts/4-llm.sh`) but that switches backends — not needed for a
       smoke run.
 
-### Phase 5 — Signal delta verification (smaller)
-- [ ] Register bot + 1 admin Signal account (manual; preserved dirs). A 3rd
-      number (existing personal account) is available as a **user, driven
-      manually from the phone** — not harness-scriptable.
-- [ ] Prove comms round-trip + ACI-admin bootstrap (automated: bot↔admin).
-- [ ] Walk the §6 differences checklist.
-- [ ] (optional, human-in-the-loop) bot↔user round-trip + minimal 3-party
-      group (bot+admin+user) with the phone user typing turns by hand. Fully
-      automated multi-party Signal lifecycle stays IT-only (runner can't script
-      the phone user); SimpleX carries the automated multi-party path.
+### Phase 5 — Signal delta verification (smaller) — ✅ DONE 2026-07-04
+- [x] Register bot + 1 admin Signal account (manual; preserved dirs). Revised:
+      3 smspva-rented numbers, ALL harness-drivable (the phone-only user
+      constraint was lifted) — bot + admin + user clients.
+- [x] Prove comms round-trip + ACI-admin bootstrap (automated: bot↔admin).
+- [x] Walk the §6 differences checklist (completed 2026-07-04 late night;
+      produced F-live-11 — see HANDOFF §Live findings).
+- [x] bot↔user round-trip + 3-party group (bot+admin+user) — fully automated
+      (s07 GREEN over Signal 2026-07-04; no phone user needed).
 
 ### Phase 6 — (optional) promote to `/testcase` skill
 - [ ] Only after 2–3 scenarios run cleanly. Skill wraps the Phase-4 runner
@@ -256,18 +255,21 @@ host-dependent live drive — needs real transports + real LLM, cannot be
 
 ## 6. SimpleX ↔ Signal differences to verify (Signal task scope)
 
-Confirmed from spec/code (design differs by construction):
-- [ ] **Admin bootstrap:** SimpleX single-use claim-token (`admin-token`,
+Confirmed from spec/code (design differs by construction); all six also
+exercised live during Phase 5 (2026-07-04 — D50 both legs, ACI identity +
+mention recognition, manual registration, TCP daemon transport incl.
+supervised restart, config validation at startup):
+- [x] **Admin bootstrap:** SimpleX single-use claim-token (`admin-token`,
       first-DM) vs Signal pre-seeded ACI (`admin`, validated at startup). [D50]
-- [ ] **Identity:** SimpleX per-connection id, profile address self-asserted &
+- [x] **Identity:** SimpleX per-connection id, profile address self-asserted &
       unverified; Signal ACI is a real crypto account id.
-- [ ] **Bot contact-id derivation:** SimpleX queried from running simplex-chat;
+- [x] **Bot contact-id derivation:** SimpleX queried from running simplex-chat;
       Signal read from signal-cli identity store (drives mention recognition).
-- [ ] **Provisioning:** SimpleX scriptable (profile + address + auto-accept);
+- [x] **Provisioning:** SimpleX scriptable (profile + address + auto-accept);
       Signal manual (phone + captcha), not scriptable.
-- [ ] **Transport:** SimpleX WebSocket ↔ simplex-chat subprocess; Signal TCP
+- [x] **Transport:** SimpleX WebSocket ↔ simplex-chat subprocess; Signal TCP
       JSON-RPC ↔ signal-cli daemon (framing, reconnect, supervision differ).
-- [ ] **Config keys:** simplex.{binary,data-dir,ws-port,admin-token} vs
+- [x] **Config keys:** simplex.{binary,data-dir,ws-port,admin-token} vs
       signal.{binary,data-dir,account,endpoint,allow-non-loopback-endpoint,admin}.
 
 Declared capability flags (verified 2026-07-01 — hardcoded constants, not
@@ -291,26 +293,42 @@ Behavioural — the real "hallucinated-reality" risk surface (verify live):
       M1-562 — no per-user membership signal on the 0.14.5 wire); both use the
       delivery-failure fallback posture, leave-cleanup is a stated
       non-commitment (M1-563).
-- [ ] **Typing / code-formatting:** SimpleX `false`, Signal `true` → progress
-      rendering + code-block output differ; confirm the degraded path on SimpleX.
-- [ ] **Message-edit fallback:** both declare edit=true, but Signal has a
-      documented edit-failure fresh-send fallback (2 frames); confirm SimpleX
-      edit behaviour on failure (may block, no fallback).
-- [ ] **Contact-acceptance model:** SimpleX explicit contact-request + auto-accept
-      vs Signal "anyone can message a number" (no request) — how the invite gate
-      + un-invited-rejection behaves on each.
+- [x] **Typing / code-formatting:** typing verified live (2026-07-04: STARTED/
+      STOPPED envelopes around the Signal /summary progress flow, DM-only by
+      design). Code-formatting: declared but v1 has NO consumer branching on
+      the flag (CapabilityFlags javadoc) — backticks pass through raw on both
+      adapters; live replies confirm.
+- [x] **Message-edit fallback:** fallback CONFIRMED live over Signal
+      (2026-07-04): first `updateMessage` fails PERMANENT → fresh-send
+      fallback delivers, handle falls back for good, each fallback draws its
+      own rate token. BUT the edit itself NEVER succeeds on real wire —
+      **F-live-11** (HANDOFF §Live findings): signal-cli 0.14.5 has no
+      `updateMessage` method; real edits go via `send`+`editTimestamp`
+      (fix shape proven live client-to-client).
+- [x] **Contact-acceptance model:** verified live 2026-07-04 (S4 un-invited
+      Signal DM → fixed rejection, zero rows; S3 invite mint→consume;
+      SimpleX contact-request path exercised across Phase 4b).
 - [x] **Mention encoding:** Signal ACI + body-range offsets verified live
       (s07 2026-07-04: `--mention start:length:<aci>` parsed, span stripped,
       command extracted); SimpleX D51 rep verified 2026-07-03.
 - [x] **Group model:** verified live via s07 over Signal (2026-07-04):
       `upstream_group_id` mapping (base64 id → groups row), pending→approve
       lifecycle, auto-promote + group-admin gate, in-group mention semantics.
-- [ ] **Inbound size cap / attachments** (both 16 KB inbound; confirm behaviour
-      at the cap).
-- [ ] **Async receive model & ordering / dedup.**
-- [ ] **Outbound rate limiting:** both cap at 5 sends/sec via `OutboundRateLimiter`;
-      confirm pacing holds under real transport.
-- [ ] **Failure/reconnect surfaces:** subprocess crash + daemon-down semantics.
+- [x] **Inbound size cap** verified live over Signal (2026-07-04): real wire
+      delivers 20 KB bodies (cap is reachable); provider drops at the shared
+      UTF-8-byte check with the value-free WARN, no reply to sender.
+- [x] **Async receive model & ordering / dedup:** verified live (2026-07-04):
+      server-queued replies delivered on next connect in order, no duplicates
+      (16/16 across two 8-message bursts). No inbound dedup exists by design
+      (FIFO single dispatch thread).
+- [x] **Outbound rate limiting:** verified live over Signal (2026-07-04):
+      8-message burst (11 ms inbound spread) → replies sustained at 5/s
+      (8 frames ≈1.6 s, mean gap ≈200 ms; daemon-side timestamp jitter
+      compresses individual gaps below 200 ms — limiter is upstream/blocking).
+- [x] **Failure/reconnect surfaces:** verified live over Signal (2026-07-04):
+      SIGKILL of the daemon → documented WARN with jittered backoff
+      (`restart 1/5 in 153 ms`) → `Signal adapter reconnected after subprocess
+      restart` at +4.7 s, gauge 1.0, post-recovery round-trip green.
 
 ## 7. Load-bearing code facts (verified 2026-07-01)
 

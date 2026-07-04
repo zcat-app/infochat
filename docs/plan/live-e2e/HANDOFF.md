@@ -7,11 +7,46 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-04 late night (**s07 GREEN over real Signal — all 5 steps (pending reply → /list-groups → /approve-group → approved /help → auto-promote /group-timezone); M1-565 gate accept-path validated live (32-byte id in-band); NEXT = remaining §6 items: edit fallback, rate pacing, reconnect/daemon-down, 16 KB cap**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-04 late night (**PHASE 5 DONE — §6 checklist fully walked: 16 KB cap, rate pacing, reconnect, edit-fallback all verified live; NEW FINDING F-live-11 (Signal edit RPC is `updateMessage` which 0.14.5 doesn't have — fallback masks it; fix `send`+`editTimestamp` proven live). NEXT = draft the F-live-11 fix ticket**) · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
+
+**PHASE 5 IS DONE (2026-07-04 late night).** The §6 differences
+checklist is fully walked — every behavioural item is ticked in
+README §6 with live evidence (see the running-log entry for the probe
+detail):
+
+- **16 KB inbound cap:** real wire delivers 20 KB; dropped at the
+  shared UTF-8-byte check, value-free WARN, no reply. Cap is reachable
+  ⇒ load-bearing.
+- **Rate pacing:** 8-msg burst (11 ms spread) → replies at a sustained
+  5/s (mean gap ≈200 ms). Bonus: server-queued replies arrive in order,
+  no duplicates (async-receive item).
+- **Reconnect:** daemon SIGKILL → documented WARN + jittered backoff →
+  `Signal adapter reconnected after subprocess restart` +4.7 s →
+  round-trip green.
+- **Edit fallback:** CONFIRMED live — and it fires on EVERY edit:
+  **F-live-11** (new finding, ticket candidate): signal-cli 0.14.5 has
+  no `updateMessage` method; the fix (`send`+`editTimestamp`) is
+  proven live. Typing indicator verified in the same probe.
+- Chat mode is single-frame by design (ProgressNotifier belongs to
+  /summary only — the survey subagent mis-attributed it; verified in
+  source).
+
+**Fixture state:** signal user DM scope now has a `source_subscription`
+row → m1-537 seed source (user-approved INSERT, kept); `live-signal-group`
+is approved with the user as group admin.
+
+**NEXT ACTION:** draft + run the F-live-11 fix ticket (re-encode Signal
+edit as `send`+`editTimestamp`, DM+group, reconcile fakes; needs image
+rebuild after merge to go live). Then the live-e2e plan is complete —
+Phase 6 (/testcase skill) stays optional.
+
+---
+
+## ▶ previous START HERE (2026-07-04 late night — s07 GREEN, kept for context)
 
 **s07 GROUP FLOW OVER SIGNAL IS GREEN (2026-07-04 late night).** All five
 scenario steps passed over real relays against the rebuilt images (see
@@ -554,13 +589,11 @@ checklist, §6 differences, §8 decisions) → `simplex-live-frame-capture` memo
 
 ## Current state (one line)
 
-Phases 0–4b DONE (all 7 live SimpleX scenarios GREEN 2026-07-03; 4b-4
-assertions DONE 2026-07-04). Phase 5 NEARLY DONE: registrations,
-round-trip, ACI bootstrap, user leg, dual-adapter tests, and **s07
-group flow all GREEN over real Signal** (2026-07-04 late night, on
-images carrying M1-562+M1-565 — gate accept-path validated live).
-Remaining: §6 differences items (edit fallback, rate pacing,
-reconnect/daemon-down, 16 KB cap). Board: 589 done / 0 pending.
+Phases 0–5 ALL DONE (SimpleX 2026-07-03; Signal 2026-07-04 — s07 GREEN
++ §6 checklist fully walked). One open finding: **F-live-11** (Signal
+edit RPC `updateMessage` doesn't exist on 0.14.5; fallback masks it;
+fix `send`+`editTimestamp` proven live) — fix ticket is the NEXT
+action. Phase 6 (/testcase skill) optional. Board: 589 done / 0 pending.
 
 ## Where we are
 
@@ -572,7 +605,7 @@ reconnect/daemon-down, 16 KB cap). Board: 589 done / 0 pending.
 | 3 — Reset & data harness | `prod/live-reset.sh`, `live-seed.sh`, `live-inject-adversarial.sh` | ✅ DONE (M1-536/537/538) |
 | **4a — scenario runner substrate** | `Scenario`, `ConversationBackend` SPI, `ScenarioRunner`, InMemory backend, `ScenarioRunnerIT` | ✅ DONE (M1-539) |
 | **4b — SimpleX live drive** | real simplex-chat drive + LLM latency + embedding retrieval | ✅ DONE — all 7 scenarios GREEN 2026-07-03; **4b-4 assertions DONE 2026-07-04** (retrieval GREEN over ollama; metrics gap = F-live-7) |
-| **5 — Signal delta** | round-trip + ACI bootstrap + §6 differences | 🔶 NEARLY DONE — round-trip + ACI bootstrap + user leg (S3/S4) + dual-adapter + **s07 group flow** all GREEN (2026-07-04, on M1-562+565 images); remaining: §6 items edit fallback / rate pacing / reconnect / 16 KB cap (host work, no tickets) |
+| **5 — Signal delta** | round-trip + ACI bootstrap + §6 differences | ✅ DONE 2026-07-04 — round-trip, ACI bootstrap, user leg (S3/S4), dual-adapter, s07 group flow, and the FULL §6 checklist (cap/pacing/reconnect/edit) all verified live; produced F-live-11 (edit RPC bug, fix ticket pending) |
 | 6 — (optional) `/testcase` skill | wrap the runner once 2–3 scenarios pass | ❌ not started |
 
 **Concrete "done vs not" marker:** `SimpleXConversationBackend` exists and is
@@ -893,6 +926,39 @@ notable: the refusal itself was spurious (3B model over-triggering on the
 untrusted-content framing) — a model-quality data point for F-live-8's
 default-model discussion.
 
+### F-live-11 (MEDIUM, adapter bug, UX-degrading not correctness) — Signal edit path never edits on real wire; fallback masks it
+
+Found by the §6 edit-fallback probe (2026-07-04 late night): the Signal
+adapter encodes message edits as JSON-RPC method `updateMessage`
+(`SignalMessageCodec` DM+group variants), but **signal-cli 0.14.5 has no
+such command** — its command list has `send` (with `--edit-timestamp`),
+`updateAccount/Contact/Device/Group/Profile`, no `updateMessage`. The
+daemon returns method-not-found, categorized PERMANENT (non-`-32603`) →
+the designed fresh-send fallback fires on the FIRST edit of every
+handle and the handle falls back for good. Green in CI because the
+fakes accept `updateMessage` — D-live-9 thesis, third strike (after
+F-live-1 and F-live-10).
+
+Live evidence (all 2026-07-04, /summary progress flow over real Signal):
+- User client received `Working on it...`, `Translating...`, and the
+  final summary as THREE separate dataMessages (no editMessage
+  envelopes); typing STARTED/STOPPED correct.
+- Metrics after one flow: `adapter_outbound_update_fail_total{reason=
+  "unknown"} 1`, `outcome="fallback_send" 2`, `outcome="ok" 2`,
+  `outcome="coalesced" 3` — exactly the update→fail→fallback,
+  finalize→direct-fallback sequence the code prescribes.
+- **Fix shape PROVEN live client-to-client:** jsonRpc `send` with
+  `editTimestamp:<original ts>` → recipient renders a true edit
+  (`Edit: Target message timestamp: …`, new body). The fix is to
+  re-encode DM+group edit as `send`+`editTimestamp` and reconcile the
+  fakes with the real method surface.
+
+Impact: correctness is preserved (content always delivered, fallback
+rate-paced per M1-359), but every progress flow degrades to N separate
+messages instead of one evolving message, and each fallen-back op costs
+2 wire frames. `supportsMessageEdit=true` stays truthful — Signal DOES
+support edits; only the RPC encoding is wrong. Ticket candidate.
+
 ### F-live-10 (HIGH for Signal groups, adapter bug) — RESOLVED by M1-562 (merged 58767406, 2026-07-04)
 
 **RESOLVED:** dual-shape parse (`groupInfo.groupId` first, `groupV2.id`
@@ -931,7 +997,51 @@ fixed; the 3-party group fixture is already built and waiting.
 
 ## Running log
 
-### 2026-07-04 late night, latest (image rebuild + s07 GREEN over Signal)
+### 2026-07-04 late night, latest (§6 checklist walked — Phase 5 DONE; F-live-11 found)
+
+- **Probe tooling that worked (reuse):** single signal-cli `jsonRpc`
+  stdin session via `docker run -i --env-file signal-private.env`
+  (recipient = bot ACI, so no number on argv; output sed-masked). TWO
+  GOTCHAS: (1) an open jsonRpc session RECEIVES AND ACKS incoming
+  envelopes — hold it open (`sleep N` after the sends, capture stdout)
+  or the replies are consumed invisibly; (2) `receive --timeout N
+  --output=json` sometimes returns empty where the plain `receive`
+  form yields the envelopes — prefer plain + grep for assertions.
+- **16 KB cap probe:** 20,431-byte DM from user accepted by the Signal
+  server/relay chain and delivered to the daemon — the cap is genuinely
+  reachable on real wire. Provider WARN (exact): `inbound dropped —
+  exceeds 16384-byte size cap; from contact#018922f0 adapterMessageId
+  signal-1783198405395`. No reply to sender; no body content logged.
+- **Rate-pacing probe:** 8 `/help` sends in one jsonRpc session landed
+  at the bot within 11 ms; replies: 8 frames in ~1.6 s / ~1.7 s (two
+  trials) = sustained 5/s, mean gap ≈200 ms (limiter signature). Min
+  observed gap 119 ms + sliding-window counts of 6–7 = daemon-side
+  timestamp jitter downstream of the blocking limiter, NOT a cap
+  breach. Bonus: burst-2's replies (missed by its own session) were
+  server-queued and delivered on burst-3's connect IN ORDER, zero
+  duplicates (16/16) — async-receive/ordering evidence.
+- **Reconnect probe:** `kill -9` of the in-container daemon (PID via
+  `ps | grep 'daemon --tcp'`) → WARN `signal-cli subprocess exited
+  (code=137); scheduling restart 1/5 in 153 ms` → INFO `Signal adapter
+  reconnected after subprocess restart` 4.7 s later (new PID), gauges
+  1.0, `/help` round-trip green.
+- **Edit/typing probe (the F-live-11 discovery):** chat turn = single
+  frame (correct — ProgressNotifier's only consumer is
+  SummaryCommandHandler; the Explore recon's "chat-mode progress"
+  attribution was wrong, verified in source). /summary with data
+  (user-approved `source_subscription` INSERT: signal user DM scope →
+  m1-537 seed; `-w 48h` because the seed posts are ~31 h old) produced
+  placeholder + typing STARTED + 2 stage bodies + typing STOPPED — all
+  as separate dataMessages, ZERO editMessage envelopes. Metrics:
+  `update_fail{reason="unknown"} 1`, `fallback_send 2`, `ok 2`,
+  `coalesced 3` = first-edit fail → permanent fallback. Root cause:
+  **no `updateMessage` in signal-cli 0.14.5's command list**; fix shape
+  proven live (user→admin jsonRpc `send`+`editTimestamp` rendered as a
+  true edit on the admin client). Full finding: §F-live-11.
+- Collector paused for both LLM-bound turns and restarted after; stack
+  healthy at session end.
+
+### 2026-07-04 late night (image rebuild + s07 GREEN over Signal)
 
 - **Image rebuild (user decision: rebuild before s07 so the run
   exercises the merged code):** both app images rebuilt detached from
