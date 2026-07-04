@@ -7,11 +7,47 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-04 evening (**PHASE 5 nearly done — registrations, round-trip, ACI bootstrap, user leg, dual-adapter /zcash+LLM all GREEN; BLOCKER = F-live-10 Signal group wire-shape bug (ticket next); group fixture ready for post-fix s07**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-04 night (**F-live-10 RESOLVED — M1-562 merged + images rebuilt + stack live on them; s07-over-Signal is UNBLOCKED, fixture ready**) · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
+
+**F-live-10 is FIXED AND LIVE (2026-07-04 night).** Where things stand:
+
+- **M1-562 merged (58767406):** `SignalGroupHandler` parses the real
+  signal-cli 0.14.5 wire shape (`groupInfo{groupId}` first, `groupV2{id}`
+  kept for route symmetry with the DM exclusion guard);
+  `supportsMembershipEvents` flipped to false per the spec mandate (no
+  native per-user membership signal on the 0.14.5 wire) and the
+  never-fires membership dispatch removed — delivery-failure fallback,
+  the SimpleX posture. Review APPROVE r1; pre-commit redteam CLEAN
+  (docs/plan/m1/redteam/M1-562-2026-07-04.md; 2 advisory out-of-model
+  items → follow-up tickets below).
+- **Images rebuilt from main and the stack is LIVE on them** (all 5
+  containers healthy, readiness UP, `adapter_connection_status` 1.0 for
+  BOTH adapters). The rebuild surfaced a new gotcha, fixed by **M1-564
+  (merged 1f6299d6):** the signal-cli daemon's root-owned
+  `prod/runtime/signal-cli/data` breaks the classic builder's context
+  walk (`checking context: can't stat`) — `.dockerignore` now excludes
+  `prod/runtime/` (secrets/identity stores never belonged in the build
+  context anyway; shipped images were always clean, multi-stage).
+- **Board: 2 pending drafts from the M1-562 redteam out-of-model items:**
+  M1-563 (spec amendment — leave-cleanup NON-COMMITMENT on
+  membership-event-less adapters + /demote remediation; both v1 adapters
+  are now in that class) and M1-565 (nice-to-have defense-in-depth —
+  band-bounded base64 shape gate on the group-id scope key, observable
+  WARN on rejection).
+
+**NEXT ACTION:** s07 group flow over Signal — the 3-party
+`live-signal-group` fixture is ready (see the fixture entry in the
+running log); then the remaining §6 differences items (edit fallback,
+rate pacing, reconnect/daemon-down, 16 KB cap). M1-563/M1-565 are
+runnable whenever.
+
+---
+
+## ▶ previous START HERE (2026-07-04 evening, kept for context)
 
 **PHASE 5 (Signal) — one blocker away from done.** Where things stand
 (2026-07-04 evening; full detail in the two Phase-5 running-log entries):
@@ -414,10 +450,11 @@ checklist, §6 differences, §8 decisions) → `simplex-live-frame-capture` memo
 ## Current state (one line)
 
 Phases 0–4b DONE (all 7 live SimpleX scenarios GREEN 2026-07-03; 4b-4
-assertions DONE 2026-07-04; board fully drained — 585 done / 0 pending).
-Phase 5 IN PROGRESS (2026-07-04): 3 Signal accounts registered, dual
-`simplex,signal` mode live, bot↔admin round-trip + ACI bootstrap GREEN;
-remaining: §6 differences checklist + optional (now automatable) user leg.
+assertions DONE 2026-07-04). Phase 5 IN PROGRESS: registrations,
+round-trip, ACI bootstrap, user leg, dual-adapter tests all GREEN;
+F-live-10 RESOLVED (M1-562) and LIVE on rebuilt images (2026-07-04
+night); remaining: s07 group flow over Signal (fixture ready) + §6
+differences checklist. Board: 587 done / 2 pending (M1-563, M1-565).
 
 ## Where we are
 
@@ -750,7 +787,15 @@ notable: the refusal itself was spurious (3B model over-triggering on the
 untrusted-content framing) — a model-quality data point for F-live-8's
 default-model discussion.
 
-### F-live-10 (HIGH for Signal groups, adapter bug) — Signal group inbound dead on real wire; OPEN, ticket needed
+### F-live-10 (HIGH for Signal groups, adapter bug) — RESOLVED by M1-562 (merged 58767406, 2026-07-04)
+
+**RESOLVED:** dual-shape parse (`groupInfo.groupId` first, `groupV2.id`
+retained for route symmetry), membership surface removed +
+`supportsMembershipEvents=false` (spec-mandated; delivery-failure
+fallback per the SimpleX posture). Live from the 2026-07-04 night image
+rebuild. Redteam CLEAN pre-commit; the two advisory out-of-model items
+became M1-563 (leave-cleanup spec posture) and M1-565 (group-id shape
+gate, nice-to-have). Original finding below, kept for the record:
 
 Found by the Phase-5 group leg (2026-07-04): every real Signal group
 message is silently dropped. `SignalGroupHandler.handleReceive` gates on
@@ -779,6 +824,42 @@ group stanza is wrong. DMs unaffected. s07-over-Signal blocked until
 fixed; the 3-party group fixture is already built and waiting.
 
 ## Running log
+
+### 2026-07-04 night (F-live-10 fixed — M1-562/563/564/565; rebuild; stack live on new images)
+
+- **M1-562 MERGED (58767406)** via `/m1-tick run M1-562` — the F-live-10
+  fix (see the finding entry above for the shape). Cycle notes worth
+  keeping: clarity FAIL → 1 bounded self-refine (test-ledger bullet);
+  TWO escalations, both user-refined: premise-fail (drafted acceptance
+  item cited a SignalMessageCodec comment that doesn't exist — lesson:
+  read the exact line before pinning it in acceptance, don't trust a
+  survey subagent's paraphrase) and budget-breach (removing the
+  constructor's membershipHandler param reached 4 out-of-scope call-site
+  tests + orphaned RecordingMembership; scope grew 11 → 16 files).
+  Verify green r1 (stack paused per the co-location rule), review
+  APPROVE r1, redteam CLEAN (2 out-of-model advisories), squash-merged.
+- **M1-563 drafted (pending):** spec amendment stating the leave-cleanup
+  NON-COMMITMENT on membership-event-less adapters (out-of-model item 1
+  — the per-user delivery-failure fallback can't fire: group sends are
+  group-addressed; implemented fallback covers bot-removal only;
+  /demote is the remediation).
+- **M1-565 drafted (pending, user-accepted nice-to-have):** band-bounded
+  base64 shape gate on the group-id scope key (out-of-model item 2),
+  mirroring isAcceptableAci; bounds are a [16,64]-byte band, NOT an
+  exact 32-byte pin (fixtures decode to 20 bytes; exact pins are the
+  F-live-10 failure mode in reverse), with an observable value-free WARN.
+- **Rebuild blocker found + fixed — M1-564 (merged 1f6299d6):** first
+  rebuild since Phase 5 provisioning failed at context prep — the
+  daemon-created root-owned 700 `prod/runtime/signal-cli/data` can't be
+  stat'ed by the classic builder. `.dockerignore` now excludes
+  `prod/runtime/` entirely (also keeps secrets.env/signal-private.env/
+  identity stores out of the build context; the shipped images were
+  always clean — multi-stage copies only quarkus-app out of the build
+  stage). Host-validated: the exact previously-failing compose build
+  exits 0 (collector 4330b57751d4, provider 75f9b3b6dd09).
+- **Stack restarted collector-first on the new images:** all 5
+  containers healthy, readiness UP, `adapter_connection_status` 1.0 for
+  both adapters. The groupInfo parse is LIVE — s07-over-Signal unblocked.
 
 ### 2026-07-04 evening (PHASE 5 cont. — user leg, F-live-10 group bug, dual-adapter LLM test)
 
