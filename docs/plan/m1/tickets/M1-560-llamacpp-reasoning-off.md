@@ -91,6 +91,12 @@ direct probes against the running server:
 This corrects F-live-6's "no thinking channel" note — the channel exists;
 it was invisible until output-format failures forced a direct look.
 
+Host cleanup rider (not a repo diff): the running stack carries the flag
+via `prod/runtime/llamacpp-reasoning-off.override.yml` (gitignored; see
+live-e2e HANDOFF §START HERE trap note). After the compose change lands
+and the service is recreated from it, DELETE that override file — leaving
+it costs nothing functionally but keeps a stale second source of truth.
+
 Expected side benefit: eval tasks (tagger/entity/security/summarizer) have
 been paying the same hidden thinking tax per call on a 4-vCPU host; with
 reasoning off the RAW-backlog chew rate should improve. Not an acceptance

@@ -76,9 +76,28 @@ after; details + re-apply recipe in the running log.
   verbatim to the user. `SummaryProseGenerator:119` intercepts + degrades
   ("never surface the marker"); chat needs the same. security_relevant.
 
-**NEXT:** Phase 5 (Signal delta — needs the user for the phone-driven
-side), the pending image rebuild (running images predate M1-551/552), the
-remote-LLM leg (needs API key), and tickets for F-live-7/8/9.
+**NEXT (fresh session):** run the three drafted tickets —
+`/m1-tick run M1-558` (metrics export), `M1-559` (refusal intercept),
+`M1-560` (reasoning-off in compose) — then Phase 5 (Signal delta — needs
+the user for the phone-driven side). Image rebuild: DONE 2026-07-04 evening
+(M1-551/552 deployed + live-validated). Remote-LLM leg: DONE (DeepSeek).
+
+**⚠ Compose-override trap until M1-560 lands:** the RUNNING llamacpp has
+`LLAMA_ARG_REASONING=off` only via an override file, now at
+`prod/runtime/llamacpp-reasoning-off.override.yml` (gitignored, stable —
+moved out of the session scratchpad). Any compose up/restart that omits it
+RECREATES llamacpp WITHOUT the flag and silently re-breaks chat (F-live-8).
+Until M1-560 puts the env in docker-compose.yml, every compose command for
+the prod stack must carry BOTH `-f` files:
+`docker compose -f docker-compose.yml -f prod/runtime/llamacpp-reasoning-off.override.yml --env-file prod/runtime/secrets.env --profile prod <cmd>`.
+(`docker stop`/`docker start` of individual containers is safe — the trap
+is only compose re-creation.) M1-560's merge deletes the override file.
+
+**Verify note for the ticket runs:** M1-558/559 need full `mvn verify` —
+pause collector+provider first (co-location rule), use the detached
+setsid+marker pattern, clean the ~5 DevServices leaks after
+(`[[clean-verify-monitoring]]` memory). M1-560 is compose+docs only
+(inert-diff gate candidate, M1-549 precedent).
 
 **Fixture state after this session:** LiveAdmin CLAIMED (`is_admin=t`,
 vouched), admin-DM → m1-537-seed-source `source_subscription` row present,
@@ -536,10 +555,11 @@ thought tokens — 3/3 probes at default temp put ALL 200 tokens in
 3/3 probes clean at default temperature (temperature exonerated) and a
 live DM round-trip delivered a 438-char reply in ~90 s (content quality
 still mediocre — abliterated-quant residual, operator model-choice
-concern). **HOST STATE: the running llamacpp has the flag active via a
-scratchpad compose override** (applied 2026-07-04 ~11:45 for the
-verification and KEPT — chat is unusable without it); M1-560 makes it
-repo-permanent in docker-compose.yml. Expected side benefit: eval tasks
+concern). **HOST STATE: the running llamacpp has the flag active via a compose
+override** (applied 2026-07-04 ~11:45 for the verification and KEPT — chat
+is unusable without it; relocated to
+`prod/runtime/llamacpp-reasoning-off.override.yml`, see §START HERE trap
+note); M1-560 makes it repo-permanent in docker-compose.yml. Expected side benefit: eval tasks
 stop paying the hidden thinking tax (faster RAW-backlog chew). Original
 finding below, kept for the record; its "sampling flakiness" framing is
 superseded.
@@ -610,9 +630,9 @@ default-model discussion.
   collector chewing backlog) re-confirmed the s12 isolation lesson on the
   new image.
 - **Stack at session end: all 5 containers healthy**, new images, chat on
-  the llamacpp baseline, reasoning-off override still active via the
-  scratchpad compose override (M1-560 commits it). RAW backlog draining
-  with reasoning off.
+  the llamacpp baseline, reasoning-off override still active (relocated to
+  `prod/runtime/llamacpp-reasoning-off.override.yml`; M1-560 commits the
+  flag and retires the file). RAW backlog draining with reasoning off.
 
 ### 2026-07-04 later (F-live-8 root-caused + fixed live; M1-558/559/560 drafted)
 
