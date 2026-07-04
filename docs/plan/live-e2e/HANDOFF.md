@@ -7,11 +7,61 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-04 (**PHASE 5 STARTED — 3 Signal accounts registered + PIN-locked, adapter live in `simplex,signal` dual mode, bot↔admin ROUND-TRIP GREEN, ACI-admin bootstrap verified; remaining: §6 differences checklist + optional user leg**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-04 evening (**PHASE 5 nearly done — registrations, round-trip, ACI bootstrap, user leg, dual-adapter /zcash+LLM all GREEN; BLOCKER = F-live-10 Signal group wire-shape bug (ticket next); group fixture ready for post-fix s07**) · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
+
+**PHASE 5 (Signal) — one blocker away from done.** Where things stand
+(2026-07-04 evening; full detail in the two Phase-5 running-log entries):
+
+- **DONE + GREEN live:** 3 Signal accounts registered & PIN-locked
+  (smspva rentals — now disposable); dual `simplex,signal` mode
+  deployed; bot↔admin round-trip; D50 ACI-admin bootstrap; S4
+  un-invited-DM rejection (zero rows persisted); S3 invite
+  mint→consume (confirm-gated, D45 probation, `/vouch` clears);
+  dual-adapter `/zcash` + LLM-chat on BOTH adapters (same deployment,
+  same llamacpp backend; reply content garbage on both = D49
+  model-side residual, adapters fine).
+- **BLOCKER — F-live-10 (HIGH, adapter bug, needs a ticket):** Signal
+  group inbound is dead on real wire — signal-cli 0.14.5 emits
+  `dataMessage.groupInfo{groupId,…}`, `SignalGroupHandler` parses
+  `groupV2{id,…}`; every group message silently drops. Membership
+  arrays (`memberJoined`/`memberLeft`) also don't exist in 0.14.5
+  output → the `supportsMembershipEvents=true` surface needs a decision
+  in the same ticket. DMs unaffected. See §Live findings F-live-10.
+- **READY + WAITING:** 3-party `live-signal-group` fixture (admin
+  creator + bot + user, all full members via the invite-link path —
+  direct-add is unusable on 0.14.5). s07-over-Signal runs right after
+  the F-live-10 fix + image rebuild.
+
+**NEXT ACTION:** draft the F-live-10 fix ticket → `/m1-tick run` it →
+image rebuild → s07 group flow over Signal → remaining §6 items (edit
+fallback, rate pacing, reconnect/daemon-down, 16 KB cap).
+
+**Private-numbers tooling (never put the numbers in argv/chat/logs):**
+`prod/runtime/signal-private.env` (chmod 600, holds numbers + PIN) +
+`prod/runtime/signal-run.sh` (masking wrapper; roles bot|admin|user →
+data-dirs `prod/runtime/signal-cli`, `prod/runtime/signal-clients/
+{admin,user}`). Bot data-dir is daemon-locked while the provider runs —
+stop the provider for any bot-CLI operation. Captcha links + SMS codes
+are non-sensitive and go via chat.
+
+**Chat-latency yardstick (do not re-diagnose as a regression):**
+70–150 s per chat turn is the EXPECTED vps profile — CPU-only llama.cpp
+on 4 vCPU, ~27 tok/s prefill / ~4 tok/s decode; a history-laden scope
+(1878-token prompt) costs ~70 s in prefill alone before the first
+output token (s12 GREEN was 159.6 s; M1-560 validation ~150 s; F-live-5
+sized the 240 s timeout for exactly this). Verified 2026-07-04: no
+co-located build was running during the slow turns; post-restart llama
+CPU ~300% = collector RAW-backlog evals (normal). Faster = operator
+tier: smaller GGUF, GPU host, or remote-LLM profile (DeepSeek answered
+in ~10 s).
+
+---
+
+## ▶ previous START HERE (2026-07-04 afternoon, kept for context)
 
 **4b-4 is DONE (2026-07-04 afternoon).** All five assertion items have live
 evidence (see the running log for detail):
@@ -699,6 +749,34 @@ chat agent needs the same intercept (friendly bundle reply + log). Also
 notable: the refusal itself was spurious (3B model over-triggering on the
 untrusted-content framing) — a model-quality data point for F-live-8's
 default-model discussion.
+
+### F-live-10 (HIGH for Signal groups, adapter bug) — Signal group inbound dead on real wire; OPEN, ticket needed
+
+Found by the Phase-5 group leg (2026-07-04): every real Signal group
+message is silently dropped. `SignalGroupHandler.handleReceive` gates on
+`dataMessage.get("groupV2")` and reads `id`, but signal-cli 0.14.5 emits
+the group stanza as `groupInfo` with `groupId`:
+
+```
+"dataMessage":{..., "mentions":[{"name":"+…","number":"+…","uuid":"<aci>",
+"start":0,"length":4}], "groupInfo":{"groupId":"<base64>",
+"groupName":"live-signal-group","revision":10,"type":"DELIVER"}}
+```
+
+(live envelope, captured via bot-CLI `--output=json receive` with the
+provider stopped). The first guard returns → spec-permitted silent drop
+→ invisible in logs. Green in CI because the fakes emit the assumed
+`groupV2` shape — D-live-9 thesis, Signal edition. The DM codec's
+group-exclusion guard (`SignalMessageCodec:235`) checks BOTH `groupInfo`
+and `groupV2`, so the real spelling was known on the DM side; the group
+parser was never reality-reconciled. Second leg: 0.14.5's `groupInfo`
+carries NO `memberJoined`/`memberLeft` arrays, so the membership-event
+dispatch (and the `supportsMembershipEvents=true` capability) is
+unfulfillable as coded — the fix ticket must either derive deltas
+(revision-diff via listGroups) or flip the capability. `mentions[]`
+shape (uuid/start/length) matches the parser's expectation — only the
+group stanza is wrong. DMs unaffected. s07-over-Signal blocked until
+fixed; the 3-party group fixture is already built and waiting.
 
 ## Running log
 
