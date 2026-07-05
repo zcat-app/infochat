@@ -7,11 +7,70 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-05 (**M1-567 host-clone migration scripts (pack.sh + restore.sh) DONE + MERGED (e9a3a027) via `/m1-tick run` — 1 self-refine (files_scope+test glob), redteam CLEAN; M1-568 drafted (LOW — tar-slip allowlist follow-up from M1-567 out-of-model item); board 591 done / 1 pending**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-05 (**M1-568 DONE + MERGED (e7a60a2e) via `/m1-tick run` — tar-slip allowlist, review APPROVE r1, redteam CLEAN. Then started the M1-567 host round-trip and it caught a REAL defect on the first `pack.sh` run → M1-569 drafted (pending, runnable). Recovery test PAUSED pending M1-569. board 592 done / 1 pending**) · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
+
+**M1-568 DONE + MERGED @ e7a60a2e (2026-07-05).** `/m1-tick run M1-568` end to
+end: restore.sh's identity extraction now names ONLY the allowlisted `${dir#/}`
+data-dir paths as `tar` targets (out-of-allowlist members ignored under
+`tar -C /`), with a load-bearing empty-array guard (`tar -x` with no members
+extracts EVERYTHING). RestoreWiringTest gained a drive-past-gates case
+(red-before/green-after verified). Clarity PASS → verify GREEN (227 provider
+tests, RestoreWiringTest 6/0/0) → review APPROVE r1 → redteam CLEAN (2
+out-of-model, both "coherently tampered bundle is game-over regardless" — no
+follow-up unless bundle-signing is promoted to spec). Board: 592 done.
+
+**THEN we started the M1-567 host round-trip (in-place full destroy+recover) —
+and it caught a REAL DEFECT before any wipe. → M1-569 drafted (0e67a9b0,
+pending, RUNNABLE).** On the first live `pack.sh` run it failed loud:
+`tar: .../signal-cli/data: Cannot open: Permission denied`. Root cause
+(RECHECKED, adapter-agnostic — the user's instinct was right to check simplex):
+the Provider image runs as ROOT (uid=0 confirmed), so BOTH adapters' identity
+DBs are root-owned. SimpleX `simplex_v1_*.db` are root:root **0644** (world-read
+→ pack succeeds by luck); signal-cli `data`/`attachments` are root:root **0700**
+(→ non-root pack CANNOT read them). NOT a live-test artifact — any clean wizard
+deployment ends up the same (signal-cli locks its store to 0700). `sudo` here is
+interactive-only, so pack can't elevate. restore.sh has the mirror problem
+(non-root untar can't recreate root:root). backup.sh shares the tar model (same
+latent gap, frozen contract → out-of-scope note in M1-569). **The fix (M1-569):
+run the identity tar (pack) + untar (restore) as root in a throwaway container
+(the pg_dump/pg_restore pattern), adapter-agnostic, preserving the M1-568
+allowlist.** No host image rebuild needed (pack/restore are host scripts).
+
+**RECOVERY-TEST PLAN (paused pending M1-569), agreed with user:** in-place full
+destroy+recover on THIS host (cleaner than DinD — one stack at a time, no
+memory-doubling, no two-owner risk; NB no /dev/kvm so a real VM is out). The
+plan, in order: (0) golden snapshot SAVED at
+`/home/infochat/recovery-test/golden-snapshot.txt` (users=3, audit_log=94,
+source=74, posts≈3794, post_embedding=624, price≈14k, chat_message=42, groups=1,
+tag=24, flyway=56; 2 admins simplex+signal). (1) pack → SAFE dir OUTSIDE
+prod/runtime, (2) verify bundle + independent safety copy of identities+DB+secrets,
+(3) SELECTIVE wipe — wipe deployment state (secrets.env, application.properties,
+bootstrap files, `simplex/` + `signal-cli/` bot identities, pgdata volume, app
+images) but PRESERVE harness/valuable NOT-in-bundle artifacts:
+`signal-clients/`, `simplex-clients/`, **`signal-private.env` (rented numbers +
+PIN)**, `signal-run.sh`, `backups/`. (4) restore.sh → rebuild images + rehydrate
+models + pg_restore-before-Flyway + bring-up + verify. (5) diff vs golden +
+`/audit`/`/summary`/`adapter.connection.status=1`. **GGUF nuance:** the gen model
+is a CUSTOM gguf (`gemma-4-E4B-it-OBLITERATED-Q4_K_M.gguf`) whose URL restore.sh
+can't recover → it fail-loud's on a wiped volume by design (and restore is NOT
+resumable — a partial run leaves secrets.env+pgdata, tripping its own gates). So
+for a clean single-pass green: KEEP the custom gen gguf in the volume, delete
+only the pinned emb gguf (`nomic-embed-text-v1.5.f16.gguf`) to exercise the
+pinned re-download path. The wipe/rm of root-owned signal-cli/data ALSO needs
+root — another reason M1-569 (or interactive sudo) gates the destructive test.
+
+**NEXT ACTION:** `/m1-tick run M1-569` (fix pack/restore). THEN re-run the
+recovery round-trip above on the fixed tooling — it stays HOST validation even
+after M1-569 (mvn verify only pins invocation shape; the real root-owned
+pack→restore proof needs the live run). Live stack is UP + healthy, untouched
+(both adapters connected, DB UP). Push remains the user's call (`main` further
+ahead of origin).
+
+## ▶ previous START HERE (2026-07-05 — M1-567 done, M1-568 drafted, kept for context)
 
 **M1-567 (host-clone migration scripts) is DONE + MERGED — 2026-07-05.** A new
 workstream (operator host-clone tooling, not live-e2e; logged here as the active
