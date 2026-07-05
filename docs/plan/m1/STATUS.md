@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 592 |
 | deferred | 10 |
-| **total** | **602** |
+| **total** | **603** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-569 — pack.sh/restore.sh handle root-owned adapter identity dirs (complexity: medium, risk: medium)
 
 ---
 
@@ -773,4 +773,5 @@ M1-565 (done)
 M1-566 (done)
 M1-567 (done)
 M1-568 (done)
+M1-569 (pending) ← runnable
 ```
