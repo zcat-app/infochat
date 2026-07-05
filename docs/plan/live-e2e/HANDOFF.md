@@ -35,14 +35,27 @@ blocked by GNU tar + `set -e`; the residual is plain system-path members;
 `tar -x <archive> <member>...` extracts only the named members). Out-of-model, so
 optional. Record: `docs/plan/m1/redteam/M1-567-2026-07-05.md`.
 
-**NEXT ACTION:** none mandatory. Optional: (a) a real pack→transfer→restore host
-round-trip validation of M1-567 (host validation, not `mvn verify`, per its
-`test_plan.notes` — like M1-566's post-merge live step); (b) `/m1-tick run
-M1-568` when the tar-slip hardening is prioritized. Push remains the user's call
-(`main` is now further ahead of origin). DRY note (plan): restore.sh duplicates
-4-llm.sh's pinned-GGUF constants + fetch_gguf deliberately (those files
-out-of-scope); drift is fail-safe (stale copy → fail-loud) — handle it on the
-next 4-llm.sh constant change, no proactive ticket.
+**OUTSTANDING VALIDATION — M1-567 happy path is UNEXERCISED end-to-end.** M1-567
+is DONE per its acceptance and `mvn verify` is green, BUT the automated tests
+(`RestoreWiringTest`) deliberately cover only restore.sh's fail-loud PRECONDITION
+GATES — per the ticket's `test_plan.notes`, the real pack→transfer→restore round
+trip is HOST validation, not `mvn verify`. So nothing has yet exercised the happy
+path: the in-container `pg_restore`-before-Flyway, `rehydrate_models` (ollama
+pull / GGUF fetch / remote-noop), the collector→provider bring-up (with `6b`
+skipped so no new SimpleX address), and the single-owner cutover. **Before
+trusting pack/restore for a real device move, run a host round-trip on a spare
+target** (pack a real deployment → transfer → `restore.sh <bundle>` → confirm the
+clone is healthy + the §7.10 step-5 checks: `/audit`, `/summary`,
+`adapter.connection.status=1`), the way M1-566's fix got a post-merge live step.
+This is the primary next step for this workstream.
+
+**NEXT ACTION:** the host round-trip validation above (recommended before
+operational use). Then OPTIONAL: `/m1-tick run M1-568` when the (out-of-model)
+tar-slip hardening is prioritized. Push remains the user's call (`main` is now
+further ahead of origin). DRY note (plan): restore.sh duplicates 4-llm.sh's
+pinned-GGUF constants + fetch_gguf deliberately (those files out-of-scope); drift
+is fail-safe (stale copy → fail-loud) — handle it on the next 4-llm.sh constant
+change, no proactive ticket.
 
 ## ▶ previous START HERE (2026-07-04 late night — live-e2e complete, kept for context)
 
