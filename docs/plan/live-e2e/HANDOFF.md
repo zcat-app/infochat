@@ -7,11 +7,59 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-05 (**M1-568 DONE + MERGED (e7a60a2e) via `/m1-tick run` — tar-slip allowlist, review APPROVE r1, redteam CLEAN. Then started the M1-567 host round-trip and it caught a REAL defect on the first `pack.sh` run → M1-569 drafted (pending, runnable). Recovery test PAUSED pending M1-569. board 592 done / 1 pending**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-05 (**M1-569 DONE + MERGED (8b84f344) via `/m1-tick run` — root-in-container tar/untar for root-owned adapter identity dirs; clarity self-refine + risk→high, verify GREEN, review APPROVE r1, redteam CLEAN, commit safety re-run GREEN. The M1-567 recovery round-trip is now UNBLOCKED (M1-569 was its gate). board 593 done / 0 pending**) · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
+
+**M1-569 DONE + MERGED @ 8b84f344 (2026-07-05).** `/m1-tick run M1-569` end to
+end fixed the root-owned-identity-dir defect the M1-567 round-trip caught.
+`pack.sh` + `restore.sh` now run the identity tar (pack) and untar (restore) as
+ROOT inside a throwaway container — `docker run -u 0:0 --entrypoint tar` on the
+pinned postgres image (`pgvector/pgvector:pg16`, debian → GNU tar; the
+pg_dump/pg_restore in-container pattern) — bind-mounting each configured data-dir
+at its ABSOLUTE host path so the `-C /` rel-path layout is byte-preserved. No
+interactive sudo. Adapter-agnostic (SimpleX + Signal via the identical path, no
+reliance on SimpleX's incidental 0644). The M1-568 extraction allowlist +
+empty-array guard are preserved AND now stacked with mount-scoping (only
+allowlisted dirs are mounted writable), so a tampered bundle's extra members land
+in the ephemeral container `/`, never the host, even under the root untar.
+`RestoreWiringTest`'s fake docker now MODELS the privileged untar (re-execs real
+tar with the named members) + a new assertion pins the `-u 0:0 --entrypoint tar`
+shape; §7.10.1 documents the mechanism and that `backup.sh` shares the same latent
+root requirement (separate follow-up). Cycle: clarity FAIL (spec_refs anchor) →
+bounded self-refine (also bumped risk medium→high / round_cap 3 on the clarity
+WARN) → WARN (complexity, kept medium w/ rationale) → verify GREEN (227 tests,
+RestoreWiringTest 6/6) → review APPROVE r1 (all 6 checks PASS) → redteam CLEAN (0
+findings, 2 out-of-model, both supply-chain/out-of-scope; one VALIDATED the
+stacked defense) → commit safety re-run GREEN (risk:high mandate) → squash-merge.
+Faithful root:root ownership round trip stays HOST validation (like M1-567), not
+mvn verify. Board: 593 done / 0 pending. NOT pushed.
+
+**NEXT ACTION — the M1-567 recovery round-trip is now UNBLOCKED** (M1-569 was its
+gate). Re-run the in-place full destroy+recover on THIS host, per the plan agreed
+with the user (unchanged; full detail in the prior START HERE below): golden
+snapshot already SAVED at `/home/infochat/recovery-test/golden-snapshot.txt`
+(users=3, audit_log=94, source=74, posts≈3794, post_embedding=624, price≈14k,
+chat_message=42, groups=1, tag=24, flyway=56; 2 admins simplex+signal). Order:
+(1) `pack.sh` → SAFE dir OUTSIDE prod/runtime, (2) verify bundle + independent
+safety copy of identities+DB+secrets, (3) SELECTIVE wipe — deployment state, but
+PRESERVE harness/valuable NOT-in-bundle artifacts (`signal-clients/`,
+`simplex-clients/`, `signal-private.env`, `signal-run.sh`, `backups/`), (4)
+`restore.sh <bundle>` → rebuild images + rehydrate models + pg_restore-before-
+Flyway + bring-up + verify, (5) diff vs golden + `/audit`/`/summary`/
+`adapter.connection.status=1`. GGUF nuance: KEEP the custom gen gguf in the volume
+(its URL isn't recoverable — restore fail-loud's by design), delete ONLY the
+pinned emb gguf (`nomic-embed-text-v1.5.f16.gguf`) to exercise the pinned
+re-download path. NOTE: M1-569 fixed pack/restore, but the destructive WIPE step
+itself (rm of root-owned `signal-cli/data`) STILL needs root — interactive sudo
+or a root container. This stays HOST validation even post-M1-569 (mvn verify only
+pins invocation shape). Live stack UP + healthy (both adapters
+`adapter_connection_status` 1.0, restarted collector-first after the M1-569
+verify). Push remains the user's call (`main` further ahead of origin).
+
+## ▶ previous START HERE (2026-07-05 — M1-568 merged + M1-569 drafted, kept for context)
 
 **M1-568 DONE + MERGED @ e7a60a2e (2026-07-05).** `/m1-tick run M1-568` end to
 end: restore.sh's identity extraction now names ONLY the allowlisted `${dir#/}`
@@ -729,8 +777,12 @@ checklist, §6 differences, §8 decisions) → `simplex-live-frame-capture` memo
 Phases 0–5 ALL DONE and ALL live findings CLOSED (F-live-11 fixed by
 M1-566 @ 96f6ef09, host-validated 2026-07-04: live /summary edits in
 place, latest-revision chain proven, zero fallback_send). Phase 6
-(/testcase skill) optional. Board: 590 done / 0 pending. Only
-observation left: F-live-12 (low, self-healing startup noise).
+(/testcase skill) optional. Host-clone tooling (separate workstream)
+merged: M1-567 (pack/restore) + M1-568 (tar-slip allowlist) + M1-569
+(root-owned identity dirs) — its recovery round-trip is the one
+outstanding HOST validation (unblocked, see §START HERE). Board: 593
+done / 0 pending. Only observation left: F-live-12 (low, self-healing
+startup noise).
 
 ## Where we are
 
