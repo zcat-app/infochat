@@ -7,7 +7,7 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-05 (**MIGRATION ROUND-TRIP RE-RUN DONE + VALIDATED — the destructive pack→wipe→restore ran in place on this host; restore.sh rebuilt a healthy clone on the FIRST pass with NO manual repair (RESTORE_EXIT=0). Both fixes PROVEN on real wire: M1-570 (infochat_admin reconstructed before pg_restore → ZERO permission errors, collector heartbeats healthy — the prior round-trip died here) and M1-571 (5.3 GB custom gen GGUF re-fetched from the backfilled secrets.env URL, SHA-verified vs 819372…, llama.cpp server healthy). All 5 containers healthy; both apps readiness 200; adapter_connection_status=1.0 for signal+simplex (same bot); DB vs golden = all STABLE tables exact (users=3, admins=2, source=74, tag=24, groups=1, invite_code=1, post=3800, chat_message=42, flyway=56), 3 append-only tables +few (expected). One leg optional/undriven: §7.10 step-5 bot-chat /audit+/summary via a live client. PENDING user decision: SHRED the recovery-test bundle/safety + .scratch pre-backfill bak (plaintext keys). THEN the queued LLM resource benchmark (llamacpp/ollama/remote). board 595 done / 0 pending. main ~15 ahead of origin, NOT pushed**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-05 (**MIGRATION ROUND-TRIP RE-RUN DONE + VALIDATED — the destructive pack→wipe→restore ran in place on this host; restore.sh rebuilt a healthy clone on the FIRST pass with NO manual repair (RESTORE_EXIT=0). Both fixes PROVEN on real wire: M1-570 (infochat_admin reconstructed before pg_restore → ZERO permission errors, collector heartbeats healthy — the prior round-trip died here) and M1-571 (5.3 GB custom gen GGUF re-fetched from the backfilled secrets.env URL, SHA-verified vs 819372…, llama.cpp server healthy). All 5 containers healthy; both apps readiness 200; adapter_connection_status=1.0 for signal+simplex (same bot); DB vs golden = all STABLE tables exact (users=3, admins=2, source=74, tag=24, groups=1, invite_code=1, post=3800, chat_message=42, flyway=56), 3 append-only tables +few (expected). One leg optional/undriven: §7.10 step-5 bot-chat /audit+/summary via a live client. SHRED DONE (recovery-test bundle/safety + .scratch pre-backfill bak all shredded). LLM BENCHMARK DONE (llamacpp-default gemma / ollama llama3.2:3b / remote DeepSeek measured swap-in-place; results → SETUP_GUIDE §"AI backend performance on modest hardware" @04635d78; deployment restored to baseline). M1-572 drafted (shred-bundle.sh helper). board 595 done / 0 pending. main ~18 ahead of origin, NOT pushed**) · Owner: ubuntu5 + Claude
 
 ---
 
@@ -55,23 +55,43 @@ client conversation, not just HTTP/DB/metrics probes. Drive a client to fully cl
 step 5 if a full sign-off is wanted; the metrics+DB+clean-log proof is otherwise
 complete.
 
-### SECRET HYGIENE — PENDING USER DECISION (IMPORTANT)
-The round-trip is done + validated, so the standing instruction is to SHRED
-`/home/infochat/recovery-test/{bundle,safety}/` (72 MB bundle ×2 + independent DB
-dump + extracted identities + raw-config — plaintext DB passwords + UNRECOVERABLE
-Signal/SimpleX identity keys, 0600) and `.scratch/secrets.env.pre-backfill.bak`
-(`shred -uz` all files + `rm -rf`). The live deployment holds its own working
-identities in `prod/runtime/`, so shredding destroys redundant backups, not the
-only copy — but it is IRREVERSIBLE, so awaiting the user's explicit go.
-Also present (non-secret records): `/home/infochat/recovery-test/{run-restore.sh,
-restore-run.log,restore.done,golden-snapshot.txt}` — scan `restore-run.log` for any
-leaked secret before keeping.
+### SECRET HYGIENE — DONE (2026-07-05)
+Per the user's "shred": `/home/infochat/recovery-test/{bundle,safety}/` (9 files —
+2 bundles, independent DB dump, extracted identities tarball, raw-config secrets)
+and `.scratch/secrets.env.pre-backfill.bak` were SHREDDED (`shred -uz` each file +
+`rm -rf` the dirs). All operator-owned, no root needed. `restore-run.log` scanned
+first (DB password ABSENT; the only "secret-ish" hits were the filename `secrets.env`
+and a Maven `smallrye-private-key-pem-parser` dep) and KEPT with the non-secret
+records (`golden-snapshot.txt`, restore logs/markers, `run-restore.sh`) in
+`recovery-test/`.
 
-### NEXT
-(1) User decision on the shred. (2) The queued **LLM resource benchmark** (llamacpp
-vs ollama vs remote — needs a remote API key from the user; ollama volume still
-empty, needs `ollama pull`). Board 595 done / 0 pending. `main` ~15 ahead of origin,
-NOT pushed (user's call). Live stack UP + healthy on the freshly-restored clone.
+### LLM RESOURCE BENCHMARK — DONE (2026-07-05)
+Ran swap-in-place (chosen over full drop+recreate): kept the SimpleX bot, dropped
+signal, PAUSED the collector to isolate chat-backend cost, one gen backend live at a
+time on the 4-vCPU/15GB host. Fixed scenario = 3 chat Qs + `/summary -w 30d` over
+SimpleX from the admin client (`@Admin-Reno`, `--execute-log messages -t N`); latency
+ground truth from backend container logs (llama.cpp/ollama `slot print_timing`).
+- **llama.cpp** (pinned default gemma-4-E4B-it-qat-UD-Q4_K_XL, 4.2 GB): ~5.3 GiB RAM,
+  all 4 cores, prefill ~35 tok/s, decode ~8–10 tok/s, chat turn ~76–80 s. Coherent.
+- **ollama** (llama3.2:3b, 2 GB): ~3.6 GiB RAM, all 4 cores, prefill ~52–56 tok/s,
+  decode ~10 tok/s, chat turn ~50 s. Coherent, actively used the searchPosts tool.
+  Lightest + snappiest local.
+- **remote** (DeepSeek deepseek-chat): ~0 local resource, ~56 tok/s decode (141 tok in
+  2.5 s direct), ~10–15 s e2e over the bot, BEST quality. Sends prompts + post content
+  to the API; needs key (existing valid DeepSeek key in secrets.env) + network.
+Key finding: CPU-only latency is PREFILL-dominated (~2,600-tok system+tools prompt),
+so the smaller local model (ollama) is snappier; compose `cpus:3.0` cap is swarm-only
+(local inference saturates all 4 cores). Written to `SETUP_GUIDE.md` §"AI backend
+performance on modest hardware" (@04635d78). Deployment RESTORED to baseline (both
+adapters 1.0, custom OBLITERATED model reloaded, collector unpaused, all 5 healthy,
+0 perm errors; the benchmark's default-gemma GGUF removed from the volume; working
+`.scratch/bench/*` artifacts + driver kept, gitignored).
+
+### NEXT (nothing mandatory)
+Optional: (a) `/m1-tick run M1-572` — the shred-bundle.sh helper ticket (drafted this
+session). (b) §7.10 step-5 bot-chat `/audit`+`/summary` full sign-off via a live
+client. (c) push (`main` ~18 ahead of origin, user's call). Live stack UP + healthy at
+baseline (both adapters, custom llamacpp model, collector running).
 
 ## ▶ previous START HERE (2026-07-05 — PAUSED at GO checkpoint, superseded by the completed round-trip above)
 
