@@ -7,11 +7,54 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-05 (**M1-567 recovery ROUND-TRIP RUN — caught a 2ND REAL DEFECT: restore.sh loses the Flyway-created `infochat_admin` role (a single-DB `pg_dump` omits cluster-global roles) → the dump's grants to it fail and, because pg_dump bundles each object's GRANTs atomically, they ROLL BACK the co-located collector/provider grants → collector crashes `permission denied for table heartbeat`, restore EXIT=1. Live deployment RECOVERED manually (create `infochat_admin` NOLOGIN + re-apply the dump's ACL section + restart — both adapters `adapter_connection_status=1`, golden row counts intact, 0 residual perm errors). M1-570 DRAFTED (pending) to automate the fix in restore.sh. board 593 done / 1 pending**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-05 (**M1-570 DONE + MERGED @ 70da339c — restore.sh now reconstructs the Flyway-created `infochat_admin` NOLOGIN role (idempotent, mirrors V2) AFTER Postgres is up and BEFORE pg_restore, fixing the 2nd defect the M1-567 round-trip caught: the co-located collector/provider grants no longer atomically roll back, so a clone comes up healthy on the FIRST restore with NO manual repair. Gate cycle ALL GREEN: clarity PASS → verify 227 → review APPROVE → redteam CLEAN → deep-code-review NO FINDINGS → risk:high commit re-verify → squash-merge. Secret hygiene DONE (recovery-test bundle+safety SHREDDED). Live stack UP + healthy (both adapters status=1, DB matches golden). board 594 done / 0 pending. NEXT: re-run the full migration round-trip on the FIXED restore.sh — needs a FRESH pack+safety+golden first (old bundle shredded)**) · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
+
+**M1-570 DONE + MERGED @ 70da339c (2026-07-05).** `/m1-tick run M1-570` end to end
+automated the fix for the SECOND defect the M1-567 round-trip caught. `restore.sh`
+now reconstructs the Flyway-created `infochat_admin` NOLOGIN role — idempotent
+(`pg_roles` NOT EXISTS guard, mirroring V2 __roles) — AFTER Postgres is up and
+BEFORE `pg_restore`, so the dump's ACL grants to `infochat_admin` (and the
+co-located collector/provider grants that atomically roll back with them) apply on
+the FIRST restore, no manual repair. Files: restore.sh (the DO-block via a quoted
+heredoc, ON_ERROR_STOP fail-loud), RestoreWiringTest (source-order invariant:
+bring-up < guard < CREATE ROLE < pg_restore), 07-deployment.md §7.10.1 (WHY
+paragraph). Gate cycle ALL GREEN: clarity PASS(0/0) → verify 227 → review APPROVE
+r1 (all checks incl. spec-conformance) → redteam CLEAN (0 findings; 2 out-of-model)
+→ deep-code-review NO FINDINGS (user-requested extra gate; independently confirmed
+the collector connects as the weak `infochat_collector` role so the bug is real,
+and the full migration history keeps `infochat_admin` NOLOGIN so a clone matches
+the source) → risk:high commit safety re-verify 227 → squash-merge. restore.sh is a
+HOST script — no app image rebuild needed. Board: 594 done / 0 pending. Live stack
+UP + healthy post-merge (both adapters `adapter_connection_status=1`, DB matches
+golden: users=3 source=74 flyway=56). NOT pushed (`main` ~14 ahead of origin).
+
+**2 advisory out-of-model notes (redteam + deep-review converged):** (1) tampered
+bundle — supply-chain, out of the v1 threat model; the role SQL is a fixed heredoc.
+(2) silent ACL-error tolerance: the pre-existing `pg_restore` runs without
+`--exit-on-error` and post-checks only table presence, not ACL correctness — so a
+FUTURE second Flyway-created role added to V2 but not to restore.sh's DO block could
+restore with silently rolled-back grants (inherited not introduced; failure is
+under-permissive/availability, not escalation). Optional future ticket: a
+grant-verification post-check in restore.sh.
+
+**NEXT ACTION (in progress this session):** re-run the FULL migration round-trip
+(pack → wipe → restore → run) on the FIXED restore.sh to prove a first-pass working
+clone with NO manual repair. The old bundle+safety were SHREDDED, so this needs a
+FRESH `pack.sh` + independent safety copy + regenerated golden snapshot FIRST — do
+NOT wipe before a verified fresh backup. Also queued (separate follow-ups):
+(a) custom-GGUF URL persistence gap — 4-llm.sh/restore.sh persist only the custom
+GGUF FILENAME, not its URL, so a custom gen GGUF can't be re-fetched on a fresh host
+(restore fails loud by design; the round-trip workaround is to KEEP the custom gen
+GGUF in the volume and wipe only the pinned emb GGUF). Ticket candidate.
+(b) LLM-provider resource benchmark (llamacpp vs ollama vs remote: memory/CPU/
+latency/quality on a fixed 3-question + 1-summary scenario) → SETUP_GUIDE advanced
+section. Push remains the user's call.
+
+## ▶ previous START HERE (2026-07-05 — M1-567 recovery round-trip + M1-570 drafted, kept for context)
 
 **M1-567 RECOVERY ROUND-TRIP RUN (2026-07-05) — full in-place destroy+recover on
 THIS host. It caught a SECOND real defect (after M1-569) and the live deployment
