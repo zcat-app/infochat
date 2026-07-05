@@ -7,11 +7,92 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-05 (**M1-570 DONE + MERGED @ 70da339c — restore.sh now reconstructs the Flyway-created `infochat_admin` NOLOGIN role (idempotent, mirrors V2) AFTER Postgres is up and BEFORE pg_restore, fixing the 2nd defect the M1-567 round-trip caught: the co-located collector/provider grants no longer atomically roll back, so a clone comes up healthy on the FIRST restore with NO manual repair. Gate cycle ALL GREEN: clarity PASS → verify 227 → review APPROVE → redteam CLEAN → deep-code-review NO FINDINGS → risk:high commit re-verify → squash-merge. Secret hygiene DONE (recovery-test bundle+safety SHREDDED). Live stack UP + healthy (both adapters status=1, DB matches golden). board 594 done / 0 pending. NEXT: re-run the full migration round-trip on the FIXED restore.sh — needs a FRESH pack+safety+golden first (old bundle shredded)**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-05 (**M1-571 DONE + MERGED @ e960bb6f — 4-llm.sh now persists the custom GGUF download URL+SHA to secrets.env so restore.sh can re-fetch a CUSTOM model on a fresh host (was: filename-only → fails loud). MIGRATION ROUND-TRIP RE-RUN is PREPPED + PAUSED at the GO checkpoint BEFORE the destructive wipe: live secrets.env backfilled with the OBLITERATED gen-model URL/SHA, fresh golden snapshot + VERIFIED pack bundle + independent safety copy at /home/infochat/recovery-test/. Live stack UP + healthy — NOT yet wiped. NEXT: on user GO, run the wipe + restore.sh (exercises M1-570 role reconstruction + M1-571 GGUF recovery, ~5.3GB re-download) then verify vs golden; THEN the LLM resource benchmark (llamacpp/ollama/remote). board 595 done / 0 pending. main ~15 ahead of origin, NOT pushed**) · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
+
+**PAUSED at the GO checkpoint BEFORE the migration round-trip WIPE (2026-07-05).**
+Everything is prepped and the backup is VERIFIED; the live deployment is UP + healthy
+and NOT yet touched. The next action is the DESTRUCTIVE wipe + restore — **wait for the
+user's explicit "go" before running it.**
+
+### Done this session
+- **M1-570 DONE + MERGED @ 70da339c** — restore.sh reconstructs `infochat_admin`
+  NOLOGIN before pg_restore (the grant-rollback fix). Detail in the previous START HERE below.
+- **M1-571 DONE + MERGED @ e960bb6f** — `4-llm.sh` now persists
+  `INFOCHAT_LLAMACPP_GGUF_URL`/`_SHA` (+ the `_EMBED_` twins in the llamacpp-embeddings
+  branch) to secrets.env; `restore.sh`'s `ensure_gguf` recovers a CUSTOM GGUF from the
+  persisted URL (SHA-verified when non-empty) instead of failing loud. Pinned path +
+  pre-M1-571 fail-loud fallback preserved; pack.sh unchanged (bundles secrets.env
+  verbatim). Cycle: clarity WARN (I'd omitted the classification frontmatter — added
+  complexity:medium / risk:medium / security_relevant:true / migration_touch:false /
+  round_cap:2) → verify GREEN (227 + LlamacppWiringTest 10/10 + RestoreWiringTest 8/8)
+  → review APPROVE r1 → redteam CLEAN (0 findings; 1 out-of-model) → risk:medium commit
+  (user-gated freshness → reused r1 log) → squash-merge. Board: 595 done / 0 pending.
+
+### Round-trip prep — DONE + VERIFIED (nothing destroyed yet)
+1. **Live secrets.env BACKFILLED** with the custom gen model's URL+SHA (the M1-571 fix is
+   forward-looking; the current deployment was configured before it):
+   `INFOCHAT_LLAMACPP_GGUF_URL="https://huggingface.co/OBLITERATUS/gemma-4-E4B-it-OBLITERATED/resolve/main/gemma-4-E4B-it-OBLITERATED-Q4_K_M.gguf"`
+   `INFOCHAT_LLAMACPP_GGUF_SHA="819372c2cd9e5aa62950f07db6c5e849769a2fd17f2f25d4932b6f2dd567d4e2"`
+   (URL from the user; SHA computed from the volume copy; URL confirmed HTTP-200; both
+   confirmed present in the bundle). Pre-backfill secrets.env backup at
+   `.scratch/secrets.env.pre-backfill.bak`.
+2. **Fresh golden snapshot** `/home/infochat/recovery-test/golden-snapshot.txt`: users=3,
+   admins=2 (signal+simplex), source=74, tag=24, groups=1, invite_code=1, post=3800,
+   post_embedding=872, chat_message=42, audit_log=104, price_snapshot=15302, flyway=56.
+3. **Fresh pack bundle** `/home/infochat/recovery-test/bundle/infochat-migration-20260705.tgz`
+   (72 MB, 0600) — VERIFIED: 5/5 members, DB dump valid (413 TOC / 38 TABLE DATA), both
+   identities root-owned+moded, backfilled URL/SHA present.
+4. **Independent safety copy** `/home/infochat/recovery-test/safety/`: 2nd bundle +
+   `db-independent.pgc` (separate fresh pg_dump, 38 TABLE DATA) + `identities-from-bundle.tgz`
+   + `raw-config/` (secrets.env, application.properties, bootstrap-{sources,assets}.json).
+
+### NEXT ACTION (on user GO) — the destructive round-trip
+- **WIPE**: stack down → remove app images → `docker volume rm` `*infochat-pgdata` → rm
+  config/secrets → rm BOTH identity dirs (`prod/runtime/{simplex,signal-cli}`) via a ROOT
+  container (signal-cli/data is root:root 0700; no interactive sudo) → rm ALL GGUFs in the
+  `infochat-llamacpp-models` volume INCLUDING the 5.3 GB custom gen
+  (`gemma-4-E4B-it-OBLITERATED-Q4_K_M.gguf`, the FULLER wipe M1-571 enables) + the pinned
+  nomic embedder. **PRESERVE**: `backups/`, `signal-clients/`, `simplex-clients/`,
+  `signal-private.env`, `signal-run.sh`.
+- **RESTORE**: `prod/scripts/restore.sh /home/infochat/recovery-test/bundle/infochat-migration-20260705.tgz`
+  → should on the FIRST pass with NO manual repair: create `infochat_admin` before
+  pg_restore (M1-570), re-fetch the custom gen model from the persisted URL (~5.3 GB,
+  SHA-checked vs 819372…) + the pinned nomic (M1-571), pg_restore, rehydrate, bring up
+  collector→provider, verify.
+- **VERIFY**: diff vs golden, `adapter_connection_status=1` both, readiness UP, 0 perm
+  errors; optionally /audit + /summary via a live client.
+- **RISK**: if restore fails, the bot is DOWN until recovery — recover manually (as in the
+  original M1-567 round-trip) or from the verified safety copy.
+
+### THEN — LLM resource benchmark (still queued)
+llamacpp vs ollama vs **remote** (user will provide an API key), fixed scenario = 3
+predefined questions + 1 summary; measure memory/CPU (docker stats, ONE backend at a time
+on the 15 GB host to avoid OOM) + latency + answer quality → SETUP_GUIDE advanced section.
+NB: ollama volume is EMPTY (needs `ollama pull llama3.2:3b`); no remote key configured yet.
+Baseline (llamacpp active): llamacpp-gen ~6.6 GB / high CPU; provider/collector/postgres
+each ~200 MB; host 15 GB total, ~4.5 GB free.
+
+### SECRET HYGIENE (carry-forward — IMPORTANT)
+`/home/infochat/recovery-test/{bundle,safety}/` are AGAIN plaintext full-secret material
+(DB passwords + UNRECOVERABLE Signal/SimpleX identity keys, mode 0600). The FIRST set was
+shredded earlier this session; this is a NEW set for the round-trip. SHRED them
+(`shred -uz` all files + `rm -rf`) once the round-trip is done + validated. Also shred
+`.scratch/secrets.env.pre-backfill.bak`.
+
+### 2 advisory out-of-model notes (optional future tickets, NOT filed)
+- M1-570: silent ACL-error tolerance in pg_restore (a FUTURE 2nd Flyway-created role not
+  added to restore.sh's DO block could restore with silently-rolled-back grants) →
+  grant-verification post-check.
+- M1-571: custom-GGUF recovery fetches from a secrets.env URL with an optional-empty SHA;
+  mandatory-SHA on custom recovery or bundle-signing, only if the v1 threat model is widened.
+
+Live stack UP + healthy. Push remains the user's call (`main` ~15 ahead of origin, NOT pushed).
+
+## ▶ previous START HERE (2026-07-05 — M1-570 merged, kept for context)
 
 **M1-570 DONE + MERGED @ 70da339c (2026-07-05).** `/m1-tick run M1-570` end to end
 automated the fix for the SECOND defect the M1-567 round-trip caught. `restore.sh`
