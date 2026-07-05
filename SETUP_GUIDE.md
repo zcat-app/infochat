@@ -694,6 +694,52 @@ Either identity is preserved by `--reset --hard` (both live under
 `prod/runtime/`, which the reset never deletes) — you only lose them if you clear
 the folder yourself.
 
+### Migrating to another device
+
+Moving your whole bot to a new machine — same posts, same users, and crucially
+the **same chat identity** (same Signal number, same SimpleX contact link, so
+nobody has to reconnect)? Two scripts do it as an exact clone. The identity
+directories from [Bot chat identity](#bot-chat-identity-where-it-lives-and-how-to-change-it)
+are exactly what make the clone the *same* bot.
+
+1. **On the old machine**, bundle everything into one file:
+   ```bash
+   ./prod/scripts/pack.sh
+   ```
+   This is read-only — it changes and stops nothing — so it's safe to run while
+   the bot is live. It writes `infochat-migration-YYYYMMDD.tgz` (under
+   `prod/runtime/migration` by default) containing the database, both messaging
+   identities, your config, your secrets, and your bootstrap files.
+
+   **That file is the crown jewels.** It holds every password, the LLM API key,
+   the full audit log, and the irreplaceable identity keys (Bot chat identity
+   above explains why those can't be regenerated). It's written `0600`, but
+   **encrypt it before you move it** (for example with `age` or `gpg`).
+
+2. **Copy the file** to the new machine (over `scp` / `rsync`, encrypted).
+
+3. **On the new machine**, from a clean checkout at the **same path** as the old
+   one (for example both at `/srv/infochat`), stand the clone up:
+   ```bash
+   ./prod/scripts/restore.sh infochat-migration-YYYYMMDD.tgz
+   ```
+   It refuses loudly if the target isn't fresh (already configured, or an existing
+   database volume). It restores the database and both identities, then starts the
+   bot — the only thing it re-downloads is the AI model (models aren't in the
+   bundle). When it finishes it prints the checks to run in chat.
+
+**One rule you must not break: only one copy may be live at a time.** The two
+machines each have their own database, so nothing *automatically* stops both from
+running — but two bots on the same Signal/SimpleX identity **corrupt** it. So stop
+the old bot (`./prod/scripts/apps.sh stop`) before the clone connects, and
+decommission the old machine only **after** you've confirmed the clone is healthy.
+The safe order is: stop old → pack → copy → restore + verify → retire old.
+
+Why the same absolute path? v1 rebuilds the identity folders at their original
+locations, so the new checkout must live at the same path; restore refuses rather
+than half-move if they differ. The full runbook is
+[docs/design/07-deployment.md §7.10.1](docs/design/07-deployment.md).
+
 ### Ports and the loopback rule
 
 Nothing is exposed to your network by default — this is deliberate.

@@ -957,6 +957,62 @@ The recommended entry point is `prod/scripts/backup.sh` (§7.7.1) so the operato
 
 The artifact names are exactly what the retention `find` patterns above match.
 
+### 7.10.1 Migrating to another device (host clone)
+
+`backup.sh` + the manual restore steps above are the *upkeep* path (cron dumps,
+in-place recovery). Moving a running deployment to **another machine as an exact
+clone** is a distinct task with sharp edges the manual sequence hits blind:
+config + secrets live outside the backup, the DB must be restored *before*
+Flyway, identities are stored at absolute paths, and models must be re-pulled.
+`prod/scripts/pack.sh` + `prod/scripts/restore.sh` are the supported turnkey pair
+for it; the manual steps 1-5 above remain the under-the-hood description of what
+`restore.sh` automates.
+
+- **`pack.sh [OUT_DIR]`** — READ-ONLY on the source. Bundles everything needed to
+  reconstruct the deployment into ONE archive (`infochat-migration-YYYYMMDD.tgz`,
+  default `prod/runtime/migration`): the `infochat` DB (`pg_dump -F c`, audit log
+  included), every configured adapter identity data-dir (modes preserved),
+  `application.properties`, `secrets.env`, and the bootstrap files. This is a
+  **superset** of `backup.sh` — it adds the config + secrets `backup.sh`
+  deliberately excludes, because a clone needs the DB passwords and admin/LLM
+  config. The archive is the single highest-value artifact the system emits
+  (every secret at once); it is written `0600` and `pack.sh` warns loudly —
+  encryption for transfer and storage stays the operator's responsibility (D34).
+- **`restore.sh <bundle>`** — run on the FRESH target (Docker + a clean checkout
+  at the SAME absolute repo path). It fails loud and early at each precondition —
+  missing/corrupt bundle, an already-configured target, a pre-existing Postgres
+  data volume, or an identity path that does not match the bundle — rather than
+  half-restoring. It places config/secrets/identities, brings Postgres up ALONE
+  and `pg_restore`s into the fresh DB **before** the Collector's first Flyway pass
+  (a Flyway-migrated empty DB would collide with the dump's schema), re-provisions
+  models from the restored backend config (idempotent `ollama pull` / GGUF fetch;
+  a pinned-default GGUF is re-fetched from its known URL, a custom one fails loud
+  because its URL was never persisted; a remote backend needs no model step), then
+  starts Collector → Provider and runs the §7.10 step-5 health verification.
+
+**Same-absolute-path constraint (v1).** The identity tar is stored relative to
+`/`, so the clone reconstructs each data-dir at its original absolute path.
+Relocating to a *different* absolute path (rewriting the `data-dir` config) is a
+follow-up, not v1; `restore.sh` fails loud on a path mismatch rather than
+silently half-restoring.
+
+**Single-owner cutover — the binding constraint.** Exactly ONE instance may own
+each messaging identity at a time. This is **not** enforced by the M1-009
+advisory lock: that lock is per-*database* (§7.8.5), and the clone restores into
+its OWN database, so the two hosts hold two independent locks and both would
+start. Signal treats `signal-cli` as the account's single primary device and a
+SimpleX queue has one legitimate owner — two live consumers corrupt
+session/ratchet state. The operator must observe the ordering:
+
+```
+stop-source → pack → transfer → restore + verify → decommission-source
+```
+
+`pack.sh` is read-only precisely so it is safe to pack a still-running source and
+cut over deliberately; decommissioning the old host (`apps.sh stop`, then
+optionally `setup.sh --reset --hard`) happens only AFTER the clone is verified
+healthy, so a corrupt bundle or a failed bring-up never leaves zero working copies.
+
 ---
 
 ## 7.11 Upgrade procedure

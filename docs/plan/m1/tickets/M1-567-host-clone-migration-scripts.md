@@ -1,9 +1,113 @@
 ---
 id: M1-567
 title: Host-clone migration scripts (prod/scripts/pack.sh + restore.sh)
-status: pending
+status: done
 created: 2026-07-05
 last_updated: 2026-07-05
+clarity_check:
+  date: 2026-07-05
+  verdict: WARN
+  warnings:
+    - >-
+      §7.12 collision: acceptance item 5's "new §7.12" doc-placement
+      alternative is already taken (## 7.12 Health checks and probes,
+      07-deployment.md line 1052) and §7.12–7.17 are cross-referenced from 4
+      files outside files_scope (infochat-provider/pom.xml, security.md,
+      04-security.md, 09-reference.md). Use a subsection under the existing
+      §7.10, NOT a new §7.12 — the ticket's "or" permits it and it is
+      collision-free.
+    - >-
+      restore.sh "runs the §7.10 verification" (acceptance item 3) is
+      ambiguous: §7.10 step 5 mixes HTTP-checkable adapter.connection.status=1
+      with live-chat /audit and /summary commands. Reasonable default:
+      automate the HTTP-health part, print the chat-command checks as a manual
+      operator follow-up. Plan decides.
+    - >-
+      risk:medium may be under-calibrated for a full-DB pg_restore (anti-Flyway
+      ordering, data integrity) plus the highest-value secret bundle
+      (unrecoverable identity keys). Operationally already covered by
+      complexity:high (plan + commit safety re-run) and security_relevant:true
+      (redteam pass); left at medium.
+  blockers: []
+outline_file: target/m1-tick-outline-M1-567.md
+reviews:
+  - round: 1
+    date: 2026-07-05
+    verdict: MANUAL
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 982
+      removed: 7
+  - round: 2
+    date: 2026-07-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 1029
+      removed: 7
+escalations:
+  - date: 2026-07-05
+    reason: manual-verdict
+    reviewer_verdict_excerpt: |
+      SCOPE-DRIFT-CHECK: FAIL — files_scope lists only 4 paths (the two scripts +
+      the two docs, NO test path), so RestoreWiringTest.java is outside
+      files_scope (a mechanical membership FAIL). BUT acceptance item 7 AND
+      test_plan.notes explicitly authorize a restore.sh ProcessBuilder wiring test
+      (M1-418 style) that "lands under files_budget", and the file is within the
+      numeric budget (5 implementation files <= 6). This is a ticket-INTERNAL
+      conflict: the frontmatter files_scope and the acceptance body cannot both be
+      honored. Per engineering-rules §6 the reviewer must not pick which provision
+      to violate, so the verdict is MANUAL (not REWORK). Every other check PASS
+      (test-integrity, out-of-scope, negative-space, acceptance items 1-7,
+      spec-conformance); mvn verify green (BUILD SUCCESS, provider 227/0/0, the
+      new test 5/5). Recommended human action: confirm item 7's authorization
+      governs and add the test-path glob to files_scope (refine), or override
+      confirming item 7 governs.
+revisions:
+  - date: 2026-07-05
+    reason: >-
+      refine (manual-verdict, round 1): files_scope omitted the RestoreWiringTest
+      path that acceptance item 7 explicitly authorizes ("its new test lands under
+      files_budget"). Added the exact test path so the frontmatter matches the
+      acceptance body. No code, acceptance, or out_of_scope change; the
+      implementation diff is byte-identical. User chose refine over
+      override/remove-test (2026-07-05).
+    files_scope_before:
+      - prod/scripts/pack.sh
+      - prod/scripts/restore.sh
+      - docs/design/07-deployment.md
+      - SETUP_GUIDE.md
+redteam_findings: []
+redteam_audits:
+  - date: 2026-07-05
+    verdict: CLEAN
+    base: b9c69cc8906717897697bd88a85517144dfef53f
+    head: m1/M1-567-host-clone-migration-scripts (working tree, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-567-2026-07-05.md
+    out_of_model_count: 1
+    note: |
+      Pre-commit adversarial audit of the branch working tree. CLEAN — no
+      threat-model gaps in the migration tooling. One out-of-model item:
+      tar-slip / arbitrary-file-overwrite if restore.sh extracts a TAMPERED
+      identities.tgz (`tar -C / -xzpf` does not reject absolute/`..` members).
+      Out of scope (a tampered bundle is an operator-infra / supply-chain
+      compromise per security.md; operator is told to encrypt for transfer),
+      and the `tar -C /` restore mechanic pre-exists in the §7.10 manual restore
+      + backup.sh, so not new to M1-567. Recommended LOW-priority defense-in-depth
+      follow-up (reject absolute/`..`/out-of-allowlist tar members before
+      extraction), NOT a blocker. Not auto-filed (redteam advisory-only).
 blocked_by: []
 files_budget: 6
 files_scope:
@@ -11,6 +115,7 @@ files_scope:
   - prod/scripts/restore.sh
   - docs/design/07-deployment.md
   - SETUP_GUIDE.md
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/wiring/RestoreWiringTest.java
 complexity: high
 risk: medium
 round_cap: 2
