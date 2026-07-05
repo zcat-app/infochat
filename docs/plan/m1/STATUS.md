@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 591 |
 | deferred | 10 |
-| **total** | **601** |
+| **total** | **602** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-568 — restore.sh extracts only allowlisted identity dirs (tar-slip) (complexity: low, risk: low)
 
 ---
 
@@ -772,4 +772,5 @@ M1-564 (done)
 M1-565 (done)
 M1-566 (done)
 M1-567 (done)
+M1-568 (pending) ← runnable
 ```

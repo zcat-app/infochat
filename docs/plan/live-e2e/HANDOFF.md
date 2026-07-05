@@ -7,11 +7,44 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-04 late night (**LIVE-E2E PLAN COMPLETE — M1-566 merged (96f6ef09), images rebuilt, F-live-11 host validation GREEN: live /summary edits in place (1 dataMessage + 2 editMessage revisions, two-hop latest-revision chain), zero fallback_send; board 590 done / 0 pending; Phase 6 (/testcase skill) stays optional**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-05 (**M1-567 host-clone migration scripts (pack.sh + restore.sh) DONE + MERGED (e9a3a027) via `/m1-tick run` — 1 self-refine (files_scope+test glob), redteam CLEAN; M1-568 drafted (LOW — tar-slip allowlist follow-up from M1-567 out-of-model item); board 591 done / 1 pending**) · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
+
+**M1-567 (host-clone migration scripts) is DONE + MERGED — 2026-07-05.** A new
+workstream (operator host-clone tooling, not live-e2e; logged here as the active
+session tracker). `/m1-tick run M1-567` drove it end to end: `prod/scripts/pack.sh`
+(read-only bundler → one 0600 archive of DB dump + adapter identities + config +
+secrets + bootstrap) and `prod/scripts/restore.sh` (fresh-host reconstructor:
+fail-loud gates → place config/secrets/identities → `pg_restore` into the fresh
+DB BEFORE Flyway → model rehydrate → start + verify), plus RestoreWiringTest (5
+gate tests) and docs (07-deployment.md §7.10.1 + SETUP_GUIDE "Migrating to another
+device"). Squash-merged @ **e9a3a027**. Cycle: clarity WARN(3) → plan PASS →
+verify GREEN → review r1 **MANUAL** (files_scope omitted the test acceptance item
+7 authorizes) → escalate→refine (added the test-path glob) → review r2 APPROVE →
+redteam **CLEAN** → complexity:high commit safety re-run GREEN → merge. Board: 591
+done.
+
+**M1-568 drafted (pending, LOW priority).** Tar-slip defense-in-depth from
+M1-567's redteam OUT-OF-MODEL item: `restore.sh`'s `tar -C / -xzpf` should name
+ONLY the allowlisted data-dir members so a *tampered* bundle's extra members
+(e.g. `etc/...`) are ignored. ~2-line fix (verified: `..` members are already
+blocked by GNU tar + `set -e`; the residual is plain system-path members;
+`tar -x <archive> <member>...` extracts only the named members). Out-of-model, so
+optional. Record: `docs/plan/m1/redteam/M1-567-2026-07-05.md`.
+
+**NEXT ACTION:** none mandatory. Optional: (a) a real pack→transfer→restore host
+round-trip validation of M1-567 (host validation, not `mvn verify`, per its
+`test_plan.notes` — like M1-566's post-merge live step); (b) `/m1-tick run
+M1-568` when the tar-slip hardening is prioritized. Push remains the user's call
+(`main` is now further ahead of origin). DRY note (plan): restore.sh duplicates
+4-llm.sh's pinned-GGUF constants + fetch_gguf deliberately (those files
+out-of-scope); drift is fail-safe (stale copy → fail-loud) — handle it on the
+next 4-llm.sh constant change, no proactive ticket.
+
+## ▶ previous START HERE (2026-07-04 late night — live-e2e complete, kept for context)
 
 **THE LIVE-E2E PLAN IS COMPLETE (2026-07-04 late night).** M1-566 (the
 F-live-11 fix, the last open finding) is merged @ 96f6ef09, both app
@@ -1058,6 +1091,47 @@ per-emit readiness gate M1-551 gave the rehydrator, or delay the
 task's first execution past startup. NOT ticketed — user's call.
 
 ## Running log
+
+### 2026-07-05 (M1-567 host-clone migration scripts run+merge; M1-568 drafted)
+
+Ran `/m1-tick run M1-567` — a NEW workstream (operator host-clone tooling, not
+live-e2e; logged here as the active session tracker, as the DeepSeek entry below
+was).
+
+- **Setup.** The ticket + a SETUP_GUIDE Signal-identity explainer sat unmerged on
+  `docs/signal-identity-explainer` (2 `process:` doc commits) and M1-567 was
+  `status: draft`. Fast-forwarded `main` to land both doc commits (the ticket
+  cross-links the "Bot chat identity" SETUP_GUIDE subsection that only existed
+  there), then promoted M1-567 draft→pending (b9c69cc8).
+- **Implemented.** `pack.sh` (read-only bundler, shellcheck-clean) + `restore.sh`
+  (fresh-host reconstructor: fail-loud preconditions → place config/secrets/
+  identities → `3-postgres.sh` → `pg_restore` into the fresh DB BEFORE Flyway →
+  `rehydrate_models` [pinned GGUF re-fetched from known URL, custom fails loud,
+  remote = none] → build → collector `--wait` → provider [SKIPS `6b` so no new
+  SimpleX address is minted] → `8-verify.sh` + printed manual chat checks +
+  single-owner cutover reminder) + `RestoreWiringTest` (5 fail-loud gate tests,
+  all pass) + docs (07-deployment.md §7.10.1 — a §7.10 subsection, NOT a new
+  §7.12 which would collide with "Health checks" per the clarity WARN — and
+  SETUP_GUIDE "Migrating to another device").
+- **Cycle.** clarity WARN(3, all heeded) → plan-writer PASS(6 risks) → verify r1
+  GREEN (provider 227/0/0, RestoreWiringTest 5/5) → review r1 **MANUAL**
+  (ticket-internal: files_scope's 4 paths omitted the test that acceptance item 7
+  explicitly authorizes → §6 rule-trade, reviewer correctly won't decide) →
+  escalate `manual-verdict` → **user chose refine** → added the test-path glob to
+  files_scope (663b482c) → review r2 **APPROVE** (all checks) → redteam **CLEAN**
+  → complexity:high commit safety re-run GREEN (**user chose re-run** over the
+  M1-272-valid reuse) → committed 87dfb008 → squash-merged **e9a3a027**, branch
+  deleted. Live apps paused only during the two verifies; back online after.
+- **Redteam out-of-model** (advisory, not a finding): `restore.sh`'s
+  `tar -C / -xzpf` of a TAMPERED identities.tgz could write system-path members
+  (tar-slip). Out of scope (tampered bundle = supply-chain, `security.md`;
+  operator encrypts for transfer) and the `tar -C /` mechanic pre-exists in the
+  §7.10 manual restore + `backup.sh`. Verified GNU tar already refuses `..`
+  members (+ `set -e` aborts); residual is plain system-path members. → drafted
+  **M1-568** (pending, LOW): name only the allowlisted members on the extract
+  (~2 lines). Not auto-filed (redteam advisory-only); record at
+  `docs/plan/m1/redteam/M1-567-2026-07-05.md`.
+- **Board:** 591 done / 1 pending (M1-568). Not pushed (user's call).
 
 ### 2026-07-04 late night, LATEST +1 (LLM backend latency comparison — user-requested; DeepSeek decision recorded)
 
