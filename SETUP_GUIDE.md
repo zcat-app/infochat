@@ -143,6 +143,12 @@ Signal adapter comes up.
 > both client binaries are baked into the image, so the only remaining manual step
 > is registering the bot's phone number — that account belongs to Signal (and its
 > captcha), not to us.
+>
+> For the deeper picture — why "verified in the Signal app" is **not** the same
+> as "verified in `signal-cli`," where the account's keys actually live, and how
+> to move the bot onto a different number or identity later — see [Bot chat
+> identity](#bot-chat-identity-where-it-lives-and-how-to-change-it) in the
+> Advanced section.
 
 > **Advanced alternative (possible, but NOT recommended or supported): link
 > instead of register.** `signal-cli` can also run as a *linked secondary device*
@@ -611,6 +617,82 @@ The wizard writes only to `prod/runtime/` (git-ignored):
   `0600` permissions and fed to Docker Compose via `--env-file` (never sourced
   into a shell), so pasted values containing `#`, `$`, or `&` can't break or
   execute. The committed template is `prod/config/secrets.env.example`.
+
+The bot's **messaging identity** does *not* live in either file above — it lives
+in the adapter data directories (`prod/runtime/signal-cli/`,
+`prod/runtime/simplex/`). The next section explains what's in them and how to
+change them.
+
+### Bot chat identity: where it lives and how to change it
+
+A deep-dive on the question that trips up almost everyone the first time:
+**an account that works in the Signal phone app is *not* automatically usable by
+the bot.** Read this before trying to move the bot onto a different number or a
+fresh identity.
+
+**Two kinds of "verified" (Signal) — not the same thing:**
+
+- **Verified in the Signal phone app** — you installed Signal on a phone, got the
+  SMS code, and can text friends. The account's keys live **on that phone**.
+- **Verified in `signal-cli`** — the account's identity keys live in the bot's
+  **data directory** (`prod/runtime/signal-cli/`), which the adapter reads at
+  startup.
+
+The bot only ever uses the second kind. Signal allows **one primary device per
+number**, so a number that's live in the phone app is *not* ready for the bot
+just by editing config — its keys aren't in the data-dir. To make `signal-cli`
+control that number you must either `register` it (SMS re-verify — this **evicts
+the phone app**; that's the "sacrifice" of turning a personal number into a bot
+number) or `link` it as a secondary device (phone stays primary, messages
+shared — the unsupported path described in [Setting up the bot's chat
+account](#setting-up-the-bots-chat-account)).
+
+**Where the number is actually registered — no shady third party.** Registering
+with `signal-cli` claims the number on **Signal's own servers** — a completely
+ordinary Signal account, gated by **Signal's own captcha** (the captcha exists
+because Signal blocks scripted sign-ups; it has nothing to do with infochat).
+But the account's **private keys are generated and stored locally**, in the
+`signal-cli` data directory on your machine. infochat never uploads them
+anywhere, and the messaging binaries run as local subprocesses with no network
+port of their own (see [Ports and the loopback rule](#ports-and-the-loopback-rule)).
+So: the *number* is a normal Signal account on Signal's servers; the
+*credentials* sit in a local folder you own.
+
+**Think of the data-dir as a keyring.** One `signal-cli` data directory can hold
+several registered accounts; the adapter picks one by
+`infochat.adapters.signal.account`. That gives the rule for changing the bot's
+number:
+
+- **Switching to a number already registered in the keyring** → change
+  `infochat.adapters.signal.account` and `./prod/scripts/apps.sh restart`. That
+  is the *only* case where it's config-and-restart.
+- **Switching to a number that's only live on a phone** → first `register` (or
+  `link`) it into the data-dir as above, *then* change config + restart.
+
+**SimpleX has none of this** — no phone number, no external registration, no
+captcha. The bot's SimpleX identity is a profile + contact address the wizard
+mints into `prod/runtime/simplex/`, stored entirely in that local folder. To
+change it:
+
+- **Keep the same identity** (the frictionless default): do nothing — a
+  `--reset --hard` does **not** touch `prod/runtime/simplex/`, so the bot's
+  contact link and every existing connection survive a database wipe. Nobody
+  reconnects.
+- **Fresh identity**: `rm -rf prod/runtime/simplex/*`, then re-run
+  `prod/scripts/6b-simplex-provision.sh` (or the wizard). You get a **new contact
+  link** to reshare, and because SimpleX connections are pairwise and bound to
+  the identity, **everyone reconnects from scratch** and the admin re-claims via
+  the token. There is no way to mint a new identity while keeping the old
+  contacts.
+
+| | "Just config + restart"? | A *fresh* identity means… |
+|---|---|---|
+| **Signal** | only if the number's keys are already in `signal-cli/` | `register`/`link` the number into the data-dir first (SMS; evicts the phone if primary) |
+| **SimpleX** | n/a (no number to select) | wipe `prod/runtime/simplex/*` → new contact link → everyone reconnects |
+
+Either identity is preserved by `--reset --hard` (both live under
+`prod/runtime/`, which the reset never deletes) — you only lose them if you clear
+the folder yourself.
 
 ### Ports and the loopback rule
 
