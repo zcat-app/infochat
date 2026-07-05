@@ -56,6 +56,12 @@ class LlamacppWiringTest {
     private static final String EMB_GGUF = "nomic-embed-text-v1.5.f16.gguf";
     private static final String EMB_SHA =
             "f7af6f66802f4df86eda10fe9bbcfc75c39562bed48ef6ace719a251cf1c2fdb";
+    // Pinned GGUF download URLs (kept in lock-step with 4-llm.sh) — M1-571 persists these
+    // into secrets.env so restore.sh can re-fetch the model on a fresh host.
+    private static final String GEN_URL =
+            "https://huggingface.co/unsloth/gemma-4-E4B-it-qat-GGUF/resolve/main/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf";
+    private static final String EMB_URL =
+            "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.f16.gguf";
 
     // Pinned in lock-step with docker-compose.yml (mirrors GEN_SHA/EMB_SHA): the
     // image both llama.cpp services must run. server-b5350 predates the gemma4
@@ -163,6 +169,40 @@ class LlamacppWiringTest {
                 "the wizard must mint the generative GGUF filename into secrets.env:\n" + secrets);
         assertTrue(secrets.contains("INFOCHAT_LLAMACPP_EMBED_GGUF=\"" + EMB_GGUF + "\""),
                 "the wizard must mint the embeddings GGUF filename into secrets.env:\n" + secrets);
+
+        // M1-571: the URL + SHA are persisted alongside the filename so restore.sh can
+        // recover the model on a fresh host (pinned here mirrors restore.sh's constants).
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_GGUF_URL=\"" + GEN_URL + "\""),
+                "the wizard must persist the generative GGUF URL for restore recovery:\n" + secrets);
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_GGUF_SHA=\"" + GEN_SHA + "\""),
+                "the wizard must persist the generative GGUF SHA:\n" + secrets);
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_EMBED_GGUF_URL=\"" + EMB_URL + "\""),
+                "the wizard must persist the embeddings GGUF URL for restore recovery:\n" + secrets);
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_EMBED_GGUF_SHA=\"" + EMB_SHA + "\""),
+                "the wizard must persist the embeddings GGUF SHA:\n" + secrets);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void customGenerativeGgufUrlAndShaArePersistedForRestoreRecovery(@TempDir Path tmp) throws Exception {
+        // M1-571: a CUSTOM generative GGUF's download URL + SHA must be persisted to
+        // secrets.env (not just the filename) so restore.sh can re-fetch it on a fresh
+        // host. Drive the wizard with a custom generative URL + SHA (pinned embedder);
+        // the fake docker's wildcard sha256sum returns all-zeros, which the custom SHA
+        // matches so the enforced-checksum path passes.
+        String customUrl = "https://models.example.test/my-custom-gen.gguf";
+        String customSha = "0000000000000000000000000000000000000000000000000000000000000000";
+        // stdin: backend=llamacpp, generative=<custom url>, gen SHA=<customSha>,
+        // embeddings=llamacpp (Enter), embeddings GGUF=pinned (Enter), timing (4× Enter).
+        runWizard(tmp, "llamacpp\n" + customUrl + "\n" + customSha + "\n\n\n" + ACCEPT_TIMING_DEFAULTS);
+
+        String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_GGUF=\"my-custom-gen.gguf\""),
+                "the custom generative GGUF filename must be minted:\n" + secrets);
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_GGUF_URL=\"" + customUrl + "\""),
+                "the custom generative GGUF URL must be persisted so restore can recover it (M1-571):\n" + secrets);
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_GGUF_SHA=\"" + customSha + "\""),
+                "the custom generative GGUF SHA must be persisted:\n" + secrets);
     }
 
     @Test

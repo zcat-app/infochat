@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 594 |
+| done | 595 |
 | deferred | 10 |
-| **total** | **604** |
+| **total** | **605** |
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-571 | persist custom GGUF download URL + SHA so restore recovers custom models | 2026-07-05 | round 1 APPROVE |
 | M1-570 | restore.sh reconstructs the infochat_admin role before pg_restore | 2026-07-05 | round 1 APPROVE |
 | M1-569 | pack.sh/restore.sh handle root-owned adapter identity dirs | 2026-07-05 | round 1 APPROVE |
 | M1-568 | restore.sh extracts only allowlisted identity dirs (tar-slip) | 2026-07-05 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-564 | Exclude prod/runtime from the app-image build context | 2026-07-04 | round 1 APPROVE |
 | M1-563 | Leave-cleanup posture for membership-event-less adapters | 2026-07-04 | round 2 APPROVE |
 | M1-562 | Signal group inbound parses the real signal-cli wire shape | 2026-07-04 | round 1 APPROVE |
-| M1-561 | Refusal-marker intercept runs on post-strip terminal text | 2026-07-04 | round 2 APPROVE |
 
 ---
 
@@ -775,4 +775,5 @@ M1-567 (done)
 M1-568 (done)
 M1-569 (done)
 M1-570 (done)
+M1-571 (done)
 ```

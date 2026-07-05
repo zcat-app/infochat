@@ -1,7 +1,7 @@
 ---
 id: M1-571
 title: persist custom GGUF download URL + SHA so restore recovers custom models
-status: pending
+status: done
 created: 2026-07-05
 last_updated: 2026-07-05
 blocked_by: []
@@ -13,6 +13,11 @@ files_scope:
   - infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/wiring/LlamacppWiringTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/wiring/RestoreWiringTest.java
   - docs/design/07-deployment.md
+complexity: medium
+risk: medium
+security_relevant: true
+migration_touch: false
+round_cap: 2
 out_of_scope:
   - >-
     prod/scripts/pack.sh. pack.sh bundles secrets.env VERBATIM, so the new
@@ -115,14 +120,49 @@ spec_refs:
   - docs/design/07-deployment.md §7.10.1
   - docs/design/07-deployment.md §7.7.2
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 126
+      removed: 20
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
-clarity_check: null
+redteam_audits:
+  - date: 2026-07-05
+    verdict: CLEAN
+    verdict_file: docs/plan/m1/redteam/M1-571-2026-07-05.md
+    out_of_model_count: 1
+    note: |
+      CLEAN. 1 out-of-model: custom-GGUF recovery fetches from a secrets.env URL with an
+      optionally-empty SHA; a tampered bundle could abuse it — but operator config + the
+      backup bundle are trusted, bundle-tampering/MITM are out of scope for v1, §SSRF binds
+      the app outbound path not operator scripts, and the pinned path uses an enforced SHA.
+      Optional future hardening (mandatory SHA / bundle-signing) only if the threat model is
+      widened; M1-571 preserved 4-llm.sh's existing optional-SHA posture (out_of_scope).
+clarity_check:
+  date: 2026-07-05
+  verdict: WARN
+  warnings:
+    - >-
+      complexity/risk/security_relevant/migration_touch/round_cap were absent from
+      the draft frontmatter (the sibling M1-569/M1-570 set them explicitly).
+      Addressed pre-start: added complexity:medium, risk:medium (blast radius is
+      model-recovery availability, not DB integrity/auth like M1-570; pinned path
+      untouched, SHA-verified, real validation is the host round-trip),
+      security_relevant:true, migration_touch:false, round_cap:2.
+  blockers: []
 ---
 
 # M1-571: persist custom GGUF download URL + SHA so restore recovers custom models

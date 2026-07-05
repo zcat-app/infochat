@@ -240,6 +240,28 @@ class RestoreWiringTest {
                         + "ACL grants to it (and the co-located service-role grants) apply cleanly");
     }
 
+    @Test
+    void restoreRecoversCustomGgufFromPersistedUrl() throws Exception {
+        // M1-571: restore.sh's ensure_gguf recovers a CUSTOM (non-pinned) GGUF from the URL
+        // 4-llm.sh persisted into secrets.env, instead of failing loud. The real multi-GB
+        // download stays HOST validation (like the rest of this file), so pin the wiring by
+        // source inspection: the custom branch must fetch from the persisted URL, the callers
+        // must read INFOCHAT_LLAMACPP_GGUF_URL / _EMBED_ from the restored secrets.env, and
+        // the pre-M1-571 (no persisted URL) fail-loud fallback must be preserved.
+        String script = Files.readString(repoRoot().resolve("prod/scripts/restore.sh"));
+
+        assertTrue(script.contains("elif [[ -n \"$persisted_url\" ]]; then"),
+                "ensure_gguf must recover a custom GGUF when a persisted URL is present");
+        assertTrue(script.contains("fetch_gguf \"$persisted_url\""),
+                "the custom-recovery branch must fetch from the persisted URL");
+        assertTrue(script.contains("bundle predates M1-571"),
+                "the no-persisted-URL fail-loud fallback must be preserved for older bundles");
+        assertTrue(script.contains("read_dotenv_value INFOCHAT_LLAMACPP_GGUF_URL"),
+                "the generative caller must read the persisted URL from secrets.env");
+        assertTrue(script.contains("read_dotenv_value INFOCHAT_LLAMACPP_EMBED_GGUF_URL"),
+                "the embeddings caller must read the persisted URL from secrets.env");
+    }
+
     // --- helpers ----------------------------------------------------------------
 
     /** Drive the real restore.sh under a controlled PATH; return exit code + combined output. */

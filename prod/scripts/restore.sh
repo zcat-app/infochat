@@ -146,24 +146,32 @@ fetch_gguf() {
   fi
 }
 
-# Ensure a llama.cpp GGUF (by persisted filename) is in the model volume. A
-# PINNED default is auto-recovered from the constants above; a CUSTOM filename
-# has no recoverable URL (4-llm.sh persists only the filename), so unless the
-# model volume survived, restore fails loud with the actionable fix (Risks #2).
+# Ensure a llama.cpp GGUF is in the model volume. A PINNED default is auto-recovered
+# from the constants above; a CUSTOM GGUF is recovered from the URL + SHA that 4-llm.sh
+# persisted into secrets.env (INFOCHAT_LLAMACPP_GGUF_URL/_SHA, M1-571), which the caller
+# passes in. An OLDER bundle (pre-M1-571) has no persisted URL, so a custom GGUF that is
+# not already in the (surviving) model volume still fails loud with the actionable fix.
+# $1 filename, $2 persisted-url ("" if none), $3 persisted-sha ("" to skip integrity).
 ensure_gguf() {
-  local file="$1"
+  local file="$1" persisted_url="$2" persisted_sha="$3"
   case "$file" in
     "$LLAMACPP_GEN_GGUF_FILE") fetch_gguf "$LLAMACPP_GEN_GGUF_URL" "$file" "$LLAMACPP_GEN_GGUF_SHA" ;;
     "$LLAMACPP_EMB_GGUF_FILE") fetch_gguf "$LLAMACPP_EMB_GGUF_URL" "$file" "$LLAMACPP_EMB_GGUF_SHA" ;;
     *)
       if docker run --rm -v infochat-llamacpp-models:/models --entrypoint ls "$CURL_IMAGE" "/models/$file" >/dev/null 2>&1; then
         echo "  GGUF $file already in the model volume (custom; skipping fetch)"
+      elif [[ -n "$persisted_url" ]]; then
+        # Custom GGUF recovered from the URL 4-llm.sh persisted at setup (M1-571). fetch_gguf
+        # verifies the SHA when non-empty; an empty SHA keeps the operator-trusted TLS fetch.
+        echo "  recovering custom GGUF $file from persisted URL (M1-571)"
+        fetch_gguf "$persisted_url" "$file" "$persisted_sha"
       else
         echo "FAIL: $file is a CUSTOM llama.cpp GGUF whose download URL was never persisted" >&2
-        echo "      (4-llm.sh stores only the filename). Fetch it manually into the" >&2
-        echo "      'infochat-llamacpp-models' Docker volume, or re-run prod/setup.sh step 4" >&2
-        echo "      (4-llm.sh) on this host to re-provision, then re-run restore.sh." >&2
-        echo "      Pinned default GGUFs are auto-recovered; only custom overrides need this." >&2
+        echo "      (bundle predates M1-571; 4-llm.sh stored only the filename). Fetch it" >&2
+        echo "      manually into the 'infochat-llamacpp-models' Docker volume, or re-run" >&2
+        echo "      prod/setup.sh step 4 (4-llm.sh) on this host to re-provision, then re-run" >&2
+        echo "      restore.sh. Pinned default GGUFs are auto-recovered; only custom overrides" >&2
+        echo "      from a pre-M1-571 bundle need this." >&2
         exit 1
       fi
       ;;
@@ -401,12 +409,16 @@ rehydrate_models() {
   # llama.cpp GGUFs first (into the volume; the servers load them on start), then
   # start each llama.cpp server it needs (mirrors 4-llm.sh's fetch-then-up order).
   if [[ "$gen_backend" == "llamacpp" ]]; then
-    ensure_gguf "$(read_dotenv_value INFOCHAT_LLAMACPP_GGUF "$SECRETS_FILE")"
+    ensure_gguf "$(read_dotenv_value INFOCHAT_LLAMACPP_GGUF "$SECRETS_FILE")" \
+      "$(read_dotenv_value INFOCHAT_LLAMACPP_GGUF_URL "$SECRETS_FILE")" \
+      "$(read_dotenv_value INFOCHAT_LLAMACPP_GGUF_SHA "$SECRETS_FILE")"
     echo "  + start llama.cpp generative server"
     compose --profile llamacpp up -d llamacpp
   fi
   if [[ "$emb_backend" == "llamacpp" ]]; then
-    ensure_gguf "$(read_dotenv_value INFOCHAT_LLAMACPP_EMBED_GGUF "$SECRETS_FILE")"
+    ensure_gguf "$(read_dotenv_value INFOCHAT_LLAMACPP_EMBED_GGUF "$SECRETS_FILE")" \
+      "$(read_dotenv_value INFOCHAT_LLAMACPP_EMBED_GGUF_URL "$SECRETS_FILE")" \
+      "$(read_dotenv_value INFOCHAT_LLAMACPP_EMBED_GGUF_SHA "$SECRETS_FILE")"
     echo "  + start llama.cpp embeddings server"
     compose --profile llamacpp-embeddings up -d llamacpp-embeddings
   fi

@@ -384,12 +384,26 @@ case "$backend" in
     # (the LLAMA_ARG_MODEL paths) resolves at container start (M1-389). ---
     fetch_gguf "$gen_url" "$gen_file" "$gen_sha"
     set_secret INFOCHAT_LLAMACPP_GGUF "$gen_file"
+    # Persist the URL + SHA too (not just the filename) so restore.sh can re-fetch a
+    # CUSTOM generative GGUF on a fresh host: the model volume is not in the pack.sh
+    # bundle, and a custom model has no pinned constant to recover from (M1-571). For
+    # the pinned default these mirror restore.sh's own constants (a harmless duplicate
+    # its pinned recovery path ignores); for a custom override they are the ONLY
+    # recovery source. $gen_sha may be empty (operator skipped the custom SHA prompt).
+    set_secret INFOCHAT_LLAMACPP_GGUF_URL "$gen_url"
+    set_secret INFOCHAT_LLAMACPP_GGUF_SHA "$gen_sha"
     echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod --profile llamacpp up -d llamacpp"
     docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile llamacpp up -d llamacpp
 
     if [[ "$emb_backend" == "llamacpp" ]]; then
       fetch_gguf "$emb_url" "$emb_file" "$emb_sha"
       set_secret INFOCHAT_LLAMACPP_EMBED_GGUF "$emb_file"
+      # Persist the embedder's URL + SHA too (M1-571), same rationale as the generative
+      # GGUF above — so a CUSTOM llama.cpp embedder is recoverable on restore. Written
+      # ONLY in this llamacpp-embeddings branch; the ollama-embeddings shape serves nomic
+      # from Ollama and has no llama.cpp embed GGUF to recover.
+      set_secret INFOCHAT_LLAMACPP_EMBED_GGUF_URL "$emb_url"
+      set_secret INFOCHAT_LLAMACPP_EMBED_GGUF_SHA "$emb_sha"
       echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod --profile llamacpp-embeddings up -d llamacpp-embeddings"
       docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile llamacpp-embeddings up -d llamacpp-embeddings
       emb_base_url="$LLAMACPP_EMBED_URL"
