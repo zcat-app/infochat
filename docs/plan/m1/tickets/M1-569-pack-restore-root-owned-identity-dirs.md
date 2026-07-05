@@ -1,7 +1,7 @@
 ---
 id: M1-569
 title: pack.sh/restore.sh handle root-owned adapter identity dirs
-status: pending
+status: done
 created: 2026-07-05
 last_updated: 2026-07-05
 blocked_by: []
@@ -104,7 +104,20 @@ spec_refs:
 decision_refs:
   - D34
   - D46
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 135
+      removed: 29
 revisions:
   - date: 2026-07-05
     reason: clarity-fail rework (bounded self-refine)
@@ -125,7 +138,27 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-07-05
+    verdict: CLEAN
+    base: 6871ac51121f3203bb14fa62fb79d72d6c3f377b
+    head: working-tree (branch m1/M1-569-pack-restore-root-owned-identity-dirs, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-569-2026-07-05.md
+    out_of_model_count: 2
+    note: |
+      Pre-commit --in-progress audit. CLEAN, no findings. 2 out-of-model, both
+      supply-chain / operator-infrastructure (out of scope per security.md):
+      (1) floating image tag (pgvector/pgvector:pg16) run as root with host
+      bind-mounts — optional digest-pin hardening; (2) tampered-bundle residual,
+      bounded by the M1-568 allowlist + writable-mount-only-allowlisted design
+      (extra members land in the ephemeral container /, never the host). No
+      follow-up ticket recommended.
+clarity_check:
+  date: 2026-07-05
+  verdict: WARN
+  warnings:
+    - "COMPLEXITY-RISK-CALIBRATED: complexity: medium may understate the ticket — the body's Open PLAN questions (image choice, mount shape preserving the -C / convention, allowlist-now-load-bearing untar, cross-adapter ownership acceptance) resemble a ticket that requires an outline. Consider complexity: high, or add a line explaining why medium still holds."
+  blockers: []
 ---
 
 # M1-569: pack.sh/restore.sh handle root-owned adapter identity dirs

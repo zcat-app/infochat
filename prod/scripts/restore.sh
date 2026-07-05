@@ -59,6 +59,14 @@ LLAMACPP_EMB_GGUF_FILE="nomic-embed-text-v1.5.f16.gguf"
 LLAMACPP_EMB_GGUF_URL="https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.f16.gguf"
 LLAMACPP_EMB_GGUF_SHA="f7af6f66802f4df86eda10fe9bbcfc75c39562bed48ef6ace719a251cf1c2fdb"
 CURL_IMAGE="curlimages/curl:8.11.1"
+# The identity untar runs as root inside a throwaway container (M1-569): the source
+# dirs are root:root and signal-cli's store is 0700, so a non-root host untar cannot
+# recreate the ownership/modes the daemons require. Same in-container-privilege
+# pattern as pg_restore — no interactive sudo. Only needs GNU tar (busybox tar
+# under-preserves modes); reuse the pinned postgres image the deployment already
+# requires (`docker run` pulls it just-in-time, then the postgres service reuses the
+# cached image). Any GNU-tar image works, so drift from the compose tag is harmless.
+IDENTITY_TAR_IMAGE="pgvector/pgvector:pg16"
 # The compose-network OpenAI-compatible endpoints (4-llm.sh) restore matches the
 # restored config against to decide which local LLM services to (re)provision.
 OLLAMA_URL="http://ollama:11434/v1"
@@ -262,28 +270,43 @@ if [[ -f "$STAGING/runtime/bootstrap-assets.json" ]]; then
   cp -p "$STAGING/runtime/bootstrap-assets.json" "$RUNTIME_DIR/bootstrap-assets.json"
 fi
 
-# Reconstruct each adapter identity dir at its original absolute path with modes
-# preserved (-p) — both clients reject world-readable keys. This is what makes
-# the clone the SAME bot. (Mirrors the §7.10 restore step `tar -xzpf ... -C /`.)
+# Reconstruct each adapter identity dir at its original absolute path with OWNERSHIP
+# and modes preserved — both clients reject world-readable keys, and signal-cli's
+# account store is root:root 0700. This is what makes the clone the SAME bot.
+#
+# Run the untar as ROOT inside a throwaway container (M1-569): a non-root host untar
+# cannot recreate root:root ownership, so the restored identity would not match the
+# source and the signal-cli daemon would reject it. Bind-mount each allowlisted
+# data-dir READ-WRITE at its absolute host path (exactly how the Provider mounts
+# them, docker-compose.yml adapter volumes); `tar -C /` inside the container writes
+# THROUGH the mount to the host path, so ONLY the mounted data-dirs are writable on
+# the host — the container's own `/` is ephemeral (--rm). `--entrypoint tar` bypasses
+# the postgres image's default entrypoint (the fetch_gguf precedent).
 #
 # Extract naming ONLY the allowlisted data-dir paths validated by the gate above:
 # GNU tar extracts each named directory member recursively and IGNORES every other
 # member, so a TAMPERED bundle carrying extra members that name system paths
-# (e.g. etc/cron.d/..., root/.ssh/...) is never written onto this host under the
-# privileged `tar -C /`. Defense-in-depth on an out-of-model threat (a tampered
-# bundle is a supply-chain concern docs/spec/security.md places out of scope), M1-568.
-# The empty-array guard is load-bearing: `tar -x` with NO members extracts
+# (e.g. etc/cron.d/..., root/.ssh/...) is never written onto this host — doubly so,
+# since only the allowlisted dirs are even mounted writable. Under the now-ROOT untar
+# this allowlist is LOAD-BEARING, not merely defense-in-depth (M1-568/M1-569); the
+# tampered bundle stays an out-of-model, supply-chain concern (security.md).
+# The empty-array guard stays load-bearing: `tar -x` with NO members extracts
 # EVERYTHING, which would reopen exactly the hole this closes — so a bundle that
 # carries identities.tgz but names no configured adapter is a malformed/tampered
 # bundle and is rejected rather than extract-all'd.
-echo "+ restore adapter identities (-C /, modes preserved, allowlisted paths only)"
+echo "+ restore adapter identities as root in-container (-C /, ownership+modes preserved, allowlisted paths only)"
 if [[ "${#identity_rel_paths[@]}" -eq 0 ]]; then
   echo "FAIL: bundle carries identities.tgz but secrets.env names no configured adapter" >&2
   echo "      data-dir — a malformed or tampered bundle. Refusing to extract (an empty" >&2
   echo "      allowlist would extract every member). Aborted." >&2
   exit 1
 fi
-tar -C / -xzpf "$STAGED_IDENTITIES" "${identity_rel_paths[@]}"
+tar_mounts=()
+for rel in "${identity_rel_paths[@]}"; do
+  tar_mounts+=(-v "/$rel:/$rel")
+done
+docker run --rm -u 0:0 -i "${tar_mounts[@]}" --entrypoint tar "$IDENTITY_TAR_IMAGE" \
+  -C / -xzpf - "${identity_rel_paths[@]}" < "$STAGED_IDENTITIES"
 
 # ── Postgres up ALONE, then pg_restore BEFORE Flyway ────────────────────
 # 3-postgres.sh brings up only postgres and waits healthy; on this fresh volume

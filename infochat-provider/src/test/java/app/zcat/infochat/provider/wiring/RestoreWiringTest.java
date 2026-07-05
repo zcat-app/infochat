@@ -22,15 +22,20 @@ import org.junit.jupiter.api.io.TempDir;
  * a parametrized fake {@code docker}) and asserts each gate refuses BEFORE any mutation,
  * naming an actionable fix.
  *
- * <p><b>Scope: the precondition gates PLUS the identity-extraction allowlist (M1-568).</b>
- * The gate cases fail before the {@code tar -C /} identity extraction, so they never mutate
- * the host or exercise Docker for real — the fake {@code docker} only has to satisfy
+ * <p><b>Scope: the precondition gates PLUS the identity-extraction allowlist (M1-568)
+ * over the M1-569 root-in-container untar.</b>
+ * The gate cases fail before the identity extraction, so they never mutate the host or
+ * exercise Docker for real — the fake {@code docker} only has to satisfy
  * {@code command -v docker} and the one {@code docker volume ls} probe the fresh-volume gate
  * makes. One further case ({@code extractionWritesOnlyAllowlistedIdentityDirs}) drives PAST
  * every gate to prove the extraction writes ONLY the configured adapter data-dirs and ignores
- * a tampered bundle's extra member; it stays sandboxed by pointing the data-dir at an absolute
- * path INSIDE the JUnit TempDir, so {@code tar -C /} lands back inside the sandbox (never the
- * real host root) and the fake {@code docker} makes the later pg_restore step a no-op. The
+ * a tampered bundle's extra member. Since M1-569 runs the untar as root inside a throwaway
+ * container ({@code docker run -u 0:0 --entrypoint tar}), the fake {@code docker} MODELS that
+ * invocation: it verifies the privilege mechanism and re-execs the real {@code tar} with the
+ * exact members the script named (bundle on stdin), so the allowlist's filesystem effect is
+ * genuinely exercised. It stays sandboxed by pointing the data-dir at an absolute path INSIDE
+ * the JUnit TempDir, so {@code tar -C /} lands back inside the sandbox (never the real host
+ * root) and the fake {@code docker} makes the later pg_restore step a no-op. The
  * full happy-path ordering invariant (pg_restore into a fresh DB BEFORE the Collector's first
  * Flyway pass, model rehydration, full bring-up) remains HOST validation (ticket
  * {@code test_plan.notes}; like M1-566's post-merge live step), NOT mvn verify. Mirrors the
@@ -52,12 +57,36 @@ class RestoreWiringTest {
 
     // The gates need only `command -v docker` to resolve and
     // `docker volume ls --filter name=infochat-pgdata -q` to report whether a pgdata
-    // volume exists; FAKE_PGDATA_VOLUME=present trips the fresh-volume gate. No other
-    // docker verb is reached before a gate fails.
+    // volume exists; FAKE_PGDATA_VOLUME=present trips the fresh-volume gate. The
+    // allowlist-extraction case additionally reaches the M1-569 privileged untar,
+    // `docker run --rm -u 0:0 -i -v ... --entrypoint tar <image> -C / -xzpf - <members>`.
+    // The `run` branch MODELS it: parse past the run flags to the image, verify the
+    // privilege mechanism (`-u 0:0` -> root-user=yes), then exec the REAL tar with the
+    // exact -C/members the script passed (inheriting the bundle on stdin) so the M1-568
+    // allowlist's filesystem effect is genuinely exercised — only the named members land,
+    // in the TempDir sandbox. No other docker verb is reached before a gate fails.
     private static final String FAKE_DOCKER =
             "#!/usr/bin/env bash\n"
             + "if [[ \"$1\" == volume && \"$2\" == ls ]]; then\n"
             + "  [[ \"${FAKE_PGDATA_VOLUME:-absent}\" == present ]] && echo \"infochat_infochat-pgdata\"\n"
+            + "  exit 0\n"
+            + "fi\n"
+            + "if [[ \"$1\" == run ]]; then\n"
+            + "  shift\n"
+            + "  saw_root_user=no; entrypoint=\"\"; image=\"\"; cmd_args=()\n"
+            + "  while [[ $# -gt 0 ]]; do\n"
+            + "    case \"$1\" in\n"
+            + "      --rm|-i) shift ;;\n"
+            + "      -u) [[ \"$2\" == 0:0 ]] && saw_root_user=yes; shift 2 ;;\n"
+            + "      -v) shift 2 ;;\n"
+            + "      --entrypoint) entrypoint=\"$2\"; shift 2 ;;\n"
+            + "      *) image=\"$1\"; shift; cmd_args=(\"$@\"); break ;;\n"
+            + "    esac\n"
+            + "  done\n"
+            + "  if [[ \"$entrypoint\" == tar ]]; then\n"
+            + "    echo \"FAKE-DOCKER: modeled privileged untar via docker run --entrypoint tar (root-user=${saw_root_user}, image=${image})\"\n"
+            + "    exec tar \"${cmd_args[@]}\"\n"
+            + "  fi\n"
             + "  exit 0\n"
             + "fi\n"
             + "exit 0\n";
@@ -136,9 +165,12 @@ class RestoreWiringTest {
     @Test
     @EnabledOnOs(OS.LINUX)
     void extractionWritesOnlyAllowlistedIdentityDirs(@TempDir Path tmp) throws Exception {
-        // Drive restore.sh PAST every gate so the `tar -C /` identity extraction runs, and
-        // prove it writes ONLY the allowlisted data-dir: a TAMPERED bundle carrying an extra
+        // Drive restore.sh PAST every gate so the identity extraction runs, and prove it
+        // writes ONLY the allowlisted data-dir: a TAMPERED bundle carrying an extra
         // out-of-allowlist member must NOT have that member written to the host (M1-568).
+        // M1-569 runs the untar as root in-container (docker run -u 0:0 --entrypoint tar);
+        // the fake docker models it, so this case pins BOTH the allowlist AND the privileged
+        // mechanism (acceptance item 5).
         //
         // Sandboxing: `tar -C /` extracts members relative to the real root, so the configured
         // data-dir is an ABSOLUTE path INSIDE this TempDir — its rel form ("${dir#/}") then
@@ -158,6 +190,12 @@ class RestoreWiringTest {
 
         RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false);
 
+        // The extraction ran through the M1-569 privileged mechanism (docker run as root with
+        // --entrypoint tar), not a bare host tar — pins the invocation shape (acceptance 5).
+        assertTrue(r.output.contains(
+                        "modeled privileged untar via docker run --entrypoint tar (root-user=yes"),
+                "extraction must run via the root in-container tar (docker run -u 0:0 --entrypoint tar):\n"
+                        + r.output);
         // The allowlisted identity dir WAS reconstructed at its absolute path (inside tmp).
         assertTrue(Files.exists(dataDir.resolve("keyfile")),
                 "the allowlisted identity dir must be extracted:\n" + r.output);

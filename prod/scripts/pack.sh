@@ -40,6 +40,16 @@ SECRETS_FILE="$RUNTIME_DIR/secrets.env"
 COMPOSE_FILE="$REPO_ROOT/docker-compose.yml"
 DEFAULT_OUT_DIR="$RUNTIME_DIR/migration"
 
+# The adapter identity dirs are written root:root by the ROOT Provider container,
+# and signal-cli locks its account store to mode 0700 — so a non-root host `tar`
+# cannot READ them (M1-569). We tar them as root INSIDE a throwaway container (the
+# same in-container-privilege pattern as the pg_dump below), so no interactive
+# sudo is needed. The image only has to ship GNU tar (busybox tar under-preserves
+# modes); we reuse the pinned postgres image the deployment already requires rather
+# than introduce a new dependency — any GNU-tar image works, so drift from the
+# compose `image:` tag is harmless (it would just pull a second image).
+IDENTITY_TAR_IMAGE="pgvector/pgvector:pg16"
+
 usage() {
   echo "Usage: pack.sh [OUT_DIR] [-h|--help]"
   echo "  Bundle the whole deployment (DB dump + adapter identities + config +"
@@ -152,8 +162,21 @@ if [[ "${#adapter_rel_paths[@]}" -eq 0 ]]; then
   exit 1
 fi
 
-echo "+ tar identities (-C /) ${adapter_rel_paths[*]} -> identities.tgz"
-tar -C / -czpf "$STAGING/identities.tgz" "${adapter_rel_paths[@]}"
+# Bind-mount each configured data-dir READ-ONLY at its absolute host path — exactly
+# how the Provider mounts them (docker-compose.yml adapter volumes) — so `tar -C /`
+# inside the container sees the same rel paths and the archive is byte-identical to
+# the old host-tar layout (restore + the M1-568 extraction allowlist both depend on
+# that layout). ADAPTER-AGNOSTIC: SimpleX and Signal dirs go through the identical
+# privileged path, no per-adapter special-case and no reliance on SimpleX's
+# incidental 0644. `-p` preserves modes into the archive; `--entrypoint tar`
+# bypasses the postgres image's default entrypoint (the fetch_gguf precedent).
+echo "+ tar identities as root in-container (-C /) ${adapter_rel_paths[*]} -> identities.tgz"
+tar_mounts=()
+for rel in "${adapter_rel_paths[@]}"; do
+  tar_mounts+=(-v "/$rel:/$rel:ro")
+done
+docker run --rm -u 0:0 "${tar_mounts[@]}" --entrypoint tar "$IDENTITY_TAR_IMAGE" \
+  -C / -czpf - "${adapter_rel_paths[@]}" > "$STAGING/identities.tgz"
 
 # ── (c)+(d)+(e) config, secrets, bootstrap files ────────────────────────
 # Straight copies (cp -p preserves the source's 0600 on secrets.env). These are

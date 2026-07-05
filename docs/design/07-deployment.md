@@ -994,6 +994,24 @@ for it; the manual steps 1-5 above remain the under-the-hood description of what
   because its URL was never persisted; a remote backend needs no model step), then
   starts Collector → Provider and runs the §7.10 step-5 health verification.
 
+**Root-owned identity dirs (M1-569).** The Provider container runs as root, so both
+adapters' identity stores are root-owned — and `signal-cli` locks its account store
+to mode `0700`, unreadable to a non-root host `tar`. So `pack.sh` and `restore.sh`
+run the identity tar (pack) and untar (restore) as **root inside a throwaway
+container** (the same in-container-privilege pattern as `pg_dump`/`pg_restore`),
+bind-mounting each configured data-dir at its absolute path — no interactive `sudo`
+on the host. This is adapter-agnostic: SimpleX and Signal dirs go through the
+identical privileged path (no reliance on SimpleX's incidental `0644`), and the
+restore untar preserves `root:root` ownership + modes so each daemon accepts the
+restored identity as its own. Because the restore untar now runs as root, the M1-568
+allowlist — extract ONLY the configured data-dir members — is **load-bearing**, not
+merely defense-in-depth; the untar additionally mounts only the allowlisted dirs
+writable, so a tampered bundle's extra members cannot reach the host even as root.
+`backup.sh` (§7.10) shares the same host-side `tar -C /` identity model and therefore
+the same root requirement — it works today only because cron runs it as root; giving
+`backup.sh` the same in-container tar is a separate follow-up (its contract is frozen
+out-of-scope here).
+
 **Same-absolute-path constraint (v1).** The identity tar is stored relative to
 `/`, so the clone reconstructs each data-dir at its original absolute path.
 Relocating to a *different* absolute path (rewriting the `data-dir` config) is a
