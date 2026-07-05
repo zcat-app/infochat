@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-569 — pack.sh/restore.sh handle root-owned adapter identity dirs (complexity: medium, risk: medium)
+- M1-569 — pack.sh/restore.sh handle root-owned adapter identity dirs (complexity: medium, risk: high)
 
 ---
 

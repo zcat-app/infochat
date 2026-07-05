@@ -13,10 +13,10 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/wiring/RestoreWiringTest.java
   - docs/design/07-deployment.md
 complexity: medium
-risk: medium
+risk: high
 security_relevant: true
 migration_touch: false
-round_cap: 2
+round_cap: 3
 out_of_scope:
   - >-
     prod/scripts/backup.sh. backup.sh shares the identical host-side `tar -C /`
@@ -100,10 +100,32 @@ test_plan:
       gate-only test scope.
 spec_refs:
   - docs/design/07-deployment.md §7.10.1
-  - docs/spec/deployment.md
+  - docs/spec/deployment.md §Backups, rotation, secrets
 decision_refs:
   - D34
   - D46
+reviews: {}
+revisions:
+  - date: 2026-07-05
+    reason: clarity-fail rework (bounded self-refine)
+    snapshot:
+      clarity_check:
+        date: 2026-07-05
+        verdict: FAIL
+        blockers:
+          - "spec_refs entry 'docs/spec/deployment.md' had no §<section> anchor and resolved to ANCHOR-NOT-FOUND."
+        warnings:
+          - "COMPLEXITY-RISK-CALIBRATED WARN: risk: medium may be understated — the root-in-container untar makes the M1-568 allowlist load-bearing (a bug + tampered bundle -> arbitrary root-owned file write). Consider risk: high."
+      risk_at_snapshot: medium
+      round_cap_at_snapshot: 2
+      spec_refs_at_snapshot:
+        - docs/design/07-deployment.md §7.10.1
+        - docs/spec/deployment.md
+overrides: []
+aborted_attempts: []
+reopens: []
+redteam_findings: []
+clarity_check: {}
 ---
 
 # M1-569: pack.sh/restore.sh handle root-owned adapter identity dirs
