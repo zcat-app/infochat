@@ -7,11 +7,84 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-05 (**M1-569 DONE + MERGED (8b84f344) via `/m1-tick run` — root-in-container tar/untar for root-owned adapter identity dirs; clarity self-refine + risk→high, verify GREEN, review APPROVE r1, redteam CLEAN, commit safety re-run GREEN. The M1-567 recovery round-trip is now UNBLOCKED (M1-569 was its gate). board 593 done / 0 pending**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-05 (**M1-567 recovery ROUND-TRIP RUN — caught a 2ND REAL DEFECT: restore.sh loses the Flyway-created `infochat_admin` role (a single-DB `pg_dump` omits cluster-global roles) → the dump's grants to it fail and, because pg_dump bundles each object's GRANTs atomically, they ROLL BACK the co-located collector/provider grants → collector crashes `permission denied for table heartbeat`, restore EXIT=1. Live deployment RECOVERED manually (create `infochat_admin` NOLOGIN + re-apply the dump's ACL section + restart — both adapters `adapter_connection_status=1`, golden row counts intact, 0 residual perm errors). M1-570 DRAFTED (pending) to automate the fix in restore.sh. board 593 done / 1 pending**) · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
+
+**M1-567 RECOVERY ROUND-TRIP RUN (2026-07-05) — full in-place destroy+recover on
+THIS host. It caught a SECOND real defect (after M1-569) and the live deployment
+was recovered manually. Sequence, all done this session:**
+
+1. **PACK — OK.** `pack.sh /home/infochat/recovery-test/bundle` →
+   `infochat-migration-20260705.tgz` (68 MB, 0600): DB dump (66.5 MB, `pg_restore
+   -l` validated — 428 TOC / 38 TABLE DATA), `identities.tgz` (simplex + signal-cli,
+   both root-owned dirs captured via the M1-569 root container), config+secrets+
+   bootstrap. **Independent safety copy** at `/home/infochat/recovery-test/safety/`
+   (2nd bundle copy + fresh `db-independent.pgc` + extracted `identities-from-bundle.tgz`
+   + raw-config/). Golden baseline: `/home/infochat/recovery-test/golden-snapshot.txt`.
+2. **WIPE — OK (selective).** Stack down, app images removed, `infochat_infochat-pgdata`
+   volume removed, pinned emb gguf deleted (KEPT the custom gen gguf), config/secrets
+   + root-owned identity dirs (`simplex/`, `signal-cli/` via root container) removed.
+   PRESERVED: `backups/`, `bootstrap-sources-full.json`, `signal-clients/`,
+   `signal-private.env`, `signal-run.sh`, `simplex-clients/`.
+3. **RESTORE — FAILED LOUD (RESTORE_EXIT=1).** `restore.sh <bundle>` placed
+   config/identities, brought up fresh Postgres, `pg_restore`d, rebuilt images,
+   re-downloaded the emb gguf, KEPT the custom gen gguf — then the collector
+   **exited(1)**: `PSQLException: permission denied for table heartbeat` in
+   `AbstractInstanceLockGuard.upsertHeartbeat`. **Root cause:** a single-DB
+   `pg_dump -F c` omits cluster-global roles; `infochat_admin` is created by
+   **Flyway V2** (`NOLOGIN`), so it is ABSENT on the fresh target (postgres-init
+   mints only infochat/collector/provider). The dump's 8 ACL entries that GRANT to
+   `infochat_admin` fail `role does not exist`, and because pg_dump emits each
+   object's GRANT set as ONE atomic multi-statement command, the co-located
+   collector/provider grants (heartbeat, source, quarantine, invite_code_attempt,
+   audit_log_view, quarantine fns) ROLL BACK too. Flyway then no-ops over the
+   restored V56 history → never repairs. Loud, not silent (good).
+4. **RECOVERY — live deployment HEALTHY again.** Manual repair on the restored DB:
+   `CREATE ROLE infochat_admin NOLOGIN` (per V2) → re-applied the dump's ACL
+   section (`pg_restore -L <acl-list>`, 47 idempotent entries, 0 errors) →
+   restarted collector (Healthy) + provider. **Verified:** `adapter_connection_status`
+   1.0 for BOTH signal+simplex (identities reconnected from the bundle = "same
+   bot"), 2 bootstrap admins intact, 0 residual perm errors, every STABLE golden
+   table matches exactly (users=3, source=74, tag=24, groups=1, invite_code=1, …);
+   only volatile append-tables drifted up (audit_log, post_embedding backlog,
+   price_snapshot) as expected from the resumed live stack.
+5. **M1-570 DRAFTED (pending, RUNNABLE)** —
+   `docs/plan/m1/tickets/M1-570-restore-reconstructs-infochat-admin-role.md`:
+   restore.sh creates `infochat_admin` NOLOGIN BEFORE pg_restore so the grants
+   apply on the FIRST restore. risk:high, security_relevant, files_scope = restore.sh
+   + RestoreWiringTest + 07-deployment.md §7.10.1. Spec anchors verified resolvable.
+
+**VERIFICATION CAVEAT (recovery leg not fully closed):** health was proven via
+metrics (`adapter_connection_status=1` both), the golden DB row-count diff, and
+clean logs (0 residual perm errors) — but the §7.10 step-5 **`/audit` + `/summary`
+bot-chat checks were NOT driven** (they need a live simplex/signal client
+conversation, not just HTTP/DB probes). Drive a client to close that leg if a
+full step-5 sign-off is wanted.
+
+**SECRET HYGIENE — DONE (2026-07-05):** `/home/infochat/recovery-test/{bundle,safety}/`
+held **plaintext full-secret material** — DB passwords + the UNRECOVERABLE Signal +
+SimpleX identity keys + (any) LLM key, mode 0600. **SHREDDED** (`shred -uz` on all 11
+files + `rm -rf` the dirs) per the user's call that the safety net is no longer
+wanted. Pre-shred safety check confirmed the live deployment keeps its own working
+identities in `prod/runtime/` (stack healthy, both adapters status=1), so the shred
+destroyed redundant backups, not the only copy of the unrecoverable keys. Non-secret
+records kept: `golden-snapshot.txt`, `restore.log` (scanned — no leaked secret
+values), `restore.marker`. An optional M1-570 re-run re-`pack.sh`s a fresh bundle
+from scratch, so nothing is blocked (pack.sh's own WARNING — D34/§7.10 — satisfied).
+
+**NEXT ACTION:** `/m1-tick run M1-570` IN PROGRESS (automate the fix). THEN OPTIONAL:
+re-run the recovery round-trip to prove the fixed restore.sh produces a working clone
+on the first pass with NO manual repair — it stays HOST validation (mvn verify only
+pins the create-role-before-pg_restore order). The `/home/infochat/recovery-test/`
+bundle + safety copy are now SHREDDED (see SECRET HYGIENE above), so a re-run must
+re-`pack.sh` a fresh bundle AND regenerate the golden snapshot (the live stack has
+been appending since). Live stack UP + healthy (all 5 containers, both adapters
+status=1). Push remains the user's call (`main` further ahead of origin).
+
+## ▶ previous START HERE (2026-07-05 — M1-569 merged / round-trip unblocked, kept for context)
 
 **M1-569 DONE + MERGED @ 8b84f344 (2026-07-05).** `/m1-tick run M1-569` end to
 end fixed the root-owned-identity-dir defect the M1-567 round-trip caught.
