@@ -927,7 +927,7 @@ Restore:
 
 1. Stop both services.
 2. `pg_restore` the most recent backup into a fresh DB.
-3. Restore each `adapters/<name>/` directory to its pre-failure state (preserve file modes — both clients are picky about world-readable keys).
+3. Restore each `adapters/<name>/` directory to its pre-failure state (preserve file modes — both clients are picky about world-readable keys). When restoring from the `adapters-*.tgz` tarball with `tar -C / -xzpf …`, name ONLY the configured adapter data-dir paths as extraction targets so a tampered archive's out-of-allowlist members (e.g. system paths) are ignored rather than written under `/`; `restore.sh` does this automatically (§7.10.1).
 4. Start Collector, then Provider.
 5. Verify `/audit` shows recent events; verify a `/summary` returns content; verify each enabled adapter reaches `adapter.connection.status=1` per [06-messaging.md §6.12](06-messaging.md).
 
@@ -982,7 +982,11 @@ for it; the manual steps 1-5 above remain the under-the-hood description of what
   at the SAME absolute repo path). It fails loud and early at each precondition —
   missing/corrupt bundle, an already-configured target, a pre-existing Postgres
   data volume, or an identity path that does not match the bundle — rather than
-  half-restoring. It places config/secrets/identities, brings Postgres up ALONE
+  half-restoring. It places config/secrets and reconstructs each adapter identity
+  dir by extracting ONLY the configured (allowlisted) data-dir paths from the
+  bundle's identity tar — so a tampered bundle carrying extra members that name
+  system paths is ignored, never written under the privileged `tar -C /` — then
+  brings Postgres up ALONE
   and `pg_restore`s into the fresh DB **before** the Collector's first Flyway pass
   (a Flyway-migrated empty DB would collide with the dump's schema), re-provisions
   models from the restored backend config (idempotent `ollama pull` / GGUF fetch;

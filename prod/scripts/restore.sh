@@ -231,6 +231,10 @@ fi
 # (§7.10.1). Fail loud rather than restore the identity to one path while the
 # config expects another (a silent adapter breakage).
 tar_entries="$(tar -tzf "$STAGED_IDENTITIES")"
+# Same rel paths ("${dir#/}", matching pack.sh's adapter_rel_paths) drive both the
+# consistency gate here AND the extraction allowlist below (M1-568) — one source
+# of truth so a validated dir is exactly a dir we extract.
+identity_rel_paths=()
 for key in INFOCHAT_SIMPLEX_DATA_DIR INFOCHAT_SIGNAL_DATA_DIR; do
   dir="$(read_dotenv_value "$key" "$STAGED_SECRETS")"
   [[ -z "$dir" ]] && continue
@@ -242,6 +246,7 @@ for key in INFOCHAT_SIMPLEX_DATA_DIR INFOCHAT_SIGNAL_DATA_DIR; do
     echo "      before any change to this host." >&2
     exit 1
   fi
+  identity_rel_paths+=("$rel")
 done
 
 echo "all preconditions passed; reconstructing the clone."
@@ -260,8 +265,25 @@ fi
 # Reconstruct each adapter identity dir at its original absolute path with modes
 # preserved (-p) — both clients reject world-readable keys. This is what makes
 # the clone the SAME bot. (Mirrors the §7.10 restore step `tar -xzpf ... -C /`.)
-echo "+ restore adapter identities (-C /, modes preserved)"
-tar -C / -xzpf "$STAGED_IDENTITIES"
+#
+# Extract naming ONLY the allowlisted data-dir paths validated by the gate above:
+# GNU tar extracts each named directory member recursively and IGNORES every other
+# member, so a TAMPERED bundle carrying extra members that name system paths
+# (e.g. etc/cron.d/..., root/.ssh/...) is never written onto this host under the
+# privileged `tar -C /`. Defense-in-depth on an out-of-model threat (a tampered
+# bundle is a supply-chain concern docs/spec/security.md places out of scope), M1-568.
+# The empty-array guard is load-bearing: `tar -x` with NO members extracts
+# EVERYTHING, which would reopen exactly the hole this closes — so a bundle that
+# carries identities.tgz but names no configured adapter is a malformed/tampered
+# bundle and is rejected rather than extract-all'd.
+echo "+ restore adapter identities (-C /, modes preserved, allowlisted paths only)"
+if [[ "${#identity_rel_paths[@]}" -eq 0 ]]; then
+  echo "FAIL: bundle carries identities.tgz but secrets.env names no configured adapter" >&2
+  echo "      data-dir — a malformed or tampered bundle. Refusing to extract (an empty" >&2
+  echo "      allowlist would extract every member). Aborted." >&2
+  exit 1
+fi
+tar -C / -xzpf "$STAGED_IDENTITIES" "${identity_rel_paths[@]}"
 
 # ── Postgres up ALONE, then pg_restore BEFORE Flyway ────────────────────
 # 3-postgres.sh brings up only postgres and waits healthy; on this fresh volume

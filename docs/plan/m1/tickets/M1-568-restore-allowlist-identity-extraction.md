@@ -1,10 +1,53 @@
 ---
 id: M1-568
 title: restore.sh extracts only allowlisted identity dirs (tar-slip)
-status: pending
+status: done
 created: 2026-07-05
 last_updated: 2026-07-05
 blocked_by: []
+reviews:
+  - round: 1
+    date: 2026-07-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 133
+      removed: 23
+redteam_findings: []
+redteam_audits:
+  - date: 2026-07-05
+    verdict: CLEAN
+    base: f49ee78b8214180bdffc4b9cf0cfeb1cc4481565
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-568-2026-07-05.md
+    out_of_model_count: 2
+    note: |
+      Pre-commit audit of the in-progress branch. CLEAN — the
+      allowlist-extraction change is a strict tightening (extract-all →
+      extract-only-allowlisted) and under-delivers no in-model commitment. Two
+      out-of-model observations: (1) a coherently tampered bundle can still set
+      INFOCHAT_*_DATA_DIR to a system path and include a matching member (also
+      game-over regardless, since that secrets.env becomes the DB passwords +
+      admin token); (2) symlink-follow / substring-gate residuals — all require
+      a tampered bundle (supply-chain, out of scope). No follow-up ticket unless
+      restore-bundle integrity (bundle signing) is promoted into the model via
+      spec-amend — a decision larger than M1-568.
+clarity_check:
+  date: 2026-07-05
+  verdict: PASS
+  warnings:
+    - >-
+      Acceptance item 5's parenthetical "(the `tar -xzpf ... -C /` step)"
+      does not literally match §7.10 step 3's prose (which reads "Restore each
+      adapters/<name>/ directory..."); the literal tar command appears only in
+      restore.sh's comments. Informational — §7.10 step 3 is still the step to
+      annotate.
 files_budget: 3
 files_scope:
   - prod/scripts/restore.sh
