@@ -1,7 +1,7 @@
 ---
 id: M1-567
 title: Host-clone migration scripts (prod/scripts/pack.sh + restore.sh)
-status: draft
+status: pending
 created: 2026-07-05
 last_updated: 2026-07-05
 blocked_by: []

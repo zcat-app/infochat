@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 590 |
 | deferred | 10 |
-| **total** | **600** |
+| **total** | **601** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-567 — Host-clone migration scripts (prod/scripts/pack.sh + restore.sh) (complexity: high, risk: medium)
 
 ---
 
@@ -771,5 +771,5 @@ M1-563 (done)
 M1-564 (done)
 M1-565 (done)
 M1-566 (done)
-M1-567 (draft)
+M1-567 (pending) ← runnable
 ```
