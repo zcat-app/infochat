@@ -792,6 +792,45 @@ A JSON response naming the loaded model means llama.cpp is serving. If you chose
 llama.cpp for embeddings, repeat with `--profile llamacpp-embeddings` against the
 `llamacpp-embeddings` service.
 
+### AI backend performance on modest hardware
+
+These figures are a **rough yardstick, not a promise.** They come from one
+controlled comparison on a small **4-vCPU, ~15 GB, CPU-only** host (a `vps`
+profile). Each backend ran on its own and drove the same fixed workload (three
+chat questions + one `/summary`), so the numbers are comparable to each other.
+Your hardware will differ — treat the *ratios*, not the absolute seconds, as the
+signal.
+
+| Backend (default model) | Resident RAM | CPU while answering | Prefill | Generation | A chat reply takes | Quality |
+|---|---|---|---|---|---|---|
+| **ollama** (`llama3.2:3b`, 2 GB) | ~3.6 GB | all cores | ~55 tok/s | ~10 tok/s | ~50 s | good, coherent |
+| **llama.cpp** (pinned gemma, 4.2 GB) | ~5.3 GB | all cores | ~35 tok/s | ~8–10 tok/s | ~75–80 s | good, coherent |
+| **remote** (DeepSeek `deepseek-chat`) | ~0 (offloaded) | ~0 | — | ~55 tok/s | ~10–15 s | best |
+
+What this means in practice:
+
+- **On a CPU-only box, almost all the wait is "prefill"** — the model reading the
+  ~2,600-token system prompt and tool definitions before it writes a single word.
+  The generation itself is short. So a *smaller* local model (ollama's
+  `llama3.2:3b`) feels noticeably snappier and uses less RAM than the larger
+  default gemma — which is why **ollama is the default and the right pick for
+  most people.**
+- **llama.cpp** with the pinned gemma is a solid local option too; expect a bit
+  more RAM and slower prefill for its larger (4B-class) model on the same CPU.
+  Choose it when you want a *specific* local model.
+- **remote** (any OpenAI-compatible API, e.g. DeepSeek) is in a different league
+  for speed — replies in seconds instead of a minute or more — and costs your
+  machine essentially **zero** RAM and CPU for the AI, with the best answer
+  quality. The trade-off: your prompts and post content go to that provider, and
+  you need an API key + network. (Embeddings still run locally, so the post
+  content used to match posts by meaning never leaves your machine — see Step 4.)
+- All three produced **coherent, on-instruction replies.** One caution: a heavily
+  "abliterated"/uncensored community GGUF can be unreliable at chat regardless of
+  backend — prefer a standard instruction-tuned model.
+- Local inference **uses every CPU core** while it answers (the Compose CPU cap
+  only applies under Docker Swarm), so on a shared host expect the machine to be
+  busy for the length of each reply.
+
 ### Developer mode (run from source, no containers)
 
 If you are working on the code rather than running a deployment, skip the wizard
