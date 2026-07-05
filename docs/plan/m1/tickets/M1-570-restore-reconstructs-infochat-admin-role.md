@@ -1,7 +1,7 @@
 ---
 id: M1-570
 title: restore.sh reconstructs the infochat_admin role before pg_restore
-status: pending
+status: done
 created: 2026-07-05
 last_updated: 2026-07-05
 blocked_by: []
@@ -113,14 +113,45 @@ spec_refs:
   - docs/design/07-deployment.md §7.10.1
   - docs/spec/security.md §DB roles
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 93
+      removed: 6
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
-clarity_check: null
+redteam_audits:
+  - date: 2026-07-05
+    verdict: CLEAN
+    base: 9634e7fa87170ad5662579b55acf0a7a771e3440
+    head: working-tree (branch m1/M1-570, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-570-2026-07-05.md
+    out_of_model_count: 2
+    note: |
+      CLEAN. CREATE ROLE infochat_admin NOLOGIN confirmed byte-identical in form to
+      the canonical V2__roles.sql; grants supplied verbatim by the dump's ACLs; the
+      DO-block runs as infochat (CREATEROLE, DB owner) — no escalation, strengthens
+      least-privilege reconstruction. 2 out-of-model: (1) tampered bundle — out of the
+      v1 threat model, role SQL is a fixed heredoc; (2) silent ACL-error tolerance in
+      the pre-existing pg_restore post-check — inherited not introduced, failure is
+      under-permissive/availability; optional future grant-verification ticket.
+clarity_check:
+  date: 2026-07-05
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-570: restore.sh reconstructs the infochat_admin role before pg_restore

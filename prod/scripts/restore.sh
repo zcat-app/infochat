@@ -316,6 +316,33 @@ docker run --rm -u 0:0 -i "${tar_mounts[@]}" --entrypoint tar "$IDENTITY_TAR_IMA
 echo "+ start Postgres alone (3-postgres.sh)"
 "$POSTGRES_SCRIPT"
 
+# ── reconstruct the Flyway-created infochat_admin role BEFORE pg_restore ──
+# A single-database `pg_dump -F c` (pack.sh) carries NO cluster-global roles, so the
+# NOLOGIN principal infochat_admin — created by Flyway V2 (V2__roles.sql), NOT by
+# postgres-init.sh (which mints only infochat + infochat_collector + infochat_provider)
+# — is absent on this fresh target. The dump's ACL entries that GRANT to infochat_admin
+# would then fail "role does not exist"; and because pg_dump emits each object's whole
+# GRANT/REVOKE set as ONE multi-statement command, that failure atomically ROLLS BACK the
+# co-located infochat_collector / infochat_provider grants (heartbeat, source, quarantine,
+# invite_code_attempt, audit_log_view, the quarantine functions) too — the Collector then
+# dies on its first heartbeat write. Flyway is a no-op over the restored (already-V56)
+# history and never repairs it, so the role must exist BEFORE pg_restore, not after (M1-570).
+# `infochat` is CREATEROLE (postgres-init), so no superuser is needed; NOLOGIN means no
+# password/secret. Idempotent (NOT EXISTS guard, mirroring V2 __roles). ON_ERROR_STOP makes
+# a failed creation fatal under `set -e`. SQL on stdin (a quoted heredoc) sidesteps the
+# nested $$/'literal' quoting hazards of an inline -c. NB: v1 has exactly one Flyway-created
+# principal — add any future ones to this DO block.
+echo "+ reconstruct Flyway-created infochat_admin role (before pg_restore)"
+docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" exec -T postgres \
+  sh -c 'PGPASSWORD="$INFOCHAT_DB_PASSWORD" psql -h 127.0.0.1 -U infochat -d infochat -v ON_ERROR_STOP=1' <<'SQL'
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'infochat_admin') THEN
+    CREATE ROLE infochat_admin NOLOGIN;
+  END IF;
+END $$;
+SQL
+
 # pg_restore the custom-format dump into the fresh `infochat` DB, in-container as
 # the owner (mirrors backup.sh's pg_dump exec; no host Postgres client, no secret
 # on the host). The DB already has vector/pgcrypto (postgres-init) and the dump

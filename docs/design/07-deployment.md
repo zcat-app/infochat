@@ -1012,6 +1012,26 @@ the same root requirement — it works today only because cron runs it as root; 
 `backup.sh` the same in-container tar is a separate follow-up (its contract is frozen
 out-of-scope here).
 
+**Flyway-created principal roles (M1-570).** `pack.sh` dumps the database with a
+single-database `pg_dump -F c`, which does NOT carry cluster-global roles. But
+`infochat_admin` — the NOLOGIN principal the service roles are GRANTed against — is
+created by **Flyway V2** (`V2__roles.sql`), not by `postgres-init.sh` (which mints
+only `infochat` + `infochat_collector` + `infochat_provider`). On a fresh target the
+role is therefore absent, and every ACL entry in the dump that grants to
+`infochat_admin` fails `role does not exist`. Because `pg_dump` emits each object's
+whole GRANT/REVOKE set as ONE atomic multi-statement command, that failure also rolls
+back the co-located `infochat_collector` / `infochat_provider` grants bundled in the
+same entry (`heartbeat`, `source`, `quarantine`, `invite_code_attempt`,
+`audit_log_view`, the quarantine functions) — so the Collector dies on its first
+`heartbeat` write and restore exits non-zero (loud, not a subtly-broken clone). Flyway
+then runs as a no-op over the restored (already-V56) history and never repairs it. So
+`restore.sh` reconstructs `infochat_admin` (idempotent `CREATE ROLE ... NOLOGIN`,
+guarded by a `pg_roles` NOT EXISTS check, mirroring V2) **after** Postgres is up but
+**before** `pg_restore`, so the dump's ACL entries apply cleanly on the first restore —
+the repair happens at restore time, not via a later migration pass. `infochat` is
+`CREATEROLE`, so no superuser is needed; NOLOGIN carries no password. (The live
+deployment was recovered the same way during the M1-567 round trip that surfaced this.)
+
 **Same-absolute-path constraint (v1).** The identity tar is stored relative to
 `/`, so the clone reconstructs each data-dir at its original absolute path.
 Relocating to a *different* absolute path (rewriting the `data-dir` config) is a

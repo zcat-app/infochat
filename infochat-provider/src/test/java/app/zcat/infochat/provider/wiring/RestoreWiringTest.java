@@ -204,6 +204,42 @@ class RestoreWiringTest {
                 "an out-of-allowlist bundle member must NOT be extracted:\n" + r.output);
     }
 
+    @Test
+    void roleReconstructionRunsAfterPostgresUpAndBeforePgRestore() throws Exception {
+        // M1-570: a single-DB `pg_dump -F c` omits cluster-global roles, so the Flyway-created
+        // NOLOGIN principal infochat_admin is absent on the fresh target (postgres-init mints
+        // only infochat + infochat_collector + infochat_provider). The dump's ACL entries that
+        // GRANT to infochat_admin then fail, and because pg_dump emits each object's GRANT set
+        // as ONE atomic multi-statement command, that failure also rolls back the co-located
+        // service-role grants — the Collector dies on its first heartbeat write. restore.sh must
+        // reconstruct the role AFTER Postgres is up and STRICTLY BEFORE pg_restore so the ACLs
+        // apply on the first restore. The real grant round trip (pg_restore emits no role error,
+        // Collector boots) needs a live Postgres and stays HOST validation (test_plan.notes);
+        // restore.sh is linear across these steps, so the ORDERING invariant is pinned by source
+        // order here — dropping the step (marker absent) or moving it after pg_restore fails the
+        // build, exactly as acceptance item 4 requires.
+        String script = Files.readString(repoRoot().resolve("prod/scripts/restore.sh"));
+
+        int postgresUpIdx = script.indexOf("\"$POSTGRES_SCRIPT\"");            // the bring-up call
+        int guardIdx = script.indexOf("pg_roles WHERE rolname = 'infochat_admin'");
+        int createRoleIdx = script.indexOf("CREATE ROLE infochat_admin NOLOGIN");
+        int pgRestoreIdx = script.indexOf("pg_restore -h 127.0.0.1");         // the real invocation
+
+        assertTrue(postgresUpIdx >= 0, "restore.sh must invoke the Postgres bring-up (3-postgres.sh)");
+        assertTrue(createRoleIdx >= 0,
+                "restore.sh must reconstruct the Flyway-created infochat_admin NOLOGIN role");
+        assertTrue(pgRestoreIdx >= 0, "restore.sh must pg_restore the dump");
+        assertTrue(guardIdx >= 0 && guardIdx < createRoleIdx,
+                "role creation must be idempotent — guarded by a NOT EXISTS pg_roles check before "
+                        + "the CREATE (mirrors V2 __roles)");
+        assertTrue(postgresUpIdx < createRoleIdx,
+                "infochat_admin must be reconstructed AFTER Postgres is up — postgres-init mints "
+                        + "only the service roles, so the role cannot pre-exist the bring-up");
+        assertTrue(createRoleIdx < pgRestoreIdx,
+                "infochat_admin must be reconstructed STRICTLY BEFORE pg_restore, so the dump's "
+                        + "ACL grants to it (and the co-located service-role grants) apply cleanly");
+    }
+
     // --- helpers ----------------------------------------------------------------
 
     /** Drive the real restore.sh under a controlled PATH; return exit code + combined output. */
