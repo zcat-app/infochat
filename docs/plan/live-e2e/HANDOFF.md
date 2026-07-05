@@ -7,11 +7,73 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-05 (**M1-571 DONE + MERGED @ e960bb6f — 4-llm.sh now persists the custom GGUF download URL+SHA to secrets.env so restore.sh can re-fetch a CUSTOM model on a fresh host (was: filename-only → fails loud). MIGRATION ROUND-TRIP RE-RUN is PREPPED + PAUSED at the GO checkpoint BEFORE the destructive wipe: live secrets.env backfilled with the OBLITERATED gen-model URL/SHA, fresh golden snapshot + VERIFIED pack bundle + independent safety copy at /home/infochat/recovery-test/. Live stack UP + healthy — NOT yet wiped. NEXT: on user GO, run the wipe + restore.sh (exercises M1-570 role reconstruction + M1-571 GGUF recovery, ~5.3GB re-download) then verify vs golden; THEN the LLM resource benchmark (llamacpp/ollama/remote). board 595 done / 0 pending. main ~15 ahead of origin, NOT pushed**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-05 (**MIGRATION ROUND-TRIP RE-RUN DONE + VALIDATED — the destructive pack→wipe→restore ran in place on this host; restore.sh rebuilt a healthy clone on the FIRST pass with NO manual repair (RESTORE_EXIT=0). Both fixes PROVEN on real wire: M1-570 (infochat_admin reconstructed before pg_restore → ZERO permission errors, collector heartbeats healthy — the prior round-trip died here) and M1-571 (5.3 GB custom gen GGUF re-fetched from the backfilled secrets.env URL, SHA-verified vs 819372…, llama.cpp server healthy). All 5 containers healthy; both apps readiness 200; adapter_connection_status=1.0 for signal+simplex (same bot); DB vs golden = all STABLE tables exact (users=3, admins=2, source=74, tag=24, groups=1, invite_code=1, post=3800, chat_message=42, flyway=56), 3 append-only tables +few (expected). One leg optional/undriven: §7.10 step-5 bot-chat /audit+/summary via a live client. PENDING user decision: SHRED the recovery-test bundle/safety + .scratch pre-backfill bak (plaintext keys). THEN the queued LLM resource benchmark (llamacpp/ollama/remote). board 595 done / 0 pending. main ~15 ahead of origin, NOT pushed**) · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
+
+**MIGRATION ROUND-TRIP RE-RUN: DONE + VALIDATED (2026-07-05).** The destructive
+pack→wipe→restore was run in place on this host and `restore.sh` reconstructed a
+healthy clone on the FIRST pass with **NO manual repair** (`RESTORE_EXIT=0`) —
+proving both fixes the prior (M1-567) round-trip forced.
+
+### Wipe that was performed (all confirmed)
+Stack down (all profiles) → app images removed → `docker volume rm
+infochat_infochat-pgdata` → both root-owned GGUFs removed from the
+`infochat-llamacpp-models` volume (5.3 GB custom gen + nomic embed, via a root
+container) → config/secrets removed (`prod/runtime/{secrets.env,
+application.properties,bootstrap-sources.json,bootstrap-assets.json}`) → both
+identity dirs removed (`prod/runtime/{simplex,signal-cli}`, via a root container).
+PRESERVED as intended: `backups/`, `signal-clients/`, `simplex-clients/`,
+`signal-private.env`, `signal-run.sh`, `bootstrap-sources-full.json`.
+
+### What the restore PROVED
+- **M1-570 (role reconstruction):** restore created `infochat_admin` NOLOGIN
+  before pg_restore → the dump's ACL grants applied → collector writes heartbeats →
+  **ZERO permission-denied errors** in either app log (the prior round-trip died
+  here with `permission denied for table heartbeat`). pg_restore logged only the 2
+  expected non-fatal `must be owner of extension pgcrypto/vector` COMMENT notices.
+- **M1-571 (custom GGUF recovery):** restore re-fetched the 5.3 GB custom gen GGUF
+  (`gemma-4-E4B-it-OBLITERATED-Q4_K_M.gguf`, 5335289792 bytes) from the backfilled
+  `INFOCHAT_LLAMACPP_GGUF_URL` in secrets.env, SHA-verified vs 819372…, and the
+  llama.cpp gen server came up healthy — instead of failing loud. Pinned nomic
+  embedder auto-recovered via the constants branch.
+
+### Verification (all GREEN)
+All 5 containers healthy; both apps readiness 200; `adapter_connection_status` =
+1.0 for BOTH signal + simplex (same bot, identities restored from bundle); DB vs
+golden = every STABLE table exact (users=3, admins=2 [signal+simplex], source=74,
+tag=24, groups=1, invite_code=1, post=3800, chat_message=42, flyway=56), the 3
+append-only tables a few rows higher (post_embedding 872→874, audit_log 104→106,
+price_snapshot 15302→15308) because the pack dump was taken ~20s after the golden
+snapshot while the live collector was still appending — expected, not drift.
+
+### One leg NOT driven (optional, same caveat as M1-567)
+The §7.10 step-5 bot-chat checks (`/audit`, `/summary`) need a live SimpleX/Signal
+client conversation, not just HTTP/DB/metrics probes. Drive a client to fully close
+step 5 if a full sign-off is wanted; the metrics+DB+clean-log proof is otherwise
+complete.
+
+### SECRET HYGIENE — PENDING USER DECISION (IMPORTANT)
+The round-trip is done + validated, so the standing instruction is to SHRED
+`/home/infochat/recovery-test/{bundle,safety}/` (72 MB bundle ×2 + independent DB
+dump + extracted identities + raw-config — plaintext DB passwords + UNRECOVERABLE
+Signal/SimpleX identity keys, 0600) and `.scratch/secrets.env.pre-backfill.bak`
+(`shred -uz` all files + `rm -rf`). The live deployment holds its own working
+identities in `prod/runtime/`, so shredding destroys redundant backups, not the
+only copy — but it is IRREVERSIBLE, so awaiting the user's explicit go.
+Also present (non-secret records): `/home/infochat/recovery-test/{run-restore.sh,
+restore-run.log,restore.done,golden-snapshot.txt}` — scan `restore-run.log` for any
+leaked secret before keeping.
+
+### NEXT
+(1) User decision on the shred. (2) The queued **LLM resource benchmark** (llamacpp
+vs ollama vs remote — needs a remote API key from the user; ollama volume still
+empty, needs `ollama pull`). Board 595 done / 0 pending. `main` ~15 ahead of origin,
+NOT pushed (user's call). Live stack UP + healthy on the freshly-restored clone.
+
+## ▶ previous START HERE (2026-07-05 — PAUSED at GO checkpoint, superseded by the completed round-trip above)
 
 **PAUSED at the GO checkpoint BEFORE the migration round-trip WIPE (2026-07-05).**
 Everything is prepped and the backup is VERIFIED; the live deployment is UP + healthy
