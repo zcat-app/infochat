@@ -58,8 +58,9 @@ acceptance:
     up) with the documented message; WITH --source-stopped the Provider start
     is reached. Collector bring-up is unaffected in both.
   - >-
-    §7.10.1 and SETUP_GUIDE document the flag and the prompt; the recovery
-    round-trip convention (run-restore.sh) is updated to pass it.
+    §7.10.1 and SETUP_GUIDE document the flag and the prompt, including that
+    unattended/scripted restore runs (e.g. a recovery round-trip re-run) must
+    pass --source-stopped.
   - "`mvn verify` is green from the repo root."
 test_plan:
   adds:
@@ -74,7 +75,27 @@ decision_refs: []
 reviews: []
 escalations: []
 overrides: []
-revisions: []
+revisions:
+  - date: 2026-07-06
+    reason: >-
+      clarity-fail refine (bounded self-refine via /m1-tick run — acceptance
+      item 5 referenced an artifact that exists nowhere in the repository)
+    snapshot: |
+      acceptance item 5 (verbatim, pre-refine):
+        "§7.10.1 and SETUP_GUIDE document the flag and the prompt; the recovery
+         round-trip convention (run-restore.sh) is updated to pass it."
+      clarity blockers (2026-07-06):
+        1. run-restore.sh exists nowhere in this repository (only trace:
+           docs/plan/live-e2e/HANDOFF.md:153, which records an out-of-repo
+           operator artifact at /home/infochat/recovery-test/run-restore.sh).
+           The clause is not checkable against the diff.
+        2. Corollary: files_scope / files_budget (5) cannot cover the
+           referenced artifact.
+      resolution: option (b) of the clarity verdict — drop the out-of-repo
+      clause from acceptance; keep the in-repo documentation requirement
+      (docs state unattended runs pass --source-stopped); record the operator
+      follow-up in ticket Notes. files_scope / files_budget / out_of_scope
+      unchanged.
 aborted_attempts: []
 reopens: []
 redteam_findings: []
@@ -108,3 +129,8 @@ messaging identity, so consent gates only the Provider start.
   No), keeping one house pattern for destructive/irreversible steps.
 - Audit provenance: finding M3 of the 2026-07-06 audit (memory
   `audit-567-576-open-findings`).
+- The live-e2e recovery round-trip script (`run-restore.sh`) is an out-of-repo
+  operator artifact at `/home/infochat/recovery-test/` (see
+  docs/plan/live-e2e/HANDOFF.md §"SECRET HYGIENE"); updating it to pass
+  `--source-stopped` on its next use is an operator follow-up after merge, not
+  an acceptance criterion — nothing in-repo realizes that convention.
