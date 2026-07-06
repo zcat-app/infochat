@@ -15,8 +15,8 @@
 | in-review | 0 |
 | escalated | 0 |
 | done | 595 |
-| deferred | 10 |
-| **total** | **607** |
+| deferred | 11 |
+| **total** | **608** |
 
 ---
 
@@ -41,7 +41,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-573 — blocked_by: M1-574 (draft), M1-575 (draft), M1-576 (draft)
+- M1-573 — blocked_by: M1-575 (draft), M1-576 (draft)
 
 ---
 
@@ -88,8 +88,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 ### post-mvp-hardening (1)
 - M1-031 → unspecified
 
-### spec-amend (1)
+### spec-amend (2)
 - M1-314 → M1-324
+- M1-574 → M1-575
 
 ### superseded-by-M1-396 (1)
 - M1-372 → M1-396
@@ -777,10 +778,9 @@ M1-569 (done)
 M1-570 (done)
 M1-571 (done)
 M1-572 (pending) ← runnable
-M1-574 (draft)
-  └── M1-573 (pending)
 M1-575 (draft)
-  └── M1-573 (pending) [see above]
+  ├── M1-573 (pending)
+  └── M1-574 (deferred)
 M1-576 (draft)
   └── M1-573 (pending) [see above]
 M1-577 (draft)

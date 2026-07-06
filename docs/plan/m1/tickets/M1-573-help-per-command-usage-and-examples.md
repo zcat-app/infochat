@@ -4,7 +4,7 @@ title: "In-app per-command help: /help <command> shows usage, flags, and example
 status: pending
 created: 2026-07-06
 last_updated: 2026-07-06
-blocked_by: [M1-574, M1-575, M1-576]
+blocked_by: [M1-575, M1-576]
 files_budget: 6
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java

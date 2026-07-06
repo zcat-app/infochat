@@ -1,10 +1,12 @@
 ---
 id: M1-574
 title: "/audit renders the usable target contact id, not the internal user UUID"
-status: draft
+status: deferred
 created: 2026-07-06
 last_updated: 2026-07-06
 blocked_by: []
+deferred_on: M1-575
+deferred_reason: spec-amend
 files_budget: 3
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java
@@ -75,6 +77,29 @@ redteam_audits: []
 ---
 
 # M1-574: `/audit` shows a usable target contact id
+
+## Deferred 2026-07-06 (spec collision — superseded by M1-575)
+
+Grounding this ticket for `/m1-tick run` surfaced a wrong premise. The drafted
+approach ("widen the SELECT to project `target_contact_id` from
+`audit_log_view`") cannot yield a copy-pasteable id: `audit_log_view` wraps
+**both** `actor_contact_id` and `target_contact_id` in `redact_contact_id(...)`
+(V5, the only view definition), and V31 redefines that function to **mask**
+contact ids (`≤10 chars → '…'`, else `left(6)…right(4)`) citing
+`docs/spec/security.md §Secrets handling` and `docs/design/04-security.md §4.11`.
+So rendering the view column shows a masked value (the live `contact_id=5`
+renders as `…`), and the acceptance ("directly copy-pasteable into `/vouch`") is
+unachievable render-only. Achieving it would require **reversing a spec-mandated
+security control** — a `security.md` amendment + a migration + redteam — which is
+out of this ticket's `migration_touch: false`, `files_budget: 3` framing.
+
+Operator decision (2026-07-06): keep the redaction; do **not** amend the spec.
+The contact-id discovery need is served instead by **M1-575** (`/pending`), whose
+`PendingUsersDao` reads the `users` base table directly (unredacted) — untouched
+by the audit-view redaction. This ticket is deferred as superseded. Reopen via
+`/m1-tick reopen M1-574` only if a deliberate decision is later made to un-redact
+the bot-admin-only `/audit` surface (which would then be a security-spec change,
+not a render-only fix).
 
 ## Context
 
