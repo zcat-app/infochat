@@ -1161,11 +1161,16 @@ contacts and contradict the registration-state model
   audit history.
 - `/pending [--page N]` — bot-admin only (closed list below),
   DM-only. Lists the bounded set of users an admin can act on right
-  now: those awaiting a vouch (`registration_state = invited`) or
-  still inside the slow-start probation window (`probation_until` in
-  the future, D45), scoped to the inbound adapter so each row's
-  `contact_id` is the exact `(inbound_adapter, contact_id)` key that
-  `/vouch` and `/ban` accept. Each row shows the contact id, adapter,
+  now: those still inside the slow-start probation window
+  (`probation_until` in the future, D45), scoped to the inbound
+  adapter so each row's `contact_id` is the exact
+  `(inbound_adapter, contact_id)` key that `/vouch` and `/ban`
+  accept. "Awaiting a vouch" is a subset of that window — post-D47
+  `registration_state = 'invited'` is terminal and `/vouch`'s only
+  effect is clearing `probation_until`, so a vouch after natural
+  probation expiry is a no-op and the predicate carries no
+  `registration_state` arm (an `invited` arm would match every
+  registered user forever). Each row shows the contact id, adapter,
   registration state, registration time, and probation deadline.
   `--page N` is 1-indexed; page size is profile-driven. Banned and
   settled (vouched, out-of-probation) users are excluded. This is the

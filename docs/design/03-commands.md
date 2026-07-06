@@ -291,6 +291,16 @@ model); the tier is unchanged. Group-*contextual* admin commands
 (`/approve-group`, `/reject-group`, `/promote`, `/demote`) are unaffected and
 keep working in group scope.
 
+**`/pending` actionable set** (mirrors `../spec/commands.md` §Command
+catalogue): the listed set is exactly the un-banned users of the inbound
+adapter still inside the slow-start probation window (`probation_until IS
+NOT NULL AND probation_until > ?`, cutoff from the injected `Clock`;
+D45/D55). Deliberately no `registration_state = 'invited'` arm: post-D47
+`'invited'` is terminal and `/vouch`'s only effect is the single-column
+`probation_until` clear, so "awaiting a vouch" is a subset of the probation
+window and an `'invited'` arm would make the list a permanent full roster
+(M1-579).
+
 **Admin-only flags are part of command identity.** A non-admin caller passing
 `--all` or `--include-deleted` to `/list-sources`, or `--all` to
 `/quarantine list`, receives a friendly permission error. The parser does

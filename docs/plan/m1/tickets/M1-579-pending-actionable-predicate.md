@@ -1,7 +1,7 @@
 ---
 id: M1-579
 title: "/pending lists only currently-actionable users (drop the terminal 'invited' roster arm)"
-status: in-progress
+status: done
 created: 2026-07-06
 last_updated: 2026-07-06
 blocked_by: []
@@ -78,14 +78,41 @@ decision_refs:
   - "D55 (narrow actionable list, no /list-users roster)"
   - "D45 (slow-start probation)"
   - "D47 (registration-state consolidation)"
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-06
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 120
+      removed: 32
 escalations: []
 overrides: []
 revisions: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-07-06
+    verdict: CLEAN
+    base: main (merge-base bdf355b4)
+    head: m1/M1-579-pending-lists-only-currently-a (working tree, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-579-2026-07-06.md
+    out_of_model_count: 3
+    note: |
+      CLEAN — the diff strictly narrows /pending's disclosure surface;
+      count+list share one parameterized predicate, adapter scoping pinned by
+      a new cross-adapter IT case, gates and PENDING_LIST audit write
+      untouched. Three informational out-of-model items (zero-width
+      now==probation_until boundary instant; the deliberate D55 trade-off that
+      settled users become undialable; pre-existing IT trigger-disable
+      fixture) — none warrants a follow-up ticket.
 clarity_check:
   date: 2026-07-06
   verdict: PASS

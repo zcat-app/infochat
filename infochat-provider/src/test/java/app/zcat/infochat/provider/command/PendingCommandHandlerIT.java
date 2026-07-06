@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Integration tests for {@link PendingCommandHandler} against the DevServices
- * Postgres container. One {@code @Test} per M1-575 acceptance scenario. Named
+ * Postgres container. One {@code @Test} per M1-575 / M1-579 acceptance scenario. Named
  * {@code *IT} (not {@code *Test}) because it injects a {@link DataSource} and so
  * runs in the failsafe integration phase (IntegrationTestNamingGuard).
  *
@@ -44,10 +44,15 @@ class PendingCommandHandlerIT {
 
     private static final String PREFIX = "m1-575-pending-";
     private static final String ADAPTER = "m1-575-pending";
+    // A second adapter for the cross-adapter exclusion case: rows here are
+    // actionable in shape but must never surface on ADAPTER's /pending (D55).
+    private static final String OTHER_ADAPTER = "m1-579-pending-other";
 
-    // Pinned "now" for the probation-window test. The probation cutoff is read
-    // from the injected Clock, pinned here via QuarkusMock so the seeded rows'
-    // probation_until offsets decide inclusion deterministically (engineering-rules §9).
+    // Pinned "now" for the probation cutoff, installed for EVERY test in
+    // cleanup(): since M1-579 dropped the 'invited' arm, every actionable-set
+    // assertion rides the Clock-gated probation comparison, so the seeded rows'
+    // probation_until offsets must decide inclusion deterministically regardless
+    // of wall clock or test order (engineering-rules §9).
     private static final Instant PINNED_NOW = Instant.parse("2026-06-20T12:00:00Z");
 
     @Inject PendingCommandHandler handler;
@@ -62,6 +67,7 @@ class PendingCommandHandlerIT {
 
     @BeforeEach
     void cleanup() throws Exception {
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
         inboundContext.setAdapterName(ADAPTER);
         try (Connection conn = dataSource.getConnection()) {
             exec(conn, "ALTER TABLE audit_log DISABLE TRIGGER trg_audit_log_no_update");
@@ -71,6 +77,7 @@ class PendingCommandHandlerIT {
             try {
                 exec(conn, "DELETE FROM audit_log WHERE actor_adapter = ?", ADAPTER);
                 exec(conn, "DELETE FROM users WHERE adapter = ?", ADAPTER);
+                exec(conn, "DELETE FROM users WHERE adapter = ?", OTHER_ADAPTER);
             } finally {
                 exec(conn, "ALTER TABLE users ENABLE TRIGGER trg_users_last_admin_update");
                 exec(conn, "ALTER TABLE users ENABLE TRIGGER trg_users_last_admin_delete");
@@ -88,16 +95,20 @@ class PendingCommandHandlerIT {
         String probationUser = PREFIX + "invited-probation";
         seedUser(probationUser, false, false, "invited",
                 Instant.parse("2026-08-01T00:00:00Z"));
-        // A settled (vouched, no probation) user: nothing pending, must be excluded.
-        String settled = PREFIX + "vouched-settled";
-        seedUser(settled, false, false, "vouched", null);
+        // A settled user in the REACHABLE post-vouch shape: per D47 /vouch only
+        // clears probation_until, registration_state stays 'invited' terminally.
+        // Nothing pending, must be excluded — this is the regression case for
+        // M1-579 (the old fixture seeded 'vouched', a state no regular user can
+        // reach, which let the permanent-roster 'invited' arm ship green).
+        String settled = PREFIX + "invited-settled";
+        seedUser(settled, false, false, "invited", null);
 
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(admin), "/pending");
 
         assertTrue(reply.text().contains(probationUser),
                 "an awaiting-vouch/probation user must be listed with its contact id");
         assertFalse(reply.text().contains(settled),
-                "a settled vouched user is not actionable and must be excluded");
+                "a settled (probation-cleared) user is not actionable and must be excluded");
     }
 
     @Test
@@ -119,8 +130,9 @@ class PendingCommandHandlerIT {
         QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
         String admin = PREFIX + "clock-admin";
         seedUser(admin, true, false, "vouched", null);
-        // Vouched (NOT invited) users, so only the probation predicate can include
-        // them — this isolates the Clock-gated comparison from the 'invited' branch.
+        // Rows differing only in their probation_until side of the pinned now:
+        // the Clock-gated comparison is the sole decider (the predicate has no
+        // registration_state arm since M1-579).
         String inProbation = PREFIX + "clock-active";
         seedUser(inProbation, false, false, "vouched", PINNED_NOW.plusSeconds(3600));
         String probationExpired = PREFIX + "clock-expired";
@@ -132,6 +144,51 @@ class PendingCommandHandlerIT {
                 "a user whose probation ends after the injected-clock now must be listed");
         assertFalse(reply.text().contains(probationExpired),
                 "a vouched user whose probation already expired is settled and must be excluded");
+    }
+
+    @Test
+    void pending_vouchClearingProbationRemovesUserFromList() throws Exception {
+        String admin = PREFIX + "vouch-admin";
+        seedUser(admin, true, false, "vouched", null);
+        String vouchTarget = PREFIX + "vouch-target";
+        seedUser(vouchTarget, false, false, "invited", PINNED_NOW.plusSeconds(3600));
+
+        OutboundMessage before = handler.handle(new ScopeRef.Dm(admin), "/pending");
+        assertTrue(before.text().contains(vouchTarget),
+                "a user inside the probation window must be listed before the vouch");
+
+        // The /vouch-shaped update: per D47 the command's sole effect is the
+        // single-column probation clear — this pins that the admin queue
+        // actually shrinks when the admin acts (M1-579).
+        try (Connection conn = dataSource.getConnection()) {
+            exec(conn, "UPDATE users SET probation_until = NULL"
+                    + " WHERE adapter = ? AND contact_id = ?", ADAPTER, vouchTarget);
+        }
+
+        OutboundMessage after = handler.handle(new ScopeRef.Dm(admin), "/pending");
+        assertFalse(after.text().contains(vouchTarget),
+                "a vouched (probation-cleared) user must disappear from /pending");
+    }
+
+    @Test
+    void pending_actionableUserOnDifferentAdapterNotListed() throws Exception {
+        String admin = PREFIX + "xadapter-admin";
+        seedUser(admin, true, false, "vouched", null);
+        String sameAdapterUser = PREFIX + "xadapter-same";
+        seedUser(sameAdapterUser, false, false, "invited", PINNED_NOW.plusSeconds(3600));
+        // Identical actionable shape on a DIFFERENT adapter: must not be listed.
+        // D55's second bound — every listed id must resolve for /vouch and /ban
+        // against the inbound (adapter, contact_id) key of THIS conversation.
+        String otherAdapterUser = PREFIX + "xadapter-other";
+        seedUser(OTHER_ADAPTER, otherAdapterUser, false, false, "invited",
+                PINNED_NOW.plusSeconds(3600));
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(admin), "/pending");
+
+        assertTrue(reply.text().contains(sameAdapterUser),
+                "the same-adapter actionable user must be listed");
+        assertFalse(reply.text().contains(otherAdapterUser),
+                "an actionable user on a different adapter must not be listed");
     }
 
     @Test
@@ -174,9 +231,10 @@ class PendingCommandHandlerIT {
     void pending_pagination() throws Exception {
         String admin = PREFIX + "page-admin";
         seedUser(admin, true, false, "vouched", null);
-        // 25 actionable (invited) users → 2 pages at the default page size of 20.
+        // 25 actionable (in-probation) users → 2 pages at the default page size of 20.
         for (int i = 0; i < 25; i++) {
-            seedUser(PREFIX + "page-u" + String.format("%03d", i), false, false, "invited", null);
+            seedUser(PREFIX + "page-u" + String.format("%03d", i), false, false, "invited",
+                    PINNED_NOW.plusSeconds(3600));
         }
 
         OutboundMessage page1 = handler.handle(new ScopeRef.Dm(admin), "/pending");
@@ -230,13 +288,19 @@ class PendingCommandHandlerIT {
     private UUID seedUser(String contactId, boolean isAdmin, boolean isBanned,
                           String registrationState, @Nullable Instant probationUntil)
             throws Exception {
+        return seedUser(ADAPTER, contactId, isAdmin, isBanned, registrationState, probationUntil);
+    }
+
+    private UUID seedUser(String adapter, String contactId, boolean isAdmin, boolean isBanned,
+                          String registrationState, @Nullable Instant probationUntil)
+            throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO users (adapter, contact_id, is_admin, is_banned, "
                              + "registration_state, probation_until, banned_at) "
                              + "VALUES (?, ?, ?, ?, ?, ?, CASE WHEN ? THEN NOW() ELSE NULL END) "
                              + "RETURNING id")) {
-            ps.setString(1, ADAPTER);
+            ps.setString(1, adapter);
             ps.setString(2, contactId);
             ps.setBoolean(3, isAdmin);
             ps.setBoolean(4, isBanned);

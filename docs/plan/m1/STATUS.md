@@ -11,10 +11,10 @@
 | Status | Count |
 |---|---|
 | pending | 7 |
-| in-progress | 2 |
+| in-progress | 1 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 599 |
+| done | 600 |
 | deferred | 11 |
 | **total** | **619** |
 
@@ -37,7 +37,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 | ID | Title | Status | Last review |
 |---|---|---|---|
-| M1-579 | /pending lists only currently-actionable users (drop the terminal 'invited' roster arm) | in-progress | (none) |
 | M1-580 | restore.sh fails loud on real pg_restore errors (stderr gate, not just table-presence) | in-progress | (none) |
 
 ---
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-579 | /pending lists only currently-actionable users (drop the terminal 'invited' roster arm) | 2026-07-06 | round 1 APPROVE |
 | M1-576 | /follow-all-sources: bulk-subscribe an approved scope to all live sources | 2026-07-06 | round 1 APPROVE |
 | M1-575 | Admin visibility of actionable users (/pending): probation + awaiting-vouch, with usable contact ids | 2026-07-06 | round 1 APPROVE |
 | M1-573 | In-app per-command help: /help <command> shows usage, flags, and examples | 2026-07-06 | round 1 APPROVE |
@@ -74,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-569 | pack.sh/restore.sh handle root-owned adapter identity dirs | 2026-07-05 | round 1 APPROVE |
 | M1-568 | restore.sh extracts only allowlisted identity dirs (tar-slip) | 2026-07-05 | round 1 APPROVE |
 | M1-567 | Host-clone migration scripts (prod/scripts/pack.sh + restore.sh) | 2026-07-05 | round 2 APPROVE |
-| M1-566 | Signal edit frames use the real signal-cli encoding (send+editTimestamp) | 2026-07-04 | round 1 APPROVE |
 
 ---
 
@@ -790,7 +789,7 @@ M1-576 (done)
   └── M1-573 (done) [see above]
 M1-577 (pending) ← runnable
 M1-578 (pending) ← runnable
-M1-579 (in-progress)
+M1-579 (done)
 M1-580 (in-progress)
   └── M1-585 (pending)
 M1-581 (pending) ← runnable
