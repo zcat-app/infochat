@@ -1,7 +1,7 @@
 ---
 id: M1-580
 title: "restore.sh fails loud on real pg_restore errors (stderr gate, not just table-presence)"
-status: pending
+status: in-progress
 created: 2026-07-06
 last_updated: 2026-07-06
 blocked_by: []
@@ -100,7 +100,7 @@ clarity_check:
       though RestoreWiringTest is a pre-existing file being extended, not
       created. Informational labeling nit only — the authorization content
       itself (acceptance item 4 + test_plan.adds) is already explicit and
-      sufficient.
+      sufficient. (Same nit the ticket's own prior clarity_check recorded.)
 ---
 
 # M1-580: restore.sh fails loud on real pg_restore errors
