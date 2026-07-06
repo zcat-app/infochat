@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 604 |
+| done | 605 |
 | deferred | 11 |
 | **total** | **619** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-582 — Single-owner cutover: stop-first pack guidance and a Provider-start gate in restore.sh (complexity: medium, risk: medium)
 - M1-583 — Close the secret-disposal gaps: shred pack.sh staging; shred-bundle accepts pack remnants and bare .pgc; hardlink/SSD caveat (complexity: medium, risk: medium)
 - M1-584 — Identity mount targets: correct the over-claiming allowlist comment; refuse system-prefix and colon data-dirs (complexity: medium, risk: medium)
 
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-582 | Single-owner cutover: stop-first pack guidance and a Provider-start gate in restore.sh | 2026-07-06 | round 1 APPROVE |
 | M1-581 | restore.sh: exact identity-path gate, truthful failure remediation, operator-role reminder | 2026-07-06 | round 1 APPROVE |
 | M1-580 | restore.sh fails loud on real pg_restore errors (stderr gate, not just table-presence) | 2026-07-06 | round 1 APPROVE |
 | M1-579 | /pending lists only currently-actionable users (drop the terminal 'invited' roster arm) | 2026-07-06 | round 1 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-575 | Admin visibility of actionable users (/pending): probation + awaiting-vouch, with usable contact ids | 2026-07-06 | round 1 APPROVE |
 | M1-573 | In-app per-command help: /help <command> shows usage, flags, and examples | 2026-07-06 | round 1 APPROVE |
 | M1-572 | operator-invoked shred-bundle.sh for safe disposal of pack.sh bundles | 2026-07-06 | round 1 APPROVE |
-| M1-571 | persist custom GGUF download URL + SHA so restore recovers custom models | 2026-07-05 | round 1 APPROVE |
 
 ---
 
@@ -792,7 +791,7 @@ M1-580 (done)
   └── M1-585 (pending)
 M1-581 (done)
   └── M1-585 (pending) [see above]
-M1-582 (pending) ← runnable
+M1-582 (done)
 M1-583 (pending) ← runnable
 M1-584 (pending) ← runnable
   └── M1-585 (pending) [see above]

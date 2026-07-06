@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.wiring;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -7,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -25,7 +27,9 @@ import org.junit.jupiter.api.io.TempDir;
  *
  * <p><b>Scope: the precondition gates PLUS the identity-extraction allowlist (M1-568)
  * over the M1-569 root-in-container untar PLUS the bounded pg_restore error gate
- * (M1-580, the two cases driving past the gates to the DB step).</b>
+ * (M1-580, the two cases driving past the gates to the DB step) PLUS the single-owner
+ * Provider-start consent gate (M1-582, the two cases driving past the DB step to
+ * bring-up).</b>
  * The gate cases fail before the identity extraction, so they never mutate the host or
  * exercise Docker for real — the fake {@code docker} only has to satisfy
  * {@code command -v docker} and the one {@code docker volume ls} probe the fresh-volume gate
@@ -51,11 +55,13 @@ class RestoreWiringTest {
     // reads (grep/tail), and the exit-trap cleanup (rm). mkdir/cp/chmod are reached only by
     // the allowlist-extraction case, which drives PAST the gates to place config/secrets and
     // extract identities (M1-568); tee by the cases that reach the pg_restore step, whose
-    // stderr capture tees to the console (M1-580). Symlinked from the host into the
-    // controlled bin so a restricted PATH still lets the script run.
+    // stderr capture tees to the console (M1-580); sed (read_prop) and cat (the
+    // single-owner gate's banner heredoc) only by the M1-582 consent-gate cases that
+    // continue past the DB step into model rehydration and bring-up. Symlinked from the
+    // host into the controlled bin so a restricted PATH still lets the script run.
     private static final String[] REAL_TOOLS =
             {"bash", "dirname", "mktemp", "tar", "gzip", "grep", "tail", "rm",
-             "mkdir", "cp", "chmod", "tee"};
+             "mkdir", "cp", "chmod", "tee", "sed", "cat"};
     private static final String[] TOOL_DIRS = {"/usr/bin", "/bin", "/usr/local/bin"};
 
     // The gates need only `command -v docker` to resolve and
@@ -391,6 +397,58 @@ class RestoreWiringTest {
                         + r.output);
     }
 
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void nonTtyRunWithoutSourceStoppedStopsBeforeProviderStart(@TempDir Path tmp) throws Exception {
+        // M1-582: the Provider is the messaging-identity consumer, so restore.sh gates its
+        // start on single-owner consent. A non-TTY run (stdin here is a closed pipe) without
+        // --source-stopped must stop AFTER the Collector (bring-up unaffected) and BEFORE
+        // `compose up -d infochat-provider`, naming the flag — otherwise an unattended
+        // restore against a still-running source opens the two-live-consumers corruption
+        // window on the unrecoverable identity with zero friction.
+        Path bundle = buildBringUpBundle(tmp);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false,
+                Map.of("FAKE_DB_TABLES", "present"));
+
+        assertNotEquals(0, r.exitCode,
+                "withheld consent must exit non-zero (the restore is incomplete):\n" + r.output);
+        assertTrue(r.output.contains("PROVIDER NOT STARTED"),
+                "the stop must print the documented withheld message:\n" + r.output);
+        assertTrue(r.output.contains("--source-stopped"),
+                "the withheld message must name the unattended-run flag:\n" + r.output);
+        // NOT a failure recipe: the deliberate stop must not print the partial-state /
+        // return-to-fresh advice (the clone's data is complete at this point).
+        assertFalse(r.output.contains("PARTIAL RESTORE"),
+                "a deliberate consent stop must not print the partial-state note:\n" + r.output);
+        String argvLog = Files.readString(tmp.resolve("docker-argv.log"));
+        assertTrue(argvLog.contains("up -d --wait") && argvLog.contains("infochat-collector"),
+                "Collector bring-up must be unaffected by the gate:\n" + argvLog);
+        assertFalse(argvLog.contains("up -d infochat-provider"),
+                "no provider-up docker step may run without consent:\n" + argvLog);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void sourceStoppedFlagReachesProviderStart(@TempDir Path tmp) throws Exception {
+        // M1-582 positive case: --source-stopped is the unattended-run consent, so the same
+        // non-TTY drive-past-gates run WITH the flag must reach `compose up -d
+        // infochat-provider` and run to completion.
+        Path bundle = buildBringUpBundle(tmp);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false,
+                Map.of("FAKE_DB_TABLES", "present"), "--source-stopped");
+
+        String argvLog = Files.readString(tmp.resolve("docker-argv.log"));
+        assertTrue(argvLog.contains("up -d --wait") && argvLog.contains("infochat-collector"),
+                "Collector bring-up must be unaffected by the gate:\n" + argvLog);
+        assertTrue(argvLog.contains("up -d infochat-provider"),
+                "the Provider start must be reached with --source-stopped:\n"
+                        + r.output + "\n" + argvLog);
+        assertEquals(0, r.exitCode,
+                "the consented run must complete end to end:\n" + r.output);
+    }
+
     // --- helpers ----------------------------------------------------------------
 
     /** Drive the real restore.sh under a controlled PATH; return exit code + combined output. */
@@ -400,10 +458,11 @@ class RestoreWiringTest {
 
     /**
      * As {@link #runRestore(Path, Path, boolean)}, with extra environment entries for the
-     * fake docker's per-case knobs (FAKE_PG_RESTORE_EXIT / _STDERR_FILE, FAKE_DB_TABLES).
+     * fake docker's per-case knobs (FAKE_PG_RESTORE_EXIT / _STDERR_FILE, FAKE_DB_TABLES)
+     * and optional extra script arguments (e.g. {@code --source-stopped}, M1-582).
      */
     private RunResult runRestore(Path tmp, Path bundle, boolean pgdataVolumePresent,
-            Map<String, String> extraEnv) throws Exception {
+            Map<String, String> extraEnv, String... scriptArgs) throws Exception {
         Path repoRoot = repoRoot();
         Path bin = Files.createDirectories(tmp.resolve("bin"));
         for (String tool : REAL_TOOLS) {
@@ -415,6 +474,7 @@ class RestoreWiringTest {
                 bin.resolve("bash").toString(),
                 repoRoot.resolve("prod/scripts/restore.sh").toString(),
                 bundle.toString());
+        pb.command().addAll(List.of(scriptArgs));
         pb.redirectErrorStream(true);
         Map<String, String> env = pb.environment();
         env.put("PATH", bin.toString()); // restricted: only our controlled bin
@@ -556,6 +616,40 @@ class RestoreWiringTest {
         run(idsrc, "tar", "-czpf", staging.resolve("identities.tgz").toString(), dataRel);
 
         Path bundle = tmp.resolve("clean-bundle.tgz");
+        run(staging, "tar", "-czf", bundle.toString(), ".");
+        return bundle;
+    }
+
+    /**
+     * As {@link #buildSandboxedBundle} (same TempDir-sandboxed identity dir), but with an
+     * application.properties whose backend endpoints let {@code rehydrate_models} succeed
+     * under the fake docker — remote generative (no model step) + llama.cpp embeddings
+     * (the fake's {@code --entrypoint ls} probe reports the GGUF present, so no fetch) —
+     * so the run continues past the DB step into the Collector/Provider bring-up the
+     * M1-582 consent-gate cases assert on. The M1-580 cases keep the plain sandboxed
+     * bundle, whose config makes them end at the model step exactly as before.
+     */
+    private Path buildBringUpBundle(Path tmp) throws Exception {
+        String dataDirAbs = tmp.resolve("idroot/signal-cli").toString();
+        String dataRel = dataDirAbs.substring(1);       // "${dir#/}" — strip the leading '/'
+        Path staging = Files.createDirectories(tmp.resolve("gsrc"));
+        Files.createDirectories(staging.resolve("db"));
+        Files.createDirectories(staging.resolve("runtime"));
+        Files.writeString(staging.resolve("db/infochat.pgc"), "PGDMP-dummy");
+        Files.writeString(staging.resolve("runtime/secrets.env"),
+                "INFOCHAT_DB_PASSWORD=\"pw\"\nINFOCHAT_SIGNAL_DATA_DIR=\"" + dataDirAbs + "\"\n");
+        Files.writeString(staging.resolve("runtime/application.properties"),
+                "quarkus.profile=vps\n"
+                + "infochat.llm.chat.base-url=https://api.example.com/v1\n"
+                + "infochat.embeddings.base-url=http://llamacpp-embeddings:8080/v1\n");
+        Files.writeString(staging.resolve("runtime/bootstrap-sources.json"), "[]\n");
+
+        Path idsrc = Files.createDirectories(tmp.resolve("gid"));
+        Files.createDirectories(idsrc.resolve(dataRel));
+        Files.writeString(idsrc.resolve(dataRel).resolve("keyfile"), "id");
+        run(idsrc, "tar", "-czpf", staging.resolve("identities.tgz").toString(), dataRel);
+
+        Path bundle = tmp.resolve("bringup-bundle.tgz");
         run(staging, "tar", "-czf", bundle.toString(), ".");
         return bundle;
     }

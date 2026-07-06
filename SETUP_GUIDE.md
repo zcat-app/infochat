@@ -702,12 +702,21 @@ nobody has to reconnect)? Two scripts do it as an exact clone. The identity
 directories from [Bot chat identity](#bot-chat-identity-where-it-lives-and-how-to-change-it)
 are exactly what make the clone the *same* bot.
 
-1. **On the old machine**, bundle everything into one file:
+1. **On the old machine**, stop the bot's apps, then bundle everything into one
+   file:
    ```bash
+   ./prod/scripts/apps.sh stop   # Postgres stays up — the pack needs it for the DB dump
    ./prod/scripts/pack.sh
    ```
-   This is read-only — it changes and stops nothing — so it's safe to run while
-   the bot is live. It writes `infochat-migration-YYYYMMDD.tgz` (under
+   Packing never changes the source — but packing while the bot is **live** can
+   catch the messaging-identity stores mid-write, and then the pack either
+   fails ("file changed as we read it") or, worse, quietly bundles a torn
+   identity snapshot you only discover after cutover, on the identity that
+   can't be regenerated. Stopping the apps first removes that risk (the
+   database dump is consistent either way) and matches the safe order below.
+   pack.sh warns loudly if the bot is still running, but doesn't refuse — a
+   live pack is still fine for a periodic just-in-case bundle you don't plan
+   to restore. It writes `infochat-migration-YYYYMMDD.tgz` (under
    `prod/runtime/migration` by default) containing the database, both messaging
    identities, your config, your secrets, and your bootstrap files.
 
@@ -726,13 +735,19 @@ are exactly what make the clone the *same* bot.
    It refuses loudly if the target isn't fresh (already configured, or an existing
    database volume). It restores the database and both identities, then starts the
    bot — the only thing it re-downloads is the AI model (models aren't in the
-   bundle). When it finishes it prints the checks to run in chat.
+   bundle). Before starting the Provider — the part that connects to your
+   Signal/SimpleX identity — it stops and asks you to confirm the old machine is
+   stopped (defaults to No). Scripted/unattended runs (no terminal) must pass
+   `--source-stopped` to assert that instead; without it they deliberately stop
+   after the Collector and print the one command to start the Provider once the
+   old machine is off. When it finishes it prints the checks to run in chat.
 
 **One rule you must not break: only one copy may be live at a time.** The two
 machines each have their own database, so nothing *automatically* stops both from
 running — but two bots on the same Signal/SimpleX identity **corrupt** it. So stop
-the old bot (`./prod/scripts/apps.sh stop`) before the clone connects, and
-decommission the old machine only **after** you've confirmed the clone is healthy.
+the old bot (`./prod/scripts/apps.sh stop`) before the clone connects — restore.sh
+holds the Provider back until you confirm that (the prompt, or `--source-stopped`) —
+and decommission the old machine only **after** you've confirmed the clone is healthy.
 The safe order is: stop old → pack → copy → restore + verify → retire old.
 
 Why the same absolute path? v1 rebuilds the identity folders at their original

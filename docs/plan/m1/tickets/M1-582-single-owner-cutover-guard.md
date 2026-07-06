@@ -1,9 +1,23 @@
 ---
 id: M1-582
 title: "Single-owner cutover: stop-first pack guidance and a Provider-start gate in restore.sh"
-status: pending
+status: done
 created: 2026-07-06
 last_updated: 2026-07-06
+clarity_check:
+  date: 2026-07-06
+  verdict: WARN
+  warnings:
+    - >-
+      risk: medium may be under-calibrated given the data-integrity stakes
+      named in §7.10 itself ("unrecoverable on loss") — see
+      COMPLEXITY-RISK-CALIBRATED.
+    - >-
+      §Context cites stale restore.sh line numbers (":473"/":485"; live file
+      has provider-up at :608 and the SINGLE-OWNER banner at :646 after
+      M1-580/M1-581 grew the script). The qualitative claim still holds; do
+      not anchor edits on the stale numbers — use surrounding text/markers.
+  blockers: []
 blocked_by: []
 files_budget: 5
 files_scope:
@@ -72,7 +86,20 @@ test_plan:
 spec_refs:
   - "docs/design/07-deployment.md §7.10.1"
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-06
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 299
+      removed: 41
 escalations: []
 overrides: []
 revisions:
@@ -99,7 +126,21 @@ revisions:
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-07-06
+    verdict: CLEAN
+    base: bfe4c88b27f2b4cf2c00daf8a11b43087c81d837
+    head: working tree (uncommitted pre-commit audit, branch m1/M1-582-single-owner-cutover-guard)
+    verdict_file: docs/plan/m1/redteam/M1-582-2026-07-06.md
+    out_of_model_count: 3
+    note: >-
+      Pre-commit --in-progress audit (run-orchestrated, after round-1 APPROVE).
+      CLEAN — the consent gate, WARN, and doc changes deliver what the threat
+      model promises. Three advisory out-of-model items (best-effort fail-silent
+      WARN detection in pack.sh; consent-not-verification TOCTOU on the
+      single-owner gate; no durable record of the consent decision) reported in
+      chat; all sit outside the documented operator-trust boundary, none
+      auto-filed.
 ---
 
 # M1-582: single-owner cutover guard

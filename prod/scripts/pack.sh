@@ -15,7 +15,15 @@
 # admin/LLM config that backup.sh omits; without them the target cannot stand up.
 #
 # READ-ONLY on the source: pack.sh only dumps and copies — it never mutates or
-# deletes source state, so it is safe to run against a still-running deployment.
+# deletes source state. That does NOT make a LIVE pack the recommended path: the
+# adapter identity stores are live-written SQLite/session files, and taring them
+# mid-write yields either a spurious tar failure ("file changed as we read it")
+# or — worse — a TORN snapshot in the bundle, discovered only after cutover, on
+# the UNRECOVERABLE identity. The RECOMMENDED order is stop-first: apps.sh stop
+# (Postgres stays up — pg_dump needs it, and the dump is MVCC-consistent either
+# way), then pack — the same stop-first order as §7.10.1's cutover sequence
+# (M1-582). Packing a still-running deployment stays POSSIBLE for periodic
+# precaution bundles: pack.sh WARNs when the Provider is running, never refuses.
 # Decommissioning the source is a SEPARATE, post-verification operator step
 # (apps.sh stop, then optionally setup.sh --reset --hard), never part of packing
 # (M1-567): a corrupt bundle or a failed target bring-up must still leave a
@@ -108,6 +116,34 @@ for required in "$APP_PROPS" "$SOURCES_FILE"; do
     exit 1
   fi
 done
+
+# ── live-source WARN (M1-582) ───────────────────────────────────────────
+# The Provider (and the simplex-chat / signal-cli processes it drives) live-
+# writes the identity stores this script is about to tar; a mid-write tar can
+# bundle a torn snapshot of the unrecoverable identity (header note above).
+# WARN, never refuse: a live pack stays deliberate for periodic precaution
+# bundles, but an operator packing for a MIGRATION must see the risk before
+# the bundle exists. Detection mirrors upgrade.sh's wait_healthy: compose ps
+# for the container id, then docker inspect for portable running-state.
+provider_cid="$(docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod ps -q infochat-provider 2>/dev/null || true)"
+if [[ -n "$provider_cid" ]] \
+   && [[ "$(docker inspect -f '{{.State.Status}}' "$provider_cid" 2>/dev/null || echo)" == "running" ]]; then
+  cat >&2 <<'LIVEWARN'
+
+========================================================================
+  WARNING - PACKING A LIVE DEPLOYMENT
+  The Provider is RUNNING, so the SimpleX/signal-cli identity stores may
+  be written WHILE this pack tars them. That can fail the tar ("file
+  changed as we read it") - or worse, quietly bundle a TORN snapshot of
+  the UNRECOVERABLE messaging identity, discovered only after cutover.
+  For a migration bundle, stop the apps first (Postgres stays up for the
+  DB dump):
+      ./prod/scripts/apps.sh stop
+  then re-run pack.sh. Continuing anyway is fine for a periodic
+  just-in-case bundle you do not plan to cut over to.
+========================================================================
+LIVEWARN
+fi
 
 STAMP="$(date +%Y%m%d)"
 mkdir -p "$OUT_DIR"

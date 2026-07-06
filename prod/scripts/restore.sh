@@ -23,9 +23,13 @@
 # would start. Signal treats signal-cli as the account's single primary device
 # and a SimpleX queue has one legitimate owner; two live consumers corrupt
 # session/ratchet state. Stop the source before the clone connects; decommission
-# the source only after the clone is verified healthy. restore.sh prints this
-# reminder at the end (and pack.sh stays read-only precisely so packing a still-
-# running source is safe).
+# the source only after the clone is verified healthy. The Provider is the
+# identity consumer, so its start is GATED on operator consent — an interactive
+# y/N defaulting to No, or --source-stopped for unattended runs (M1-582); the
+# Collector holds no messaging identity and starts ungated. The cutover-order
+# reminder still prints at the end. (pack.sh never mutates the source, but the
+# RECOMMENDED order is stop-first even for packing — a live pack can tar the
+# identity stores mid-write; see pack.sh's header.)
 set -euo pipefail
 # Files this script writes before their explicit modes are set (staging tree
 # holding the bundle's secrets, the placed secrets.env) carry secret material;
@@ -74,18 +78,36 @@ LLAMACPP_URL="http://llamacpp:8080/v1"
 LLAMACPP_EMBED_URL="http://llamacpp-embeddings:8080/v1"
 
 usage() {
-  echo "Usage: restore.sh <bundle.tgz> [-h|--help]"
+  echo "Usage: restore.sh [--source-stopped] <bundle.tgz> [-h|--help]"
   echo "  Reconstruct a deployment on a FRESH host from a pack.sh bundle:"
   echo "  place config + secrets + identities, pg_restore the DB into a fresh"
   echo "  database BEFORE Flyway, re-provision models, then start and verify."
   echo "  Run from a clean checkout at the SAME absolute repo path as the source."
+  echo "  --source-stopped  assert the SOURCE host's apps are stopped: skip the"
+  echo "                    interactive single-owner prompt before the Provider"
+  echo "                    start (required for unattended/non-TTY runs)."
 }
 
-case "${1:-}" in
-  -h|--help) usage; exit 0 ;;
-  "") echo "FAIL: no bundle given." >&2; usage >&2; exit 2 ;;
-esac
-BUNDLE="$1"
+# Mirrors shred-bundle.sh's flag loop — the house pattern for consent-carrying
+# scripts (M1-582).
+SOURCE_STOPPED=no
+BUNDLE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --source-stopped) SOURCE_STOPPED=yes; shift ;;
+    *)
+      if [[ -n "$BUNDLE" ]]; then
+        echo "FAIL: exactly one bundle expected (got '$BUNDLE' and '$1')." >&2
+        usage >&2
+        exit 2
+      fi
+      BUNDLE="$1"; shift ;;
+  esac
+done
+if [[ -z "$BUNDLE" ]]; then
+  echo "FAIL: no bundle given." >&2; usage >&2; exit 2
+fi
 
 # Single place the prod compose flags live (upgrade.sh precedent). Used only
 # AFTER secrets.env is placed (postgres/apps steps); the early gates below run
@@ -135,6 +157,23 @@ print_fresh_host_recipe() {
     echo "             docker volume rm \"\$(docker volume ls --filter name=infochat-pgdata -q)\""
     echo "      (setup.sh --reset --hard is NOT this recipe: it keeps secrets.env — the"
     echo "      fresh-host gate would still refuse — and launches the interactive setup wizard.)"
+  } >&2
+}
+
+# What the operator does after the single-owner gate below withholds the
+# Provider start (M1-582). NOT a failure recipe: the clone's data is complete
+# and healthy at that point — only the identity-consuming Provider was withheld
+# until the source host is stopped.
+print_provider_withheld_note() {
+  {
+    echo "      The clone's data is fully in place (DB restored, identities placed) and"
+    echo "      the Collector is up — only the Provider, the messaging-identity consumer,"
+    echo "      was withheld. Once the SOURCE host's apps are stopped (on it:"
+    echo "      prod/scripts/apps.sh stop), start the Provider here and verify:"
+    echo "        docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod up -d infochat-provider"
+    echo "        $VERIFY_SCRIPT"
+    echo "      Unattended runs assert the source is stopped up front with:"
+    echo "        restore.sh --source-stopped <bundle>"
   } >&2
 }
 
@@ -604,16 +643,58 @@ echo "+ build app images"
 compose build infochat-collector infochat-provider
 echo "+ start Collector (wait up to ${COLLECTOR_WAIT_TIMEOUT}s for healthy — it runs Flyway, an idempotent no-op over the restored schema)"
 compose up -d --wait --wait-timeout "$COLLECTOR_WAIT_TIMEOUT" infochat-collector
-echo "+ start Provider"
-compose up -d infochat-provider
 
-# The clone is fully placed once the Provider starts: from here a failure is a
-# health problem on a COMPLETE clone (the verify NOTE below), not partial
-# state — the return-to-fresh recipe would be wrong advice. Disarm back to the
-# plain staging cleanup (M1-581).
+# The clone is fully placed once the Collector is up: every bundle artifact
+# (DB, identities, config) has landed, so from here a failure is a health
+# problem on a COMPLETE clone (the verify NOTE below), not partial state — the
+# return-to-fresh recipe would be wrong advice. In particular the single-owner
+# gate below stops here BY DESIGN when consent is withheld; that deliberate
+# stop must not print the recipe. Disarm back to the plain staging cleanup
+# (M1-581/M1-582).
 set +E
 trap - ERR
 trap 'rm -rf "$STAGING"' EXIT
+
+# ── single-owner consent gate before the Provider start (M1-582) ────────
+# The Provider is the messaging-identity consumer: the moment it starts, this
+# clone connects to the restored Signal/SimpleX identity, and if the SOURCE
+# host is still running there are two live consumers on one identity —
+# session/ratchet corruption on UNRECOVERABLE state (header note). A banner
+# printed afterwards cannot close that window, so the start itself is gated on
+# operator consent: --source-stopped for unattended runs, or an interactive
+# y/N defaulting to No (TTY-checked — the shred-bundle.sh consent precedent).
+# The Collector holds no messaging identity, so it is already up regardless.
+cat >&2 <<'GATE'
+
+========================================================================
+  SINGLE-OWNER GATE - the next step starts the Provider, which connects
+  to the restored Signal/SimpleX identity. Exactly ONE instance may own
+  that identity at a time; the M1-009 advisory lock does NOT span hosts
+  (it is per-database, and this clone has its own restored DB). If the
+  SOURCE host is still running, two live consumers will corrupt
+  session/ratchet state on the UNRECOVERABLE identity.
+========================================================================
+GATE
+if [[ "$SOURCE_STOPPED" == yes ]]; then
+  echo "  --source-stopped: operator asserts the source host is stopped; starting the Provider."
+elif [[ ! -t 0 ]]; then
+  echo "PROVIDER NOT STARTED: single-owner confirmation required — no interactive" >&2
+  echo "      terminal and --source-stopped was not given." >&2
+  print_provider_withheld_note
+  exit 1
+else
+  read -r -p "Is the SOURCE host stopped — start the Provider now? [y/N] " answer
+  case "$answer" in
+    y|Y|yes|YES) ;;
+    *)
+      echo "PROVIDER NOT STARTED: declined by operator." >&2
+      print_provider_withheld_note
+      exit 1
+      ;;
+  esac
+fi
+echo "+ start Provider"
+compose up -d infochat-provider
 
 # ── verify (§7.10 step 5, split per the clarity WARN) ───────────────────
 # The HTTP-health part is automatable (8-verify.sh polls /q/health on both apps

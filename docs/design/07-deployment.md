@@ -968,7 +968,14 @@ Flyway, identities are stored at absolute paths, and models must be re-pulled.
 for it; the manual steps 1-5 above remain the under-the-hood description of what
 `restore.sh` automates.
 
-- **`pack.sh [OUT_DIR]`** — READ-ONLY on the source. Bundles everything needed to
+- **`pack.sh [OUT_DIR]`** — READ-ONLY on the source, but **stop-first is the
+  recommended order** (`apps.sh stop`; Postgres stays up — `pg_dump` needs it and
+  the dump is MVCC-consistent either way): a LIVE pack can tar the
+  SimpleX/signal-cli identity stores mid-write, yielding a spurious tar failure
+  ("file changed as we read it") or a torn SQLite/ratchet snapshot discovered only
+  after cutover, on the unrecoverable identity. `pack.sh` prints a loud WARN when
+  the Provider is running — it never refuses (a live pack stays legitimate for
+  periodic precaution bundles; M1-582). Bundles everything needed to
   reconstruct the deployment into ONE archive (`infochat-migration-YYYYMMDD.tgz`,
   default `prod/runtime/migration`): the `infochat` DB (`pg_dump -F c`, audit log
   included), every configured adapter identity data-dir (modes preserved),
@@ -994,7 +1001,16 @@ for it; the manual steps 1-5 above remain the under-the-hood description of what
   URL + SHA `4-llm.sh` persisted into `secrets.env` at setup (M1-571) — only a custom
   GGUF from an OLDER bundle (pre-M1-571, no persisted URL) fails loud; a remote
   backend needs no model step), then
-  starts Collector → Provider and runs the §7.10 step-5 health verification.
+  starts the Collector and **gates the Provider start on single-owner consent**
+  (M1-582): the Provider is the messaging-identity consumer, so before
+  `compose up -d infochat-provider` the script prints the single-owner invariant
+  and requires either an interactive y/N confirmation (default No, TTY-checked —
+  the `shred-bundle.sh` consent shape) or the explicit `--source-stopped` flag.
+  Declining — or a non-TTY run without the flag — stops after the Collector with
+  instructions to start the Provider manually once the source host is stopped;
+  unattended/scripted runs (e.g. a recovery round-trip re-run) must pass
+  `--source-stopped` to reach the Provider start. With consent it starts the
+  Provider and runs the §7.10 step-5 health verification.
 - **`shred-bundle.sh [-y|--yes] <target>`** — the closing step of the migration
   lifecycle: pack → transfer → restore → verify → **dispose** (M1-572). Once the
   clone is verified healthy and the source decommissioned, the bundle — and any
@@ -1107,10 +1123,14 @@ session/ratchet state. The operator must observe the ordering:
 stop-source → pack → transfer → restore + verify → decommission-source
 ```
 
-`pack.sh` is read-only precisely so it is safe to pack a still-running source and
-cut over deliberately; decommissioning the old host (`apps.sh stop`, then
-optionally `setup.sh --reset --hard`) happens only AFTER the clone is verified
-healthy, so a corrupt bundle or a failed bring-up never leaves zero working copies.
+Two pieces of tooling friction back the ordering (M1-582): `pack.sh` WARNs — never
+refuses — when the Provider is still running (read-only, so a live pack cannot hurt
+the source, but it can bundle a torn identity snapshot; see the `pack.sh` bullet
+above), and `restore.sh` will not start the Provider without operator consent
+(`--source-stopped`, or the interactive default-No prompt). Decommissioning the old
+host (`apps.sh stop`, then optionally `setup.sh --reset --hard`) happens only AFTER
+the clone is verified healthy, so a corrupt bundle or a failed bring-up never leaves
+zero working copies.
 
 ---
 
