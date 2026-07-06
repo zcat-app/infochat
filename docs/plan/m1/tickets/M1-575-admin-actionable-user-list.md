@@ -1,7 +1,7 @@
 ---
 id: M1-575
 title: "Admin visibility of actionable users (/pending): probation + awaiting-vouch, with usable contact ids"
-status: draft
+status: pending
 created: 2026-07-06
 last_updated: 2026-07-06
 blocked_by: []
