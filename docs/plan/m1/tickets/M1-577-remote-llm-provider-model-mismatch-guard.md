@@ -1,7 +1,7 @@
 ---
 id: M1-577
 title: "Startup guard for remote-LLM provider/base-url/model mismatch (catch silent 400s)"
-status: pending
+status: done
 created: 2026-07-06
 last_updated: 2026-07-06
 blocked_by: []
@@ -36,11 +36,15 @@ acceptance:
     At startup, for each LLM ModelTask, the guard detects an internally
     inconsistent (provider, base-url, model) triple and emits a distinct,
     actionable WARN naming the task, provider, base-url host, model, and the
-    likely fix. At minimum it flags: (a) provider=anthropic with a base-url whose
-    host is not the Anthropic API host, and (b) provider=openai-compatible whose
-    model name is a local-runtime name (llama*/nomic*/qwen*/mistral* families)
-    while the base-url host is a non-loopback remote — the exact shape that made
-    DeepSeek 400 on every call this session.
+    likely fix. At minimum it flags: (a) provider=anthropic with a base-url that
+    is not an Anthropic-FORMAT endpoint — host is not the Anthropic API host AND
+    the path carries no Anthropic route (vendors like DeepSeek expose the
+    Anthropic dialect at api.deepseek.com/anthropic; provider=anthropic against
+    such an /anthropic-path route is a valid pairing that must NOT be flagged) —
+    and (b) provider=openai-compatible whose model name is a local-runtime name
+    (llama*/nomic*/qwen*/mistral* families) while the base-url host is a
+    non-loopback remote — the exact shape that made DeepSeek 400 on every call
+    this session.
   - >-
     The guard is ADVISORY by default (it does not block boot). A single config
     flag (documented) opts into fail-fast for operators who want a misconfig to
@@ -50,8 +54,8 @@ acceptance:
     (loopback base-url, llama/nomic models); (2) an Anthropic remote
     (provider=anthropic, anthropic.com base-url, claude-* models); (3) a
     correctly-configured OpenAI-compatible remote (provider=openai-compatible,
-    remote base-url, a provider-native model such as deepseek-chat). Each must
-    pass the guard cleanly.
+    remote base-url, a provider-native model the remote actually serves). Each
+    must pass the guard cleanly.
   - >-
     LlmRouterStartupGuardTest asserts: the DeepSeek-misconfig triple
     (provider=anthropic OR model=llama3.1:8b against api.deepseek.com) is flagged;
@@ -69,14 +73,55 @@ spec_refs:
   - "docs/design/05-llm-and-embeddings.md §5.3 Provider implementations"
   - "docs/spec/llm.md §Per-task routing rules"
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-06
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 647
+      removed: 16
 escalations: []
 overrides: []
-revisions: []
+revisions:
+  - date: 2026-07-06
+    reason: >-
+      user-approved mid-implementation refine (in-chat, 2026-07-06): shape (a)
+      host-only detection false-positives on Anthropic-format endpoints that
+      third-party vendors expose on an /anthropic path
+      (api-docs.deepseek.com documents api.deepseek.com/anthropic for the
+      Anthropic SDK) — under fail-fast it would block a valid config. Shape (a)
+      redefined path-aware. Separately, deepseek-chat dropped as the
+      recommended-model example everywhere (deprecated upstream 2026-07-24;
+      user directive: drop the model, keep the incident narrative).
+    prior_values: |
+      acceptance[0] shape (a): "provider=anthropic with a base-url whose host
+        is not the Anthropic API host"
+      acceptance[2] shape (3): "a provider-native model such as deepseek-chat"
 aborted_attempts: []
 reopens: []
 redteam_findings: []
 redteam_audits: []
+clarity_check:
+  date: 2026-07-06
+  verdict: WARN
+  warnings:
+    - >-
+      FILES-BUDGET-PLAUSIBLE: if the new fail-fast flag follows this class's
+      existing per-service application.properties convention (both
+      infochat-provider and infochat-collector carry an explicit default line
+      for the sibling infochat.llm.local-only flag), the implementer may need 2
+      files outside files_scope, pushing the total past files_budget: 4. Not
+      certain — the flag can be implemented with a code-level default and no
+      properties-file entry — so aim for the code-level default and escalate to
+      a files_budget bump only if consistency demands the properties entries.
+  blockers: []
 ---
 
 # M1-577: Guard against remote-LLM provider/base-url/model mismatch

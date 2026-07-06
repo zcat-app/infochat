@@ -161,7 +161,56 @@ enum Capability {
     LARGE_CONTEXT,         // > 32K                                                                                                                                                                                                                   
 }                                                                                                                                                                                                                                                     
 ```                                                                                   
-The router uses these to pick a provider. SUPPORTS_LANGUAGE_CS decides whether the summarizer can write Czech directly (one call) or needs TranslationProvider post-process (two calls).                                                              
+The router uses these to pick a provider. SUPPORTS_LANGUAGE_CS decides whether the summarizer can write Czech directly (one call) or needs TranslationProvider post-process (two calls).
+
+### Provider/base-url/model consistency guard (M1-577)
+
+`LlmRouterStartupGuard` (run on both services' `@Startup`) scans each
+`ModelTask`'s effective `(provider, base-url, model)` triple for an internal
+contradiction that would make every call to that task HTTP-400 while nothing
+else in startup complains. It exists because a live `remote-llm` deployment
+pointed `base-url` at DeepSeek but left the profile's Anthropic defaults in
+place (`provider=anthropic` + `claude-*` models, and Ollama `llama3.1:8b`
+model names for the local tasks). The result was 3883 silent 400s — degraded
+tagging/entity extraction and a broken `/summary` — while the guard's only
+output was the benign "post bodies leave the host" WARN.
+
+Two shapes are flagged (conservative, so the three supported shapes never
+false-positive):
+
+- **`provider=anthropic` against a base-url that is not an Anthropic-FORMAT
+  endpoint.** The `anthropic` provider speaks the Anthropic Messages wire
+  dialect; against an OpenAI-format endpoint it 400s. A base-url counts as
+  Anthropic-format when its host is `anthropic.com` / `*.anthropic.com` OR its
+  path carries an anthropic route — several OpenAI-compatible vendors also
+  expose the Anthropic dialect on an `/anthropic` path (DeepSeek documents
+  `api.deepseek.com/anthropic`), and `provider=anthropic` against such a route
+  is a valid pairing, NOT flagged. This is a config-only heuristic: a gateway
+  serving the Anthropic dialect at a neutral path is still flagged, which is
+  one reason the guard defaults to advisory. Fix: point the task `base-url` at
+  an Anthropic-format endpoint, or switch it to `provider=openai-compatible`.
+- **`provider=openai-compatible` with a local-runtime model name against a
+  non-loopback remote.** A model whose name begins `llama` / `nomic` / `qwen`
+  / `mistral` (case-insensitive) is an Ollama-family model a remote endpoint
+  does not serve — it 400/404s. A LOOPBACK base-url with such a model is the
+  normal local-Ollama setup and is NOT flagged. Fix: set the task `model` to
+  one the remote actually serves, or point `base-url` at local Ollama.
+
+Each offending triple logs a distinct, actionable line naming the task,
+provider, base-url host, model, and the fix (the exact config keys to change).
+
+**Advisory by default.** A detected mismatch logs a WARN and boot continues —
+a partial misconfig degrades-and-warns rather than hardening into a boot
+failure. Operators who prefer a misconfig to stop startup set
+`infochat.llm.mismatch-guard.fail-fast=true` (default `false`); each offender
+then logs at FATAL and startup aborts. The guard never rewrites operator
+config — it only observes and reports.
+
+The three supported shapes pass cleanly: (1) local Ollama (loopback base-url,
+`llama`/`nomic` models); (2) an Anthropic remote (`provider=anthropic`,
+`anthropic.com` base-url, `claude-*` models); (3) a correctly-configured
+OpenAI-compatible remote (`provider=openai-compatible`, remote base-url, a
+model that provider natively serves).                                                              
                                                                                  
 ---                                                                                                                                                                                                                                                   
 ## 5.4 Prompt templates                                                             
