@@ -1,7 +1,7 @@
 ---
 id: M1-580
 title: "restore.sh fails loud on real pg_restore errors (stderr gate, not just table-presence)"
-status: in-progress
+status: pending
 created: 2026-07-06
 last_updated: 2026-07-06
 blocked_by: []
