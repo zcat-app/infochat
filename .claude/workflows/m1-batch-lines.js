@@ -33,8 +33,24 @@ const TICKET_SCHEMA = {
 }
 
 const PREFLIGHT_SCHEMA = {
-  type: 'object', required: ['ok', 'notes'],
-  properties: { ok: { type: 'boolean' }, notes: { type: 'string' } },
+  type: 'object', required: ['ok', 'notes', 'tickets'],
+  properties: {
+    ok: { type: 'boolean' },
+    notes: { type: 'string' },
+    // Per-ticket classification read from frontmatter, used to pick the solver model
+    // (fable 5 for security_relevant:true OR risk:high; opus 4.7 otherwise). Keyed by ticket id.
+    tickets: {
+      type: 'object',
+      additionalProperties: {
+        type: 'object',
+        required: ['security_relevant', 'risk'],
+        properties: {
+          security_relevant: { type: 'boolean' },
+          risk: { type: 'string' },
+        },
+      },
+    },
+  },
 }
 
 // ── The per-ticket developer-orchestrator prompt ─────────────────────────
@@ -96,7 +112,9 @@ and scripts/regen-status.py exist and docker is responsive; (4) stop the live ap
 per the operator's standing clean-verify directive: use prod/scripts/apps.sh stop (read it first;
 stop collector+provider only, leave postgres/llm containers), then confirm both app containers
 are down; (5) note the current main sha as the batch baseline. Return ok + notes (include the
-baseline sha). If ANY check fails, ok=false with the reason — do not stop the apps in that case.`,
+baseline sha); (6) for EVERY ticket across all lines, read its frontmatter and return a tickets
+map from ticket id to { security_relevant: <boolean>, risk: <string> } (include this map even when
+ok=false — best effort). If ANY check fails, ok=false with the reason — do not stop the apps in that case.`,
   { label: 'preflight', phase: 'Preflight', schema: PREFLIGHT_SCHEMA })
 
 if (!pre || !pre.ok) {
@@ -104,13 +122,25 @@ if (!pre || !pre.ok) {
 }
 log(`preflight OK — ${pre.notes}`)
 
+// Model policy (user directive 2026-07-06): security-critical tickets are solved by Fable 5,
+// the rest by Opus 4.7. "Critical" = the ticket's own frontmatter says security_relevant:true
+// OR risk:high (preflight read these into pre.tickets). Deriving from the flags rather than a
+// fixed id list keeps the rule correct even if LINES is overridden via args. For this batch it
+// resolves to: fable → M1-579/580/581/582/583/584 ; opus-4-7 → M1-577/578/585.
+const modelFor = (id) => {
+  const meta = pre.tickets && pre.tickets[id]
+  const critical = !!meta && (meta.security_relevant === true || meta.risk === 'high')
+  return critical ? 'claude-fable-5' : 'claude-opus-4-7'
+}
+
 // ── Two sequential lines, in parallel ────────────────────────────────────
 const runLine = (line, ids) => async () => {
   const results = []
   for (const id of ids) {
-    log(`[${line}] starting ${id}`)
+    const model = modelFor(id)
+    log(`[${line}] starting ${id} on ${model}`)
     const r = await agent(ticketPrompt(id, line),
-      { label: `${line}:${id}`, phase: line, agentType: 'general-purpose', schema: TICKET_SCHEMA })
+      { label: `${line}:${id}`, phase: line, agentType: 'general-purpose', schema: TICKET_SCHEMA, model })
     results.push({ id, ...(r ?? { verdict: 'HALTED', summary: 'agent died/skipped', haltReason: 'agent returned null' }) })
     const last = results[results.length - 1]
     log(`[${line}] ${id} → ${last.verdict}${last.mergeSha ? ' @ ' + last.mergeSha : ''}`)
