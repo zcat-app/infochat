@@ -149,6 +149,7 @@ them to the marked region — doing so would red the build.
 /lang
 /list-groups
 /list-sources
+/pending
 /promote
 /quarantine
 /recover-pool
@@ -1118,6 +1119,18 @@ contacts and contradict the registration-state model
   existence-vs-no-rows distinction is not exposed. v1 ships no
   `/list-users` command; bot admins enumerate via the existing
   audit history.
+- `/pending [--page N]` — bot-admin only (closed list below),
+  DM-only. Lists the bounded set of users an admin can act on right
+  now: those awaiting a vouch (`registration_state = invited`) or
+  still inside the slow-start probation window (`probation_until` in
+  the future, D45), scoped to the inbound adapter so each row's
+  `contact_id` is the exact `(inbound_adapter, contact_id)` key that
+  `/vouch` and `/ban` accept. Each row shows the contact id, adapter,
+  registration state, registration time, and probation deadline.
+  `--page N` is 1-indexed; page size is profile-driven. Banned and
+  settled (vouched, out-of-probation) users are excluded. This is the
+  deliberate narrow complement to the no-`/list-users` posture (D55):
+  it exposes only the admin-action input subset, never a full roster.
 
 ## Permission model
 
@@ -1161,7 +1174,7 @@ cannot silently shrink across versions.
 - **Bot-admin only:** `/grant-admin`, `/revoke-admin`, `/ban`,
   `/unban`, `/promote`, `/demote`, `/vouch`, `/invite create`,
   `/invite list`, `/invite revoke`, `/quarantine list`,
-  `/quarantine approve`, `/quarantine reject`, `/audit`,
+  `/quarantine approve`, `/quarantine reject`, `/audit`, `/pending`,
   `/remove-source`, `/source-enable`, `/source-disable`,
   `/list-sources --all`, `/list-sources --include-deleted`,
   `/approve-group`, `/reject-group`, `/list-groups`,

@@ -270,10 +270,11 @@ admin in v1).
 | `/quarantine approve <id>` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
 | `/quarantine reject <id>` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
 | `/audit [-w …]` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
+| `/pending [--page N]` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
 
 **"✅ DM only" for bot-admin commands.** The bot-global admin commands
 (`/grant-admin`, `/revoke-admin`, `/ban`, `/unban`, `/vouch`, the `/invite`
-subcommands, the `/quarantine` subcommands, `/audit`, and the
+subcommands, the `/quarantine` subcommands, `/audit`, `/pending`, and the
 `/list-sources --all` / `--include-deleted` privileged listing) run **only
 in DM scope**, even for a bot admin. A reply to a group scope is delivered to
 the whole group (there is no private-reply-to-admin path), and these

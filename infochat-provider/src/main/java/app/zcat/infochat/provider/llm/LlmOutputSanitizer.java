@@ -114,6 +114,7 @@ public class LlmOutputSanitizer {
             "/quarantine approve",
             "/quarantine reject",
             "/audit",
+            "/pending",
             "/remove-source",
             "/source-enable",
             "/source-disable",

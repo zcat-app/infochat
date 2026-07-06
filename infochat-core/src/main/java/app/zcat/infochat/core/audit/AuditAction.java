@@ -178,6 +178,15 @@ public enum AuditAction implements AuditVerb {
     LIST_SOURCES_ALL,
     AUDIT_READ,
     QUARANTINE_LIST,
+    // PENDING_LIST records the bot-admin-only /pending read — a bounded
+    // enumeration of the actionable-user set (probation / awaiting-vouch), each
+    // row carrying a user's contact id and registration state (PII). Mirrors
+    // LIST_GROUPS / LIST_SOURCES_ALL: a privileged admin read whose disclosure
+    // closes the gap between "destructive admin writes audited" and "privileged
+    // admin reads not audited" (security.md §Authorization model step 8, D55).
+    // Written audit-before-effect so the intent is recorded even when the list
+    // is empty. Like /list-groups it has no unprivileged form, so no _ALL suffix.
+    PENDING_LIST,
     // QUARANTINE_REJECT_INTENT is the audit-on-intent row written on the
     // first-call (un-confirmed) leg of the forensic /quarantine reject
     // path — overriding the system's own BENIGN_CLOSED all-clear to
