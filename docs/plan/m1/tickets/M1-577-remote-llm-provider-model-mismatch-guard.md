@@ -1,7 +1,7 @@
 ---
 id: M1-577
 title: "Startup guard for remote-LLM provider/base-url/model mismatch (catch silent 400s)"
-status: draft
+status: pending
 created: 2026-07-06
 last_updated: 2026-07-06
 blocked_by: []

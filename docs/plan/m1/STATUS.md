@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 9 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 599 |
 | deferred | 11 |
-| **total** | **617** |
+| **total** | **619** |
 
 ---
 
@@ -24,6 +24,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
+- M1-577 — Startup guard for remote-LLM provider/base-url/model mismatch (catch silent 400s) (complexity: medium, risk: low)
+- M1-578 — BootstrapLoader reports ALL invalid source tags at once, not just the first (complexity: low, risk: low)
 - M1-579 — /pending lists only currently-actionable users (drop the terminal 'invited' roster arm) (complexity: low, risk: medium)
 - M1-580 — restore.sh fails loud on real pg_restore errors (stderr gate, not just table-presence) (complexity: medium, risk: high)
 - M1-581 — restore.sh: exact identity-path gate, truthful failure remediation, operator-role reminder (complexity: medium, risk: medium)
@@ -788,8 +790,8 @@ M1-575 (done)
   └── M1-574 (deferred)
 M1-576 (done)
   └── M1-573 (done) [see above]
-M1-577 (draft)
-M1-578 (draft)
+M1-577 (pending) ← runnable
+M1-578 (pending) ← runnable
 M1-579 (pending) ← runnable
 M1-580 (pending) ← runnable
   └── M1-585 (pending)

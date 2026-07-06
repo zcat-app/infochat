@@ -1,7 +1,7 @@
 ---
 id: M1-578
 title: "BootstrapLoader reports ALL invalid source tags at once, not just the first"
-status: draft
+status: pending
 created: 2026-07-06
 last_updated: 2026-07-06
 blocked_by: []
