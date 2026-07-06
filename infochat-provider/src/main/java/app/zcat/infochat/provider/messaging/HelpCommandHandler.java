@@ -109,6 +109,7 @@ public class HelpCommandHandler implements CommandHandler {
             new CommandHelp("unsave", BundleKeys.HELP_CMD_UNSAVE_SHORT, HelpTier.USER),
             new CommandHelp("export", BundleKeys.HELP_CMD_EXPORT_SHORT, HelpTier.USER),
             new CommandHelp("add-source", BundleKeys.HELP_CMD_ADD_SOURCE_SHORT, HelpTier.USER_OR_GROUP_ADMIN),
+            new CommandHelp("follow-all-sources", BundleKeys.HELP_CMD_FOLLOW_ALL_SOURCES_SHORT, HelpTier.USER_OR_GROUP_ADMIN),
             new CommandHelp("unfollow-source", BundleKeys.HELP_CMD_UNFOLLOW_SOURCE_SHORT, HelpTier.USER_OR_GROUP_ADMIN),
             new CommandHelp("follow-tag", BundleKeys.HELP_CMD_FOLLOW_TAG_SHORT, HelpTier.USER_OR_GROUP_ADMIN),
             new CommandHelp("unfollow-tag", BundleKeys.HELP_CMD_UNFOLLOW_TAG_SHORT, HelpTier.USER_OR_GROUP_ADMIN),

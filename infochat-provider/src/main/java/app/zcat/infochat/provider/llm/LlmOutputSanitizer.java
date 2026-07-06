@@ -127,6 +127,7 @@ public class LlmOutputSanitizer {
             // Group-admin (or bot admin acting in the group):
             "/add-source",
             "/unfollow-source",
+            "/follow-all-sources",
             "/lang",
             "/group-timezone",
             "/digest",

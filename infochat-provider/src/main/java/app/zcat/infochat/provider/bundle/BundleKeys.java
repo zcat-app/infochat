@@ -135,6 +135,9 @@ public final class BundleKeys {
     /** Short-help line for {@code /unfollow-source} (user-or-group-admin tier). */
     public static final String HELP_CMD_UNFOLLOW_SOURCE_SHORT = "help.cmd.unfollow-source.short";
 
+    /** Short-help line for {@code /follow-all-sources} (user-or-group-admin tier). */
+    public static final String HELP_CMD_FOLLOW_ALL_SOURCES_SHORT = "help.cmd.follow-all-sources.short";
+
     /** Short-help line for {@code /source-enable} (bot-admin tier). */
     public static final String HELP_CMD_SOURCE_ENABLE_SHORT = "help.cmd.source-enable.short";
 
@@ -678,6 +681,14 @@ public final class BundleKeys {
 
     /** {@code /unfollow-source <id>} success reply. Token: {@code {0}} = source display name. */
     public static final String REPLY_UNFOLLOW_SOURCE_SUCCESS = "reply.unfollow_source.success";
+
+    // ----- /follow-all-sources (M1-576) -----------------------------------
+
+    /** {@code /follow-all-sources} in a group: caller is neither group admin nor bot admin (mirrors {@code /add-source}'s group gate). */
+    public static final String ERROR_FOLLOW_ALL_SOURCES_GROUP_ADMIN_ONLY = "error.follow_all_sources.group_admin_only";
+
+    /** {@code /follow-all-sources} success reply. Tokens: {@code {0}} = newly-subscribed count, {@code {1}} = total sources now followed in this scope. */
+    public static final String REPLY_FOLLOW_ALL_SOURCES_DONE = "reply.follow_all_sources.done";
 
     /** {@code /source-enable <id>}: parse failure on the positional {@code <id>} (not a UUID literal). */
     public static final String ERROR_SOURCE_ENABLE_UNKNOWN_ID = "error.source_enable.unknown_id";

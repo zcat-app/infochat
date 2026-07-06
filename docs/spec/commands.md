@@ -138,6 +138,7 @@ them to the marked region — doing so would red the build.
 /demote
 /digest
 /export
+/follow-all-sources
 /follow-tag
 /forget
 /get-sources
@@ -582,6 +583,23 @@ shared across the group and writable only by group admins.
   "last contributor leaves" edge case) that no review report
   flagged as necessary. v2 may revisit if user requests
   materialize.
+- `/follow-all-sources` — bulk per-scope subscribe: upserts a
+  `source_subscription` row for the calling scope for **every live
+  source row (`deleted_at IS NULL`)** in one call. Idempotent — a
+  re-run subscribes only the sources not already followed and never
+  duplicates; the reply reports the newly-subscribed count and the
+  scope's new total. Exists to resolve the empty-feed cliff: bootstrap
+  seeding creates `source` rows but no subscriptions, so a fresh
+  approved user's `/summary` is empty until they follow feeds; this
+  removes the one-feed-at-a-time `/add-source` toil while keeping
+  subscription an explicit per-scope opt-in (no auto-subscribe at
+  registration). Soft-deleted rows are excluded; `disabled`/`failed`
+  rows are included (they are subscribable, matching `/add-source`
+  semantics — the scheduler simply isn't fetching them right now).
+  **Permission (v1)** mirrors `/add-source`: DM — any registered
+  caller, own scope only; group — **group admin or bot admin only**.
+  Blocked during slow-start probation (not in the §Slow-start allowed
+  set). The per-source undo is `/unfollow-source <id>`.
 - `/remove-source <id>` — bot-admin only, requires confirm. Soft-delete
   only. The source row's `source_subscription` rows are
   cascade-deleted in the same transaction (the source is gone, so
@@ -1181,8 +1199,9 @@ cannot silently shrink across versions.
   `/recover-pool`.
 - **Group-admin (or bot admin acting in the group):**
   `/add-source` in groups, `/unfollow-source` in groups,
-  `/lang` in groups, `/group-timezone`, `/digest`,
-  `/follow-tag` in groups, `/unfollow-tag` in groups.
+  `/follow-all-sources` in groups, `/lang` in groups,
+  `/group-timezone`, `/digest`, `/follow-tag` in groups,
+  `/unfollow-tag` in groups.
 
 The full per-actor-tier matrix (which DM / group-member commands
 are allowed to non-privileged users, plus the per-flag splits like

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 596 |
+| done | 597 |
 | deferred | 11 |
 | **total** | **610** |
 
@@ -25,7 +25,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-572 — operator-invoked shred-bundle.sh for safe disposal of pack.sh bundles (complexity: medium, risk: medium)
-- M1-576 — /follow-all-sources: bulk-subscribe an approved scope to all live sources (complexity: medium, risk: low)
+- M1-573 — In-app per-command help: /help <command> shows usage, flags, and examples (complexity: medium, risk: low)
 
 ---
 
@@ -42,7 +42,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-573 — blocked_by: M1-575 (done), M1-576 (pending)
+_(none)_
 
 ---
 
@@ -61,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-576 | /follow-all-sources: bulk-subscribe an approved scope to all live sources | 2026-07-06 | round 1 APPROVE |
 | M1-575 | Admin visibility of actionable users (/pending): probation + awaiting-vouch, with usable contact ids | 2026-07-06 | round 1 APPROVE |
 | M1-571 | persist custom GGUF download URL + SHA so restore recovers custom models | 2026-07-05 | round 1 APPROVE |
 | M1-570 | restore.sh reconstructs the infochat_admin role before pg_restore | 2026-07-05 | round 1 APPROVE |
@@ -70,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-566 | Signal edit frames use the real signal-cli encoding (send+editTimestamp) | 2026-07-04 | round 1 APPROVE |
 | M1-565 | Base64 shape gate on the Signal group-id scope key | 2026-07-04 | round 1 APPROVE |
 | M1-564 | Exclude prod/runtime from the app-image build context | 2026-07-04 | round 1 APPROVE |
-| M1-563 | Leave-cleanup posture for membership-event-less adapters | 2026-07-04 | round 2 APPROVE |
 
 ---
 
@@ -780,9 +780,9 @@ M1-570 (done)
 M1-571 (done)
 M1-572 (pending) ← runnable
 M1-575 (done)
-  ├── M1-573 (pending)
+  ├── M1-573 (pending) ← runnable
   └── M1-574 (deferred)
-M1-576 (pending) ← runnable
+M1-576 (done)
   └── M1-573 (pending) [see above]
 M1-577 (draft)
 M1-578 (draft)

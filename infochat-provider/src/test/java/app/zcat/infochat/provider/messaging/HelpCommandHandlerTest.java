@@ -182,6 +182,25 @@ class HelpCommandHandlerTest {
     }
 
     @Test
+    void followAllSourcesShownToDmUserAndGroupAdminButNotPlainGroupMember() {
+        // USER_OR_GROUP_ADMIN tier (M1-576): open to any user in DM,
+        // group-admin-gated in a group — same gate as /add-source.
+        assertContainsLine(handlerFor(dm(false, false, false), productionBundleLoader)
+                        .handle(new ScopeRef.Dm("alice"), "/help").text(),
+                BundleKeys.HELP_CMD_FOLLOW_ALL_SOURCES_SHORT);
+        assertContainsLine(handlerFor(group(false, true, false), productionBundleLoader)
+                        .handle(new ScopeRef.Group("g1"), "/help").text(),
+                BundleKeys.HELP_CMD_FOLLOW_ALL_SOURCES_SHORT);
+        assertOmitsLine(handlerFor(group(false, false, false), productionBundleLoader)
+                        .handle(new ScopeRef.Group("g1"), "/help").text(),
+                BundleKeys.HELP_CMD_FOLLOW_ALL_SOURCES_SHORT);
+        // A write command → hidden during probation (absent from the allowed-set).
+        assertOmitsLine(handlerFor(dm(false, false, true), productionBundleLoader)
+                        .handle(new ScopeRef.Dm("rookie"), "/help").text(),
+                BundleKeys.HELP_CMD_FOLLOW_ALL_SOURCES_SHORT);
+    }
+
+    @Test
     void missingBundleKeyCausesHandlerToFailInsteadOfShippingIncompleteReply() {
         // Spy permits no keys — every BundleLoader.get(...) throws as the
         // real BundleLoader would for a missing entry. Handler must

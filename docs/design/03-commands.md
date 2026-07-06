@@ -239,6 +239,7 @@ admin in v1).
 | `/monero` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `/add-source --tags …` | ✅ self | ❌ | ✅ for group | ✅ | ❌ |
 | `/unfollow-source <id>` | ✅ self | ❌ | ✅ for group | ✅ | ❌ |
+| `/follow-all-sources` | ✅ self | ❌ | ✅ for group | ✅ | ❌ |
 | `/remove-source <id>` | ❌ | ❌ | ❌ | ✅ | ❌ |
 | `/source-enable <id>` | ❌ | ❌ | ❌ | ✅ | ❌ |
 | `/source-disable <id>` | ❌ | ❌ | ❌ | ✅ | ❌ |
