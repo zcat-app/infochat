@@ -1058,6 +1058,28 @@ the repair happens at restore time, not via a later migration pass. `infochat` i
 `CREATEROLE`, so no superuser is needed; NOLOGIN carries no password. (The live
 deployment was recovered the same way during the M1-567 round trip that surfaced this.)
 
+**Bounded pg_restore error tolerance (M1-580).** `postgres-init.sh` pre-creates the
+`vector` and `pgcrypto` extensions at first volume init, owned by the bootstrap
+superuser — so the dump's two `COMMENT ON EXTENSION` statements, replayed by the
+non-owner `infochat` role, always fail `must be owner of extension pgcrypto` /
+`… vector`. Those two notices are EXPECTED on every healthy restore (the extensions
+themselves exist; only the cosmetic comments are skipped), which is why `restore.sh`
+does not pass `--exit-on-error`. The tolerance is bounded to exactly that set: on a
+non-zero `pg_restore` exit, every `pg_restore: error:` stderr line must match one of
+those two notices, and the ignored lines are always printed with their count — never
+silenced. Any other error line (disk full mid-data-load, invalid data, a failed index
+build — or a non-zero exit with no recognizable error line at all, e.g. the compose
+transport died) fails the restore loud BEFORE the app image build and bring-up,
+naming the failing lines and stating the clone is INCOMPLETE. The "at least one table
+present" check stays as a backstop for the one shape the error gate cannot see: a
+restore that populated nothing yet exited 0. *Recovering from a failed (partial)
+restore:* the target then holds placed runtime files (config/secrets/identities) and
+a partially-populated database, and `restore.sh`'s fresh-host gates will refuse a
+plain re-run. Return the target to fresh — remove the Postgres data volume
+(`docker volume rm <project>_infochat-pgdata`) and the placed `prod/runtime` files
+(or use `prod/setup.sh --reset --hard`), fix the underlying cause, then re-run
+`restore.sh` with the bundle.
+
 **Same-absolute-path constraint (v1).** The identity tar is stored relative to
 `/`, so the clone reconstructs each data-dir at its original absolute path.
 Relocating to a *different* absolute path (rewriting the `data-dir` config) is a

@@ -1,7 +1,7 @@
 ---
 id: M1-580
 title: "restore.sh fails loud on real pg_restore errors (stderr gate, not just table-presence)"
-status: in-progress
+status: done
 created: 2026-07-06
 last_updated: 2026-07-06
 blocked_by: []
@@ -67,7 +67,20 @@ test_plan:
 spec_refs:
   - "docs/design/07-deployment.md §7.10.1"
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-06
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 227
+      removed: 18
 escalations: []
 overrides: []
 revisions:
@@ -89,7 +102,23 @@ revisions:
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-07-06
+    verdict: CLEAN
+    base: a6815fc693783566fad4be319a52d26378e76fe6
+    head: "m1/M1-580-restoresh-fails-loud-on-real-p (working tree, pre-commit)"
+    verdict_file: docs/plan/m1/redteam/M1-580-2026-07-06.md
+    out_of_model_count: 3
+    note: |
+      In-progress audit (post-APPROVE, pre-commit) per the unattended batch
+      flow. CLEAN. Three out-of-model advisories: (1) tee write-error could
+      truncate the stderr capture and mask residue errors (bounded — the
+      later image build fails loudly on a full disk; possible one-line
+      PIPESTATUS[1] hardening as a follow-up); (2) ANSI-escape passthrough
+      to the operator terminal via raw pg_restore stderr (pre-existing, not
+      widened by the diff); (3) the stderr capture can briefly hold
+      DB-derived content at rest in the 0700 staging tree (same class as
+      the staged secrets.env; removed by the EXIT trap). None auto-filed.
 clarity_check:
   date: 2026-07-06
   verdict: PASS

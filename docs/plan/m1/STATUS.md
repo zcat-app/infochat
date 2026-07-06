@@ -11,10 +11,10 @@
 | Status | Count |
 |---|---|
 | pending | 7 |
-| in-progress | 1 |
+| in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 600 |
+| done | 601 |
 | deferred | 11 |
 | **total** | **619** |
 
@@ -37,7 +37,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 | ID | Title | Status | Last review |
 |---|---|---|---|
-| M1-580 | restore.sh fails loud on real pg_restore errors (stderr gate, not just table-presence) | in-progress | (none) |
+
+_(none)_
 
 ---
 
@@ -45,7 +46,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-585 — blocked_by: M1-580 (in-progress), M1-581 (pending), M1-584 (pending)
+- M1-585 — blocked_by: M1-580 (done), M1-581 (pending), M1-584 (pending)
 
 ---
 
@@ -64,6 +65,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-580 | restore.sh fails loud on real pg_restore errors (stderr gate, not just table-presence) | 2026-07-06 | round 1 APPROVE |
 | M1-579 | /pending lists only currently-actionable users (drop the terminal 'invited' roster arm) | 2026-07-06 | round 1 APPROVE |
 | M1-576 | /follow-all-sources: bulk-subscribe an approved scope to all live sources | 2026-07-06 | round 1 APPROVE |
 | M1-575 | Admin visibility of actionable users (/pending): probation + awaiting-vouch, with usable contact ids | 2026-07-06 | round 1 APPROVE |
@@ -73,7 +75,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-570 | restore.sh reconstructs the infochat_admin role before pg_restore | 2026-07-05 | round 1 APPROVE |
 | M1-569 | pack.sh/restore.sh handle root-owned adapter identity dirs | 2026-07-05 | round 1 APPROVE |
 | M1-568 | restore.sh extracts only allowlisted identity dirs (tar-slip) | 2026-07-05 | round 1 APPROVE |
-| M1-567 | Host-clone migration scripts (prod/scripts/pack.sh + restore.sh) | 2026-07-05 | round 2 APPROVE |
 
 ---
 
@@ -790,7 +791,7 @@ M1-576 (done)
 M1-577 (pending) ← runnable
 M1-578 (pending) ← runnable
 M1-579 (done)
-M1-580 (in-progress)
+M1-580 (done)
   └── M1-585 (pending)
 M1-581 (pending) ← runnable
   └── M1-585 (pending) [see above]

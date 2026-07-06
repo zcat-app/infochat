@@ -353,24 +353,68 @@ SQL
 
 # pg_restore the custom-format dump into the fresh `infochat` DB, in-container as
 # the owner (mirrors backup.sh's pg_dump exec; no host Postgres client, no secret
-# on the host). The DB already has vector/pgcrypto (postgres-init) and the dump
-# also carries them, so pg_restore may log a few "already exists" notices — those
-# are expected and non-fatal, so we do NOT pass --exit-on-error and we capture the
-# status instead of letting `set -e` abort on an ignorable notice. Correctness is
-# then confirmed by the schema-landed check below, independent of the exit code.
+# on the host). postgres-init pre-creates vector/pgcrypto (owned by the bootstrap
+# superuser), so the dump's COMMENT ON EXTENSION statements, restored as the
+# non-owner `infochat`, always fail "must be owner of extension" — expected and
+# harmless (the extensions exist; only the cosmetic comments are skipped). We
+# therefore do NOT pass --exit-on-error, but the tolerance is BOUNDED (M1-580):
+# stderr is captured to a file while tee'd live to the console, and a non-zero
+# exit is accepted ONLY when every error line matches that enumerable ignorable
+# set — anything else aborts below, BEFORE image build and bring-up. The fd
+# shuffle keeps stdout on the console untouched; only stderr flows through tee
+# into the capture file, then back to the console via >&2.
 echo "+ pg_restore db/infochat.pgc into the fresh infochat DB (before Flyway)"
+PG_RESTORE_STDERR="$STAGING/pg_restore.stderr"
 set +e
-docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" exec -T postgres \
-  sh -c 'PGPASSWORD="$INFOCHAT_DB_PASSWORD" pg_restore -h 127.0.0.1 -U infochat --no-owner -d infochat' \
-  < "$DB_DUMP"
-restore_status=$?
+{
+  docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" exec -T postgres \
+    sh -c 'PGPASSWORD="$INFOCHAT_DB_PASSWORD" pg_restore -h 127.0.0.1 -U infochat --no-owner -d infochat' \
+    < "$DB_DUMP" 2>&1 1>&3 | tee "$PG_RESTORE_STDERR" >&2
+  restore_status=${PIPESTATUS[0]}
+} 3>&1
 set -e
 
-# Confirm the restore actually landed the schema: a migrated infochat DB always
-# has tables in `public` (app tables + flyway_schema_history). Empty means the
-# restore did not populate the DB — a real failure regardless of pg_restore's
-# exit code (which tolerates the ignorable extension notices above). `\dt` needs
-# no SQL string literal, avoiding nested-quote hazards.
+# Bounded error gate (M1-580): on a non-zero exit, every line pg_restore itself
+# flagged as an error must match the known-ignorable set — currently exactly the
+# two extension-COMMENT ownership notices the 2026-07-05 live round-trip
+# produced. Context lines ("Command was: ...", the closing "errors ignored on
+# restore: N" warning) are not error lines and are not gated. LC_ALL=C pins
+# byte-wise matching regardless of host locale (the in-container pg_restore
+# comes from the pinned pgvector/pgvector:pg16 image, so the message strings are
+# stable). Ignored notices are always printed with their count — never silenced
+# — and any residue, or a non-zero exit with NO recognizable pg_restore error
+# line (e.g. the compose transport itself died), fails the restore loud.
+if [[ "$restore_status" -ne 0 ]]; then
+  IGNORABLE_RESTORE_ERRORS='^pg_restore: error: could not execute query: ERROR:[[:space:]]+must be owner of extension (pgcrypto|vector)$'
+  ignored_errors="$(LC_ALL=C grep -E '^pg_restore: error:' "$PG_RESTORE_STDERR" | LC_ALL=C grep -E "$IGNORABLE_RESTORE_ERRORS" || true)"
+  residue_errors="$(LC_ALL=C grep -E '^pg_restore: error:' "$PG_RESTORE_STDERR" | LC_ALL=C grep -Ev "$IGNORABLE_RESTORE_ERRORS" || true)"
+  if [[ -n "$residue_errors" || -z "$ignored_errors" ]]; then
+    echo "FAIL: pg_restore exited $restore_status with errors beyond the known-ignorable" >&2
+    echo "      extension COMMENT notices. Failing lines:" >&2
+    if [[ -n "$residue_errors" ]]; then
+      printf '%s\n' "$residue_errors" >&2
+    else
+      echo "      (no recognizable 'pg_restore: error:' line was captured — the docker/" >&2
+      echo "      compose transport itself may have failed; full stderr is above)" >&2
+    fi
+    echo "      The clone is INCOMPLETE — the database holds a partial restore. Do NOT" >&2
+    echo "      cut over. See docs/design/07-deployment.md §7.10.1 (bounded pg_restore" >&2
+    echo "      error tolerance) for recovering from the partial state. Aborted before" >&2
+    echo "      image build and bring-up." >&2
+    exit 1
+  fi
+  ignored_count="$(printf '%s\n' "$ignored_errors" | LC_ALL=C grep -c .)"
+  echo "  pg_restore exited $restore_status; all $ignored_count error line(s) match the known-ignorable"
+  echo "  extension-COMMENT set (postgres-init pre-creates vector/pgcrypto). Ignored:"
+  printf '%s\n' "$ignored_errors"
+fi
+
+# Backstop behind the error gate above (M1-580 — no longer the sole success
+# criterion): confirm the restore actually landed the schema — a migrated
+# infochat DB always has tables in `public` (app tables + flyway_schema_history).
+# Empty catches the one failure shape the error gate cannot see: a restore that
+# populated nothing yet exited 0 with no error lines. `\dt` needs no SQL string
+# literal, avoiding nested-quote hazards.
 placed_tables="$(docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" exec -T postgres \
   sh -c 'PGPASSWORD="$INFOCHAT_DB_PASSWORD" psql -h 127.0.0.1 -U infochat -d infochat -tAqc "\dt"' 2>/dev/null || true)"
 if [[ -z "$placed_tables" ]]; then

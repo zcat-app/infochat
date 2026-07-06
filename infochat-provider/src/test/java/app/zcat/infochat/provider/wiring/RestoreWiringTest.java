@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.wiring;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -23,7 +24,8 @@ import org.junit.jupiter.api.io.TempDir;
  * naming an actionable fix.
  *
  * <p><b>Scope: the precondition gates PLUS the identity-extraction allowlist (M1-568)
- * over the M1-569 root-in-container untar.</b>
+ * over the M1-569 root-in-container untar PLUS the bounded pg_restore error gate
+ * (M1-580, the two cases driving past the gates to the DB step).</b>
  * The gate cases fail before the identity extraction, so they never mutate the host or
  * exercise Docker for real — the fake {@code docker} only has to satisfy
  * {@code command -v docker} and the one {@code docker volume ls} probe the fresh-volume gate
@@ -48,11 +50,12 @@ class RestoreWiringTest {
     // resolution (dirname), staging (mktemp), unpack + list (tar/gzip), the dotenv/tar
     // reads (grep/tail), and the exit-trap cleanup (rm). mkdir/cp/chmod are reached only by
     // the allowlist-extraction case, which drives PAST the gates to place config/secrets and
-    // extract identities (M1-568). Symlinked from the host into the controlled bin so a
-    // restricted PATH still lets the script run.
+    // extract identities (M1-568); tee by the cases that reach the pg_restore step, whose
+    // stderr capture tees to the console (M1-580). Symlinked from the host into the
+    // controlled bin so a restricted PATH still lets the script run.
     private static final String[] REAL_TOOLS =
             {"bash", "dirname", "mktemp", "tar", "gzip", "grep", "tail", "rm",
-             "mkdir", "cp", "chmod"};
+             "mkdir", "cp", "chmod", "tee"};
     private static final String[] TOOL_DIRS = {"/usr/bin", "/bin", "/usr/local/bin"};
 
     // The gates need only `command -v docker` to resolve and
@@ -65,8 +68,16 @@ class RestoreWiringTest {
     // exact -C/members the script passed (inheriting the bundle on stdin) so the M1-568
     // allowlist's filesystem effect is genuinely exercised — only the named members land,
     // in the TempDir sandbox. No other docker verb is reached before a gate fails.
+    //
+    // The `compose` branch (M1-580) parametrizes the two DB probes the error-gate cases
+    // reach: the pg_restore exec replays FAKE_PG_RESTORE_STDERR_FILE to stderr and exits
+    // FAKE_PG_RESTORE_EXIT (default 0), and the `\dt` table probe (`-tAqc`) reports a
+    // table only when FAKE_DB_TABLES=present, so the backstop is steerable per case.
+    // Every invocation's argv is appended to FAKE_DOCKER_ARGV_LOG so tests can assert
+    // which docker steps ran (e.g. that no image build/bring-up followed a failed gate).
     private static final String FAKE_DOCKER =
             "#!/usr/bin/env bash\n"
+            + "printf '%s\\n' \"$*\" >> \"${FAKE_DOCKER_ARGV_LOG:-/dev/null}\"\n"
             + "if [[ \"$1\" == volume && \"$2\" == ls ]]; then\n"
             + "  [[ \"${FAKE_PGDATA_VOLUME:-absent}\" == present ]] && echo \"infochat_infochat-pgdata\"\n"
             + "  exit 0\n"
@@ -89,7 +100,29 @@ class RestoreWiringTest {
             + "  fi\n"
             + "  exit 0\n"
             + "fi\n"
+            + "if [[ \"$1\" == compose ]]; then\n"
+            + "  case \"$*\" in\n"
+            + "    *pg_restore*)\n"
+            + "      [[ -n \"${FAKE_PG_RESTORE_STDERR_FILE:-}\" ]] && printf '%s\\n' \"$(<\"$FAKE_PG_RESTORE_STDERR_FILE\")\" >&2\n"
+            + "      exit \"${FAKE_PG_RESTORE_EXIT:-0}\" ;;\n"
+            + "    *-tAqc*)\n"
+            + "      [[ \"${FAKE_DB_TABLES:-absent}\" == present ]] && echo \"public|flyway_schema_history|table|infochat\"\n"
+            + "      exit 0 ;;\n"
+            + "  esac\n"
+            + "  exit 0\n"
+            + "fi\n"
             + "exit 0\n";
+
+    // The exact two notices the 2026-07-05 live round-trip produced — the ONLY pg_restore
+    // errors a healthy restore emits (postgres-init pre-creates vector/pgcrypto, so the
+    // dump's COMMENT ON EXTENSION statements fail ownership), and therefore the whole
+    // known-ignorable set restore.sh's bounded error gate accepts (M1-580).
+    private static final String IGNORABLE_PG_RESTORE_STDERR =
+            "pg_restore: error: could not execute query: ERROR:  must be owner of extension pgcrypto\n"
+            + "Command was: COMMENT ON EXTENSION pgcrypto IS 'cryptographic functions';\n"
+            + "pg_restore: error: could not execute query: ERROR:  must be owner of extension vector\n"
+            + "Command was: COMMENT ON EXTENSION vector IS 'vector data type and ivfflat and hnsw access methods';\n"
+            + "pg_restore: warning: errors ignored on restore: 2\n";
 
     private record RunResult(int exitCode, String output) {}
 
@@ -262,10 +295,86 @@ class RestoreWiringTest {
                 "the embeddings caller must read the persisted URL from secrets.env");
     }
 
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void nonIgnorablePgRestoreErrorAbortsBeforeImageBuildAndBringUp(@TempDir Path tmp) throws Exception {
+        // M1-580: pg_restore exiting 1 with a REAL error beyond the two ignorable notices
+        // (here: disk full mid-data-load) must fail the restore BEFORE the app image
+        // build / bring-up — replacing the old behavior where "at least one table landed"
+        // yielded "DB restored (schema present)." over a partial clone. FAKE_DB_TABLES=
+        // present is load-bearing: with tables reported, ONLY the error gate can abort,
+        // so a gate regression surfaces as "DB restored" + build steps in the argv log.
+        Path stderrFixture = tmp.resolve("pg-restore-stderr.txt");
+        Files.writeString(stderrFixture, IGNORABLE_PG_RESTORE_STDERR
+                + "pg_restore: error: could not execute query: ERROR:  could not extend file"
+                + " \"base/16384/16723\": No space left on device\n");
+        Path bundle = buildSandboxedBundle(tmp);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_PG_RESTORE_EXIT", "1",
+                "FAKE_PG_RESTORE_STDERR_FILE", stderrFixture.toString(),
+                "FAKE_DB_TABLES", "present"));
+
+        assertNotEquals(0, r.exitCode,
+                "a non-ignorable pg_restore error must fail the restore:\n" + r.output);
+        assertTrue(r.output.contains("Failing lines:")
+                        && r.output.contains("No space left on device"),
+                "the failure must name the non-ignorable lines:\n" + r.output);
+        assertTrue(r.output.contains("INCOMPLETE"),
+                "the failure must state the clone is INCOMPLETE:\n" + r.output);
+        assertTrue(r.output.contains("7.10.1"),
+                "the failure must point at the §7.10.1 partial-state recovery doc:\n" + r.output);
+        assertFalse(r.output.contains("DB restored"),
+                "a failed restore must not claim the DB was restored:\n" + r.output);
+        String argvLog = Files.readString(tmp.resolve("docker-argv.log"));
+        assertFalse(argvLog.contains("build") || argvLog.contains("infochat-collector")
+                        || argvLog.contains("infochat-provider"),
+                "no image-build/bring-up docker step may run after the failed restore:\n" + argvLog);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void onlyIgnorableNoticesProceedPastDbStepAndArePrinted(@TempDir Path tmp) throws Exception {
+        // M1-580: pg_restore exit 1 whose stderr carries ONLY the two known extension-
+        // COMMENT notices — the proven 2026-07-05 live round-trip shape — must still pass
+        // the DB step (the tolerance is bounded, not removed), and the gate must print
+        // the ignored count and the ignored lines themselves (never silence).
+        Path stderrFixture = tmp.resolve("pg-restore-stderr.txt");
+        Files.writeString(stderrFixture, IGNORABLE_PG_RESTORE_STDERR);
+        Path bundle = buildSandboxedBundle(tmp);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_PG_RESTORE_EXIT", "1",
+                "FAKE_PG_RESTORE_STDERR_FILE", stderrFixture.toString(),
+                "FAKE_DB_TABLES", "present"));
+
+        assertTrue(r.output.contains("DB restored (schema present)."),
+                "the ignorable-notices shape must proceed past the DB step:\n" + r.output);
+        assertTrue(r.output.contains("all 2 error line(s) match the known-ignorable"),
+                "the count of ignored errors must be printed:\n" + r.output);
+        int ignoredReportIdx = r.output.indexOf("Ignored:");
+        assertTrue(ignoredReportIdx >= 0,
+                "the gate must print its ignored-lines report:\n" + r.output);
+        String ignoredReport = r.output.substring(ignoredReportIdx);
+        assertTrue(ignoredReport.contains("must be owner of extension pgcrypto")
+                        && ignoredReport.contains("must be owner of extension vector"),
+                "the ignored lines themselves must be printed in the report (not only tee'd):\n"
+                        + r.output);
+    }
+
     // --- helpers ----------------------------------------------------------------
 
     /** Drive the real restore.sh under a controlled PATH; return exit code + combined output. */
     private RunResult runRestore(Path tmp, Path bundle, boolean pgdataVolumePresent) throws Exception {
+        return runRestore(tmp, bundle, pgdataVolumePresent, Map.of());
+    }
+
+    /**
+     * As {@link #runRestore(Path, Path, boolean)}, with extra environment entries for the
+     * fake docker's per-case knobs (FAKE_PG_RESTORE_EXIT / _STDERR_FILE, FAKE_DB_TABLES).
+     */
+    private RunResult runRestore(Path tmp, Path bundle, boolean pgdataVolumePresent,
+            Map<String, String> extraEnv) throws Exception {
         Path repoRoot = repoRoot();
         Path bin = Files.createDirectories(tmp.resolve("bin"));
         for (String tool : REAL_TOOLS) {
@@ -284,6 +393,8 @@ class RestoreWiringTest {
         // the real prod/runtime; the fake docker keeps the volume probe off real Docker.
         env.put("INFOCHAT_RUNTIME_DIR", tmp.resolve("runtime").toString());
         env.put("FAKE_PGDATA_VOLUME", pgdataVolumePresent ? "present" : "absent");
+        env.put("FAKE_DOCKER_ARGV_LOG", tmp.resolve("docker-argv.log").toString());
+        env.putAll(extraEnv);
 
         Process p = pb.start();
         p.getOutputStream().close();
@@ -353,6 +464,38 @@ class RestoreWiringTest {
         run(idsrc, "tar", "-czpf", staging.resolve("identities.tgz").toString(), dataRel, extraRel);
 
         Path bundle = tmp.resolve("tampered" + uid + ".tgz");
+        run(staging, "tar", "-czf", bundle.toString(), ".");
+        return bundle;
+    }
+
+    /**
+     * Build a well-formed bundle whose configured identity data-dir is an absolute path
+     * INSIDE the TempDir, so a run that drives past every gate keeps the modeled root
+     * untar ({@code tar -C /}) inside the sandbox — the same sandboxing as
+     * {@link #buildTamperedBundle}, without the tampered extra member. The M1-580
+     * error-gate cases use it because they must genuinely reach (and pass) the DB step.
+     */
+    private Path buildSandboxedBundle(Path tmp) throws Exception {
+        String dataDirAbs = tmp.resolve("idroot/signal-cli").toString();
+        String dataRel = dataDirAbs.substring(1);       // "${dir#/}" — strip the leading '/'
+        Path staging = Files.createDirectories(tmp.resolve("csrc"));
+        Files.createDirectories(staging.resolve("db"));
+        Files.createDirectories(staging.resolve("runtime"));
+        Files.writeString(staging.resolve("db/infochat.pgc"), "PGDMP-dummy");
+        Files.writeString(staging.resolve("runtime/secrets.env"),
+                "INFOCHAT_DB_PASSWORD=\"pw\"\nINFOCHAT_SIGNAL_DATA_DIR=\"" + dataDirAbs + "\"\n");
+        Files.writeString(staging.resolve("runtime/application.properties"), "quarkus.profile=vps\n");
+        Files.writeString(staging.resolve("runtime/bootstrap-sources.json"), "[]\n");
+
+        // Nested identity tar naming the rel path exactly as pack.sh names
+        // adapter_rel_paths (relative to /, no ./ prefix) so the allowlisted extraction
+        // matches the member by name.
+        Path idsrc = Files.createDirectories(tmp.resolve("cid"));
+        Files.createDirectories(idsrc.resolve(dataRel));
+        Files.writeString(idsrc.resolve(dataRel).resolve("keyfile"), "id");
+        run(idsrc, "tar", "-czpf", staging.resolve("identities.tgz").toString(), dataRel);
+
+        Path bundle = tmp.resolve("clean-bundle.tgz");
         run(staging, "tar", "-czf", bundle.toString(), ".");
         return bundle;
     }
