@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 596 |
 | deferred | 11 |
-| **total** | **609** |
+| **total** | **610** |
 
 ---
 
@@ -25,6 +25,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-572 — operator-invoked shred-bundle.sh for safe disposal of pack.sh bundles (complexity: medium, risk: medium)
+- M1-576 — /follow-all-sources: bulk-subscribe an approved scope to all live sources (complexity: medium, risk: low)
 
 ---
 
@@ -41,7 +42,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-573 — blocked_by: M1-575 (done), M1-576 (draft)
+- M1-573 — blocked_by: M1-575 (done), M1-576 (pending)
 
 ---
 
@@ -781,7 +782,7 @@ M1-572 (pending) ← runnable
 M1-575 (done)
   ├── M1-573 (pending)
   └── M1-574 (deferred)
-M1-576 (draft)
+M1-576 (pending) ← runnable
   └── M1-573 (pending) [see above]
 M1-577 (draft)
 M1-578 (draft)

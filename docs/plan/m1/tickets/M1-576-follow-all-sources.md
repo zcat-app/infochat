@@ -1,7 +1,7 @@
 ---
 id: M1-576
 title: "/follow-all-sources: bulk-subscribe an approved scope to all live sources"
-status: draft
+status: pending
 created: 2026-07-06
 last_updated: 2026-07-06
 blocked_by: []
@@ -44,9 +44,12 @@ acceptance:
   - >-
     Permission mirrors `/add-source`: allowed for an approved (non-probation)
     user in their own DM scope, and for a group admin (or bot admin) for the
-    group scope; a probation-tier caller receives the probation reply (probation
-    is ❌ for `/add-source`, so it is ❌ here too). The subscription is written
-    for the correct `(scope_kind, scope_id)`.
+    group scope. Probation refusal is `InboundRouter`'s centralized step-5 gate,
+    NOT handler logic: like `/add-source`, the new command is simply not in
+    `CommandPermissions`' allowed-during-probation set, so the router emits the
+    probation reply before the handler runs (a handler-level probation check
+    would be dead defensive code per §No defensive code). The subscription is
+    written for the correct `(scope_kind, scope_id)`.
   - >-
     After running it, `/summary` for that scope returns content from the newly
     followed sources (subject to the scope's existing tag-mode and the `-w`
@@ -58,12 +61,15 @@ acceptance:
     so the M1-527 parity test stays green. New en+cs bundle keys (D43).
   - >-
     FollowAllSourcesCommandHandlerTest covers: a fresh approved scope goes from
-    0 subscriptions to N; a re-run is a no-op (idempotent); a probation caller is
-    refused; the reply count is correct.
+    0 subscriptions to N; a re-run is a no-op (idempotent); the new command is
+    excluded from the probation allowlist (assert
+    `CommandPermissions.allowedDuringProbation("follow-all-sources")` is false,
+    matching `/add-source` — the router-level refusal, no handler probation
+    logic); the reply count is correct.
   - "`mvn verify` is green from the repo root (new tests pass; full suite passes)."
 test_plan:
   adds:
-    - "infochat-provider/src/test/java/app/zcat/infochat/provider/command/FollowAllSourcesCommandHandlerTest.java — 0→N, idempotent re-run, probation refusal, count."
+    - "infochat-provider/src/test/java/app/zcat/infochat/provider/command/FollowAllSourcesCommandHandlerTest.java — 0→N, idempotent re-run, probation-allowlist exclusion, count."
   modifies:
     - "docs/spec/commands.md — command-index + catalogue; docs/design/03-commands.md — matrix; en/cs bundles. AddSourceCommandHandler only if a shared subscribe-upsert helper is extracted."
   preserves:
@@ -117,3 +123,10 @@ a useful feed in one command. (Observed live this session: with 0 subscriptions
 - Pairs with the existing `/unfollow-source <id>` (per-source undo) and
   `/unfollow-tag --all`.
 - New command → update the M1-527 command-index marker in the same change.
+- **Probation is a router gate, not handler logic.** `InboundRouter` step 5
+  refuses any command not in `CommandPermissions.ALLOWED` (a spec-closed
+  allowlist, §Slow-start tier) before dispatch, exactly as it already does for
+  `/add-source`. The handler therefore adds NO probation check; the "probation
+  is refused" property is proven by the command's absence from that allowlist
+  (asserted via `CommandPermissions` in the test). Grounding confirmed
+  `AddSourceCommandHandler` has no probation check either.
