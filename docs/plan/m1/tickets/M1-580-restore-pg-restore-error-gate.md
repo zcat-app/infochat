@@ -66,12 +66,26 @@ test_plan:
     - "All existing gate tests; the ignorable-notice tolerance; the \\dt backstop; pg_restore-before-Flyway ordering (M1-570 pin)."
 spec_refs:
   - "docs/design/07-deployment.md §7.10.1"
-  - "docs/spec/deployment.md §Runtime"
 decision_refs: []
 reviews: []
 escalations: []
 overrides: []
-revisions: []
+revisions:
+  - date: 2026-07-06
+    reason: clarity-fail rework (bounded self-refine via /m1-tick run) — drop the unresolvable spec_refs entry "docs/spec/deployment.md §Runtime"
+    prior_values: |
+      spec_refs: 2 entries ("docs/design/07-deployment.md §7.10.1",
+        "docs/spec/deployment.md §Runtime")
+      (Clarity pre-flight FAIL, 1 blocker: docs/spec/deployment.md has no
+       heading matching "Runtime" — headings are Topology; Operator inputs;
+       Bootstrap behavior on startup; Configuration surface (spec level);
+       Health and observability; Backups, rotation, secrets; Local
+       development; Deployment scenarios; What lives in design notes. Entry
+       dropped rather than re-pointed: §Backups, rotation, secrets explicitly
+       delegates backup/restore tooling to design notes, so no spec-level
+       heading states this ticket's contract, and the clarity
+       SELF-CONTAINED-CHECK confirmed the ticket body does not depend on the
+       ref. The resolving design ref §7.10.1 remains.)
 aborted_attempts: []
 reopens: []
 redteam_findings: []
