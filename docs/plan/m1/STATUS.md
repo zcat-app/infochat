@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 595 |
 | deferred | 10 |
-| **total** | **606** |
+| **total** | **607** |
 
 ---
 
@@ -25,6 +25,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-572 — operator-invoked shred-bundle.sh for safe disposal of pack.sh bundles (complexity: medium, risk: medium)
+- M1-573 — In-app per-command help: /help <command> shows usage, flags, and examples (complexity: medium, risk: low)
 
 ---
 
@@ -777,7 +778,7 @@ M1-569 (done)
 M1-570 (done)
 M1-571 (done)
 M1-572 (pending) ← runnable
-M1-573 (draft)
+M1-573 (pending) ← runnable
 M1-574 (draft)
 M1-575 (draft)
 M1-576 (draft)

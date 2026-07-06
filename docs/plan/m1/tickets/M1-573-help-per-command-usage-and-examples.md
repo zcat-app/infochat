@@ -1,7 +1,7 @@
 ---
 id: M1-573
 title: "In-app per-command help: /help <command> shows usage, flags, and examples"
-status: draft
+status: pending
 created: 2026-07-06
 last_updated: 2026-07-06
 blocked_by: []
