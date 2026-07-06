@@ -995,6 +995,30 @@ for it; the manual steps 1-5 above remain the under-the-hood description of what
   GGUF from an OLDER bundle (pre-M1-571, no persisted URL) fails loud; a remote
   backend needs no model step), then
   starts Collector → Provider and runs the §7.10 step-5 health verification.
+- **`shred-bundle.sh [-y|--yes] <target>`** — the closing step of the migration
+  lifecycle: pack → transfer → restore → verify → **dispose** (M1-572). Once the
+  clone is verified healthy and the source decommissioned, the bundle — and any
+  independent safety copy of it — is the last remaining every-secret-at-once
+  artifact; a plain `rm` leaves that material in freed blocks. The helper
+  standardizes overwrite-then-remove: `shred -uz` on a bundle file, or
+  `find <dir> -type f -exec shred -uz {} +` then `rm -rf` on a recovery
+  directory, so no empty tree is left. Because it is irreversibly destructive it
+  is guarded: it acts only on a `*.tgz` regular file or a directory whose
+  immediate contents are bundle/recovery material (a `*.tgz`, a `*.pgc` dump, or
+  a `raw-config/` subdir); it refuses nonexistent paths, `/`, the invoking
+  user's `$HOME`, the repo root, and anything not matching those shapes; and it
+  destroys nothing without explicit consent (`--yes`, or an interactive y/N
+  prompt defaulting to No) after printing the resolved absolute target and a
+  file-count/size inventory. Disposal is **deliberately not automated** —
+  `restore.sh` never invokes it and no cron should: the bundle is the
+  disaster-recovery fallback, kept until the operator has verified the clone
+  healthy, and auto-destruction at restore time would remove the only backup
+  exactly when a subtly-broken restore reveals itself. Destroying it stays an
+  operator-timed act; the helper only makes that act safe and one-command. On a
+  copy-on-write or journaled filesystem `shred` cannot guarantee the old blocks
+  are unrecoverable — overwrite-then-remove is best-effort; full-disk encryption
+  of the storage medium is the real guarantee (the same class of caveat as the
+  D34 transfer/storage-encryption responsibility).
 
 **Root-owned identity dirs (M1-569).** The Provider container runs as root, so both
 adapters' identity stores are root-owned — and `signal-cli` locks its account store

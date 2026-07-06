@@ -1,9 +1,9 @@
 ---
 id: M1-572
 title: operator-invoked shred-bundle.sh for safe disposal of pack.sh bundles
-status: pending
+status: done
 created: 2026-07-05
-last_updated: 2026-07-05
+last_updated: 2026-07-06
 blocked_by: []
 files_budget: 4
 files_scope:
@@ -113,14 +113,45 @@ spec_refs:
   - docs/design/07-deployment.md §7.10.1
 decision_refs:
   - D34
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-06
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 431
+      removed: 9
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-07-06
+    verdict: CLEAN
+    base: main
+    head: m1/M1-572-shred-bundle-helper
+    verdict_file: docs/plan/m1/redteam/M1-572-2026-07-06.md
+    out_of_model_count: 4
+    note: |
+      Pre-commit audit of the branch tip per /m1-tick run step 5 (--in-progress
+      form). CLEAN — no in-model findings. Four out-of-model observations, all
+      operator-error / local-attacker classes security.md excludes: sibling-file
+      sweep inside an eligible directory, guard/destruction TOCTOU on a shared
+      host, exact-match (non-containment) dangerous-path list, and hardlinked
+      bundle disposal semantics. Reported as advisory; none warranted a
+      follow-up ticket.
+clarity_check:
+  date: 2026-07-06
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-572: operator-invoked shred-bundle.sh for safe disposal of pack.sh bundles

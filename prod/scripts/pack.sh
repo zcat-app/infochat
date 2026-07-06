@@ -212,6 +212,7 @@ cat >&2 <<WARN
   Anyone with this file can impersonate the bot and read everything it has
   stored. It is written 0600; encryption for TRANSFER and STORAGE is YOUR
   responsibility (D34/§7.10) - e.g. age/gpg the file before moving it.
+  When it has served its purpose, dispose of it: prod/scripts/shred-bundle.sh <bundle>
 ========================================================================
 WARN
 
