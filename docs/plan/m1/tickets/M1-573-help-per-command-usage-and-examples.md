@@ -32,6 +32,25 @@ out_of_scope:
   - >-
     Changing bare `/help` (the context-aware list). It stays exactly as-is; this
     ticket only adds the `<command>` argument branch.
+  - >-
+    Redirecting the existing reactive `Usage:` error strings at `/help
+    <command>`. Dropped at clarity pre-flight: those strings are inline literals
+    in 13+ handler files outside files_scope, and MissingArgumentUsageReplyTest
+    exact-matches them. This ticket is purely additive — no handler `Usage:`
+    literal changes; the redirect is a candidate follow-up ticket.
+  - >-
+    Per-command detail blocks for asset commands (`/zcash`, `/monero`, …).
+    Assets render through the single dynamic `help.cmd.asset.line` key and have
+    no per-command bundle-key structure. `/help <enabled-asset>` replies with
+    that same existing short line (no detail block); asset detail — including
+    the spec's "only enabled sub-verbs appear in per-command help" promise
+    (commands.md §Asset commands) — stays a follow-up.
+  - >-
+    Adding `/pending` to the help catalogue. Pre-existing M1-575 gap (no
+    `help.cmd.pending.short` key, absent from bare `/help`); fixing it here
+    would change bare `/help` output, which this ticket's acceptance freezes.
+    `/help pending` therefore resolves to the unknown-command friendly error in
+    this ticket; the catalogue addition is a follow-up ticket.
 acceptance:
   - >-
     `/help <command>` (e.g. `/help summary`) replies, in plain text, with a
@@ -50,10 +69,13 @@ acceptance:
     `/help <unknown>` returns the existing friendly-error shape with a fuzzy
     suggestion, pointing the user back at `/help`.
   - >-
-    Each command gains two new localization-bundle keys (a usage/arguments key
-    and an examples key) in BOTH en.properties and cs.properties (D43 bilateral
-    keyset). The existing bundle-completeness check (BundleLoaderTest) stays green
-    — every added en key has a cs twin.
+    Every command in HelpCommandHandler's closed CATALOGUE (the static commands
+    that already carry a `help.cmd.<name>.short` key — currently 39; asset
+    commands and `/pending` excluded per out_of_scope) gains two new
+    localization-bundle keys (a usage/arguments key and an examples key) in
+    BOTH en.properties and cs.properties (D43 bilateral keyset). The existing
+    bundle-completeness check (BundleLoaderTest) stays green — every added en
+    key has a cs twin.
   - >-
     HelpCommandHandlerTest asserts: `/help summary` output contains the usage
     line, the `-w` flag description, and an example; `/help <unknown>` returns the
@@ -62,12 +84,13 @@ acceptance:
     `mvn verify` is green from the repo root: the new tests pass and the full
     pre-existing suite still passes (report regressions, not just the new checks).
 test_plan:
-  adds:
-    - "infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/HelpCommandHandlerTest.java — cases for /help <command>, /help <unknown>, permission-filtered detail."
+  adds: []
   modifies:
-    - "infochat-provider/src/main/resources/bundles/en.properties — usage/example keys per command (cs.properties twins added in the same change)."
+    - "infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/HelpCommandHandlerTest.java — existing file (11 tests); new cases for /help <command>, /help <unknown>, permission-filtered detail."
+    - "infochat-provider/src/main/resources/bundles/en.properties — usage/example keys per catalogue command (cs.properties twins added in the same change)."
   preserves:
     - "all tests currently green on main; bare /help behavior unchanged."
+    - "MissingArgumentUsageReplyTest — untouched; no handler Usage: literal changes (reactive-usage redirect is out of scope)."
 spec_refs:
   - "docs/spec/commands.md §Command catalogue"
   - "docs/design/03-commands.md §/help"
@@ -76,7 +99,27 @@ decision_refs:
 reviews: []
 escalations: []
 overrides: []
-revisions: []
+revisions:
+  - date: 2026-07-06
+    reason: clarity-fail rework (bounded self-refine via /m1-tick run) — drop Approach bullet 4 (reactive Usage: redirect), anchor "each command" to the closed help CATALOGUE, exclude asset detail and the pre-existing /pending gap
+    prior_values: |
+      out_of_scope: 4 entries (universal --help flag; rich/markdown formatting;
+        add/remove/rename commands; bare /help changes)
+      acceptance[5] (bundle-keys item): "Each command gains two new
+        localization-bundle keys (a usage/arguments key and an examples key) in
+        BOTH en.properties and cs.properties (D43 bilateral keyset). ..."
+      test_plan.adds: listed HelpCommandHandlerTest.java as a NEW file (it
+        already exists with 11 tests); test_plan.modifies: en.properties only
+      Approach bullet 4 (body): "Point the reactive `Usage:` strings at
+        `/help <command>` for the fuller view."
+      (Clarity pre-flight FAIL, 3 blockers: (1) Approach bullet 4 implied edits
+       to 13+ handler files outside files_scope/files_budget; (2) those edits
+       would change MissingArgumentUsageReplyTest's exact-match literals without
+       authorization; (3) "each command" was ambiguous re: asset commands, which
+       have no per-command bundle-key structure to hang two keys on. Fix
+       narrows, never widens: bullet 4 dropped and excluded, acceptance anchored
+       to the 39-entry CATALOGUE, asset detail and /pending catalogue addition
+       explicitly out of scope as follow-up candidates.)
 aborted_attempts: []
 reopens: []
 redteam_findings: []
@@ -108,7 +151,6 @@ command's usage line, its arguments/flags with meanings, and worked examples.
   header + usage + per-flag lines + examples, all plain text.
 - Reuse the existing permission/context filtering so the detail only shows
   flags and sub-verbs the caller may actually use.
-- Point the reactive `Usage:` strings at `/help <command>` for the fuller view.
 
 Illustrative output for `/help summary`:
 
@@ -136,3 +178,10 @@ Examples
 - Companion to the discoverability work from the same session: `/help vouch`
   is the natural place to explain how to obtain a contact id (see M1-574 /
   M1-575), so its examples key should reference those once they land.
+- **Follow-up candidates surfaced at clarity pre-flight (2026-07-06),
+  deliberately not in this ticket:** (a) pointing the reactive `Usage:` error
+  strings (inline literals in 13+ handlers) at `/help <command>`; (b) per-asset
+  detail blocks fulfilling the spec's "only enabled sub-verbs appear in
+  per-command help" promise; (c) adding `/pending` (M1-575) to the help
+  CATALOGUE — it currently has no `help.cmd.pending.short` key and is missing
+  from bare `/help`.
