@@ -7,11 +7,64 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-05 (**MIGRATION ROUND-TRIP RE-RUN DONE + VALIDATED — the destructive pack→wipe→restore ran in place on this host; restore.sh rebuilt a healthy clone on the FIRST pass with NO manual repair (RESTORE_EXIT=0). Both fixes PROVEN on real wire: M1-570 (infochat_admin reconstructed before pg_restore → ZERO permission errors, collector heartbeats healthy — the prior round-trip died here) and M1-571 (5.3 GB custom gen GGUF re-fetched from the backfilled secrets.env URL, SHA-verified vs 819372…, llama.cpp server healthy). All 5 containers healthy; both apps readiness 200; adapter_connection_status=1.0 for signal+simplex (same bot); DB vs golden = all STABLE tables exact (users=3, admins=2, source=74, tag=24, groups=1, invite_code=1, post=3800, chat_message=42, flyway=56), 3 append-only tables +few (expected). One leg optional/undriven: §7.10 step-5 bot-chat /audit+/summary via a live client. SHRED DONE (recovery-test bundle/safety + .scratch pre-backfill bak all shredded). LLM BENCHMARK DONE (llamacpp-default gemma / ollama llama3.2:3b / remote DeepSeek measured swap-in-place; results → SETUP_GUIDE §"AI backend performance on modest hardware" @04635d78; deployment restored to baseline). M1-572 drafted (shred-bundle.sh helper). board 595 done / 0 pending. main ~18 ahead of origin, NOT pushed**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-06 (**BATCH EXECUTION OF THE 9 REMAINING TICKETS PREPARED — launch it in the fresh session via the named workflow `.claude/workflows/m1-batch-lines.js`; see START HERE. Also this date: M1-573 merged @ f81a06f5; audit of M1-567..576 → tickets M1-579..585 filed @ 851089d8; M1-577/578 promoted @ 3d2faf61; board 9 pending / 599 done.** Previous status 2026-07-05: MIGRATION ROUND-TRIP RE-RUN DONE + VALIDATED — the destructive pack→wipe→restore ran in place on this host; restore.sh rebuilt a healthy clone on the FIRST pass with NO manual repair (RESTORE_EXIT=0). Both fixes PROVEN on real wire: M1-570 (infochat_admin reconstructed before pg_restore → ZERO permission errors, collector heartbeats healthy — the prior round-trip died here) and M1-571 (5.3 GB custom gen GGUF re-fetched from the backfilled secrets.env URL, SHA-verified vs 819372…, llama.cpp server healthy). All 5 containers healthy; both apps readiness 200; adapter_connection_status=1.0 for signal+simplex (same bot); DB vs golden = all STABLE tables exact (users=3, admins=2, source=74, tag=24, groups=1, invite_code=1, post=3800, chat_message=42, flyway=56), 3 append-only tables +few (expected). One leg optional/undriven: §7.10 step-5 bot-chat /audit+/summary via a live client. SHRED DONE (recovery-test bundle/safety + .scratch pre-backfill bak all shredded). LLM BENCHMARK DONE (llamacpp-default gemma / ollama llama3.2:3b / remote DeepSeek measured swap-in-place; results → SETUP_GUIDE §"AI backend performance on modest hardware" @04635d78; deployment restored to baseline). M1-572 drafted (shred-bundle.sh helper). board 595 done / 0 pending. main ~18 ahead of origin, NOT pushed**) · Owner: ubuntu5 + Claude
 
 ---
 
 ## ▶ START HERE (fresh session — next step)
+
+**BATCH EXECUTION OF THE REMAINING 9 TICKETS — PREPARED 2026-07-06, LAUNCH IN THIS
+FRESH SESSION ON THE USER'S GO.** What led here, all committed on `main` (NOT pushed):
+
+- **M1-573 merged @ f81a06f5** (`/help <command>` per-command usage/examples).
+- **Audit of implemented M1-567..576 ran** (6 parallel auditors; every HIGH/MEDIUM
+  finding actively falsified against source before filing; LOWs reported in-chat only —
+  see memory `audit-567-576-open-findings`). Result: **7 tickets M1-579..585 drafted
+  @ 851089d8**. The two HIGHs: `/pending`'s `'invited'` arm makes it a permanent full
+  user roster (D55 violation; queue never shrinks on `/vouch`), and restore.sh declares
+  success on a partially-failed pg_restore ("≥1 table exists" is the only gate).
+- **M1-577/578 promoted draft→pending @ 3d2faf61.** Board: 9 pending / 8 runnable
+  (M1-585 `blocked_by` its own line's 580/581/584 — by design).
+- **The batch workflow is committed as a named workflow:
+  `.claude/workflows/m1-batch-lines.js`** (user-approved design, 2026-07-06).
+
+### How to launch (single action)
+
+Invoke the Workflow tool: `Workflow({name: 'm1-batch-lines'})` — **no args**, the
+approved batch is the baked-in default. (Fallback if name resolution fails:
+`Workflow({scriptPath: '<repo>/.claude/workflows/m1-batch-lines.js'})`.) It runs in the
+**background**: the main conversation only launches and then RECEIVES — `log()` progress
+lines, the `/workflows` live tree, and the final structured result (`merged[]` with
+SHAs, `halted[]` with reason + evidence paths, `wrapUp` operator report). Do NOT do
+ticket or repo work in the main thread while it runs (the workflow owns the primary
+checkout's main mutations under `m1-batch-main.lock`).
+
+### What it does (summary — the script is the authority, read it before launching)
+
+- Two file-disjoint SEQUENTIAL lines in parallel, one full-context agent per ticket
+  driving the **verbatim m1-tick cycle** (start `--parallel` worktree → implement →
+  `scripts/verify-serialized.sh` → code-reviewer → `/redteam` when security_relevant →
+  commit → merge): **Scripts** 580→581→584→582→583→585; **Java** 579→578→577.
+- Unattended policies settled with the user: explicit-id grounding (no confirm menu);
+  verify ALWAYS runs, never log-reuse; every primary-checkout git write under
+  `flock …/m1-batch-main.lock`; **hard stops stay hard** — clarity 2×FAIL, escalation
+  triggers, round-cap/must-shrink/MANUAL, redteam FINDINGS, substantive merge conflict
+  → that LINE halts and reports, the other line continues; **never push**; leaked
+  testcontainers pruned under the verify flock after each merge (~5 leak/verify × ~11
+  verifies would otherwise drown the host).
+- **Preflight stops collector+provider for the whole batch** (the standing
+  clean-verify directive) and aborts untouched on a dirty main; **wrap-up restarts the
+  stack collector-first**, regens STATUS, reports. The bot is DOWN for the run
+  (estimate 4–10 h; ~11 serialized full verifies incl. 580's risk-high commit re-run).
+
+### After the run
+
+Read the workflow result and the run's `journal.jsonl` before diagnosing anything.
+Halted tickets keep their worktrees and `escalated` status for the user's five-way
+menu (`git worktree list` first, per SKILL.md session-resume rule). Push remains the
+user's call.
+
+## ▶ previous START HERE (2026-07-05 — migration round-trip re-run, kept for context)
 
 **MIGRATION ROUND-TRIP RE-RUN: DONE + VALIDATED (2026-07-05).** The destructive
 pack→wipe→restore was run in place on this host and `restore.sh` reconstructed a
