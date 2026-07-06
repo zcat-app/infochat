@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 601 |
+| done | 602 |
 | deferred | 11 |
 | **total** | **619** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-577 — Startup guard for remote-LLM provider/base-url/model mismatch (catch silent 400s) (complexity: medium, risk: low)
 - M1-578 — BootstrapLoader reports ALL invalid source tags at once, not just the first (complexity: low, risk: low)
-- M1-581 — restore.sh: exact identity-path gate, truthful failure remediation, operator-role reminder (complexity: medium, risk: medium)
 - M1-582 — Single-owner cutover: stop-first pack guidance and a Provider-start gate in restore.sh (complexity: medium, risk: medium)
 - M1-583 — Close the secret-disposal gaps: shred pack.sh staging; shred-bundle accepts pack remnants and bare .pgc; hardlink/SSD caveat (complexity: medium, risk: medium)
 - M1-584 — Identity mount targets: correct the over-claiming allowlist comment; refuse system-prefix and colon data-dirs (complexity: medium, risk: medium)
@@ -46,7 +45,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-585 — blocked_by: M1-580 (done), M1-581 (pending), M1-584 (pending)
+- M1-585 — blocked_by: M1-580 (done), M1-581 (done), M1-584 (pending)
 
 ---
 
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-581 | restore.sh: exact identity-path gate, truthful failure remediation, operator-role reminder | 2026-07-06 | round 1 APPROVE |
 | M1-580 | restore.sh fails loud on real pg_restore errors (stderr gate, not just table-presence) | 2026-07-06 | round 1 APPROVE |
 | M1-579 | /pending lists only currently-actionable users (drop the terminal 'invited' roster arm) | 2026-07-06 | round 1 APPROVE |
 | M1-576 | /follow-all-sources: bulk-subscribe an approved scope to all live sources | 2026-07-06 | round 1 APPROVE |
@@ -74,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-571 | persist custom GGUF download URL + SHA so restore recovers custom models | 2026-07-05 | round 1 APPROVE |
 | M1-570 | restore.sh reconstructs the infochat_admin role before pg_restore | 2026-07-05 | round 1 APPROVE |
 | M1-569 | pack.sh/restore.sh handle root-owned adapter identity dirs | 2026-07-05 | round 1 APPROVE |
-| M1-568 | restore.sh extracts only allowlisted identity dirs (tar-slip) | 2026-07-05 | round 1 APPROVE |
 
 ---
 
@@ -793,7 +792,7 @@ M1-578 (pending) ← runnable
 M1-579 (done)
 M1-580 (done)
   └── M1-585 (pending)
-M1-581 (pending) ← runnable
+M1-581 (done)
   └── M1-585 (pending) [see above]
 M1-582 (pending) ← runnable
 M1-583 (pending) ← runnable

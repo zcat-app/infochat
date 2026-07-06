@@ -112,6 +112,32 @@ read_dotenv_value() {
   printf '%s' "$val"
 }
 
+# The one true return-to-FRESH recipe, shared by the already-configured gate and
+# the post-mutation partial-state note (M1-581) so both name the SAME actionable
+# fix. setup.sh --reset --hard is NOT this recipe: its do_reset removes
+# containers/network/pgdata (and, opted-in, model caches) only — secrets.env
+# survives, so restore.sh's fresh-host gate still refuses, and setup.sh then
+# falls through into the interactive wizard. PRINTED, never executed: removing
+# identity material is the operator's deliberate act — it may be the only copy
+# on this host (M1-581 out-of-scope: no auto-cleanup).
+print_fresh_host_recipe() {
+  {
+    echo "      To return this host to FRESH so restore.sh can run:"
+    echo "        (these steps DESTROY this host's deployment state — only proceed if it"
+    echo "        is a failed/aborted restore or otherwise disposable)"
+    echo "        1. remove the placed runtime files: secrets.env, application.properties,"
+    echo "           and the bootstrap-*.json files under $RUNTIME_DIR"
+    echo "        2. remove each restored adapter identity dir (the INFOCHAT_*_DATA_DIR"
+    echo "           paths in secrets.env; root-owned, so use a root container):"
+    echo "             docker run --rm -u 0:0 -v /<data-dir>:/<data-dir> \\"
+    echo "               --entrypoint rm $IDENTITY_TAR_IMAGE -rf /<data-dir>"
+    echo "        3. remove the Postgres data volume:"
+    echo "             docker volume rm \"\$(docker volume ls --filter name=infochat-pgdata -q)\""
+    echo "      (setup.sh --reset --hard is NOT this recipe: it keeps secrets.env — the"
+    echo "      fresh-host gate would still refuse — and launches the interactive setup wizard.)"
+  } >&2
+}
+
 # Last-wins read of a property from the RESTORED application.properties. Mirrors
 # 4-llm.sh's inline `sed -n 's/^key=//p' | tail -n1` idiom (4-llm.sh has a
 # set_prop writer but no reader). The key's literal dots are escaped for the sed
@@ -166,12 +192,22 @@ ensure_gguf() {
         echo "  recovering custom GGUF $file from persisted URL (M1-571)"
         fetch_gguf "$persisted_url" "$file" "$persisted_sha"
       else
+        # No setup.sh/4-llm.sh advice here: 4-llm.sh would re-prompt and rewrite the
+        # config this restore just laid down (see rehydrate_models), and the fresh-host
+        # gates make a plain restore.sh re-run impossible — the old message advised
+        # exactly that dead end (M1-581).
         echo "FAIL: $file is a CUSTOM llama.cpp GGUF whose download URL was never persisted" >&2
-        echo "      (bundle predates M1-571; 4-llm.sh stored only the filename). Fetch it" >&2
-        echo "      manually into the 'infochat-llamacpp-models' Docker volume, or re-run" >&2
-        echo "      prod/setup.sh step 4 (4-llm.sh) on this host to re-provision, then re-run" >&2
-        echo "      restore.sh. Pinned default GGUFs are auto-recovered; only custom overrides" >&2
-        echo "      from a pre-M1-571 bundle need this." >&2
+        echo "      (bundle predates M1-571; 4-llm.sh stored only the filename). Fetch the" >&2
+        echo "      GGUF manually into the 'infochat-llamacpp-models' Docker volume:" >&2
+        echo "        docker run --rm -u 0:0 -v infochat-llamacpp-models:/models \\" >&2
+        echo "          $CURL_IMAGE -fL -o \"/models/$file\" \"<your-gguf-url>\"" >&2
+        echo "      then EITHER return this host to fresh (recipe in the partial-state note" >&2
+        echo "      below) and re-run restore.sh — the fetched model survives in its volume" >&2
+        echo "      and is reused — OR finish bring-up manually in restore.sh's own order:" >&2
+        echo "      start the needed llama.cpp service(s), compose build the two apps, start" >&2
+        echo "      Collector (wait healthy) then Provider, then 8-verify.sh. Pinned default" >&2
+        echo "      GGUFs are auto-recovered; only custom overrides from a pre-M1-571 bundle" >&2
+        echo "      need this." >&2
         exit 1
       fi
       ;;
@@ -195,7 +231,8 @@ fi
 if [[ -f "$SECRETS_FILE" ]]; then
   echo "FAIL: $SECRETS_FILE already exists — this host is already configured." >&2
   echo "      restore.sh reconstructs a clone on a FRESH host. Use a clean host, or" >&2
-  echo "      tear this deployment down first (prod/setup.sh --reset --hard removes the DB)." >&2
+  echo "      return this one to fresh first:" >&2
+  print_fresh_host_recipe
   exit 1
 fi
 
@@ -250,12 +287,19 @@ tar_entries="$(tar -tzf "$STAGED_IDENTITIES")"
 # Same rel paths ("${dir#/}", matching pack.sh's adapter_rel_paths) drive both the
 # consistency gate here AND the extraction allowlist below (M1-568) — one source
 # of truth so a validated dir is exactly a dir we extract.
+#
+# The match is EXACT-LINE (grep -x): pack.sh names each data-dir as a tar member,
+# so GNU tar always lists exactly 'a/b/c/'. A substring match would false-pass a
+# hand-repacked bundle whose members sit under a prefix (backup/a/b/c/ contains
+# 'a/b/c/' as a substring), deferring the inevitable failure to the extraction
+# step — AFTER mutation began, breaking this gate's "Aborted before any change"
+# promise (M1-581).
 identity_rel_paths=()
 for key in INFOCHAT_SIMPLEX_DATA_DIR INFOCHAT_SIGNAL_DATA_DIR; do
   dir="$(read_dotenv_value "$key" "$STAGED_SECRETS")"
   [[ -z "$dir" ]] && continue
   rel="${dir#/}"
-  if ! printf '%s\n' "$tar_entries" | grep -qF "$rel/"; then
+  if ! printf '%s\n' "$tar_entries" | grep -qxF -- "$rel/"; then
     echo "FAIL: identity path mismatch — $key=$dir has no matching entry in the bundle." >&2
     echo "      v1 requires the clone to reconstruct identity dirs at the SAME absolute" >&2
     echo "      path; relocating to a different path is a follow-up (§7.10.1). Aborted" >&2
@@ -267,6 +311,38 @@ done
 
 echo "all preconditions passed; reconstructing the clone."
 
+# ── partial-state note: mutation begins below (M1-581) ──────────────────
+# From the first cp onward a failure leaves this host partially restored, and
+# the fresh-host gates refuse a plain re-run — so every post-mutation failure
+# must tell the operator what landed and how to retry. Two hooks cover bash's
+# two failure shapes: the ERR trap fires on set -e aborts (an unguarded command
+# failing; set -E extends it into functions), the EXIT-status hook on the
+# script's own explicit `exit 1` fail-loud paths (an explicit exit never raises
+# ERR). The flag single-prints the note when both fire for one failure. The
+# note DELETES NOTHING — restored identity material may be the only copy on
+# this host; the operator executes the recipe deliberately (M1-581
+# out-of-scope: no auto-cleanup).
+PLACED=()
+partial_note_printed=0
+print_partial_state_note() {
+  [[ "$partial_note_printed" -eq 1 ]] && return 0
+  partial_note_printed=1
+  {
+    echo ""
+    echo "PARTIAL RESTORE: this run failed after mutation began. Placed so far:"
+    local item
+    for item in "${PLACED[@]}"; do
+      echo "  - $item"
+    done
+    echo "      Nothing was deleted automatically — inspect before removing anything;"
+    echo "      the restored identity dirs may be the only copy on this host."
+  } >&2
+  print_fresh_host_recipe
+}
+set -E
+trap 'print_partial_state_note' ERR
+trap 'status=$?; rm -rf "$STAGING"; if [[ "$status" -ne 0 ]]; then print_partial_state_note; fi' EXIT
+
 # ── place config, secrets, identities (mutation begins) ─────────────────
 mkdir -p "$RUNTIME_DIR"
 echo "+ place application.properties + secrets.env + bootstrap files -> $RUNTIME_DIR"
@@ -277,6 +353,7 @@ cp -p "$STAGED_SOURCES" "$RUNTIME_DIR/bootstrap-sources.json"
 if [[ -f "$STAGING/runtime/bootstrap-assets.json" ]]; then
   cp -p "$STAGING/runtime/bootstrap-assets.json" "$RUNTIME_DIR/bootstrap-assets.json"
 fi
+PLACED+=("config + secrets + bootstrap files in $RUNTIME_DIR")
 
 # Reconstruct each adapter identity dir at its original absolute path with OWNERSHIP
 # and modes preserved — both clients reject world-readable keys, and signal-cli's
@@ -315,6 +392,9 @@ for rel in "${identity_rel_paths[@]}"; do
 done
 docker run --rm -u 0:0 -i "${tar_mounts[@]}" --entrypoint tar "$IDENTITY_TAR_IMAGE" \
   -C / -xzpf - "${identity_rel_paths[@]}" < "$STAGED_IDENTITIES"
+for rel in "${identity_rel_paths[@]}"; do
+  PLACED+=("identity dir /$rel (root-owned)")
+done
 
 # ── Postgres up ALONE, then pg_restore BEFORE Flyway ────────────────────
 # 3-postgres.sh brings up only postgres and waits healthy; on this fresh volume
@@ -323,6 +403,7 @@ docker run --rm -u 0:0 -i "${tar_mounts[@]}" --entrypoint tar "$IDENTITY_TAR_IMA
 # until the dump is loaded.
 echo "+ start Postgres alone (3-postgres.sh)"
 "$POSTGRES_SCRIPT"
+PLACED+=("Postgres data volume (fresh init; service-role passwords baked from restored secrets)")
 
 # ── reconstruct the Flyway-created infochat_admin role BEFORE pg_restore ──
 # A single-database `pg_dump -F c` (pack.sh) carries NO cluster-global roles, so the
@@ -365,6 +446,13 @@ SQL
 # into the capture file, then back to the console via >&2.
 echo "+ pg_restore db/infochat.pgc into the fresh infochat DB (before Flyway)"
 PG_RESTORE_STDERR="$STAGING/pg_restore.stderr"
+# The ERR hook fires on ANY failing command regardless of set +e, so it must be
+# disarmed around this deliberately-tolerated non-zero exit: pg_restore exiting 1
+# with only the two extension-COMMENT notices is a HEALTHY restore (M1-580), and
+# a partial-state note here would be false. A REAL failure is re-raised by the
+# bounded gate below as exit 1, which the EXIT-status hook reports — after the
+# gate's own FAIL message, in reading order (M1-581).
+trap - ERR
 set +e
 {
   docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" exec -T postgres \
@@ -373,6 +461,7 @@ set +e
   restore_status=${PIPESTATUS[0]}
 } 3>&1
 set -e
+trap 'print_partial_state_note' ERR
 
 # Bounded error gate (M1-580): on a non-zero exit, every line pg_restore itself
 # flagged as an error must match the known-ignorable set — currently exactly the
@@ -423,6 +512,7 @@ if [[ -z "$placed_tables" ]]; then
   exit 1
 fi
 echo "  DB restored (schema present)."
+PLACED+=("database contents (pg_restore complete)")
 
 # ── re-provision models from the RESTORED backend config ────────────────
 # Idempotent, and WITHOUT re-running the interactive 4-llm.sh (which would
@@ -503,6 +593,7 @@ rehydrate_models() {
 }
 echo "+ re-provision models from the restored backend config"
 rehydrate_models
+PLACED+=("LLM models in their Docker volumes (reused as-is on a re-run)")
 
 # ── build images, then start Collector (healthy) then Provider ──────────
 # Mirrors 7-apps.sh's build -> collector(--wait) -> provider ordering, but does
@@ -515,6 +606,14 @@ echo "+ start Collector (wait up to ${COLLECTOR_WAIT_TIMEOUT}s for healthy — i
 compose up -d --wait --wait-timeout "$COLLECTOR_WAIT_TIMEOUT" infochat-collector
 echo "+ start Provider"
 compose up -d infochat-provider
+
+# The clone is fully placed once the Provider starts: from here a failure is a
+# health problem on a COMPLETE clone (the verify NOTE below), not partial
+# state — the return-to-fresh recipe would be wrong advice. Disarm back to the
+# plain staging cleanup (M1-581).
+set +E
+trap - ERR
+trap 'rm -rf "$STAGING"' EXIT
 
 # ── verify (§7.10 step 5, split per the clarity WARN) ───────────────────
 # The HTTP-health part is automatable (8-verify.sh polls /q/health on both apps
@@ -535,6 +634,14 @@ cat <<'DONE'
     - /summary  returns content
     - each enabled adapter reaches adapter.connection.status=1
   (The HTTP health of both apps was just checked automatically above.)
+
+  OPERATOR LOGIN ROLES ARE NOT CLONED: a single-database dump carries no
+  cluster-global roles, so personal operator LOGIN roles and their
+  memberships (CREATE ROLE ops_... LOGIN; GRANT infochat_admin TO ops_...,
+  the V43-documented workflow) must be re-created by hand on this clone —
+  psql admin access via those roles silently stops working otherwise. This
+  is the one SILENT divergence from the exact-clone promise; everything
+  else fails loud.
 
   SINGLE-OWNER CUTOVER — do this in order:
     1. Stop the SOURCE host so it no longer touches Signal/SimpleX (the M1-009

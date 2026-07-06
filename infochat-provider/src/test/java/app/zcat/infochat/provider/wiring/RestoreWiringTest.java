@@ -197,6 +197,35 @@ class RestoreWiringTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
+    void prefixedIdentityMembersRefusedPreMutation(@TempDir Path tmp) throws Exception {
+        // M1-581: the path-consistency gate must match an EXACT tar listing line, not a
+        // substring. A relocated/hand-repacked bundle whose identity members sit under a
+        // prefix (backup/<data-dir>/...) contains "<data-dir>/" only as a SUBSTRING of
+        // "backup/<data-dir>/"; the old `grep -qF` gate false-passed it and the run then
+        // aborted MID-mutation at the extraction step (tar: member not found) — after
+        // config placement, violating the gate's own "Aborted before any change to this
+        // host" promise. pack.sh names each data-dir as a tar member (tar -C / -czpf -
+        // <rel>...), so a well-formed bundle always lists exactly "<rel>/" and the
+        // exact-match gate keeps passing it.
+        String dataDirAbs = tmp.resolve("idroot/signal-cli").toString(); // absolute, inside tmp
+        String dataRel = dataDirAbs.substring(1);       // "${dir#/}" — strip the leading '/'
+        Path bundle = buildPrefixedBundle(tmp, dataDirAbs, dataRel);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false);
+
+        assertNotEquals(0, r.exitCode, "a prefixed-member bundle must be refused:\n" + r.output);
+        assertTrue(r.output.contains("path mismatch"),
+                "the refusal must reuse the existing mismatch message:\n" + r.output);
+        assertTrue(r.output.contains("Aborted"),
+                "the refusal must state it aborted before any change:\n" + r.output);
+        // Pre-mutation: the gate fires BEFORE config placement, so nothing lands on the
+        // host — the exact promise the substring gate broke.
+        assertTrue(Files.notExists(tmp.resolve("runtime").resolve("secrets.env")),
+                "the refusal must come BEFORE any mutation (no secrets.env placed):\n" + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
     void extractionWritesOnlyAllowlistedIdentityDirs(@TempDir Path tmp) throws Exception {
         // Drive restore.sh PAST every gate so the identity extraction runs, and prove it
         // writes ONLY the allowlisted data-dir: a TAMPERED bundle carrying an extra
@@ -464,6 +493,37 @@ class RestoreWiringTest {
         run(idsrc, "tar", "-czpf", staging.resolve("identities.tgz").toString(), dataRel, extraRel);
 
         Path bundle = tmp.resolve("tampered" + uid + ".tgz");
+        run(staging, "tar", "-czf", bundle.toString(), ".");
+        return bundle;
+    }
+
+    /**
+     * Build a bundle whose identities.tgz members all sit under a {@code backup/} PREFIX
+     * ({@code backup/<dataRel>/...}), as a hand-repacked or relocated bundle would — so
+     * the tar listing contains {@code <dataRel>/} only as a substring of
+     * {@code backup/<dataRel>/}, never as an exact line. secrets.env names
+     * {@code dataDirAbs} as the sole configured adapter, so only the exact-line gate
+     * distinguishes this bundle from a well-formed one (M1-581).
+     */
+    private Path buildPrefixedBundle(Path tmp, String dataDirAbs, String dataRel) throws Exception {
+        Path staging = Files.createDirectories(tmp.resolve("psrc"));
+        Files.createDirectories(staging.resolve("db"));
+        Files.createDirectories(staging.resolve("runtime"));
+        Files.writeString(staging.resolve("db/infochat.pgc"), "PGDMP-dummy");
+        Files.writeString(staging.resolve("runtime/secrets.env"),
+                "INFOCHAT_DB_PASSWORD=\"pw\"\nINFOCHAT_SIGNAL_DATA_DIR=\"" + dataDirAbs + "\"\n");
+        Files.writeString(staging.resolve("runtime/application.properties"), "quarkus.profile=vps\n");
+        Files.writeString(staging.resolve("runtime/bootstrap-sources.json"), "[]\n");
+
+        // Nested identity tar naming "backup" as the member, so every entry carries the
+        // backup/ prefix — the shape the substring gate false-passed.
+        Path idsrc = Files.createDirectories(tmp.resolve("pid"));
+        Path prefixed = idsrc.resolve("backup").resolve(dataRel);
+        Files.createDirectories(prefixed);
+        Files.writeString(prefixed.resolve("keyfile"), "id");
+        run(idsrc, "tar", "-czpf", staging.resolve("identities.tgz").toString(), "backup");
+
+        Path bundle = tmp.resolve("prefixed-bundle.tgz");
         run(staging, "tar", "-czf", bundle.toString(), ".");
         return bundle;
     }

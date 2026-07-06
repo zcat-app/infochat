@@ -1057,6 +1057,12 @@ guarded by a `pg_roles` NOT EXISTS check, mirroring V2) **after** Postgres is up
 the repair happens at restore time, not via a later migration pass. `infochat` is
 `CREATEROLE`, so no superuser is needed; NOLOGIN carries no password. (The live
 deployment was recovered the same way during the M1-567 round trip that surfaced this.)
+One residue is NOT repaired and cannot be: personal operator LOGIN roles and their
+`GRANT infochat_admin TO …` memberships (the V43-documented `ops_alice` workflow) are
+likewise cluster-global and absent from the single-DB dump — their password hashes
+were deliberately never in the bundle — so they must be re-created by hand on the
+clone. This is the one silent divergence from the exact-clone promise (everything
+else fails loud); `restore.sh` prints this reminder at the end of every run (M1-581).
 
 **Bounded pg_restore error tolerance (M1-580).** `postgres-init.sh` pre-creates the
 `vector` and `pgcrypto` extensions at first volume init, owned by the bootstrap
@@ -1076,9 +1082,12 @@ restore that populated nothing yet exited 0. *Recovering from a failed (partial)
 restore:* the target then holds placed runtime files (config/secrets/identities) and
 a partially-populated database, and `restore.sh`'s fresh-host gates will refuse a
 plain re-run. Return the target to fresh — remove the Postgres data volume
-(`docker volume rm <project>_infochat-pgdata`) and the placed `prod/runtime` files
-(or use `prod/setup.sh --reset --hard`), fix the underlying cause, then re-run
-`restore.sh` with the bundle.
+(`docker volume rm <project>_infochat-pgdata`), the placed `prod/runtime` files, and
+the restored identity dirs (root-owned; remove via a root container) — `restore.sh`
+prints this exact recipe on any post-mutation failure (M1-581). `prod/setup.sh
+--reset --hard` is NOT a substitute: it keeps `secrets.env`, so the fresh-host gate
+still refuses, and it falls through into the interactive setup wizard. Fix the
+underlying cause, then re-run `restore.sh` with the bundle.
 
 **Same-absolute-path constraint (v1).** The identity tar is stored relative to
 `/`, so the clone reconstructs each data-dir at its original absolute path.

@@ -1,9 +1,14 @@
 ---
 id: M1-581
 title: "restore.sh: exact identity-path gate, truthful failure remediation, operator-role reminder"
-status: pending
+status: done
 created: 2026-07-06
 last_updated: 2026-07-06
+clarity_check:
+  date: 2026-07-06
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 3
 files_scope:
@@ -78,14 +83,42 @@ test_plan:
 spec_refs:
   - "docs/design/07-deployment.md §7.10.1"
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-06
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 197
+      removed: 18
 escalations: []
 overrides: []
 revisions: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-07-06
+    verdict: CLEAN
+    base: c426e5d05743c9e5756627b2e3d1e043ab3788a6
+    head: "m1/M1-581-restoresh-exact-identity-path (working tree, pre-commit)"
+    verdict_file: docs/plan/m1/redteam/M1-581-2026-07-06.md
+    out_of_model_count: 3
+    note: |
+      In-progress audit between review APPROVE (round 1) and commit. CLEAN.
+      Three out-of-model advisories: (1) bundle-supplied data-dir paths as a
+      root-write vector — operator-trusted supply-chain per security.md, and
+      pending M1-584 already tracks path-sanity refusal; (2) rm-based secret
+      disposal vs shred — pending M1-583 already tracks it; (3) the printed
+      volume-rm recipe's name-substring filter could select a co-located
+      project's volume — same filter as the pre-existing fresh-DB gate,
+      operator-executed advice only. None auto-filed.
 ---
 
 # M1-581: exact identity-path gate + truthful remediation
