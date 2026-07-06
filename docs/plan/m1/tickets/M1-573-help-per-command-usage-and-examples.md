@@ -8,6 +8,7 @@ blocked_by: [M1-575, M1-576]
 files_budget: 6
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/bundles/cs.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/HelpCommandHandlerTest.java
@@ -97,7 +98,25 @@ spec_refs:
 decision_refs:
   - "D43 (bilateral localization keyset)"
 reviews: []
-escalations: []
+escalations:
+  - date: 2026-07-06
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      CLARITY VERDICT: FAIL (round 2, after one bounded self-refine)
+      BLOCKERS:
+        1. files_scope omits infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java.
+           Acceptance item 5 relies on BundleLoaderTest's completeness check to
+           prove every new usage/example key has an en+cs pair, but that check
+           only inspects keys registered as BundleKeys constants (the
+           test.fallback.probe key demonstrates the converse — unregistered
+           keys are never inspected). Without BundleKeys.java in files_scope
+           the implementer either has no authorized file for the ~78 new
+           constants (39 commands x 2 keys) or adds keys without constants,
+           making item 5's "BundleLoaderTest stays green" vacuously true.
+           Fix: add BundleKeys.java as the sixth files_scope entry (fits the
+           existing files_budget: 6 unchanged); optionally sharpen acceptance
+           item 5 to require the new keys be registered as BundleKeys
+           constants.
 overrides: []
 revisions:
   - date: 2026-07-06
@@ -120,6 +139,17 @@ revisions:
        narrows, never widens: bullet 4 dropped and excluded, acceptance anchored
        to the 39-entry CATALOGUE, asset detail and /pending catalogue addition
        explicitly out of scope as follow-up candidates.)
+  - date: 2026-07-06
+    reason: clarity-fail rework (user-directed refine, escalation option 1) — add BundleKeys.java to files_scope so the ~78 new bundle-key constants are an authorized edit and BundleLoaderTest's completeness check actually covers the new keys
+    prior_values: |
+      files_scope: 5 entries (HelpCommandHandler.java, en.properties,
+        cs.properties, HelpCommandHandlerTest.java, docs/spec/commands.md) —
+        omitted infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
+      (Clarity round-2 FAIL, 1 blocker: BundleLoaderTest's completeness walk
+       reflects over BundleKeys' constant field set only — keys added to the
+       .properties files without constants are invisible to it, making
+       acceptance item 5's "BundleLoaderTest stays green" vacuous. files_budget
+       stays 6; the new sixth entry fits without a budget change.)
 aborted_attempts: []
 reopens: []
 redteam_findings: []
