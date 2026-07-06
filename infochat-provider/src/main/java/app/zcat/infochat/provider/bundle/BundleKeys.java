@@ -166,6 +166,259 @@ public final class BundleKeys {
      */
     public static final String HELP_CMD_ASSET_LINE = "help.cmd.asset.line";
 
+    // ----- /help <command> per-command detail (M1-573) --------------------
+    // Per docs/spec/commands.md §Discovery (Per-command detail): every
+    // catalogue command carries two detail keys — .usage (signature +
+    // description + indented argument/flag lines) and .examples (indented
+    // example invocations) — composed by HelpCommandHandler with the shared
+    // examples-header key. help.cmd.list-sources.usage.admin holds the
+    // bot-admin-only flag lines (--all / --include-deleted are
+    // flag-as-identity, admin-only) appended only for a bot admin, so the
+    // detail view never widens what the bare list already hides.
+
+    /** Shared "Examples" section header for every {@code /help <command>} detail block. */
+    public static final String HELP_DETAIL_EXAMPLES_HEADER = "help.detail.examples.header";
+
+    /** Unknown {@code /help <command>} argument — friendly error with fuzzy suggestions drawn only from the caller-visible command set. */
+    public static final String ERROR_HELP_UNKNOWN_COMMAND = "error.help.unknown_command";
+
+    /** {@code /help} usage detail. */
+    public static final String HELP_CMD_HELP_USAGE = "help.cmd.help.usage";
+
+    /** {@code /help} examples. */
+    public static final String HELP_CMD_HELP_EXAMPLES = "help.cmd.help.examples";
+
+    /** {@code /status} usage detail. */
+    public static final String HELP_CMD_STATUS_USAGE = "help.cmd.status.usage";
+
+    /** {@code /status} examples. */
+    public static final String HELP_CMD_STATUS_EXAMPLES = "help.cmd.status.examples";
+
+    /** {@code /get-tags} usage detail. */
+    public static final String HELP_CMD_GET_TAGS_USAGE = "help.cmd.get-tags.usage";
+
+    /** {@code /get-tags} examples. */
+    public static final String HELP_CMD_GET_TAGS_EXAMPLES = "help.cmd.get-tags.examples";
+
+    /** {@code /get-sources} usage detail. */
+    public static final String HELP_CMD_GET_SOURCES_USAGE = "help.cmd.get-sources.usage";
+
+    /** {@code /get-sources} examples. */
+    public static final String HELP_CMD_GET_SOURCES_EXAMPLES = "help.cmd.get-sources.examples";
+
+    /** {@code /summary} usage detail. */
+    public static final String HELP_CMD_SUMMARY_USAGE = "help.cmd.summary.usage";
+
+    /** {@code /summary} examples. */
+    public static final String HELP_CMD_SUMMARY_EXAMPLES = "help.cmd.summary.examples";
+
+    /** {@code /list-sources} usage detail (non-admin surface). */
+    public static final String HELP_CMD_LIST_SOURCES_USAGE = "help.cmd.list-sources.usage";
+
+    /** {@code /list-sources} bot-admin-only flag lines ({@code --all}, {@code --include-deleted}), appended after the usage detail for a bot admin only. */
+    public static final String HELP_CMD_LIST_SOURCES_USAGE_ADMIN = "help.cmd.list-sources.usage.admin";
+
+    /** {@code /list-sources} examples. */
+    public static final String HELP_CMD_LIST_SOURCES_EXAMPLES = "help.cmd.list-sources.examples";
+
+    /** {@code /save} usage detail. */
+    public static final String HELP_CMD_SAVE_USAGE = "help.cmd.save.usage";
+
+    /** {@code /save} examples. */
+    public static final String HELP_CMD_SAVE_EXAMPLES = "help.cmd.save.examples";
+
+    /** {@code /saved} usage detail. */
+    public static final String HELP_CMD_SAVED_USAGE = "help.cmd.saved.usage";
+
+    /** {@code /saved} examples. */
+    public static final String HELP_CMD_SAVED_EXAMPLES = "help.cmd.saved.examples";
+
+    /** {@code /unsave} usage detail. */
+    public static final String HELP_CMD_UNSAVE_USAGE = "help.cmd.unsave.usage";
+
+    /** {@code /unsave} examples. */
+    public static final String HELP_CMD_UNSAVE_EXAMPLES = "help.cmd.unsave.examples";
+
+    /** {@code /export} usage detail. */
+    public static final String HELP_CMD_EXPORT_USAGE = "help.cmd.export.usage";
+
+    /** {@code /export} examples. */
+    public static final String HELP_CMD_EXPORT_EXAMPLES = "help.cmd.export.examples";
+
+    /** {@code /add-source} usage detail. */
+    public static final String HELP_CMD_ADD_SOURCE_USAGE = "help.cmd.add-source.usage";
+
+    /** {@code /add-source} examples. */
+    public static final String HELP_CMD_ADD_SOURCE_EXAMPLES = "help.cmd.add-source.examples";
+
+    /** {@code /follow-all-sources} usage detail. */
+    public static final String HELP_CMD_FOLLOW_ALL_SOURCES_USAGE = "help.cmd.follow-all-sources.usage";
+
+    /** {@code /follow-all-sources} examples. */
+    public static final String HELP_CMD_FOLLOW_ALL_SOURCES_EXAMPLES = "help.cmd.follow-all-sources.examples";
+
+    /** {@code /unfollow-source} usage detail. */
+    public static final String HELP_CMD_UNFOLLOW_SOURCE_USAGE = "help.cmd.unfollow-source.usage";
+
+    /** {@code /unfollow-source} examples. */
+    public static final String HELP_CMD_UNFOLLOW_SOURCE_EXAMPLES = "help.cmd.unfollow-source.examples";
+
+    /** {@code /follow-tag} usage detail. */
+    public static final String HELP_CMD_FOLLOW_TAG_USAGE = "help.cmd.follow-tag.usage";
+
+    /** {@code /follow-tag} examples. */
+    public static final String HELP_CMD_FOLLOW_TAG_EXAMPLES = "help.cmd.follow-tag.examples";
+
+    /** {@code /unfollow-tag} usage detail. */
+    public static final String HELP_CMD_UNFOLLOW_TAG_USAGE = "help.cmd.unfollow-tag.usage";
+
+    /** {@code /unfollow-tag} examples. */
+    public static final String HELP_CMD_UNFOLLOW_TAG_EXAMPLES = "help.cmd.unfollow-tag.examples";
+
+    /** {@code /lang} usage detail. */
+    public static final String HELP_CMD_LANG_USAGE = "help.cmd.lang.usage";
+
+    /** {@code /lang} examples. */
+    public static final String HELP_CMD_LANG_EXAMPLES = "help.cmd.lang.examples";
+
+    /** {@code /clear} usage detail. */
+    public static final String HELP_CMD_CLEAR_USAGE = "help.cmd.clear.usage";
+
+    /** {@code /clear} examples. */
+    public static final String HELP_CMD_CLEAR_EXAMPLES = "help.cmd.clear.examples";
+
+    /** {@code /compress} usage detail. */
+    public static final String HELP_CMD_COMPRESS_USAGE = "help.cmd.compress.usage";
+
+    /** {@code /compress} examples. */
+    public static final String HELP_CMD_COMPRESS_EXAMPLES = "help.cmd.compress.examples";
+
+    /** {@code /forget} usage detail. */
+    public static final String HELP_CMD_FORGET_USAGE = "help.cmd.forget.usage";
+
+    /** {@code /forget} examples. */
+    public static final String HELP_CMD_FORGET_EXAMPLES = "help.cmd.forget.examples";
+
+    /** {@code /stop} usage detail. */
+    public static final String HELP_CMD_STOP_USAGE = "help.cmd.stop.usage";
+
+    /** {@code /stop} examples. */
+    public static final String HELP_CMD_STOP_EXAMPLES = "help.cmd.stop.examples";
+
+    /** {@code /retry} usage detail. */
+    public static final String HELP_CMD_RETRY_USAGE = "help.cmd.retry.usage";
+
+    /** {@code /retry} examples. */
+    public static final String HELP_CMD_RETRY_EXAMPLES = "help.cmd.retry.examples";
+
+    /** {@code /group-timezone} usage detail. */
+    public static final String HELP_CMD_GROUP_TIMEZONE_USAGE = "help.cmd.group-timezone.usage";
+
+    /** {@code /group-timezone} examples. */
+    public static final String HELP_CMD_GROUP_TIMEZONE_EXAMPLES = "help.cmd.group-timezone.examples";
+
+    /** {@code /digest} usage detail. */
+    public static final String HELP_CMD_DIGEST_USAGE = "help.cmd.digest.usage";
+
+    /** {@code /digest} examples. */
+    public static final String HELP_CMD_DIGEST_EXAMPLES = "help.cmd.digest.examples";
+
+    /** {@code /grant-admin} usage detail. */
+    public static final String HELP_CMD_GRANT_ADMIN_USAGE = "help.cmd.grant-admin.usage";
+
+    /** {@code /grant-admin} examples. */
+    public static final String HELP_CMD_GRANT_ADMIN_EXAMPLES = "help.cmd.grant-admin.examples";
+
+    /** {@code /revoke-admin} usage detail. */
+    public static final String HELP_CMD_REVOKE_ADMIN_USAGE = "help.cmd.revoke-admin.usage";
+
+    /** {@code /revoke-admin} examples. */
+    public static final String HELP_CMD_REVOKE_ADMIN_EXAMPLES = "help.cmd.revoke-admin.examples";
+
+    /** {@code /ban} usage detail. */
+    public static final String HELP_CMD_BAN_USAGE = "help.cmd.ban.usage";
+
+    /** {@code /ban} examples. */
+    public static final String HELP_CMD_BAN_EXAMPLES = "help.cmd.ban.examples";
+
+    /** {@code /unban} usage detail. */
+    public static final String HELP_CMD_UNBAN_USAGE = "help.cmd.unban.usage";
+
+    /** {@code /unban} examples. */
+    public static final String HELP_CMD_UNBAN_EXAMPLES = "help.cmd.unban.examples";
+
+    /** {@code /promote} usage detail. */
+    public static final String HELP_CMD_PROMOTE_USAGE = "help.cmd.promote.usage";
+
+    /** {@code /promote} examples. */
+    public static final String HELP_CMD_PROMOTE_EXAMPLES = "help.cmd.promote.examples";
+
+    /** {@code /demote} usage detail. */
+    public static final String HELP_CMD_DEMOTE_USAGE = "help.cmd.demote.usage";
+
+    /** {@code /demote} examples. */
+    public static final String HELP_CMD_DEMOTE_EXAMPLES = "help.cmd.demote.examples";
+
+    /** {@code /vouch} usage detail. */
+    public static final String HELP_CMD_VOUCH_USAGE = "help.cmd.vouch.usage";
+
+    /** {@code /vouch} examples. */
+    public static final String HELP_CMD_VOUCH_EXAMPLES = "help.cmd.vouch.examples";
+
+    /** {@code /invite} usage detail. */
+    public static final String HELP_CMD_INVITE_USAGE = "help.cmd.invite.usage";
+
+    /** {@code /invite} examples. */
+    public static final String HELP_CMD_INVITE_EXAMPLES = "help.cmd.invite.examples";
+
+    /** {@code /quarantine} usage detail. */
+    public static final String HELP_CMD_QUARANTINE_USAGE = "help.cmd.quarantine.usage";
+
+    /** {@code /quarantine} examples. */
+    public static final String HELP_CMD_QUARANTINE_EXAMPLES = "help.cmd.quarantine.examples";
+
+    /** {@code /audit} usage detail. */
+    public static final String HELP_CMD_AUDIT_USAGE = "help.cmd.audit.usage";
+
+    /** {@code /audit} examples. */
+    public static final String HELP_CMD_AUDIT_EXAMPLES = "help.cmd.audit.examples";
+
+    /** {@code /remove-source} usage detail. */
+    public static final String HELP_CMD_REMOVE_SOURCE_USAGE = "help.cmd.remove-source.usage";
+
+    /** {@code /remove-source} examples. */
+    public static final String HELP_CMD_REMOVE_SOURCE_EXAMPLES = "help.cmd.remove-source.examples";
+
+    /** {@code /source-enable} usage detail. */
+    public static final String HELP_CMD_SOURCE_ENABLE_USAGE = "help.cmd.source-enable.usage";
+
+    /** {@code /source-enable} examples. */
+    public static final String HELP_CMD_SOURCE_ENABLE_EXAMPLES = "help.cmd.source-enable.examples";
+
+    /** {@code /source-disable} usage detail. */
+    public static final String HELP_CMD_SOURCE_DISABLE_USAGE = "help.cmd.source-disable.usage";
+
+    /** {@code /source-disable} examples. */
+    public static final String HELP_CMD_SOURCE_DISABLE_EXAMPLES = "help.cmd.source-disable.examples";
+
+    /** {@code /approve-group} usage detail. */
+    public static final String HELP_CMD_APPROVE_GROUP_USAGE = "help.cmd.approve-group.usage";
+
+    /** {@code /approve-group} examples. */
+    public static final String HELP_CMD_APPROVE_GROUP_EXAMPLES = "help.cmd.approve-group.examples";
+
+    /** {@code /reject-group} usage detail. */
+    public static final String HELP_CMD_REJECT_GROUP_USAGE = "help.cmd.reject-group.usage";
+
+    /** {@code /reject-group} examples. */
+    public static final String HELP_CMD_REJECT_GROUP_EXAMPLES = "help.cmd.reject-group.examples";
+
+    /** {@code /list-groups} usage detail. */
+    public static final String HELP_CMD_LIST_GROUPS_USAGE = "help.cmd.list-groups.usage";
+
+    /** {@code /list-groups} examples. */
+    public static final String HELP_CMD_LIST_GROUPS_EXAMPLES = "help.cmd.list-groups.examples";
+
     /** Deterministic reply for an unknown slash command, looked up by InboundRouter's slash dispatch in the requester's effective scope language. */
     public static final String ERROR_UNKNOWN_COMMAND = "error.unknown_command";
 

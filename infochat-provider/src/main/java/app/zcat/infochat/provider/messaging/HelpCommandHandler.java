@@ -18,7 +18,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.text.MessageFormat;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 /**
@@ -61,12 +63,28 @@ import java.util.UUID;
  * emoji, no auto-formatting beyond the literal bundle strings. The
  * regression guard against an accidental markdown-link bundle value
  * lives in {@code HelpCommandHandlerTest}.</p>
+ *
+ * <p><b>Per-command detail (M1-573).</b> {@code /help <command>} renders
+ * a detail block (usage/arguments + examples, two bundle keys per
+ * catalogue command) instead of the list. Visibility reuses the exact
+ * bare-list predicate ({@link #visible}), so a command the caller cannot
+ * invoke here resolves to the same friendly error as a nonexistent one —
+ * the detail view never reveals surface the list already hides. The
+ * bot-admin-only {@code /list-sources} flags live in a separate suffix
+ * key appended only for a bot admin. An enabled asset renders its
+ * existing dynamic short line (per-asset detail is not in v1); anything
+ * else gets the unknown-command error with fuzzy suggestions drawn only
+ * from the caller-visible names. Only the first argument token is
+ * considered; trailing tokens are ignored.</p>
  */
 @ApplicationScoped
 public class HelpCommandHandler implements CommandHandler {
 
     private static final String SELECT_CALLER_SQL =
             "SELECT id, is_admin FROM users WHERE adapter = ? AND contact_id = ?";
+
+    /** Max fuzzy-suggestion entries surfaced in the unknown-command error. */
+    private static final int FUZZY_SUGGESTION_MAX = 5;
 
     /**
      * Per-command visibility tier. {@link #USER_OR_GROUP_ADMIN} captures
@@ -86,8 +104,8 @@ public class HelpCommandHandler implements CommandHandler {
         BOT_ADMIN
     }
 
-    /** One catalogue entry: the command name (for the probation predicate), its short-help bundle key, and its visibility tier. */
-    record CommandHelp(String command, String bundleKey, HelpTier tier) {}
+    /** One catalogue entry: the command name (for the probation predicate), its short-help / usage-detail / examples bundle keys, and its visibility tier. */
+    record CommandHelp(String command, String bundleKey, String usageKey, String examplesKey, HelpTier tier) {}
 
     /** Resolved tier facts about the caller in the current dispatch. */
     record CallerTier(boolean botAdmin, boolean groupAdmin, boolean probation, boolean group) {}
@@ -97,46 +115,46 @@ public class HelpCommandHandler implements CommandHandler {
      * order. The set mirrors the v1 dispatchable command handlers; the
      * tiers mirror spec §Permission model's closed privileged-tier list.
      */
-    private static final List<CommandHelp> CATALOGUE = List.of(
-            new CommandHelp("help", BundleKeys.HELP_CMD_HELP_SHORT, HelpTier.USER),
-            new CommandHelp("status", BundleKeys.HELP_CMD_STATUS_SHORT, HelpTier.USER),
-            new CommandHelp("get-tags", BundleKeys.HELP_CMD_GET_TAGS_SHORT, HelpTier.USER),
-            new CommandHelp("get-sources", BundleKeys.HELP_CMD_GET_SOURCES_SHORT, HelpTier.USER),
-            new CommandHelp("summary", BundleKeys.HELP_CMD_SUMMARY_SHORT, HelpTier.USER),
-            new CommandHelp("list-sources", BundleKeys.HELP_CMD_LIST_SOURCES_SHORT, HelpTier.USER),
-            new CommandHelp("save", BundleKeys.HELP_CMD_SAVE_SHORT, HelpTier.USER),
-            new CommandHelp("saved", BundleKeys.HELP_CMD_SAVED_SHORT, HelpTier.USER),
-            new CommandHelp("unsave", BundleKeys.HELP_CMD_UNSAVE_SHORT, HelpTier.USER),
-            new CommandHelp("export", BundleKeys.HELP_CMD_EXPORT_SHORT, HelpTier.USER),
-            new CommandHelp("add-source", BundleKeys.HELP_CMD_ADD_SOURCE_SHORT, HelpTier.USER_OR_GROUP_ADMIN),
-            new CommandHelp("follow-all-sources", BundleKeys.HELP_CMD_FOLLOW_ALL_SOURCES_SHORT, HelpTier.USER_OR_GROUP_ADMIN),
-            new CommandHelp("unfollow-source", BundleKeys.HELP_CMD_UNFOLLOW_SOURCE_SHORT, HelpTier.USER_OR_GROUP_ADMIN),
-            new CommandHelp("follow-tag", BundleKeys.HELP_CMD_FOLLOW_TAG_SHORT, HelpTier.USER_OR_GROUP_ADMIN),
-            new CommandHelp("unfollow-tag", BundleKeys.HELP_CMD_UNFOLLOW_TAG_SHORT, HelpTier.USER_OR_GROUP_ADMIN),
-            new CommandHelp("lang", BundleKeys.HELP_CMD_LANG_SHORT, HelpTier.USER_OR_GROUP_ADMIN),
-            new CommandHelp("clear", BundleKeys.HELP_CMD_CLEAR_SHORT, HelpTier.USER),
-            new CommandHelp("compress", BundleKeys.HELP_CMD_COMPRESS_SHORT, HelpTier.USER),
-            new CommandHelp("forget", BundleKeys.HELP_CMD_FORGET_SHORT, HelpTier.USER),
-            new CommandHelp("stop", BundleKeys.HELP_CMD_STOP_SHORT, HelpTier.USER),
-            new CommandHelp("retry", BundleKeys.HELP_CMD_RETRY_SHORT, HelpTier.USER),
-            new CommandHelp("group-timezone", BundleKeys.HELP_CMD_GROUP_TIMEZONE_SHORT, HelpTier.GROUP_ADMIN),
-            new CommandHelp("digest", BundleKeys.HELP_CMD_DIGEST_SHORT, HelpTier.GROUP_ADMIN),
-            new CommandHelp("grant-admin", BundleKeys.HELP_CMD_GRANT_ADMIN_SHORT, HelpTier.BOT_ADMIN),
-            new CommandHelp("revoke-admin", BundleKeys.HELP_CMD_REVOKE_ADMIN_SHORT, HelpTier.BOT_ADMIN),
-            new CommandHelp("ban", BundleKeys.HELP_CMD_BAN_SHORT, HelpTier.BOT_ADMIN),
-            new CommandHelp("unban", BundleKeys.HELP_CMD_UNBAN_SHORT, HelpTier.BOT_ADMIN),
-            new CommandHelp("promote", BundleKeys.HELP_CMD_PROMOTE_SHORT, HelpTier.BOT_ADMIN),
-            new CommandHelp("demote", BundleKeys.HELP_CMD_DEMOTE_SHORT, HelpTier.BOT_ADMIN),
-            new CommandHelp("vouch", BundleKeys.HELP_CMD_VOUCH_SHORT, HelpTier.BOT_ADMIN),
-            new CommandHelp("invite", BundleKeys.HELP_CMD_INVITE_SHORT, HelpTier.BOT_ADMIN),
-            new CommandHelp("quarantine", BundleKeys.HELP_CMD_QUARANTINE_SHORT, HelpTier.BOT_ADMIN),
-            new CommandHelp("audit", BundleKeys.HELP_CMD_AUDIT_SHORT, HelpTier.BOT_ADMIN),
-            new CommandHelp("remove-source", BundleKeys.HELP_CMD_REMOVE_SOURCE_SHORT, HelpTier.BOT_ADMIN),
-            new CommandHelp("source-enable", BundleKeys.HELP_CMD_SOURCE_ENABLE_SHORT, HelpTier.BOT_ADMIN),
-            new CommandHelp("source-disable", BundleKeys.HELP_CMD_SOURCE_DISABLE_SHORT, HelpTier.BOT_ADMIN),
-            new CommandHelp("approve-group", BundleKeys.HELP_CMD_APPROVE_GROUP_SHORT, HelpTier.BOT_ADMIN),
-            new CommandHelp("reject-group", BundleKeys.HELP_CMD_REJECT_GROUP_SHORT, HelpTier.BOT_ADMIN),
-            new CommandHelp("list-groups", BundleKeys.HELP_CMD_LIST_GROUPS_SHORT, HelpTier.BOT_ADMIN));
+    static final List<CommandHelp> CATALOGUE = List.of(
+            new CommandHelp("help", BundleKeys.HELP_CMD_HELP_SHORT, BundleKeys.HELP_CMD_HELP_USAGE, BundleKeys.HELP_CMD_HELP_EXAMPLES, HelpTier.USER),
+            new CommandHelp("status", BundleKeys.HELP_CMD_STATUS_SHORT, BundleKeys.HELP_CMD_STATUS_USAGE, BundleKeys.HELP_CMD_STATUS_EXAMPLES, HelpTier.USER),
+            new CommandHelp("get-tags", BundleKeys.HELP_CMD_GET_TAGS_SHORT, BundleKeys.HELP_CMD_GET_TAGS_USAGE, BundleKeys.HELP_CMD_GET_TAGS_EXAMPLES, HelpTier.USER),
+            new CommandHelp("get-sources", BundleKeys.HELP_CMD_GET_SOURCES_SHORT, BundleKeys.HELP_CMD_GET_SOURCES_USAGE, BundleKeys.HELP_CMD_GET_SOURCES_EXAMPLES, HelpTier.USER),
+            new CommandHelp("summary", BundleKeys.HELP_CMD_SUMMARY_SHORT, BundleKeys.HELP_CMD_SUMMARY_USAGE, BundleKeys.HELP_CMD_SUMMARY_EXAMPLES, HelpTier.USER),
+            new CommandHelp("list-sources", BundleKeys.HELP_CMD_LIST_SOURCES_SHORT, BundleKeys.HELP_CMD_LIST_SOURCES_USAGE, BundleKeys.HELP_CMD_LIST_SOURCES_EXAMPLES, HelpTier.USER),
+            new CommandHelp("save", BundleKeys.HELP_CMD_SAVE_SHORT, BundleKeys.HELP_CMD_SAVE_USAGE, BundleKeys.HELP_CMD_SAVE_EXAMPLES, HelpTier.USER),
+            new CommandHelp("saved", BundleKeys.HELP_CMD_SAVED_SHORT, BundleKeys.HELP_CMD_SAVED_USAGE, BundleKeys.HELP_CMD_SAVED_EXAMPLES, HelpTier.USER),
+            new CommandHelp("unsave", BundleKeys.HELP_CMD_UNSAVE_SHORT, BundleKeys.HELP_CMD_UNSAVE_USAGE, BundleKeys.HELP_CMD_UNSAVE_EXAMPLES, HelpTier.USER),
+            new CommandHelp("export", BundleKeys.HELP_CMD_EXPORT_SHORT, BundleKeys.HELP_CMD_EXPORT_USAGE, BundleKeys.HELP_CMD_EXPORT_EXAMPLES, HelpTier.USER),
+            new CommandHelp("add-source", BundleKeys.HELP_CMD_ADD_SOURCE_SHORT, BundleKeys.HELP_CMD_ADD_SOURCE_USAGE, BundleKeys.HELP_CMD_ADD_SOURCE_EXAMPLES, HelpTier.USER_OR_GROUP_ADMIN),
+            new CommandHelp("follow-all-sources", BundleKeys.HELP_CMD_FOLLOW_ALL_SOURCES_SHORT, BundleKeys.HELP_CMD_FOLLOW_ALL_SOURCES_USAGE, BundleKeys.HELP_CMD_FOLLOW_ALL_SOURCES_EXAMPLES, HelpTier.USER_OR_GROUP_ADMIN),
+            new CommandHelp("unfollow-source", BundleKeys.HELP_CMD_UNFOLLOW_SOURCE_SHORT, BundleKeys.HELP_CMD_UNFOLLOW_SOURCE_USAGE, BundleKeys.HELP_CMD_UNFOLLOW_SOURCE_EXAMPLES, HelpTier.USER_OR_GROUP_ADMIN),
+            new CommandHelp("follow-tag", BundleKeys.HELP_CMD_FOLLOW_TAG_SHORT, BundleKeys.HELP_CMD_FOLLOW_TAG_USAGE, BundleKeys.HELP_CMD_FOLLOW_TAG_EXAMPLES, HelpTier.USER_OR_GROUP_ADMIN),
+            new CommandHelp("unfollow-tag", BundleKeys.HELP_CMD_UNFOLLOW_TAG_SHORT, BundleKeys.HELP_CMD_UNFOLLOW_TAG_USAGE, BundleKeys.HELP_CMD_UNFOLLOW_TAG_EXAMPLES, HelpTier.USER_OR_GROUP_ADMIN),
+            new CommandHelp("lang", BundleKeys.HELP_CMD_LANG_SHORT, BundleKeys.HELP_CMD_LANG_USAGE, BundleKeys.HELP_CMD_LANG_EXAMPLES, HelpTier.USER_OR_GROUP_ADMIN),
+            new CommandHelp("clear", BundleKeys.HELP_CMD_CLEAR_SHORT, BundleKeys.HELP_CMD_CLEAR_USAGE, BundleKeys.HELP_CMD_CLEAR_EXAMPLES, HelpTier.USER),
+            new CommandHelp("compress", BundleKeys.HELP_CMD_COMPRESS_SHORT, BundleKeys.HELP_CMD_COMPRESS_USAGE, BundleKeys.HELP_CMD_COMPRESS_EXAMPLES, HelpTier.USER),
+            new CommandHelp("forget", BundleKeys.HELP_CMD_FORGET_SHORT, BundleKeys.HELP_CMD_FORGET_USAGE, BundleKeys.HELP_CMD_FORGET_EXAMPLES, HelpTier.USER),
+            new CommandHelp("stop", BundleKeys.HELP_CMD_STOP_SHORT, BundleKeys.HELP_CMD_STOP_USAGE, BundleKeys.HELP_CMD_STOP_EXAMPLES, HelpTier.USER),
+            new CommandHelp("retry", BundleKeys.HELP_CMD_RETRY_SHORT, BundleKeys.HELP_CMD_RETRY_USAGE, BundleKeys.HELP_CMD_RETRY_EXAMPLES, HelpTier.USER),
+            new CommandHelp("group-timezone", BundleKeys.HELP_CMD_GROUP_TIMEZONE_SHORT, BundleKeys.HELP_CMD_GROUP_TIMEZONE_USAGE, BundleKeys.HELP_CMD_GROUP_TIMEZONE_EXAMPLES, HelpTier.GROUP_ADMIN),
+            new CommandHelp("digest", BundleKeys.HELP_CMD_DIGEST_SHORT, BundleKeys.HELP_CMD_DIGEST_USAGE, BundleKeys.HELP_CMD_DIGEST_EXAMPLES, HelpTier.GROUP_ADMIN),
+            new CommandHelp("grant-admin", BundleKeys.HELP_CMD_GRANT_ADMIN_SHORT, BundleKeys.HELP_CMD_GRANT_ADMIN_USAGE, BundleKeys.HELP_CMD_GRANT_ADMIN_EXAMPLES, HelpTier.BOT_ADMIN),
+            new CommandHelp("revoke-admin", BundleKeys.HELP_CMD_REVOKE_ADMIN_SHORT, BundleKeys.HELP_CMD_REVOKE_ADMIN_USAGE, BundleKeys.HELP_CMD_REVOKE_ADMIN_EXAMPLES, HelpTier.BOT_ADMIN),
+            new CommandHelp("ban", BundleKeys.HELP_CMD_BAN_SHORT, BundleKeys.HELP_CMD_BAN_USAGE, BundleKeys.HELP_CMD_BAN_EXAMPLES, HelpTier.BOT_ADMIN),
+            new CommandHelp("unban", BundleKeys.HELP_CMD_UNBAN_SHORT, BundleKeys.HELP_CMD_UNBAN_USAGE, BundleKeys.HELP_CMD_UNBAN_EXAMPLES, HelpTier.BOT_ADMIN),
+            new CommandHelp("promote", BundleKeys.HELP_CMD_PROMOTE_SHORT, BundleKeys.HELP_CMD_PROMOTE_USAGE, BundleKeys.HELP_CMD_PROMOTE_EXAMPLES, HelpTier.BOT_ADMIN),
+            new CommandHelp("demote", BundleKeys.HELP_CMD_DEMOTE_SHORT, BundleKeys.HELP_CMD_DEMOTE_USAGE, BundleKeys.HELP_CMD_DEMOTE_EXAMPLES, HelpTier.BOT_ADMIN),
+            new CommandHelp("vouch", BundleKeys.HELP_CMD_VOUCH_SHORT, BundleKeys.HELP_CMD_VOUCH_USAGE, BundleKeys.HELP_CMD_VOUCH_EXAMPLES, HelpTier.BOT_ADMIN),
+            new CommandHelp("invite", BundleKeys.HELP_CMD_INVITE_SHORT, BundleKeys.HELP_CMD_INVITE_USAGE, BundleKeys.HELP_CMD_INVITE_EXAMPLES, HelpTier.BOT_ADMIN),
+            new CommandHelp("quarantine", BundleKeys.HELP_CMD_QUARANTINE_SHORT, BundleKeys.HELP_CMD_QUARANTINE_USAGE, BundleKeys.HELP_CMD_QUARANTINE_EXAMPLES, HelpTier.BOT_ADMIN),
+            new CommandHelp("audit", BundleKeys.HELP_CMD_AUDIT_SHORT, BundleKeys.HELP_CMD_AUDIT_USAGE, BundleKeys.HELP_CMD_AUDIT_EXAMPLES, HelpTier.BOT_ADMIN),
+            new CommandHelp("remove-source", BundleKeys.HELP_CMD_REMOVE_SOURCE_SHORT, BundleKeys.HELP_CMD_REMOVE_SOURCE_USAGE, BundleKeys.HELP_CMD_REMOVE_SOURCE_EXAMPLES, HelpTier.BOT_ADMIN),
+            new CommandHelp("source-enable", BundleKeys.HELP_CMD_SOURCE_ENABLE_SHORT, BundleKeys.HELP_CMD_SOURCE_ENABLE_USAGE, BundleKeys.HELP_CMD_SOURCE_ENABLE_EXAMPLES, HelpTier.BOT_ADMIN),
+            new CommandHelp("source-disable", BundleKeys.HELP_CMD_SOURCE_DISABLE_SHORT, BundleKeys.HELP_CMD_SOURCE_DISABLE_USAGE, BundleKeys.HELP_CMD_SOURCE_DISABLE_EXAMPLES, HelpTier.BOT_ADMIN),
+            new CommandHelp("approve-group", BundleKeys.HELP_CMD_APPROVE_GROUP_SHORT, BundleKeys.HELP_CMD_APPROVE_GROUP_USAGE, BundleKeys.HELP_CMD_APPROVE_GROUP_EXAMPLES, HelpTier.BOT_ADMIN),
+            new CommandHelp("reject-group", BundleKeys.HELP_CMD_REJECT_GROUP_SHORT, BundleKeys.HELP_CMD_REJECT_GROUP_USAGE, BundleKeys.HELP_CMD_REJECT_GROUP_EXAMPLES, HelpTier.BOT_ADMIN),
+            new CommandHelp("list-groups", BundleKeys.HELP_CMD_LIST_GROUPS_SHORT, BundleKeys.HELP_CMD_LIST_GROUPS_USAGE, BundleKeys.HELP_CMD_LIST_GROUPS_EXAMPLES, HelpTier.BOT_ADMIN));
 
     @Inject
     BundleLoader bundleLoader;
@@ -171,6 +189,12 @@ public class HelpCommandHandler implements CommandHandler {
     public OutboundMessage handle(ScopeRef scope, String rawText) {
         CallerTier caller = resolveTier(scope);
 
+        String[] tokens = rawText.trim().split("\\s+");
+        if (tokens.length > 1) {
+            return new OutboundMessage(scope, detailBody(tokens[1], caller),
+                    Instant.now(), UUID.randomUUID().toString());
+        }
+
         StringBuilder body = new StringBuilder();
         body.append(bundleLoader.get(headerKey(caller), inboundContext.effectiveLanguage()));
         for (CommandHelp entry : CATALOGUE) {
@@ -186,6 +210,118 @@ public class HelpCommandHandler implements CommandHandler {
         }
 
         return new OutboundMessage(scope, body.toString(), Instant.now(), UUID.randomUUID().toString());
+    }
+
+    /**
+     * Body of the {@code /help <command>} detail reply (M1-573): the
+     * usage + examples block for a caller-visible catalogue command,
+     * the dynamic short line for an enabled asset, or the
+     * unknown-command friendly error. The visibility check runs the
+     * exact bare-list predicate, so a hidden-but-existing command and
+     * a nonexistent one are indistinguishable to the caller.
+     */
+    private String detailBody(String requested, CallerTier caller) {
+        String language = inboundContext.effectiveLanguage();
+        String name = normalizeCommandName(requested);
+        for (CommandHelp entry : CATALOGUE) {
+            if (entry.command().equals(name) && visible(entry, caller)) {
+                return composeDetail(entry, caller, language);
+            }
+        }
+        for (AssetRegistry.AssetEntry asset : assetRegistry.getEnabledAssets()) {
+            if (asset.name().equals(name)) {
+                StringBuilder line = new StringBuilder();
+                appendAssetLine(line, asset, language);
+                return line.toString();
+            }
+        }
+        return unknownCommandReply(name, caller, language);
+    }
+
+    private String composeDetail(CommandHelp entry, CallerTier caller, String language) {
+        StringBuilder body = new StringBuilder();
+        body.append(bundleLoader.get(entry.usageKey(), language));
+        // /list-sources --all / --include-deleted are bot-admin-only flags
+        // (flag-as-identity, spec §Discovery); their lines live in a
+        // separate suffix key so a non-admin never sees them. /get-sources
+        // (the non-admin alias) strips these flags, so no suffix there.
+        if (caller.botAdmin() && entry.command().equals("list-sources")) {
+            body.append('\n');
+            body.append(bundleLoader.get(BundleKeys.HELP_CMD_LIST_SOURCES_USAGE_ADMIN, language));
+        }
+        body.append("\n\n");
+        body.append(bundleLoader.get(BundleKeys.HELP_DETAIL_EXAMPLES_HEADER, language));
+        body.append('\n');
+        body.append(bundleLoader.get(entry.examplesKey(), language));
+        return body.toString();
+    }
+
+    /**
+     * Unknown-command friendly error mirroring the unknown-tag shape.
+     * The fuzzy-suggestion vocabulary is restricted to the names the
+     * caller can see in bare {@code /help} (visible catalogue entries
+     * plus enabled assets), so the suggestions cannot leak the
+     * existence of admin-only or otherwise hidden commands.
+     */
+    private String unknownCommandReply(String requested, CallerTier caller, String language) {
+        List<String> visibleNames = new ArrayList<>();
+        for (CommandHelp entry : CATALOGUE) {
+            if (visible(entry, caller)) {
+                visibleNames.add(entry.command());
+            }
+        }
+        for (AssetRegistry.AssetEntry asset : assetRegistry.getEnabledAssets()) {
+            visibleNames.add(asset.name());
+        }
+        List<String> suggestions = fuzzySuggest(requested, visibleNames, FUZZY_SUGGESTION_MAX);
+        StringBuilder joined = new StringBuilder();
+        for (String suggestion : suggestions) {
+            if (joined.length() > 0) {
+                joined.append(", ");
+            }
+            joined.append('/').append(suggestion);
+        }
+        return MessageFormat.format(
+                bundleLoader.get(BundleKeys.ERROR_HELP_UNKNOWN_COMMAND, language),
+                requested, joined.toString());
+    }
+
+    /** First-token normalization: an optional leading {@code /} is stripped so {@code /help /summary} and {@code /help summary} are equivalent. */
+    private static String normalizeCommandName(String requested) {
+        String name = requested.startsWith("/") ? requested.substring(1) : requested;
+        return name.toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Fuzzy-suggestion list ordered by shared-prefix length DESC then
+     * name ASC — the same naive convention the tag friendly errors use
+     * (M1-037 shape); kept local because the tag handlers' copies are
+     * private to their classes.
+     */
+    private static List<String> fuzzySuggest(String supplied, List<String> vocabulary, int max) {
+        record Scored(String name, int shared) {}
+        List<Scored> scored = new ArrayList<>(vocabulary.size());
+        for (String v : vocabulary) {
+            scored.add(new Scored(v, sharedPrefixLength(supplied, v)));
+        }
+        scored.sort((a, b) -> {
+            int cmp = Integer.compare(b.shared, a.shared);
+            return cmp != 0 ? cmp : a.name.compareTo(b.name);
+        });
+        List<String> out = new ArrayList<>();
+        for (int i = 0; i < Math.min(max, scored.size()); i++) {
+            out.add(scored.get(i).name);
+        }
+        return out;
+    }
+
+    private static int sharedPrefixLength(String a, String b) {
+        int n = Math.min(a.length(), b.length());
+        int i = 0;
+        while (i < n && a.charAt(i) == b.charAt(i)) {
+            i++;
+        }
+        return i;
     }
 
     private static String headerKey(CallerTier caller) {
@@ -216,16 +352,20 @@ public class HelpCommandHandler implements CommandHandler {
     private void appendEnabledAssets(StringBuilder body) {
         String language = inboundContext.effectiveLanguage();
         for (AssetRegistry.AssetEntry asset : assetRegistry.getEnabledAssets()) {
-            List<String> subVerbs = asset.enabledSubVerbNames();
             body.append('\n');
-            body.append(MessageFormat.format(
-                    bundleLoader.get(BundleKeys.HELP_CMD_ASSET_LINE, language),
-                    asset.name(), asset.displayName()));
-            // The enabled sub-verb names are literal command tokens, not
-            // translatable prose; the parenthetical wrapper stays in code.
-            if (!subVerbs.isEmpty()) {
-                body.append(" (").append(String.join(", ", subVerbs)).append(')');
-            }
+            appendAssetLine(body, asset, language);
+        }
+    }
+
+    private void appendAssetLine(StringBuilder body, AssetRegistry.AssetEntry asset, String language) {
+        List<String> subVerbs = asset.enabledSubVerbNames();
+        body.append(MessageFormat.format(
+                bundleLoader.get(BundleKeys.HELP_CMD_ASSET_LINE, language),
+                asset.name(), asset.displayName()));
+        // The enabled sub-verb names are literal command tokens, not
+        // translatable prose; the parenthetical wrapper stays in code.
+        if (!subVerbs.isEmpty()) {
+            body.append(" (").append(String.join(", ", subVerbs)).append(')');
         }
     }
 

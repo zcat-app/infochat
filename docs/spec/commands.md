@@ -203,6 +203,28 @@ them to the marked region — doing so would red the build.
   `llm.md` §Translation flow), and that the header / footer keys
   exist. This commitment fixes the bundle structure so adding a
   third language is a deterministic drop-in.
+
+  **Per-command detail.** `/help <command>` (e.g. `/help summary`)
+  returns a plain-text detail block for one catalogue command: the
+  command's signature line, a one-line description, each
+  argument/flag with a one-line meaning (accepted values and
+  defaults), and at least one concrete example. The detail is
+  filtered by the **same visibility predicate as the bare list**: a
+  command the caller cannot currently invoke in this scope resolves
+  to the unknown-command friendly error, and a flag the caller may
+  not use is omitted (`/list-sources --all` and
+  `--include-deleted` render only for a bot admin). Composition
+  mirrors the bare list: **two per-command bundle keys**
+  (`help.cmd.<command>.usage`, `help.cmd.<command>.examples`), a
+  shared examples-header key, and a bot-admin-only usage-suffix key
+  for `/list-sources`; the bundle-completeness CI covers each key
+  in `en` and `cs`. An enabled asset command renders its existing
+  dynamic short line (whose parenthetical already lists only the
+  enabled sub-verbs, per §Asset commands); per-asset detail blocks
+  are not in v1. `/help <unknown>` mirrors the unknown-tag
+  friendly-error shape: fuzzy suggestions drawn **only from the
+  caller-visible command set** (no admin-command existence leak),
+  pointing the user back at bare `/help`.
 - `/status` — runtime status (active profile and uptime; admin sees
   more). DM and group; any non-banned user. Bot
   admin view includes a count of pending groups

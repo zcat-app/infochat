@@ -1,7 +1,7 @@
 ---
 id: M1-573
 title: "In-app per-command help: /help <command> shows usage, flags, and examples"
-status: pending
+status: done
 created: 2026-07-06
 last_updated: 2026-07-06
 blocked_by: [M1-575, M1-576]
@@ -97,7 +97,20 @@ spec_refs:
   - "docs/design/03-commands.md §/help"
 decision_refs:
   - "D43 (bilateral localization keyset)"
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-06
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 856
+      removed: 59
 escalations:
   - date: 2026-07-06
     reason: clarity-fail
@@ -154,6 +167,23 @@ aborted_attempts: []
 reopens: []
 redteam_findings: []
 redteam_audits: []
+clarity_check:
+  date: 2026-07-06
+  verdict: WARN
+  warnings:
+    - >-
+      SECURITY-FLAG-CONSISTENT: security_relevant: false alongside an
+      acceptance item whose entire point is hiding admin-only command surface
+      from non-admins in a new rendering path. Consider flipping to true, or
+      adding a one-line note distinguishing "reuses existing gate, does not
+      create one" so the reviewer doesn't have to infer it.
+    - >-
+      FILES-BUDGET-PLAUSIBLE: docs/spec/commands.md is in files_scope but no
+      acceptance item names what changes there; worth a one-line acceptance
+      addition (e.g. "the §Discovery /help entry notes the new <command>
+      argument mode") so the implementer isn't guessing at scope for that
+      file.
+  blockers: []
 ---
 
 # M1-573: In-app per-command help (`/help <command>`)

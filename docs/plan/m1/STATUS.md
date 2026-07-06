@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 598 |
+| done | 599 |
 | deferred | 11 |
-| **total** | **610** |
+| **total** | **617** |
 
 ---
 
@@ -24,7 +24,12 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-573 — In-app per-command help: /help <command> shows usage, flags, and examples (complexity: medium, risk: low)
+- M1-579 — /pending lists only currently-actionable users (drop the terminal 'invited' roster arm) (complexity: low, risk: medium)
+- M1-580 — restore.sh fails loud on real pg_restore errors (stderr gate, not just table-presence) (complexity: medium, risk: high)
+- M1-581 — restore.sh: exact identity-path gate, truthful failure remediation, operator-role reminder (complexity: medium, risk: medium)
+- M1-582 — Single-owner cutover: stop-first pack guidance and a Provider-start gate in restore.sh (complexity: medium, risk: medium)
+- M1-583 — Close the secret-disposal gaps: shred pack.sh staging; shred-bundle accepts pack remnants and bare .pgc; hardlink/SSD caveat (complexity: medium, risk: medium)
+- M1-584 — Identity mount targets: correct the over-claiming allowlist comment; refuse system-prefix and colon data-dirs (complexity: medium, risk: medium)
 
 ---
 
@@ -41,7 +46,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-585 — blocked_by: M1-580 (pending), M1-581 (pending), M1-584 (pending)
 
 ---
 
@@ -62,6 +67,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-576 | /follow-all-sources: bulk-subscribe an approved scope to all live sources | 2026-07-06 | round 1 APPROVE |
 | M1-575 | Admin visibility of actionable users (/pending): probation + awaiting-vouch, with usable contact ids | 2026-07-06 | round 1 APPROVE |
+| M1-573 | In-app per-command help: /help <command> shows usage, flags, and examples | 2026-07-06 | round 1 APPROVE |
 | M1-572 | operator-invoked shred-bundle.sh for safe disposal of pack.sh bundles | 2026-07-06 | round 1 APPROVE |
 | M1-571 | persist custom GGUF download URL + SHA so restore recovers custom models | 2026-07-05 | round 1 APPROVE |
 | M1-570 | restore.sh reconstructs the infochat_admin role before pg_restore | 2026-07-05 | round 1 APPROVE |
@@ -69,7 +75,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-568 | restore.sh extracts only allowlisted identity dirs (tar-slip) | 2026-07-05 | round 1 APPROVE |
 | M1-567 | Host-clone migration scripts (prod/scripts/pack.sh + restore.sh) | 2026-07-05 | round 2 APPROVE |
 | M1-566 | Signal edit frames use the real signal-cli encoding (send+editTimestamp) | 2026-07-04 | round 1 APPROVE |
-| M1-565 | Base64 shape gate on the Signal group-id scope key | 2026-07-04 | round 1 APPROVE |
 
 ---
 
@@ -779,10 +784,19 @@ M1-570 (done)
 M1-571 (done)
 M1-572 (done)
 M1-575 (done)
-  ├── M1-573 (pending) ← runnable
+  ├── M1-573 (done)
   └── M1-574 (deferred)
 M1-576 (done)
-  └── M1-573 (pending) [see above]
+  └── M1-573 (done) [see above]
 M1-577 (draft)
 M1-578 (draft)
+M1-579 (pending) ← runnable
+M1-580 (pending) ← runnable
+  └── M1-585 (pending)
+M1-581 (pending) ← runnable
+  └── M1-585 (pending) [see above]
+M1-582 (pending) ← runnable
+M1-583 (pending) ← runnable
+M1-584 (pending) ← runnable
+  └── M1-585 (pending) [see above]
 ```

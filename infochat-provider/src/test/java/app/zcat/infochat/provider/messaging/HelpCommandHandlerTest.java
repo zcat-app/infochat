@@ -43,6 +43,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>A missing bundle key propagates rather than shipping a partial
  *       reply (bundle-completeness CI alignment).</li>
  *   <li>The reply contains no markdown link syntax / HTML anchors (D30).</li>
+ *   <li>{@code /help <command>} (M1-573) renders the per-command detail
+ *       block gated by the same visibility predicate as the bare list; a
+ *       hidden or nonexistent command gets the friendly error whose fuzzy
+ *       suggestions never leak invisible names.</li>
  * </ol>
  */
 class HelpCommandHandlerTest {
@@ -256,6 +260,194 @@ class HelpCommandHandlerTest {
                 "asset line must render in cs through the bundle; got: " + body);
         assertFalse(body.contains("market data"),
                 "cs asset line must not concatenate inline English 'market data'; got: " + body);
+    }
+
+    // ----- /help <command> per-command detail (M1-573) ---------------------
+
+    @Test
+    void helpSummaryDetailShowsUsageWindowFlagAndExample() {
+        String body = handlerFor(dm(false, false, false), productionBundleLoader)
+                .handle(new ScopeRef.Dm("alice"), "/help summary").text();
+
+        assertTrue(body.contains(productionBundleLoader.get(BundleKeys.HELP_CMD_SUMMARY_USAGE)),
+                "detail must carry the full /summary usage block; got: " + body);
+        assertTrue(body.contains("/summary [tag] [-w <duration>]"),
+                "detail must carry the signature line; got: " + body);
+        assertTrue(body.contains("-w <duration>") && body.contains("default 24h"),
+                "detail must describe the -w flag with its default; got: " + body);
+        assertTrue(body.contains("1h-168h, 1d-30d, 1w-4w"),
+                "detail must list the accepted -w ranges; got: " + body);
+        // Header directly above the first example line, which keeps its
+        // two-space indent (the bundle values escape it as \ \ so
+        // Properties.load does not strip it).
+        assertTrue(body.contains(productionBundleLoader.get(BundleKeys.HELP_DETAIL_EXAMPLES_HEADER) + "\n  /summary"),
+                "detail must carry the Examples header above the indented examples; got: " + body);
+        assertTrue(body.contains("\n  /summary -w 7d"),
+                "detail must carry a concrete indented example; got: " + body);
+    }
+
+    @Test
+    void helpDetailIgnoresTokensAfterTheFirstArgument() {
+        HelpCommandHandler handler = handlerFor(dm(false, false, false), productionBundleLoader);
+
+        assertEquals(handler.handle(new ScopeRef.Dm("alice"), "/help summary").text(),
+                handler.handle(new ScopeRef.Dm("alice"), "/help summary -w 7d").text());
+    }
+
+    @Test
+    void helpDetailAcceptsLeadingSlashOnTheArgument() {
+        HelpCommandHandler handler = handlerFor(dm(false, false, false), productionBundleLoader);
+
+        assertEquals(handler.handle(new ScopeRef.Dm("alice"), "/help summary").text(),
+                handler.handle(new ScopeRef.Dm("alice"), "/help /summary").text());
+    }
+
+    @Test
+    void helpUnknownCommandReturnsFriendlyErrorWithVisibleSuggestions() {
+        String body = handlerFor(dm(false, false, false), productionBundleLoader)
+                .handle(new ScopeRef.Dm("alice"), "/help summry").text();
+
+        assertTrue(body.contains("Unknown command `/summry`"),
+                "unknown reply must echo the requested name; got: " + body);
+        assertTrue(body.contains("/summary"),
+                "fuzzy suggestions must offer the close match /summary; got: " + body);
+        assertTrue(body.contains("/help"),
+                "unknown reply must point back at /help; got: " + body);
+    }
+
+    @Test
+    void helpDetailOfCommandHiddenFromCallerIsUnknownCommandError() {
+        // Non-admin asking for a bot-admin command: same reply as a
+        // nonexistent name — the detail view must not confirm existence.
+        String nonAdmin = handlerFor(dm(false, false, false), productionBundleLoader)
+                .handle(new ScopeRef.Dm("alice"), "/help ban").text();
+        assertTrue(nonAdmin.contains("Unknown command `/ban`"),
+                "hidden command must resolve to the unknown error; got: " + nonAdmin);
+        assertFalse(nonAdmin.contains("/ban <contact>"),
+                "hidden command detail must not leak the signature; got: " + nonAdmin);
+        assertFalse(nonAdmin.contains("/ban,") || nonAdmin.contains(": /ban"),
+                "suggestions must not include the hidden name itself; got: " + nonAdmin);
+
+        // A probation caller asking for a command outside the slow-start
+        // allowed subset (e.g. /save, hidden in the probation list).
+        String probation = handlerFor(dm(false, false, true), productionBundleLoader)
+                .handle(new ScopeRef.Dm("rookie"), "/help save").text();
+        assertTrue(probation.contains("Unknown command `/save`"),
+                "probation-hidden command must resolve to the unknown error; got: " + probation);
+        assertFalse(probation.contains(productionBundleLoader.get(BundleKeys.HELP_CMD_SAVE_USAGE)),
+                "probation caller must not see the /save detail; got: " + probation);
+
+        // An admin asking the same names gets the real detail.
+        String admin = handlerFor(dm(true, false, false), productionBundleLoader)
+                .handle(new ScopeRef.Dm("admin"), "/help ban").text();
+        assertTrue(admin.contains(productionBundleLoader.get(BundleKeys.HELP_CMD_BAN_USAGE)),
+                "bot admin must get the /ban detail; got: " + admin);
+    }
+
+    @Test
+    void helpListSourcesDetailShowsAdminFlagsOnlyToBotAdmin() {
+        String nonAdmin = handlerFor(dm(false, false, false), productionBundleLoader)
+                .handle(new ScopeRef.Dm("alice"), "/help list-sources").text();
+        assertTrue(nonAdmin.contains(productionBundleLoader.get(BundleKeys.HELP_CMD_LIST_SOURCES_USAGE)),
+                "non-admin must still get the base /list-sources detail; got: " + nonAdmin);
+        assertFalse(nonAdmin.contains("--all"),
+                "non-admin detail must not show the --all flag; got: " + nonAdmin);
+        assertFalse(nonAdmin.contains("--include-deleted"),
+                "non-admin detail must not show --include-deleted; got: " + nonAdmin);
+
+        String admin = handlerFor(dm(true, false, false), productionBundleLoader)
+                .handle(new ScopeRef.Dm("admin"), "/help list-sources").text();
+        assertTrue(admin.contains("--all") && admin.contains("--include-deleted"),
+                "bot-admin detail must show the admin-only flags; got: " + admin);
+    }
+
+    @Test
+    void helpDetailForEnabledAssetRendersDynamicShortLine() {
+        HelpCommandHandler handler = new HelpCommandHandler() {
+            @Override
+            HelpCommandHandler.CallerTier resolveTier(ScopeRef scope) {
+                return dm(false, false, false);
+            }
+        };
+        handler.bundleLoader = productionBundleLoader;
+        handler.commandPermissions = commandPermissions;
+        handler.inboundContext = new InboundContext();
+        handler.assetRegistry = new AssetRegistry() {
+            @Override
+            public List<AssetRegistry.AssetEntry> getEnabledAssets() {
+                return List.of(new AssetRegistry.AssetEntry(
+                        "zcash", "Zcash",
+                        List.of(new AssetRegistry.SubVerbEntry(
+                                "price", true, true, "https://example.com", "usd")),
+                        List.of("usd")));
+            }
+        };
+
+        String body = handler.handle(new ScopeRef.Dm("alice"), "/help zcash").text();
+
+        assertEquals("/zcash [sub-verb] [--vs <currency>] — Zcash market data (price)", body,
+                "enabled asset detail must be the existing dynamic short line");
+
+        // Without the asset enabled, the same name is unknown.
+        String disabled = handlerFor(dm(false, false, false), productionBundleLoader)
+                .handle(new ScopeRef.Dm("alice"), "/help zcash").text();
+        assertTrue(disabled.contains("Unknown command `/zcash`"),
+                "a non-enabled asset name must resolve to the unknown error; got: " + disabled);
+    }
+
+    @Test
+    void everyCatalogueCommandRendersADetailBlockForAnEligibleCaller() {
+        // botAdmin + groupAdmin in group scope sees all four tiers, so every
+        // catalogue command must render: usage block, Examples header,
+        // examples block — and stay markdown-free (D30).
+        HelpCommandHandler handler = handlerFor(group(true, true, false), productionBundleLoader);
+        for (HelpCommandHandler.CommandHelp entry : HelpCommandHandler.CATALOGUE) {
+            String body = handler.handle(new ScopeRef.Group("g1"), "/help " + entry.command()).text();
+            assertTrue(body.contains(productionBundleLoader.get(entry.usageKey())),
+                    "detail for /" + entry.command() + " must carry its usage block; got: " + body);
+            assertTrue(body.contains(productionBundleLoader.get(BundleKeys.HELP_DETAIL_EXAMPLES_HEADER)),
+                    "detail for /" + entry.command() + " must carry the Examples header");
+            assertTrue(body.contains(productionBundleLoader.get(entry.examplesKey())),
+                    "detail for /" + entry.command() + " must carry its examples block");
+            assertTrue(body.startsWith("/" + entry.command()),
+                    "detail for /" + entry.command() + " must start with its signature; got: " + body);
+            assertFalse(containsMarkdownLink(body),
+                    "detail for /" + entry.command() + " must not contain markdown links: " + body);
+            assertFalse(body.contains("<a href="),
+                    "detail for /" + entry.command() + " must not contain HTML anchors: " + body);
+        }
+    }
+
+    @Test
+    void helpDetailRendersInScopeLanguage() {
+        HelpCommandHandler handler = new HelpCommandHandler() {
+            @Override
+            HelpCommandHandler.CallerTier resolveTier(ScopeRef scope) {
+                return dm(false, false, false);
+            }
+        };
+        handler.bundleLoader = productionBundleLoader;
+        handler.commandPermissions = commandPermissions;
+        InboundContext context = new InboundContext();
+        context.setEffectiveLanguage("cs");
+        handler.inboundContext = context;
+        handler.assetRegistry = new AssetRegistry();
+
+        String body = handler.handle(new ScopeRef.Dm("alice"), "/help summary").text();
+
+        assertTrue(body.contains(productionBundleLoader.get(BundleKeys.HELP_CMD_SUMMARY_USAGE, "cs")),
+                "cs detail must resolve the cs usage block; got: " + body);
+        assertTrue(body.contains(productionBundleLoader.get(BundleKeys.HELP_DETAIL_EXAMPLES_HEADER, "cs")),
+                "cs detail must resolve the cs Examples header; got: " + body);
+    }
+
+    @Test
+    void helpDetailMissingBundleKeyPropagates() {
+        HelpCommandHandler handler = handlerFor(dm(false, false, false),
+                new RecordingBundleLoader(Set.of()));
+
+        assertThrows(IllegalStateException.class,
+                () -> handler.handle(new ScopeRef.Dm("alice"), "/help summary"));
     }
 
     // ----- helpers ----------------------------------------------------------
