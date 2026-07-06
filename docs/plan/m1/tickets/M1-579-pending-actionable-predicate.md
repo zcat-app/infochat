@@ -1,7 +1,7 @@
 ---
 id: M1-579
 title: "/pending lists only currently-actionable users (drop the terminal 'invited' roster arm)"
-status: pending
+status: in-progress
 created: 2026-07-06
 last_updated: 2026-07-06
 blocked_by: []
@@ -86,6 +86,10 @@ aborted_attempts: []
 reopens: []
 redteam_findings: []
 redteam_audits: []
+clarity_check:
+  date: 2026-07-06
+  verdict: PASS
+  warnings: []
 ---
 
 # M1-579: /pending lists only currently-actionable users
