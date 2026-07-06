@@ -26,6 +26,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -126,6 +127,7 @@ public class BootstrapLoader {
 
         BootstrapSourcesParser parser = new BootstrapSourcesParser();
         List<BootstrapSourcesEntry> entries = parser.parse(bytes);
+        failFastOnInvalidTags(entries);
 
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
@@ -253,19 +255,41 @@ public class BootstrapLoader {
     }
 
     /**
+     * Validates every source tag across all entries and throws ONCE,
+     * enumerating each invalid (source identifier, raw tag, reason) —
+     * an operator whose file carries several bad tags fixes them all in
+     * one pass instead of one reboot per tag (M1-578). Runs before the
+     * connection is borrowed, so fail-fast is preserved with nothing
+     * partially loaded.
+     */
+    private static void failFastOnInvalidTags(List<BootstrapSourcesEntry> entries) {
+        List<String> invalidTagReports = new ArrayList<>();
+        for (BootstrapSourcesEntry entry : entries) {
+            for (String raw : Objects.requireNonNull(entry.tags())) {
+                if (TagNormalizer.normalize(raw) == null) {
+                    invalidTagReports.add(
+                        "source '" + entry.identifier() + "': tag '" + raw
+                            + "' — must match " + TagNormalizer.TAG_NAME_PATTERN.pattern());
+                }
+            }
+        }
+        if (invalidTagReports.isEmpty()) {
+            return;
+        }
+        throw new IllegalStateException(
+            "BootstrapLoader: " + invalidTagReports.size()
+                + " invalid source tag(s) in bootstrap-sources file — fix all of them, then restart:\n  - "
+                + String.join("\n  - ", invalidTagReports));
+    }
+
+    /**
      * Delegates to the shared {@link TagNormalizer#normalize(String)}
      * (NFC + {@code Locale.ROOT} lower-case + character-class
-     * validation). Throws on an invalid tag so the operator gets a
-     * fast-fail at startup rather than a cryptic DB constraint
-     * violation mid-transaction.
+     * validation). Every file-sourced tag has already passed
+     * {@link #failFastOnInvalidTags}, so normalize cannot return null
+     * here; requireNonNull re-states that for the type system.
      */
     private static String normalizeTag(String raw) {
-        String normalized = TagNormalizer.normalize(raw);
-        if (normalized == null) {
-            throw new IllegalStateException(
-                "BootstrapLoader: invalid tag '" + raw + "' — must match "
-                    + TagNormalizer.TAG_NAME_PATTERN.pattern());
-        }
-        return normalized;
+        return Objects.requireNonNull(TagNormalizer.normalize(raw));
     }
 }

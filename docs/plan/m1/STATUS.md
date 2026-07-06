@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 603 |
+| done | 604 |
 | deferred | 11 |
 | **total** | **619** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-578 — BootstrapLoader reports ALL invalid source tags at once, not just the first (complexity: low, risk: low)
 - M1-582 — Single-owner cutover: stop-first pack guidance and a Provider-start gate in restore.sh (complexity: medium, risk: medium)
 - M1-583 — Close the secret-disposal gaps: shred pack.sh staging; shred-bundle accepts pack remnants and bare .pgc; hardlink/SSD caveat (complexity: medium, risk: medium)
 - M1-584 — Identity mount targets: correct the over-claiming allowlist comment; refuse system-prefix and colon data-dirs (complexity: medium, risk: medium)
@@ -66,13 +65,13 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-581 | restore.sh: exact identity-path gate, truthful failure remediation, operator-role reminder | 2026-07-06 | round 1 APPROVE |
 | M1-580 | restore.sh fails loud on real pg_restore errors (stderr gate, not just table-presence) | 2026-07-06 | round 1 APPROVE |
 | M1-579 | /pending lists only currently-actionable users (drop the terminal 'invited' roster arm) | 2026-07-06 | round 1 APPROVE |
+| M1-578 | BootstrapLoader reports ALL invalid source tags at once, not just the first | 2026-07-06 | round 1 APPROVE |
 | M1-577 | Startup guard for remote-LLM provider/base-url/model mismatch (catch silent 400s) | 2026-07-06 | round 1 APPROVE |
 | M1-576 | /follow-all-sources: bulk-subscribe an approved scope to all live sources | 2026-07-06 | round 1 APPROVE |
 | M1-575 | Admin visibility of actionable users (/pending): probation + awaiting-vouch, with usable contact ids | 2026-07-06 | round 1 APPROVE |
 | M1-573 | In-app per-command help: /help <command> shows usage, flags, and examples | 2026-07-06 | round 1 APPROVE |
 | M1-572 | operator-invoked shred-bundle.sh for safe disposal of pack.sh bundles | 2026-07-06 | round 1 APPROVE |
 | M1-571 | persist custom GGUF download URL + SHA so restore recovers custom models | 2026-07-05 | round 1 APPROVE |
-| M1-570 | restore.sh reconstructs the infochat_admin role before pg_restore | 2026-07-05 | round 1 APPROVE |
 
 ---
 
@@ -787,7 +786,7 @@ M1-575 (done)
 M1-576 (done)
   └── M1-573 (done) [see above]
 M1-577 (done)
-M1-578 (pending) ← runnable
+M1-578 (done)
 M1-579 (done)
 M1-580 (done)
   └── M1-585 (pending)

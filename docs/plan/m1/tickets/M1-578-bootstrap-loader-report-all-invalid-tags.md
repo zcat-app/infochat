@@ -1,7 +1,7 @@
 ---
 id: M1-578
 title: "BootstrapLoader reports ALL invalid source tags at once, not just the first"
-status: pending
+status: done
 created: 2026-07-06
 last_updated: 2026-07-06
 blocked_by: []
@@ -50,7 +50,20 @@ test_plan:
 spec_refs:
   - "docs/design/03-commands.md §Tag arguments"
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-06
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 120
+      removed: 17
 escalations: []
 overrides: []
 revisions: []
@@ -58,6 +71,27 @@ aborted_attempts: []
 reopens: []
 redteam_findings: []
 redteam_audits: []
+clarity_check:
+  date: 2026-07-06
+  verdict: WARN
+  warnings:
+    - >-
+      ACCEPTANCE-RUNNABLE item 4: names a test class (BootstrapLoaderTest.java)
+      that does not exist yet; the only existing test for BootstrapLoader is
+      BootstrapLoaderIT.java (@QuarkusTest + DataSource). A sibling *Test
+      unit-test file is an accepted pattern here, but it must be a plain unit
+      test of the collect-then-throw validation logic (no @QuarkusTest /
+      DataSource) — a DataSource-backed class under the *Test name trips
+      IntegrationTestNamingGuardTest (M1-495) and fails mvn verify (acceptance
+      item 5). Same class-name confusion was hit and corrected in M1-041.
+    - >-
+      FILES-BUDGET-PLAUSIBLE: files_scope does not list the pre-existing
+      BootstrapLoaderIT.java. Likely fine — its existing assertion
+      invalidTagInBootstrapJsonFailsFast is a substring check
+      (message contains "machine learning") that should survive the
+      enumerated-message format — but the implementer must verify that file
+      keeps passing unmodified.
+  blockers: []
 ---
 
 # M1-578: Report all invalid bootstrap tags at once
