@@ -7,7 +7,7 @@
 > in [`README.md`](README.md) — that stays the source of truth; this file links
 > into it. `process:` commit prefix (docs-only, no ticket, no `mvn verify`).
 
-Last updated: 2026-07-06 (**BATCH EXECUTION OF THE 9 REMAINING TICKETS PREPARED — launch it in the fresh session via the named workflow `.claude/workflows/m1-batch-lines.js`; see START HERE. Also this date: M1-573 merged @ f81a06f5; audit of M1-567..576 → tickets M1-579..585 filed @ 851089d8; M1-577/578 promoted @ 3d2faf61; board 9 pending / 599 done.** Previous status 2026-07-05: MIGRATION ROUND-TRIP RE-RUN DONE + VALIDATED — the destructive pack→wipe→restore ran in place on this host; restore.sh rebuilt a healthy clone on the FIRST pass with NO manual repair (RESTORE_EXIT=0). Both fixes PROVEN on real wire: M1-570 (infochat_admin reconstructed before pg_restore → ZERO permission errors, collector heartbeats healthy — the prior round-trip died here) and M1-571 (5.3 GB custom gen GGUF re-fetched from the backfilled secrets.env URL, SHA-verified vs 819372…, llama.cpp server healthy). All 5 containers healthy; both apps readiness 200; adapter_connection_status=1.0 for signal+simplex (same bot); DB vs golden = all STABLE tables exact (users=3, admins=2, source=74, tag=24, groups=1, invite_code=1, post=3800, chat_message=42, flyway=56), 3 append-only tables +few (expected). One leg optional/undriven: §7.10 step-5 bot-chat /audit+/summary via a live client. SHRED DONE (recovery-test bundle/safety + .scratch pre-backfill bak all shredded). LLM BENCHMARK DONE (llamacpp-default gemma / ollama llama3.2:3b / remote DeepSeek measured swap-in-place; results → SETUP_GUIDE §"AI backend performance on modest hardware" @04635d78; deployment restored to baseline). M1-572 drafted (shred-bundle.sh helper). board 595 done / 0 pending. main ~18 ahead of origin, NOT pushed**) · Owner: ubuntu5 + Claude
+Last updated: 2026-07-06 (**BATCH EXECUTION OF THE 9 REMAINING TICKETS PREPARED + PER-TICKET SOLVER MODEL WIRED @ 318bd0b0 (fable5 for security/high-risk, opus-4-7 else) — launch it in the fresh session via the named workflow `.claude/workflows/m1-batch-lines.js`; see START HERE. Also this date: M1-573 merged @ f81a06f5; audit of M1-567..576 → tickets M1-579..585 filed @ 851089d8; M1-577/578 promoted @ 3d2faf61; board 9 pending / 599 done.** Previous status 2026-07-05: MIGRATION ROUND-TRIP RE-RUN DONE + VALIDATED — the destructive pack→wipe→restore ran in place on this host; restore.sh rebuilt a healthy clone on the FIRST pass with NO manual repair (RESTORE_EXIT=0). Both fixes PROVEN on real wire: M1-570 (infochat_admin reconstructed before pg_restore → ZERO permission errors, collector heartbeats healthy — the prior round-trip died here) and M1-571 (5.3 GB custom gen GGUF re-fetched from the backfilled secrets.env URL, SHA-verified vs 819372…, llama.cpp server healthy). All 5 containers healthy; both apps readiness 200; adapter_connection_status=1.0 for signal+simplex (same bot); DB vs golden = all STABLE tables exact (users=3, admins=2, source=74, tag=24, groups=1, invite_code=1, post=3800, chat_message=42, flyway=56), 3 append-only tables +few (expected). One leg optional/undriven: §7.10 step-5 bot-chat /audit+/summary via a live client. SHRED DONE (recovery-test bundle/safety + .scratch pre-backfill bak all shredded). LLM BENCHMARK DONE (llamacpp-default gemma / ollama llama3.2:3b / remote DeepSeek measured swap-in-place; results → SETUP_GUIDE §"AI backend performance on modest hardware" @04635d78; deployment restored to baseline). M1-572 drafted (shred-bundle.sh helper). board 595 done / 0 pending. main ~18 ahead of origin, NOT pushed**) · Owner: ubuntu5 + Claude
 
 ---
 
@@ -27,6 +27,19 @@ FRESH SESSION ON THE USER'S GO.** What led here, all committed on `main` (NOT pu
   (M1-585 `blocked_by` its own line's 580/581/584 — by design).
 - **The batch workflow is committed as a named workflow:
   `.claude/workflows/m1-batch-lines.js`** (user-approved design, 2026-07-06).
+- **Per-ticket solver model wired @ 318bd0b0 (user directive 2026-07-06).** The
+  developer-agent that SOLVES each ticket runs on a model chosen from that ticket's own
+  frontmatter: **Fable 5** when `security_relevant: true` OR `risk: high`, **Opus 4.7**
+  otherwise. Preflight returns the flags in `pre.tickets`; `modelFor(id)` applies the rule
+  (flag-derived, not a fixed id list, so an `args.lines` override still classifies right).
+  This batch → **fable: M1-579/580/581/582/583/584** (the 6 security-relevant, 580 also
+  risk:high); **opus-4-7: M1-577/578/585**. Gate subagents keep their own definitions
+  (clarity-reviewer pinned `sonnet`; code-reviewer/threat-actor/plan-writer `model:
+  inherit`). **CAVEAT:** `claude-fable-5` is the documented exact id; `claude-opus-4-7`
+  follows the `claude-opus-4-8` naming pattern but was NOT probe-verified (the user declined
+  the probe). If the harness rejects it, only the 3 opus tickets (577/578/585) are hit — the
+  6 fable security tickets still complete; fix = one-word edit to `modelFor` + relaunch the
+  remaining tickets (see "If interrupted" below).
 
 ### How to launch (single action)
 
@@ -63,6 +76,28 @@ Read the workflow result and the run's `journal.jsonl` before diagnosing anythin
 Halted tickets keep their worktrees and `escalated` status for the user's five-way
 menu (`git worktree list` first, per SKILL.md session-resume rule). Push remains the
 user's call.
+
+### If interrupted mid-run (resume / recover)
+
+The batch keeps NO state file of its own; durability is git (merged tickets + STATUS) plus
+the harness `journal.jsonl`. Two recovery paths:
+- **SAME session** (the run was killed but this session is alive): relaunch with
+  `Workflow({scriptPath: '<repo>/.claude/workflows/m1-batch-lines.js', resumeFromRunId:
+  '<runId from the original launch>'})` — merged tickets are cached and return instantly;
+  execution goes live from the first uncached `agent()` call. `resumeFromRunId` is
+  **SAME-SESSION ONLY**.
+- **FRESH session** (context was cleared — the likely case here): do NOT bare-relaunch —
+  preflight asserts every batch ticket is `status: pending` and ABORTS once some are merged
+  (that guard is deliberate). Instead relaunch listing ONLY the still-pending tickets:
+  `Workflow({name: 'm1-batch-lines', args: {lines: {Scripts: [<remaining…>], Java:
+  [<remaining…>]}}})`. Merged tickets simply drop out of LINES, preflight passes, and the
+  flag-derived model still classifies the subset correctly.
+- **GAP either way:** one agent = one whole ticket, so a ticket cut off MID-FLIGHT is not
+  checkpointed — its worktree/branch (and possibly a completed merge + status flip) exist on
+  disk but a re-run starts from scratch. Reconcile that ONE ticket first (`git worktree
+  list` + its ticket status) before you resume/relist.
+- An interrupted run leaves the **bot DOWN** (only wrap-up restarts it). If you won't resume
+  promptly, restart the stack manually via `prod/scripts/apps.sh`.
 
 ## ▶ previous START HERE (2026-07-05 — migration round-trip re-run, kept for context)
 
