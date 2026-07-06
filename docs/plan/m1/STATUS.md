@@ -10,8 +10,8 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
-| in-progress | 1 |
+| pending | 7 |
+| in-progress | 2 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 599 |
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-577 — Startup guard for remote-LLM provider/base-url/model mismatch (catch silent 400s) (complexity: medium, risk: low)
 - M1-578 — BootstrapLoader reports ALL invalid source tags at once, not just the first (complexity: low, risk: low)
-- M1-580 — restore.sh fails loud on real pg_restore errors (stderr gate, not just table-presence) (complexity: medium, risk: high)
 - M1-581 — restore.sh: exact identity-path gate, truthful failure remediation, operator-role reminder (complexity: medium, risk: medium)
 - M1-582 — Single-owner cutover: stop-first pack guidance and a Provider-start gate in restore.sh (complexity: medium, risk: medium)
 - M1-583 — Close the secret-disposal gaps: shred pack.sh staging; shred-bundle accepts pack remnants and bare .pgc; hardlink/SSD caveat (complexity: medium, risk: medium)
@@ -39,6 +38,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 | ID | Title | Status | Last review |
 |---|---|---|---|
 | M1-579 | /pending lists only currently-actionable users (drop the terminal 'invited' roster arm) | in-progress | (none) |
+| M1-580 | restore.sh fails loud on real pg_restore errors (stderr gate, not just table-presence) | in-progress | (none) |
 
 ---
 
@@ -46,7 +46,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-585 — blocked_by: M1-580 (pending), M1-581 (pending), M1-584 (pending)
+- M1-585 — blocked_by: M1-580 (in-progress), M1-581 (pending), M1-584 (pending)
 
 ---
 
@@ -791,7 +791,7 @@ M1-576 (done)
 M1-577 (pending) ← runnable
 M1-578 (pending) ← runnable
 M1-579 (in-progress)
-M1-580 (pending) ← runnable
+M1-580 (in-progress)
   └── M1-585 (pending)
 M1-581 (pending) ← runnable
   └── M1-585 (pending) [see above]
