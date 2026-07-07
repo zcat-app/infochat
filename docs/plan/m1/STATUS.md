@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 608 |
 | deferred | 11 |
-| **total** | **619** |
+| **total** | **620** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-586 — Strip markdown fences before entity/tagger JSON parse (complexity: low, risk: low)
 
 ---
 
@@ -794,4 +794,5 @@ M1-582 (done)
 M1-583 (done)
 M1-584 (done)
   └── M1-585 (done) [see above]
+M1-586 (pending) ← runnable
 ```
