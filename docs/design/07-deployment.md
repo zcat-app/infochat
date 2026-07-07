@@ -1055,9 +1055,18 @@ on the host. This is adapter-agnostic: SimpleX and Signal dirs go through the
 identical privileged path (no reliance on SimpleX's incidental `0644`), and the
 restore untar preserves `root:root` ownership + modes so each daemon accepts the
 restored identity as its own. Because the restore untar now runs as root, the M1-568
-allowlist — extract ONLY the configured data-dir members — is **load-bearing**, not
-merely defense-in-depth; the untar additionally mounts only the allowlisted dirs
-writable, so a tampered bundle's extra members cannot reach the host even as root.
+allowlist — extract ONLY the configured data-dir members — is **load-bearing** for an
+honest-config bundle's EXTRA members, not merely defense-in-depth; the untar mounts
+only the configured data-dirs writable. This does NOT stop a COHERENTLY tampered
+bundle: the writable mount target is derived from the same operator-controlled
+`INFOCHAT_<NAME>_DATA_DIR` the allowlist is built from, so a tamper naming a system dir
+(with a matching tar member) would let the root untar write there — an out-of-model,
+supply-chain case (security.md keeps the bundle trusted). Running the untar as root
+also removed the M1-568-era incidental EACCES backstop against root-owned system dirs;
+`pack.sh` and `restore.sh` restore an explicit equivalent by **refusing**, before any
+mount is built and naming the offending key, a `data-dir` that resolves under a
+clearly-system prefix (`/etc /root /boot /bin /sbin /lib /lib64 /dev /proc /sys
+/var/lib/docker`) or that contains a `:` — docker's `-v` mount-spec separator (M1-584).
 `backup.sh` (§7.10) shares the same host-side `tar -C /` identity model and therefore
 the same root requirement — it works today only because cron runs it as root; giving
 `backup.sh` the same in-container tar is a separate follow-up (its contract is frozen

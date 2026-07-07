@@ -134,6 +134,38 @@ read_dotenv_value() {
   printf '%s' "$val"
 }
 
+# Boundary validation (M1-584) for an operator-configured adapter data-dir before
+# it becomes a writable identity bind-mount target. Two refusals:
+#   - ':' — docker's -v mount-spec separator; a data-dir containing one yields a
+#     mis-parsed `-v` and an obscure docker error, so refuse with a named message.
+#   - a clearly-system prefix — under the M1-569 ROOT in-container untar the mount
+#     `-v /$rel:/$rel` is writable, so a value like /etc/cron.d would let the root
+#     tar write root-owned files onto the host. This denylist restores an explicit
+#     equivalent of the EACCES property M1-568's non-root untar gave for free. A
+#     COHERENTLY tampered bundle (matching secrets.env + tar member) is still
+#     out-of-model — supply-chain, excluded by security.md, and game-over via the
+#     DB creds regardless; this is the cheap M1-568/M1-565 defense-in-depth gate,
+#     a denylist of clearly-system prefixes being the widest gate that breaks no
+#     legitimate operator layout. Literal-prefix match (no realpath): the EACCES
+#     equivalent it restores only ever protected the direct system path too.
+SYSTEM_DATA_DIR_PREFIXES=(/etc /root /boot /bin /sbin /lib /lib64 /dev /proc /sys /var/lib/docker)
+reject_unsafe_data_dir() {
+  local key="$1" dir="$2" prefix
+  if [[ "$dir" == *:* ]]; then
+    echo "FAIL: $key=$dir contains ':' — docker's -v mount-spec separator; an identity" >&2
+    echo "      data-dir must not contain a colon (it would mis-parse the bind-mount)." >&2
+    exit 1
+  fi
+  for prefix in "${SYSTEM_DATA_DIR_PREFIXES[@]}"; do
+    if [[ "$dir" == "$prefix" || "$dir" == "$prefix"/* ]]; then
+      echo "FAIL: $key=$dir resolves under the system prefix $prefix — refusing to build a" >&2
+      echo "      writable identity mount there. Configure adapter data-dirs outside system" >&2
+      echo "      directories (${SYSTEM_DATA_DIR_PREFIXES[*]})." >&2
+      exit 1
+    fi
+  done
+}
+
 # The one true return-to-FRESH recipe, shared by the already-configured gate and
 # the post-mutation partial-state note (M1-581) so both name the SAME actionable
 # fix. setup.sh --reset --hard is NOT this recipe: its do_reset removes
@@ -337,6 +369,10 @@ identity_rel_paths=()
 for key in INFOCHAT_SIMPLEX_DATA_DIR INFOCHAT_SIGNAL_DATA_DIR; do
   dir="$(read_dotenv_value "$key" "$STAGED_SECRETS")"
   [[ -z "$dir" ]] && continue
+  # M1-584: refuse a colon or clearly-system data-dir BEFORE any mount is built —
+  # ahead of the tar-consistency grep, so an obviously-dangerous value is rejected
+  # without doing the listing work (and the FAIL names the offending key).
+  reject_unsafe_data_dir "$key" "$dir"
   rel="${dir#/}"
   if ! printf '%s\n' "$tar_entries" | grep -qxF -- "$rel/"; then
     echo "FAIL: identity path mismatch — $key=$dir has no matching entry in the bundle." >&2
@@ -409,11 +445,20 @@ PLACED+=("config + secrets + bootstrap files in $RUNTIME_DIR")
 #
 # Extract naming ONLY the allowlisted data-dir paths validated by the gate above:
 # GNU tar extracts each named directory member recursively and IGNORES every other
-# member, so a TAMPERED bundle carrying extra members that name system paths
-# (e.g. etc/cron.d/..., root/.ssh/...) is never written onto this host — doubly so,
-# since only the allowlisted dirs are even mounted writable. Under the now-ROOT untar
-# this allowlist is LOAD-BEARING, not merely defense-in-depth (M1-568/M1-569); the
-# tampered bundle stays an out-of-model, supply-chain concern (security.md).
+# member. For a bundle whose secrets.env is HONEST, the named-member allowlist plus
+# the mount scoping below bound the EXTRA members a tampered identities.tgz might
+# smuggle (etc/cron.d/..., root/.ssh/...): they are not among the named members, so
+# they are never extracted. What this does NOT stop is a COHERENTLY tampered bundle:
+# the writable mount target `-v /$rel:/$rel` is derived from the SAME
+# attacker-controlled secrets.env value the allowlist is built from, so a tamper that
+# sets INFOCHAT_<NAME>_DATA_DIR=/etc/cron.d with a matching tar member passes the
+# consistency gate and the ROOT tar (M1-569) writes there — the M1-568-era incidental
+# backstop (a NON-root untar dying on EACCES against root-owned system dirs) no longer
+# exists. The reject_unsafe_data_dir denylist above restores an explicit equivalent of
+# that EACCES property for the clearly-system prefixes; a coherently tampered bundle
+# stays an out-of-model, supply-chain concern either way (security.md keeps the bundle
+# trusted). So the allowlist is LOAD-BEARING for the honest-config extra-member case,
+# NOT a guarantee against a coherent tamper — this comment must not over-claim.
 # The empty-array guard stays load-bearing: `tar -x` with NO members extracts
 # EVERYTHING, which would reopen exactly the hole this closes — so a bundle that
 # carries identities.tgz but names no configured adapter is a malformed/tampered

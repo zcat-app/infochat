@@ -29,7 +29,8 @@ import org.junit.jupiter.api.io.TempDir;
  * over the M1-569 root-in-container untar PLUS the bounded pg_restore error gate
  * (M1-580, the two cases driving past the gates to the DB step) PLUS the single-owner
  * Provider-start consent gate (M1-582, the two cases driving past the DB step to
- * bring-up).</b>
+ * bring-up) PLUS the M1-584 data-dir boundary refusals (a system-prefix or colon
+ * value refused in the DATA_DIR validation loop, before any mount is built).</b>
  * The gate cases fail before the identity extraction, so they never mutate the host or
  * exercise Docker for real — the fake {@code docker} only has to satisfy
  * {@code command -v docker} and the one {@code docker volume ls} probe the fresh-volume gate
@@ -226,6 +227,49 @@ class RestoreWiringTest {
                 "the refusal must state it aborted before any change:\n" + r.output);
         // Pre-mutation: the gate fires BEFORE config placement, so nothing lands on the
         // host — the exact promise the substring gate broke.
+        assertTrue(Files.notExists(tmp.resolve("runtime").resolve("secrets.env")),
+                "the refusal must come BEFORE any mutation (no secrets.env placed):\n" + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void systemPrefixDataDirRefusedPreMutation(@TempDir Path tmp) throws Exception {
+        // M1-584: under the M1-569 ROOT untar the identity bind-mount `-v /$rel:/$rel`
+        // is writable, so a data-dir naming a system dir would let the root tar write
+        // root-owned files onto the host. restore.sh refuses such a value in the DATA_DIR
+        // validation loop BEFORE any mount is built (an explicit equivalent of the EACCES
+        // property the non-root untar gave for free). /etc/cron.d is the audit's worked
+        // example. The refusal fires ahead of the tar-consistency grep, so buildValidBundle's
+        // consistent (if ./-prefixed) identity tar is never reached.
+        Path bundle = buildValidBundle(tmp, "/etc/cron.d", "etc/cron.d");
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false);
+
+        assertNotEquals(0, r.exitCode, "a system-prefix data-dir must be refused:\n" + r.output);
+        assertTrue(r.output.contains("resolves under the system prefix")
+                        && r.output.contains("INFOCHAT_SIGNAL_DATA_DIR"),
+                "the refusal must name the offending key and the system-prefix rule:\n" + r.output);
+        // Pre-mutation: the gate fires in the DATA_DIR loop, before config placement.
+        assertTrue(Files.notExists(tmp.resolve("runtime").resolve("secrets.env")),
+                "the refusal must come BEFORE any mutation (no secrets.env placed):\n" + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void colonDataDirRefusedWithNamedMessage(@TempDir Path tmp) throws Exception {
+        // M1-584: ':' is docker's -v mount-spec separator, so a data-dir containing one
+        // yields a mis-parsed mount and an obscure docker error. restore.sh refuses it in
+        // the DATA_DIR validation loop with a message naming the constraint — a pure
+        // error-message improvement for trusted-but-fallible operator config. The
+        // identityTarTop is irrelevant: the colon refusal fires before the consistency gate.
+        Path bundle = buildValidBundle(tmp, "/var/lib/infochat/sig:nal", "var/lib/infochat/signal");
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false);
+
+        assertNotEquals(0, r.exitCode, "a colon-containing data-dir must be refused:\n" + r.output);
+        assertTrue(r.output.contains("contains ':'")
+                        && r.output.contains("INFOCHAT_SIGNAL_DATA_DIR"),
+                "the refusal must name the offending key and the colon constraint:\n" + r.output);
         assertTrue(Files.notExists(tmp.resolve("runtime").resolve("secrets.env")),
                 "the refusal must come BEFORE any mutation (no secrets.env placed):\n" + r.output);
     }

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 606 |
+| done | 607 |
 | deferred | 11 |
 | **total** | **619** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-584 — Identity mount targets: correct the over-claiming allowlist comment; refuse system-prefix and colon data-dirs (complexity: medium, risk: medium)
+- M1-585 — RestoreWiringTest: behavioral pins for persisted-SHA recovery, role-before-restore order, and mount shape (complexity: medium, risk: low)
 
 ---
 
@@ -41,7 +41,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-585 — blocked_by: M1-580 (done), M1-581 (done), M1-584 (pending)
+_(none)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-584 | Identity mount targets: correct the over-claiming allowlist comment; refuse system-prefix and colon data-dirs | 2026-07-07 | round 1 APPROVE |
 | M1-583 | Close the secret-disposal gaps: shred pack.sh staging; shred-bundle accepts pack remnants and bare .pgc; hardlink/SSD caveat | 2026-07-07 | round 2 APPROVE |
 | M1-582 | Single-owner cutover: stop-first pack guidance and a Provider-start gate in restore.sh | 2026-07-06 | round 1 APPROVE |
 | M1-581 | restore.sh: exact identity-path gate, truthful failure remediation, operator-role reminder | 2026-07-06 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-577 | Startup guard for remote-LLM provider/base-url/model mismatch (catch silent 400s) | 2026-07-06 | round 1 APPROVE |
 | M1-576 | /follow-all-sources: bulk-subscribe an approved scope to all live sources | 2026-07-06 | round 1 APPROVE |
 | M1-575 | Admin visibility of actionable users (/pending): probation + awaiting-vouch, with usable contact ids | 2026-07-06 | round 1 APPROVE |
-| M1-573 | In-app per-command help: /help <command> shows usage, flags, and examples | 2026-07-06 | round 1 APPROVE |
 
 ---
 
@@ -787,11 +787,11 @@ M1-577 (done)
 M1-578 (done)
 M1-579 (done)
 M1-580 (done)
-  └── M1-585 (pending)
+  └── M1-585 (pending) ← runnable
 M1-581 (done)
   └── M1-585 (pending) [see above]
 M1-582 (done)
 M1-583 (done)
-M1-584 (pending) ← runnable
+M1-584 (done)
   └── M1-585 (pending) [see above]
 ```

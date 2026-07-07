@@ -105,6 +105,32 @@ read_dotenv_value() {
   printf '%s' "$val"
 }
 
+# Boundary validation (M1-584) — the TWIN of restore.sh's identical guard: pack.sh
+# builds the same writable `-v /$rel:/$rel` identity-tar mount from the same
+# operator-configured data-dir, so it applies the same two refusals. A ':' is
+# docker's -v mount-spec separator (a colon data-dir mis-parses the mount); a
+# clearly-system prefix would name a writable mount over a system dir. See
+# restore.sh's fuller note for the M1-568/M1-569 EACCES-equivalent rationale — both
+# scripts keep the denylist in sync (as with read_dotenv_value, duplicated rather
+# than sourced because there is no shared lib and backup.sh's contract is frozen).
+SYSTEM_DATA_DIR_PREFIXES=(/etc /root /boot /bin /sbin /lib /lib64 /dev /proc /sys /var/lib/docker)
+reject_unsafe_data_dir() {
+  local key="$1" dir="$2" prefix
+  if [[ "$dir" == *:* ]]; then
+    echo "FAIL: $key=$dir contains ':' — docker's -v mount-spec separator; an identity" >&2
+    echo "      data-dir must not contain a colon (it would mis-parse the bind-mount)." >&2
+    exit 1
+  fi
+  for prefix in "${SYSTEM_DATA_DIR_PREFIXES[@]}"; do
+    if [[ "$dir" == "$prefix" || "$dir" == "$prefix"/* ]]; then
+      echo "FAIL: $key=$dir resolves under the system prefix $prefix — refusing to build a" >&2
+      echo "      writable identity mount there. Configure adapter data-dirs outside system" >&2
+      echo "      directories (${SYSTEM_DATA_DIR_PREFIXES[*]})." >&2
+      exit 1
+    fi
+  done
+}
+
 # The two config files a deployment cannot run without; fail loud if either is
 # missing (a clone without them is useless). bootstrap-assets.json is optional
 # (only the asset feature writes it) and copied conditionally below.
@@ -199,6 +225,8 @@ for key in INFOCHAT_SIMPLEX_DATA_DIR INFOCHAT_SIGNAL_DATA_DIR; do
     echo "  skip ${key} (adapter not configured)"
     continue
   fi
+  # M1-584: refuse a colon or clearly-system data-dir before building the tar mount.
+  reject_unsafe_data_dir "$key" "$dir"
   if [[ ! -d "$dir" ]]; then
     echo "FAIL: ${key}=$dir is configured but the directory does not exist." >&2
     exit 1

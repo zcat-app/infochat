@@ -1,9 +1,23 @@
 ---
 id: M1-584
 title: "Identity mount targets: correct the over-claiming allowlist comment; refuse system-prefix and colon data-dirs"
-status: pending
+status: done
 created: 2026-07-06
-last_updated: 2026-07-06
+last_updated: 2026-07-07
+clarity_check:
+  date: 2026-07-07
+  verdict: WARN
+  warnings:
+    - >-
+      Acceptance item 3's "pack.sh applies the same two refusals" has no test
+      in test_plan (no PackWiringTest exists); a regression in pack.sh's
+      mirrored validation would pass mvn verify undetected. pack.sh's mirror
+      is verified by code review only.
+    - >-
+      Acceptance item 5 ("§7.10.1 notes the two constraints") does not pin
+      expected wording/placement; implement as a checkable one-line note in
+      the pack.sh/restore.sh data-dir contract bullet.
+  blockers: []
 blocked_by: []
 files_budget: 4
 files_scope:
@@ -72,14 +86,46 @@ spec_refs:
   - "docs/design/07-deployment.md §7.10.1"
   - "docs/spec/security.md §Threat model"
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 157
+      removed: 18
 escalations: []
 overrides: []
 revisions: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-07-07
+    verdict: CLEAN
+    base: main (96aac25e)
+    head: m1/M1-584-identity-mount-target-guard (working tree, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-584-2026-07-07.md
+    out_of_model_count: 3
+    note: >-
+      Pre-commit audit (security_relevant: true) of the branch working tree.
+      CLEAN. Three out-of-model advisories, all matching deliberate documented
+      trade-offs: (1) literal-prefix match, no realpath — a `..`/symlink
+      coherent tamper could evade the denylist, but that is supply-chain /
+      trusted-config, out of security.md scope, and the comment acknowledges
+      the no-realpath limitation; (2) the denylist omits /usr and /usr/local
+      (a merged-usr system's /bin,/sbin,/lib symlink into /usr) — a possible
+      belt-and-suspenders addition, but out-of-model and risks false-positives
+      on legit /usr/local state, so not filed; (3) the whole pack/restore
+      clone-tooling surface is outside the documented threat model — the diff
+      strictly ADDS defense-in-depth and CORRECTS an over-claim, removing no
+      protection. None warrants a follow-up ticket.
 ---
 
 # M1-584: identity mount-target guard + honest comment
