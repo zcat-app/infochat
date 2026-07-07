@@ -15,7 +15,8 @@
 | in-review | 0 |
 | escalated | 0 |
 | done | 609 |
-| deferred | 11 |
+| deferred | 1 |
+| abandoned | 10 |
 | **total** | **620** |
 
 ---
@@ -75,28 +76,32 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 ## Deferred
 
-### blocked-on-new-ticket (1)
-- M1-505 → M1-506
-
-### decomposed (5)
-- M1-034 → M1-034a
-- M1-318 → unspecified
-- M1-493 → unspecified
-- M1-511 → unspecified
-- M1-522 → unspecified
-
 ### post-mvp-hardening (1)
 - M1-031 → unspecified
 
-### spec-amend (2)
-- M1-314 → M1-324
-- M1-574 → M1-575
+---
 
-### superseded-by-M1-396 (1)
-- M1-372 → M1-396
+## Abandoned
+
+Tickets decided against — not implemented as this ticket. Terminal: not reopenable via the driver's `reopen`. `abandoned_reason` records why (`decomposed` = split into shipped children; `superseded` = absorbed by another ticket; `obsoleted-by-spec-amend` = a spec change dropped the requirement; `wont-do-infeasible` = evaluated and judged not worth building). See `docs/process/workflow.md` §Status values.
+
+### decomposed (5)
+- M1-034 — Tagger + Embedding pipeline + status→READY + new_post NOTIFY
+- M1-318 — Derive per-adapter bot contact id from adapter identity material (SimpleX queue address, Signal ACI)
+- M1-493 — Schema hardening: NOT NULL upstream_identifier + approve_quarantine phantom NOTIFY
+- M1-511 — SimpleX groups: v6.5.4.1 mention recognition + auto-accept group invitations
+- M1-522 — Free auto_joined_group slots when the bot leaves a group
+
+### obsoleted-by-spec-amend (1)
+- M1-314 — Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed
+
+### superseded (3)
+- M1-372 — messaging: align the SimpleX auth-failure design note with the loopback-trusted v1 transport and drop the dead auth.fail meter
+- M1-505 — SimpleX: map inbound admin DM to the configured admin address
+- M1-574 — /audit renders the usable target contact id, not the internal user UUID
 
 ### wont-do-infeasible (1)
-- M1-258 → unspecified
+- M1-258 — ThrottledAdminNotifier: fold suppressed_count bump into the UPSERT
 
 ---
 
@@ -117,12 +122,12 @@ M1-001 (done)
   │     │     │     │     ├── M1-028 (done)
   │     │     │     │     │     └── M1-032 (done)
   │     │     │     │     │           └── M1-033 (done)
-  │     │     │     │     │                 ├── M1-034 (deferred)
+  │     │     │     │     │                 ├── M1-034 (abandoned)
   │     │     │     │     │                 └── M1-034a (done)
-  │     │     │     │     │                       ├── M1-034 (deferred) [see above]
+  │     │     │     │     │                       ├── M1-034 (abandoned) [see above]
   │     │     │     │     │                       └── M1-034b (done)
   │     │     │     │     ├── M1-032 (done) [see above]
-  │     │     │     │     ├── M1-034 (deferred) [see above]
+  │     │     │     │     ├── M1-034 (abandoned) [see above]
   │     │     │     │     └── M1-034a (done) [see above]
   │     │     │     ├── M1-021 (done)
   │     │     │     └── M1-022 (done)
@@ -131,7 +136,7 @@ M1-001 (done)
   │     │     │     ├── M1-008 (done) [see above]
   │     │     │     ├── M1-008c (done) [see above]
   │     │     │     ├── M1-022 (done) [see above]
-  │     │     │     ├── M1-034 (deferred) [see above]
+  │     │     │     ├── M1-034 (abandoned) [see above]
   │     │     │     └── M1-034a (done) [see above]
   │     │     └── M1-009 (done)
   │     ├── M1-008a (done) [see above]
@@ -452,7 +457,7 @@ M1-253 (done)
 M1-255 (done)
 M1-256 (done)
 M1-257 (done)
-M1-258 (deferred)
+M1-258 (abandoned)
 M1-259 (done)
 M1-260 (done)
 M1-261 (done)
@@ -480,7 +485,7 @@ M1-281 (done)
 M1-282 (done)
 M1-284 (done)
   ├── M1-313 (done)
-  └── M1-314 (deferred)
+  └── M1-314 (abandoned)
 M1-285 (done)
 M1-286 (done)
 M1-287 (done)
@@ -491,7 +496,7 @@ M1-291 (done)
 M1-292 (done)
 M1-293 (done)
 M1-294 (done)
-  └── M1-314 (deferred) [see above]
+  └── M1-314 (abandoned) [see above]
 M1-295 (done)
 M1-296 (done)
 M1-297 (done)
@@ -514,13 +519,13 @@ M1-312 (done)
 M1-315 (done)
 M1-316 (done)
 M1-317 (done)
-M1-318 (deferred)
+M1-318 (abandoned)
 M1-319 (done)
   └── M1-320 (done)
 M1-321 (done)
   └── M1-322 (done)
 M1-324 (done)
-  └── M1-314 (deferred) [see above]
+  └── M1-314 (abandoned) [see above]
 M1-325 (done)
 M1-326 (done)
 M1-327 (done)
@@ -593,7 +598,7 @@ M1-381 (done)
 M1-387 (done)
   ├── M1-391 (done)
   └── M1-396 (done)
-        └── M1-372 (deferred)
+        └── M1-372 (abandoned)
 M1-388 (done)
   └── M1-391 (done) [see above]
 M1-389 (done)
@@ -697,7 +702,7 @@ M1-489 (done)
 M1-490 (done)
 M1-491 (done)
 M1-492 (done)
-M1-493 (deferred)
+M1-493 (abandoned)
 M1-494 (done)
 M1-495 (done)
 M1-496 (done)
@@ -709,20 +714,20 @@ M1-501 (done)
 M1-502 (done)
 M1-503 (done)
 M1-504 (done)
-  └── M1-505 (deferred)
+  └── M1-505 (abandoned)
 M1-506 (done)
-  └── M1-505 (deferred) [see above]
+  └── M1-505 (abandoned) [see above]
 M1-507 (done)
 M1-508 (done)
 M1-509 (done)
 M1-510 (done)
-  └── M1-511 (deferred)
+  └── M1-511 (abandoned)
 M1-512 (done)
 M1-513 (draft)
 M1-514 (done)
   └── M1-515 (done)
         └── M1-519 (done)
-              └── M1-522 (deferred)
+              └── M1-522 (abandoned)
 M1-516 (done)
 M1-517 (done)
 M1-518 (done)
@@ -780,7 +785,7 @@ M1-571 (done)
 M1-572 (done)
 M1-575 (done)
   ├── M1-573 (done)
-  └── M1-574 (deferred)
+  └── M1-574 (abandoned)
 M1-576 (done)
   └── M1-573 (done) [see above]
 M1-577 (done)

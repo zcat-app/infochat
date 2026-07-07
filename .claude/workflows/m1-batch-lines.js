@@ -28,7 +28,7 @@ const TICKET_SCHEMA = {
     summary: { type: 'string', description: '3-5 sentences: what was built, review rounds, redteam outcome, verify evidence' },
     mergeSha: { type: 'string', description: 'squash-merge commit sha on main (MERGED only)' },
     haltReason: { type: 'string', description: 'which hard stop fired and why (HALTED only)' },
-    haltEvidence: { type: 'string', description: 'paths to logs/verdict files the user needs for the five-way menu' },
+    haltEvidence: { type: 'string', description: 'paths to logs/verdict files the user needs for the escalation menu' },
   },
 }
 

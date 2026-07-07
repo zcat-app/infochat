@@ -1,11 +1,11 @@
 ---
 id: M1-493
 title: "Schema hardening: NOT NULL upstream_identifier + approve_quarantine phantom NOTIFY"
-status: deferred
+status: abandoned
 created: 2026-06-27
 last_updated: 2026-06-29
 blocked_by: []
-deferred_reason: decomposed
+abandoned_reason: decomposed
 decomposed_into:
   - M1-516
   - M1-517

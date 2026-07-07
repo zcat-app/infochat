@@ -1,12 +1,12 @@
 ---
 id: M1-574
 title: "/audit renders the usable target contact id, not the internal user UUID"
-status: deferred
+status: abandoned
 created: 2026-07-06
 last_updated: 2026-07-06
 blocked_by: []
 deferred_on: M1-575
-deferred_reason: spec-amend
+abandoned_reason: superseded
 files_budget: 3
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java

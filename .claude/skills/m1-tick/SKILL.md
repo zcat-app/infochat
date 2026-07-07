@@ -1,6 +1,6 @@
 ---
 name: m1-tick
-description: Drive the M1 ticket workflow — pick the next runnable ticket, start work on a branch, run review via the code-reviewer subagent, commit on approval, or surface the five-way escalation menu when a round cap or trigger fires. Use when the user invokes `/m1-tick <subcommand>` (run [id] | next | start <id> | review <id> | commit <id> | merge <id> | escalate <id> | abort <id> | show <id> | reopen <id> | status). `run` drives one ticket through the whole cycle unattended, stopping only at human-owned gates. For adversarial security review, see the separate `/redteam` skill.
+description: Drive the M1 ticket workflow — pick the next runnable ticket, start work on a branch, run review via the code-reviewer subagent, commit on approval, or surface the escalation menu when a round cap or trigger fires. Use when the user invokes `/m1-tick <subcommand>` (run [id] | next | start <id> | review <id> | commit <id> | merge <id> | escalate <id> | abort <id> | show <id> | reopen <id> | status). `run` drives one ticket through the whole cycle unattended, stopping only at human-owned gates. For adversarial security review, see the separate `/redteam` skill.
 ---
 
 # /m1-tick — M1 ticket workflow
@@ -30,7 +30,7 @@ Dispatch table:
 | `/m1-tick review <id>` | [`.claude/skills/m1-tick/subcommands/review.md`](subcommands/review.md) — spawn reviewer subagent |
 | `/m1-tick commit <id>` | [`.claude/skills/m1-tick/subcommands/commit.md`](subcommands/commit.md) — finalize the per-ticket commit |
 | `/m1-tick merge <id>` | [`.claude/skills/m1-tick/subcommands/merge.md`](subcommands/merge.md) — squash-merge the per-ticket branch into main |
-| `/m1-tick escalate <id> [reason]` | [`.claude/skills/m1-tick/subcommands/escalate.md`](subcommands/escalate.md) — fire the five-way menu |
+| `/m1-tick escalate <id> [reason]` | [`.claude/skills/m1-tick/subcommands/escalate.md`](subcommands/escalate.md) — fire the six-way menu |
 | `/m1-tick abort <id>` | [`.claude/skills/m1-tick/subcommands/abort.md`](subcommands/abort.md) — cancel an in-progress ticket and roll back |
 | `/m1-tick show <id>` | [`.claude/skills/m1-tick/subcommands/show.md`](subcommands/show.md) — read-only inspection of a ticket |
 | `/m1-tick reopen <id>` | [`.claude/skills/m1-tick/subcommands/reopen.md`](subcommands/reopen.md) — bring a deferred ticket back to pending |
@@ -46,7 +46,7 @@ These are the lifecycle / process rules the skill applies. Previously the always
 
 - **Tickets** live in `docs/plan/m1/tickets/M1-NNN-<slug>.md`, one file per ticket, YAML frontmatter — see `docs/process/ticket-template.md` for the full schema (key fields: `id`, `status`, `blocked_by`, `acceptance`, `files_budget`, `out_of_scope`, `complexity`, `risk`, `round_cap`, `security_relevant`, `migration_touch`).
 - **Status board** is `docs/plan/m1/STATUS.md`, regenerated from frontmatter; never hand-edit, always derive.
-- **Lifecycle**: `pending` → `in-progress` → `in-review` → `done` (or `escalated` / `deferred`).
+- **Lifecycle**: `pending` → `in-progress` → `in-review` → `done` (or `escalated` / `deferred` / `abandoned`). `deferred` = paused but still intended (reopenable); `abandoned` = decided against, terminal (not reopenable) — see `docs/process/workflow.md` §Status values.
 - **One ticket = one branch = one commit on `main` after `/m1-tick merge` squash-merges the branch.** Branch name `m1/M1-NNN-<slug>`. Commit subject `M1-NNN: <imperative summary>`. Body includes a `Reviewed-by:` trailer with the reviewer's verdict line. `/m1-tick commit` lands the commit on the per-ticket branch (status: done); `/m1-tick merge` performs the squash-merge into `main` as a separate explicit step.
 - **Never amend a passed commit.** Defects found after a passed review become a new ticket and a new commit.
 - **Round cap: 2 by default.** Implement → `mvn verify` → reviewer (round 1). If `REWORK`, fix only the named items → `mvn verify` → reviewer (round 2). If round 2 isn't `APPROVE`, escalate. Tickets with `complexity: high` or `risk: high` may set `round_cap: 3` in frontmatter.
@@ -61,7 +61,7 @@ These are the lifecycle / process rules the skill applies. Previously the always
 - **On session resume, inventory worktrees first.** Resuming after a crash or context loss with any ticket `in-progress`: run `git worktree list` and check each worktree's fork distance (`git rev-list --count main..<branch>`) before touching anything — case-variant worktree names can hide where the real branch lives. (Observed: M1-054, 2026-05-24.)
 - **Ticket-clarity pre-flight at start.** `/m1-tick start` spawns a fresh-context subagent that validates the ticket itself before implementation begins; FAIL blocks the start. Procedure in [`subcommands/start.md`](subcommands/start.md) step 1.
 - **Immediate escalation triggers** (skip remaining rounds): reviewer returns `MANUAL`; developer about to exceed `files_budget` or touch a path outside `files_scope` (when set); tests fail in a way that suggests the ticket's premise is wrong; two consecutive test failures with the same root cause.
-- **Escalation surfaces a five-way menu** to the user in chat: refine / override / decompose / defer / spec-amend.
+- **Escalation surfaces a six-way menu** to the user in chat: refine / override / decompose / defer / spec-amend / abandon.
 - **Reviewer is a fresh-context subagent** (`Agent` with `subagent_type: "code-reviewer"`); developer-as-subagent is forbidden. The reviewer's prompt template lives in `docs/process/reviewer-prompt.md`; input capture (diff, stats, negative-space list) lives in [`subcommands/review.md`](subcommands/review.md).
 - **Threat-actor (red-team) review** runs at milestone boundaries, on tickets with `security_relevant: true`, and before release tags — via the separate [`/redteam`](../redteam/SKILL.md) skill; findings reach the lifecycle workflow only when the user runs `/m1-tick escalate <id> redteam-finding`.
 - **Commit safety re-runs `mvn verify`.** For `complexity: high` or `risk: high` tickets, `/m1-tick commit` re-executes the full suite rather than trusting the prior log; for other tickets it verifies test-log freshness by mtime. Mechanics in [`subcommands/commit.md`](subcommands/commit.md) step 2.

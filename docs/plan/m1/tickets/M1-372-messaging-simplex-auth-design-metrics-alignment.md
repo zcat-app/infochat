@@ -1,11 +1,11 @@
 ---
 id: M1-372
 title: "messaging: align the SimpleX auth-failure design note with the loopback-trusted v1 transport and drop the dead auth.fail meter"
-status: deferred
+status: abandoned
 created: 2026-06-14
 last_updated: 2026-06-18
 deferred_on: [M1-396]
-deferred_reason: superseded-by-M1-396
+abandoned_reason: superseded
 blocked_by: []
 files_budget: 5
 files_scope:

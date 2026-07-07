@@ -1,10 +1,10 @@
 ---
 id: M1-258
 title: "ThrottledAdminNotifier: fold suppressed_count bump into the UPSERT"
-status: deferred
+status: abandoned
 created: 2026-06-09
 last_updated: 2026-06-09
-deferred_reason: wont-do-infeasible
+abandoned_reason: wont-do-infeasible
 deferred_on: []
 blocked_by: []
 files_budget: 3

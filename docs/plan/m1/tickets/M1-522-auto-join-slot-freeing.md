@@ -1,10 +1,10 @@
 ---
 id: M1-522
 title: "Free auto_joined_group slots when the bot leaves a group"
-status: deferred
+status: abandoned
 created: 2026-06-29
 last_updated: 2026-06-29
-deferred_reason: decomposed
+abandoned_reason: decomposed
 decomposed_into:
   - M1-525
   - M1-526

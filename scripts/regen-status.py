@@ -5,11 +5,11 @@ Usage: regen-status.py <tickets-glob> <status-file-path>
 
 The script reads every ticket file matching the glob, extracts the
 specific frontmatter fields STATUS.md needs (id, title, status,
-blocked_by, deferred_on, deferred_reason, complexity, risk,
-last_updated, reviews, escalations), classifies each ticket, renders
-the canonical template, writes the destination file, and prints a
-four-line summary on stdout matching the contract the m1-tick skill
-consumes.
+blocked_by, deferred_on, deferred_reason, abandoned_reason,
+complexity, risk, last_updated, reviews, escalations), classifies each
+ticket, renders the canonical template, writes the destination file,
+and prints a four-line summary on stdout matching the contract the
+m1-tick skill consumes.
 
 The parser is targeted extraction — not a general YAML parser. It
 reads only the eleven fields above; everything else in the
@@ -40,7 +40,7 @@ from pathlib import Path
 
 SCALAR_FIELDS = {
     "id", "title", "status", "complexity", "risk",
-    "last_updated", "deferred_reason",
+    "last_updated", "deferred_reason", "abandoned_reason",
 }
 ID_LIST_FIELDS = {"blocked_by", "deferred_on"}
 MAPPING_LIST_FIELDS = {"reviews", "escalations"}
@@ -238,7 +238,7 @@ def main(argv: list[str]) -> int:
             tickets_by_id[tid] = fm
 
     counts = {"pending": 0, "in-progress": 0, "in-review": 0,
-              "escalated": 0, "done": 0, "deferred": 0}
+              "escalated": 0, "done": 0, "deferred": 0, "abandoned": 0}
     for t in tickets_by_id.values():
         s = t.get("status")
         if s in counts:
@@ -268,6 +268,11 @@ def main(argv: list[str]) -> int:
                     f"WARNING: {tid}'s blocker {b} is deferred "
                     f"(status: deferred); {tid} stays unrunnable until the "
                     f"blocker is reopened and completed")
+            elif blocker.get("status") == "abandoned":
+                blocker_warnings.append(
+                    f"WARNING: {tid}'s blocker {b} is abandoned "
+                    f"(status: abandoned; will not be built); {tid} can never "
+                    f"become runnable as written — re-scope it or abandon it too")
     in_flight_ids = sorted(tid for tid, t in tickets_by_id.items()
                            if t.get("status") in ("in-progress", "in-review"))
     blocked_ids = sorted(tid for tid, t in tickets_by_id.items()
@@ -279,6 +284,7 @@ def main(argv: list[str]) -> int:
         reverse=True,
     )
     deferred_ids = sorted(tid for tid, t in tickets_by_id.items() if t.get("status") == "deferred")
+    abandoned_ids = sorted(tid for tid, t in tickets_by_id.items() if t.get("status") == "abandoned")
 
     last_updated_line = (
         datetime.date.today().isoformat()
@@ -308,6 +314,7 @@ def main(argv: list[str]) -> int:
     L.append(f"| escalated | {counts['escalated']} |")
     L.append(f"| done | {counts['done']} |")
     L.append(f"| deferred | {counts['deferred']} |")
+    L.append(f"| abandoned | {counts['abandoned']} |")
     L.append(f"| **total** | **{total}** |")
     L.append("")
     L.append("---")
@@ -415,6 +422,31 @@ def main(argv: list[str]) -> int:
         L.append("")
     L.append("---")
     L.append("")
+    L.append("## Abandoned")
+    L.append("")
+    L.append("Tickets decided against — not implemented as this ticket. Terminal: "
+             "not reopenable via the driver's `reopen`. `abandoned_reason` records why "
+             "(`decomposed` = split into shipped children; `superseded` = absorbed by "
+             "another ticket; `obsoleted-by-spec-amend` = a spec change dropped the "
+             "requirement; `wont-do-infeasible` = evaluated and judged not worth building). "
+             "See `docs/process/workflow.md` §Status values.")
+    L.append("")
+    if abandoned_ids:
+        abandoned_groups: dict = {}
+        for tid in abandoned_ids:
+            reason = tickets_by_id[tid].get("abandoned_reason", "other")
+            abandoned_groups.setdefault(reason, []).append(tid)
+        for reason in sorted(abandoned_groups):
+            L.append(f"### {reason} ({len(abandoned_groups[reason])})")
+            for tid in abandoned_groups[reason]:
+                t = tickets_by_id[tid]
+                L.append(f"- {tid} — {t.get('title', '')}")
+            L.append("")
+    else:
+        L.append("_(none)_")
+        L.append("")
+    L.append("---")
+    L.append("")
     L.append("## Dependency graph")
     L.append("")
     L.append("ASCII DAG: nodes are ticket IDs (with status in parens), edges are "
@@ -434,7 +466,8 @@ def main(argv: list[str]) -> int:
     print(f"STATUS REGENERATED: {status_path}")
     print(f"Counts: pending={counts['pending']}, in-progress={counts['in-progress']}, "
           f"in-review={counts['in-review']}, escalated={counts['escalated']}, "
-          f"done={counts['done']}, deferred={counts['deferred']}")
+          f"done={counts['done']}, deferred={counts['deferred']}, "
+          f"abandoned={counts['abandoned']}")
     if runnable_ids:
         print(f"Runnable: {len(runnable_ids)} tickets — {', '.join(runnable_ids)}")
     else:

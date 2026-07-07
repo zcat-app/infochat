@@ -1,11 +1,11 @@
 ---
 id: M1-505
 title: "SimpleX: map inbound admin DM to the configured admin address"
-status: deferred
+status: abandoned
 created: 2026-06-27
 last_updated: 2026-06-27
 deferred_on: M1-506
-deferred_reason: blocked-on-new-ticket
+abandoned_reason: superseded
 blocked_by:
   - M1-504
 files_budget: 8

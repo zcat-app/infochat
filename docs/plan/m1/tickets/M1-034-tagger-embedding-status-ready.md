@@ -1,13 +1,13 @@
 ---
 id: M1-034
 title: Tagger + Embedding pipeline + status→READY + new_post NOTIFY
-status: deferred
+status: abandoned
 created: 2026-05-16
 last_updated: 2026-05-17
 replaced_by:
   - M1-034a
   - M1-034b
-deferred_reason: decomposed
+abandoned_reason: decomposed
 deferred_on: M1-034a
 aborted_attempts:
   - date: 2026-05-17

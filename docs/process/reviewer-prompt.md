@@ -351,8 +351,8 @@ both literally.
 11. Updates the ticket frontmatter:
     - On `APPROVE`: status stays `in-review`; the verdict is recorded under a `reviews:` list with timestamp + round + diff stats; user is prompted to run `/m1-tick commit`.
     - On `REWORK` round 1: status returns to `in-progress`; rework items are appended to the ticket body under a "Round 1 rework" section; the developer fixes only those items.
-    - On `REWORK` round 2: if the ticket's `round_cap` is `3`, status returns to `in-progress` and a "Round 2 rework" section is appended. Otherwise status moves to `escalated`; the five-way menu fires.
+    - On `REWORK` round 2: if the ticket's `round_cap` is `3`, status returns to `in-progress` and a "Round 2 rework" section is appended. Otherwise status moves to `escalated`; the escalation menu fires.
     - On `REWORK` round 3 (only reachable when `round_cap: 3`): status moves to `escalated` regardless.
-    - On `MANUAL`: status moves to `escalated` immediately; the five-way menu fires.
+    - On `MANUAL`: status moves to `escalated` immediately; the escalation menu fires.
 
 The reviewer never edits source files. It Reads its inputs, Writes the full verdict to {{VERDICT_FILE_PATH}}, returns the short chat reply, and exits.

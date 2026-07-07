@@ -1,11 +1,11 @@
 ---
 id: M1-314
 title: "Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed"
-status: deferred
+status: abandoned
 created: 2026-06-11
 last_updated: 2026-06-13
 deferred_on: M1-324
-deferred_reason: spec-amend
+abandoned_reason: obsoleted-by-spec-amend
 blocked_by:
   - M1-284
   - M1-294

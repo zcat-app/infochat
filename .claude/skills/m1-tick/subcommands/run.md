@@ -23,8 +23,9 @@ Everything else is "stop typing the subcommand names." `run` introduces exactly 
 | `in-progress`, branch exists | step 3 (implement) or step 4 (review), per whether the last review round is open |
 | `in-review` (APPROVE / OVERRIDE-APPROVE) | step 5 (redteam gate) → step 6 (commit) |
 | `done` | step 7 (merge) |
-| `escalated` | **refuse** — an escalation is open; the user resolves it via the five-way menu before `run` can resume |
+| `escalated` | **refuse** — an escalation is open; the user resolves it via the escalation menu before `run` can resume |
 | `deferred` | **refuse** — `run` does not reopen; point the user at `/m1-tick reopen <id>` |
+| `abandoned` | **refuse** — the ticket was decided against and is terminal; `run` does not revive it. Reviving is a fresh, deliberate decision (a new ticket, or re-escalation with justification) |
 
 ## Steps
 
@@ -39,7 +40,7 @@ Everything else is "stop typing the subcommand names." `run` introduces exactly 
      - **Eligibility — prose-defect blockers ONLY.** Self-refine is permitted *only* when every blocker is a ticket-*prose* defect the orchestrator can fix without changing scope or intent: unrunnable/ambiguous acceptance phrasing, an empty `out_of_scope`, a mistyped or unresolvable `spec_refs` anchor. Blockers that imply a **structural** resolution — "ticket is too big" (decompose), "acceptance is unachievable as framed" (defer), "the spec itself is wrong" (spec-amend), or anything requiring a wider `files_budget`/`files_scope` — are **NOT** self-refinable. `run` must not silently expand `files_budget`/`files_scope`/`out_of_scope` (the SKILL.md cross-cutting rule binds here).
      - **Verify before applying.** Ultrathink the blocker. Try to *falsify* the proposed prose fix ("what would make this the wrong correction?"). Apply it only if it survives.
      - **Cap: 1 self-refine attempt.** Apply the prose fix exactly as the `escalate → refine` clarity-fail arm would (snapshot under `revisions:`, commit `M1-NNN: refine ticket spec (clarity-fail rework)` on `main`, clear `clarity_check:`, status back to `pending`), record a one-line note of what was changed and why, then **re-run `start`**. Re-running `start` re-fires the clarity pre-flight fresh — that independent re-check is the backstop: a refine that did not truly fix the blocker simply FAILs again.
-     - **Halt conditions:** any structural blocker, OR a second FAIL after one self-refine → stop and surface the **five-way escalation menu** (`escalate` with the original `clarity-fail` / `outline-fail` reason). `run` does not self-refine twice and does not self-resolve structural blockers.
+     - **Halt conditions:** any structural blocker, OR a second FAIL after one self-refine → stop and surface the **escalation menu** (`escalate` with the original `clarity-fail` / `outline-fail` reason). `run` does not self-refine twice and does not self-resolve structural blockers.
 
 3. **Implement.** The orchestrator writes the diff in normal Edit/Write/Bash calls. For `complexity:high`, read the plan-writer sidecar (`outline_file:`) before touching code. Run `mvn verify` capturing to the fixed log path per the SKILL.md "Capture `mvn verify` output" rule before moving to review.
    - **Halt to an option menu** on any documented immediate-escalation trigger — `files_budget` about to be exceeded, a path outside `files_scope`/`out_of_scope`, a test failure suggesting the ticket's *premise* is wrong, two consecutive failures with the same root cause — or on a genuine design decision only the user can make. Each halt presents a brief summary and verified options, the recommended one first with its reasoning. **Every recommended option is verified before it is offered** (CLAUDE.md verify-before-recommending). A red `mvn verify` from the orchestrator's own diff is fixed in-band, not escalated, unless it reveals a premise-fail.
@@ -47,7 +48,7 @@ Everything else is "stop typing the subcommand names." `run` introduces exactly 
 4. **Review loop** — invoke [`review.md`](review.md) for each round.
    - **APPROVE** → proceed to step 5.
    - **REWORK, round 1** → address only the named items, re-run `mvn verify`, re-invoke `review`. (Round-1 REWORK is notify-and-continue.)
-   - **Round-cap reached, must-shrink violation, or MANUAL** → `review.md` already sets `escalated` and fires `escalate`; `run` **halts** to that five-way menu. It does not loop past the round cap.
+   - **Round-cap reached, must-shrink violation, or MANUAL** → `review.md` already sets `escalated` and fires `escalate`; `run` **halts** to that escalation menu. It does not loop past the round cap.
 
 5. **Redteam gate (conditional on `security_relevant`).**
    - If `security_relevant: false` → skip directly to step 6.

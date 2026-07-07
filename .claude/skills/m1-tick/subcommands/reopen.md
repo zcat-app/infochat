@@ -4,7 +4,7 @@ Bring a `deferred` ticket back to `pending`. Requires that the blocker (if any) 
 
 Preconditions:
 
-- The ticket exists and `status: deferred`.
+- The ticket exists and `status: deferred`. **Refuse `status: abandoned`** with: `M1-NNN is abandoned (decided against, terminal) — reopen does not revive it. If the decision has genuinely changed, draft a fresh ticket (optionally with a lineage pointer to M1-NNN) or re-escalate with explicit justification.` `reopen` is only for work that was paused-but-still-intended.
 - If `deferred_on:` is set, that ticket is `status: done`. Refuse if not.
 - For `deferred_reason: spec-amend`, additionally require that the spec amendment ticket landed AND the user re-affirms that the original ticket's `spec_refs` are still correct (the spec text changed; the ticket's references may need updating). The re-affirmation procedure runs in step 1 below.
 

@@ -55,11 +55,12 @@ Apply the doctrine on every proposed process change: is this addition addressing
        (N=2 default; N=3 if            ▼
         round_cap: 3)                escalated  ───→  refine     ─→ (in-progress if branch exists; pending otherwise)
                                          │           override   ─→ (straight to commit; APPROVE bypassed)
-                                         │           decompose  ─→ (this ticket → deferred; new tickets created)
+                                         │           decompose  ─→ (this ticket → deferred or abandoned; new tickets created)
                                          │           defer      ─→ (this ticket → deferred; blocker queued)
-                                         ▼           spec-amend ─→ (this ticket → deferred; amendment ticket queued)
-                                      deferred
-                                      (resume via /<driver> reopen once blocker is done)
+                                         │           spec-amend ─→ (this ticket → deferred or abandoned; amendment ticket queued)
+                                         ▼           abandon    ─→ (this ticket → abandoned; decided against, terminal)
+                                      deferred                     abandoned
+                                      (reopen once blocker done)   (terminal — not reopenable)
 ```
 
 Edges:
@@ -73,8 +74,10 @@ Edges:
 - `escalated → pending` — `refine` resolution when the prior escalation reason was `clarity-fail` or `outline-fail` (no branch). The user re-runs `/<driver> start` to re-trigger clarity.
 - `escalated → in-progress` — `refine` resolution when the prior escalation reason was `round-cap`, `manual-verdict`, `budget-breach`, `premise-fail`, `loop`, or `redteam-finding` (branch exists; clarity does NOT re-run).
 - `escalated → in-review → done` — `override` resolution (APPROVE bypassed; `OVERRIDE-APPROVE` recorded in `reviews:`).
-- `escalated → deferred` — `decompose`, `defer`, or `spec-amend`.
+- `escalated → deferred` — `defer`; `decompose` or `spec-amend` when the operand retains residual work and will be reopened after the new ticket(s) land.
+- `escalated → abandoned` — `abandon` (decided against outright); or `decompose`/`spec-amend` when the operand is fully replaced/obsoleted by the new ticket(s) and will NOT be reopened.
 - `deferred → pending` — `/<driver> reopen` once the blocker is `done`.
+- `abandoned` is terminal — the driver's `reopen` refuses it. Reviving an abandoned ticket is a fresh, deliberate decision (draft a new ticket, or re-escalate with explicit justification).
 
 Status values (used in ticket frontmatter):
 
@@ -83,9 +86,10 @@ Status values (used in ticket frontmatter):
 | `pending` | Drafted, not yet started. May be `blocked_by` other tickets. |
 | `in-progress` | Developer (the main conversation) is actively implementing. Branch exists. |
 | `in-review` | Code is committed to the branch, `mvn verify` is green, reviewer subagent is running or has just returned a verdict. |
-| `escalated` | Round cap hit, or an immediate-escalation trigger fired. Awaiting user resolution via the five-way menu. |
+| `escalated` | Round cap hit, or an immediate-escalation trigger fired. Awaiting user resolution via the escalation menu. |
 | `done` | Reviewer returned `APPROVE` (or `OVERRIDE-APPROVE`), ticket commit landed on the per-ticket branch via `/<driver> commit`. Squash-merge into `main` is a separate post-`done` step via `/<driver> merge`; the squash commit on `main` is the merge audit trail and does not require a status change. |
-| `deferred` | Work paused. Either intentionally postponed (out-of-milestone scope discovered), blocked on a new ticket the work surfaced, or waiting on a spec amendment. |
+| `deferred` | Work paused **but still intended** — it will be reopened. Blocked on a new ticket the work surfaced, waiting on a spec amendment that will land, or a decomposition whose umbrella retains integration/assembly work. Reopenable via `/<driver> reopen` once the blocker is `done`. Grouped in STATUS.md by `deferred_reason`. |
+| `abandoned` | Work **decided against** — will not be implemented as this ticket. Terminal (not reopenable via `reopen`). `abandoned_reason` records why: `decomposed` (fully replaced by shipped children), `superseded` (absorbed by another ticket), `obsoleted-by-spec-amend` (a spec change dropped the requirement), or `wont-do-infeasible` (evaluated and judged not worth building). Grouped in STATUS.md by `abandoned_reason`. |
 
 ---
 
@@ -100,7 +104,7 @@ If this section disagrees with `ticket-template.md`, the template wins; sync thi
 | Field | Purpose | Used by |
 |---|---|---|
 | `id` | Stable ticket identifier (`M<N>-NNN`). Never reused. | every step |
-| `status` | Lifecycle state (`pending` → `in-progress` → `in-review` → `done` / `escalated` / `deferred`). | every step |
+| `status` | Lifecycle state (`pending` → `in-progress` → `in-review` → `done` / `escalated` / `deferred` / `abandoned`). | every step |
 | `blocked_by` | List of ticket IDs that must be `done` before this can start. | `next`, `start` preconditions |
 | `files_budget` | Numeric upper bound on file count touched by the diff (always enforced). | reviewer SCOPE-DRIFT-CHECK |
 | `files_scope` | Optional path/glob list. Enables negative-space check + parallelism eligibility. | reviewer NEGATIVE-SPACE-CHECK, `start --parallel` |
@@ -113,7 +117,7 @@ If this section disagrees with `ticket-template.md`, the template wins; sync thi
 | `migration_touch` | When `true`, serializes parallel start globally. | `start --parallel` preconditions |
 | `spec_refs` / `decision_refs` | Anchors into `docs/spec/` and the decisions log. | clarity pre-flight |
 | `clarity_check`, `reviews`, `overrides`, `redteam_findings`, `aborted_attempts`, `reopens` | Dynamic — populated by the milestone-driver skill. Authors leave empty. `clarity_check` and `reviews` carry only the LATEST entry (no per-round accumulation); `escalations` and `revisions` are not in the schema — git log is the audit trail for refine/escalation history. | the driver skill |
-| Lineage (`decomposed_from`, `replaces`, `replaced_by`, `deferred_on`, `deferred_reason`, `spec_amend_for`, `spec_amend_parent`, `remediates`) | Populated only when applicable (escalation paths, redteam remediation on done tickets). | the driver skill |
+| Lineage (`decomposed_from`, `replaces`, `replaced_by`, `deferred_on`, `deferred_reason`, `abandoned_reason`, `spec_amend_for`, `spec_amend_parent`, `remediates`) | Populated only when applicable (escalation paths, redteam remediation on done tickets). | the driver skill |
 
 For body section order (Context → Definition of Done → Implementation notes → Big-picture notes → Out-of-scope expansion → Authorized test changes → Alternatives considered) and field defaults / comments / example values, read [`ticket-template.md`](ticket-template.md) directly.
 
@@ -207,7 +211,7 @@ Squash-merge the per-ticket branch into `main` so `main` history stays one-commi
 
 ### 8. Escalate — `/<driver> escalate M<N>-NNN`
 
-The skill prints the five-way menu in chat:
+The skill prints the escalation menu in chat:
 
 ```
 M<N>-NNN: <title>  —  ESCALATED
@@ -228,9 +232,10 @@ Reply with: <number> [optional notes]
 
 - `refine` → user edits the ticket; status returns to `in-progress`. The commit message records the refine reason (`M<N>-NNN: refine ticket spec (<reason>-rework)`); git log is the audit trail. No YAML accumulation.
 - `override` → reviewer's specific objections are recorded under `overrides:` with a one-line user justification. Status returns to `in-review` and the skill proceeds to commit.
-- `decompose` → driver allocates fresh IDs (`M<N>-AAA`, `M<N>-BBB`, ...) via the ID allocation algorithm; user provides only titles. Operand → `status: deferred` with `deferred_reason: decomposed`. Replacement skeletons created in `docs/plan/<milestone>/tickets/M<N>-AAA-<slug>.md` (etc.) with `decomposed_from: M<N>-NNN` (the operand) populated on each child. The lineage is queryable so a stale child doesn't get lost when its parent is later reopened.
+- `decompose` → driver allocates fresh IDs (`M<N>-AAA`, `M<N>-BBB`, ...) via the ID allocation algorithm; user provides only titles. Replacement skeletons created in `docs/plan/<milestone>/tickets/M<N>-AAA-<slug>.md` (etc.) with `decomposed_from: M<N>-NNN` (the operand) populated on each child. The operand's terminal state depends on whether it retains residual work: if the children **fully replace** it (no umbrella integration/assembly left), operand → `status: abandoned` with `abandoned_reason: decomposed`; if the operand retains integration work to run after the children ship (the umbrella pattern), operand → `status: deferred` with `deferred_reason: decomposed` and is reopened later. The lineage is queryable either way so a stale child doesn't get lost.
 - `defer` → user names the blocking ticket ID (or asks the skill to draft it). Original → `status: deferred` with `deferred_on:` and `deferred_reason: blocked-on-new-ticket`. Blocker → new pending ticket.
-- `spec-amend` → the spec itself is wrong. Driver allocates a fresh ID (`M<N>-AAA`) for the amendment ticket, whose acceptance criteria amend the spec section, with `spec_amend_for: <spec-path-and-section>` and `spec_amend_parent: M<N>-NNN` (the operand). The operand → `status: deferred` with `deferred_reason: spec-amend` and `deferred_on: M<N>-AAA`. Use this instead of `decompose` whenever the issue is "the spec said X but should say Y", not "the implementation needs to be split into N pieces."
+- `spec-amend` → the spec itself is wrong. Driver allocates a fresh ID (`M<N>-AAA`) for the amendment ticket, whose acceptance criteria amend the spec section, with `spec_amend_for: <spec-path-and-section>` and `spec_amend_parent: M<N>-NNN` (the operand). If the operand will be reopened after the amendment lands, operand → `status: deferred` with `deferred_reason: spec-amend` and `deferred_on: M<N>-AAA`; if the amendment **obsoletes** the operand (drops its requirement), operand → `status: abandoned` with `abandoned_reason: obsoleted-by-spec-amend`. Use this instead of `decompose` whenever the issue is "the spec said X but should say Y", not "the implementation needs to be split into N pieces."
+- `abandon` → the ticket is decided against outright — the work will not be built and there is no split or amendment that carries it. Operand → `status: abandoned` with `abandoned_reason: superseded` (absorbed by another named ticket) or `wont-do-infeasible` (evaluated, not worth building). Terminal; the driver's `reopen` refuses it.
 
 ---
 
@@ -413,7 +418,7 @@ OUT-OF-MODEL: (optional)
 
 **What happens with findings:** Findings are NOT auto-converted to REWORK. The path depends on the affected ticket's status:
 
-- For `in-progress` or `in-review` tickets — the user opens the standard five-way menu (trigger reason: `redteam-finding`) on that ticket; `redteam_findings:` is populated on it. The user can choose `refine` to widen acceptance, `decompose`, `defer`, or `spec-amend`.
+- For `in-progress` or `in-review` tickets — the user opens the standard escalation menu (trigger reason: `redteam-finding`) on that ticket; `redteam_findings:` is populated on it. The user can choose `refine` to widen acceptance, `decompose`, `defer`, `spec-amend`, or `abandon`.
 - For `done` tickets — the original commit is **never amended** (per `.claude/skills/m1-tick/SKILL.md` §M1 workflow rules "never amend a passed commit"). Instead, the user creates a **new remediation ticket** with `remediates: M<N>-XXX` set on the new ticket pointing back at the done ticket. The new ticket carries the fix; the done ticket's `redteam_findings:` is populated for traceability but its commit stays untouched. This preserves the one-commit-per-ticket invariant of `main`.
 - For findings that span multiple tickets or describe an architectural gap with no clear owner, the user files a fresh ticket (no `remediates:`) or raises a spec amendment via `spec-amend` on a related ticket.
 

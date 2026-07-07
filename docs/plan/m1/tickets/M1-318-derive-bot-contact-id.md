@@ -1,7 +1,7 @@
 ---
 id: M1-318
 title: "Derive per-adapter bot contact id from adapter identity material (SimpleX queue address, Signal ACI)"
-status: deferred
+status: abandoned
 created: 2026-06-12
 last_updated: 2026-06-12
 blocked_by: []
@@ -21,7 +21,7 @@ round_cap: 3
 security_relevant: true
 migration_touch: false
 outline_file: target/m1-tick-outline-M1-318.md
-deferred_reason: decomposed
+abandoned_reason: decomposed
 escalations:
   - date: 2026-06-12
     reason: budget-breach

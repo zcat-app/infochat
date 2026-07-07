@@ -1,6 +1,6 @@
 # /m1-tick escalate
 
-Set the ticket to `escalated`, append an escalation entry, and print the five-way menu so the user picks the resolution (refine / override / decompose / defer / spec-amend). Invocation: `escalate <id> [reason]`.
+Set the ticket to `escalated`, append an escalation entry, and print the six-way menu so the user picks the resolution (refine / override / decompose / defer / spec-amend / abandon). Invocation: `escalate <id> [reason]`.
 
 Reasons (auto-set by `review`/`start` or passed explicitly):
 
@@ -25,7 +25,7 @@ Steps:
           or "N/A" if escalation is from budget-breach/loop/premise-fail>
    ```
 2. Regenerate `STATUS.md`.
-3. Print the five-way menu (in chat — the user picks). The "trigger context" block adapts based on reason:
+3. Print the six-way menu (in chat — the user picks). The "trigger context" block adapts based on reason:
    - `round-cap` / `manual-verdict` → the verbatim verdict from the most recent `reviews:` entry.
    - `clarity-fail` → the verbatim `clarity_check.blockers:` list.
    - `outline-fail` → the verbatim `## OUTLINE FAILED` block appended to the ticket body by `start`.
@@ -44,9 +44,13 @@ Choose:
   2. override   — reviewer was too strict; record the override and approve
                   (NOT applicable to clarity-fail, outline-fail, premise-fail,
                    budget-breach, loop, or redteam-finding)
-  3. decompose  — split into N tickets; defer this one and queue replacements
-  4. defer      — block on a new ticket the work surfaced; pause this one
-  5. spec-amend — the spec itself is wrong; raise an amendment ticket and pause
+  3. decompose  — split into N tickets; queue replacements. This ticket →
+                  abandoned (fully replaced) or deferred (retains integration work)
+  4. defer      — block on a new ticket the work surfaced; pause this one (deferred)
+  5. spec-amend — the spec itself is wrong; raise an amendment ticket. This ticket →
+                  deferred (reopens after) or abandoned (amendment obsoletes it)
+  6. abandon    — decided against; the work will not be built and no split/amendment
+                  carries it. This ticket → abandoned (terminal, not reopenable)
 
 Reply with: <number> [optional notes]
 ```
@@ -126,7 +130,7 @@ Reply with: <number> [optional notes]
 
      Override is NOT permitted for `TEST-INTEGRITY-CHECK: FAIL` flowing through `MANUAL` — the user must explicitly acknowledge that they are overriding test integrity, and the override entry must include the literal text `"acknowledging-test-integrity-override"` in `user_justification`.
 
-   - **`3` (decompose).** Ask the user how many replacement tickets and to provide one-line titles for each. Allocate IDs (`M1-AAA`, `M1-BBB`, ...) via the **ID allocation algorithm** below; do NOT ask the user for IDs (manual ID assignment risks collision with deferred or aborted tickets the user has forgotten about). Set the operand ticket's `status: deferred` with `deferred_reason: decomposed`. Create N skeleton ticket files from `docs/process/ticket-template.md`, one per allocated ID, each placed under `docs/plan/m1/tickets/M1-AAA-<slug-of-AAA>.md` (and `M1-BBB-...`, etc.). Skeleton frontmatter rules:
+   - **`3` (decompose).** Ask the user how many replacement tickets and to provide one-line titles for each. Allocate IDs (`M1-AAA`, `M1-BBB`, ...) via the **ID allocation algorithm** below; do NOT ask the user for IDs (manual ID assignment risks collision with deferred or aborted tickets the user has forgotten about). Set the operand's terminal state per whether it retains residual work: ask the user "does the operand keep any integration/assembly work to run after the children ship, or do the children fully replace it?" — **fully replaced** → `status: abandoned` with `abandoned_reason: decomposed` (terminal; the children carry all the work); **retains integration work** (the umbrella pattern) → `status: deferred` with `deferred_reason: decomposed`, to be reopened after the children are `done`. Create N skeleton ticket files from `docs/process/ticket-template.md`, one per allocated ID, each placed under `docs/plan/m1/tickets/M1-AAA-<slug-of-AAA>.md` (and `M1-BBB-...`, etc.). Skeleton frontmatter rules:
 
      - `id: M1-AAA` (the allocated ID, distinct per skeleton)
      - `title:` from the user-supplied one-liner
@@ -156,7 +160,9 @@ Reply with: <number> [optional notes]
      - `out_of_scope: []`, `test_plan: { adds: [], preserves: [...] }`, `decision_refs: []` — the user fills these in. The empty `out_of_scope` is intentional: clarity-FAIL is the forcing function for the user to think about boundaries before `start`.
      - All dynamic fields (`reviews`, `escalations`, `revisions`, `overrides`, `aborted_attempts`, `reopens`, `redteam_findings`, `clarity_check`) start empty. Lineage fields other than `spec_amend_for` and `spec_amend_parent` are unset.
 
-     Set the operand ticket: `status: deferred`, `deferred_on: M1-AAA`, `deferred_reason: spec-amend`. Print the new ticket path and a one-line reminder: "The amendment ticket needs `acceptance` and `out_of_scope` filled in before `/m1-tick start M1-AAA` will pass clarity. The amendment ticket must be `done` before the operand can be reopened."
+     Set the operand's terminal state per whether the amendment obsoletes it: ask the user "after this amendment lands, is the operand reopened to do the (now-corrected) work, or does the amendment drop the operand's requirement entirely?" — **reopened after** → `status: deferred`, `deferred_on: M1-AAA`, `deferred_reason: spec-amend`; **obsoleted** → `status: abandoned`, `abandoned_reason: obsoleted-by-spec-amend` (record the obsoleting ticket in `deferred_on: M1-AAA` for lineage; terminal). Print the new ticket path and a one-line reminder: "The amendment ticket needs `acceptance` and `out_of_scope` filled in before `/m1-tick start M1-AAA` will pass clarity." Add, for the deferred case only: "The amendment ticket must be `done` before the operand can be reopened."
+
+   - **`6` (abandon).** The ticket is decided against outright — the work will not be built and no split (`decompose`) or amendment (`spec-amend`) carries it. Ask the user for the reason category — `superseded` (the work is absorbed by an existing/other named ticket) or `wont-do-infeasible` (evaluated and judged not worth building / not achievable as framed) — plus a one-line free-text justification and, for `superseded`, the ID(s) that absorb it. Set the operand ticket: `status: abandoned`, `abandoned_reason: <superseded | wont-do-infeasible>`, and (for `superseded`, if IDs were named) record them in `deferred_on:` for lineage. Do NOT delete the branch here — if a per-ticket branch exists (the escalation came mid-implementation), remind the user that `/m1-tick abort M1-NNN` is the destructive path to discard it; `abandon` only records the decision on the ticket. Abandoned is terminal — the driver's `reopen` refuses it; reviving requires a fresh, deliberate decision. Print the abandoned state and the recorded reason.
 
 6. Regenerate `STATUS.md` after the resolution applies.
 
@@ -167,8 +173,8 @@ Used by `decompose` and `spec-amend` to allocate fresh ticket IDs.
 **ID shape.** A ticket ID has the form `M<N>-<digits>[<suffix>]` where `<digits>` is one or more decimal digits (zero-padded to 3 in canonical form) and the optional `<suffix>` is one or more lowercase ASCII letters (`[a-z]+`). The suffix exists as a manual planning affordance for the **umbrella + subticket** idiom (see `docs/process/workflow.md` §Ticket-ID placeholder convention): a bare `M1-008` is the umbrella ticket holding the topic's shared context and the whole-topic integration test, while `M1-008a`, `M1-008b`, `M1-008c` are independent subtickets implementing one slice each. The umbrella and its subtickets are **distinct independent tickets** that share the digit slot by design; the umbrella's `blocked_by` lists the subtickets so it becomes runnable only after they ship. The skill itself never *generates* suffix-IDs — subticket IDs are authored by hand at planning time. For every other purpose (commit subjects, branch names, file paths, grep history) the ID is an opaque string, so the suffix is transparent to the rest of the workflow.
 
 1. Glob `docs/plan/m1/tickets/M1-*.md` (or for other milestones, the corresponding directory).
-2. Parse the `id:` field from every file's frontmatter. Include tickets in EVERY status — pending, in-progress, in-review, escalated, done, deferred. IDs of `aborted_attempts:` are NOT separate IDs (they're attempts on existing tickets), so they don't enter this scan.
+2. Parse the `id:` field from every file's frontmatter. Include tickets in EVERY status — pending, in-progress, in-review, escalated, done, deferred, abandoned. IDs of `aborted_attempts:` are NOT separate IDs (they're attempts on existing tickets), so they don't enter this scan.
 3. For each ID, extract the digit run as an integer (any optional letter suffix is ignored for slot accounting: `M1-007` → `7`, `M1-008a` → `8`). Take the maximum integer across all IDs.
 4. Allocated ID = `M<N>-<max+1>`, zero-padded to 3 digits, no suffix (e.g. `M1-009` after a max of `8`). The skill always allocates primary IDs; suffix-IDs only enter the directory through hand-authored umbrella+subticket splits.
 5. For multiple allocations in one operation (decompose into N), allocate sequentially: `M1-<max+1>`, `M1-<max+2>`, etc. — all primary IDs, no suffixes.
-6. **IDs are never reused.** A `done` ticket's ID is reserved for that ticket forever; a `deferred` ticket's ID stays with it through reopen; even an aborted-and-restarted ticket keeps its original ID. To inspect history by ID, use the anchored prefix form to disambiguate umbrella from subtickets: `git log --grep "^M1-008: "` returns only the umbrella's commits, `git log --grep "^M1-008a: "` only that subticket's. The unanchored form `git log --grep "M1-008"` returns commits for the umbrella AND every subticket because `M1-008` is a substring of `M1-008a/b/c` — useful when you want the whole topic's history at once.
+6. **IDs are never reused.** A `done` ticket's ID is reserved for that ticket forever; a `deferred` ticket's ID stays with it through reopen; an `abandoned` ticket's ID stays reserved (it is terminal, never revived under the same ID); even an aborted-and-restarted ticket keeps its original ID. To inspect history by ID, use the anchored prefix form to disambiguate umbrella from subtickets: `git log --grep "^M1-008: "` returns only the umbrella's commits, `git log --grep "^M1-008a: "` only that subticket's. The unanchored form `git log --grep "M1-008"` returns commits for the umbrella AND every subticket because `M1-008` is a substring of `M1-008a/b/c` — useful when you want the whole topic's history at once.

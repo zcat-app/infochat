@@ -9,6 +9,7 @@ Preconditions:
 - The per-ticket branch is resolvable per the **branch resolution procedure** in [`docs/process/workflow.md`](../../../../docs/process/workflow.md) §"Naming conventions (slug, branch, ticket file)". (The ticket may have been refined since `start`, drifting the slug; the prefix-glob fallback locates it.)
 - Refuse if `status: done`. Done tickets are immutable; defects → new ticket.
 - Refuse if `status: deferred`. Deferred tickets do not have a branch to abort; use `/m1-tick reopen` if the user wants to resume them.
+- Refuse if `status: abandoned`. Abandoned tickets are terminal and have no branch to abort; the abandonment decision already closed them.
 
 Steps:
 

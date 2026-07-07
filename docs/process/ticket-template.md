@@ -1,7 +1,7 @@
 ---
 id: M<N>-NNN
 title: <imperative title, ≤ 60 chars>
-status: pending                # pending | in-progress | in-review | escalated | done | deferred
+status: pending                # pending | in-progress | in-review | escalated | done | deferred | abandoned
 created: <YYYY-MM-DD>          # set on first save; never edited afterwards
 last_updated: <YYYY-MM-DD>     # auto-updated by the milestone-driver skill on every status transition
 blocked_by: []
@@ -88,8 +88,12 @@ decision_refs:
 decomposed_from: M<N>-XXX      # the parent ticket this was split out from
 replaces: M<N>-XXX             # the prior ticket this rewrites (refine path resulted in a new ticket)
 replaced_by: M<N>-AAA          # set on the OLD ticket when refine produces a new one
-deferred_on: M<N>-XXX          # the blocker ticket this is paused on (if status: deferred)
-deferred_reason:               # one of: decomposed | blocked-on-new-ticket | spec-amend
+deferred_on: M<N>-XXX          # (status: deferred) the blocker this is paused on; also reused as the
+                               # lineage pointer to the superseding/obsoleting ticket on status: abandoned
+deferred_reason:               # (status: deferred — work still intended, will be reopened) one of:
+                               #   blocked-on-new-ticket | spec-amend | decomposed (umbrella retains integration work)
+abandoned_reason:              # (status: abandoned — decided against, terminal) one of:
+                               #   decomposed (fully replaced by children) | superseded | obsoleted-by-spec-amend | wont-do-infeasible
 spec_amend_for: docs/spec/X.md §Y    # set when this ticket exists to amend the cited spec section
 spec_amend_parent: M<N>-XXX    # the implementation ticket waiting on this amendment to land
 remediates: M<N>-XXX           # set on a remediation ticket created from a /redteam finding on a done ticket

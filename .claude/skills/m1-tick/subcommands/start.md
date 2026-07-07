@@ -58,7 +58,7 @@ Steps:
 3. Branch on clarity verdict:
    - `PASS` → continue.
    - `WARN` → print warnings; continue.
-   - `FAIL` → print blockers; refuse the start; fire `escalate` with `reason: clarity-fail` (this sets status to `escalated` and prints the five-way menu with `clarity_check.blockers:` as the trigger context). Status does NOT pass through `in-progress`.
+   - `FAIL` → print blockers; refuse the start; fire `escalate` with `reason: clarity-fail` (this sets status to `escalated` and prints the escalation menu with `clarity_check.blockers:` as the trigger context). Status does NOT pass through `in-progress`.
 4. Set the ticket's frontmatter `status: in-progress`. Update `last_updated` to today's date.
 5. Compute slug from the title per the canonical rule in [`docs/process/workflow.md`](../../../../docs/process/workflow.md) §"Naming conventions (slug, branch, ticket file)".
 6. Branch:
