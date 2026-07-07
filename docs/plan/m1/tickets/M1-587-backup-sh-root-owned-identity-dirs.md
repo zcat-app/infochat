@@ -1,7 +1,7 @@
 ---
 id: M1-587
 title: "backup.sh handles root-owned adapter identity dirs (the M1-569 follow-up)"
-status: pending
+status: done
 created: 2026-07-07
 last_updated: 2026-07-07
 blocked_by: []
@@ -97,14 +97,44 @@ spec_refs:
 decision_refs:
   - D34
   - D46
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 167
+      removed: 13
 escalations: []
 overrides: []
 revisions: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-07-07
+    verdict: CLEAN
+    base: 70a8985a081f026598c0b432b1672dd68b80b27d
+    head: working-tree-pre-commit
+    verdict_file: docs/plan/m1/redteam/M1-587-2026-07-07.md
+    out_of_model_count: 2
+    note: |
+      Pre-commit --in-progress audit (between review APPROVE and commit). CLEAN,
+      no findings. Faithful port of M1-569's root-in-container tar (itself
+      redteam-CLEAN) into backup.sh; :ro mounts + M1-584 colon/system-prefix
+      guard. 2 out-of-model observations (supply-chain / operator-infra, out of
+      scope per security.md). No follow-up ticket recommended.
+clarity_check:
+  date: 2026-07-07
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-587: backup.sh handles root-owned adapter identity dirs (the M1-569 follow-up)

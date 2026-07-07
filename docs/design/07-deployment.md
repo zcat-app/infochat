@@ -1067,10 +1067,12 @@ also removed the M1-568-era incidental EACCES backstop against root-owned system
 mount is built and naming the offending key, a `data-dir` that resolves under a
 clearly-system prefix (`/etc /root /boot /bin /sbin /lib /lib64 /dev /proc /sys
 /var/lib/docker`) or that contains a `:` — docker's `-v` mount-spec separator (M1-584).
-`backup.sh` (§7.10) shares the same host-side `tar -C /` identity model and therefore
-the same root requirement — it works today only because cron runs it as root; giving
-`backup.sh` the same in-container tar is a separate follow-up (its contract is frozen
-out-of-scope here).
+`backup.sh` (§7.10) uses the SAME root-privileged in-container tar (M1-587), so its
+step-1 identity backup succeeds when run as the non-root deploy user — the way
+`upgrade.sh` invokes it — not only under a root cron. backup.sh only READS the identity
+dirs (its bind-mounts are `:ro`) and streams the tgz to a host file, so it carries the
+same M1-584 colon / system-prefix `data-dir` guard but none of the write-side allowlist
+the restore untar needs.
 
 **Flyway-created principal roles (M1-570).** `pack.sh` dumps the database with a
 single-database `pg_dump -F c`, which does NOT carry cluster-global roles. But

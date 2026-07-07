@@ -33,6 +33,14 @@ REPO_ROOT="$(cd "$PROD_DIR/.." && pwd)"
 RUNTIME_DIR="${INFOCHAT_RUNTIME_DIR:-$PROD_DIR/runtime}"
 SECRETS_FILE="$RUNTIME_DIR/secrets.env"
 COMPOSE_FILE="$REPO_ROOT/docker-compose.yml"
+# The adapter identity tar runs as root INSIDE a throwaway container (see the
+# identity-tar step below): the Provider writes those dirs root:root and
+# signal-cli locks its store to 0700, so a non-root host tar cannot read them
+# (M1-569 fixed this for pack.sh/restore.sh; M1-587 brings backup.sh to parity).
+# Reuse the already-pulled postgres image — it ships GNU tar (busybox under-
+# preserves modes); any GNU-tar image works, so drift from the compose tag is
+# harmless. Mirrors pack.sh/restore.sh's IDENTITY_TAR_IMAGE.
+IDENTITY_TAR_IMAGE="pgvector/pgvector:pg16"
 # Default under prod/runtime/ (gitignored, owned by the runtime user) so the
 # no-arg invocation works with zero operator config — the `mkdir -p` below
 # creates it. The host-root `/backups` it replaced is not writable by the
@@ -85,6 +93,31 @@ read_dotenv_value() {
   printf '%s' "$val"
 }
 
+# System-boundary guard on the operator's data-dir value before it is spliced
+# into a docker `-v` bind-mount spec below (the M1-584 check pack.sh/restore.sh
+# apply). A colon would mis-parse the mount spec; a system-prefix path would tar
+# a system directory as if it were identity material. secrets.env is operator/
+# wizard input, so this validates at the boundary. Each host-clone script carries
+# its own copy (pack.sh, restore.sh) — backup.sh follows suit rather than adding
+# a shared lib for one function.
+SYSTEM_DATA_DIR_PREFIXES=(/etc /root /boot /bin /sbin /lib /lib64 /dev /proc /sys /var/lib/docker)
+reject_unsafe_data_dir() {
+  local key="$1" dir="$2" prefix
+  if [[ "$dir" == *:* ]]; then
+    echo "FAIL: $key=$dir contains ':' — docker's -v mount-spec separator; an identity" >&2
+    echo "      data-dir must not contain a colon (it would mis-parse the bind-mount)." >&2
+    exit 1
+  fi
+  for prefix in "${SYSTEM_DATA_DIR_PREFIXES[@]}"; do
+    if [[ "$dir" == "$prefix" || "$dir" == "$prefix"/* ]]; then
+      echo "FAIL: $key=$dir resolves under the system prefix $prefix — refusing to build an" >&2
+      echo "      identity mount there. Configure adapter data-dirs outside system" >&2
+      echo "      directories (${SYSTEM_DATA_DIR_PREFIXES[*]})." >&2
+      exit 1
+    fi
+  done
+}
+
 STAMP="$(date +%Y%m%d)"
 mkdir -p "$BACKUP_DIR"
 
@@ -120,6 +153,8 @@ for key in INFOCHAT_SIMPLEX_DATA_DIR INFOCHAT_SIGNAL_DATA_DIR; do
     echo "  skip ${key} (adapter not configured)"
     continue
   fi
+  # M1-584: refuse a colon or clearly-system data-dir before building the tar mount.
+  reject_unsafe_data_dir "$key" "$dir"
   if [[ ! -d "$dir" ]]; then
     echo "FAIL: ${key}=$dir is configured but the directory does not exist." >&2
     exit 1
@@ -132,7 +167,21 @@ if [[ "${#adapter_rel_paths[@]}" -eq 0 ]]; then
   exit 1
 fi
 
-echo "+ tar -czpf $ADAPTERS_ARTIFACT (-C /) ${adapter_rel_paths[*]}"
-tar -C / -czpf "$ADAPTERS_ARTIFACT" "${adapter_rel_paths[@]}"
+# Tar the identity dirs as ROOT inside a throwaway container (M1-569 / M1-587):
+# the Provider writes them root:root and signal-cli locks its store to mode 0700,
+# so a non-root host `tar` cannot read them — upgrade.sh calls backup.sh as the
+# non-root deploy user, which failed `Permission denied` on signal-cli/data
+# before this fix. Each data-dir is bind-mounted READ-ONLY at its absolute host
+# path so the in-container `tar -C /` yields the same relative-path archive the
+# §7.10 restore expects; the tgz goes to the host backup dir via stdout, owned by
+# the invoking (non-root) user. Adapter-agnostic — SimpleX and Signal take the
+# identical privileged path (no reliance on SimpleX's incidental 0644).
+echo "+ tar identities as root in-container (-C /) ${adapter_rel_paths[*]} -> $ADAPTERS_ARTIFACT"
+tar_mounts=()
+for rel in "${adapter_rel_paths[@]}"; do
+  tar_mounts+=(-v "/$rel:/$rel:ro")
+done
+docker run --rm -u 0:0 "${tar_mounts[@]}" --entrypoint tar "$IDENTITY_TAR_IMAGE" \
+  -C / -czpf - "${adapter_rel_paths[@]}" > "$ADAPTERS_ARTIFACT"
 
 echo "backup complete: $DB_ARTIFACT + $ADAPTERS_ARTIFACT"

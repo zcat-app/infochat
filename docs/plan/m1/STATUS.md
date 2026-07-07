@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 609 |
+| done | 610 |
 | deferred | 1 |
 | abandoned | 10 |
 | **total** | **621** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-587 — backup.sh handles root-owned adapter identity dirs (the M1-569 follow-up) (complexity: low, risk: medium)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -61,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-587 | backup.sh handles root-owned adapter identity dirs (the M1-569 follow-up) | 2026-07-07 | round 1 APPROVE |
 | M1-586 | Strip markdown fences before entity/tagger JSON parse | 2026-07-07 | round 1 APPROVE |
 | M1-585 | RestoreWiringTest: behavioral pins for persisted-SHA recovery, role-before-restore order, and mount shape | 2026-07-07 | round 1 APPROVE |
 | M1-584 | Identity mount targets: correct the over-claiming allowlist comment; refuse system-prefix and colon data-dirs | 2026-07-07 | round 1 APPROVE |
@@ -70,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-580 | restore.sh fails loud on real pg_restore errors (stderr gate, not just table-presence) | 2026-07-06 | round 1 APPROVE |
 | M1-579 | /pending lists only currently-actionable users (drop the terminal 'invited' roster arm) | 2026-07-06 | round 1 APPROVE |
 | M1-578 | BootstrapLoader reports ALL invalid source tags at once, not just the first | 2026-07-06 | round 1 APPROVE |
-| M1-577 | Startup guard for remote-LLM provider/base-url/model mismatch (catch silent 400s) | 2026-07-06 | round 1 APPROVE |
 
 ---
 
@@ -800,5 +800,5 @@ M1-583 (done)
 M1-584 (done)
   └── M1-585 (done) [see above]
 M1-586 (done)
-M1-587 (pending) ← runnable
+M1-587 (done)
 ```
