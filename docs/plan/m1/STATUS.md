@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 609 |
 | deferred | 1 |
 | abandoned | 10 |
-| **total** | **620** |
+| **total** | **621** |
 
 ---
 
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-587 — backup.sh handles root-owned adapter identity dirs (the M1-569 follow-up) (complexity: low, risk: medium)
 
 ---
 
@@ -800,4 +800,5 @@ M1-583 (done)
 M1-584 (done)
   └── M1-585 (done) [see above]
 M1-586 (done)
+M1-587 (pending) ← runnable
 ```
