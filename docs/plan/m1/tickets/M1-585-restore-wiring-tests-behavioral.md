@@ -1,9 +1,9 @@
 ---
 id: M1-585
 title: "RestoreWiringTest: behavioral pins for persisted-SHA recovery, role-before-restore order, and mount shape"
-status: pending
+status: done
 created: 2026-07-06
-last_updated: 2026-07-06
+last_updated: 2026-07-07
 blocked_by: [M1-580, M1-581, M1-584]
 files_budget: 2
 files_scope:
@@ -62,7 +62,20 @@ test_plan:
 spec_refs:
   - "docs/design/07-deployment.md §7.10.1"
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 102
+      removed: 15
 escalations: []
 overrides: []
 revisions: []
@@ -70,6 +83,19 @@ aborted_attempts: []
 reopens: []
 redteam_findings: []
 redteam_audits: []
+clarity_check:
+  date: 2026-07-07
+  verdict: WARN
+  warnings:
+    - >-
+      COMPLEXITY-RISK-CALIBRATED: risk low may undersell the domain pinned
+      (restore-ordering data integrity, GGUF SHA verification); test-only scope
+      is the counter-argument keeping it low.
+    - >-
+      TEST-CHANGES-AUTHORIZED: test_plan.adds lists the fetch_gguf 3-arg pin as
+      an addition, but acceptance item 1 describes it as tightening a
+      pre-existing prefix-only assertion (arguably a .modifies entry).
+  blockers: []
 ---
 
 # M1-585: behavioral pins for the restore wiring tests

@@ -74,7 +74,10 @@ class RestoreWiringTest {
     // privilege mechanism (`-u 0:0` -> root-user=yes), then exec the REAL tar with the
     // exact -C/members the script passed (inheriting the bundle on stdin) so the M1-568
     // allowlist's filesystem effect is genuinely exercised — only the named members land,
-    // in the TempDir sandbox. No other docker verb is reached before a gate fails.
+    // in the TempDir sandbox. It also RECORDS the `-v` mount specs (M1-585) and echoes
+    // them, so a test can pin that the untar bind-mounts EXACTLY the allowlisted data-dir
+    // set (mount SHAPE; write-confinement stays host-validated per M1-569). No other
+    // docker verb is reached before a gate fails.
     //
     // The `compose` branch (M1-580) parametrizes the two DB probes the error-gate cases
     // reach: the pg_restore exec replays FAKE_PG_RESTORE_STDERR_FILE to stderr and exits
@@ -82,6 +85,10 @@ class RestoreWiringTest {
     // table only when FAKE_DB_TABLES=present, so the backstop is steerable per case.
     // Every invocation's argv is appended to FAKE_DOCKER_ARGV_LOG so tests can assert
     // which docker steps ran (e.g. that no image build/bring-up followed a failed gate).
+    // Each recognized in-container exec (role-reconstruct psql, pg_restore, table probe)
+    // additionally echoes an identifying `FAKE-DOCKER:` line (M1-585), so a driven run's
+    // ORDER — infochat_admin role reconstruct strictly BEFORE pg_restore (M1-570) — is
+    // behaviorally pinnable, not merely source-order checkable.
     private static final String FAKE_DOCKER =
             "#!/usr/bin/env bash\n"
             + "printf '%s\\n' \"$*\" >> \"${FAKE_DOCKER_ARGV_LOG:-/dev/null}\"\n"
@@ -91,18 +98,19 @@ class RestoreWiringTest {
             + "fi\n"
             + "if [[ \"$1\" == run ]]; then\n"
             + "  shift\n"
-            + "  saw_root_user=no; entrypoint=\"\"; image=\"\"; cmd_args=()\n"
+            + "  saw_root_user=no; entrypoint=\"\"; image=\"\"; cmd_args=(); mounts=()\n"
             + "  while [[ $# -gt 0 ]]; do\n"
             + "    case \"$1\" in\n"
             + "      --rm|-i) shift ;;\n"
             + "      -u) [[ \"$2\" == 0:0 ]] && saw_root_user=yes; shift 2 ;;\n"
-            + "      -v) shift 2 ;;\n"
+            + "      -v) mounts+=(\"$2\"); shift 2 ;;\n"
             + "      --entrypoint) entrypoint=\"$2\"; shift 2 ;;\n"
             + "      *) image=\"$1\"; shift; cmd_args=(\"$@\"); break ;;\n"
             + "    esac\n"
             + "  done\n"
             + "  if [[ \"$entrypoint\" == tar ]]; then\n"
             + "    echo \"FAKE-DOCKER: modeled privileged untar via docker run --entrypoint tar (root-user=${saw_root_user}, image=${image})\"\n"
+            + "    echo \"FAKE-DOCKER: untar mount specs: ${mounts[*]}\"\n"
             + "    exec tar \"${cmd_args[@]}\"\n"
             + "  fi\n"
             + "  exit 0\n"
@@ -110,9 +118,14 @@ class RestoreWiringTest {
             + "if [[ \"$1\" == compose ]]; then\n"
             + "  case \"$*\" in\n"
             + "    *pg_restore*)\n"
+            + "      echo \"FAKE-DOCKER: exec pg_restore into fresh infochat database\"\n"
             + "      [[ -n \"${FAKE_PG_RESTORE_STDERR_FILE:-}\" ]] && printf '%s\\n' \"$(<\"$FAKE_PG_RESTORE_STDERR_FILE\")\" >&2\n"
             + "      exit \"${FAKE_PG_RESTORE_EXIT:-0}\" ;;\n"
+            + "    *ON_ERROR_STOP=1*)\n"
+            + "      echo \"FAKE-DOCKER: exec role-reconstruct psql (infochat_admin, ON_ERROR_STOP)\"\n"
+            + "      exit 0 ;;\n"
             + "    *-tAqc*)\n"
+            + "      echo \"FAKE-DOCKER: exec table-presence probe psql\"\n"
             + "      [[ \"${FAKE_DB_TABLES:-absent}\" == present ]] && echo \"public|flyway_schema_history|table|infochat\"\n"
             + "      exit 0 ;;\n"
             + "  esac\n"
@@ -308,6 +321,23 @@ class RestoreWiringTest {
                         "modeled privileged untar via docker run --entrypoint tar (root-user=yes"),
                 "extraction must run via the root in-container tar (docker run -u 0:0 --entrypoint tar):\n"
                         + r.output);
+        // Mount SHAPE pin (M1-585 / M1-569): the fake docker now RECORDS the -v specs it was
+        // handed (it previously discarded them). The privileged untar must bind-mount EXACTLY
+        // the allowlisted data-dir set read-write — dropping the mount (no -v) or widening it
+        // (e.g. -v /:/host) must both fail here. Mount ENFORCEMENT — writes actually CONFINED to
+        // the mounts — is NOT modeled: the fake re-execs host tar, so write-confinement stays
+        // HOST validation, exactly the M1-569 ticket posture. Single configured adapter, so the
+        // recorded set is exactly one spec `/<rel>:/<rel>` = `dataDirAbs:dataDirAbs`.
+        String mountPrefix = "FAKE-DOCKER: untar mount specs: ";
+        String recordedMounts = r.output.lines()
+                .filter(line -> line.startsWith(mountPrefix))
+                .map(line -> line.substring(mountPrefix.length()).trim())
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "the fake docker must record the privileged untar's -v mount specs:\n" + r.output));
+        assertEquals(dataDirAbs + ":" + dataDirAbs, recordedMounts,
+                "the privileged untar must bind-mount EXACTLY the single allowlisted data-dir "
+                        + "(no dropped mount, no /:/host widening):\n" + r.output);
         // The allowlisted identity dir WAS reconstructed at its absolute path (inside tmp).
         assertTrue(Files.exists(dataDir.resolve("keyfile")),
                 "the allowlisted identity dir must be extracted:\n" + r.output);
@@ -353,6 +383,45 @@ class RestoreWiringTest {
     }
 
     @Test
+    @EnabledOnOs(OS.LINUX)
+    void roleReconstructRunsBeforePgRestoreInDrivenRun(@TempDir Path tmp) throws Exception {
+        // M1-585: a BEHAVIORAL pin for the M1-570 ordering invariant, complementing the
+        // source-order pre-check above. That check reads the script TEXT — it catches a
+        // deleted or reordered step, but not a run where the steps fire out of order at
+        // execution time. Here we drive restore.sh PAST the gates so it actually execs the
+        // in-container commands, then prove from the fake docker's ORDERED argv log that the
+        // infochat_admin role-reconstruct psql ran STRICTLY BEFORE pg_restore. The sandboxed
+        // bundle drives through the DB step and ends at model rehydration (its config names no
+        // local backend) — the role + pg_restore steps have both run by then; this case asserts
+        // ORDER, not the exit code (like the extraction case).
+        Path bundle = buildSandboxedBundle(tmp);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false,
+                Map.of("FAKE_DB_TABLES", "present"));
+
+        // The infochat_admin DO-block psql is the only compose exec carrying ON_ERROR_STOP=1;
+        // pg_restore is the only one carrying `pg_restore -h 127.0.0.1` — so the raw argv log
+        // distinguishes them unambiguously and preserves their execution order.
+        String argvLog = Files.readString(tmp.resolve("docker-argv.log"));
+        int roleArgvIdx = argvLog.indexOf("ON_ERROR_STOP=1");
+        int pgRestoreArgvIdx = argvLog.indexOf("pg_restore -h 127.0.0.1");
+        assertTrue(roleArgvIdx >= 0,
+                "the infochat_admin role-reconstruct psql must reach the fake docker:\n" + argvLog);
+        assertTrue(pgRestoreArgvIdx >= 0, "pg_restore must reach the fake docker:\n" + argvLog);
+        assertTrue(roleArgvIdx < pgRestoreArgvIdx,
+                "infochat_admin must be reconstructed STRICTLY BEFORE pg_restore at run time "
+                        + "(fake-docker argv log order):\n" + argvLog);
+        // The fake docker's per-command identifying echoes pin the same ordering on the run's
+        // console output: the role-reconstruct marker must precede the pg_restore marker.
+        int roleMarkerIdx = r.output.indexOf("FAKE-DOCKER: exec role-reconstruct psql");
+        int pgRestoreMarkerIdx = r.output.indexOf("FAKE-DOCKER: exec pg_restore");
+        assertTrue(roleMarkerIdx >= 0 && pgRestoreMarkerIdx >= 0,
+                "each exec'd in-container command must echo an identifying FAKE-DOCKER line:\n" + r.output);
+        assertTrue(roleMarkerIdx < pgRestoreMarkerIdx,
+                "the role-reconstruct marker must precede the pg_restore marker in output:\n" + r.output);
+    }
+
+    @Test
     void restoreRecoversCustomGgufFromPersistedUrl() throws Exception {
         // M1-571: restore.sh's ensure_gguf recovers a CUSTOM (non-pinned) GGUF from the URL
         // 4-llm.sh persisted into secrets.env, instead of failing loud. The real multi-GB
@@ -364,8 +433,14 @@ class RestoreWiringTest {
 
         assertTrue(script.contains("elif [[ -n \"$persisted_url\" ]]; then"),
                 "ensure_gguf must recover a custom GGUF when a persisted URL is present");
-        assertTrue(script.contains("fetch_gguf \"$persisted_url\""),
-                "the custom-recovery branch must fetch from the persisted URL");
+        // Pin the FULL three-argument invocation, not just the `fetch_gguf "$persisted_url"`
+        // prefix (M1-585): a prefix-only assertion left the `"$persisted_sha"` argument — the
+        // restore-side GGUF SHA-256 verification — deletable with the build still green (no
+        // test anywhere referenced persisted_sha). fetch_gguf skips integrity only on an EMPTY
+        // expected SHA, so dropping the arg silently disables the check for a recovered custom GGUF.
+        assertTrue(script.contains("fetch_gguf \"$persisted_url\" \"$file\" \"$persisted_sha\""),
+                "the custom-recovery branch must pass all three args (persisted url, file, persisted SHA) "
+                        + "so restore-side GGUF SHA verification cannot be silently dropped");
         assertTrue(script.contains("bundle predates M1-571"),
                 "the no-persisted-URL fail-loud fallback must be preserved for older bundles");
         assertTrue(script.contains("read_dotenv_value INFOCHAT_LLAMACPP_GGUF_URL"),
