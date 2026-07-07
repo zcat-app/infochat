@@ -1019,9 +1019,13 @@ for it; the manual steps 1-5 above remain the under-the-hood description of what
   standardizes overwrite-then-remove: `shred -uz` on a bundle file, or
   `find <dir> -type f -exec shred -uz {} +` then `rm -rf` on a recovery
   directory, so no empty tree is left. Because it is irreversibly destructive it
-  is guarded: it acts only on a `*.tgz` regular file or a directory whose
-  immediate contents are bundle/recovery material (a `*.tgz`, a `*.pgc` dump, or
-  a `raw-config/` subdir); it refuses nonexistent paths, `/`, the invoking
+  is guarded: it acts only on a `*.tgz` or `*.pgc` regular file (the bundle, or
+  the recovery convention's independent safety-copy dump) or a directory shaped
+  like bundle/recovery material (a `*.tgz` or `*.pgc` at its top level, a
+  `db/*.pgc` one level down or a `.infochat-pack.*` name — both mark the
+  interrupted-pack staging remnant that a SIGKILL/OOM/power loss during
+  `pg_dump` leaves behind, beyond the reach of `pack.sh`'s EXIT trap — or a
+  `raw-config/` subdir); it refuses nonexistent paths, `/`, the invoking
   user's `$HOME`, the repo root, and anything not matching those shapes; and it
   destroys nothing without explicit consent (`--yes`, or an interactive y/N
   prompt defaulting to No) after printing the resolved absolute target and a
@@ -1032,9 +1036,14 @@ for it; the manual steps 1-5 above remain the under-the-hood description of what
   exactly when a subtly-broken restore reveals itself. Destroying it stays an
   operator-timed act; the helper only makes that act safe and one-command. On a
   copy-on-write or journaled filesystem `shred` cannot guarantee the old blocks
-  are unrecoverable — overwrite-then-remove is best-effort; full-disk encryption
-  of the storage medium is the real guarantee (the same class of caveat as the
-  D34 transfer/storage-encryption responsibility).
+  are unrecoverable; hardlinks cut both ways (shredding one name zeroes the
+  shared inode, so other directory entries survive pointing at zeroed content —
+  and conversely a hardlinked "safety copy" IS destroyed by shredding any one
+  of its names); and on SSDs wear-leveling/FTL remapping means the overwrite
+  may never reach the original NAND cells — overwrite-then-remove is
+  best-effort; full-disk encryption of the storage medium is the real guarantee
+  (the same class of caveat as the D34 transfer/storage-encryption
+  responsibility).
 
 **Root-owned identity dirs (M1-569).** The Provider container runs as root, so both
 adapters' identity stores are root-owned — and `signal-cli` locks its account store

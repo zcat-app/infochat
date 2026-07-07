@@ -1,9 +1,23 @@
 ---
 id: M1-583
 title: "Close the secret-disposal gaps: shred pack.sh staging; shred-bundle accepts pack remnants and bare .pgc; hardlink/SSD caveat"
-status: pending
+status: done
 created: 2026-07-06
-last_updated: 2026-07-06
+last_updated: 2026-07-07
+clarity_check:
+  date: 2026-07-06
+  verdict: WARN
+  warnings:
+    - >-
+      ACCEPTANCE-RUNNABLE item 1 (pack.sh staging-trap shredding) has no named
+      automated test in test_plan — the shred-unavailable fallback and
+      failure-path trap firing are verified by diff-read only.
+    - >-
+      test_plan.preserves lists "symlink guard" as an existing
+      ShredBundleWiringTest behavior, but the current test file has no symlink
+      fixture — closest is the realpath-based dangerous-path guard. Slightly
+      inaccurate characterization; nothing pins the phantom case.
+  blockers: []
 blocked_by: []
 files_budget: 4
 files_scope:
@@ -73,14 +87,56 @@ spec_refs:
   - "docs/design/07-deployment.md §7.10.1"
 decision_refs:
   - "D34 (operator-owned transfer/storage encryption)"
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-06
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 149
+      removed: 31
+  - round: 2
+    date: 2026-07-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 176
+      removed: 31
 escalations: []
 overrides: []
 revisions: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-07-07
+    verdict: CLEAN
+    base: main (3c59a356)
+    head: m1/M1-583-secret-disposal-gaps (working tree, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-583-2026-07-07.md
+    out_of_model_count: 3
+    note: >-
+      Pre-commit audit (security_relevant: true) of the branch working tree.
+      CLEAN. Three out-of-model advisories: silent no-shred rm fallback in
+      pack.sh cleanup (deliberate, documented best-effort posture); widened
+      destruction eligibility as an operator footgun (consent gate is the
+      control; local-attacker shapes outside model); inventory-vs-destroy
+      TOCTOU (requires host write access, outside model). None warrants a
+      follow-up ticket — each requires an attacker position the threat model
+      explicitly excludes, and the D34 operator-owned-encryption posture
+      already covers the residual risk.
 ---
 
 # M1-583: close the secret-disposal gaps
@@ -112,3 +168,14 @@ touching that file") — this is that ticket.
   OUT_DIR.
 - Audit provenance: finding M4 + hardlink nit of the 2026-07-06 audit (memory
   `audit-567-576-open-findings`, `shred-bundle-hardlink-caveat-nit`).
+
+## Round 1 rework
+
+1. Restore the raw-config directory eligibility in
+   `prod/scripts/shred-bundle.sh`: re-add the deleted block
+   `if [[ -d "$TARGET_ABS/raw-config" ]]; then ELIGIBLE=yes; fi` alongside
+   (not instead of) the new `.infochat-pack.*` name check in the directory
+   branch, so a recovery directory whose only qualifying member is a
+   raw-config/ subdir remains eligible as it was pre-diff (M1-572 behavior).
+   The diff's own eligibility comment, refusal message, and amended §7.10.1
+   text already state this shape — only the check is missing.

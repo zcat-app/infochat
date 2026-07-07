@@ -19,8 +19,12 @@
 # BEST-EFFORT disposal: on a copy-on-write or journaled filesystem (btrfs, zfs,
 # ext4 journaling) shred(1) cannot guarantee the OLD blocks are unrecoverable —
 # the same class of caveat as pack.sh's "encryption is YOUR responsibility"
-# (D34/§7.10). Full-disk encryption of the storage medium is the real
-# guarantee; overwrite-then-remove is the best-effort step this helper
+# (D34/§7.10). Hardlinks cut both ways: shred overwrites the shared INODE, so
+# other directory entries for the same file survive pointing at zeroed content —
+# and conversely a hardlinked "safety copy" IS destroyed by shredding any one of
+# its names. On SSDs, wear-leveling/FTL remapping means the overwrite may never
+# reach the original NAND cells. Full-disk encryption of the storage medium is
+# the real guarantee; overwrite-then-remove is the best-effort step this helper
 # standardizes, not a substitute for it.
 #
 # Runs under the operator account — no docker, no root: pack.sh writes bundles
@@ -34,8 +38,8 @@ REPO_ROOT_ABS="$(realpath "$SCRIPT_DIR/../..")"
 
 usage() {
   echo "Usage: shred-bundle.sh [-y|--yes] <target>"
-  echo "  Securely dispose of a pack.sh bundle (a *.tgz file) or a recovery"
-  echo "  secret-material directory: shred -uz every file, then remove."
+  echo "  Securely dispose of a pack.sh bundle (a *.tgz file), a *.pgc dump, or"
+  echo "  a recovery secret-material directory: shred -uz every file, then remove."
   echo "  -y, --yes   skip the interactive confirmation (unattended use)"
 }
 
@@ -84,21 +88,28 @@ if [[ "$TARGET_ABS" == "$REPO_ROOT_ABS" ]]; then
   exit 1
 fi
 
-# Shape eligibility: only a pack.sh bundle file, or a directory whose IMMEDIATE
-# contents are bundle / recovery material — at least one *.tgz (the bundle or
-# the identities tarball), a *.pgc dump, or a raw-config/ subdir. Anything else
-# is refused rather than shredded: this helper disposes of what pack.sh and a
-# recovery safety copy produce; it is not a general-purpose shredder and must
-# not sweep sibling files it was not pointed at.
+# Shape eligibility: only a pack.sh bundle file or a safety-copy *.pgc dump, or
+# a directory shaped like bundle / recovery material — at least one *.tgz (the
+# bundle or the identities tarball) or *.pgc dump at the immediate level, a
+# db/*.pgc one level down or a .infochat-pack.* name (both mark an
+# interrupted-pack staging remnant: SIGKILL/OOM/power loss during pg_dump
+# outruns pack.sh's EXIT trap, which only covers catchable exits — M1-583), or
+# a raw-config/ subdir. Anything else is refused rather than shredded: this
+# helper disposes of what pack.sh and a recovery safety copy produce; it is not
+# a general-purpose shredder and must not sweep sibling files it was not
+# pointed at.
 if [[ -f "$TARGET_ABS" ]]; then
-  if [[ "$TARGET_ABS" != *.tgz ]]; then
-    echo "FAIL: $TARGET_ABS is not a *.tgz bundle — nothing removed." >&2
+  # *.pgc joins *.tgz (M1-583): the recovery convention's independent
+  # safety-copy dump is disposal material in its own right — it was already
+  # eligible as a directory member, and the header names it as handled.
+  if [[ "$TARGET_ABS" != *.tgz && "$TARGET_ABS" != *.pgc ]]; then
+    echo "FAIL: $TARGET_ABS is not a *.tgz bundle or a *.pgc dump — nothing removed." >&2
     exit 1
   fi
 elif [[ -d "$TARGET_ABS" ]]; then
   shopt -s nullglob
   ELIGIBLE=no
-  for member in "$TARGET_ABS"/*.tgz "$TARGET_ABS"/*.pgc; do
+  for member in "$TARGET_ABS"/*.tgz "$TARGET_ABS"/*.pgc "$TARGET_ABS"/db/*.pgc; do
     if [[ -f "$member" ]]; then
       ELIGIBLE=yes
       break
@@ -108,8 +119,15 @@ elif [[ -d "$TARGET_ABS" ]]; then
   if [[ -d "$TARGET_ABS/raw-config" ]]; then
     ELIGIBLE=yes
   fi
+  # The mktemp name alone qualifies a remnant even before (or without) any
+  # db/*.pgc landing. The operator still names the remnant ITSELF, never its
+  # parent — the no-sibling-sweep posture is unchanged. Bash expansion, not
+  # basename(1): the wiring test's restricted PATH ships no basename.
+  if [[ "${TARGET_ABS##*/}" == .infochat-pack.* ]]; then
+    ELIGIBLE=yes
+  fi
   if [[ "$ELIGIBLE" != yes ]]; then
-    echo "FAIL: $TARGET_ABS does not look like bundle/recovery material (no *.tgz, *.pgc, or raw-config/ at its top level) — nothing removed." >&2
+    echo "FAIL: $TARGET_ABS does not look like bundle/recovery material (no *.tgz or *.pgc at its top level, no db/*.pgc one level down, no raw-config/, not a .infochat-pack.* staging remnant) — nothing removed." >&2
     exit 1
   fi
 else

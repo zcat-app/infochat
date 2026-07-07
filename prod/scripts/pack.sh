@@ -152,9 +152,22 @@ BUNDLE="$OUT_DIR/infochat-migration-$STAMP.tgz"
 # Staging tree UNDER OUT_DIR (same filesystem) so secrets never transit a
 # world-shared /tmp and the final wrap is a local operation. Removed on ANY exit
 # (success, failure, or interrupt) so half-built staging never lingers with
-# secret content.
+# secret content — and best-effort SHREDDED first (M1-583): the staging tree
+# holds the complete secret set (DB dump, identities tar, secrets.env copy), and
+# a plain `rm` would leave in freed blocks exactly the material shred-bundle.sh's
+# own caveat says plain `rm` leaves. Same best-effort limits as shred-bundle.sh
+# (CoW/journaling, hardlinks, SSD FTL). The `|| true` and the missing-tool
+# fallback keep the rm alive no matter what — cleanup must never be lost to a
+# missing shred or a file vanishing mid-walk. If multi-GB dumps ever make the
+# default three overwrite passes too slow, `shred -n1 -z` is the knob.
 STAGING="$(mktemp -d "$OUT_DIR/.infochat-pack.XXXXXX")"
-trap 'rm -rf "$STAGING"' EXIT
+shred_staging() {
+  if command -v shred >/dev/null 2>&1; then
+    find "$STAGING" -type f -exec shred -uz {} + || true
+  fi
+  rm -rf "$STAGING"
+}
+trap shred_staging EXIT
 mkdir -p "$STAGING/db" "$STAGING/runtime"
 
 # ── (a) Postgres dump ───────────────────────────────────────────────────

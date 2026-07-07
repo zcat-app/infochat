@@ -29,7 +29,7 @@ import org.junit.jupiter.api.io.TempDir;
  * <p>Unlike the restore round-trip, secure disposal has no multi-GB or privileged step, so
  * BOTH sides are fully exercised here on JUnit {@code @TempDir} fixtures: the refusal paths
  * (guard fires, control fixture untouched) and the success paths (real {@code shred} + remove
- * of a fixture bundle file and a fixture recovery directory tree). The refusal cases against
+ * of fixture bundle/dump files and fixture recovery / interrupted-pack staging trees). The refusal cases against
  * REAL dangerous paths (repo root) deliberately omit {@code --yes}, so even a hypothetically
  * broken guard could not destroy anything — stdin is not a TTY, so the consent gate refuses
  * too; the assertions then require the GUARD's message, proving which gate fired. Linux-gated:
@@ -160,6 +160,75 @@ class ShredBundleWiringTest {
         assertTrue(Files.notExists(recovery),
                 "the whole recovery tree must be shredded and removed — no empty tree left:\n"
                         + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void yesFlagShredsInterruptedPackStagingRemnantWithDbDump(@TempDir Path tmp) throws Exception {
+        // An interrupted pack (SIGKILL/OOM/power loss during pg_dump — beyond the EXIT
+        // trap's reach) leaves a staging tree whose dump sits one level DOWN at db/*.pgc;
+        // eligibility must come from that member regardless of the directory's name.
+        Path remnant = Files.createDirectories(tmp.resolve("stag"));
+        Files.createDirectories(remnant.resolve("db"));
+        Files.writeString(remnant.resolve("db/infochat.pgc"), "partial-dump-bytes");
+
+        RunResult r = runShred(tmp, remnant.toString(), "--yes");
+
+        assertEquals(0, r.exitCode,
+                "a staging remnant with db/*.pgc one level down must be accepted:\n" + r.output);
+        assertTrue(Files.notExists(remnant),
+                "the whole staging remnant must be shredded and removed:\n" + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void yesFlagShredsInterruptedPackStagingRemnantByName(@TempDir Path tmp) throws Exception {
+        // The .infochat-pack.* mktemp name alone qualifies a remnant; the fixture
+        // deliberately matches NO content shape (no *.tgz/*.pgc, no db/, no raw-config/)
+        // so this pins the name check, not the member globs.
+        Path remnant = Files.createDirectories(tmp.resolve(".infochat-pack.k3Ts7q"));
+        Files.writeString(remnant.resolve("secrets.env"), "INFOCHAT_DB_PASSWORD=\"pw\"\n");
+
+        RunResult r = runShred(tmp, remnant.toString(), "--yes");
+
+        assertEquals(0, r.exitCode,
+                "a .infochat-pack.* staging remnant must be accepted by name:\n" + r.output);
+        assertTrue(Files.notExists(remnant),
+                "the whole staging remnant must be shredded and removed:\n" + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void yesFlagShredsBarePgcDumpFile(@TempDir Path tmp) throws Exception {
+        // The recovery convention's independent safety-copy dump is a bare *.pgc file —
+        // disposal material in its own right, not only as a directory member.
+        Path dump = tmp.resolve("infochat-20260706.pgc");
+        Files.writeString(dump, "pgdump-custom-format-bytes");
+
+        RunResult r = runShred(tmp, dump.toString(), "--yes");
+
+        assertEquals(0, r.exitCode, "a --yes run on a bare .pgc dump must succeed:\n" + r.output);
+        assertTrue(Files.notExists(dump),
+                "the dump file must be shredded and removed:\n" + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void refusesFileThatIsNeitherTgzNorPgc(@TempDir Path tmp) throws Exception {
+        // Pins the file-branch guard, which previously had no test: not a general-purpose
+        // shredder — a file target outside the two eligible extensions is refused even
+        // with --yes, and survives.
+        Path stray = tmp.resolve("notes.txt");
+        Files.writeString(stray, "not bundle material");
+
+        RunResult r = runShred(tmp, stray.toString(), "--yes");
+
+        assertNotEquals(0, r.exitCode,
+                "a non-tgz/pgc file target must be refused:\n" + r.output);
+        assertTrue(r.output.contains("is not a *.tgz bundle or a *.pgc dump"),
+                "the refusal must come from the file-shape guard:\n" + r.output);
+        assertTrue(Files.exists(stray),
+                "a refusal must leave the file untouched:\n" + r.output);
     }
 
     // --- helpers ----------------------------------------------------------------
