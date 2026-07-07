@@ -1,7 +1,7 @@
 ---
 id: M1-586
 title: "Strip markdown fences before entity/tagger JSON parse"
-status: pending
+status: done
 created: 2026-07-07
 last_updated: 2026-07-07
 blocked_by: []
@@ -72,7 +72,20 @@ spec_refs:
   - "docs/spec/llm.md §Failure handling (recap)"
 decision_refs:
   - "D22"
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 206
+      removed: 10
 escalations: []
 overrides: []
 revisions: []
@@ -80,6 +93,11 @@ aborted_attempts: []
 reopens: []
 redteam_findings: []
 redteam_audits: []
+clarity_check:
+  date: 2026-07-07
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-586: strip markdown code fences before the entity/tagger JSON parse

@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.eval.entity;
 
+import app.zcat.infochat.collector.eval.LlmJson;
 import app.zcat.infochat.collector.eval.PartitionScan;
 import app.zcat.infochat.collector.eval.RetryBackoff;
 import app.zcat.infochat.collector.eval.TransactionHelper;
@@ -319,9 +320,16 @@ public class EntityExtractorWorker {
         if (trimmed.isEmpty()) {
             return null;
         }
+        // DeepSeek (and other providers at temperature ~1.0) wrap the JSON
+        // array in a markdown code fence on a fraction of calls (M1-586);
+        // strip a single enclosing fence before the strict array parse so a
+        // fenced-but-valid payload is recovered. A non-fenced or genuinely
+        // malformed reply is returned unchanged and still fails the parse
+        // below → null, so the D22 release-without-entities path is unchanged.
+        String unfenced = LlmJson.stripCodeFence(trimmed);
         JsonNode root;
         try {
-            root = objectMapper.readTree(trimmed);
+            root = objectMapper.readTree(unfenced);
         } catch (IOException e) {
             return null;
         }

@@ -2,6 +2,7 @@ package app.zcat.infochat.collector.eval.tagger;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import app.zcat.infochat.collector.eval.LlmJson;
 import app.zcat.infochat.collector.eval.PartitionScan;
 import app.zcat.infochat.collector.eval.RetryBackoff;
 import app.zcat.infochat.core.log.SafeLog;
@@ -420,9 +421,14 @@ public class TaggerWorker {
             }
             return out;
         }
-        // JSON shape.
+        // JSON shape. DeepSeek (and other providers at temperature ~1.0) wrap
+        // the {"tags":[...]} object in a markdown code fence on a fraction of
+        // calls (M1-586); strip a single enclosing fence before the parse so a
+        // fenced-but-valid payload is recovered. A non-fenced or malformed
+        // reply is returned unchanged and still fails the parse → null, so the
+        // schema-violating → bootstrap-fallback path is unchanged.
         try {
-            JsonNode root = objectMapper.readTree(trimmed);
+            JsonNode root = objectMapper.readTree(LlmJson.stripCodeFence(trimmed));
             JsonNode tags = root.get("tags");
             if (tags == null || !tags.isArray()) {
                 return null;

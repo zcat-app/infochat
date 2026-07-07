@@ -141,6 +141,28 @@ class TaggerWorkerTest {
         assertEquals(0, result.cappedCount(), "nothing capped below the cap");
     }
 
+    @Test
+    void fencedJsonObject_recoversTagsInsteadOfBootstrapFallback() throws Exception {
+        // A valid {"tags":[...]} object wrapped in a ```json markdown code
+        // fence (the DeepSeek shape from M1-586). Before the fence-strip the
+        // strict readTree rejected the fence → SCHEMA_VIOLATING → retry →
+        // bootstrap fallback; now it is recovered on the first attempt
+        // (callCount==1, tagger_fallback=false, LLM tags persisted).
+        stub().setNextResponse("```json\n{\"tags\":[\"security\",\"news\"]}\n```");
+        SeededPost post = seedPost("fenced", List.of("ai", "java"));
+
+        taggerWorker.processOne(rowFor(post, List.of("ai", "java")));
+
+        // tagger_fallback=false + the LLM tags (not the {ai,java} bootstrap
+        // set) prove the fenced object was recovered rather than degrading to
+        // the bootstrap fallback. (Asserting on the shared ThrottledAdminNotifier
+        // state would be order-dependent — zeroValidTags... leaves the same
+        // error-class present — so the per-post state is the reliable proof.)
+        assertPostState(post.id, true, false, Set.of("security", "news"));
+        assertEquals(1, stub().callCount(),
+            "fenced-but-valid reply parses on the first attempt — no schema-violating retry");
+    }
+
     // ---------- helpers ----------
 
     private TaggerWorker.PostRow rowFor(SeededPost post, List<String> bootstrapTags) {

@@ -137,6 +137,27 @@ class EntityExtractorWorkerTest {
         assertEntityDone(post.id);
     }
 
+    @Test
+    void fencedJsonArray_recoversEntitiesInsteadOfSchemaViolating() throws Exception {
+        // The exact DeepSeek shape observed live 2026-07-07 (M1-586): a
+        // valid JSON array wrapped in a ```json markdown code fence. Before
+        // the fence-strip the strict readTree rejected the fence →
+        // SCHEMA_VIOLATING → release without entities; now it is recovered on
+        // the first attempt (callCount==1, no retry).
+        stub().setNextResponse("```json\n[\n  {\"text\": \"CISA\", \"type\": \"org\"}\n]\n```");
+        SeededPost post = seedPost("fenced");
+
+        entityExtractorWorker.processOne(rowFor(post));
+
+        List<EntityPair> entities = queryEntities(post.id);
+        assertEquals(1, entities.size(),
+            "fenced-but-valid JSON array must be recovered, not released without entities");
+        assertEquals(new EntityPair("cisa", "org"), entities.get(0));
+        assertEntityDone(post.id);
+        assertEquals(1, stub().callCount(),
+            "fenced-but-valid reply parses on the first attempt — no schema-violating retry");
+    }
+
     // ---------- helpers ----------
 
     private EntityExtractorWorker.PostRow rowFor(SeededPost post) {
