@@ -497,6 +497,8 @@ public class ChatAgent {
         try (Connection conn = dataSource.getConnection()) {
             RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
                     .actorUserId(userId)
+                    .actorContactId(inboundContext.senderContactId())
+                    .actorAdapter(inboundContext.adapterName())
                     .action(AuditAction.CHAT_MODE)
                     .targetKind(TargetKind.USER)
                     .targetId(userId.toString())

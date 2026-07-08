@@ -1,9 +1,14 @@
 ---
 id: M1-595
 title: "Chat-mode audit rows record no actor_contact_id — a chat interaction is unattributable"
-status: pending
+status: done
 created: 2026-07-08
 last_updated: 2026-07-08
+clarity_check:
+  date: 2026-07-08
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 2
 files_scope:
@@ -100,14 +105,39 @@ spec_refs:
   - docs/spec/schema.md §Identity and access
   - docs/spec/security.md §DB roles
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 74
+      removed: 7
 escalations: []
 overrides: []
 revisions: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-07-08
+    verdict: CLEAN
+    base: main (c6438a87)
+    head: working-tree (m1/M1-595-chat-mode-audit-actor branch, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-595-2026-07-08.md
+    out_of_model_count: 0
+    note: |
+      Pre-commit --in-progress audit of the CHAT_MODE actor-attribution
+      change. CLEAN — no findings. Populating actor_contact_id/actor_adapter
+      is a pure audit-coverage improvement; the raw column is redaction-masked
+      in audit_log_view, so it widens no operator-facing exposure. Nothing
+      feeds a future ticket.
 ---
 
 # M1-595: chat-mode audit rows record no actor_contact_id
