@@ -78,7 +78,7 @@ acceptance:
   - >-
     The Phase-4 privacy disclosure block in prod/switch-llm.sh names the
     classifier among the tasks whose post bodies now leave the host on a remote
-    switch (the disclosure commitment in docs/spec/llm.md §Privacy /
+    switch (the disclosure commitment in docs/spec/security.md
     §Secrets handling — "naming exactly which generative tasks now call a remote
     provider"), so the disclosure stays complete for the 7-task set.
   - >-
@@ -103,7 +103,8 @@ test_plan:
       — untouched.
 spec_refs:
   - docs/spec/security.md §Prompt-injection defenses
-  - docs/spec/llm.md §Privacy notes for remote providers
+  - docs/spec/security.md §Secrets handling
+  - docs/design/05-llm-and-embeddings.md §5.10 Privacy notes for remote providers
   - docs/design/05-llm-and-embeddings.md §5.4.2 Tagger
   - docs/design/05-llm-and-embeddings.md §5.4.3 Entity extractor
 decision_refs:
@@ -113,7 +114,28 @@ redteam_audits: []
 reviews: []
 escalations: []
 overrides: []
-revisions: []
+revisions:
+  - date: 2026-07-08
+    reason: >-
+      clarity-fail self-refine (auto, /m1-tick run bounded prose-refine): the
+      SPEC-REFS-VALID blocker — frontmatter spec_ref
+      "docs/spec/llm.md §Privacy notes for remote providers" does not resolve
+      (docs/spec/llm.md has no privacy/secrets heading), and the same
+      mis-citation recurs in acceptance item 5's inline reference. Pure citation
+      retarget; no scope, acceptance, or files_scope change.
+    snapshot: |
+      spec_refs entry (pre-refine): "docs/spec/llm.md §Privacy notes for remote providers"
+      acceptance item 5 inline cite (pre-refine): "the disclosure commitment in
+        docs/spec/llm.md §Privacy / §Secrets handling"
+      clarity blocker (2026-07-08): docs/spec/llm.md §Privacy notes for remote
+        providers unresolvable; the disclosure commitment quoted by item 5
+        ("naming exactly which generative tasks now call a remote provider")
+        actually lives in docs/spec/security.md §Secrets handling (lines 1258-1262).
+      resolution: retarget the spec_ref to docs/spec/security.md §Secrets handling
+        (the spec-level source) + add docs/design/05-llm-and-embeddings.md §5.10
+        Privacy notes for remote providers (design mirror); fix acceptance item 5's
+        inline cite to docs/spec/security.md §Secrets handling. files_budget /
+        files_scope / acceptance semantics / complexity / risk / round_cap unchanged.
 aborted_attempts: []
 reopens: []
 ---
