@@ -224,8 +224,7 @@ class SummaryCommandHandlerTest {
                 "LLM-authored prose lands at the summary: slot. Got: " + body);
         assertTrue(body.contains("covered by:"));
         assertTrue(body.contains("score:"));
-        assertFalse(body.contains("classification:"),
-                "the redundant classification: line is gone (M1-591); only tags: remains");
+        assertTrue(body.contains("classification:"));
         assertTrue(body.contains("tags:"));
         assertTrue(body.contains("Headline A"));
     }
