@@ -20,6 +20,7 @@ files_scope:
   - docs/design/02-schema.md
   - docs/design/05-llm-and-embeddings.md
   - docs/spec/architecture.md
+  - docs/spec/llm.md
 complexity: high
 risk: medium
 round_cap: 3
@@ -84,10 +85,13 @@ acceptance:
     from an injected java.time.Clock per engineering-rules §9, mirroring the
     tagger). Per post it makes ONE LLM call via prompts/classifier.md, parses the
     returned label set, normalizes + filters to the closed enum (out-of-enum
-    labels dropped), caps the accepted set, and writes the atomic cursor
+    labels dropped), caps the accepted substantive set at 3 (the 1-3 cardinality
+    carried over from the retired §5.4.4 prompt), and writes the atomic cursor
     `UPDATE post SET classification=?, classifier_done=TRUE WHERE id=? AND
     fetched_at=?`. `unknown` is a first-class label the model may return when no
-    substantive label fits; and on schema-violation / empty-after-filter / LLM
+    substantive label fits and is never combined with a substantive label (a
+    non-empty filtered substantive set yields 1-3 of those labels; an empty one
+    yields exactly `{unknown}`); and on schema-violation / empty-after-filter / LLM
     unreachable the worker writes `classification={unknown}, classifier_done=TRUE`
     (graceful — mirrors the entity extractor's "entity_done=TRUE with no rows").
     Untrusted post content is wrapped with the per-call rotating {{id}} delimiter,
@@ -102,8 +106,10 @@ acceptance:
     classifier are all done.
   - >-
     NAMED TESTS. ClassifierWorkerTest (unit, no DB): parse of the classifier reply,
-    closed-enum membership filter (out-of-enum labels dropped), the cap, and the
-    three fallback-to-{unknown} surfaces (schema-violating, empty-after-filter,
+    closed-enum membership filter (out-of-enum labels dropped), the cap (a reply
+    with >3 substantive labels is truncated to 3; `unknown` returned alongside
+    substantive labels is dropped so the two never co-occur), and the three
+    fallback-to-{unknown} surfaces (schema-violating, empty-after-filter,
     unreachable). ClassifierWorkerIT (Testcontainers, mirrors EntityExtractorWorkerIT):
     a RAW tagger-done post is classified and its classification + classifier_done
     are written; a schema-violating reply yields classification={unknown} and
@@ -118,7 +124,12 @@ acceptance:
     enum is documented WITH `unknown`, and §5.4.4 Summarizer is reframed so
     classification is described as an ingest-time per-post evaluation (NOT a
     summarizer output); docs/spec/architecture.md §Pipelines adds `classifier` to
-    the parallel-after-tagger stage set ({classifier, entity extraction, embedding}).
+    the parallel-after-tagger stage set ({classifier, entity extraction, embedding});
+    and docs/spec/llm.md §SPI shape adds CLASSIFIER("classifier") to the closed
+    ModelTask enum listing (line ~43) — its design mirror docs/design/05
+    §5.1 SPI overview does the same — and the §Per-task routing rules prose that
+    enumerates the Collector ingest-pipeline tasks (security judge, tagging,
+    entity extraction, embedding) adds classification.
   - mvn verify is green from the repo root.
 test_plan:
   adds:
@@ -152,9 +163,40 @@ decision_refs:
 redteam_findings: []
 redteam_audits: []
 reviews: []
-escalations: []
+escalations:
+  - date: 2026-07-08
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      CLARITY VERDICT: FAIL (2 blockers, 2 warnings). Blockers: (1) cap number
+      for the classification label set is unspecified in acceptance items 3 & 5;
+      (2) docs/spec/llm.md §SPI shape (closed ModelTask enum) is missing from
+      files_scope and the item-6 doc checklist, though item 2 widens that enum.
 overrides: []
-revisions: []
+revisions:
+  - date: 2026-07-08
+    reason: >-
+      clarity-fail refine (user-directed via /m1-tick run escalation menu):
+      acceptance items 3 & 5 left the classification cap number unstated, and
+      files_scope / item-6 doc checklist omitted docs/spec/llm.md §SPI shape
+      (the closed ModelTask enum item 2 widens).
+    snapshot: |
+      files_scope (pre-refine): 13 paths; docs/spec/llm.md absent (spec_refs only).
+      acceptance item 3 (verbatim, pre-refine): "... normalizes + filters to the
+        closed enum (out-of-enum labels dropped), caps the accepted set, and
+        writes the atomic cursor ..."
+      acceptance item 5 (verbatim, pre-refine): "... closed-enum membership filter
+        (out-of-enum labels dropped), the cap, and the three fallback-to-{unknown}
+        surfaces ..."
+      acceptance item 6 (pre-refine): ended at docs/spec/architecture.md §Pipelines;
+        docs/spec/llm.md §SPI shape not listed.
+      clarity blockers (2026-07-08): (1) cap number unspecified; (2) docs/spec/llm.md
+        §SPI shape closed enum missing from files_scope + item-6 checklist though
+        item 2 adds a 7th ModelTask value.
+      resolution: state cap = 3 substantive labels (1-3 carried from retired §5.4.4;
+        unknown mutually exclusive); add docs/spec/llm.md to files_scope (14 paths,
+        still <= files_budget 16); extend item 6 to require CLASSIFIER in the
+        §SPI shape enum listing + design §5.1 mirror + §Per-task routing prose.
+        files_budget / complexity / risk / round_cap unchanged.
 aborted_attempts: []
 reopens: []
 ---
