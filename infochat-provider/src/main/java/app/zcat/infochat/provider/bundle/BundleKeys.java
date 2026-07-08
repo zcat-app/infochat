@@ -552,9 +552,6 @@ public final class BundleKeys {
     /** Cluster-block {@code summary: } label prefix; the (possibly translated) LLM prose is appended after it. */
     public static final String REPLY_SUMMARY_CLUSTER_SUMMARY_LABEL = "reply.summary.cluster.summary_label";
 
-    /** Cluster-block {@code classification: } label prefix; the comma-joined tag union is appended after it. */
-    public static final String REPLY_SUMMARY_CLUSTER_CLASSIFICATION_LABEL = "reply.summary.cluster.classification_label";
-
     /** Cluster-block {@code tags: } label prefix; the comma-joined tag union is appended after it. */
     public static final String REPLY_SUMMARY_CLUSTER_TAGS_LABEL = "reply.summary.cluster.tags_label";
 

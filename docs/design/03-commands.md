@@ -486,7 +486,6 @@ CVE-2026-1234 — OpenSSL heap overflow
 covered by: Bleeping Computer (uid p-a91), TheHackerNews (uid p-b04), /r/netsec (uid p-c12)
 score: high (3 sources, news+social)
 summary: A heap overflow in OpenSSL 3.5 lets a remote attacker execute code...
-classification: technical, urgent
 tags: security, ai
 
 [topic_id=t-9e02]

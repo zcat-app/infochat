@@ -98,9 +98,6 @@ final class ClusterBlockRenderer {
                         llmOutputSanitizer.sanitize(cp.prose()), scopeLanguage);
         out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_CLUSTER_SUMMARY_LABEL, scopeLanguage))
            .append(' ').append(summaryText).append("\n");
-        // classification: comma-joined union of cluster.posts.tags.
-        out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_CLUSTER_CLASSIFICATION_LABEL, scopeLanguage))
-           .append(' ').append(joinedTags(posts)).append("\n");
         // tags: deduplicated union of cluster.posts.tags.
         out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_CLUSTER_TAGS_LABEL, scopeLanguage))
            .append(' ').append(joinedTags(posts)).append("\n");

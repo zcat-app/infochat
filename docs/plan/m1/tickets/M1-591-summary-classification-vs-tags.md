@@ -1,9 +1,14 @@
 ---
 id: M1-591
 title: "/summary cluster block prints classification: and tags: as two identical lines — collapse the redundancy"
-status: pending
+status: done
 created: 2026-07-08
 last_updated: 2026-07-08
+clarity_check:
+  date: 2026-07-08
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 8
 files_scope:
@@ -118,7 +123,20 @@ decision_refs:
   - D43
   - D19
   - D36
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 12
+      removed: 19
 escalations: []
 overrides: []
 revisions: []

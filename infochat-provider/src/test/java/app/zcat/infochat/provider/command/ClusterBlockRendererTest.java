@@ -60,7 +60,6 @@ class ClusterBlockRendererTest {
                         + "covered by: Src1 (uid p-1)\n"
                         + "score: 1 source\n"
                         + "summary: Degraded prose.\n"
-                        + "classification: a\n"
                         + "tags: a\n"
                         + "\n",
                 rendered,
@@ -86,7 +85,6 @@ class ClusterBlockRendererTest {
                         + "pokrývají: Src1 (uid p-1)\n"
                         + "skóre: 1 zdroj\n"
                         + "shrnutí: Degraded prose.\n"
-                        + "klasifikace: a\n"
                         + "tagy: a\n"
                         + "\n",
                 rendered,
