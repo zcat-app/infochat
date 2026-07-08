@@ -55,6 +55,48 @@ class NitterFetcherTest {
         </rss>
         """.getBytes(StandardCharsets.UTF_8);
 
+    // xcancel's anti-scraping placeholder: HTTP 200 + well-formed RSS whose
+    // sole item is a whitelist notice, not tweets. The per-reader hex id in the
+    // body varies in the wild; the fixture uses a stand-in.
+    private static final byte[] XCANCEL_PLACEHOLDER_FIXTURE = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>@vxunderground / xcancel</title>
+            <link>https://rss.xcancel.com/vxunderground</link>
+            <description>Twitter feed for @vxunderground</description>
+            <item>
+              <title>RSS reader not yet whitelisted!</title>
+              <link>https://rss.xcancel.com/vxunderground</link>
+              <guid isPermaLink="false">xcancel:not-whitelisted</guid>
+              <description>RSS reader not yet whitelist! Please send an email rss [AT] xcancel [DOT] com with this ID to get your RSS feed reader whitelisted: 0a1b2c3d4e5f</description>
+              <pubDate>Mon, 06 Sep 2010 00:01:00 +0000</pubDate>
+            </item>
+          </channel>
+        </rss>
+        """.getBytes(StandardCharsets.UTF_8);
+
+    // A legitimate single-item feed whose tweet merely mentions "whitelist" —
+    // it passes the sole-item gate but neither the exact title nor the notice
+    // matches, so the sentinel guard must NOT drop it.
+    private static final byte[] LEGIT_WHITELIST_MENTION_FIXTURE = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>@builder / Nitter</title>
+            <link>https://nitter.example.com/builder</link>
+            <description>Feed for @builder on Nitter</description>
+            <item>
+              <title>Finally got whitelisted for the private beta today</title>
+              <link>https://nitter.example.com/builder/status/200001</link>
+              <guid isPermaLink="false">nitter:200001</guid>
+              <description>Finally got whitelisted for the private beta today, super excited to try it out</description>
+              <pubDate>Tue, 07 Sep 2010 12:30:45 +0000</pubDate>
+            </item>
+          </channel>
+        </rss>
+        """.getBytes(StandardCharsets.UTF_8);
+
     private HttpServer server;
 
     private int port;
@@ -68,6 +110,20 @@ class NitterFetcherTest {
             exchange.sendResponseHeaders(200, NITTER_RSS_FIXTURE.length);
             try (OutputStream out = exchange.getResponseBody()) {
                 out.write(NITTER_RSS_FIXTURE);
+            }
+        });
+        server.createContext("/xcancel-placeholder/rss", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "application/rss+xml; charset=UTF-8");
+            exchange.sendResponseHeaders(200, XCANCEL_PLACEHOLDER_FIXTURE.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(XCANCEL_PLACEHOLDER_FIXTURE);
+            }
+        });
+        server.createContext("/legit-whitelist/rss", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "application/rss+xml; charset=UTF-8");
+            exchange.sendResponseHeaders(200, LEGIT_WHITELIST_MENTION_FIXTURE.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(LEGIT_WHITELIST_MENTION_FIXTURE);
             }
         });
         server.createContext("/notfound", exchange -> {
@@ -127,6 +183,29 @@ class NitterFetcherTest {
 
         assertTrue(ex.getMessage().contains("404"),
             "exception must surface the upstream HTTP status code");
+    }
+
+    @Test
+    void fetchThrowsOnXcancelWhitelistPlaceholder() {
+        NitterFetcher.NitterFetchException ex = assertThrows(
+            NitterFetcher.NitterFetchException.class,
+            () -> testModeFetcher().fetch(1L, "http://127.0.0.1:" + port + "/xcancel-placeholder/rss"),
+            "a degraded xcancel feed (sole item = whitelist sentinel) must be a Fetcher "
+            + "failure (D42), not a successful ingest of the stub");
+
+        assertTrue(ex.getMessage().contains("degraded feed"),
+            "the failure message must identify the degraded-feed cause");
+    }
+
+    @Test
+    void fetchReturnsPostWhenItemMerelyMentionsWhitelist() {
+        List<NormalizedPost> posts =
+            testModeFetcher().fetch(1L, "http://127.0.0.1:" + port + "/legit-whitelist/rss");
+
+        assertEquals(1, posts.size(),
+            "a real tweet that merely mentions 'whitelist' must NOT match the exact "
+            + "sentinel and must be returned unchanged");
+        assertEquals("nitter:200001", posts.get(0).upstreamIdentifier());
     }
 
     private NitterFetcher testModeFetcher() {

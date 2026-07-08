@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 610 |
+| done | 611 |
 | deferred | 1 |
 | abandoned | 10 |
 | **total** | **630** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-588 — Collector: a degraded placeholder feed (xcancel 'not whitelisted' stub) is a Fetcher failure, not a successful ingest (complexity: low, risk: medium)
 - M1-589 — Provider chat: digest-first semantic RAG — a general assistant grounded in pgvector nearest-neighbour retrieval, replacing tag-guessing (complexity: high, risk: medium)
 - M1-590 — Provider: one canonical source for the probation-allowed command list (welcome + /help + rejection can no longer drift; rejection wrongly omits /zcash /monero) (complexity: low, risk: low)
 - M1-591 — /summary cluster block prints classification: and tags: as two identical lines — collapse the redundancy (complexity: low, risk: low)
@@ -69,6 +68,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-588 | Collector: a degraded placeholder feed (xcancel 'not whitelisted' stub) is a Fetcher failure, not a successful ingest | 2026-07-08 | round 1 APPROVE |
 | M1-587 | backup.sh handles root-owned adapter identity dirs (the M1-569 follow-up) | 2026-07-07 | round 1 APPROVE |
 | M1-586 | Strip markdown fences before entity/tagger JSON parse | 2026-07-07 | round 1 APPROVE |
 | M1-585 | RestoreWiringTest: behavioral pins for persisted-SHA recovery, role-before-restore order, and mount shape | 2026-07-07 | round 1 APPROVE |
@@ -78,7 +78,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-581 | restore.sh: exact identity-path gate, truthful failure remediation, operator-role reminder | 2026-07-06 | round 1 APPROVE |
 | M1-580 | restore.sh fails loud on real pg_restore errors (stderr gate, not just table-presence) | 2026-07-06 | round 1 APPROVE |
 | M1-579 | /pending lists only currently-actionable users (drop the terminal 'invited' roster arm) | 2026-07-06 | round 1 APPROVE |
-| M1-578 | BootstrapLoader reports ALL invalid source tags at once, not just the first | 2026-07-06 | round 1 APPROVE |
 
 ---
 
@@ -809,7 +808,7 @@ M1-584 (done)
   └── M1-585 (done) [see above]
 M1-586 (done)
 M1-587 (done)
-M1-588 (pending) ← runnable
+M1-588 (done)
 M1-589 (pending) ← runnable
 M1-590 (pending) ← runnable
 M1-591 (pending) ← runnable

@@ -5,6 +5,7 @@ import app.zcat.infochat.collector.fetcher.SingleGetFetch;
 import app.zcat.infochat.core.ingest.Fetcher;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
+import app.zcat.infochat.ssrf.UrlRedactor;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.List;
@@ -44,13 +45,47 @@ public class NitterFetcher implements Fetcher {
         this.client = client;
     }
 
+    // Sole item of xcancel's anti-scraping placeholder feed served when our
+    // RSS reader is not whitelisted. The parser does not trim <title>, so the
+    // stripped title is compared; the notice substring is stable while the
+    // per-reader hex id in the rest of the body varies (M1-588).
+    private static final String XCANCEL_PLACEHOLDER_TITLE = "RSS reader not yet whitelisted!";
+    private static final String XCANCEL_PLACEHOLDER_NOTICE = "get your RSS feed reader whitelisted";
+
     @Override
     public List<NormalizedPost> fetch(long dispatchKey, String identifier) {
-        return SingleGetFetch.fetchAndParse(
+        List<NormalizedPost> posts = SingleGetFetch.fetchAndParse(
             client::get, "Nitter", dispatchKey, identifier,
             (message, cause) -> cause == null
                 ? new NitterFetchException(message)
                 : new NitterFetchException(message, cause));
+
+        // A xcancel instance that has not whitelisted our reader returns HTTP
+        // 200 + a well-formed RSS feed whose sole item is a whitelist sentinel,
+        // not tweets. That parses cleanly, so without this guard the collector
+        // would record a successful fetch and ingest the stub — a dead source
+        // would look healthy. Signal a Fetcher failure so FetchScheduler runs
+        // D42's per-source counter and the source eventually flips to
+        // status='failed' (M1-588). The match is exact — sole item, exact
+        // title, whitelist notice — so a real tweet mentioning "whitelist" is
+        // never dropped.
+        if (isXcancelWhitelistPlaceholder(posts)) {
+            throw new NitterFetchException(
+                "Nitter feed for " + UrlRedactor.redact(identifier)
+                + " is the xcancel whitelist placeholder, not content — treating as a degraded feed (D42)");
+        }
+
+        return posts;
+    }
+
+    private static boolean isXcancelWhitelistPlaceholder(List<NormalizedPost> posts) {
+        if (posts.size() != 1) {
+            return false;
+        }
+        NormalizedPost only = posts.get(0);
+        return only.title() != null
+            && XCANCEL_PLACEHOLDER_TITLE.equals(only.title().strip())
+            && only.body().contains(XCANCEL_PLACEHOLDER_NOTICE);
     }
 
     /**
