@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 616 |
 | deferred | 1 |
 | abandoned | 11 |
-| **total** | **632** |
+| **total** | **633** |
 
 ---
 
@@ -29,6 +29,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-593 — Provider: /summary distinguishes zero-subscriptions from empty-window, and the welcome steers a fresh user to follow a source (complexity: low, risk: low)
 - M1-594 — Provider: /summary emits a misleading \"Translating...\" progress step for an English scope (suppress the TRANSLATING stage when scope language == source) (complexity: low, risk: low)
 - M1-598 — Provider: render real per-post classification in /summary (union, drop 'unknown' unless sole) (complexity: medium, risk: low)
+- M1-599 — Tagger title-wrap (D21) + classifier switch-llm/4-llm tooling (complexity: medium, risk: low)
 
 ---
 
@@ -818,4 +819,5 @@ M1-595 (done)
 M1-596 (done)
 M1-597 (done)
   └── M1-598 (pending) ← runnable
+M1-599 (pending) ← runnable
 ```
