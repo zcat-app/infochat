@@ -214,8 +214,10 @@ source actually provides — it never invents zeros or estimates.
   ```
   Zcash (coingecko)
     $42.18  ·  0.000651 BTC
-    1h:    +0.3%
-    24h:   −2.4%  (high $43.91 / low $41.07)
+    1h:    +0.30%
+    24h:   −2.40%
+    24h high: $43.91
+    24h low:  $41.07
     as of 14:32 UTC, cached 41s
     source: coingecko.com/en/coins/zcash
   ```
@@ -225,7 +227,8 @@ source actually provides — it never invents zeros or estimates.
   ```
   Zcash (kraken)
     $42.15  ·  0.000650 BTC
-    24h:   high $43.88 / low $41.02
+    24h high: $43.88
+    24h low:  $41.02
     as of 14:32 UTC, cached 38s
     source: kraken.com/prices/zec-usd-zcash-price-chart
   ```
@@ -239,12 +242,14 @@ source actually provides — it never invents zeros or estimates.
   for crypto-vs-crypto context (privacy-coin audience anchors on BTC).
   Skipped if `--vs btc` (would be redundant) or if the source did not
   return a BTC-denominated price.
-- Delta lines (coingecko only): 1h first, then 24h. Sign-bearing U+2212
-  minus (not ASCII hyphen) for negative values. Omitted entirely for
-  exchange sub-verbs since they do not provide delta.
-- Spread line: `24h: high $X / low $Y`. For coingecko the spread is
-  appended to the 24h delta line as a parenthetical. For exchange
-  sub-verbs it stands alone as the only 24h line.
+- Delta lines (coingecko only): 1h first, then 24h, each at a fixed 2
+  decimal places (HALF_UP) so every delta reads at the same precision.
+  Sign-bearing U+2212 minus (not ASCII hyphen) for negative values.
+  Omitted entirely for exchange sub-verbs since they do not provide delta.
+- Spread lines: the 24h high and 24h low each print on their own line
+  (`24h high: $X` / `24h low: $Y`), so the reply does not wrap
+  mid-parenthetical on a phone. For coingecko they follow the 24h delta
+  line; for exchange sub-verbs they are the only 24h lines.
 - Any field absent from the snapshot row is silently omitted — the
   renderer never invents zeros.
 - Capture/cache line: capture timestamp in UTC, cache age in seconds.
