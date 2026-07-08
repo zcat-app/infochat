@@ -19,6 +19,7 @@ class LlmRouterStartupGuardKeyDerivationTest {
         ModelTask.SECURITY_JUDGE, "security",
         ModelTask.TAGGER, "tagger",
         ModelTask.ENTITY, "entity",
+        ModelTask.CLASSIFIER, "classifier",
         ModelTask.SUMMARIZER, "summarizer",
         ModelTask.CHAT_AGENT, "chat",
         ModelTask.TRANSLATOR, "translator");

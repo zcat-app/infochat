@@ -293,7 +293,7 @@ public class LlmRouter {
     private static boolean isLanguageAwareTask(ModelTask task) {
         return switch (task) {
             case SUMMARIZER, TRANSLATOR -> true;
-            case SECURITY_JUDGE, TAGGER, ENTITY, CHAT_AGENT -> false;
+            case SECURITY_JUDGE, TAGGER, ENTITY, CLASSIFIER, CHAT_AGENT -> false;
         };
     }
 

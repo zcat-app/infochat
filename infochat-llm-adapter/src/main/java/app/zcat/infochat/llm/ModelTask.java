@@ -24,6 +24,7 @@ public enum ModelTask {
     SECURITY_JUDGE("security"),
     TAGGER("tagger"),
     ENTITY("entity"),
+    CLASSIFIER("classifier"),
     SUMMARIZER("summarizer"),
     CHAT_AGENT("chat"),
     TRANSLATOR("translator");

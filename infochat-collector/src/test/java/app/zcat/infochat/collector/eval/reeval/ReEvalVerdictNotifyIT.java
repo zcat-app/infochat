@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.eval.reeval;
 
+import app.zcat.infochat.collector.eval.classifier.ClassifierWorker;
 import app.zcat.infochat.collector.eval.embedding.EmbeddingWorker;
 import app.zcat.infochat.collector.eval.entity.EntityExtractorWorker;
 import app.zcat.infochat.collector.eval.ready.ReadyPromoter;
@@ -73,6 +74,9 @@ class ReEvalVerdictNotifyIT {
 
     @Inject
     EmbeddingWorker embeddingWorker;
+
+    @Inject
+    ClassifierWorker classifierWorker;
 
     @Inject
     ReadyPromoter readyPromoter;
@@ -175,6 +179,12 @@ class ReEvalVerdictNotifyIT {
             taggerWorker.onTick();
             entityExtractorWorker.onTick();
             embeddingWorker.onTick();
+            // The classifier is the third parallel-after-tagger stage and gates
+            // RAW→READY (M1-597). No classifier reply is queued on the stub, so
+            // it rides the empty-queue → {unknown} graceful release, advancing
+            // classifier_done=TRUE — same "drive each stage, fall back on empty
+            // stub" shape as the tagger/entity/embedding ticks above.
+            classifierWorker.onTick();
             readyPromoter.onTick();
 
             assertPostStatus(post.id, "READY");

@@ -4,6 +4,7 @@ import app.zcat.infochat.collector.eval.embedding.EmbeddingMetadataDao;
 import app.zcat.infochat.collector.eval.embedding.EmbeddingMetadataStartupGuard;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import io.quarkus.arc.ClientProxy;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterEach;
@@ -22,7 +23,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -432,30 +435,76 @@ class ReadyPromoterIT {
         }
     }
 
+    // ---------- 8. classifier_done gate (M1-597) ----------
+
+    @Test
+    @Order(8)
+    void classifierNotDone_isNotPromotedUntilClassifierDone() throws Exception {
+        // The M1-597 gate: a post that has passed every other stage but has
+        // classifier_done=FALSE must NOT be picked up for promotion — else it
+        // would reach READY before classification and the classifier's own
+        // status='RAW' pickup would exclude it forever, leaving it {unknown}.
+        // The gate lives in enumeratePending (not promoteOne, whose WHERE is
+        // only status='RAW'), so this asserts via the pickup, like the
+        // quarantined-exclusion scenario.
+        //
+        // Pin the injected Clock so the shared FETCHED_AT (2026-05-16) is
+        // inside the scan-window floor — the OTHER scenarios drive promoteOne
+        // directly and so are floor-independent, but this one exercises
+        // enumeratePending, whose fetched_at floor reads the injected Clock.
+        QuarkusMock.installMockForType(
+            Clock.fixed(Instant.parse("2026-05-17T00:00:00Z"), ZoneOffset.UTC), Clock.class);
+        SeededPost notClassified = seedPost("not-classified", "RAW",
+            /* stage1Done */ true, /* stage1Flagged */ false,
+            /* stage2Done */ false, /* stage2Failed */ false,
+            /* taggerDone */ true, /* entityDone */ true, /* embeddingDone */ true,
+            /* classifierDone */ false);
+
+        List<ReadyPromoter.PromotionCandidate> pendingBefore = readyPromoter.enumeratePending(10);
+        assertFalse(pendingBefore.stream().anyMatch(c -> c.id().equals(notClassified.id())),
+            "a post with classifier_done=FALSE (all other stages done) must NOT be picked up");
+
+        // Flip only classifier_done → the same post now qualifies.
+        setClassifierDone(notClassified.id());
+        List<ReadyPromoter.PromotionCandidate> pendingAfter = readyPromoter.enumeratePending(10);
+        assertTrue(pendingAfter.stream().anyMatch(c -> c.id().equals(notClassified.id())),
+            "once classifier_done=TRUE (all other stages done) the post is promotable");
+    }
+
     // ---------- helpers ----------
+
+    private void setClassifierDone(UUID id) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "UPDATE post SET classifier_done = TRUE WHERE id = ?")) {
+            ps.setObject(1, id);
+            ps.executeUpdate();
+        }
+    }
 
     private SeededPost seedPickupReadyPost(String slug) throws Exception {
         return seedPost(slug, "RAW", /* stage1Done */ true, /* stage1Flagged */ false,
             /* stage2Done */ false, /* stage2Failed */ false,
-            /* taggerDone */ true, /* entityDone */ true, /* embeddingDone */ true);
+            /* taggerDone */ true, /* entityDone */ true, /* embeddingDone */ true,
+            /* classifierDone */ true);
     }
 
     private SeededPost seedQuarantinedPost(String slug) throws Exception {
-        return seedPost(slug, "QUARANTINED", true, true, true, false, true, true, true);
+        return seedPost(slug, "QUARANTINED", true, true, true, false, true, true, true, true);
     }
 
     private SeededPost seedStage2FailedReleasePost(String slug) throws Exception {
         // The release-on-stage2-failure=true path leaves the post
         // status='RAW' with stage2_failed=true so it flows through
         // the rest of the pipeline like a BENIGN post.
-        return seedPost(slug, "RAW", true, true, false, true, true, true, true);
+        return seedPost(slug, "RAW", true, true, false, true, true, true, true, true);
     }
 
     private SeededPost seedPost(String slug, String status,
                                  boolean stage1Done, boolean stage1Flagged,
                                  boolean stage2Done, boolean stage2Failed,
                                  boolean taggerDone, boolean entityDone,
-                                 boolean embeddingDone) throws Exception {
+                                 boolean embeddingDone, boolean classifierDone) throws Exception {
         UUID sourceId = seedRssSource(slug);
         String uid = UID_PREFIX + slug;
         try (Connection conn = dataSource.getConnection();
@@ -464,11 +513,11 @@ class ReadyPromoterIT {
                      + "  id, uid, source_id, upstream_identifier, title, body, "
                      + "  fetched_at, status, "
                      + "  stage1_done, stage1_flagged, stage2_done, stage2_failed, "
-                     + "  tagger_done, entity_done, embedding_done, tagger_fallback, tags"
+                     + "  tagger_done, entity_done, embedding_done, classifier_done, tagger_fallback, tags"
                      + ") VALUES ("
                      + "  gen_random_uuid(), ?, ?, ?, ?, ?, ?, ?, "
                      + "  ?, ?, ?, ?, "
-                     + "  ?, ?, ?, FALSE, '{}'"
+                     + "  ?, ?, ?, ?, FALSE, '{}'"
                      + ") RETURNING id, fetched_at")) {
             ps.setString(1, uid);
             ps.setObject(2, sourceId);
@@ -484,6 +533,7 @@ class ReadyPromoterIT {
             ps.setBoolean(12, taggerDone);
             ps.setBoolean(13, entityDone);
             ps.setBoolean(14, embeddingDone);
+            ps.setBoolean(15, classifierDone);
             try (ResultSet rs = ps.executeQuery()) {
                 assertTrue(rs.next(), "INSERT must yield an id");
                 UUID id = (UUID) rs.getObject(1);

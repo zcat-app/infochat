@@ -89,11 +89,11 @@ class ReadyPromoterClockIT {
                      + "  id, uid, source_id, upstream_identifier, title, body,"
                      + "  fetched_at, status,"
                      + "  stage1_done, stage2_done, tagger_done, entity_done, embedding_done,"
-                     + "  stage1_flagged, stage2_failed, tagger_fallback, tags"
+                     + "  classifier_done, stage1_flagged, stage2_failed, tagger_fallback, tags"
                      + ") VALUES ("
                      + "  gen_random_uuid(), ?, ?, ?, 'Ready Clock IT title', 'Ready Clock IT body',"
                      + "  ?, 'RAW',"
-                     + "  TRUE, FALSE, TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, '{}'"
+                     + "  TRUE, FALSE, TRUE, TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, '{}'"
                      + ") RETURNING id")) {
             ps.setString(1, UID_PREFIX + slug);
             ps.setObject(2, sourceId);

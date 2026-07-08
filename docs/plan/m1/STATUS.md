@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 615 |
+| done | 616 |
 | deferred | 1 |
 | abandoned | 11 |
 | **total** | **632** |
@@ -28,7 +28,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-589 — Provider chat: digest-first semantic RAG — a general assistant grounded in pgvector nearest-neighbour retrieval, replacing tag-guessing (complexity: high, risk: medium)
 - M1-593 — Provider: /summary distinguishes zero-subscriptions from empty-window, and the welcome steers a fresh user to follow a source (complexity: low, risk: low)
 - M1-594 — Provider: /summary emits a misleading \"Translating...\" progress step for an English scope (suppress the TRANSLATING stage when scope language == source) (complexity: low, risk: low)
-- M1-597 — Collector: real per-post classification ingest stage (ClassifierWorker + post.classification, unknown default) (complexity: high, risk: medium)
+- M1-598 — Provider: render real per-post classification in /summary (union, drop 'unknown' unless sole) (complexity: medium, risk: low)
 
 ---
 
@@ -45,7 +45,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-598 — blocked_by: M1-597 (pending)
+_(none)_
 
 ---
 
@@ -64,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-597 | Collector: real per-post classification ingest stage (ClassifierWorker + post.classification, unknown default) | 2026-07-08 | round 2 APPROVE |
 | M1-596 | Collector: INVESTIGATE — FetchScheduler wedges a kind's dispatch after a bulk identifier/host change collapses its sources onto one host; make the drain self-heal | 2026-07-08 | round 1 APPROVE |
 | M1-595 | Chat-mode audit rows record no actor_contact_id — a chat interaction is unattributable | 2026-07-08 | round 1 APPROVE |
 | M1-592 | Asset reply renderer: split the 24h high/low onto their own lines (mobile wrap) and fix inconsistent Δ% precision | 2026-07-08 | round 1 APPROVE |
@@ -73,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-586 | Strip markdown fences before entity/tagger JSON parse | 2026-07-07 | round 1 APPROVE |
 | M1-585 | RestoreWiringTest: behavioral pins for persisted-SHA recovery, role-before-restore order, and mount shape | 2026-07-07 | round 1 APPROVE |
 | M1-584 | Identity mount targets: correct the over-claiming allowlist comment; refuse system-prefix and colon data-dirs | 2026-07-07 | round 1 APPROVE |
-| M1-583 | Close the secret-disposal gaps: shred pack.sh staging; shred-bundle accepts pack remnants and bare .pgc; hardlink/SSD caveat | 2026-07-07 | round 2 APPROVE |
 
 ---
 
@@ -816,6 +816,6 @@ M1-593 (pending) ← runnable
 M1-594 (pending) ← runnable
 M1-595 (done)
 M1-596 (done)
-M1-597 (pending) ← runnable
-  └── M1-598 (pending)
+M1-597 (done)
+  └── M1-598 (pending) ← runnable
 ```

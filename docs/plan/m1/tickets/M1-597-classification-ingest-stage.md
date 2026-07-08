@@ -1,11 +1,11 @@
 ---
 id: M1-597
 title: "Collector: real per-post classification ingest stage (ClassifierWorker + post.classification, unknown default)"
-status: pending
+status: done
 created: 2026-07-08
 last_updated: 2026-07-08
 blocked_by: []
-files_budget: 20
+files_budget: 22
 files_scope:
   - infochat-core/src/main/resources/db/migration/V57__post_classification.sql
   - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/ModelTask.java
@@ -21,6 +21,8 @@ files_scope:
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/classifier/ClassifierWorkerTest.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/classifier/ClassifierWorkerIT.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/ready/ReadyPromoterIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/ready/ReadyPromoterClockIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/ReEvalVerdictNotifyIT.java
   - docs/design/02-schema.md
   - docs/design/05-llm-and-embeddings.md
   - docs/spec/architecture.md
@@ -30,6 +32,7 @@ risk: medium
 round_cap: 3
 security_relevant: true
 migration_touch: true
+outline_file: target/m1-tick-outline-M1-597.md
 out_of_scope:
   - >-
     The provider render + retrieval surface (EligiblePostQuery,
@@ -158,15 +161,31 @@ acceptance:
     `assertEquals(6, ModelTask enum-constant count)` becomes 7 with its comment
     updated to list classification. Both are authorized in test_plan.modifies and
     are red-before / green-after the enum widening.
+  - >-
+    Prompt-injection hardening (D21 redteam remediation): the classifier prompt
+    wraps the untrusted post TITLE inside the per-call {{id}} delimiter (not just
+    the body), so all user-derived text sits inside the delimited block per
+    §Prompt-injection defenses. ClassifierWorkerTest.renderPrompt_wrapsTitleInsideDelimiter
+    asserts the rendered title lands between the delimiter markers (red-before /
+    green-after). Pre-existing tagger/entity title placement is a separate
+    follow-up, out of scope here.
   - mvn verify is green from the repo root.
 test_plan:
   adds:
     - >-
-      infochat-collector/.../eval/classifier/ClassifierWorkerTest.java — parse /
-      closed-enum filter / cap / three fallback-to-unknown surfaces.
+      infochat-collector/.../eval/classifier/ClassifierWorkerTest.java — pure unit
+      (no DB, no @QuarkusTest — the IT-naming guard requires a new DataSource-
+      injecting test be named *IT): parseClassification parse / closed-enum filter
+      / cap-at-3 / unknown-mutual-exclusion / schema-violating→null /
+      empty-after-filter→{unknown} / fenced-JSON recovery / renderPrompt wraps
+      the title inside the {{id}} delimiter (D21 redteam remediation).
     - >-
       infochat-collector/.../eval/classifier/ClassifierWorkerIT.java — end-to-end
-      RAW→classified + schema-violation→{unknown} (Testcontainers).
+      (Testcontainers): RAW→classified via the real pickup SQL + scan-window
+      floor, plus the write-level fallback surfaces schema-violation→{unknown}
+      and LLM-unreachable→{unknown}+notify (the two surfaces that need
+      processOne + a DB; the parse-level schema/empty surfaces live in the unit
+      test).
   modifies:
     - >-
       infochat-collector/.../eval/ready/ReadyPromoterIT.java — classifier_done is
@@ -179,6 +198,14 @@ test_plan:
       infochat-llm-adapter/.../LlmSpisLoadTest.java — the spec-mandated ModelTask
       count assertion goes 6 -> 7 and its comment lists classification (forced by
       the enum widening).
+    - >-
+      infochat-collector/.../eval/ready/ReadyPromoterClockIT.java — its
+      seedPromotionReadyPost fixture gains classifier_done=TRUE (forced by the
+      ReadyPromoter classifier_done gate; else the in-window post is gate-excluded).
+    - >-
+      infochat-collector/.../eval/reeval/ReEvalVerdictNotifyIT.java — the
+      re-eval→READY drive-sequence gains classifierWorker.onTick() so the requeued
+      post clears the new classifier_done gate (forced by the gate; else it stays RAW).
   preserves:
     - all tests currently green on main
     - >-
@@ -192,13 +219,92 @@ spec_refs:
   - docs/design/02-schema.md §2.3.1 `post` — partitioned by `fetched_at`
   - docs/design/05-llm-and-embeddings.md §5.4.2 Tagger
   - docs/design/05-llm-and-embeddings.md §5.4.3 Entity extractor
-  - docs/design/05-llm-and-embeddings.md §5.4.4 Summarizer (cluster mode)
+  - docs/design/05-llm-and-embeddings.md §5.4.5 Summarizer (cluster mode) [was §5.4.4 pre-M1-597; renumbered by the new §5.4.4 Classifier]
 decision_refs:
   - D19
   - D36
-redteam_findings: []
-redteam_audits: []
-reviews: []
+redteam_findings:
+  - date: 2026-07-08
+    category: INJECTION
+    severity: low
+    promise: |
+      docs/spec/security.md §Prompt-injection defenses (D21): every prompt
+      including user-derived text is wrapped in a per-call random delimiter
+      block so attackers cannot forge a closing tag.
+    gap: |
+      The classifier prompt renders `Post title: {{title}}` OUTSIDE the per-call
+      {{id}} delimiter (classifier.md: title line above the wrapper opener; only
+      {{body}} is inside). ClassifierWorker.renderPrompt substitutes the
+      upstream-untrusted row.title() verbatim into that un-delimited position.
+      Mirrors the pre-existing tagger (§5.4.2) / entity (§5.4.3) prompts.
+    repro: |
+      A feed-controlling adversary publishes a post whose TITLE carries
+      injection text; the collector weaves it into the prompt outside the
+      delimiter so the model reads it as instructions. Impact bounded to nil by
+      the closed-enum Java filter + V57 DB CHECK (worst case: mislabel the KIND
+      of the attacker's own post) — hence low / defense-in-depth.
+    suggested_fix_class: input-sanitization
+redteam_audits:
+  - date: 2026-07-08
+    verdict: FINDINGS
+    base: 87fedd1873c596ac2dc503a5f1343874ff071ca3
+    head: working-tree (m1/M1-597-classification-ingest-stage)
+    verdict_file: docs/plan/m1/redteam/M1-597-2026-07-08.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      One LOW defense-in-depth injection finding (title outside the {{id}}
+      delimiter, mirrors tagger/entity; bounded to nil by the closed-enum
+      filter). One SAFE out-of-model note (switch-llm.sh unaware of the
+      classifier task; classifier stays local, no remote leak). Disposition:
+      user chose refine → remediated in-branch (see the CLEAN re-run below).
+  - date: 2026-07-08
+    verdict: CLEAN
+    base: 87fedd1873c596ac2dc503a5f1343874ff071ca3
+    head: working-tree (m1/M1-597-classification-ingest-stage, post-remediation)
+    verdict_file: docs/plan/m1/redteam/M1-597-2026-07-08.md
+    out_of_model_count: 1
+    note: |
+      Post-remediation re-run after the D21 fix (title moved inside the {{id}}
+      delimiter). CLEAN — the LOW injection finding is closed; no new finding.
+      The out-of-model item (switch-llm.sh classifier-awareness) is unchanged
+      and carried to a follow-up, out of M1-597's scope.
+reviews:
+  - round: 1
+    date: 2026-07-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 22
+      added: 1197
+      removed: 55
+  - round: 2
+    date: 2026-07-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 22
+      added: 1312
+      removed: 58
+clarity_check:
+  date: 2026-07-08
+  verdict: PASS
+  warnings:
+    - >-
+      risk: medium is defensible but borderline given migration_touch: true plus
+      the ReadyPromoter gate change item 4 calls "load-bearing"; informational
+      only (the hard rule only flags risk: low against this surface).
+  blockers: []
 escalations:
   - date: 2026-07-08
     reason: clarity-fail
@@ -223,6 +329,40 @@ escalations:
       config in infochat-provider/.../application.properties) is forbidden by
       out_of_scope + absent from files_scope. Both confirmed against ground
       truth. SUGGESTED ESCALATION: refine.
+  - date: 2026-07-08
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      files_scope path-list breach (not a count breach: 18 -> 20 = budget 20).
+      The ReadyPromoter classifier_done gate (acceptance item 4) breaks TWO
+      pre-existing full-pipeline promotion fixtures that drive a post to READY
+      and whose seeds omit classifier_done — neither in files_scope nor
+      test_plan.modifies (the refine's Risk-3 named ReadyPromoterIT +
+      IngestNotifySmokeIT but under-enumerated these two):
+        - ReadyPromoterClockIT.enumeratePending_gatesOnInjectedClock — its
+          seedPromotionReadyPost INSERT sets stage1/stage2/tagger/entity/
+          embedding_done but not classifier_done -> the in-window post is now
+          gate-excluded -> "must be enumerated" assertion fails.
+        - ReEvalVerdictNotifyIT.unknownBenignReEvalCompletesPipelineAndEmitsNewPost
+          — drives tagger/entity/embedding onTick then readyPromoter.onTick
+          (the gated enumeratePending path); no classifier stage runs ->
+          classifier_done=FALSE -> post stays RAW, "READY" assertion fails.
+      Full collector suite ran (199 tests, exactly these 2 failures); other
+      promotion ITs use promoteOne (gate-independent) or were already fixed
+      (ReadyPromoterIT). Provider module [7/7] was NOT reached (build stopped
+      at collector). SUGGESTED ESCALATION: refine (add the two ITs to
+      files_scope + test_plan.modifies; fixes are mechanical — add
+      classifier_done=TRUE to the ClockIT fixture, add classifierWorker.onTick()
+      to the ReEval drive-sequence).
+  - date: 2026-07-08
+    reason: redteam-finding
+    reviewer_verdict_excerpt: |
+      RED-TEAM: FINDINGS (low=1, out-of-model=1). LOW / INJECTION: the classifier
+      prompt renders `Post title: {{title}}` OUTSIDE the per-call {{id}}
+      delimiter (only {{body}} is wrapped) — a D21 defense-in-depth gap. The
+      title is upstream-untrusted (feed-supplied). Impact bounded to nil by the
+      closed-enum Java filter + V57 DB CHECK (worst case: mislabel the KIND of
+      the attacker's own post). Mirrors the shipping tagger (§5.4.2) / entity
+      (§5.4.3) prompts. Full verdict: docs/plan/m1/redteam/M1-597-2026-07-08.md.
 overrides: []
 revisions:
   - date: 2026-07-08
@@ -282,6 +422,46 @@ revisions:
         provider config); new acceptance item for the two enum-guard tests;
         test_plan.modifies += the two forced tests. complexity/risk/round_cap
         unchanged.
+  - date: 2026-07-08
+    reason: >-
+      budget-breach refine (user-directed via /m1-tick run escalation menu): the
+      pre-review mvn verify surfaced two more gate-forced fixture edits outside
+      files_scope that the outline-fail refine's Risk-3 under-enumerated.
+    snapshot: |
+      files_scope (pre-refine): 18 paths; files_budget 20.
+      test_plan.modifies (pre-refine): ReadyPromoterIT + the two enum-guard tests.
+      pre-review mvn verify (r1): core+messaging+collector ran; 199 collector
+      tests, 2 failures — both the ReadyPromoter classifier_done gate breaking a
+      full-pipeline promotion fixture:
+        - ReadyPromoterClockIT.enumeratePending_gatesOnInjectedClock (seed omits
+          classifier_done -> in-window post gate-excluded).
+        - ReEvalVerdictNotifyIT.unknownBenignReEvalCompletesPipelineAndEmitsNewPost
+          (drives readyPromoter.onTick with no classifier stage -> stays RAW).
+      provider module [7/7] not reached (build stopped at collector).
+      resolution: files_scope 18 -> 20 (+ ReadyPromoterClockIT,
+      + ReEvalVerdictNotifyIT); files_budget 20 -> 22 (headroom before the
+      provider module runs); test_plan.modifies += the two. Mechanical fixes:
+      classifier_done=TRUE in the ClockIT fixture; classifierWorker.onTick() in
+      the ReEval drive-sequence. complexity/risk/round_cap unchanged.
+  - date: 2026-07-08
+    reason: >-
+      redteam-finding refine (user-directed via /m1-tick escalate M1-597
+      redteam-finding): remediate the LOW INJECTION finding by wrapping the
+      untrusted post title inside the per-call {{id}} delimiter (D21).
+    snapshot: |
+      Pre-refine: classifier.md rendered `Post title: {{title}}` OUTSIDE the
+      <<<UNTRUSTED_CONTENT id="{{id}}">>> block; only {{body}} was wrapped
+      (mirrored the tagger/entity prompts). D21 requires every user-derived text
+      be delimiter-wrapped. Impact was bounded to nil by the closed-enum filter.
+      resolution: move the title inside the delimiter in prompts/classifier.md +
+      sync docs/design/05-llm §5.4.4 Classifier; add ClassifierWorkerTest
+      .renderPrompt_wrapsTitleInsideDelimiter (red-before/green-after). No code
+      change to ClassifierWorker (renderPrompt substitutes tokens wherever the
+      template places them). files_scope/budget UNCHANGED — the fix touches only
+      already-scoped files (classifier.md, ClassifierWorkerTest, 05-llm). This is
+      a user-accepted in-branch redteam remediation → the round-2 growth is a
+      citable must-shrink exemption. Pre-existing tagger/entity title-wrapping +
+      switch-llm.sh classifier-awareness are a separate follow-up (out of scope).
 aborted_attempts: []
 reopens: []
 ---

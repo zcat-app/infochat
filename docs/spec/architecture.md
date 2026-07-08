@@ -313,12 +313,14 @@ Two pipelines must be reasoned about end-to-end:
 
 - **Ingest** (Collector) — Source → Fetcher *or* StreamSource → persist
   as `RAW` → enqueue → Stage 1 → (Stage 2 only on hits) → tagger →
-  {entity extraction, embedding} → mark `READY` → NOTIFY. Entity
-  extraction and embedding run **in parallel** after tagger completes —
-  they read the post body independently and write to separate tables
-  (`post_entity` vs `post_embedding`); neither depends on the other's
-  output (D6 treats named-entity match and cosine similarity as
-  orthogonal signals). `READY` promotion waits for both to finish.
+  {classifier, entity extraction, embedding} → mark `READY` → NOTIFY.
+  Classification, entity extraction, and embedding run **in parallel**
+  after tagger completes — they read the post body independently, each
+  writing its own result (`post.classification` / `post_entity` /
+  `post_embedding`); none depends on the others' output (D6 treats
+  named-entity match and cosine similarity as orthogonal signals;
+  classification is an independent per-post label set). `READY`
+  promotion waits for all three to finish.
   Each stage has its own failure policy (see `security.md` and
   decision D22). The persist-before-enqueue step is the outbox: a
   startup rehydrator re-enqueues anything left in `RAW` after a crash.

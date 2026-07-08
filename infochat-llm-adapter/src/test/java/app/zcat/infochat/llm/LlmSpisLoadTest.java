@@ -37,12 +37,13 @@ class LlmSpisLoadTest {
         Class<?> type = Class.forName("app.zcat.infochat.llm.ModelTask");
         assertNotNull(type);
         assertTrue(type.isEnum(), "ModelTask must be an enum");
-        // The exact six values are spec-mandated (docs/spec/llm.md §SPI
-        // shape). Asserting the count guards against a future drive-by
-        // addition (most likely an EMBEDDER value, which the spec
-        // explicitly excludes under "Scope of the enum").
-        assertEquals(6, type.getEnumConstants().length,
-                "ModelTask must have exactly six spec-mandated values");
+        // The exact seven values are spec-mandated (docs/spec/llm.md §SPI
+        // shape): SECURITY_JUDGE, TAGGER, ENTITY, CLASSIFIER, SUMMARIZER,
+        // CHAT_AGENT, TRANSLATOR. Asserting the count guards against a
+        // future drive-by addition (most likely an EMBEDDER value, which
+        // the spec explicitly excludes under "Scope of the enum").
+        assertEquals(7, type.getEnumConstants().length,
+                "ModelTask must have exactly seven spec-mandated values");
     }
 
     @Test

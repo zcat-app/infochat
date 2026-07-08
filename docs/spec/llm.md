@@ -41,7 +41,7 @@ The LLM adapter exposes pluggable interfaces (decision D32):
   §Translation flow and the `TRANSLATOR` routing are part of this
   file's surface.
 - **`ModelTask`** enum — `SECURITY_JUDGE`, `TAGGER`, `ENTITY`,
-  `SUMMARIZER`, `CHAT_AGENT`, `TRANSLATOR`. **Scope of the enum:**
+  `CLASSIFIER`, `SUMMARIZER`, `CHAT_AGENT`, `TRANSLATOR`. **Scope of the enum:**
   `ModelTask` enumerates `LlmProvider` tasks **only**. The embedder
   is **not** a `ModelTask` — `EmbeddingProvider` is a distinct SPI
   with its own provider selection (operators configure the
@@ -155,9 +155,9 @@ post bodies start leaving the host.
 The local-only conflict check and the remote-embedding confirmation
 log run on **both** services' startups — Collector and Provider. This
 is intentional, not incidental: each service routes live LLM calls
-(the Stage 2 security judge, tagging, entity extraction, and embedding
-generation run in the Collector's ingest pipeline; the chat, summarizer,
-and translator call sites run in the Provider), and both services load
+(the Stage 2 security judge, tagging, entity extraction, classification,
+and embedding generation run in the Collector's ingest pipeline; the
+chat, summarizer, and translator call sites run in the Provider), and both services load
 the same LLM adapter, so each validates the configuration it boots
 with. The guard's scan covers the per-task base-urls, the embedding
 base-url, per-task provider overrides (and the configured default
