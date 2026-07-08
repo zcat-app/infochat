@@ -1,11 +1,16 @@
 ---
 id: M1-590
 title: "Provider: one canonical source for the probation-allowed command list (welcome + /help + rejection can no longer drift; rejection wrongly omits /zcash /monero)"
-status: pending
+status: done
 created: 2026-07-08
 last_updated: 2026-07-08
 blocked_by: []
-files_budget: 7
+clarity_check:
+  date: 2026-07-08
+  verdict: PASS
+  warnings: []
+  blockers: []
+files_budget: 13
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/CommandPermissions.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/AssetCommandFamilyOracle.java
@@ -13,6 +18,12 @@ files_scope:
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/bundles/cs.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/ProbationCommandListConsistencyTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/SimpleXAdminClaimTokenTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/journey/GoldenPathJourneyIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InviteIntakeRoundtripIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/group/GroupAuthorizationRoundtripIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/dev/DevTerminalHarnessRoundtripIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterChatModeIT.java
 complexity: low
 risk: low
 round_cap: 2
@@ -117,10 +128,40 @@ spec_refs:
   - docs/spec/security.md §Slow-start tier
 decision_refs:
   - D45
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 14
+      added: 350
+      removed: 28
 escalations: []
 overrides: []
-revisions: []
+revisions:
+  - date: 2026-07-08
+    kind: files_scope-expansion
+    reason: >-
+      The acceptance-mandated welcome rendering (reply.welcome.dm_fresh
+      switches from a bare bundleLoader.get to MessageFormat.format so it
+      can carry the canonical probation command list) invalidates the
+      static-string assumption in six existing tests that pinned the
+      welcome OR rejection against the raw bundle value: welcome —
+      SimpleXAdminClaimTokenTest, GoldenPathJourneyIT, InviteIntakeRoundtripIT,
+      GroupAuthorizationRoundtripIT, DevTerminalHarnessRoundtripIT; rejection
+      ({1} command-list arg) — InboundRouterChatModeIT. Added those six test
+      files to files_scope and bumped files_budget 7→13 to render each
+      expected the way the router does (a mechanical orphan-fix the ticket's
+      own production change necessitates; no assertion intent changes). User
+      approved via escalate→refine (2026-07-08); the sixth file
+      (InboundRouterChatModeIT) surfaced only in the failsafe/IT phase after
+      the first five surefire/IT fixes and is the same mechanical category.
 aborted_attempts: []
 reopens: []
 redteam_findings: []

@@ -4,6 +4,8 @@ import app.zcat.infochat.provider.command.asset.AssetRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.util.Set;
+
 /**
  * Per-asset slash command family oracle. Consulted by
  * {@link CommandPermissions#allowedDuringProbation} to decide whether
@@ -28,5 +30,18 @@ public class AssetCommandFamilyOracle {
      */
     public boolean isAssetCommand(String slashCommand) {
         return assetRegistry.containsEnabledAsset(slashCommand);
+    }
+
+    /**
+     * The operator-enabled asset-command names (without the leading
+     * {@code /}), in registry order. Lets
+     * {@link CommandPermissions#probationAllowedCommandNames()} enumerate
+     * the enabled asset family for the canonical probation listing without
+     * {@code CommandPermissions} gaining a direct {@link AssetRegistry}
+     * dependency — the same enabled set {@code /help} reads via
+     * {@code AssetRegistry.getEnabledAssets} (M1-590).
+     */
+    public Set<String> enabledAssetCommandNames() {
+        return assetRegistry.getEnabledAssetNames();
     }
 }

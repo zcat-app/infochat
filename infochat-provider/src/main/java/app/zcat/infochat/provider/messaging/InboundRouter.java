@@ -503,14 +503,14 @@ public class InboundRouter {
                 // keeping this router adapter-agnostic.
                 if (simpleXAdminClaim.claim(adapterName, contactId, normalized)
                         instanceof SimpleXAdminClaim.Claimed) {
-                    sendReply(msg.scope(), bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH, lang), adapterName);
+                    sendReply(msg.scope(), welcomeReply(lang), adapterName);
                     return;
                 }
                 InviteCodeConsumer.Outcome outcome =
                         inviteCodeConsumer.consume(adapterName, contactId, normalized);
                 switch (outcome) {
                     case InviteCodeConsumer.Accepted a ->
-                            sendReply(msg.scope(), bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH, lang), adapterName);
+                            sendReply(msg.scope(), welcomeReply(lang), adapterName);
                     case InviteCodeConsumer.Rejected r ->
                             sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED, lang), adapterName);
                     case InviteCodeConsumer.BruteForceThresholdBreached b ->
@@ -706,9 +706,13 @@ public class InboundRouter {
             String commandName = commandNameOf(normalized);
             if (probationActor.inProbation(probationNow)) {
                 if (!commandPermissions.allowedDuringProbation(commandName)) {
+                    // {0} = time until unlock; {1} = the canonical probation
+                    // command list (same source /help renders), so the
+                    // rejection can no longer omit an allowed command (M1-590).
                     String body = MessageFormat.format(
                             bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED, inboundContext.effectiveLanguage()),
-                            formatTimeUntilUnlock(probationNow, probationActor.probationUntil()));
+                            formatTimeUntilUnlock(probationNow, probationActor.probationUntil()),
+                            commandPermissions.renderProbationCommandList());
                     sendReply(msg.scope(), body, adapterName);
                     return;
                 }
@@ -1104,6 +1108,20 @@ public class InboundRouter {
             return assetHandler.handle(commandName, scope, normalized).text();
         }
         return bundleLoader.get(BundleKeys.ERROR_UNKNOWN_COMMAND, inboundContext.effectiveLanguage());
+    }
+
+    /**
+     * The registration welcome reply, with its {@code {0}} placeholder
+     * filled from the canonical probation command list — the same
+     * {@link CommandPermissions} source {@code /help} and the probation
+     * rejection render, so the welcome can no longer omit an allowed
+     * command (M1-590). Both DM-registration branches (SimpleX admin
+     * claim, invite accept) go through here.
+     */
+    private String welcomeReply(String lang) {
+        return MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH, lang),
+                commandPermissions.renderProbationCommandList());
     }
 
     /**

@@ -6,6 +6,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -38,6 +39,7 @@ class InboundRouterChatModeIT {
     @Inject InboundRouter router;
     @Inject @SeedDataSource DataSource dataSource;
     @Inject BundleLoader bundleLoader;
+    @Inject CommandPermissions commandPermissions;
     @Inject TestLlmProvider testLlmProvider;
 
     @BeforeEach
@@ -183,9 +185,11 @@ class InboundRouterChatModeIT {
         // Probation users get the error.probation.blocked reply, not the chat
         // agent. Assert via the bundle key (not English substring fragments):
         // seeded probation_until = now + 24h, so formatTimeUntilUnlock truncates
-        // the strictly-under-24h remaining to the "~23h" {0} token.
+        // the strictly-under-24h remaining to the "~23h" {0} token; {1} carries
+        // the canonical probation command list (M1-590).
         String expected = java.text.MessageFormat.format(
-                bundleLoader.get("error.probation.blocked"), "~23h");
+                bundleLoader.get("error.probation.blocked"), "~23h",
+                commandPermissions.renderProbationCommandList());
         assertEquals(expected, reply.text(),
                 "Probation user must receive the error.probation.blocked reply "
                         + "with the ~23h time-until-unlock interpolated");

@@ -10,6 +10,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
+import java.text.MessageFormat;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -65,6 +67,7 @@ class SimpleXAdminClaimTokenTest {
     @Inject InboundRouter inboundRouter;
     @Inject @SeedDataSource DataSource dataSource;
     @Inject BundleLoader bundleLoader;
+    @Inject CommandPermissions commandPermissions;
 
     private final RecordingSimplexAdapter replyTarget = new RecordingSimplexAdapter();
 
@@ -108,8 +111,13 @@ class SimpleXAdminClaimTokenTest {
         assertNull(probationUntilEpochAt(contactId),
                 "a claimed admin skips the slow-start tier: probation_until IS NULL");
         // The user-visible outcome is the welcome reply (same entry an
-        // invite-accept sends — reused per D50, no new bundle string).
-        assertEquals(List.of(bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH)),
+        // invite-accept sends — reused per D50, no new bundle string). The
+        // welcome is a MessageFormat template carrying the canonical
+        // probation command list (M1-590), so render it the way the router
+        // does rather than comparing to the raw bundle value.
+        assertEquals(List.of(MessageFormat.format(
+                        bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH),
+                        commandPermissions.renderProbationCommandList())),
                 replyTarget.sentBodies(),
                 "a successful claim sends exactly the welcome reply");
     }

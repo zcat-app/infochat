@@ -6,6 +6,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -18,6 +19,7 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.text.MessageFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -80,6 +82,7 @@ class GroupAuthorizationRoundtripIT {
     @Inject InMemoryAdapter adapter;
     @Inject @SeedDataSource DataSource dataSource;
     @Inject BundleLoader bundleLoader;
+    @Inject CommandPermissions commandPermissions;
     @Inject ThrottledAdminNotifier throttledAdminNotifier;
 
     @BeforeEach
@@ -156,7 +159,10 @@ class GroupAuthorizationRoundtripIT {
         UUID code = UUID.randomUUID();
         seedPendingInvite(code, u, adminId);
         adapter.deliverDm(u, code.toString());
-        assertEquals(bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH),
+        // The welcome renders the canonical probation command list via
+        // MessageFormat (M1-590); build the expected the way the router does.
+        assertEquals(MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH),
+                        commandPermissions.renderProbationCommandList()),
                 lastReplyText(),
                 "step (1): invite-consume must return the welcome reply");
         assertEquals("invited", registrationStateOf(u),

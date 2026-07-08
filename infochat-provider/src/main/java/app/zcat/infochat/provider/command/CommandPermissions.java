@@ -3,7 +3,8 @@ package app.zcat.infochat.provider.command;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
-import java.util.Set;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Authorization-time predicate over slash command names for the
@@ -33,7 +34,7 @@ import java.util.Set;
 public class CommandPermissions {
 
     /**
-     * Closed set of slash commands a probation user may invoke,
+     * Closed, ordered list of slash commands a probation user may invoke,
      * verbatim from {@code docs/spec/security.md} §Slow-start tier.
      * The eleven entries are: the read-only catalogue
      * ({@code help, status, get-tags, get-sources, list-sources,
@@ -41,8 +42,15 @@ public class CommandPermissions {
      * ({@code forget, lang}), and the {@code /stop} carve-out
      * (idempotent no-op, no side effect — see spec §Slow-start
      * tier "{@code /stop} is not blocked").
+     *
+     * <p>Ordered (a {@link List}, not an unordered {@code Set}) so it can
+     * seed the single canonical probation-command listing that the welcome
+     * reply, the rejection reply, and {@code /help} all render from — the
+     * one source those three surfaces cannot drift apart on (M1-590). The
+     * eleven names are distinct, so {@link List#contains} is an exact
+     * membership test for the probation gate.
      */
-    private static final Set<String> ALLOWED = Set.of(
+    private static final List<String> ALLOWED = List.of(
             "help",
             "status",
             "get-tags",
@@ -70,5 +78,40 @@ public class CommandPermissions {
      */
     public boolean allowedDuringProbation(String slashCommand) {
         return ALLOWED.contains(slashCommand) || assetCommandFamilyOracle.isAssetCommand(slashCommand);
+    }
+
+    /**
+     * The single canonical, ordered list of command names (without the
+     * leading {@code /}) a probation user may invoke: the static
+     * {@link #ALLOWED} set followed by the operator-enabled asset-command
+     * names. This is the one source the welcome reply, the rejection
+     * reply, and {@code /help}'s probation listing all render from, so the
+     * three surfaces cannot drift (M1-590). The predicate
+     * {@link #allowedDuringProbation} accepts exactly this set (static
+     * names OR the asset family), so the list and the gate stay in lockstep.
+     */
+    public List<String> probationAllowedCommandNames() {
+        List<String> names = new ArrayList<>(ALLOWED);
+        names.addAll(assetCommandFamilyOracle.enabledAssetCommandNames());
+        return names;
+    }
+
+    /**
+     * The {@link #probationAllowedCommandNames()} list rendered as a
+     * comma-separated, slash-prefixed string ({@code "/help, /status, …"})
+     * for the welcome and rejection replies (which show a single inline
+     * list). {@code /help} renders its own per-command line form from the
+     * same {@link #probationAllowedCommandNames()} source — the display
+     * format differs, the underlying command set does not.
+     */
+    public String renderProbationCommandList() {
+        StringBuilder rendered = new StringBuilder();
+        for (String name : probationAllowedCommandNames()) {
+            if (rendered.length() > 0) {
+                rendered.append(", ");
+            }
+            rendered.append('/').append(name);
+        }
+        return rendered.toString();
     }
 }

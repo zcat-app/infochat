@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -21,6 +22,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.text.MessageFormat;
 import java.util.Map;
 import java.util.UUID;
 import javax.sql.DataSource;
@@ -62,6 +64,7 @@ class DevTerminalHarnessRoundtripIT {
     @Inject InMemoryAdapter adapter;
     @Inject @SeedDataSource DataSource dataSource;
     @Inject BundleLoader bundleLoader;
+    @Inject CommandPermissions commandPermissions;
     @Inject TestLlmProvider mockLlm;
 
     @BeforeEach
@@ -91,7 +94,11 @@ class DevTerminalHarnessRoundtripIT {
 
         String output = Files.readString(Path.of(OUTPUT_FILE), StandardCharsets.UTF_8);
 
-        assertTrue(output.contains(bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH)),
+        // The welcome renders the canonical probation command list via
+        // MessageFormat (M1-590); build the expected the way the router does.
+        assertTrue(output.contains(MessageFormat.format(
+                        bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH),
+                        commandPermissions.renderProbationCommandList())),
                 "directive 1: invite redemption must round-trip the welcome reply "
                         + "through the harness output file. Got:\n" + output);
         assertTrue(output.contains("m1-413-ready-security"),

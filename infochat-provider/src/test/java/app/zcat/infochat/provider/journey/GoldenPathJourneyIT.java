@@ -5,6 +5,7 @@ import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.digest.DigestSlot;
 import app.zcat.infochat.provider.digest.DigestWorker;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
 import java.math.BigDecimal;
+import java.text.MessageFormat;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -91,6 +93,7 @@ class GoldenPathJourneyIT {
     @Inject InMemoryAdapter adapter;
     @Inject @SeedDataSource DataSource dataSource;
     @Inject BundleLoader bundleLoader;
+    @Inject CommandPermissions commandPermissions;
     @Inject TestLlmProvider testLlmProvider;
     @Inject DigestWorker digestWorker;
 
@@ -190,7 +193,11 @@ class GoldenPathJourneyIT {
 
         // ----- Hop 3 — register via the code; probation begins -------------
         adapter.deliverDm(user, code.toString());
-        assertEquals(bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH), lastReply().text(),
+        // The welcome renders the canonical probation command list via
+        // MessageFormat (M1-590), so build the expected the way the router does.
+        assertEquals(MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH),
+                        commandPermissions.renderProbationCommandList()),
+                lastReply().text(),
                 "hop 3: invite-consume must return the welcome reply");
         assertEquals("invited", registrationStateOf(user),
                 "hop 3: consumer must transition to registration_state='invited'");
