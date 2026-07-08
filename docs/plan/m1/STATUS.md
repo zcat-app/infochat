@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 611 |
+| done | 612 |
 | deferred | 1 |
 | abandoned | 10 |
 | **total** | **630** |
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-589 — Provider chat: digest-first semantic RAG — a general assistant grounded in pgvector nearest-neighbour retrieval, replacing tag-guessing (complexity: high, risk: medium)
 - M1-590 — Provider: one canonical source for the probation-allowed command list (welcome + /help + rejection can no longer drift; rejection wrongly omits /zcash /monero) (complexity: low, risk: low)
 - M1-591 — /summary cluster block prints classification: and tags: as two identical lines — collapse the redundancy (complexity: low, risk: low)
-- M1-592 — Asset reply renderer: split the 24h high/low onto their own lines (mobile wrap) and fix inconsistent Δ% precision (complexity: low, risk: low)
 - M1-593 — Provider: /summary distinguishes zero-subscriptions from empty-window, and the welcome steers a fresh user to follow a source (complexity: low, risk: low)
 - M1-594 — Provider: /summary emits a misleading \"Translating...\" progress step for an English scope (suppress the TRANSLATING stage when scope language == source) (complexity: low, risk: low)
 - M1-595 — Chat-mode audit rows record no actor_contact_id — a chat interaction is unattributable (complexity: low, risk: low)
@@ -68,6 +67,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-592 | Asset reply renderer: split the 24h high/low onto their own lines (mobile wrap) and fix inconsistent Δ% precision | 2026-07-08 | round 1 APPROVE |
 | M1-588 | Collector: a degraded placeholder feed (xcancel 'not whitelisted' stub) is a Fetcher failure, not a successful ingest | 2026-07-08 | round 1 APPROVE |
 | M1-587 | backup.sh handles root-owned adapter identity dirs (the M1-569 follow-up) | 2026-07-07 | round 1 APPROVE |
 | M1-586 | Strip markdown fences before entity/tagger JSON parse | 2026-07-07 | round 1 APPROVE |
@@ -77,7 +77,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-582 | Single-owner cutover: stop-first pack guidance and a Provider-start gate in restore.sh | 2026-07-06 | round 1 APPROVE |
 | M1-581 | restore.sh: exact identity-path gate, truthful failure remediation, operator-role reminder | 2026-07-06 | round 1 APPROVE |
 | M1-580 | restore.sh fails loud on real pg_restore errors (stderr gate, not just table-presence) | 2026-07-06 | round 1 APPROVE |
-| M1-579 | /pending lists only currently-actionable users (drop the terminal 'invited' roster arm) | 2026-07-06 | round 1 APPROVE |
 
 ---
 
@@ -812,7 +811,7 @@ M1-588 (done)
 M1-589 (pending) ← runnable
 M1-590 (pending) ← runnable
 M1-591 (pending) ← runnable
-M1-592 (pending) ← runnable
+M1-592 (done)
 M1-593 (pending) ← runnable
 M1-594 (pending) ← runnable
 M1-595 (pending) ← runnable

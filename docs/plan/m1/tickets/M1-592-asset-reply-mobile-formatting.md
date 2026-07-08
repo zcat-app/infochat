@@ -1,9 +1,14 @@
 ---
 id: M1-592
 title: "Asset reply renderer: split the 24h high/low onto their own lines (mobile wrap) and fix inconsistent Δ% precision"
-status: pending
+status: done
 created: 2026-07-08
 last_updated: 2026-07-08
+clarity_check:
+  date: 2026-07-08
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 4
 files_scope:
@@ -106,7 +111,20 @@ spec_refs:
 decision_refs:
   - D30
   - D43
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 47
+      removed: 22
 escalations: []
 overrides: []
 revisions: []

@@ -6,6 +6,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.text.MessageFormat;
 import java.time.Duration;
 import java.time.Instant;
@@ -124,11 +125,15 @@ public class AssetReplyRenderer {
         };
     }
 
-    // U+2212 MINUS SIGN for negative values per design §10.5
+    // U+2212 MINUS SIGN for negative values per design §10.5. Fixed 2-dp scale
+    // (HALF_UP) so every delta reads at the same precision — raw API precision
+    // otherwise printed e.g. 1h at 3 dp next to 24h at 4 dp in the same reply
+    // (M1-592).
     private static String formatDelta(BigDecimal pct) {
+        String magnitude = pct.abs().setScale(2, RoundingMode.HALF_UP).toPlainString();
         if (pct.signum() >= 0) {
-            return "+" + pct.stripTrailingZeros().toPlainString() + "%";
+            return "+" + magnitude + "%";
         }
-        return "−" + pct.abs().stripTrailingZeros().toPlainString() + "%";
+        return "−" + magnitude + "%";
     }
 }

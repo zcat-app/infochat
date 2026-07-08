@@ -44,8 +44,8 @@ class AssetReplyRendererTest {
                 new BigDecimal("12345678.50"),
                 new BigDecimal("43.91"),
                 new BigDecimal("41.07"),
-                new BigDecimal("0.3"),
-                new BigDecimal("-2.4"),
+                new BigDecimal("-0.345"),
+                new BigDecimal("6.4774"),
                 new BigDecimal("5.1"),
                 Instant.now().minusSeconds(41),
                 "coingecko.com/en/coins/zcash"
@@ -60,8 +60,18 @@ class AssetReplyRendererTest {
         assertTrue(rendered.contains("$42.18"), "price line");
         assertTrue(rendered.contains("1h:"), "1h delta present for coingecko");
         assertTrue(rendered.contains("24h:"), "24h delta present for coingecko");
-        assertTrue(rendered.contains("high $43.91"), "24h high");
-        assertTrue(rendered.contains("low $41.07"), "24h low");
+        // The 24h Δ%, high, and low each sit on their own line (mobile wrap fix,
+        // M1-592) — not one combined `(high $X / low $Y)` parenthetical.
+        assertTrue(rendered.contains("  24h:   +6.48%\n  24h high: $43.91\n  24h low:  $41.07"),
+                "24h Δ%, high, and low each on their own line; got: " + rendered);
+        assertFalse(rendered.contains("(high"),
+                "the old single-line high/low parenthetical must be gone");
+        // formatDelta emits a fixed 2 dp (HALF_UP): 6.4774 → +6.48%, and the
+        // 3-dp API value −0.345 renders with exactly two decimals (not three).
+        assertTrue(rendered.contains("+6.48%"), "24h Δ% at fixed 2 dp");
+        assertTrue(rendered.contains("−0.35%"), "1h Δ% at fixed 2 dp (−0.345 → −0.35)");
+        assertFalse(rendered.contains("6.4774"), "raw API 4-dp precision must not leak");
+        assertFalse(rendered.contains("0.345"), "raw API 3-dp precision must not leak");
         assertTrue(rendered.contains("cached"), "cache age line");
         assertTrue(rendered.contains("coingecko.com/en/coins/zcash"), "attribution URL bare");
         assertTrue(rendered.contains("source:"), "source label");
@@ -95,9 +105,12 @@ class AssetReplyRendererTest {
         assertTrue(rendered.contains("$42.15"), "price line");
         // Delta lines should be absent (exchange sources don't provide them)
         assertFalse(rendered.contains("1h:"), "1h delta must be absent for exchanges");
-        // Spread line should be present without delta percentage
-        assertTrue(rendered.contains("high $43.88"), "24h high in spread");
-        assertTrue(rendered.contains("low $41.02"), "24h low in spread");
+        // Spread present without delta %, high/low each on their own line
+        // (M1-592 split layout).
+        assertTrue(rendered.contains("  24h high: $43.88\n  24h low:  $41.02"),
+                "spread high and low each on their own line; got: " + rendered);
+        assertFalse(rendered.contains("high $43.88 / low"),
+                "the old single-line spread must be gone");
         assertTrue(rendered.contains("kraken.com/prices/zec-usd-zcash-price-chart"), "attribution URL");
     }
 
