@@ -1,9 +1,14 @@
 ---
 id: M1-596
 title: "Collector: INVESTIGATE — FetchScheduler wedges a kind's dispatch after a bulk identifier/host change collapses its sources onto one host; make the drain self-heal"
-status: pending
+status: done
 created: 2026-07-08
 last_updated: 2026-07-08
+clarity_check:
+  date: 2026-07-08
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 3
 files_scope:
@@ -120,7 +125,20 @@ spec_refs:
 decision_refs:
   - D42
   - D38
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 218
+      removed: 9
 escalations: []
 overrides: []
 revisions: []
@@ -237,3 +255,56 @@ inert to dispatch by design).
   which it is.
 - **Config in force at observation:** `infochat.fetch.heartbeat-interval=1m`,
   `infochat.fetch.host-min-interval=20s`, `infochat.fetch.nitter.interval=10m`.
+
+## Investigation conclusion (recorded before code, per acceptance item 1)
+
+**Classification: NO reachable permanent dispatch wedge under the observed
+config. The behavior is slow-but-progressing paced drain.** Resolved as
+documentation-plus-regression-test (acceptance item 3); `FetchScheduler.java`
+is UNCHANGED.
+
+**Evidence from the code (`FetchScheduler.drainPending`, ~L324–353):**
+
+- `hostNextAllowed[host]` is only ever written as `now.plus(hostMinInterval)`
+  (L346) — i.e. `now + 20s` at the observed config. A cooldown written at
+  heartbeat N−1 is `now_{N-1}+20s`; at heartbeat N, `now_N ≈ now_{N-1}+60s`
+  (heartbeat-interval=1m). Since `60s > 20s`, `now_N` is never before the stored
+  `nextAllowed`, so the `continue` skip at L339 never fires for the FIRST pending
+  source of a crowded host. **At least one source of a crowded single host
+  dispatches every heartbeat.**
+- A mid-drain kind keeps its `pendingByKind` entry and is excluded from
+  re-enumeration (`onTick` L255), but it is NOT re-filled while draining — the
+  queue only shrinks (`sources.remove()` at L344) and therefore always empties.
+  When it empties, `lastTickByKind` is stamped and the kind is dropped (L349–352).
+- The bulk-edit interaction (a queued `SourceRow` carries the `identifier`
+  captured at enumeration time) cannot pin the queue: whatever host string a row
+  captured, it still dispatches at ≥1/heartbeat. The edit changes WHICH host is
+  fetched, not WHETHER the queue drains.
+- Net: 27 single-host sources drain in ~27 heartbeats ≈ ~27 minutes at the 1m
+  heartbeat — slow enough to look "frozen" over an 8-minute window, but always
+  advancing. `consecutive_failures=0` on the not-yet-dispatched rows is
+  consistent: sources still queued have had NO fetch attempted, so nothing was
+  counted (the D42 ladder is not involved — dispatch-side, not counter-side).
+
+**Caveat on the live "restart cleared it" detail.** A restart does NOT change the
+drain rate — post-restart the kind re-enumerates and drains at the same
+~1/heartbeat. The code cannot reproduce a faster-than-paced recovery, so the
+operator's "restart fully cleared it" impression is most plausibly (a) timing
+(the ~27-minute drain had largely completed by restart), and/or (b) the operator
+reading DB `last_fetch_at` — which they had reset and which is inert to the
+in-memory dueness gate (see out_of_scope) — rather than actual dispatch.
+
+**One genuine LATENT wedge condition, out of this ticket's scope.** If an operator
+sets `host-min-interval >= heartbeat-interval`, the first source of a crowded host
+IS skipped every heartbeat (`now_N = now_{N-1}+heartbeat < now_{N-1}+host-min =
+nextAllowed`), so the queue never drains → a true permanent wedge. The observed
+config (60s heartbeat, 20s host-min) does not hit it. Guarding this is a
+pacing-POLICY / config-validation concern, which M1-466's policy owns and this
+ticket lists as out_of_scope — noted here as a candidate follow-up, not fixed.
+
+**Regression test.** `FetchSchedulerHostPacingIT` gains
+`singleHostCollapseDrainsAcrossHeartbeatsWhileSecondKindDispatchesOnItsOwnSchedule`,
+pinning: (1) 5 same-host sources of one kind all eventually dispatch across
+heartbeats with NO scheduler restart, one per heartbeat, each exactly once; and
+(2) a second kind (`youtube`) on a distinct host dispatches every heartbeat while
+the first kind is mid-drain, proving per-kind isolation.

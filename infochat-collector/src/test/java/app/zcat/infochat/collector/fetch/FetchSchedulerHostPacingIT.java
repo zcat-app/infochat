@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.fetch;
 
 import app.zcat.infochat.collector.fetcher.nitter.NitterFetcher;
+import app.zcat.infochat.collector.fetcher.youtube.YouTubeFetcher;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import io.quarkus.arc.ClientProxy;
@@ -26,6 +27,7 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Drives {@link FetchScheduler#onTick()} with per-host pacing ENABLED — a
@@ -36,7 +38,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * <ul>
  *   <li>sources sharing one host dispatch at most one-per-window; the rest are
  *       deferred to later heartbeats and eventually all fetched (none dropped);
- *   <li>sources on distinct hosts all dispatch in a single heartbeat.
+ *   <li>sources on distinct hosts all dispatch in a single heartbeat;
+ *   <li>a single-host <em>crowd</em> (many due sources of one kind collapsed onto
+ *       ONE host, mirroring the live 27-nitter-on-nitter.net event of M1-596)
+ *       drains fully across heartbeats WITHOUT a scheduler restart — one dispatch
+ *       per heartbeat, the queue strictly shrinking, never wedging — while a
+ *       second kind on a distinct host keeps dispatching on its own schedule
+ *       throughout (per-kind isolation: one kind's mid-drain queue never gates
+ *       another kind's dispatch).
  * </ul>
  *
  * <p>The {@code nitter} kind is the vehicle: it has a registered Fetcher but no
@@ -61,11 +70,22 @@ class FetchSchedulerHostPacingIT {
     public static class PacingEnabledProfile implements QuarkusTestProfile {
         @Override
         public Map<String, String> getConfigOverrides() {
-            return Map.of("infochat.fetch.host-min-interval", "1m");
+            // youtube.interval=1m so the second kind re-becomes due on every
+            // modelled 2m heartbeat, letting the single-host-collapse test observe
+            // it dispatch throughout nitter's multi-heartbeat drain (per-kind
+            // isolation). The other tests suppress youtube, so the key is inert
+            // for them.
+            return Map.of(
+                "infochat.fetch.host-min-interval", "1m",
+                "infochat.fetch.youtube.interval", "1m");
         }
     }
 
     private static final String PACED_KIND = "nitter";
+    // A registered-Fetcher kind with NO bootstrap active source (like nitter),
+    // so the test fully controls its source set; used as the distinct-host
+    // "second kind" proving one kind's mid-drain never gates another's dispatch.
+    private static final String SECOND_KIND = "youtube";
     private static final Instant BASE = Instant.parse("2125-01-01T00:00:00Z");
     // Each modelled heartbeat advances the clock past the 1m pacing window so
     // the previously-dispatched host frees for the next deferred source.
@@ -79,14 +99,21 @@ class FetchSchedulerHostPacingIT {
     DataSource dataSource;
 
     private RecordingNitterFetcher recorder;
+    private RecordingYouTubeFetcher youtubeRecorder;
 
     @BeforeEach
     void setUp() throws Exception {
         deleteNitterSources();
+        deleteYouTubeSources();
         installClock(BASE);
         recorder = new RecordingNitterFetcher();
         QuarkusMock.installMockForType(recorder, NitterFetcher.class,
             new FetcherKind.Literal(PACED_KIND));
+        // Always mock the second kind's Fetcher too, so no real YouTubeFetcher
+        // network fetch can occur even if a test forces youtube due.
+        youtubeRecorder = new RecordingYouTubeFetcher();
+        QuarkusMock.installMockForType(youtubeRecorder, YouTubeFetcher.class,
+            new FetcherKind.Literal(SECOND_KIND));
 
         // Pacing is ON for every test in this class, so the in-memory pacing
         // maps would bleed between tests — clear them through the package-private
@@ -100,6 +127,7 @@ class FetchSchedulerHostPacingIT {
     @AfterEach
     void tearDown() throws Exception {
         deleteNitterSources();
+        deleteYouTubeSources();
     }
 
     @Test
@@ -165,6 +193,75 @@ class FetchSchedulerHostPacingIT {
     }
 
     /**
+     * M1-596 regression: many due sources of ONE kind collapsed onto a SINGLE
+     * host (mirroring the live 27-nitter-on-nitter.net event) drain FULLY across
+     * heartbeats without a scheduler restart, and a second kind on a distinct
+     * host dispatches on its own schedule throughout.
+     *
+     * <p>This pins the investigation's conclusion (see the M1-596 ticket Notes):
+     * there is NO reachable permanent dispatch wedge under a heartbeat interval
+     * wider than the host-min-interval — {@code hostNextAllowed[host]} is only
+     * ever set to {@code now + host-min-interval}, so a cooldown written one
+     * heartbeat ago has always expired by the next heartbeat, and the crowded
+     * host dispatches exactly one more source every heartbeat. The queue strictly
+     * shrinks and always empties; the live 8-minute "frozen nitter" was the
+     * expected slow-but-progressing paced drain of a single-host crowd, not a
+     * stall. Red-before/green-after is not applicable (no FetchScheduler code
+     * change) — this test pins the slow-but-progressing drain as intended.
+     */
+    @Test
+    void singleHostCollapseDrainsAcrossHeartbeatsWhileSecondKindDispatchesOnItsOwnSchedule()
+            throws Exception {
+        // Collapse N sources of one kind onto ONE host, all forced due at once.
+        // N need only exceed one heartbeat's single-per-host budget to exercise
+        // the multi-heartbeat drain; the wedge question is whether the queue can
+        // fail to drain, not the exact count.
+        int collapsedCount = 5;
+        for (int i = 1; i <= collapsedCount; i++) {
+            seedNitterSource("https://nitter.net/feed" + i);
+        }
+        // Second kind, distinct host, due every heartbeat (youtube.interval=1m).
+        seedYouTubeSource("https://youtube.example/channel");
+
+        // Drive one heartbeat per pacing window across enough heartbeats to fully
+        // drain the crowd. The SAME live FetchScheduler instance throughout — no
+        // restart / re-construction between heartbeats.
+        for (int heartbeatIndex = 0; heartbeatIndex < collapsedCount; heartbeatIndex++) {
+            heartbeatWithSecondKindDue(BASE.plus(ADVANCE.multipliedBy(heartbeatIndex)));
+
+            // The crowded host dispatches exactly ONE more source this heartbeat:
+            // the queue strictly shrinks — it never stalls at zero (no wedge).
+            assertEquals(heartbeatIndex + 1, recorder.dispatched.size(),
+                "single-host crowd drains exactly one source per heartbeat, never wedging");
+            // Per-kind isolation: the second kind dispatches every heartbeat even
+            // while nitter is mid-drain, so a mid-drain kind never gates another.
+            assertEquals(heartbeatIndex + 1, youtubeRecorder.dispatched.size(),
+                "distinct-host second kind dispatches every heartbeat, ungated by the "
+                    + "mid-drain nitter queue");
+            if (heartbeatIndex + 1 < collapsedCount) {
+                assertTrue(
+                    ClientProxy.unwrap(fetchScheduler).pendingByKind().containsKey(PACED_KIND),
+                    "nitter is still mid-drain here, so the second kind's dispatch this "
+                        + "heartbeat proves per-kind isolation");
+            }
+        }
+
+        // Every collapsed source was eventually fetched, exactly once, with NO
+        // restart — the drain self-completes. Slow-but-progressing, not wedged.
+        assertEquals(collapsedCount, recorder.dispatched.size(),
+            "every single-host source is eventually fetched across heartbeats, no restart");
+        assertEquals(collapsedCount, Set.copyOf(recorder.dispatched).size(),
+            "no single-host source is re-blasted — each dispatched exactly once");
+
+        // nitter's queue fully drained, so its kind-interval finally restarts:
+        // lastTickByKind is stamped from the injected Clock only at drain completion.
+        Instant lastTick =
+            ClientProxy.unwrap(fetchScheduler).lastTickByKind().get(PACED_KIND);
+        assertEquals(BASE.plus(ADVANCE.multipliedBy(collapsedCount - 1)), lastTick,
+            "lastTickByKind is stamped only once the crowded host fully drains");
+    }
+
+    /**
      * Advance the injected clock to {@code now}, mark every kind EXCEPT the
      * paced kind not-due (so no source-bearing kind's real Fetcher fires this
      * heartbeat), then drive one {@code onTick()}.
@@ -189,6 +286,25 @@ class FetchSchedulerHostPacingIT {
         }
     }
 
+    /**
+     * Like {@link #heartbeat(Instant)} but leaves BOTH the paced kind and the
+     * second kind to their natural dueness — every OTHER registered kind is
+     * suppressed so no bootstrap-seeded real Fetcher (rss/bluesky) fires. Used
+     * by the single-host-collapse test to let the second kind dispatch on its
+     * own schedule while the paced kind drains.
+     */
+    private void heartbeatWithSecondKindDue(Instant now) throws Exception {
+        installClock(now);
+        FetchScheduler real = ClientProxy.unwrap(fetchScheduler);
+        Map<String, Instant> lastTick = real.lastTickByKind();
+        for (String kind : real.registeredKinds()) {
+            if (!kind.equals(PACED_KIND) && !kind.equals(SECOND_KIND)) {
+                lastTick.put(kind, now);
+            }
+        }
+        fetchScheduler.onTick();
+    }
+
     private void seedNitterSource(String identifier) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -209,6 +325,26 @@ class FetchSchedulerHostPacingIT {
         }
     }
 
+    private void seedYouTubeSource(String identifier) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO source (kind, identifier, display_name, category, "
+                     + "  bootstrap_tags, status) "
+                     + "VALUES ('youtube', ?, ?, 'news', '{}', 'active')")) {
+            ps.setString(1, identifier);
+            ps.setString(2, "host-pacing IT youtube " + identifier);
+            ps.executeUpdate();
+        }
+    }
+
+    private void deleteYouTubeSources() throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "DELETE FROM source WHERE kind = 'youtube'")) {
+            ps.executeUpdate();
+        }
+    }
+
     /**
      * Stub {@link NitterFetcher} that records each dispatched identifier and
      * performs no network I/O. The super's public no-arg constructor builds an
@@ -216,6 +352,23 @@ class FetchSchedulerHostPacingIT {
      * is never exercised.
      */
     private static final class RecordingNitterFetcher extends NitterFetcher {
+        final List<String> dispatched = new CopyOnWriteArrayList<>();
+
+        @Override
+        public List<NormalizedPost> fetch(long dispatchKey, String identifier) {
+            dispatched.add(identifier);
+            return List.of();
+        }
+    }
+
+    /**
+     * Stub {@link YouTubeFetcher} recording each dispatched identifier and doing
+     * no network I/O — the second-kind counterpart of
+     * {@link RecordingNitterFetcher}. The super's public no-arg constructor
+     * builds an unused {@code SsrfGuardedHttpClient}; {@link #fetch} is
+     * overridden so it is never exercised.
+     */
+    private static final class RecordingYouTubeFetcher extends YouTubeFetcher {
         final List<String> dispatched = new CopyOnWriteArrayList<>();
 
         @Override
