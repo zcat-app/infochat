@@ -5,15 +5,19 @@ status: pending
 created: 2026-07-08
 last_updated: 2026-07-08
 blocked_by: []
-files_budget: 16
+files_budget: 20
 files_scope:
   - infochat-core/src/main/resources/db/migration/V57__post_classification.sql
   - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/ModelTask.java
   - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing/LlmRouter.java
+  - infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/routing/LlmRouterStartupGuardKeyDerivationTest.java
+  - infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/LlmSpisLoadTest.java
   - infochat-llm-adapter/src/main/resources/prompts/classifier.md
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/classifier/ClassifierWorker.java
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/classifier/ClassificationResult.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/ready/ReadyPromoter.java
   - infochat-collector/src/main/resources/application.properties
+  - infochat-provider/src/main/resources/application.properties
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/classifier/ClassifierWorkerTest.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/classifier/ClassifierWorkerIT.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/ready/ReadyPromoterIT.java
@@ -33,7 +37,14 @@ out_of_scope:
     M1-598 (blocked_by this ticket). This ticket produces and stores the
     classification data ONLY; it does NOT change what /summary emits — the
     renderer keeps showing today's reverted tags-copy stub until M1-598 re-points
-    it. Do NOT touch anything under infochat-provider/.
+    it. Do NOT touch any infochat-provider/ Java, render, or retrieval code. The
+    SINGLE permitted provider edit is
+    infochat-provider/src/main/resources/application.properties, which gains an
+    infochat.llm.classifier.* block (base-url + model, mirroring the six existing
+    per-task blocks) SOLELY so the shared @Startup LlmRouterStartupGuard — which
+    runs on BOTH services and eagerly resolves every ModelTask's per-task config
+    at boot — does not abort provider startup once ModelTask.CLASSIFIER exists.
+    The provider never issues a classifier call.
   - >-
     Backfilling real classifications onto the pre-migration post backlog. Existing
     posts get the {unknown} column DEFAULT and are marked classifier_done=TRUE (no
@@ -77,7 +88,15 @@ acceptance:
     ModelTask gains `CLASSIFIER("classifier")` and LlmRouter routes it from
     `infochat.llm.classifier.*` config (base-url / api-key / model /
     max-concurrency / poll-interval) added to the collector application.properties,
-    mirroring the existing `infochat.llm.entity.*` shape.
+    mirroring the existing `infochat.llm.entity.*` shape. `LlmRouter.isLanguageAwareTask`
+    gains `CLASSIFIER` in its non-language-aware (`-> false`) switch arm so the
+    exhaustive switch still compiles (classification, like tagging, has no
+    target-language variation). Because the `@Startup LlmRouterStartupGuard` runs
+    on BOTH services and eagerly resolves every ModelTask at boot, the provider
+    application.properties ALSO gains an `infochat.llm.classifier.*` block
+    (base-url + model at minimum) so provider startup does not abort — the
+    provider never runs a classifier call (see out_of_scope for the single-file
+    carve-out).
   - >-
     ClassifierWorker (new, modeled on EntityExtractorWorker) is a @Scheduled poller
     whose pickup is `status='RAW' AND tagger_done=TRUE AND classifier_done=FALSE
@@ -130,6 +149,15 @@ acceptance:
     §5.1 SPI overview does the same — and the §Per-task routing rules prose that
     enumerates the Collector ingest-pipeline tasks (security judge, tagging,
     entity extraction, embedding) adds classification.
+  - >-
+    The two ModelTask-enumeration guards are updated for the seventh value:
+    LlmRouterStartupGuardKeyDerivationTest's EXPECTED_SEGMENTS map gains
+    `ModelTask.CLASSIFIER, "classifier"` (its assertion pins
+    `EXPECTED_SEGMENTS.size() == ModelTask.values().length` and the loop derives
+    each per-task key), and LlmSpisLoadTest's spec-mandated count assertion
+    `assertEquals(6, ModelTask enum-constant count)` becomes 7 with its comment
+    updated to list classification. Both are authorized in test_plan.modifies and
+    are red-before / green-after the enum widening.
   - mvn verify is green from the repo root.
 test_plan:
   adds:
@@ -143,6 +171,14 @@ test_plan:
     - >-
       infochat-collector/.../eval/ready/ReadyPromoterIT.java — classifier_done is
       now part of the RAW→READY gate.
+    - >-
+      infochat-llm-adapter/.../routing/LlmRouterStartupGuardKeyDerivationTest.java
+      — EXPECTED_SEGMENTS gains ModelTask.CLASSIFIER -> "classifier" (6->7) so the
+      key-derivation pin covers the new task (forced by the enum widening).
+    - >-
+      infochat-llm-adapter/.../LlmSpisLoadTest.java — the spec-mandated ModelTask
+      count assertion goes 6 -> 7 and its comment lists classification (forced by
+      the enum widening).
   preserves:
     - all tests currently green on main
     - >-
@@ -171,6 +207,22 @@ escalations:
       for the classification label set is unspecified in acceptance items 3 & 5;
       (2) docs/spec/llm.md §SPI shape (closed ModelTask enum) is missing from
       files_scope and the item-6 doc checklist, though item 2 widens that enum.
+  - date: 2026-07-08
+    reason: outline-fail
+    reviewer_verdict_excerpt: |
+      OUTLINE FAILED (plan-writer, round 1). Root cause: acceptance item 2's
+      ModelTask.CLASSIFIER enum widening forces two edits the ticket never
+      scoped. (1) Breaks pre-existing unit test LlmRouterStartupGuardKey
+      DerivationTest (6-entry EXPECTED_SEGMENTS, asserts size==values().length,
+      loops get(task)) — an unauthorized test modification (not in files_scope
+      nor test_plan.modifies). (2) LlmRouterStartupGuard (@Startup, runs on
+      BOTH services via provider index-dependency) calls assertAllTasksResolve()
+      which requires base-url+model for EVERY ModelTask; provider has no
+      classifier block, so provider boot throws TaskConfigUnresolvableException
+      → provider ITs fail → "mvn verify green" unreachable. Fix (classifier
+      config in infochat-provider/.../application.properties) is forbidden by
+      out_of_scope + absent from files_scope. Both confirmed against ground
+      truth. SUGGESTED ESCALATION: refine.
 overrides: []
 revisions:
   - date: 2026-07-08
@@ -197,6 +249,39 @@ revisions:
         still <= files_budget 16); extend item 6 to require CLASSIFIER in the
         §SPI shape enum listing + design §5.1 mirror + §Per-task routing prose.
         files_budget / complexity / risk / round_cap unchanged.
+  - date: 2026-07-08
+    reason: >-
+      outline-fail refine (user-directed via /m1-tick run escalation menu, applied
+      with an exhaustive ripple audit): the ModelTask.CLASSIFIER enum widening
+      forced three edits the ticket had not scoped, plus an entity-mirror companion.
+    snapshot: |
+      files_scope (pre-refine): 14 paths; files_budget 16.
+      out_of_scope (pre-refine): "Do NOT touch anything under infochat-provider/."
+      test_plan.modifies (pre-refine): ReadyPromoterIT only.
+      plan-writer OUTLINE FAILED (round 1) findings + orchestrator audit:
+        - FORCED (in-module test): LlmRouterStartupGuardKeyDerivationTest asserts
+          EXPECTED_SEGMENTS.size()==ModelTask.values().length (6) -> breaks at 7.
+        - FORCED (in-module test, found by orchestrator audit, NOT in the plan
+          -writer findings): LlmSpisLoadTest asserts ModelTask enum count == 6.
+        - FORCED (provider config): @Startup LlmRouterStartupGuard runs on BOTH
+          services and resolves every ModelTask; provider needs a classifier
+          base-url+model block or boot aborts. Was under the provider ban.
+        - COMPILE (already in scope): LlmRouter.isLanguageAwareTask exhaustive
+          switch needs a CLASSIFIER arm.
+      audited NOT forced (stay out of scope): TaggerWorker/Stage2Worker (switch
+        over non-ModelTask, has default); LlmRouterStartupGuard (data-driven, "no
+        guard edit" by design); PostPersister (classifier_done via DB DEFAULT,
+        mirrors entity_done which its INSERT also omits); ReEvaluationJob (stage2
+        -only); all provider Java + provider tests (constant-use / non-exhaustive
+        if); OpenAiCompatibleProviderTest "AllSix" (data-driven, passes; name
+        cosmetic).
+      resolution: files_scope 14 -> 18 (+ KeyDerivationTest, + LlmSpisLoadTest,
+        + provider application.properties, + ClassificationResult.java entity
+        mirror); files_budget 16 -> 20; out_of_scope narrowed to a single-file
+        provider carve-out; acceptance item 2 extended (isLanguageAwareTask arm +
+        provider config); new acceptance item for the two enum-guard tests;
+        test_plan.modifies += the two forced tests. complexity/risk/round_cap
+        unchanged.
 aborted_attempts: []
 reopens: []
 ---
@@ -253,10 +338,14 @@ any un-run post are non-null.
 ## Size note
 
 This ticket spans three modules (core migration, llm-adapter, collector) plus a
-migration and the ReadyPromoter gate — ~13 files. It is kept whole per the
-approved collector+schema / provider split. If review finds it unwieldy, the
-natural sub-split is [V57 migration + 02-schema] / [ClassifierWorker + router +
-prompt + ReadyPromoter + 05-llm/architecture]; raise it via escalate→decompose
+one-line provider boot-config edit, a migration, and the ReadyPromoter gate —
+~18 files (files_budget 20). The size grew from the initial ~13 estimate because
+the ModelTask.CLASSIFIER enum widening forces two in-module enum-guard test
+updates (LlmRouterStartupGuardKeyDerivationTest, LlmSpisLoadTest) plus the
+provider boot-config block (see revisions for the ripple audit). It is kept whole
+per the approved collector+schema / provider split. If review finds it unwieldy,
+the natural sub-split is [V57 migration + 02-schema] / [ClassifierWorker + router
++ prompt + ReadyPromoter + 05-llm/architecture]; raise it via escalate→decompose
 rather than silently splitting.
 
 ## Notes
