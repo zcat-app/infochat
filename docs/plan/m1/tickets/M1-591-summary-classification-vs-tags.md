@@ -1,9 +1,12 @@
 ---
 id: M1-591
 title: "/summary cluster block prints classification: and tags: as two identical lines — collapse the redundancy"
-status: pending
+status: abandoned
 created: 2026-07-08
 last_updated: 2026-07-08
+replaced_by:
+  - M1-597
+  - M1-598
 blocked_by: []
 files_budget: 8
 files_scope:
@@ -129,6 +132,14 @@ redteam_audits: []
 ---
 
 # M1-591: /summary prints classification: and tags: as two identical lines
+
+> **ABANDONED 2026-07-08 — superseded by M1-597 + M1-598.** This ticket chose to
+> DELETE the always-duplicate `classification:` line. It was implemented and
+> merged (`2b7fd5ac`), then **reverted** (`57da696a`, `77e96fee`) on the
+> decision that classification — a distinct per-post enum designed from day one —
+> should be given a real data source, not removed. The proper implementation is
+> split across M1-597 (collector ingest stage + `post.classification` schema) and
+> M1-598 (provider render). This ticket is terminal; do not reopen or re-run it.
 
 ## Context
 

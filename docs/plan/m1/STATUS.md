@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 615 |
 | deferred | 1 |
-| abandoned | 10 |
-| **total** | **630** |
+| abandoned | 11 |
+| **total** | **632** |
 
 ---
 
@@ -26,9 +26,9 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-589 — Provider chat: digest-first semantic RAG — a general assistant grounded in pgvector nearest-neighbour retrieval, replacing tag-guessing (complexity: high, risk: medium)
-- M1-591 — /summary cluster block prints classification: and tags: as two identical lines — collapse the redundancy (complexity: low, risk: low)
 - M1-593 — Provider: /summary distinguishes zero-subscriptions from empty-window, and the welcome steers a fresh user to follow a source (complexity: low, risk: low)
 - M1-594 — Provider: /summary emits a misleading \"Translating...\" progress step for an English scope (suppress the TRANSLATING stage when scope language == source) (complexity: low, risk: low)
+- M1-597 — Collector: real per-post classification ingest stage (ClassifierWorker + post.classification, unknown default) (complexity: high, risk: medium)
 
 ---
 
@@ -45,7 +45,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-598 — blocked_by: M1-597 (pending)
 
 ---
 
@@ -97,6 +97,9 @@ Tickets decided against — not implemented as this ticket. Terminal: not reopen
 
 ### obsoleted-by-spec-amend (1)
 - M1-314 — Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed
+
+### other (1)
+- M1-591 — /summary cluster block prints classification: and tags: as two identical lines — collapse the redundancy
 
 ### superseded (3)
 - M1-372 — messaging: align the SimpleX auth-failure design note with the loopback-trusted v1 transport and drop the dead auth.fail meter
@@ -807,10 +810,12 @@ M1-587 (done)
 M1-588 (done)
 M1-589 (pending) ← runnable
 M1-590 (done)
-M1-591 (pending) ← runnable
+M1-591 (abandoned)
 M1-592 (done)
 M1-593 (pending) ← runnable
 M1-594 (pending) ← runnable
 M1-595 (done)
 M1-596 (done)
+M1-597 (pending) ← runnable
+  └── M1-598 (pending)
 ```
