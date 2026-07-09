@@ -3,9 +3,9 @@ id: M1-593
 title: "Provider: /summary distinguishes zero-subscriptions from empty-window, and the welcome steers a fresh user to follow a source"
 status: pending
 created: 2026-07-08
-last_updated: 2026-07-08
+last_updated: 2026-07-09
 blocked_by: []
-files_budget: 7
+files_budget: 8
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SummaryCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/summary/EligiblePostQuery.java
@@ -14,6 +14,7 @@ files_scope:
   - infochat-provider/src/main/resources/bundles/cs.properties
   - docs/spec/commands.md
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/EligiblePostQueryIT.java
 complexity: low
 risk: low
 round_cap: 2
@@ -100,14 +101,28 @@ acceptance:
     fresh, zero-subscription user at following a source. Both edits are the spec
     coordinated with the code change (not a standalone spec edit).
   - >-
-    NAMED TEST: SummaryCommandHandlerTest gains (a) a case where the eligible set
-    is empty and the scope's subscription count is 0, asserting the reply equals
-    the resolved reply.summary.no_subscriptions string; and (b) a case where the
-    eligible set is empty but the subscription count is >0, asserting the reply
-    is the unchanged reply.summary.no_posts_yet. The handler-tier
-    RecordingEligiblePostQuery stub is extended with a settable subscription
-    count so both branches are driven without a live DB. Red-before/green-after
-    on (a).
+    NAMED TEST: SummaryCommandHandlerTest covers both empty-branch outcomes. The
+    handler-tier RecordingEligiblePostQuery stub is extended with a settable
+    subscription count whose DEFAULT is a positive ("subscribed") value, so every
+    pre-existing empty-branch test that does not opt in keeps asserting
+    reply.summary.no_posts_yet unchanged. (a) The pre-existing
+    zeroSubscriptionsProducesNoPostsYetReplyWithoutLlmCall test is REWRITTEN
+    (renamed) to explicitly seed subscription count 0 and assert the reply equals
+    the resolved reply.summary.no_subscriptions string (this is the empty+0-subs
+    case; red-before/green-after on it) — the prose generator is still NOT
+    invoked. (b) A case where the eligible set is empty but the subscription
+    count is >0 asserts the reply is the unchanged reply.summary.no_posts_yet.
+    The class-level Javadoc "Asserted invariants" bullet that today reads
+    "Zero-subscriptions / empty-window branches: empty post list -> no_posts_yet
+    reply" is corrected to distinguish zero-subscriptions (-> no_subscriptions)
+    from empty-window-while-subscribed (-> no_posts_yet).
+  - >-
+    NAMED TEST (live DB): EligiblePostQueryIT gains a case that exercises the new
+    countSubscriptions(scopeKind, scopeId) SQL against a live schema — mirroring
+    how the sibling countFollowedTags is covered by EligiblePostQueryIT today. It
+    seeds source_subscription rows for a scope and asserts the count is the number
+    of rows, and asserts 0 for a scope with no subscriptions, so the real SQL
+    (not only the handler-tier test double) is executed at least once.
   - >-
     mvn verify is green from the repo root.
 test_plan:
@@ -115,18 +130,37 @@ test_plan:
   modifies:
     - >-
       infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
-      — add the empty+zero-subscriptions case (asserts reply.summary.no_subscriptions)
-      and the empty+has-subscriptions case (asserts reply.summary.no_posts_yet,
-      no regression); extend the inner RecordingEligiblePostQuery stub with a
-      settable subscription count.
+      — extend the inner RecordingEligiblePostQuery stub with a settable
+      subscription count DEFAULTING to a positive ("subscribed") value (so the
+      empty-window-while-subscribed tests keep asserting no_posts_yet).
+      REWRITE the pre-existing zeroSubscriptionsProducesNoPostsYetReplyWithoutLlmCall
+      test (rename + seed count 0 + assert reply.summary.no_subscriptions; prose
+      generator still not invoked) — this is the empty+zero-subscriptions case
+      (red-before/green-after). Add the empty+has-subscriptions case (asserts
+      reply.summary.no_posts_yet, no regression). CORRECT the class-level Javadoc
+      "Asserted invariants" bullet at lines ~67-68 to distinguish
+      zero-subscriptions (-> no_subscriptions) from empty-window-while-subscribed
+      (-> no_posts_yet).
+    - >-
+      infochat-provider/src/test/java/app/zcat/infochat/provider/summary/EligiblePostQueryIT.java
+      — add a live-DB case exercising the new countSubscriptions SQL (seed
+      source_subscription rows for a scope, assert the count; assert 0 for a scope
+      with none), mirroring the existing countFollowedTags IT coverage.
   preserves:
     - all tests currently green on main
     - >-
       BundleLoaderTest's D43 en/cs keyset-parity check (the new key + reworded
       welcome are mirrored in both bundles).
     - >-
-      SummaryCommandHandlerTest's existing no-posts, in-flight, rate-cap,
-      unknown-tag, and terminal-summary assertions.
+      SummaryCommandHandlerTest's existing in-flight, rate-cap, unknown-tag, and
+      terminal-summary assertions, plus the two generic no-posts tests
+      (handlerNameIsLiteralSummary, inboundRouterDispatchesSummaryToHandlerExactlyOnce)
+      and emptyWindowProducesNoPostsYetReplyWithoutLlmCall — these keep asserting
+      no_posts_yet unchanged because the stub's default subscription count is
+      positive ("subscribed"). NOT preserved:
+      zeroSubscriptionsProducesNoPostsYetReplyWithoutLlmCall and the class Javadoc
+      invariant bullet, both rewritten per test_plan.modifies (they encode the
+      pre-ticket behavior acceptance item 1 changes).
 spec_refs:
   - docs/spec/commands.md §Content
   - docs/spec/commands.md §Onboarding
@@ -138,7 +172,48 @@ decision_refs:
 reviews: []
 escalations: []
 overrides: []
-revisions: []
+revisions:
+  - date: 2026-07-09
+    reason: >-
+      clarity-fail refine: two prose blockers (bounded self-refine via /m1-tick
+      run, within existing scope) plus one user-directed scope refine (the
+      countSubscriptions SQL-coverage warning, resolved via the run
+      AskUserQuestion by adding a live-DB IT case).
+    snapshot: |
+      files_budget (pre-refine): 7; files_scope: 7 paths (EligiblePostQueryIT.java
+        absent). clarity_check verdict 2026-07-09: FAIL, 2 blockers + 1 warning.
+      Blocker 1 (TEST-CHANGES-AUTHORIZED): the pre-existing
+        SummaryCommandHandlerTest.zeroSubscriptionsProducesNoPostsYetReplyWithoutLlmCall
+        (lines 175-188) and the class Javadoc "Asserted invariants" bullet
+        (lines 67-68) assert no_posts_yet for the zero-subscription empty case —
+        exactly what acceptance item 1 changes to no_subscriptions — yet
+        test_plan.preserves claimed "SummaryCommandHandlerTest's existing
+        no-posts ... assertions" survive unchanged. Confirmed verbatim against
+        the file.
+      Blocker 2 (default unstated): four tests seed seedNoPosts() expecting
+        no_posts_yet; the new settable subscription-count field's default decides
+        which flip. Default was unspecified.
+      Warning (FILES-BUDGET-PLAUSIBLE): the new countSubscriptions SQL would ship
+        covered only by the handler-tier test double, never run against a live DB
+        (unlike the sibling countFollowedTags, covered by EligiblePostQueryIT).
+      acceptance item 7 (verbatim, pre-refine): "NAMED TEST:
+        SummaryCommandHandlerTest gains (a) a case where the eligible set is empty
+        and the scope's subscription count is 0, asserting the reply equals the
+        resolved reply.summary.no_subscriptions string; and (b) a case where the
+        eligible set is empty but the subscription count is >0, asserting the
+        reply is the unchanged reply.summary.no_posts_yet. The handler-tier
+        RecordingEligiblePostQuery stub is extended with a settable subscription
+        count so both branches are driven without a live DB. Red-before/green-after
+        on (a)."
+      resolution: (blocker 1) move the zeroSubscriptions test + class Javadoc into
+        test_plan.modifies (rewrite → seed count 0 → assert no_subscriptions),
+        narrow test_plan.preserves to name only the truly-unchanged assertions;
+        (blocker 2) pin the stub's default subscription count to a positive
+        ("subscribed") value so the empty-window-subscribed tests keep asserting
+        no_posts_yet; (warning) add EligiblePostQueryIT.java to files_scope
+        (files_budget 7→8) + a live-DB acceptance item for countSubscriptions.
+        complexity / risk / round_cap / security_relevant / migration_touch
+        unchanged.
 aborted_attempts: []
 reopens: []
 redteam_findings: []
@@ -237,8 +312,17 @@ untouched.
 - **Test tier.** The handler-tier `SummaryCommandHandlerTest` already stubs
   `EligiblePostQuery` via `RecordingEligiblePostQuery extends EligiblePostQuery`
   and drives empty vs non-empty `Result`s without a DB; extending that stub with
-  a settable subscription count keeps the new branch a fast, DB-free unit test,
-  consistent with the existing no-posts assertion.
+  a settable subscription count keeps the branch-selection logic a fast, DB-free
+  unit test, consistent with the existing no-posts assertion. Because that stub
+  overrides `countSubscriptions`, the real SQL never runs under the handler-tier
+  test — so `EligiblePostQueryIT` gets a live-DB case for `countSubscriptions`,
+  mirroring the `countFollowedTags` IT coverage, so the query itself is exercised
+  once against a real schema.
+- **Stub default.** The new settable subscription count on
+  `RecordingEligiblePostQuery` defaults to a positive ("subscribed") value. The
+  three pre-existing empty-branch tests that model "subscribed but empty window"
+  keep asserting `no_posts_yet` unchanged; only the rewritten zero-subscription
+  case explicitly seeds count 0 to reach the new `no_subscriptions` reply.
 - **D43.** Adding `reply.summary.no_subscriptions` to `en.properties` requires
   its `cs.properties` twin (bilateral keyset), and the reworded
   `reply.welcome.dm_fresh` is updated in both — else `BundleLoaderTest` fails.
