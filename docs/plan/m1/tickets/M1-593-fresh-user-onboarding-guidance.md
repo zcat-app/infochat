@@ -1,9 +1,14 @@
 ---
 id: M1-593
 title: "Provider: /summary distinguishes zero-subscriptions from empty-window, and the welcome steers a fresh user to follow a source"
-status: pending
+status: done
 created: 2026-07-08
 last_updated: 2026-07-09
+clarity_check:
+  date: 2026-07-09
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 8
 files_scope:
@@ -62,7 +67,7 @@ acceptance:
     distinct bundle string (reply.summary.no_subscriptions, a new
     BundleKeys.REPLY_SUMMARY_NO_SUBSCRIPTIONS constant) whose text attributes the
     emptiness to having no followed sources and gives an actionable next step
-    (naming /list-sources to see available sources and how to follow one) —
+    (naming /follow-all-sources as the way to subscribe to the available feeds) —
     NOT reply.summary.no_posts_yet, which misattributes the cause to the time
     window. No LLM invocation on this branch (unchanged determinism posture).
   - >-
@@ -78,13 +83,15 @@ acceptance:
     against).
   - >-
     The DM-fresh welcome message (reply.welcome.dm_fresh, en + cs) is reworded so
-    a freshly-registered user with zero subscriptions is steered toward an action
-    that will not dead-end: it points at following a source (e.g. /list-sources
-    then following one) as the way to start receiving content, rather than the
-    current "Try /summary -w 24h once a few sources are configured" line, which
-    misleads because the gate for a fresh user is having NO subscriptions, not
-    source configuration. The probation-window notice and the reduced-command
-    list are preserved (D45).
+    a freshly-registered user (always in slow-start probation, D45) is given an
+    accurate expectation instead of the current misleading "Try /summary -w 24h
+    once a few sources are configured" line (which blames source configuration
+    when the real gate is having NO subscriptions): content starts once they
+    follow sources with /follow-all-sources (or add their own with /add-source),
+    and those source-following commands unlock when the ~24h probation ends — they
+    are NOT in the slow-start allowed set, so steering a probation user to follow
+    a source NOW would dead-end just like /summary does. The probation-window
+    notice and the reduced-command list are preserved (D45).
   - >-
     D43 bilateral keyset holds: reply.summary.no_subscriptions is added to BOTH
     en.properties and cs.properties (Czech twin), and the reworded
@@ -97,9 +104,12 @@ acceptance:
     and 'nothing subscribed'" is revised to specify the DISTINCT no-subscriptions
     reply for the nothing-subscribed sub-case (deterministic localization-bundle
     string, still no LLM invocation); (b) §Onboarding — the D23 "steered toward
-    an action that will not be empty" welcome intent is reflected as pointing a
-    fresh, zero-subscription user at following a source. Both edits are the spec
-    coordinated with the code change (not a standalone spec edit).
+    an action that will not be empty" welcome intent is reflected as setting an
+    accurate expectation for a fresh, zero-subscription (probation) user: content
+    starts once they follow sources with /follow-all-sources, which unlocks after
+    probation — i.e. steered toward an action that will not dead-end given the
+    probation gate. Both edits are the spec coordinated with the code change (not
+    a standalone spec edit).
   - >-
     NAMED TEST: SummaryCommandHandlerTest covers both empty-branch outcomes. The
     handler-tier RecordingEligiblePostQuery stub is extended with a settable
@@ -169,8 +179,37 @@ decision_refs:
   - D23
   - D44
   - D45
-reviews: []
-escalations: []
+reviews:
+  - round: 1
+    date: 2026-07-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 227
+      removed: 44
+escalations:
+  - date: 2026-07-09
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      Grounding discovery (pre-implementation, via /m1-tick run halt): a DM-fresh
+      user is always in slow-start probation (D45). The probation allowed-command
+      set (CommandPermissions.ALLOWED) is {help, status, get-tags, get-sources,
+      list-sources, summary, saved, export, forget, lang, stop} + asset commands.
+      The source-following commands /follow-all-sources and /add-source are NOT in
+      that set (commands.md: "/follow-all-sources ... Blocked during slow-start
+      probation"), and /list-sources shows only the caller's own subscriptions
+      (empty for a fresh user; --all is bot-admin only). So the ticket's suggested
+      steer "/list-sources then follow one" (acceptance items 1, 4, 6b) dead-ends
+      during probation exactly like /summary does — contradicting item 4's own
+      goal ("an action that will NOT dead-end"). User resolution (AskUserQuestion,
+      2026-07-09): refine to a probation-honest steer that names /follow-all-sources
+      and notes it unlocks after probation.
 overrides: []
 revisions:
   - date: 2026-07-09
@@ -214,6 +253,34 @@ revisions:
         (files_budget 7→8) + a live-DB acceptance item for countSubscriptions.
         complexity / risk / round_cap / security_relevant / migration_touch
         unchanged.
+  - date: 2026-07-09
+    reason: >-
+      premise-fail refine (user-directed via /m1-tick run halt): the steer text in
+      acceptance items 1, 4 & 6b prescribed pointing a fresh user at "/list-sources
+      then follow one", which dead-ends during slow-start probation — /follow-all-sources
+      and /add-source are probation-blocked and /list-sources shows only the
+      caller's own (empty) subscriptions. Reworded to a probation-honest steer.
+    snapshot: |
+      acceptance item 1 steer (verbatim, pre-refine): "... gives an actionable next
+        step (naming /list-sources to see available sources and how to follow one) ..."
+      acceptance item 4 (verbatim, pre-refine): "The DM-fresh welcome message
+        (reply.welcome.dm_fresh, en + cs) is reworded so a freshly-registered user
+        with zero subscriptions is steered toward an action that will not dead-end:
+        it points at following a source (e.g. /list-sources then following one) as
+        the way to start receiving content, rather than the current 'Try /summary
+        -w 24h once a few sources are configured' line, which misleads because the
+        gate for a fresh user is having NO subscriptions, not source configuration.
+        The probation-window notice and the reduced-command list are preserved (D45)."
+      acceptance item 6b (verbatim, pre-refine): "... (b) §Onboarding — the D23
+        'steered toward an action that will not be empty' welcome intent is
+        reflected as pointing a fresh, zero-subscription user at following a source."
+      resolution: reword items 1/4/6b (and the matching body prose) so the
+        no_subscriptions reply names /follow-all-sources as the subscribe lever and
+        the welcome sets an accurate expectation that source-following unlocks after
+        the ~24h probation. files_budget / files_scope / complexity / risk /
+        round_cap / security_relevant / migration_touch all unchanged; no test change
+        (the branch-selection and IT tests are wording-agnostic; the bundle-value
+        assertions, if any, follow the new strings).
 aborted_attempts: []
 reopens: []
 redteam_findings: []
@@ -236,7 +303,7 @@ to follow a source:
    (`reply.summary.no_posts_yet`). That message **misattributes** the emptiness
    to the **time window** when the real reason is **zero subscriptions**. A
    distinct message for the no-subscriptions case ("you're not following any
-   sources yet — use `/list-sources` / follow a source") is clearer and
+   sources yet — subscribe with `/follow-all-sources`") is clearer and
    actionable.
 
 2. More broadly, onboarding gives a new user no clear "here's how to start
@@ -269,18 +336,23 @@ Scope: a UX/messaging improvement, no new capability.
   mirroring the existing `countFollowedTags` shape). Count `0` → emit the new
   `reply.summary.no_subscriptions` string (new
   `BundleKeys.REPLY_SUMMARY_NO_SUBSCRIPTIONS`), which names the real cause and
-  points at `/list-sources` and following a source. Count `> 0` → the existing
+  points at `/follow-all-sources` as the way to subscribe to the available feeds.
+  Count `> 0` → the existing
   `reply.summary.no_posts_yet`, unchanged. The count query runs **only** on the
   empty branch, so the happy path pays nothing. No LLM call on either branch —
   the determinism boundary is untouched.
 
-- **(b) Welcome points at following a source.** Reword `reply.welcome.dm_fresh`
-  (en + cs) so a fresh, zero-subscription user is steered to follow a source
-  (e.g. `/list-sources` then follow one) instead of the current "once a few
-  sources are configured" line. Preserve the probation-window notice and the
-  reduced-command list (D45). This is a bundle-string edit only — the welcome is
-  emitted from the D43 bundle by `InboundRouter`
-  (`BundleKeys.REPLY_WELCOME_DM_FRESH`), no router-code change.
+- **(b) Welcome sets an accurate expectation.** Reword `reply.welcome.dm_fresh`
+  (en + cs) so a fresh user (always in slow-start probation, D45) learns that
+  content starts once they follow sources with `/follow-all-sources` (or
+  `/add-source`), which unlock when the ~24h probation ends — instead of the
+  current "once a few sources are configured" line. Steering a probation user to
+  follow a source *now* would dead-end (both follow commands are probation-blocked
+  and `/list-sources` shows only their own empty subscriptions), so the welcome
+  sets the timing expectation rather than prescribing an immediate action.
+  Preserve the probation-window notice and the reduced-command list (D45). This
+  is a bundle-string edit only — the welcome is emitted from the D43 bundle by
+  `InboundRouter` (`BundleKeys.REPLY_WELCOME_DM_FRESH`), no router-code change.
 
 - **(c) Spec.** Amend commands.md §Content (the /summary empty-window/zero-subs
   paragraph) to describe the distinct no-subscriptions reply, and §Onboarding

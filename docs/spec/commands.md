@@ -262,10 +262,15 @@ them to the marked region — doing so would red the build.
   eligible posts exist in the window, `/summary` returns a friendly
   "no posts yet" reply (deterministic localization-bundle string,
   no LLM invocation, no empty summary block). If the calling scope
-  has zero active subscriptions, `/summary` returns the same "no
-  posts yet" reply regardless of tag mode or window size — the
-  empty-eligible-set path covers both "subscribed but nothing
-  arrived" and "nothing subscribed."
+  has zero active subscriptions, `/summary` instead returns a
+  distinct "no subscriptions" reply (a separate deterministic
+  localization-bundle string, still no LLM invocation) that
+  attributes the emptiness to following no sources and steers the
+  user to `/follow-all-sources`. The subscription count is read only
+  when the eligible set is empty, so a non-empty `/summary` runs no
+  extra query — and the two empty sub-cases, "subscribed but nothing
+  arrived" (no posts yet) vs. "nothing subscribed" (no
+  subscriptions), are reported distinctly.
   **Posts with Stage 1 redactions retained** (`stage2_failed=true`,
   released `READY` per `security.md` §Failure handling) are included
   in the eligible set; the LLM summarizer sees the redacted body
@@ -1264,6 +1269,11 @@ probation window and the reduced command set available until it elapses.
 
 The welcome message branches on two modes (DM-fresh, DM-returning)
 so the user is steered toward an action that will not be empty (decision D23).
+For a DM-fresh user — who has zero subscriptions and is in slow-start probation
+(D45) — that steer is an accurate expectation rather than a dead-end: content
+starts once they follow sources with `/follow-all-sources`, which (like
+free-form chat) unlocks when probation ends, since the source-following commands
+sit outside the slow-start allowed set.
 The pre-D47 'group-first-mention' branch is removed — under D47, a user's
 first group interaction is not an onboarding event (they were already
 registered via DM). No group-side welcome message is sent; the user's DM

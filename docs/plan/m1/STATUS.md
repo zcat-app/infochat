@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 617 |
+| done | 618 |
 | deferred | 1 |
 | abandoned | 11 |
 | **total** | **633** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-589 — Provider chat: digest-first semantic RAG — a general assistant grounded in pgvector nearest-neighbour retrieval, replacing tag-guessing (complexity: high, risk: medium)
-- M1-593 — Provider: /summary distinguishes zero-subscriptions from empty-window, and the welcome steers a fresh user to follow a source (complexity: low, risk: low)
 - M1-594 — Provider: /summary emits a misleading \"Translating...\" progress step for an English scope (suppress the TRANSLATING stage when scope language == source) (complexity: low, risk: low)
 - M1-598 — Provider: render real per-post classification in /summary (union, drop 'unknown' unless sole) (complexity: medium, risk: low)
 
@@ -64,6 +63,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-593 | Provider: /summary distinguishes zero-subscriptions from empty-window, and the welcome steers a fresh user to follow a source | 2026-07-09 | round 1 APPROVE |
 | M1-599 | Tagger title-wrap (D21) + classifier switch-llm/4-llm tooling | 2026-07-08 | round 1 APPROVE |
 | M1-597 | Collector: real per-post classification ingest stage (ClassifierWorker + post.classification, unknown default) | 2026-07-08 | round 2 APPROVE |
 | M1-596 | Collector: INVESTIGATE — FetchScheduler wedges a kind's dispatch after a bulk identifier/host change collapses its sources onto one host; make the drain self-heal | 2026-07-08 | round 1 APPROVE |
@@ -73,7 +73,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-588 | Collector: a degraded placeholder feed (xcancel 'not whitelisted' stub) is a Fetcher failure, not a successful ingest | 2026-07-08 | round 1 APPROVE |
 | M1-587 | backup.sh handles root-owned adapter identity dirs (the M1-569 follow-up) | 2026-07-07 | round 1 APPROVE |
 | M1-586 | Strip markdown fences before entity/tagger JSON parse | 2026-07-07 | round 1 APPROVE |
-| M1-585 | RestoreWiringTest: behavioral pins for persisted-SHA recovery, role-before-restore order, and mount shape | 2026-07-07 | round 1 APPROVE |
 
 ---
 
@@ -812,7 +811,7 @@ M1-589 (pending) ← runnable
 M1-590 (done)
 M1-591 (abandoned)
 M1-592 (done)
-M1-593 (pending) ← runnable
+M1-593 (done)
 M1-594 (pending) ← runnable
 M1-595 (done)
 M1-596 (done)

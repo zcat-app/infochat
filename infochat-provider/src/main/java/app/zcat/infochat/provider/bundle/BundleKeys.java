@@ -515,8 +515,16 @@ public final class BundleKeys {
 
     // ----- /summary successful / informational replies (M1-037) -----------
 
-    /** Empty result — zero eligible posts in the window (or zero subscriptions). */
+    /** Empty result — subscribed, but zero eligible posts in the window. Zero-subscription scopes get {@link #REPLY_SUMMARY_NO_SUBSCRIPTIONS} instead (M1-593). */
     public static final String REPLY_SUMMARY_NO_POSTS_YET = "reply.summary.no_posts_yet";
+
+    /**
+     * Empty result — the scope follows NO sources yet, so nothing can arrive
+     * (the fresh-user empty-feed cliff, M1-593). Distinct from
+     * {@link #REPLY_SUMMARY_NO_POSTS_YET} (subscribed-but-empty-window): this
+     * one names the real cause and steers the user to /follow-all-sources.
+     */
+    public static final String REPLY_SUMMARY_NO_SUBSCRIPTIONS = "reply.summary.no_subscriptions";
 
     /** LLM unreachable: reply prefix announcing the degraded-fallback form. */
     public static final String REPLY_SUMMARY_DEGRADED_NOTICE = "reply.summary.degraded_notice";

@@ -384,6 +384,24 @@ class EligiblePostQueryIT {
                 "exactly 5 followed tags is at threshold → no top-3 restriction");
     }
 
+    @Test
+    void countSubscriptionsReturnsActiveSubscriptionCountForScope() throws Exception {
+        // Live-DB coverage of the M1-593 countSubscriptions SQL. The handler-tier
+        // SummaryCommandHandlerTest replaces this query with a test double, so
+        // this IT is the only place the real SQL runs against a schema.
+        UUID subscribedUser = insertUser("countsub-user");
+        UUID unsubscribedUser = insertUser("countsub-other");
+        UUID sourceA = insertSource("countsub-a", "CSA");
+        UUID sourceB = insertSource("countsub-b", "CSB");
+        insertSubscription("dm", subscribedUser, sourceA);
+        insertSubscription("dm", subscribedUser, sourceB);
+
+        assertEquals(2, query.countSubscriptions("dm", subscribedUser),
+                "counts exactly the scope's active source_subscription rows");
+        assertEquals(0, query.countSubscriptions("dm", unsubscribedUser),
+                "a scope following no sources counts 0 (the fresh-user empty-feed cliff)");
+    }
+
     // ----- helpers ------------------------------------------------------
 
     private UUID insertUser(String suffix) throws Exception {

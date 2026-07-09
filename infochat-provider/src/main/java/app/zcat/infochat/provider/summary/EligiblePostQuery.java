@@ -367,6 +367,30 @@ public class EligiblePostQuery {
     }
 
     /**
+     * Count the calling scope's active source subscriptions. The /summary
+     * empty branch reads this ONLY when the eligible set came back empty, to
+     * tell "subscribed but nothing arrived in the window" (→ no_posts_yet)
+     * apart from "following no sources yet" (→ no_subscriptions) — the
+     * fresh-user empty-feed cliff (M1-593, commands.md §Content). Keeps its
+     * own connection (like {@link #readVocabulary}); the happy /summary path
+     * never calls it, so a normal summary pays no extra round-trip.
+     */
+    public int countSubscriptions(String scopeKind, UUID scopeId) {
+        String sql = "SELECT COUNT(*) FROM source_subscription WHERE scope_kind = ? AND scope_id = ?";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = prepareTimed(conn, sql)) {
+            ps.setString(1, scopeKind);
+            ps.setObject(2, scopeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getInt(1);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("EligiblePostQuery.countSubscriptions failed", e);
+        }
+    }
+
+    /**
      * Prepare a statement on {@code conn} after applying the profile-driven
      * statement_timeout. Per commands.md §Conversation control, on-demand
      * /summary's read-only queries run under a statement_timeout that bounds

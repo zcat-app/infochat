@@ -219,7 +219,16 @@ public class SummaryCommandHandler implements CommandHandler {
 
         Result result = eligiblePostQuery.fetch(scopeKind, scopeId.get(), args.tag(), args.window());
         if (result.posts().isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_SUMMARY_NO_POSTS_YET, inboundContext.effectiveLanguage()));
+            // Distinguish the fresh-user empty-feed cliff from a
+            // subscribed-but-empty window (M1-593, commands.md §Content): a scope
+            // following no sources gets the actionable no_subscriptions steer, not
+            // the window-blaming no_posts_yet. The subscription count runs ONLY on
+            // this empty branch (a resolved scope id in hand), so a /summary that
+            // returns posts pays no extra query.
+            String emptyKey = eligiblePostQuery.countSubscriptions(scopeKind, scopeId.get()) == 0
+                    ? BundleKeys.REPLY_SUMMARY_NO_SUBSCRIPTIONS
+                    : BundleKeys.REPLY_SUMMARY_NO_POSTS_YET;
+            return reply(scope, bundleLoader.get(emptyKey, inboundContext.effectiveLanguage()));
         }
 
         // At most one in-flight interruptible request per (user, scope)
