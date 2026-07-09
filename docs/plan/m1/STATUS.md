@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 619 |
 | deferred | 1 |
 | abandoned | 11 |
-| **total** | **634** |
+| **total** | **636** |
 
 ---
 
@@ -28,6 +28,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-589 — Provider chat: digest-first semantic RAG — a general assistant grounded in pgvector nearest-neighbour retrieval, replacing tag-guessing (complexity: high, risk: medium)
 - M1-598 — Provider: render real per-post classification in /summary (union, drop 'unknown' unless sole) (complexity: medium, risk: low)
 - M1-600 — Provider: /grant-admin and /revoke-admin render error.probation.blocked with no MessageFormat args, so the defense-in-depth probation branch would emit literal {0}/{1} (use an arg-free probation key) (complexity: low, risk: low)
+- M1-601 — test: de-rot ReEvalVerdictNotifyIT scan-window fixture by pinning the injected Clock (2026-07-09 time-bomb) (complexity: low, risk: low)
+- M1-602 — test-hygiene: sweep all absolute-fetched_at scan-window fixtures onto a pinned Clock + add a build guard against new time-bombs (complexity: high, risk: low)
 
 ---
 
@@ -819,4 +821,6 @@ M1-597 (done)
   └── M1-598 (pending) ← runnable
 M1-599 (done)
 M1-600 (pending) ← runnable
+M1-601 (pending) ← runnable
+M1-602 (pending) ← runnable
 ```

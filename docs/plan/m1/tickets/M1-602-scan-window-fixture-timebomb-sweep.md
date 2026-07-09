@@ -1,0 +1,134 @@
+---
+id: M1-602
+title: "test-hygiene: sweep all absolute-fetched_at scan-window fixtures onto a pinned Clock + add a build guard against new time-bombs"
+status: pending
+created: 2026-07-09
+last_updated: 2026-07-09
+blocked_by: []
+files_budget: 30
+files_scope:
+  - docs/plan/m1/scan-window-fixture-census.md
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/testsupport/ScanWindowFixtureGuardTest.java
+complexity: high
+risk: low
+round_cap: 3
+security_relevant: false
+migration_touch: false
+out_of_scope:
+  - >-
+    ReEvalVerdictNotifyIT — already de-rotted by M1-601 (the one fixture whose
+    detonation date had passed). This ticket sweeps the REST of the class and
+    adds the recurrence guard; it must not re-touch ReEvalVerdictNotifyIT beyond
+    confirming the guard passes for it.
+  - >-
+    Production code. Every eval-worker scan floor already reads the injected
+    Clock (M1-444/M1-447); this is purely test-fixture hygiene. No worker,
+    PartitionScan, ReadyPromoter, or migration change.
+  - >-
+    Rewriting assertion intent. Each swept fixture keeps its existing assertions;
+    only the time seam changes (pin the injected Clock via QuarkusMock, or make
+    the seeded fetched_at relative to the pinned clock's instant). No assertion
+    is weakened or deleted.
+acceptance:
+  - >-
+    A committed census at EXACTLY docs/plan/m1/scan-window-fixture-census.md
+    enumerates every collector test (IT and unit) that seeds an ABSOLUTE
+    fetched_at (or any other scan-window-gated absolute instant — TTL/expiry/
+    cooldown pickup floors) via `Instant.parse("20NN-...")` WITHOUT pinning the
+    injected Clock, classifying each as (A) LIVE/LATENT time-bomb (its seed feeds
+    a `fetched_at >= now - Nd` style pickup gate) vs (B) BENIGN (the absolute
+    instant is parser data, an expected value, a published_at recency seed not
+    gating worker pickup, or a RAW-status seed never enumerated). The (A) list is
+    the sweep worklist. Starting-point candidates (from the M1-601 investigation
+    grep): the Stage1*/Stage2*/EmbeddingWorker*/TaggerWorker*/EntityExtractor*/
+    Linking*/ReEvaluation*/Quarantine*/Partition* IT+Test set — each must be
+    opened and classified, not assumed.
+  - >-
+    Every (A) fixture from the census reads its decision-time from the injected
+    Clock pinned via `QuarkusMock.installMockForType(Clock.fixed(<instant
+    relative to its seed>, ZoneOffset.UTC), Clock.class)` (the M1-444 / M1-601
+    pattern), OR seeds its fetched_at relative to that pinned instant — so its
+    pickup-gate outcome no longer depends on the wall-clock date. No new inline
+    `Instant.now()` / SQL `now()` is introduced (engineering-rules §9). The exact
+    per-fixture file list is added to files_scope at start-time from the census.
+  - >-
+    A build guard at
+    infochat-collector/.../testsupport/ScanWindowFixtureGuardTest.java fails the
+    build when a collector test source seeds an absolute
+    `Instant.parse("20NN-...")` used as a fetched_at (or other pickup-floor) seed
+    without a `Clock.fixed(` / `installMockForType(..., Clock.class)` pin in the
+    same file. The guard is documented with the allow-list mechanism for the
+    (B) benign cases the census identified, so a legitimately-benign absolute
+    instant does not trip it.
+  - >-
+    mvn verify is green from the repo root AND the new guard passes — proving
+    both that the swept suite no longer depends on the wall-clock date and that a
+    future absolute-fetched_at-without-Clock-pin fixture is caught at build time
+    rather than detonating on its own future calendar boundary.
+test_plan:
+  adds:
+    - >-
+      infochat-collector/.../testsupport/ScanWindowFixtureGuardTest.java — the
+      recurrence guard (source-scanning meta-test over collector test files).
+  modifies:
+    - >-
+      Every (A) fixture the census identifies — pin the injected Clock (or make
+      the seed relative). Enumerated into test_plan.modifies + files_scope at
+      start-time from the census (acceptance item 1).
+  preserves:
+    - all tests currently green on main (each swept fixture keeps its assertions)
+    - >-
+      the injectable-time discipline (engineering-rules §9): the sweep ADDS Clock
+      pins, never new inline now(); audit/record timestamps stay on the DB clock.
+spec_refs:
+  - docs/process/engineering-rules-verbatim.md §9 Injectable time in decision logic
+decision_refs: []
+redteam_findings: []
+redteam_audits: []
+reviews: []
+escalations: []
+overrides: []
+revisions: []
+aborted_attempts: []
+reopens: []
+---
+
+# M1-602: sweep absolute-fetched_at scan-window time-bombs + add a build guard
+
+## Context
+
+M1-601 de-rotted `ReEvalVerdictNotifyIT`, the one scan-window fixture whose
+detonation date (2026-07-09T10:00Z) had already passed. But it is one of a
+**class**: a grep of `infochat-collector/src/test` for
+`Instant.parse("20NN-...")` near `fetched_at` without a Clock pin surfaces ~40
+files. Not all are bombs (many parse timestamps as data, seed `published_at`, or
+seed RAW posts never enumerated), but every one that seeds a `fetched_at`
+feeding a `fetched_at >= now − Nd` pickup gate is a latent time-bomb that will
+detonate on its own calendar boundary — exactly as `ReEvalVerdictNotifyIT` did.
+
+The injectable-time work (M1-398/M1-400/M1-444/M1-447) fixed only the fixtures
+that were red at the time, plus converted production sites and added new pinned
+tests for three security components; **it never swept the pre-existing eval-worker
+IT fixtures**. M1-447's own acceptance says it modified no pre-existing test. So
+the backlog remains, and CLAUDE.md records the whack-a-mole history verbatim:
+"the date-boundary time-bomb M1-398 / M1-400 / M1-444 each fixed one instance of."
+
+## The fix
+
+1. **Census** every collector fixture with an absolute scan-window-gated instant;
+   classify (A) bomb vs (B) benign.
+2. **Pin** each (A) fixture's injected Clock (M1-444/M1-601 pattern), or make its
+   seed relative to the pinned instant.
+3. **Guard**: a source-scanning meta-test that fails the build if a new collector
+   test seeds an absolute `fetched_at` without a Clock pin — turning the
+   whack-a-mole class into a compile-time-caught invariant.
+
+## Notes
+
+- `files_scope` here lists only the census doc + the guard test; the per-fixture
+  file set is added at `/m1-tick start` from the census (acceptance item 1),
+  which is why `files_budget` is a generous 30. Size it down to the real (A)
+  count once the census is written.
+- Deliberately NOT blocking M1-598 (the provider classification-render ticket):
+  M1-601 alone unblocks the full verify today; this systemic sweep runs on its
+  own schedule.
