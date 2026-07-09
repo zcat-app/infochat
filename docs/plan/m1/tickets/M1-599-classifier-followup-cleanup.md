@@ -1,7 +1,7 @@
 ---
 id: M1-599
 title: "Tagger title-wrap (D21) + classifier switch-llm/4-llm tooling"
-status: pending
+status: done
 created: 2026-07-08
 last_updated: 2026-07-08
 blocked_by: []
@@ -21,6 +21,23 @@ risk: low
 round_cap: 2
 security_relevant: true
 migration_touch: false
+clarity_check:
+  date: 2026-07-08
+  verdict: PASS
+  warnings:
+    - >-
+      Acceptance item 6's "they currently pin the six-task list" is precise for
+      LlamacppWiringTest (literal six-element array) and SwitchLlmWiringTest
+      (fixture configs / positional stdin), but RemoteLlmWiringTest pins the
+      six-task count only in a class Javadoc comment, not an executable
+      assertion — that file may need only a comment update (or no functional
+      change).
+    - >-
+      docs/design/05 §5.10 (remote-provider post-body list) omits classifier
+      and already omits security; no acceptance item directs updating it.
+      Classifier stays local-by-default (out_of_scope 3), so §5.10 is not wrong
+      for classifier; the security omission is a pre-existing separate gap.
+      Notify-and-continue; no scope change.
 out_of_scope:
   - >-
     The classifier ingest stage itself (ClassifierWorker, V57 migration,
@@ -110,8 +127,36 @@ spec_refs:
 decision_refs:
   - D21
 redteam_findings: []
-redteam_audits: []
-reviews: []
+redteam_audits:
+  - date: 2026-07-08
+    verdict: CLEAN
+    base: 457b2dac
+    head: working-tree-uncommitted (--in-progress branch tip, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-599-2026-07-08.md
+    out_of_model_count: 1
+    note: |
+      CLEAN — no findings. D21 tagger title-wrap (item 1) and the classifier
+      remote-routing privacy disclosure (items 4-5) both delivered per the
+      threat model; routing completeness verified. One out-of-model doc
+      observation: design §5.8 summary-prompt template shows title outside the
+      <<<UNTRUSTED_CONTENT>>> wrapper, but SummaryProseGenerator wraps it
+      correctly (stale note, not a live D21 gap). Out of M1-599 scope; doc-sync
+      follow-up candidate alongside the §5.10 privacy-tasks-list staleness the
+      clarity/review WARNs flagged.
+reviews:
+  - round: 1
+    date: 2026-07-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 105
+      removed: 48
 escalations: []
 overrides: []
 revisions:

@@ -9,8 +9,8 @@
 # no app-code change, since each task's config family is already independent and
 # the shipped %remote-llm profile is itself a mix.
 #
-# It prompts per generative task (security tagger entity summarizer chat
-# translator) for remote | ollama | llamacpp, defaulting to the task's CURRENT
+# It prompts per generative task (security tagger entity classifier summarizer
+# chat translator) for remote | ollama | llamacpp, defaulting to the task's CURRENT
 # backend (classified from its base-url). It NEVER touches infochat.embeddings.*:
 # embeddings are locked to the 768-dim nomic embedder (allow-model-change=false);
 # changing them corrupts pgvector retrieval and is rejected at Collector startup.
@@ -39,8 +39,11 @@ OLLAMA_URL="http://ollama:11434/v1"
 LLAMACPP_URL="http://llamacpp:8080/v1"
 LLAMACPP_EMBED_URL="http://llamacpp-embeddings:8080/v1"
 
-# The six generative task config families (embeddings is deliberately excluded).
-LLM_TASKS="security tagger entity summarizer chat translator"
+# The seven generative task config families (embeddings is deliberately excluded).
+# classifier is an ingest task (post-kind labels) that ships on its local-Ollama
+# default; it is listed here so a post-setup remote switch routes AND discloses
+# it like tagger/entity, never silently leaving it on localhost (M1-599).
+LLM_TASKS="security tagger entity classifier summarizer chat translator"
 VALID_BACKENDS="remote ollama llamacpp"
 
 # --- config / secret helpers (mirrored from 4-llm.sh so the two cannot drift) ---
@@ -270,6 +273,7 @@ if [[ -n "${remote_tasks// /}" ]]; then
       security)   echo "  -  security — moderation over fetched PUBLIC posts; exposes your source list / topic interests, not private user data." ;;
       tagger)     echo "  -  tagger — topic tagging over fetched PUBLIC posts; exposes your topic interests." ;;
       entity)     echo "  -  entity — entity extraction over fetched PUBLIC posts; exposes your topic interests." ;;
+      classifier) echo "  -  classifier — post-kind classification over fetched PUBLIC posts; exposes your topic interests." ;;
       summarizer) echo "  -  summarizer — summaries of the posts you query; exposes which topics / posts you read." ;;
       translator) echo "  -  translator — translation of the bot's replies to you; exposes the bot-reply text (which can echo your queries)." ;;
     esac

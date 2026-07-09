@@ -23,8 +23,8 @@ Controlled vocabulary (one entry per line):
 - {name}
 {/tags}
 
+<<<UNTRUSTED_CONTENT id="{{id}}">>>
 Post title: {{title}}
 
-<<<UNTRUSTED_CONTENT id="{{id}}">>>
 {{body}}
 <<<END id="{{id}}">>>

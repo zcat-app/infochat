@@ -11,7 +11,7 @@
 #              it from the llama.cpp instance at llamacpp:8080 (§7.4); embeddings
 #              run on a SEPARATE backend (a second llama.cpp instance or the
 #              co-running Ollama nomic embedder), never the generative GGUF (D49).
-#   remote   — route the six generative tasks to a remote OpenAI-compatible
+#   remote   — route the seven generative tasks to a remote OpenAI-compatible
 #              endpoint (base-url + API key minted into secrets.env, §7.3);
 #              embeddings still run LOCALLY — a co-started Ollama nomic embedder
 #              is pulled, never the remote endpoint (D54).
@@ -64,10 +64,10 @@ LLAMACPP_EMB_GGUF_SHA="f7af6f66802f4df86eda10fe9bbcfc75c39562bed48ef6ace719a251c
 NOMIC_OLLAMA_MODEL="nomic-embed-text"
 EMBEDDINGS_DIMENSION=768
 
-# The six per-task LLM config families share one endpoint; only the model
+# The seven per-task LLM config families share one endpoint; only the model
 # differs (security vs chat vs embedding) per §5.7. embeddings is handled
 # alongside but lives under its own infochat.embeddings.* prefix.
-LLM_TASKS="security tagger entity summarizer chat translator"
+LLM_TASKS="security tagger entity classifier summarizer chat translator"
 
 usage() {
   echo "Usage: 4-llm.sh [--defaults] [-h|--help]"
@@ -150,7 +150,7 @@ set_secret() {
 }
 
 # Remove the remote-backend credentials a prior `remote` run wrote, for a re-run
-# that switches AWAY to a local backend (M1-530): the six
+# that switches AWAY to a local backend (M1-530): the seven
 # infochat.llm.<task>.api-key lines + any infochat.embeddings.api-key from
 # application.properties (a local backend carries no key), and INFOCHAT_LLM_API_KEY
 # from secrets.env (referenced by nothing once remote is de-selected). Mirrors the
@@ -164,7 +164,7 @@ clear_remote_llm_creds() {
   sed -i '/^INFOCHAT_LLM_API_KEY=/d' "$SECRETS_FILE"
 }
 
-# Point only the six LLM tasks (not embeddings) at one endpoint. The llamacpp
+# Point only the seven LLM tasks (not embeddings) at one endpoint. The llamacpp
 # branch wires embeddings to a SEPARATE backend (a second llama.cpp instance or
 # Ollama), so unlike set_all_base_urls it leaves infochat.embeddings.base-url for
 # the caller to set (M1-417).
@@ -230,8 +230,8 @@ if [[ -z "$profile" ]]; then
   exit 1
 fi
 
-# §5.7 canonical per-profile model table. tagger/entity/summarizer/chat/
-# translator share the "chat" model in every profile; security and embeddings
+# §5.7 canonical per-profile model table. tagger/entity/classifier/summarizer/
+# chat/translator share the "chat" model in every profile; security and embeddings
 # differ. remote-llm has no local models (provider-side) — it pairs with the
 # remote backend, not ollama/llamacpp.
 case "$profile" in
@@ -300,7 +300,7 @@ case "$backend" in
     clear_remote_llm_creds
     set_all_base_urls "$OLLAMA_URL"
     set_prop infochat.llm.security.model "$security_model"
-    for task in tagger entity summarizer chat translator; do
+    for task in tagger entity classifier summarizer chat translator; do
       set_prop "infochat.llm.${task}.model" "$chat_model"
     done
     set_prop infochat.embeddings.model "$embedding_model"
@@ -451,7 +451,7 @@ case "$backend" in
     fi
     # Privacy disclosure BEFORE the operator commits to a remote endpoint: the
     # operator must see what leaves the machine before typing the URL/key, not
-    # after. At setup the remote backend routes the six GENERATIVE tasks — chat
+    # after. At setup the remote backend routes the seven GENERATIVE tasks — chat
     # included — to the remote endpoint (set_llm_base_urls below); embeddings run
     # LOCALLY on a co-started Ollama nomic embedder and never leave the machine
     # (D54). switch-llm.sh can later move generative tasks back to local one at a
@@ -461,9 +461,9 @@ case "$backend" in
     echo "to the remote provider (embeddings are NOT sent — see the last line):"
     echo "  !! chat — YOUR PRIVATE MESSAGES to the bot are sent to the remote provider."
     echo "           This is the most sensitive exposure: your direct conversations."
-    echo "  -  security / tagger / entity — moderation, tagging and entity extraction"
-    echo "     over fetched PUBLIC posts; exposes your source list / topic interests,"
-    echo "     not private user data."
+    echo "  -  security / tagger / entity / classifier — moderation, tagging, entity"
+    echo "     extraction and post-kind classification over fetched PUBLIC posts;"
+    echo "     exposes your source list / topic interests, not private user data."
     echo "  -  summarizer — summaries of the posts you query; exposes which topics / posts you read."
     echo "  -  translator — translation of the bot's replies; exposes the bot-reply text (can echo your queries)."
     echo "  -  embeddings — run LOCALLY: a small Ollama nomic embedder is started on"
@@ -502,7 +502,7 @@ case "$backend" in
     # Embeddings run locally even with a remote chat backend (D54): the embedding
     # model is frozen 768-dim nomic (allow-model-change=false) and commercial
     # remote endpoints don't serve nomic-embed-text at 768-dim, so route ONLY the
-    # six generative tasks remote and co-start a local Ollama nomic embedder. This
+    # seven generative tasks remote and co-start a local Ollama nomic embedder. This
     # mirrors the llamacpp branch's ollama-embeddings hook; it MUST run after the
     # API-key block above, which guarantees secrets.env exists for --env-file.
     echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod --profile ollama up -d ollama"

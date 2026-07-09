@@ -254,8 +254,8 @@ Vocabulary:
 - {{name}}                                                                                                                                                                                                                                            
 {{/tags}}
                                                                                                                                                                                                                                                       
-Title: {{title}}                                                                 
 <<<UNTRUSTED_CONTENT id="{{id}}">>>
+Title: {{title}}                                                                 
 {{{body_or_summary}}}                                                                                                                                                                                                                                 
 <<<END id="{{id}}">>>                                                                                                                                                                                                                                 
 ```                                                                                                                                                                                                                                                        
@@ -277,8 +277,8 @@ Vocabulary:
 - {{name}}
 {{/tags}}
 
-Title: {{title}}
 <<<UNTRUSTED_CONTENT id="{{id}}">>>
+Title: {{title}}
 {{{body_or_summary}}}
 <<<END id="{{id}}">>>
 ```
@@ -299,8 +299,8 @@ Allowed types: cve, product, org, person, location, project.
 - 0 to 10 entities; cap at 10.                                                                                                                                                                                                                        
   
 ```text
-Title: {{title}}                                                                                                                                                                                                                                      
 <<<UNTRUSTED_CONTENT id="{{id}}">>>                                              
+Title: {{title}}                                                                                                                                                                                                                                      
 {{{body_or_summary}}}                                                                                                                                                                                                                                 
 <<<END id="{{id}}">>>                                                            
 ```

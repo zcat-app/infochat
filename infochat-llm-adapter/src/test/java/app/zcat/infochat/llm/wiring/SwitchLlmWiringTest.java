@@ -56,6 +56,8 @@ class SwitchLlmWiringTest {
             + "infochat.llm.tagger.model=llama3.2:3b\n"
             + "infochat.llm.entity.base-url=" + OLLAMA_URL + "\n"
             + "infochat.llm.entity.model=llama3.2:3b\n"
+            + "infochat.llm.classifier.base-url=" + OLLAMA_URL + "\n"
+            + "infochat.llm.classifier.model=llama3.2:3b\n"
             + "infochat.llm.summarizer.base-url=" + OLLAMA_URL + "\n"
             + "infochat.llm.summarizer.model=llama3.2:3b\n"
             + "infochat.llm.chat.base-url=" + OLLAMA_URL + "\n"
@@ -77,6 +79,8 @@ class SwitchLlmWiringTest {
             + "infochat.llm.tagger.model=llama3.2:3b\n"
             + "infochat.llm.entity.base-url=" + OLLAMA_URL + "\n"
             + "infochat.llm.entity.model=llama3.2:3b\n"
+            + "infochat.llm.classifier.base-url=" + OLLAMA_URL + "\n"
+            + "infochat.llm.classifier.model=llama3.2:3b\n"
             + "infochat.llm.summarizer.base-url=" + OLLAMA_URL + "\n"
             + "infochat.llm.summarizer.model=llama3.2:3b\n"
             + "infochat.llm.chat.base-url=https://api.example.com/v1\n"
@@ -95,8 +99,8 @@ class SwitchLlmWiringTest {
     @Test
     @EnabledOnOs(OS.LINUX)
     void allEnterIsByteIdenticalNoOp(@TempDir Path tmp) throws Exception {
-        // Six tasks, all ollama: one Enter each keeps the current backend.
-        RunResult r = runSwitch(tmp, BASELINE_OLLAMA, null, "\n\n\n\n\n\n");
+        // Seven tasks, all ollama: one Enter each keeps the current backend.
+        RunResult r = runSwitch(tmp, BASELINE_OLLAMA, null, "\n\n\n\n\n\n\n");
 
         assertEquals(BASELINE_OLLAMA, r.rawConfig,
                 "an all-default run must leave application.properties byte-identical:\n" + r.output);
@@ -112,7 +116,7 @@ class SwitchLlmWiringTest {
         // chat is remote, the key already in secrets.env. All-Enter must accept
         // remote (backend), the current base-url, and the current model — three
         // Enters for chat — and still produce a byte-identical file.
-        RunResult r = runSwitch(tmp, BASELINE_CHAT_REMOTE, EXISTING_SECRETS, "\n\n\n\n\n\n\n\n");
+        RunResult r = runSwitch(tmp, BASELINE_CHAT_REMOTE, EXISTING_SECRETS, "\n\n\n\n\n\n\n\n\n");
 
         assertEquals(BASELINE_CHAT_REMOTE, r.rawConfig,
                 "all-default over a mixed config must be byte-identical:\n" + r.output);
@@ -131,7 +135,7 @@ class SwitchLlmWiringTest {
         // infochat.embeddings.* line is byte-identical before and after.
         List<String> before = embeddingsLines(BASELINE_OLLAMA);
         RunResult r = runSwitch(tmp, BASELINE_OLLAMA, null,
-                "\n\n\n\nremote\nhttps://api.example.com/v1\ngpt-test\n\nsk-test-key\n");
+                "\n\n\n\n\nremote\nhttps://api.example.com/v1\ngpt-test\n\nsk-test-key\n");
 
         assertEquals(before, embeddingsLines(r.rawConfig),
                 "the embeddings block must be byte-identical after a generative re-route:\n" + r.rawConfig);
@@ -142,10 +146,10 @@ class SwitchLlmWiringTest {
     @Test
     @EnabledOnOs(OS.LINUX)
     void routeTaskToRemoteWritesBaseUrlApiKeyRefAndModel(@TempDir Path tmp) throws Exception {
-        // chat is the 5th task: four Enters (ollama), then remote + base-url +
+        // chat is the 6th task: five Enters (ollama), then remote + base-url +
         // model, then an Enter for translator, then the API key prompt.
         RunResult r = runSwitch(tmp, BASELINE_OLLAMA, null,
-                "\n\n\n\nremote\nhttps://api.example.com/v1\ngpt-test\n\nsk-test-key\n");
+                "\n\n\n\n\nremote\nhttps://api.example.com/v1\ngpt-test\n\nsk-test-key\n");
 
         assertEquals("https://api.example.com/v1", r.props.get("infochat.llm.chat.base-url"));
         assertEquals(API_KEY_REF, r.props.get("infochat.llm.chat.api-key"),
@@ -161,10 +165,10 @@ class SwitchLlmWiringTest {
     @EnabledOnOs(OS.LINUX)
     void existingApiKeyIsReusedNotReprompted(@TempDir Path tmp) throws Exception {
         // tagger is the 2nd task: Enter (security), then remote + base-url + model,
-        // then four Enters for entity/summarizer/chat/translator. With the key
-        // already in secrets.env there is NO key prompt — so eight lines total.
+        // then five Enters for entity/classifier/summarizer/chat/translator. With the
+        // key already in secrets.env there is NO key prompt — so nine lines total.
         RunResult r = runSwitch(tmp, BASELINE_OLLAMA, EXISTING_SECRETS,
-                "\nremote\nhttps://r.example.com/v1\nmodelX\n\n\n\n\n");
+                "\nremote\nhttps://r.example.com/v1\nmodelX\n\n\n\n\n\n");
 
         assertTrue(r.output.contains("reused, not re-prompted"),
                 "an existing INFOCHAT_LLM_API_KEY must be reused, not re-prompted:\n" + r.output);
@@ -178,10 +182,10 @@ class SwitchLlmWiringTest {
     @Test
     @EnabledOnOs(OS.LINUX)
     void routeTaskToLocalClearsApiKey(@TempDir Path tmp) throws Exception {
-        // Start with chat remote; route it back to ollama. Four Enters, then
+        // Start with chat remote; route it back to ollama. Five Enters, then
         // ollama for chat, then an Enter for translator. No remote task remains,
         // so no key prompt.
-        RunResult r = runSwitch(tmp, BASELINE_CHAT_REMOTE, EXISTING_SECRETS, "\n\n\n\nollama\n\n");
+        RunResult r = runSwitch(tmp, BASELINE_CHAT_REMOTE, EXISTING_SECRETS, "\n\n\n\n\nollama\n\n");
 
         assertEquals(OLLAMA_URL, r.props.get("infochat.llm.chat.base-url"),
                 "routing to ollama must point the base-url at the ollama service");
@@ -195,7 +199,7 @@ class SwitchLlmWiringTest {
     @EnabledOnOs(OS.LINUX)
     void mutatingRunBacksUpAndPrintsRollback(@TempDir Path tmp) throws Exception {
         RunResult r = runSwitch(tmp, BASELINE_OLLAMA, null,
-                "\n\n\n\nremote\nhttps://api.example.com/v1\ngpt-test\n\nsk-test-key\n");
+                "\n\n\n\n\nremote\nhttps://api.example.com/v1\ngpt-test\n\nsk-test-key\n");
 
         assertFalse(listBackups(r.runtimeDir).isEmpty(),
                 "a mutating run must back up application.properties to a timestamped copy");
@@ -210,14 +214,14 @@ class SwitchLlmWiringTest {
     void privacyDisclosureNamesOnlyRemoteTasksWithCorrectExposure(@TempDir Path tmp) throws Exception {
         // (a) chat remote -> the loudest private-message warning.
         RunResult chat = runSwitch(tmp.resolve("a"), BASELINE_OLLAMA, null,
-                "\n\n\n\nremote\nhttps://api.example.com/v1\ngpt-test\n\nsk-test-key\n");
+                "\n\n\n\n\nremote\nhttps://api.example.com/v1\ngpt-test\n\nsk-test-key\n");
         assertTrue(chat.output.contains("chat — YOUR PRIVATE MESSAGES"),
                 "routing chat remote must print the loudest private-message warning:\n" + chat.output);
 
         // (b) only an ingest task (entity, the 3rd) remote -> topic-interest
         // framing, and NOT the chat private-message line.
         RunResult entity = runSwitch(tmp.resolve("b"), BASELINE_OLLAMA, null,
-                "\n\nremote\nhttps://api.example.com/v1\ngpt-test\n\n\n\nsk-test-key\n");
+                "\n\nremote\nhttps://api.example.com/v1\ngpt-test\n\n\n\n\nsk-test-key\n");
         assertTrue(entity.output.contains("entity — entity extraction over fetched PUBLIC posts"),
                 "an ingest task must be framed as topic-interest exposure:\n" + entity.output);
         assertFalse(entity.output.contains("YOUR PRIVATE MESSAGES"),
@@ -225,7 +229,7 @@ class SwitchLlmWiringTest {
 
         // (c) a mutating run that leaves NO task remote (chat remote -> ollama)
         // prints no disclosure at all.
-        RunResult none = runSwitch(tmp.resolve("c"), BASELINE_CHAT_REMOTE, EXISTING_SECRETS, "\n\n\n\nollama\n\n");
+        RunResult none = runSwitch(tmp.resolve("c"), BASELINE_CHAT_REMOTE, EXISTING_SECRETS, "\n\n\n\n\nollama\n\n");
         assertFalse(none.output.contains("PRIVACY DISCLOSURE"),
                 "no remote task means no privacy disclosure:\n" + none.output);
     }
@@ -236,7 +240,7 @@ class SwitchLlmWiringTest {
     @EnabledOnOs(OS.LINUX)
     void recreateCommandUsesUpNotRestart(@TempDir Path tmp) throws Exception {
         RunResult r = runSwitch(tmp, BASELINE_OLLAMA, null,
-                "\n\n\n\nremote\nhttps://api.example.com/v1\ngpt-test\n\nsk-test-key\n");
+                "\n\n\n\n\nremote\nhttps://api.example.com/v1\ngpt-test\n\nsk-test-key\n");
 
         assertTrue(r.output.contains("up -d infochat-collector infochat-provider"),
                 "the recreate command must use `up -d infochat-collector infochat-provider`:\n" + r.output);

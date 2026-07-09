@@ -27,7 +27,7 @@ import org.junit.jupiter.api.io.TempDir;
  * <p>Drives the real {@code prod/scripts/4-llm.sh} remote branch with a fake
  * {@code docker} on {@code PATH} (no-ops the compose up / readiness / pull) and
  * scripted stdin, then asserts the generated {@code application.properties}: the
- * six generative tasks carry the remote base-url + the {@code ${INFOCHAT_LLM_API_KEY}}
+ * seven generative tasks carry the remote base-url + the {@code ${INFOCHAT_LLM_API_KEY}}
  * reference, while {@code infochat.embeddings.*} resolves to the local Ollama nomic
  * endpoint and is NEVER the remote base-url. Mirrors the generated-config layer of
  * {@link LlamacppWiringTest}; no static-compose assertions are needed for this branch.
@@ -67,6 +67,14 @@ class RemoteLlmWiringTest {
                 "generative tasks must point at the remote endpoint");
         assertEquals("${INFOCHAT_LLM_API_KEY}", props.get("infochat.llm.chat.api-key"),
                 "generative tasks must reference the API key from secrets.env");
+
+        // The classifier task (M1-599) must be routed remote like the others — the
+        // whole point of teaching switch-llm/4-llm the classifier: an operator remote
+        // switch must not silently leave it on localhost (red before it joined LLM_TASKS).
+        assertEquals(REMOTE_BASE_URL, props.get("infochat.llm.classifier.base-url"),
+                "the classifier task must point at the remote endpoint (M1-599)");
+        assertEquals("${INFOCHAT_LLM_API_KEY}", props.get("infochat.llm.classifier.api-key"),
+                "the classifier task must reference the API key from secrets.env (M1-599)");
 
         // Embeddings → local Ollama nomic, never the remote endpoint (the F11 guard).
         assertEquals(OLLAMA_URL, props.get("infochat.embeddings.base-url"),

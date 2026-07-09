@@ -163,6 +163,32 @@ class TaggerWorkerTest {
             "fenced-but-valid reply parses on the first attempt — no schema-violating retry");
     }
 
+    @Test
+    void renderPrompt_wrapsTitleInsideDelimiter() {
+        // D21 remediation (redteam follow-up from M1-597): the untrusted post
+        // title must sit INSIDE the per-call {{id}} delimiter, not before the
+        // opener, so a feed-controlled title cannot reach the model as
+        // un-delimited instructions (mirrors the classifier.md fix).
+        String template = TaggerWorker.loadResource(TaggerWorker.PRIMARY_PROMPT_RESOURCE);
+        TaggerWorker.PostRow row = new TaggerWorker.PostRow(
+            UUID.fromString("00000000-0000-0000-0000-000000000001"),
+            Instant.EPOCH, "EVIL TITLE INJECTION", "post body text", List.of("ai"));
+
+        String rendered = taggerWorker.renderPrompt(template, "DELIM-TOKEN-1", row);
+
+        // The prompt PREAMBLE also names the delimiter tokens when it explains
+        // the wrapper format, so target the ACTUAL content wrapper (the last
+        // occurrence) rather than the preamble's explanatory mention.
+        int opener = rendered.lastIndexOf("<<<UNTRUSTED_CONTENT id=\"DELIM-TOKEN-1\">>>");
+        int closer = rendered.lastIndexOf("<<<END id=\"DELIM-TOKEN-1\">>>");
+        int title = rendered.indexOf("EVIL TITLE INJECTION");
+        assertTrue(opener >= 0, "the delimiter opener must be present");
+        assertTrue(closer > opener, "the delimiter closer must follow the opener");
+        assertTrue(title > opener && title < closer,
+            "the untrusted title must sit INSIDE the {{id}} delimiter block (D21), "
+                + "not before the opener where it would read as instructions");
+    }
+
     // ---------- helpers ----------
 
     private TaggerWorker.PostRow rowFor(SeededPost post, List<String> bootstrapTags) {

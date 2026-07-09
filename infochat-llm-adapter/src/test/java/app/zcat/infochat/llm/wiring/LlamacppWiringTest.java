@@ -243,13 +243,13 @@ class LlamacppWiringTest {
     @Test
     @EnabledOnOs(OS.LINUX)
     void switchingAwayFromRemoteToLlamacppClearsStaleRemoteApiKeys(@TempDir Path tmp) throws Exception {
-        // Seed the runtime as a prior `remote` run left it: six generative api-key
+        // Seed the runtime as a prior `remote` run left it: seven generative api-key
         // lines + an embeddings api-key in application.properties, and the
         // INFOCHAT_LLM_API_KEY secret in secrets.env. Switching to a LOCAL backend
         // (llamacpp) must clear all of them (M1-530) — a local backend carries no key.
         Path runtime = Files.createDirectories(tmp.resolve("runtime"));
         StringBuilder seed = new StringBuilder("quarkus.profile=vps\n");
-        for (String task : new String[] {"security", "tagger", "entity", "summarizer", "chat", "translator"}) {
+        for (String task : new String[] {"security", "tagger", "entity", "classifier", "summarizer", "chat", "translator"}) {
             seed.append("infochat.llm.").append(task).append(".api-key=${INFOCHAT_LLM_API_KEY}\n");
         }
         seed.append("infochat.embeddings.api-key=${INFOCHAT_LLM_API_KEY}\n");
