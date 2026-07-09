@@ -1479,7 +1479,7 @@ allowed read-only commands.
 [bot] Your account is in the probation period for the next ~24h. While probation is on, you can:
 [bot]   /help, /status, /summary, /saved, /list-sources, /get-tags, /export, /forget, /lang, /zcash, /monero
 [bot] Free-form chat unlocks automatically when probation ends.
-[bot] Try /summary -w 24h once a few sources are configured, or /help to see the full surface.
+[bot] Content starts once you follow sources with /follow-all-sources (or add your own with /add-source); like free-form chat, these unlock when probation ends. /help shows the full surface.
 
 #### Mode 2 — DM, returning user (probation already cleared)
 
