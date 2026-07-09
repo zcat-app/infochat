@@ -3,7 +3,7 @@ id: M1-598
 title: "Provider: render real per-post classification in /summary (union, drop 'unknown' unless sole)"
 status: pending
 created: 2026-07-08
-last_updated: 2026-07-08
+last_updated: 2026-07-09
 blocked_by:
   - M1-597
 files_budget: 8
@@ -95,7 +95,7 @@ test_plan:
       shape at /summary and /retry.
 spec_refs:
   - docs/design/03-commands.md §`/summary [tag] [-w 24h]`
-  - docs/design/05-llm-and-embeddings.md §5.4.4 Summarizer (cluster mode)
+  - docs/design/05-llm-and-embeddings.md §5.4.5 Summarizer (cluster mode)
   - docs/spec/llm.md §Determinism boundary
 decision_refs:
   - D19
@@ -106,7 +106,24 @@ redteam_audits: []
 reviews: []
 escalations: []
 overrides: []
-revisions: []
+revisions:
+  - date: 2026-07-09
+    reason: >-
+      clarity-fail self-refine (auto, /m1-tick run bounded prose-refine): the
+      SPEC-REFS-VALID blocker — frontmatter spec_ref
+      "docs/design/05-llm-and-embeddings.md §5.4.4 Summarizer (cluster mode)"
+      is stale. M1-597 (this ticket's own blocked_by, now done) inserted a new
+      §5.4.4 Classifier section, renumbering the Summarizer section to §5.4.5.
+      Pure citation retarget; no scope, acceptance, or files_scope change.
+    snapshot: |
+      spec_refs entry (pre-refine): "docs/design/05-llm-and-embeddings.md §5.4.4 Summarizer (cluster mode)"
+      clarity blocker (2026-07-09): §5.4.4 is now "Classifier" (design file line
+        308, inserted by M1-597); "Summarizer (cluster mode)" is at §5.4.5
+        (design file line 349). ANCHOR-NOT-FOUND against the pre-refine cite.
+      resolution: retarget the section number 5.4.4 -> 5.4.5, keeping the
+        "Summarizer (cluster mode)" label (verified: line 349 is exactly that
+        heading). files_budget / files_scope / acceptance semantics / complexity
+        / risk / round_cap unchanged.
 aborted_attempts: []
 reopens: []
 ---
