@@ -1,7 +1,7 @@
 ---
 id: M1-601
 title: "test: de-rot ReEvalVerdictNotifyIT scan-window fixture by pinning the injected Clock (2026-07-09 time-bomb)"
-status: pending
+status: done
 created: 2026-07-09
 last_updated: 2026-07-09
 blocked_by: []
@@ -77,12 +77,30 @@ spec_refs:
 decision_refs: []
 redteam_findings: []
 redteam_audits: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 25
+      removed: 7
 escalations: []
 overrides: []
 revisions: []
 aborted_attempts: []
 reopens: []
+clarity_check:
+  date: 2026-07-09
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-601: de-rot ReEvalVerdictNotifyIT scan-window fixture

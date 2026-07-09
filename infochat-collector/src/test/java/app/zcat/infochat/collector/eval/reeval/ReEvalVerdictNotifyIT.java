@@ -8,6 +8,7 @@ import app.zcat.infochat.collector.eval.tagger.TaggerWorker;
 import app.zcat.infochat.collector.eval.testing.StubLlmProvider;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.llm.LlmProvider;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.Nullable;
@@ -22,7 +23,10 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -87,6 +91,17 @@ class ReEvalVerdictNotifyIT {
 
     @BeforeEach
     void setup() throws Exception {
+        // Pin the app-wide injected Clock so every eval stage's scan-window floor
+        // (fetched_at >= scanWindowFloor(clock.instant()) = now - 32d) includes
+        // the seeded FETCHED_AT regardless of the real calendar date. Without the
+        // pin the absolute FETCHED_AT ages out of the rolling window and the
+        // requeued pipeline post never leaves RAW (the date-boundary time-bomb
+        // that fired on 2026-07-09T10:00Z; engineering-rules §9, M1-444 pattern).
+        // Fixed shortly after FETCHED_AT so the post is in-window (and never
+        // future) for every stage's pickup gate.
+        QuarkusMock.installMockForType(
+                Clock.fixed(FETCHED_AT.plus(Duration.ofHours(1)), ZoneOffset.UTC),
+                Clock.class);
         stub().reset();
         try (Connection conn = dataSource.getConnection()) {
             exec(conn, "DELETE FROM quarantine WHERE post_uid LIKE ?", UID_PREFIX + "%");
