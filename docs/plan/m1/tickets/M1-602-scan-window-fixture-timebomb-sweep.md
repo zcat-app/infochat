@@ -50,7 +50,8 @@ acceptance:
     pattern), OR seeds its fetched_at relative to that pinned instant — so its
     pickup-gate outcome no longer depends on the wall-clock date. No new inline
     `Instant.now()` / SQL `now()` is introduced (engineering-rules §9). The exact
-    per-fixture file list is added to files_scope at start-time from the census.
+    per-fixture file list enters files_scope via the PLANNED post-census
+    escalate → refine cycle (see Notes) — never by silent start-time expansion.
   - >-
     A build guard at
     infochat-collector/.../testsupport/ScanWindowFixtureGuardTest.java fails the
@@ -73,8 +74,8 @@ test_plan:
   modifies:
     - >-
       Every (A) fixture the census identifies — pin the injected Clock (or make
-      the seed relative). Enumerated into test_plan.modifies + files_scope at
-      start-time from the census (acceptance item 1).
+      the seed relative). Enumerated into files_scope via the planned
+      post-census escalate → refine (acceptance item 1; Notes).
   preserves:
     - all tests currently green on main (each swept fixture keeps its assertions)
     - >-
@@ -88,7 +89,36 @@ redteam_audits: []
 reviews: []
 escalations: []
 overrides: []
-revisions: []
+revisions:
+  - date: 2026-07-09
+    reason: >-
+      clarity-fail self-refine (auto, /m1-tick run bounded prose-refine): the
+      FILES-BUDGET-PLAUSIBLE blocker — the ticket planned to add the census's
+      (A) per-fixture file list to files_scope "at start-time", a mechanism
+      that does not exist in the workflow (start.md has no files_scope
+      amendment step; SKILL.md forbids silent files_scope expansion and treats
+      an out-of-scope touch as an immediate escalation trigger). Pure
+      mechanism-phrasing retarget; no scope, acceptance-behavior, or
+      files_scope change.
+    snapshot: |
+      acceptance item 2 last sentence (pre-refine): "The exact per-fixture
+        file list is added to files_scope at start-time from the census."
+      test_plan.modifies (pre-refine): "Enumerated into test_plan.modifies +
+        files_scope at start-time from the census (acceptance item 1)."
+      Notes bullet 1 (pre-refine): "files_scope here lists only the census doc
+        + the guard test; the per-fixture file set is added at /m1-tick start
+        from the census (acceptance item 1), which is why files_budget is a
+        generous 30. Size it down to the real (A) count once the census is
+        written."
+      clarity blocker (2026-07-09): files_scope excludes the (A) fixture files
+        acceptance item 2 requires modifying, and "added at start-time" is not
+        a supported workflow operation (workflow.md files_scope rule; SKILL.md
+        never-silently-expand + immediate-escalation trigger).
+      resolution: reworded all three sites to route the expansion through the
+        documented mid-ticket escalate(budget-breach) -> refine cycle fired
+        AFTER the census lands and BEFORE any fixture edit (clarity fix
+        option (c)). files_budget / files_scope entries / acceptance semantics
+        / complexity / risk / round_cap unchanged.
 aborted_attempts: []
 reopens: []
 ---
@@ -125,10 +155,17 @@ the backlog remains, and CLAUDE.md records the whack-a-mole history verbatim:
 
 ## Notes
 
-- `files_scope` here lists only the census doc + the guard test; the per-fixture
-  file set is added at `/m1-tick start` from the census (acceptance item 1),
-  which is why `files_budget` is a generous 30. Size it down to the real (A)
-  count once the census is written.
+- `files_scope` at filing time lists only the census doc + the guard test; the
+  per-fixture (A) file set enters via a PLANNED mid-ticket escalation, not
+  silent expansion: once the census (acceptance item 1) lands and the (A)
+  worklist is concrete, the developer halts BEFORE editing any fixture and
+  fires `/m1-tick escalate M1-602 budget-breach` ("about to touch paths
+  outside files_scope" — the documented immediate-escalation trigger); the
+  user's `refine` then widens `files_scope` to the census's (A) list and sizes
+  `files_budget` down from the generous 30 to the real count. This escalate →
+  refine cycle is the workflow-sanctioned channel for scope changes (SKILL.md
+  "Never silently expand"); hitting it right after the census is EXPECTED, not
+  an error.
 - Deliberately NOT blocking M1-598 (the provider classification-render ticket):
   M1-601 alone unblocks the full verify today; this systemic sweep runs on its
   own schedule.
