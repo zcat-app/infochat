@@ -156,6 +156,6 @@ class ClusterTraversalTest {
 
     private static Post post(String uid, String title) {
         return new Post(UUID.randomUUID(), uid, UUID.randomUUID(), "Src", title,
-                "https://example.com/" + uid, "Body", Instant.now(), List.of("tech"));
+                "https://example.com/" + uid, "Body", Instant.now(), List.of("tech"), List.of("unknown"));
     }
 }

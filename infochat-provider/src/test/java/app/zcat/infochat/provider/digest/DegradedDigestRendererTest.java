@@ -42,6 +42,6 @@ class DegradedDigestRendererTest {
                                                String source, String url) {
         return new EligiblePostQuery.Post(
                 UUID.randomUUID(), uid, UUID.randomUUID(), source,
-                title, url, "body", Instant.now(), List.of("crypto"));
+                title, url, "body", Instant.now(), List.of("crypto"), List.of("unknown"));
     }
 }

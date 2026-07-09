@@ -100,7 +100,12 @@ public class DigestPostCollector {
                 rs.getString("url"),
                 rs.getString("body"),
                 rs.getTimestamp("published_at").toInstant(),
-                tags);
+                tags,
+                // The digest path never renders the classification: line (that
+                // belongs to /summary + /retry via ClusterBlockRenderer); the
+                // shared Post record still requires the field, so it carries the
+                // {unknown} sentinel here — the digest SELECT does not project it.
+                List.of("unknown"));
     }
 
     private static final String SCOPE_PREFS_SQL = """

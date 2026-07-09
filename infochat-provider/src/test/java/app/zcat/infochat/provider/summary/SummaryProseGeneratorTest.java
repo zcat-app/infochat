@@ -70,7 +70,7 @@ class SummaryProseGeneratorTest {
 
         Post p = new Post(UUID.randomUUID(), "p-redact", UUID.randomUUID(), "Src", "RedTitle",
                 "https://example.com/r", "Body with [REDACTED:abc123] placeholder.",
-                Instant.now(), List.of("news"));
+                Instant.now(), List.of("news"), List.of("unknown"));
         Cluster cluster = new Cluster("t-redact", List.of(p));
 
         gen.generate(List.of(cluster), "en");
@@ -89,7 +89,7 @@ class SummaryProseGeneratorTest {
         SummaryProseGenerator gen = generatorWith(stub);
 
         Post p = new Post(UUID.randomUUID(), "p-degraded", UUID.randomUUID(), "Src", "DegTitle",
-                "https://example.com/d", "Body", Instant.now(), List.of("news"));
+                "https://example.com/d", "Body", Instant.now(), List.of("news"), List.of("unknown"));
         List<ClusterProse> result = gen.generate(
                 List.of(new Cluster("t-d", List.of(p))), "en");
 
@@ -106,7 +106,7 @@ class SummaryProseGeneratorTest {
     @Test
     void degradedProseAvoidsMarkdownLinkSyntax() {
         Post p = new Post(UUID.randomUUID(), "p-bare", UUID.randomUUID(), "Src", "Title",
-                "https://example.com/x", "Body", Instant.now(), List.of("news"));
+                "https://example.com/x", "Body", Instant.now(), List.of("news"), List.of("unknown"));
         String degraded = SummaryProseGenerator.degradedProseFor(
                 new Cluster("t-bare", List.of(p)));
         assertFalse(degraded.contains("]("),
@@ -130,7 +130,7 @@ class SummaryProseGeneratorTest {
     private static Cluster singletonCluster(String uid, String title) {
         Post p = new Post(UUID.randomUUID(), uid, UUID.randomUUID(), "Src", title,
                 "https://example.com/" + uid, "Body for " + title, Instant.now(),
-                List.of("news"));
+                List.of("news"), List.of("unknown"));
         return new Cluster("t-" + uid, List.of(p));
     }
 

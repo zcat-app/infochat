@@ -261,8 +261,10 @@ class SummaryCommandHandlerTest {
                 "LLM-authored prose lands at the summary: slot. Got: " + body);
         assertTrue(body.contains("covered by:"));
         assertTrue(body.contains("score:"));
-        assertTrue(body.contains("classification:"));
-        assertTrue(body.contains("tags:"));
+        assertTrue(body.contains("classification: technical\n"),
+                "classification: line reflects the seeded classification (technical), not the tags. Got: " + body);
+        assertTrue(body.contains("tags: " + PREFIX + "news\n"),
+                "tags: line reflects the seeded tags, distinct from classification. Got: " + body);
         assertTrue(body.contains("Headline A"));
     }
 
@@ -600,7 +602,10 @@ class SummaryCommandHandlerTest {
                 "https://example.com/" + uid,
                 "Body for " + title,
                 publishedAt,
-                List.of(PREFIX + "news"));
+                List.of(PREFIX + "news"),
+                // classification seeded DISTINCT from tags so the summary
+                // assertion can prove the classification: line is not the tag copy.
+                List.of("technical"));
     }
 
     /**

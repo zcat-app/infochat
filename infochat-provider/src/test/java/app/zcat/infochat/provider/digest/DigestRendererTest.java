@@ -67,7 +67,7 @@ class DigestRendererTest {
         return new Post(
                 UUID.randomUUID(), uid, UUID.randomUUID(), "TestSrc",
                 title, "https://example.com/" + uid, "body",
-                Instant.now(), List.of("crypto"));
+                Instant.now(), List.of("crypto"), List.of("unknown"));
     }
 
     /**

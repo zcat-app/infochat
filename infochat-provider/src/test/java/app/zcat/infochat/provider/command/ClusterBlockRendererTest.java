@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -60,11 +61,12 @@ class ClusterBlockRendererTest {
                         + "covered by: Src1 (uid p-1)\n"
                         + "score: 1 source\n"
                         + "summary: Degraded prose.\n"
-                        + "classification: a\n"
+                        + "classification: factual\n"
                         + "tags: a\n"
                         + "\n",
                 rendered,
-                "en cluster block must render verbatim (byte-identical-replay guard)");
+                "en cluster block must render verbatim (byte-identical-replay guard); "
+                        + "classification (factual) is independent of tags (a)");
     }
 
     @Test
@@ -86,11 +88,12 @@ class ClusterBlockRendererTest {
                         + "pokrývají: Src1 (uid p-1)\n"
                         + "skóre: 1 zdroj\n"
                         + "shrnutí: Degraded prose.\n"
-                        + "klasifikace: a\n"
+                        + "klasifikace: factual\n"
                         + "tagy: a\n"
                         + "\n",
                 rendered,
-                "cs cluster block must render translated labels verbatim");
+                "cs cluster block must render translated labels verbatim; the "
+                        + "classification value (factual) stays verbatim, only the label is translated");
     }
 
     @Test
@@ -101,6 +104,31 @@ class ClusterBlockRendererTest {
                 "cs score: few-form (2 zdroje)");
         assertTrue(render(clusterWithSources(5, List.of("a")), "cs").contains("skóre: 5 zdrojů\n"),
                 "cs score: many-form (5 zdrojů)");
+    }
+
+    @Test
+    void classificationUnionDropsUnknownWhenSubstantiveLabelPresent() {
+        // Cross-post union {factual, unknown} → the no-signal `unknown` is
+        // dropped, leaving only the substantive label.
+        Cluster cluster = clusterWithPerPostClassification(
+                List.of(List.of("factual"), List.of("unknown")));
+        String rendered = render(cluster, "en");
+
+        assertTrue(rendered.contains("classification: factual\n"),
+                "substantive label rendered when the union mixes it with unknown");
+        assertFalse(rendered.contains("unknown"),
+                "`unknown` dropped from the union when a substantive label is present");
+    }
+
+    @Test
+    void classificationRendersUnknownWhenUnionIsOnlyUnknown() {
+        // Whole union is exactly {unknown} → the line shows `unknown` (always
+        // populated, never mirrors tags).
+        Cluster cluster = clusterWithPerPostClassification(List.of(List.of("unknown")));
+        String rendered = render(cluster, "en");
+
+        assertTrue(rendered.contains("classification: unknown\n"),
+                "sole-unknown union renders classification: unknown");
     }
 
     private String render(Cluster cluster, String language) {
@@ -126,7 +154,33 @@ class ClusterBlockRendererTest {
                     "https://example.com/p-" + i,
                     "body",
                     Instant.parse("2026-01-01T00:00:00Z"),
-                    tags));
+                    tags,
+                    // classification seeded DISTINCT from tags so the two rendered
+                    // lines are shown genuinely independent (not the M1-591 mirror).
+                    List.of("factual")));
+        }
+        return new Cluster("t-1", posts);
+    }
+
+    /**
+     * Build a cluster with one post per supplied classification list (all
+     * sharing a fixed tag {@code a}), so a test can exercise the cross-post
+     * classification union + the {@code unknown} drop rule independent of tags.
+     */
+    private static Cluster clusterWithPerPostClassification(List<List<String>> perPostClassification) {
+        List<Post> posts = new ArrayList<>();
+        for (int i = 0; i < perPostClassification.size(); i++) {
+            posts.add(new Post(
+                    UUID.randomUUID(),
+                    "p-" + (i + 1),
+                    UUID.randomUUID(),
+                    "Src" + (i + 1),
+                    i == 0 ? "Headline" : "Headline " + (i + 1),
+                    "https://example.com/p-" + (i + 1),
+                    "body",
+                    Instant.parse("2026-01-01T00:00:00Z"),
+                    List.of("a"),
+                    perPostClassification.get(i)));
         }
         return new Cluster("t-1", posts);
     }

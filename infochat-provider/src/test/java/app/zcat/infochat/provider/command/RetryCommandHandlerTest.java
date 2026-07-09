@@ -339,7 +339,7 @@ class RetryCommandHandlerTest {
         return new Post(
                 UUID.randomUUID(), uid, UUID.randomUUID(), "TestSrc",
                 title, "https://example.com/" + uid, "Body for " + title,
-                publishedAt, List.of("test-tag"));
+                publishedAt, List.of("test-tag"), List.of("unknown"));
     }
 
     private static class StubAnchorRepository extends SummaryAnchorRepository {

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 620 |
+| done | 621 |
 | deferred | 1 |
 | abandoned | 11 |
 | **total** | **636** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-589 — Provider chat: digest-first semantic RAG — a general assistant grounded in pgvector nearest-neighbour retrieval, replacing tag-guessing (complexity: high, risk: medium)
-- M1-598 — Provider: render real per-post classification in /summary (union, drop 'unknown' unless sole) (complexity: medium, risk: low)
 - M1-600 — Provider: /grant-admin and /revoke-admin render error.probation.blocked with no MessageFormat args, so the defense-in-depth probation branch would emit literal {0}/{1} (use an arg-free probation key) (complexity: low, risk: low)
 - M1-602 — test-hygiene: sweep all absolute-fetched_at scan-window fixtures onto a pinned Clock + add a build guard against new time-bombs (complexity: high, risk: low)
 
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-601 | test: de-rot ReEvalVerdictNotifyIT scan-window fixture by pinning the injected Clock (2026-07-09 time-bomb) | 2026-07-09 | round 1 APPROVE |
+| M1-598 | Provider: render real per-post classification in /summary (union, drop 'unknown' unless sole) | 2026-07-09 | round 1 APPROVE |
 | M1-594 | Provider: /summary emits a misleading \"Translating...\" progress step for an English scope (suppress the TRANSLATING stage when scope language == source) | 2026-07-09 | — |
 | M1-593 | Provider: /summary distinguishes zero-subscriptions from empty-window, and the welcome steers a fresh user to follow a source | 2026-07-09 | round 1 APPROVE |
 | M1-599 | Tagger title-wrap (D21) + classifier switch-llm/4-llm tooling | 2026-07-08 | round 1 APPROVE |
@@ -73,7 +73,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-595 | Chat-mode audit rows record no actor_contact_id — a chat interaction is unattributable | 2026-07-08 | round 1 APPROVE |
 | M1-592 | Asset reply renderer: split the 24h high/low onto their own lines (mobile wrap) and fix inconsistent Δ% precision | 2026-07-08 | round 1 APPROVE |
 | M1-590 | Provider: one canonical source for the probation-allowed command list (welcome + /help + rejection can no longer drift; rejection wrongly omits /zcash /monero) | 2026-07-08 | round 1 APPROVE |
-| M1-588 | Collector: a degraded placeholder feed (xcancel 'not whitelisted' stub) is a Fetcher failure, not a successful ingest | 2026-07-08 | round 1 APPROVE |
 
 ---
 
@@ -817,7 +816,7 @@ M1-594 (done)
 M1-595 (done)
 M1-596 (done)
 M1-597 (done)
-  └── M1-598 (pending) ← runnable
+  └── M1-598 (done)
 M1-599 (done)
 M1-600 (pending) ← runnable
 M1-601 (done)

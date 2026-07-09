@@ -112,6 +112,6 @@ class DigestWorkerClockTest {
     private static Post postPublishedAt(Instant publishedAt) {
         return new Post(UUID.randomUUID(), "uid-clock", UUID.randomUUID(),
                 "Src", "Title", "https://example.com/1", "body", publishedAt,
-                List.of("crypto"));
+                List.of("crypto"), List.of("unknown"));
     }
 }

@@ -494,6 +494,12 @@ tags: security, ai
 
 `-w` defaults to 24h.
 
+The `classification:` line is the union of the clustered posts' per-post ingest
+classification labels (the closed set `{factual, opinion, technical, urgent,
+ongoing, unknown}`, assigned at ingest — see
+[05-llm-and-embeddings.md §5.4.4](05-llm-and-embeddings.md)); it is independent
+of `tags:`, and `unknown` is shown only when no substantive label applies.
+
 **Cluster cap is profile-driven** via `infochat.summary.cluster-cap`:
 
 | Profile | Cap |

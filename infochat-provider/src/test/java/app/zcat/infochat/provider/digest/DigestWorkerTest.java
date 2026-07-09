@@ -306,17 +306,17 @@ class DigestWorkerTest {
     private static Post postPublishedAt(Instant publishedAt) {
         return new Post(UUID.randomUUID(), "uid-between", UUID.randomUUID(),
                 "TechCrunch", "Between slots", "https://tc.com/between",
-                "body", publishedAt, List.of("crypto"));
+                "body", publishedAt, List.of("crypto"), List.of("unknown"));
     }
 
     private static List<Post> testPosts() {
         return List.of(
                 new Post(UUID.randomUUID(), "uid-1", UUID.randomUUID(),
                         "TechCrunch", "Bitcoin $100k", "https://tc.com/btc",
-                        "body", Instant.now(), List.of("crypto")),
+                        "body", Instant.now(), List.of("crypto"), List.of("unknown")),
                 new Post(UUID.randomUUID(), "uid-2", UUID.randomUUID(),
                         "CoinDesk", "Ethereum update", "https://cd.com/eth",
-                        "body", Instant.now(), List.of("crypto")));
+                        "body", Instant.now(), List.of("crypto"), List.of("unknown")));
     }
 
     // ----- recording/stub collaborators -------------------------------------

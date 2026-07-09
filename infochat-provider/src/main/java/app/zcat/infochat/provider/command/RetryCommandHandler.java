@@ -69,9 +69,13 @@ public class RetryCommandHandler implements CommandHandler {
     // Fetch posts by uid where status='READY'. The uid column on post
     // is the human-readable "p-<hash>" identifier; we join source for
     // display_name. Only READY posts pass the status filter.
+    // p.classification is projected alongside p.tags so the replayed cluster
+    // block renders the same classification: line /summary did for the same DB
+    // state (D19/D36 byte-identical replay; the shared ClusterBlockRenderer
+    // reads Post.classification).
     private static final String SELECT_POSTS_BY_UIDS = """
             SELECT p.id, p.uid, p.source_id, s.display_name AS source_display_name,
-                   p.title, p.url, p.body, p.published_at, p.tags
+                   p.title, p.url, p.body, p.published_at, p.tags, p.classification
             FROM post p
             JOIN source s ON s.id = p.source_id
             WHERE p.uid = ANY(?) AND p.status = 'READY'
@@ -324,6 +328,7 @@ public class RetryCommandHandler implements CommandHandler {
     @SuppressWarnings("unchecked")
     private Post mapPost(ResultSet rs) throws SQLException {
         String[] rawTags = (String[]) rs.getArray("tags").getArray();
+        String[] rawClassification = (String[]) rs.getArray("classification").getArray();
         return new Post(
                 (UUID) rs.getObject("id"),
                 rs.getString("uid"),
@@ -333,7 +338,8 @@ public class RetryCommandHandler implements CommandHandler {
                 rs.getString("url"),
                 rs.getString("body"),
                 rs.getTimestamp("published_at").toInstant(),
-                List.of(rawTags));
+                List.of(rawTags),
+                List.of(rawClassification));
     }
 
     private Optional<UUID> resolveUserId(ScopeRef scope) {

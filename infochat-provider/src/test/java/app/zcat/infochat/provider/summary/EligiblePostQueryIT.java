@@ -402,6 +402,39 @@ class EligiblePostQueryIT {
                 "a scope following no sources counts 0 (the fresh-user empty-feed cliff)");
     }
 
+    @Test
+    void projectsClassificationIntoPostRecord() throws Exception {
+        // p.classification (V57, M1-597) round-trips into Post.classification,
+        // seeded DISTINCT from tags so the projection is not confused with tags.
+        UUID userId = insertUser("classif-user");
+        UUID sourceId = insertSource("classif-src", "CLS");
+        insertSubscription("dm", userId, sourceId);
+        Instant now = Instant.now();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO post (uid, source_id, title, body, published_at, status, "
+                             + "tags, classification, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, 'READY', ?, ?, ?)")) {
+            ps.setString(1, PREFIX + "classif-1");
+            ps.setObject(2, sourceId);
+            ps.setString(3, "Classified post");
+            ps.setString(4, "Body");
+            ps.setTimestamp(5, Timestamp.from(now));
+            ps.setArray(6, conn.createArrayOf("TEXT", new String[] { PREFIX + "news" }));
+            ps.setArray(7, conn.createArrayOf("TEXT", new String[] { "factual", "technical" }));
+            ps.setString(8, PREFIX + "classif-1");
+            ps.executeUpdate();
+        }
+
+        Result result = query.fetch("dm", userId, Optional.empty(), Duration.ofHours(24));
+        assertEquals(1, result.posts().size());
+        Post projected = result.posts().get(0);
+        assertEquals(List.of("factual", "technical"), projected.classification(),
+                "p.classification projects into the Post record, distinct from tags");
+        assertEquals(List.of(PREFIX + "news"), projected.tags(),
+                "tags remain independently projected");
+    }
+
     // ----- helpers ------------------------------------------------------
 
     private UUID insertUser(String suffix) throws Exception {

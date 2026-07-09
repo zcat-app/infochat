@@ -121,7 +121,7 @@ class SummaryProseInjectionTest {
     private static Cluster clusterWithBody(String uid, String title, String body) {
         Post p = new Post(UUID.randomUUID(), uid, UUID.randomUUID(), "TestSrc",
                 title, "https://example.com/" + uid, body, Instant.now(),
-                List.of("news"));
+                List.of("news"), List.of("unknown"));
         return new Cluster("t-" + uid, List.of(p));
     }
 }

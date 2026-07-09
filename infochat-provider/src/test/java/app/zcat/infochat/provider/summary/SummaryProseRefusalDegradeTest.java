@@ -77,7 +77,7 @@ class SummaryProseRefusalDegradeTest {
     private static Cluster singletonCluster(String uid, String title) {
         Post p = new Post(UUID.randomUUID(), uid, UUID.randomUUID(), "Src", title,
                 "https://example.com/" + uid, "Body for " + title, Instant.now(),
-                List.of("news"));
+                List.of("news"), List.of("unknown"));
         return new Cluster("t-" + uid, List.of(p));
     }
 

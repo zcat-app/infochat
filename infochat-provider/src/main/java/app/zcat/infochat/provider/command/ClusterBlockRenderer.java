@@ -41,6 +41,15 @@ import java.util.Set;
  */
 final class ClusterBlockRenderer {
 
+    /**
+     * The no-signal classification label. {@code unknown} is a real per-post
+     * label from the closed classification set (docs/design/05-llm-and-embeddings.md
+     * §5.4.4 Classifier, landed by M1-597) but carries no cluster-level signal:
+     * it is dropped from the rendered union whenever any substantive label is
+     * present, and shown alone only when the whole union is exactly {@code {unknown}}.
+     */
+    private static final String UNKNOWN_CLASSIFICATION = "unknown";
+
     private final LlmOutputSanitizer llmOutputSanitizer;
     private final TranslationPipeline translationPipeline;
     private final BundleLoader bundleLoader;
@@ -98,9 +107,11 @@ final class ClusterBlockRenderer {
                         llmOutputSanitizer.sanitize(cp.prose()), scopeLanguage);
         out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_CLUSTER_SUMMARY_LABEL, scopeLanguage))
            .append(' ').append(summaryText).append("\n");
-        // classification: comma-joined union of cluster.posts.tags.
+        // classification: union of the cluster's per-post classification label
+        // sets (the ingest classifier's output) — genuinely independent of the
+        // tags: line below, NOT the tag-union stub M1-591 reverted.
         out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_CLUSTER_CLASSIFICATION_LABEL, scopeLanguage))
-           .append(' ').append(joinedTags(posts)).append("\n");
+           .append(' ').append(joinedClassifications(posts)).append("\n");
         // tags: deduplicated union of cluster.posts.tags.
         out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_CLUSTER_TAGS_LABEL, scopeLanguage))
            .append(' ').append(joinedTags(posts)).append("\n");
@@ -111,6 +122,24 @@ final class ClusterBlockRenderer {
         Set<String> union = new LinkedHashSet<>();
         for (Post p : posts) {
             union.addAll(p.tags());
+        }
+        return String.join(", ", union);
+    }
+
+    private static String joinedClassifications(List<Post> posts) {
+        // Union the cluster's per-post classification sets in first-seen order
+        // for deterministic (D19/D36) output — same discipline as joinedTags.
+        Set<String> union = new LinkedHashSet<>();
+        for (Post p : posts) {
+            union.addAll(p.classification());
+        }
+        // Drop `unknown` when any substantive label is present; keep it alone
+        // only when the whole union is exactly {unknown}. The DB guarantees a
+        // non-empty classification per post (NOT NULL + cardinality>=1 CHECK,
+        // V57), so the union is never empty and the line is always populated.
+        boolean hasSubstantive = union.stream().anyMatch(label -> !UNKNOWN_CLASSIFICATION.equals(label));
+        if (hasSubstantive) {
+            union.remove(UNKNOWN_CLASSIFICATION);
         }
         return String.join(", ", union);
     }

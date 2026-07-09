@@ -120,7 +120,8 @@ public class EligiblePostQuery {
             String url,
             String body,
             @Nullable Instant publishedAt,
-            List<String> tags) {
+            List<String> tags,
+            List<String> classification) {
     }
 
     /**
@@ -205,7 +206,7 @@ public class EligiblePostQuery {
         //     in Java to the cap
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT p.id, p.uid, p.source_id, s.display_name, p.title, ")
-           .append("       p.url, p.body, p.published_at, p.tags, ")
+           .append("       p.url, p.body, p.published_at, p.tags, p.classification, ")
            .append("       COUNT(*) OVER () AS total_count ")
            .append("  FROM post p ")
            .append("  JOIN source s ON s.id = p.source_id ")
@@ -258,10 +259,12 @@ public class EligiblePostQuery {
                     Instant publishedAt = publishedTs == null ? null : publishedTs.toInstant();
                     String[] tagArr = (String[]) rs.getArray("tags").getArray();
                     List<String> tags = Arrays.asList(tagArr);
+                    String[] classificationArr = (String[]) rs.getArray("classification").getArray();
+                    List<String> classification = Arrays.asList(classificationArr);
                     // Same value on every row; zero rows → total stays 0.
                     totalBeforeCap = rs.getInt("total_count");
                     out.add(new Post(id, uid, sourceId, displayName, title, url, body,
-                            publishedAt, tags));
+                            publishedAt, tags, classification));
                 }
                 return new Selection(out, totalBeforeCap);
             }
