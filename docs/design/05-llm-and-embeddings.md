@@ -382,10 +382,10 @@ Clusters:
 {{#posts}}
 - post_uid: {{uid}}                                                                                                                                                                                                                                   
   source: {{source_name}} ({{category}})                                         
-  title: {{title}}                                                                                                                                                                                                                                    
   published: {{published_at}}                                                    
   tags: {{tags}}                                                                                                                                                                                                                                      
   <<<UNTRUSTED_CONTENT id="{{uid}}">>>                                           
+  title: {{title}}
   {{{body_or_summary}}}                                                                                                                                                                                                                               
   <<<END id="{{uid}}">>>
 {{/posts}}                                                                                                                                                                                                                                            
@@ -668,7 +668,7 @@ outcome ∈ {ok, retry, fallback, fail}.
                                                                                                                                                                                                                                                       
 When infochat.llm.*.provider is a remote provider:
                                                                                                                                                                                                                                                       
-- Post bodies are sent to the remote provider as part of summarizer / chat-agent / tagger / entity calls. **Embeddings are NOT sent** — they always run on a local nomic-768 backend (D54); even the `remote-llm` profile / `remote` backend co-starts a local Ollama nomic embedder, so post content for vectorization never leaves the machine.                                                                                                                                 
+- Post bodies are sent to the remote provider as part of security / tagger / entity / classifier / summarizer / chat-agent calls. **Embeddings are NOT sent** — they always run on a local nomic-768 backend (D54); even the `remote-llm` profile / `remote` backend co-starts a local Ollama nomic embedder, so post content for vectorization never leaves the machine.                                                                                                                                 
 - This is explicit operator opt-in. Local profiles (laptop/vps/pi) default to local Ollama; no remote calls happen unless config changes.                                                                                                             
 - On startup, if any task's provider is remote, log a single redacted line at WARN: LLM task=summarizer provider=anthropic base-url=https://api.anthropic.com. This makes "did I accidentally enable remote?" easy to audit.                          
 - API keys come from environment variables (e.g., ANTHROPIC_API_KEY), never from the DB.                                                                                                                                                              
