@@ -9,6 +9,7 @@ files_budget: 30
 files_scope:
   - docs/plan/m1/scan-window-fixture-census.md
   - infochat-collector/src/test/java/app/zcat/infochat/collector/testsupport/ScanWindowFixtureGuardTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/**
 complexity: high
 risk: low
 round_cap: 3
@@ -49,9 +50,10 @@ acceptance:
     relative to its seed>, ZoneOffset.UTC), Clock.class)` (the M1-444 / M1-601
     pattern), OR seeds its fetched_at relative to that pinned instant — so its
     pickup-gate outcome no longer depends on the wall-clock date. No new inline
-    `Instant.now()` / SQL `now()` is introduced (engineering-rules §9). The exact
-    per-fixture file list enters files_scope via the PLANNED post-census
-    escalate → refine cycle (see Notes) — never by silent start-time expansion.
+    `Instant.now()` / SQL `now()` is introduced (engineering-rules §9). The
+    filing-time files_scope glob over the collector test tree covers the
+    per-fixture edits; the census (item 1) is the authoritative enumeration of
+    exactly which files were swept and why.
   - >-
     A build guard at
     infochat-collector/.../testsupport/ScanWindowFixtureGuardTest.java fails the
@@ -74,8 +76,8 @@ test_plan:
   modifies:
     - >-
       Every (A) fixture the census identifies — pin the injected Clock (or make
-      the seed relative). Enumerated into files_scope via the planned
-      post-census escalate → refine (acceptance item 1; Notes).
+      the seed relative). Enumerated by the census (acceptance item 1); covered
+      by the filing-time files_scope glob over the collector test tree.
   preserves:
     - all tests currently green on main (each swept fixture keeps its assertions)
     - >-
@@ -87,7 +89,21 @@ decision_refs: []
 redteam_findings: []
 redteam_audits: []
 reviews: []
-escalations: []
+escalations:
+  - date: 2026-07-09
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      CLARITY VERDICT: FAIL (round 2, after one bounded self-refine)
+      FILES-BUDGET-PLAUSIBLE: FAIL — files_scope (census doc + guard test only)
+      does not cover the files acceptance item 2 requires modifying ("every
+      (A) fixture from the census"); acceptance item 2's own text admits this,
+      deferring to a mid-ticket escalate→refine. As filed, the ticket can only
+      complete acceptance item 1 before it must escalate; items 2-4 are
+      unreachable inside the current files_scope. Fix by (a) widening
+      files_scope now to a glob covering the collector test tree, e.g.
+      infochat-collector/src/test/java/app/zcat/infochat/collector/**, or
+      (b) splitting at the census boundary (census-only ticket now; follow-up
+      sweep+guard ticket with exact files_scope once the (A) list exists).
 overrides: []
 revisions:
   - date: 2026-07-09
@@ -118,6 +134,27 @@ revisions:
         documented mid-ticket escalate(budget-breach) -> refine cycle fired
         AFTER the census lands and BEFORE any fixture edit (clarity fix
         option (c)). files_budget / files_scope entries / acceptance semantics
+        / complexity / risk / round_cap unchanged.
+  - date: 2026-07-09
+    reason: >-
+      clarity-fail refine round 2 (user-directed via the escalation menu,
+      option 1): round-2 clarity re-flagged the same FILES-BUDGET-PLAUSIBLE
+      gap — files_scope structurally cannot cover acceptance items 2-4, and
+      the fix (widen scope) is beyond the bounded self-refine. User chose to
+      widen files_scope at filing time with a glob over the collector test
+      tree rather than decompose at the census boundary.
+    snapshot: |
+      files_scope (pre-refine): [docs/plan/m1/scan-window-fixture-census.md,
+        infochat-collector/.../testsupport/ScanWindowFixtureGuardTest.java]
+      acceptance item 2 closing (pre-refine): "The exact per-fixture file list
+        enters files_scope via the PLANNED post-census escalate -> refine
+        cycle (see Notes) — never by silent start-time expansion."
+      Notes bullet 1 (pre-refine): the planned mid-ticket
+        escalate(budget-breach) -> refine choreography.
+      resolution: files_scope += infochat-collector/src/test/java/app/zcat/
+        infochat/collector/** (user-approved filing-time grant); dropped the
+        now-moot planned-escalation prose from acceptance item 2,
+        test_plan.modifies, and Notes. files_budget 30 / acceptance semantics
         / complexity / risk / round_cap unchanged.
 aborted_attempts: []
 reopens: []
@@ -155,17 +192,14 @@ the backlog remains, and CLAUDE.md records the whack-a-mole history verbatim:
 
 ## Notes
 
-- `files_scope` at filing time lists only the census doc + the guard test; the
-  per-fixture (A) file set enters via a PLANNED mid-ticket escalation, not
-  silent expansion: once the census (acceptance item 1) lands and the (A)
-  worklist is concrete, the developer halts BEFORE editing any fixture and
-  fires `/m1-tick escalate M1-602 budget-breach` ("about to touch paths
-  outside files_scope" — the documented immediate-escalation trigger); the
-  user's `refine` then widens `files_scope` to the census's (A) list and sizes
-  `files_budget` down from the generous 30 to the real count. This escalate →
-  refine cycle is the workflow-sanctioned channel for scope changes (SKILL.md
-  "Never silently expand"); hitting it right after the census is EXPECTED, not
-  an error.
+- `files_scope` grants the census doc, the guard test, and a filing-time glob
+  over the collector test tree (`infochat-collector/src/test/java/app/zcat/
+  infochat/collector/**`) — the round-2 clarity resolution: the sweep's exact
+  file set is unknowable until the census exists, so the wide grant is
+  declared up front with user approval (no silent expansion) and bounded by
+  `files_budget: 30`, out_of_scope item 3 (time-seam-only edits, no assertion
+  rewrites), and the census itself (acceptance item 1), which enumerates
+  exactly which files were swept and why.
 - Deliberately NOT blocking M1-598 (the provider classification-render ticket):
   M1-601 alone unblocks the full verify today; this systemic sweep runs on its
   own schedule.
