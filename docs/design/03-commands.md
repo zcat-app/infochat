@@ -1477,7 +1477,7 @@ allowed read-only commands.
 
 [bot] Welcome! You're registered as <contact_id_short>. I aggregate news and social posts.
 [bot] Your account is in the probation period for the next ~24h. While probation is on, you can:
-[bot]   /help, /status, /summary, /saved, /list-sources, /get-tags, /export, /forget, /lang, /zcash, /monero
+[bot]   /help, /status, /get-tags, /get-sources, /list-sources, /summary, /saved, /export, /forget, /lang, /stop, /zcash, /monero
 [bot] Free-form chat unlocks automatically when probation ends.
 [bot] Content starts once you follow sources with /follow-all-sources (or add your own with /add-source); like free-form chat, these unlock when probation ends. /help shows the full surface.
 
