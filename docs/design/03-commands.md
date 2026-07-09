@@ -1475,7 +1475,7 @@ Wording is from the localization bundle (D43); `en` shown:
 Probation is in effect. Chat is blocked; we steer the user to the
 allowed read-only commands.
 
-[bot] Welcome! You're registered as <contact_id_short>. I aggregate news and social posts.
+[bot] Welcome! You're registered. I aggregate news and social posts.
 [bot] Your account is in the probation period for the next ~24h. While probation is on, you can:
 [bot]   /help, /status, /get-tags, /get-sources, /list-sources, /summary, /saved, /export, /forget, /lang, /stop, /zcash, /monero
 [bot] Free-form chat unlocks automatically when probation ends.
