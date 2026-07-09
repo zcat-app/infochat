@@ -27,7 +27,7 @@ public final class TranslationFixtures {
      * collaborators are injected fields with no test constructor, so they are
      * set reflectively.
      */
-    public static TranslationPipeline newEnShortCircuitPipeline() throws Exception {
+    public static TranslationPipeline newEnShortCircuitPipeline(BundleLoader bundleLoader) throws Exception {
         TranslationPipeline pipeline = new TranslationPipeline();
         Field cacheField = TranslationPipeline.class.getDeclaredField("translationCache");
         cacheField.setAccessible(true);
@@ -40,6 +40,13 @@ public final class TranslationFixtures {
         Field sanitizerField = TranslationPipeline.class.getDeclaredField("llmOutputSanitizer");
         sanitizerField.setAccessible(true);
         sanitizerField.set(pipeline, SanitizerTestDoubles.noAuditSanitizer());
+
+        // Set bundleLoader so the fallback path (for non-English scopes where the
+        // identity translator returns input unchanged) can resolve the
+        // REPLY_TRANSLATION_UNAVAILABLE bundle key without NPE.
+        Field bundleLoaderField = TranslationPipeline.class.getDeclaredField("bundleLoader");
+        bundleLoaderField.setAccessible(true);
+        bundleLoaderField.set(pipeline, bundleLoader);
         return pipeline;
     }
 

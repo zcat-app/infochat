@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.digest;
 
+import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.summary.ClusterTraversal;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
@@ -18,6 +19,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newEnShortCircuitPipeline;
+import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newRealBundleLoader;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -32,12 +34,13 @@ class DigestRendererTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        BundleLoader bundleLoader = newRealBundleLoader();
         renderer = new DigestRenderer();
         renderer.clusterTraversal = new ClusterTraversal(new EmptyEdgeSource(), 3);
         proseGenerator = new RecordingSummaryProseGenerator();
         renderer.summaryProseGenerator = proseGenerator;
         renderer.llmOutputSanitizer = SanitizerTestDoubles.noAuditSanitizer();
-        renderer.translationPipeline = newEnShortCircuitPipeline();
+        renderer.translationPipeline = newEnShortCircuitPipeline(bundleLoader);
     }
 
     @Test

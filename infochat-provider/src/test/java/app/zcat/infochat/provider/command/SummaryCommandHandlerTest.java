@@ -114,7 +114,7 @@ class SummaryCommandHandlerTest {
         handler.clusterTraversal = new ClusterTraversal(new EmptyEdgeSource(), 3);
         handler.summaryProseGenerator = proseGenerator;
         handler.llmOutputSanitizer = SanitizerTestDoubles.noAuditSanitizer();
-        handler.translationPipeline = newEnShortCircuitPipeline();
+        handler.translationPipeline = newEnShortCircuitPipeline(bundleLoader);
         handler.summaryAnchorRepository = anchorRepository;
         handler.inFlightTracker = tracker;
         handler.llmRateCap = new LlmRateCap(10);
@@ -277,15 +277,39 @@ class SummaryCommandHandlerTest {
         assertNull(reply, "terminal /summary self-delivers via the notifier and returns null");
         assertEquals(
                 List.of(ProgressStage.STARTED, ProgressStage.RETRIEVING,
-                        ProgressStage.GENERATING, ProgressStage.TRANSLATING,
-                        ProgressStage.FINALIZING),
+                        ProgressStage.GENERATING, ProgressStage.FINALIZING),
                 progressNotifier.publishedStages(),
-                "the handler must publish the five non-terminal stages in spec order "
+                "the handler must publish the four non-terminal stages in spec order "
+                        + "for an English scope (TRANSLATING is suppressed when scope language is 'en') "
                         + "before the terminal complete()");
         assertNotNull(progressNotifier.completedText(),
                 "the terminal path must call complete() with the composed summary");
         assertEquals(0, progressNotifier.failCount(),
                 "a successful summary must not call fail()");
+    }
+
+    @Test
+    void csScopePublishesTranslatingStage() {
+        // For a Czech-scope user, the TRANSLATING stage must be published
+        // in spec order (between GENERATING and FINALIZING), unlike the
+        // English-default case where it is suppressed.
+        eligiblePostQuery.seedPosts(
+                List.of(post(PREFIX + "cs1", "CS headline", Instant.now())), 0);
+        proseGenerator.setResponseText("CS prose.");
+
+        // Override the DataSource to return "cs" for the scope_preferences lookup.
+        UUID groupId = UUID.randomUUID();
+        handler.dataSource = new FixedUserAndLanguageDataSource(userId, groupId, "cs");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "cs"), "/summary");
+
+        assertNull(reply, "terminal /summary self-delivers via the notifier and returns null");
+        assertTrue(
+                progressNotifier.publishedStages().contains(ProgressStage.TRANSLATING),
+                "a Czech-scope summary must publish TRANSLATING in the stage sequence. "
+                        + "Published stages: " + progressNotifier.publishedStages());
+        assertNotNull(progressNotifier.completedText(),
+                "the terminal path must call complete() with the composed summary");
     }
 
     @Test

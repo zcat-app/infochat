@@ -17,16 +17,24 @@ import java.util.UUID;
 final class FixedUserAndLanguageDataSource extends UnsupportedDataSource {
     private final UUID userId;
     private final UUID groupId;
+    private final String scopeLanguage;
 
     FixedUserAndLanguageDataSource(UUID userId) {
         // DM-only callers never issue the groups lookup; supply a
         // throwaway group id so the single-arg form stays compatible.
-        this(userId, UUID.randomUUID());
+        // Default scope language is "en".
+        this(userId, UUID.randomUUID(), "en");
     }
 
     FixedUserAndLanguageDataSource(UUID userId, UUID groupId) {
+        // Default scope language is "en".
+        this(userId, groupId, "en");
+    }
+
+    FixedUserAndLanguageDataSource(UUID userId, UUID groupId, String scopeLanguage) {
         this.userId = userId;
         this.groupId = groupId;
+        this.scopeLanguage = scopeLanguage;
     }
 
     @Override
@@ -101,7 +109,7 @@ final class FixedUserAndLanguageDataSource extends UnsupportedDataSource {
                         consumed[0] = true;
                         yield true;
                     }
-                    case "getString" -> "en";
+                    case "getString" -> scopeLanguage;
                     case "close" -> null;
                     case "toString" -> "StubResultSet(language)";
                     case "hashCode" -> System.identityHashCode(proxy);

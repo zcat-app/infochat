@@ -69,7 +69,8 @@ class RetryCommandHandlerTest {
         timeoutField.set(cancellationService, Duration.ofSeconds(30));
 
         handler = new RetryCommandHandler();
-        handler.bundleLoader = newRealBundleLoader();
+        BundleLoader bundleLoader = newRealBundleLoader();
+        handler.bundleLoader = bundleLoader;
         handler.cancellationService = cancellationService;
         handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of());
         handler.userRepository = new UserRepository(
@@ -77,7 +78,7 @@ class RetryCommandHandlerTest {
         handler.summaryAnchorRepository = anchorRepo;
         handler.summaryProseGenerator = proseGenerator;
         handler.llmOutputSanitizer = SanitizerTestDoubles.noAuditSanitizer();
-        handler.translationPipeline = newEnShortCircuitPipeline();
+        handler.translationPipeline = newEnShortCircuitPipeline(bundleLoader);
         handler.inFlightTracker = tracker;
         handler.llmRateCap = new LlmRateCap(10);
         handler.retryCap = 3;

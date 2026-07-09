@@ -283,7 +283,14 @@ public class SummaryCommandHandler implements CommandHandler {
                         actorId, scopeKind, scopeId.get(), "summary",
                         argHash, postUids, clusterMapJson);
 
-                progressNotifier.publish(scope, ProgressStage.TRANSLATING);
+                // Only publish TRANSLATING when the scope actually translates —
+                // the same guard TranslationPipeline uses. For an English scope
+                // (the default), no translation work happens, so the label would be
+                // misleading.
+                if (!scopeLanguage.equalsIgnoreCase("en")) {
+                    progressNotifier.publish(scope, ProgressStage.TRANSLATING);
+                }
+
                 StringBuilder out = new StringBuilder();
 
                 if (result.topTagRestriction().isPresent()) {
