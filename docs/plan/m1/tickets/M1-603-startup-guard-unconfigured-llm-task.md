@@ -110,6 +110,35 @@ overrides: []
 revisions: []
 aborted_attempts: []
 reopens: []
+clarity_check:
+  date: 2026-07-10
+  verdict: FAIL
+  warnings: []
+  blockers:
+    - >-
+      Acceptance items 1-2 rest on a premise that cannot occur: "no per-task
+      base-url and no usable default" is unreachable for any of the 7 current
+      ModelTask values because infochat-collector/src/main/resources/application.properties
+      ships an UNCONDITIONAL checked-in base-url default for every task
+      (classifier line 462 = http://localhost:11434/v1), and the operator's
+      runtime file layers ON TOP of — never removes — it, so
+      LlmRouterStartupGuard.snapshotConfig() never observes an empty classifier
+      base-url in production. The test in item 2 would pass against a hand-rolled
+      Map that omits the key, but that config shape cannot occur, so it does not
+      reproduce the M1-597 incident it claims to.
+    - >-
+      The incident narrative (body) is factually wrong on the mechanism: the
+      implicit default provider is openai-compatible (LlmRouter.java line 188),
+      NOT the profile's Anthropic default. The real failure was the classifier
+      resolving to the checked-in local-Ollama shape (openai-compatible +
+      http://localhost:11434/v1 + llama3.1:8b) on a remote-llm host with no local
+      Ollama at that address → ConnectException — a shape the existing M1-577
+      mismatch scan deliberately does NOT flag (loopback carve-out in
+      isRemoteBaseUrl; LlmRouterStartupGuardTest.localOllamaShapeIsNotFlagged).
+      Closing it plausibly needs profile-awareness ("profile=remote-llm but task
+      X still resolves to the loopback default"), which out_of_scope entry 4
+      currently forbids. Re-diagnose against the checked-in defaults and reconcile
+      out_of_scope before re-writing acceptance.
 ---
 
 # M1-603: fail LOUD when an LLM task has no usable route
