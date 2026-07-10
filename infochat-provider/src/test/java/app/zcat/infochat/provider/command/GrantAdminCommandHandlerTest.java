@@ -308,6 +308,36 @@ class GrantAdminCommandHandlerTest {
                 "(signal-mock, alice).is_admin must remain false — the lookup is inbound-adapter-scoped");
     }
 
+    // ----- (g) Admin-in-probation → arg-free generic probation reply -------
+    // Defense-in-depth branch (GrantAdminCommandHandler step 3): the router
+    // pre-gates probation before dispatch, so an is_admin+in-probation actor
+    // never reaches this handler in production. Calling handle() directly
+    // exercises the branch, which must emit the argument-free generic reply —
+    // not the router's two-placeholder key rendered with no MessageFormat
+    // args, which would leak literal {0}/{1} braces (M1-600).
+
+    @Test
+    void grantAdminInProbationEmitsGenericProbationReplyWithoutLiteralPlaceholders() throws Exception {
+        String actor = PREFIX + "probation-actor";
+        String target = PREFIX + "probation-target";
+        seedUser(ADAPTER, actor, /* isAdmin */ true, false);
+        // probation_until in the future (DB-relative interval, so no
+        // absolute-timestamp time-bomb) makes ProbationCheck.inProbation
+        // return true under the real injected Clock; no Clock pin needed.
+        setProbationUntilFuture(ADAPTER, actor);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/grant-admin " + target);
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED_GENERIC), reply.text(),
+                "admin-in-probation /grant-admin must surface the arg-free generic probation reply");
+        assertFalse(reply.text().contains("{0}"),
+                "the generic probation reply must not leak a literal {0} placeholder");
+        assertFalse(reply.text().contains("{1}"),
+                "the generic probation reply must not leak a literal {1} placeholder");
+    }
+
     // ----- helpers ---------------------------------------------------------
 
     private UUID seedUser(String adapter, String contactId, boolean isAdmin,
@@ -328,6 +358,21 @@ class GrantAdminCommandHandlerTest {
                 rs.next();
                 return (UUID) rs.getObject("id");
             }
+        }
+    }
+
+    /**
+     * Set {@code probation_until} to a DB-relative future instant so
+     * {@link app.zcat.infochat.provider.messaging.ProbationCheck#inProbation}
+     * returns true. Relative ({@code NOW() + INTERVAL}) rather than an
+     * absolute literal so the fixture can never rot into a time-bomb.
+     */
+    private void setProbationUntilFuture(String adapter, String contactId) throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            exec(conn,
+                    "UPDATE users SET probation_until = NOW() + INTERVAL '24 hours' "
+                            + "WHERE adapter = ? AND contact_id = ?",
+                    adapter, contactId);
         }
     }
 

@@ -46,7 +46,7 @@ import java.util.UUID;
  *       refusing and NON-LOCKING: resolve the actor by
  *       (adapter, contact_id); absent or non-admin →
  *       {@code error.admin_only}; in probation →
- *       {@code error.probation_blocked}. Mirrors BanCommandHandler's
+ *       {@code error.probation.blocked.generic}. Mirrors BanCommandHandler's
  *       step-1 admin gate. The step-6a {@code FOR UPDATE} gate stays
  *       authoritative for EXECUTION (M1-046 PERM-ESCAL closure): an
  *       actor revoked between this read and the transaction is
@@ -226,7 +226,7 @@ public class RevokeAdminCommandHandler implements CommandHandler {
         }
         UserRow actor = actorPre.get();
         if (probationCheck.inProbation(actor.id)) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED, inboundContext.effectiveLanguage()));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED_GENERIC, inboundContext.effectiveLanguage()));
         }
 
         // Step 4 — audit-on-intent (spec step 8) on a separate
@@ -303,7 +303,7 @@ public class RevokeAdminCommandHandler implements CommandHandler {
                 // Step 6b — probation guard (defense-in-depth).
                 if (probationCheck.inProbation(actor.id)) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED, inboundContext.effectiveLanguage()));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED_GENERIC, inboundContext.effectiveLanguage()));
                 }
 
                 // Step 6c — target lookup INSIDE the tx.

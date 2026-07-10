@@ -746,6 +746,19 @@ public final class BundleKeys {
     public static final String ERROR_PROBATION_BLOCKED = "error.probation.blocked";
 
     /**
+     * Argument-free probation rejection reply for the {@code /grant-admin}
+     * and {@code /revoke-admin} in-handler defense-in-depth probation
+     * branches. Unlike {@link #ERROR_PROBATION_BLOCKED} — the router's
+     * step-5 gate, which fills the {@code {0}} unlock-time and {@code {1}}
+     * allowed-list tokens via {@code MessageFormat} — the admin handlers
+     * carry no {@code Clock} / {@code CommandPermissions} to fill those
+     * tokens, so they emit this placeholder-free reply via a plain
+     * {@code bundleLoader.get}. The two-argument key stays for the router
+     * (M1-600).
+     */
+    public static final String ERROR_PROBATION_BLOCKED_GENERIC = "error.probation.blocked.generic";
+
+    /**
      * {@code /vouch} success reply. Sent on the happy path where
      * the handler cleared probation ({@code probation_until = NULL})
      * in one transaction with one VOUCH audit row. Per D47 the

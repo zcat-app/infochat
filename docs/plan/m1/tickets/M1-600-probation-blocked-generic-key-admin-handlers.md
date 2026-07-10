@@ -1,9 +1,9 @@
 ---
 id: M1-600
 title: "Provider: /grant-admin and /revoke-admin render error.probation.blocked with no MessageFormat args, so the defense-in-depth probation branch would emit literal {0}/{1} (use an arg-free probation key)"
-status: pending
+status: done
 created: 2026-07-09
-last_updated: 2026-07-09
+last_updated: 2026-07-10
 blocked_by: []
 files_budget: 7
 files_scope:
@@ -137,7 +137,35 @@ spec_refs:
 decision_refs:
   - D43
   - D45
-reviews: []
+clarity_check:
+  date: 2026-07-10
+  verdict: WARN
+  warnings:
+    - >-
+      COMPLEXITY-RISK-CALIBRATED: risk: low is claimed on a ticket whose entire
+      file surface is bot-admin command handlers; the ticket's own reasoning for
+      low effective risk (branch unreachable via router, probation decision
+      unchanged, only the rendered string moves) is thorough but a future reader
+      must reconstruct it from Alternatives-considered.
+    - >-
+      SECURITY-FLAG-CONSISTENT: security_relevant: false on admin-surface files;
+      defensible given the explicit "decision unchanged, only the string changes"
+      framing, but worth a second look if the reviewer disagrees with that framing.
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-10
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 136
+      removed: 14
 escalations: []
 overrides: []
 revisions: []

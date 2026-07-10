@@ -354,6 +354,36 @@ class RevokeAdminCommandHandlerTest {
                         + "exactly one REVOKE_ADMIN_INTENT row (intent↔effect correlation)");
     }
 
+    // ----- (g) Admin-in-probation → arg-free generic probation reply -------
+    // Mirror of GrantAdminCommandHandlerTest (g). Defense-in-depth branch
+    // (RevokeAdminCommandHandler step 3), unreachable via the router (which
+    // pre-gates probation) but reachable by a direct handle() call with an
+    // is_admin+in-probation actor. The branch must emit the argument-free
+    // generic reply, not the router's two-placeholder key rendered with no
+    // MessageFormat args, which would leak literal {0}/{1} braces (M1-600).
+
+    @Test
+    void revokeAdminInProbationEmitsGenericProbationReplyWithoutLiteralPlaceholders() throws Exception {
+        String actor = PREFIX + "probation-actor";
+        String target = PREFIX + "probation-target";
+        seedUser(actor, /* isAdmin */ true, false);
+        // probation_until in the future (DB-relative interval, so no
+        // absolute-timestamp time-bomb) makes ProbationCheck.inProbation
+        // return true under the real injected Clock; no Clock pin needed.
+        setProbationUntilFuture(ADAPTER, actor);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/revoke-admin " + target);
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED_GENERIC), reply.text(),
+                "admin-in-probation /revoke-admin must surface the arg-free generic probation reply");
+        assertFalse(reply.text().contains("{0}"),
+                "the generic probation reply must not leak a literal {0} placeholder");
+        assertFalse(reply.text().contains("{1}"),
+                "the generic probation reply must not leak a literal {1} placeholder");
+    }
+
     // ----- helpers ---------------------------------------------------------
 
     private UUID seedUser(String contactId, boolean isAdmin, boolean isBanned) throws Exception {
@@ -383,6 +413,21 @@ class RevokeAdminCommandHandlerTest {
 
     private boolean isAdmin(String contactId) throws Exception {
         return isAdminOnAdapter(ADAPTER, contactId);
+    }
+
+    /**
+     * Set {@code probation_until} to a DB-relative future instant so
+     * {@link app.zcat.infochat.provider.messaging.ProbationCheck#inProbation}
+     * returns true. Relative ({@code NOW() + INTERVAL}) rather than an
+     * absolute literal so the fixture can never rot into a time-bomb.
+     */
+    private void setProbationUntilFuture(String adapter, String contactId) throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            exec(conn,
+                    "UPDATE users SET probation_until = NOW() + INTERVAL '24 hours' "
+                            + "WHERE adapter = ? AND contact_id = ?",
+                    adapter, contactId);
+        }
     }
 
     private boolean isAdminOnAdapter(String adapter, String contactId) throws Exception {
