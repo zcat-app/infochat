@@ -4,6 +4,7 @@ import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.notifier.AdminNotificationRecord;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.llm.EmbeddingProvider;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,7 +15,10 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -83,6 +87,15 @@ class EmbeddingWorkerDimensionMismatchTest {
 
     @BeforeEach
     void reset() throws Exception {
+        // Pin the injected Clock just after FETCHED_AT so the seeded post
+        // stays inside the workers' now-32d pickup window on every calendar
+        // date. Unpinned, the onTick scenario went silently vacuous on
+        // 2026-06-17 (seed+32d): enumeratePending returned nothing and the
+        // mismatch-containment path was never exercised (engineering-rules
+        // §9, M1-444/M1-601 pattern; M1-602).
+        QuarkusMock.installMockForType(
+            Clock.fixed(FETCHED_AT.plus(Duration.ofHours(1)), ZoneOffset.UTC),
+            Clock.class);
         stub().reset();
         clearPosts();
         // Reset the coalescing counters so the exact notification_count

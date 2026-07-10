@@ -1,9 +1,14 @@
 ---
 id: M1-602
 title: "test-hygiene: sweep all absolute-fetched_at scan-window fixtures onto a pinned Clock + add a build guard against new time-bombs"
-status: pending
+status: done
+clarity_check:
+  date: 2026-07-09
+  verdict: PASS
+  warnings: []
+outline_file: target/m1-tick-outline-M1-602.md
 created: 2026-07-09
-last_updated: 2026-07-09
+last_updated: 2026-07-10
 blocked_by: []
 files_budget: 30
 files_scope:
@@ -88,7 +93,20 @@ spec_refs:
 decision_refs: []
 redteam_findings: []
 redteam_audits: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-10
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 477
+      removed: 7
 escalations:
   - date: 2026-07-09
     reason: clarity-fail

@@ -3,6 +3,7 @@ package app.zcat.infochat.collector.eval.tagger;
 import app.zcat.infochat.collector.eval.testing.StubLlmProvider;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.llm.LlmProvider;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,7 +17,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -57,6 +60,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class TaggerWorkerIT {
 
+    /**
+     * One hour after the latest seeded fetched_at (2026-05-15T13:30Z, the
+     * quarantined post) so every seed is inside the now-32d pickup window
+     * on every calendar date.
+     */
+    private static final Instant PINNED_NOW = Instant.parse("2026-05-15T14:30:00Z");
+
     @Inject
     @SeedDataSource
     DataSource dataSource;
@@ -76,6 +86,14 @@ class TaggerWorkerIT {
 
     @BeforeEach
     void reset() throws Exception {
+        // Pin the injected Clock so the seeded posts stay inside the
+        // tagger's now-32d pickup window on every calendar date. Unpinned,
+        // scenario 27.7's quarantine-exclusion assertion went silently
+        // vacuous on 2026-06-16 (seed+32d): the post was excluded by the
+        // fetched_at floor instead of the status filter (engineering-rules
+        // §9, M1-444/M1-601 pattern; M1-602).
+        QuarkusMock.installMockForType(
+            Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
         stub().reset();
         seedVocabularyTag("news");
         seedVocabularyTag("security");

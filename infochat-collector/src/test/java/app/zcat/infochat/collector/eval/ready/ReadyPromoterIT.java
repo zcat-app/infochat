@@ -24,6 +24,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -87,6 +88,17 @@ class ReadyPromoterIT {
 
     @BeforeEach
     void reset() throws Exception {
+        // Pin the injected Clock just after FETCHED_AT so the seeded posts
+        // stay inside enumeratePending's now-32d window on every calendar
+        // date. Unpinned, Orders 2 and 3 went silently vacuous on 2026-06-17
+        // (seed+32d): onTick enumerated nothing, so the same-transaction
+        // rollback (Order 2) and the quarantine status-filter exclusion
+        // (Order 3) both passed without testing their contracts. Order 8
+        // installs its own pin on top for the classifier_done gate
+        // (engineering-rules §9, M1-444/M1-601 pattern; M1-602).
+        QuarkusMock.installMockForType(
+            Clock.fixed(FETCHED_AT.plus(Duration.ofHours(1)), ZoneOffset.UTC),
+            Clock.class);
         // Field writes on a CDI proxy do not reach the contextual
         // instance — same pattern as Stage2WorkerIT.releaseOnStage2Failure.
         ClientProxy.unwrap(readyPromoter).afterUpdateHook = conn -> {};
