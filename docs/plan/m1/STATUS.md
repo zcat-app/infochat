@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 623 |
 | deferred | 1 |
 | abandoned | 11 |
-| **total** | **636** |
+| **total** | **637** |
 
 ---
 
@@ -26,6 +26,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-589 — Provider chat: digest-first semantic RAG — a general assistant grounded in pgvector nearest-neighbour retrieval, replacing tag-guessing (complexity: high, risk: medium)
+- M1-603 — LlmRouterStartupGuard: a ModelTask with no usable route (missing base-url on a base-url-requiring provider) boots clean and fails 100% of calls silently at runtime — surface it at startup (complexity: medium, risk: medium)
 
 ---
 
@@ -819,4 +820,5 @@ M1-599 (done)
 M1-600 (done)
 M1-601 (done)
 M1-602 (done)
+M1-603 (pending) ← runnable
 ```
