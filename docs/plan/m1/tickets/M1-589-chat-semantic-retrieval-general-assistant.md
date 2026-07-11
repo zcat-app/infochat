@@ -3,7 +3,7 @@ id: M1-589
 title: "Provider chat: digest-first semantic RAG — a general assistant grounded in pgvector nearest-neighbour retrieval, replacing tag-guessing"
 status: pending
 created: 2026-07-08
-last_updated: 2026-07-08
+last_updated: 2026-07-11
 blocked_by: []
 files_budget: 13
 files_scope:
@@ -95,7 +95,7 @@ acceptance:
     described in ChatAgent.TOOL_INSTRUCTIONS. Because the closed allowlist is a
     documented spec surface (security.md §Prompt-injection defenses names it a spec
     amendment), docs/spec/security.md §Prompt-injection defenses and
-    docs/design/05-llm-and-embeddings.md §5.4.5 are updated to reflect the widened
+    docs/design/05-llm-and-embeddings.md §5.4.6 are updated to reflect the widened
     tool set and the semantic-retrieval capability.
   - >-
     ChatPromptBuilder's CHAT_SYSTEM_PROMPT_TEMPLATE is rewritten from the tag-only
@@ -169,7 +169,7 @@ spec_refs:
   - docs/spec/llm.md §Embedding pipeline
   - docs/spec/llm.md §Memory retrieval
   - docs/spec/security.md §Prompt-injection defenses
-  - docs/design/05-llm-and-embeddings.md §5.4.5 Chat agent
+  - docs/design/05-llm-and-embeddings.md §5.4.6 Chat agent
   - docs/design/05-llm-and-embeddings.md §5.5 Embeddings
 decision_refs:
   - D5
@@ -180,7 +180,25 @@ decision_refs:
 reviews: []
 escalations: []
 overrides: []
-revisions: []
+revisions:
+  - date: 2026-07-11
+    reason: >-
+      clarity-fail rework (run self-refine) — stale spec_refs anchor. §5.4.5 in
+      docs/design/05-llm-and-embeddings.md is "Summarizer (cluster mode)"; the
+      Chat agent section is §5.4.6 (renumbered after a §5.4.4 Classifier section
+      was inserted upstream). Corrected §5.4.5 -> §5.4.6 in the spec_refs entry
+      and in the two body references (acceptance item 3 "... are updated" and the
+      Spec-alignment paragraph "§5.4.5/§5.5"); the §5.5 Embeddings citation was
+      already correct and is unchanged. Also deleted two stray leftover-transcript
+      lines (</content>, </invoke>) at the file tail (clarity WARNING, file
+      hygiene). No scope/intent change; files_scope, acceptance, and out_of_scope
+      are untouched.
+    prior_values: |
+      spec_refs (changed entry):
+        - docs/design/05-llm-and-embeddings.md §5.4.5 Chat agent
+      body: acceptance item 3 read "...§5.4.5 are updated...";
+            Spec-alignment paragraph read "...§5.4.5/§5.5...".
+      file tail carried two stray markup lines: </content> and </invoke>.
 aborted_attempts: []
 reopens: []
 redteam_findings: []
@@ -317,7 +335,7 @@ posts and their order come from `ORDER BY embedding <=> ?` in SQL — the LLM on
 *embeds* the query (an allowed LLM task) and *writes prose* (allowed); it never
 picks the set. This extends embeddings from D5/D6's "internal linking only" use
 to chat retrieval **without ever showing a vector** — the widening is recorded
-in `docs/design/05-llm-and-embeddings.md` §5.4.5/§5.5, and the widened tool
+in `docs/design/05-llm-and-embeddings.md` §5.4.6/§5.5, and the widened tool
 allowlist in `docs/spec/security.md` §Prompt-injection defenses (which names the
 closed tool set a spec surface). A separate cosine-distance threshold property
 (`infochat.chat.*`) is added for chat relevance — do NOT reuse
@@ -355,5 +373,3 @@ tool instructions are Java constants, so D43's en/cs twin rule is not triggered)
 - **Determinism knob.** Because the query embedding is deterministic for a given
   message + model and the ranking is SQL, "same DB state + same message -> same
   retrieved set/order" holds (D19's temporal-scope guarantee).
-</content>
-</invoke>
