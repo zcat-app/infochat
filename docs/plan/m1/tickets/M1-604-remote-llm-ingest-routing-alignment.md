@@ -1,7 +1,7 @@
 ---
 id: M1-604
 title: "Doc alignment for remote-llm ingest routing: record the all-generative-remote decision + add the classifier rows missing from design §5.7 (M1-603 already shipped the props comment + Anthropic-block removal)"
-status: pending
+status: done
 created: 2026-07-11
 last_updated: 2026-07-11
 blocked_by: []
@@ -80,7 +80,20 @@ decision_refs:
   - D56
 redteam_findings: []
 redteam_audits: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-11
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 15
+      removed: 8
 escalations: []
 overrides: []
 revisions:
@@ -101,7 +114,11 @@ revisions:
       D54; §5.7 also missing classifier rows since M1-597.
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-11
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-604: one story for where ingest LLM tasks run under remote-llm

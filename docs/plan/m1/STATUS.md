@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 624 |
+| done | 625 |
 | deferred | 1 |
 | abandoned | 11 |
 | **total** | **639** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-589 — Provider chat: digest-first semantic RAG — a general assistant grounded in pgvector nearest-neighbour retrieval, replacing tag-guessing (complexity: high, risk: medium)
-- M1-604 — Doc alignment for remote-llm ingest routing: record the all-generative-remote decision + add the classifier rows missing from design §5.7 (M1-603 already shipped the props comment + Anthropic-block removal) (complexity: low, risk: low)
 - M1-605 — switch-llm.sh must not silently sweep a hand-pinned per-task route on an all-default run: require explicit confirmation when the current config is mixed/pinned (M1-603 consent regression) (complexity: medium, risk: low)
 
 ---
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-604 | Doc alignment for remote-llm ingest routing: record the all-generative-remote decision + add the classifier rows missing from design §5.7 (M1-603 already shipped the props comment + Anthropic-block removal) | 2026-07-11 | round 1 APPROVE |
 | M1-603 | One LLM service by default: shared infochat.llm.default.{base-url,api-key} inherited by every ModelTask; remove the per-task baked base-urls so a task absent from operator config inherits the operator's endpoint — or refuses boot loudly | 2026-07-11 | round 3 APPROVE |
 | M1-602 | test-hygiene: sweep all absolute-fetched_at scan-window fixtures onto a pinned Clock + add a build guard against new time-bombs | 2026-07-10 | round 1 APPROVE |
 | M1-600 | Provider: /grant-admin and /revoke-admin render error.probation.blocked with no MessageFormat args, so the defense-in-depth probation branch would emit literal {0}/{1} (use an arg-free probation key) | 2026-07-10 | round 1 APPROVE |
@@ -72,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-593 | Provider: /summary distinguishes zero-subscriptions from empty-window, and the welcome steers a fresh user to follow a source | 2026-07-09 | round 1 APPROVE |
 | M1-599 | Tagger title-wrap (D21) + classifier switch-llm/4-llm tooling | 2026-07-08 | round 1 APPROVE |
 | M1-597 | Collector: real per-post classification ingest stage (ClassifierWorker + post.classification, unknown default) | 2026-07-08 | round 2 APPROVE |
-| M1-596 | Collector: INVESTIGATE — FetchScheduler wedges a kind's dispatch after a bulk identifier/host change collapses its sources onto one host; make the drain self-heal | 2026-07-08 | round 1 APPROVE |
 
 ---
 
@@ -822,6 +821,6 @@ M1-600 (done)
 M1-601 (done)
 M1-602 (done)
 M1-603 (done)
-M1-604 (pending) ← runnable
+M1-604 (done)
 M1-605 (pending) ← runnable
 ```
