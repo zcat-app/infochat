@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 624 |
 | deferred | 1 |
 | abandoned | 11 |
-| **total** | **638** |
+| **total** | **639** |
 
 ---
 
@@ -26,7 +26,8 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-589 — Provider chat: digest-first semantic RAG — a general assistant grounded in pgvector nearest-neighbour retrieval, replacing tag-guessing (complexity: high, risk: medium)
-- M1-604 — Align %remote-llm ingest-task routing intent with design §5.7: all generative tasks route remote by default — fix the stale 'ingest stays local even under remote-llm' props comment, add the missing classifier rows to §5.7, record the decision (complexity: low, risk: low)
+- M1-604 — Doc alignment for remote-llm ingest routing: record the all-generative-remote decision + add the classifier rows missing from design §5.7 (M1-603 already shipped the props comment + Anthropic-block removal) (complexity: low, risk: low)
+- M1-605 — switch-llm.sh must not silently sweep a hand-pinned per-task route on an all-default run: require explicit confirmation when the current config is mixed/pinned (M1-603 consent regression) (complexity: medium, risk: low)
 
 ---
 
@@ -821,5 +822,6 @@ M1-600 (done)
 M1-601 (done)
 M1-602 (done)
 M1-603 (done)
-  └── M1-604 (pending) ← runnable
+M1-604 (pending) ← runnable
+M1-605 (pending) ← runnable
 ```
