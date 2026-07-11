@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 627 |
 | deferred | 1 |
 | abandoned | 11 |
-| **total** | **639** |
+| **total** | **640** |
 
 ---
 
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-606 — LLM router circuit breaker: fail-fast + pre-fetch skip on unreachable provider (complexity: high, risk: medium)
 
 ---
 
@@ -822,4 +822,5 @@ M1-602 (done)
 M1-603 (done)
 M1-604 (done)
 M1-605 (done)
+M1-606 (pending) ← runnable
 ```
