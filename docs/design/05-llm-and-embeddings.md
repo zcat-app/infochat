@@ -110,6 +110,31 @@ infochat.llm.summarizer.model=llama-3.1-70b-instruct
 ```                                                                                   
 The provider key ollama is a thin alias of openai-compatible with the local URL pre-filled.
 
+**Shared endpoint defaults (D56, M1-603).** `base-url` resolves
+per-task-key-first, else the deployment-wide `infochat.llm.default.base-url`;
+`api-key` resolves per-task-key-first, else — ONLY when the base-url also
+came from the shared default — `infochat.llm.default.api-key` (the default
+credential travels only to the default endpoint: a per-task base-url pin
+never inherits the shared key implicitly, per the 2026-07-11 red-team
+finding). One deployment runs one LLM service in practice, so the endpoint
+is stated once and every `ModelTask` (including future ones) inherits it. A
+task with no effective base-url refuses startup naming both settable keys.
+`LlmRouterStartupGuard` also emits an advisory WARN for the orphan shape — a
+per-task `api-key` with no per-task `base-url`, which would send that
+credential to the shared default endpoint — and stores only api-key
+*presence* (never the raw value) in its config snapshot. The examples
+above show the per-task OVERRIDE form, which always wins when present; the
+setup wizard writes the shared default form. NO per-task base-url/api-key
+defaults are baked into `application.properties` any more: `%laptop`/`%vps`/
+`%pi` (plus `%test`/`%dev`) carry one profile-scoped
+`infochat.llm.default.base-url=http://localhost:11434/v1`, and `%remote-llm`
+carries none — every task on that profile must be routed explicitly (the
+wizard does), so a stale operator config that predates a new task fails boot
+instead of silently inheriting a loopback address the containerized host does
+not serve (the M1-597 classifier incident). `model` stays per-task with baked
+per-task defaults. `infochat.embeddings.base-url` is a separate SPI surface
+and never inherits from the LLM default (D54).
+
 Every request carries `max_tokens`, read from the per-task key
 `infochat.llm.<task>.max-tokens` (optional, default 1024, must be positive).
 It caps OUTPUT only — prompt/input size is unaffected. The default is a cap,

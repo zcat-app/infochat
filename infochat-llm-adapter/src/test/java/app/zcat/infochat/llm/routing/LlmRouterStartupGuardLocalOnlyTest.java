@@ -13,6 +13,7 @@ import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -165,6 +166,45 @@ class LlmRouterStartupGuardLocalOnlyTest {
     }
 
     @Test
+    void localOnlyTrueWithRemoteSharedDefaultBaseUrlRefusesStartupNamingTheDefaultKey() {
+        // An off-host SHARED default base-url (D56) is inherited by every
+        // task without a per-task key — under local-only that is the same
+        // conflict as a per-task off-host route, reported per task and
+        // naming the DEFAULT key (the per-task key the operator never wrote
+        // is the wrong fix line). A task with a loopback per-task override
+        // does NOT inherit the default and must not be an offender.
+        Map<String, String> conflict = new LinkedHashMap<>();
+        conflict.put(LlmRouterStartupGuard.CONFIG_KEY_LOCAL_ONLY, "true");
+        conflict.put(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL, REMOTE_BASE_URL);
+        conflict.put("infochat.llm.chat.base-url", LOOPBACK_BASE_URL);
+
+        LlmRouterStartupGuard.LocalOnlyConflictException ex = assertThrows(
+            LlmRouterStartupGuard.LocalOnlyConflictException.class,
+            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(conflict),
+            "a remote shared default base-url under local-only=true must throw");
+        String msg = ex.getMessage();
+        assertTrue(msg.contains(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL),
+            "fatal message must name the shared default key; got: " + msg);
+        assertTrue(msg.contains("TAGGER"),
+            "fatal message must name a task inheriting the default; got: " + msg);
+        assertFalse(msg.contains("CHAT_AGENT"),
+            "a task with a loopback per-task override must not be an offender; got: " + msg);
+    }
+
+    @Test
+    void localOnlyTrueWithLoopbackSharedDefaultDoesNotThrow() {
+        // The bare-metal D56 shape: a loopback shared default inherited by
+        // every task is fully on-host — no conflict.
+        Map<String, String> ok = new LinkedHashMap<>();
+        ok.put(LlmRouterStartupGuard.CONFIG_KEY_LOCAL_ONLY, "true");
+        ok.put(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL, LOOPBACK_BASE_URL);
+
+        assertDoesNotThrow(
+            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(ok),
+            "a loopback shared default under local-only must NOT throw");
+    }
+
+    @Test
     void localOnlyTrueAllOnHostDoesNotThrow() {
         // Loopback embedding + loopback base-url + the host-neutral
         // openai-compatible provider — nothing leaves the host.
@@ -195,6 +235,31 @@ class LlmRouterStartupGuardLocalOnlyTest {
         }), "remote embedding without local-only must emit a confirmation log "
             + "naming the base-url and that post bodies leave the host; captured: "
             + capturer.formattedAll());
+    }
+
+    @Test
+    void remoteSharedDefaultWithoutLocalOnlyEmitsDisclosureWarnPerInheritingTask() {
+        // No local-only: a remote shared default is allowed but must be
+        // loud — the M1-597 incident shape (a task with no per-task keys)
+        // now resolves to the operator's remote endpoint, and the
+        // disclosure WARN proves the effective route is that endpoint,
+        // not any loopback fallback. Both postures decide off-host on the
+        // same perTaskRoutes, so this mirrors the fatal case above (M1-432).
+        Map<String, String> snapshot = new LinkedHashMap<>();
+        snapshot.put(LlmRouterStartupGuard.CONFIG_KEY_LOCAL_ONLY, "false");
+        snapshot.put(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL, REMOTE_BASE_URL);
+
+        assertDoesNotThrow(
+            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(snapshot),
+            "a remote shared default without local-only is allowed (must NOT throw)");
+
+        List<LogRecord> warns = capturer.recordsAtLevel(Level.WARNING);
+        assertTrue(warns.stream().anyMatch(r -> {
+            String m = CapturingHandler.formatMessage(r);
+            return m.contains("TAGGER") && m.contains(REMOTE_BASE_URL) && m.contains("leave the host");
+        }), "a task inheriting the remote shared default must emit a per-task disclosure "
+            + "WARN naming the task, the inherited base-url, and that post bodies leave "
+            + "the host; captured: " + capturer.formattedAll());
     }
 
     @Test

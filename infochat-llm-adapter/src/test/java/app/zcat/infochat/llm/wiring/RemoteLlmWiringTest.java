@@ -2,6 +2,7 @@ package app.zcat.infochat.llm.wiring;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
@@ -27,10 +28,12 @@ import org.junit.jupiter.api.io.TempDir;
  * <p>Drives the real {@code prod/scripts/4-llm.sh} remote branch with a fake
  * {@code docker} on {@code PATH} (no-ops the compose up / readiness / pull) and
  * scripted stdin, then asserts the generated {@code application.properties}: the
- * seven generative tasks carry the remote base-url + the {@code ${INFOCHAT_LLM_API_KEY}}
- * reference, while {@code infochat.embeddings.*} resolves to the local Ollama nomic
- * endpoint and is NEVER the remote base-url. Mirrors the generated-config layer of
- * {@link LlamacppWiringTest}; no static-compose assertions are needed for this branch.
+ * SHARED {@code infochat.llm.default.{base-url,api-key}} keys (written once and
+ * inherited by all seven generative tasks, D56/M1-603 — no per-task
+ * base-url/api-key lines are written at all), while {@code infochat.embeddings.*}
+ * resolves to the local Ollama nomic endpoint and is NEVER the remote base-url.
+ * Mirrors the generated-config layer of {@link LlamacppWiringTest}; no
+ * static-compose assertions are needed for this branch.
  *
  * <p>Linux-gated for the same reason as {@link LlamacppWiringTest}: {@code 4-llm.sh}
  * uses GNU {@code sed -i} and bash, matching the Linux deployment target. The
@@ -62,19 +65,25 @@ class RemoteLlmWiringTest {
         Map<String, String> props = runWizard(tmp,
                 "remote\n" + REMOTE_BASE_URL + "\n" + REMOTE_API_KEY + "\n" + ACCEPT_TIMING_DEFAULTS);
 
-        // Generative tasks → remote endpoint + API-key reference.
-        assertEquals(REMOTE_BASE_URL, props.get("infochat.llm.chat.base-url"),
-                "generative tasks must point at the remote endpoint");
-        assertEquals("${INFOCHAT_LLM_API_KEY}", props.get("infochat.llm.chat.api-key"),
-                "generative tasks must reference the API key from secrets.env");
-
-        // The classifier task (M1-599) must be routed remote like the others — the
-        // whole point of teaching switch-llm/4-llm the classifier: an operator remote
-        // switch must not silently leave it on localhost (red before it joined LLM_TASKS).
-        assertEquals(REMOTE_BASE_URL, props.get("infochat.llm.classifier.base-url"),
-                "the classifier task must point at the remote endpoint (M1-599)");
-        assertEquals("${INFOCHAT_LLM_API_KEY}", props.get("infochat.llm.classifier.api-key"),
-                "the classifier task must reference the API key from secrets.env (M1-599)");
+        // Generative tasks → the SHARED default endpoint + API-key reference,
+        // written ONCE (D56/M1-603). Because inheritance is task-agnostic, a
+        // future new ModelTask is routed remote automatically — the general
+        // form of the M1-599 classifier guarantee (an operator remote switch
+        // must not silently leave any task on localhost).
+        assertEquals(REMOTE_BASE_URL, props.get("infochat.llm.default.base-url"),
+                "the remote endpoint must be written once as the shared default");
+        assertEquals("${INFOCHAT_LLM_API_KEY}", props.get("infochat.llm.default.api-key"),
+                "the shared default must reference the API key from secrets.env");
+        // No per-task route lines: a stale per-task line would win over the
+        // shared default and silently pin its task to the old endpoint, so the
+        // wizard writes none — the classifier (M1-599) included.
+        for (String task : new String[]{
+                "security", "tagger", "entity", "classifier", "summarizer", "chat", "translator"}) {
+            assertNull(props.get("infochat.llm." + task + ".base-url"),
+                    task + " must carry no per-task base-url (inherits the shared default)");
+            assertNull(props.get("infochat.llm." + task + ".api-key"),
+                    task + " must carry no per-task api-key (inherits the shared default)");
+        }
 
         // Embeddings → local Ollama nomic, never the remote endpoint (the F11 guard).
         assertEquals(OLLAMA_URL, props.get("infochat.embeddings.base-url"),

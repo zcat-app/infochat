@@ -604,11 +604,18 @@ PLACED+=("database contents (pg_restore complete)")
 # back from the restored config's endpoints (4-llm.sh chooses it by prompt; here
 # there is no operator, so we infer it from what was persisted).
 rehydrate_models() {
-  local chat_url emb_url gen_backend emb_backend
-  chat_url="$(read_prop 'infochat.llm.chat.base-url')"
+  local gen_url emb_url gen_backend emb_backend
+  # The generative endpoint is the shared default key since M1-603 (D56);
+  # a pre-M1-603 dump instead carries per-task lines, so fall back to the
+  # chat task's — without the fallback an old dump would classify as
+  # 'remote' and an ollama-backend restore would never re-pull its models.
+  gen_url="$(read_prop 'infochat.llm.default.base-url')"
+  if [[ -z "$gen_url" ]]; then
+    gen_url="$(read_prop 'infochat.llm.chat.base-url')"
+  fi
   emb_url="$(read_prop 'infochat.embeddings.base-url')"
 
-  case "$chat_url" in
+  case "$gen_url" in
     "$OLLAMA_URL")   gen_backend=ollama ;;
     "$LLAMACPP_URL") gen_backend=llamacpp ;;
     *)               gen_backend=remote ;;

@@ -60,9 +60,12 @@ class RestoreWiringTest {
     // single-owner gate's banner heredoc) only by the M1-582 consent-gate cases that
     // continue past the DB step into model rehydration and bring-up. Symlinked from the
     // host into the controlled bin so a restricted PATH still lets the script run.
+    // sort: the ollama re-pull loop dedups model names with `sort -u`; the
+    // new-format-ollama case (M1-603) is the first to reach that loop under
+    // this restricted PATH.
     private static final String[] REAL_TOOLS =
             {"bash", "dirname", "mktemp", "tar", "gzip", "grep", "tail", "rm",
-             "mkdir", "cp", "chmod", "tee", "sed", "cat"};
+             "mkdir", "cp", "chmod", "tee", "sed", "cat", "sort"};
     private static final String[] TOOL_DIRS = {"/usr/bin", "/bin", "/usr/local/bin"};
 
     // The gates need only `command -v docker` to resolve and
@@ -568,6 +571,33 @@ class RestoreWiringTest {
                 "the consented run must complete end to end:\n" + r.output);
     }
 
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void newFormatSharedDefaultConfigClassifiesGenerativeBackendCorrectly(@TempDir Path tmp) throws Exception {
+        // M1-603: the wizard now writes the generative endpoint as the SHARED
+        // infochat.llm.default.base-url (no per-task chat line), so
+        // rehydrate_models must classify the backend from the default key —
+        // before the fix it read only infochat.llm.chat.base-url, classified a
+        // new-format ollama bundle as 'remote', and never re-pulled the ollama
+        // models: a restored deployment with a dead LLM. Old-format bundles
+        // (per-task lines, no default key) stay covered by the chat.base-url
+        // fallback the other bring-up cases exercise.
+        Path bundle = buildNewFormatOllamaBundle(tmp);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false,
+                Map.of("FAKE_DB_TABLES", "present"), "--source-stopped");
+
+        assertTrue(r.output.contains("generative backend: ollama"),
+                "a new-format shared-default ollama config must classify as ollama:\n" + r.output);
+        assertFalse(r.output.contains("generative backend: remote"),
+                "the new-format ollama config must NOT misclassify as remote:\n" + r.output);
+        assertTrue(r.output.contains("ollama pull llama3.2:3b")
+                        && r.output.contains("ollama pull llama3.1:8b"),
+                "the restored config's ollama models must be re-pulled:\n" + r.output);
+        assertEquals(0, r.exitCode,
+                "the consented new-format restore must complete end to end:\n" + r.output);
+    }
+
     // --- helpers ----------------------------------------------------------------
 
     /** Drive the real restore.sh under a controlled PATH; return exit code + combined output. */
@@ -769,6 +799,40 @@ class RestoreWiringTest {
         run(idsrc, "tar", "-czpf", staging.resolve("identities.tgz").toString(), dataRel);
 
         Path bundle = tmp.resolve("bringup-bundle.tgz");
+        run(staging, "tar", "-czf", bundle.toString(), ".");
+        return bundle;
+    }
+
+    /**
+     * As {@link #buildBringUpBundle}, but with a NEW-format (M1-603 shared-default)
+     * application.properties: the generative endpoint lives ONLY in
+     * {@code infochat.llm.default.base-url} (ollama), with the per-task model lines
+     * the ollama re-pull reads — the config shape the reworked wizard writes.
+     */
+    private Path buildNewFormatOllamaBundle(Path tmp) throws Exception {
+        String dataDirAbs = tmp.resolve("idroot/signal-cli").toString();
+        String dataRel = dataDirAbs.substring(1);       // "${dir#/}" — strip the leading '/'
+        Path staging = Files.createDirectories(tmp.resolve("nfsrc"));
+        Files.createDirectories(staging.resolve("db"));
+        Files.createDirectories(staging.resolve("runtime"));
+        Files.writeString(staging.resolve("db/infochat.pgc"), "PGDMP-dummy");
+        Files.writeString(staging.resolve("runtime/secrets.env"),
+                "INFOCHAT_DB_PASSWORD=\"pw\"\nINFOCHAT_SIGNAL_DATA_DIR=\"" + dataDirAbs + "\"\n");
+        Files.writeString(staging.resolve("runtime/application.properties"),
+                "quarkus.profile=vps\n"
+                + "infochat.llm.default.base-url=http://ollama:11434/v1\n"
+                + "infochat.llm.security.model=llama3.2:3b\n"
+                + "infochat.llm.chat.model=llama3.1:8b\n"
+                + "infochat.embeddings.base-url=http://ollama:11434/v1\n"
+                + "infochat.embeddings.model=nomic-embed-text\n");
+        Files.writeString(staging.resolve("runtime/bootstrap-sources.json"), "[]\n");
+
+        Path idsrc = Files.createDirectories(tmp.resolve("nfid"));
+        Files.createDirectories(idsrc.resolve(dataRel));
+        Files.writeString(idsrc.resolve(dataRel).resolve("keyfile"), "id");
+        run(idsrc, "tar", "-czpf", staging.resolve("identities.tgz").toString(), dataRel);
+
+        Path bundle = tmp.resolve("newformat-bundle.tgz");
         run(staging, "tar", "-czf", bundle.toString(), ".");
         return bundle;
     }

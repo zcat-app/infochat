@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
+import app.zcat.infochat.llm.routing.LlmRouter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.Config;
@@ -17,6 +18,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.time.Duration;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 
 /**
  * Native Anthropic Messages API provider. Uses the Anthropic-specific
@@ -54,8 +56,13 @@ import java.util.NoSuchElementException;
  * per-field {@code @ConfigProperty} injection. With 6 tasks × 5
  * properties = 30 fields, dynamic lookup is cleaner. The property
  * key pattern is {@code infochat.llm.<taskKeySegment>.<property>}.
- * {@code max-tokens} is REQUIRED by the Anthropic API (unlike
- * OpenAI where it is optional).
+ * {@code base-url} and {@code api-key} fall back to the shared
+ * deployment defaults ({@link LlmRouter#CONFIG_KEY_DEFAULT_BASE_URL} /
+ * {@link LlmRouter#CONFIG_KEY_DEFAULT_API_KEY}, D56) when the per-task
+ * key is unset — the api-key ONLY together with the base-url (a task
+ * whose base-url is pinned per-task never inherits the shared
+ * credential; see the default-api-key javadoc). {@code max-tokens} is
+ * REQUIRED by the Anthropic API (unlike OpenAI where it is optional).
  *
  * <h2>Failure surface</h2>
  * <p>Same contract as {@link OpenAiCompatibleProvider}, surfaced
@@ -128,9 +135,33 @@ public class AnthropicProvider implements LlmProvider {
         // LlmProvider contract and never leaks the third-party type to
         // callers or the startup-scan tests. (M1-357)
         try {
-            String baseUrl = config.getValue(prefix + "base-url", String.class);
-            LlmHttpSupport.requireHttpBaseUrl(baseUrl, prefix + "base-url");
-            String apiKey = config.getOptionalValue(prefix + "api-key", String.class).orElse("");
+            String baseUrlKey = prefix + "base-url";
+            // Effective endpoint: the per-task override wins, else the shared
+            // deployment default (D56). Neither set → refuse with a message
+            // naming BOTH settable keys (mirrors OpenAiCompatibleProvider —
+            // the M1-597 failure shape must be a loud startup error naming
+            // the fix, not a silent per-call fallback). requireHttpBaseUrl
+            // reports against the key the value actually came from.
+            Optional<String> perTaskBaseUrl = config.getOptionalValue(baseUrlKey, String.class);
+            String effectiveBaseUrlKey =
+                perTaskBaseUrl.isPresent() ? baseUrlKey : LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL;
+            String baseUrl = perTaskBaseUrl
+                .or(() -> config.getOptionalValue(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL, String.class))
+                .orElseThrow(() -> new LlmProvider.TaskConfigUnresolvableException(
+                    "AnthropicProvider: no base-url configured for " + task
+                        + " — set " + baseUrlKey + " (per-task) or "
+                        + LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL + " (shared default)"));
+            LlmHttpSupport.requireHttpBaseUrl(baseUrl, effectiveBaseUrlKey);
+            // The default credential travels ONLY to the default endpoint
+            // (redteam 2026-07-11, M1-603): a task whose base-url is pinned
+            // per-task must not implicitly inherit the deployment-wide key —
+            // mirrors OpenAiCompatibleProvider. A pinned route that needs the
+            // key restates it explicitly via the per-task api-key.
+            String apiKey = config.getOptionalValue(prefix + "api-key", String.class)
+                .or(() -> perTaskBaseUrl.isPresent()
+                    ? Optional.<String>empty()
+                    : config.getOptionalValue(LlmRouter.CONFIG_KEY_DEFAULT_API_KEY, String.class))
+                .orElse("");
             String model = config.getValue(prefix + "model", String.class);
             long timeoutMs = config.getOptionalValue(prefix + "timeout-ms", Long.class).orElse(30000L);
             LlmHttpSupport.requirePositiveTimeoutMs(timeoutMs, prefix + "timeout-ms");

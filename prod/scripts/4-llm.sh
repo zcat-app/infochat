@@ -5,16 +5,18 @@
 # Branches on the backend choice (ollama | llamacpp | remote):
 #   ollama   — start the ollama compose service and `ollama pull` the active
 #              profile's security / chat / embedding models (§5.7), then point
-#              every infochat.llm.* + infochat.embeddings.* base-url at the
-#              ollama service over the compose network.
+#              the shared infochat.llm.default.base-url (inherited by every
+#              task, D56) + infochat.embeddings.base-url at the ollama service
+#              over the compose network.
 #   llamacpp — fetch the chosen generative GGUF into the model volume and serve
 #              it from the llama.cpp instance at llamacpp:8080 (§7.4); embeddings
 #              run on a SEPARATE backend (a second llama.cpp instance or the
 #              co-running Ollama nomic embedder), never the generative GGUF (D49).
-#   remote   — route the seven generative tasks to a remote OpenAI-compatible
-#              endpoint (base-url + API key minted into secrets.env, §7.3);
-#              embeddings still run LOCALLY — a co-started Ollama nomic embedder
-#              is pulled, never the remote endpoint (D54).
+#   remote   — route the seven generative tasks (via the shared default keys)
+#              to a remote OpenAI-compatible endpoint (base-url + API key minted
+#              into secrets.env, §7.3); embeddings still run LOCALLY — a
+#              co-started Ollama nomic embedder is pulled, never the remote
+#              endpoint (D54).
 # Model names follow the active profile recorded by 1-profile.sh, never a
 # hard-coded profile (§5.7 is the canonical table). Re-running is idempotent:
 # `ollama pull` skips an already-present model and each property line is
@@ -64,9 +66,11 @@ LLAMACPP_EMB_GGUF_SHA="f7af6f66802f4df86eda10fe9bbcfc75c39562bed48ef6ace719a251c
 NOMIC_OLLAMA_MODEL="nomic-embed-text"
 EMBEDDINGS_DIMENSION=768
 
-# The seven per-task LLM config families share one endpoint; only the model
-# differs (security vs chat vs embedding) per §5.7. embeddings is handled
-# alongside but lives under its own infochat.embeddings.* prefix.
+# The seven LLM tasks share one endpoint — since M1-603 (D56) written ONCE as
+# infochat.llm.default.{base-url,api-key}, which every task inherits; only the
+# model differs (security vs chat vs embedding) per §5.7, so LLM_TASKS drives
+# the per-task model writes and the old-format-line sweeps below. embeddings
+# is handled alongside but lives under its own infochat.embeddings.* prefix.
 LLM_TASKS="security tagger entity classifier summarizer chat translator"
 
 usage() {
@@ -114,12 +118,26 @@ prompt_timing() {
   printf -v "$__var" '%s' "$answer"
 }
 
-# Point every LLM task + embeddings at one endpoint base-url.
-set_all_base_urls() {
-  local url="$1" task
+# Migrate an old-format runtime file (per-task base-url/api-key fan-out,
+# pre-M1-603) whenever a run rewrites the routing: a stale per-task line
+# would WIN over the shared default keys (per-task beats default, D56), so
+# leaving it in place silently pins that task to the OLD endpoint and turns
+# the backend switch into a no-op for it. Idempotent; never touches the
+# default keys themselves (the task-name loop cannot match "default").
+sweep_per_task_routes() {
+  local task
   for task in $LLM_TASKS; do
-    set_prop "infochat.llm.${task}.base-url" "$url"
+    sed -i -e "/^infochat\.llm\.${task}\.base-url=/d" \
+           -e "/^infochat\.llm\.${task}\.api-key=/d" "$CONFIG_FILE"
   done
+}
+
+# Point every LLM task (via the shared default, D56) + embeddings at one
+# endpoint base-url.
+set_all_base_urls() {
+  local url="$1"
+  sweep_per_task_routes
+  set_prop infochat.llm.default.base-url "$url"
   set_prop infochat.embeddings.base-url "$url"
 }
 
@@ -164,15 +182,14 @@ clear_remote_llm_creds() {
   sed -i '/^INFOCHAT_LLM_API_KEY=/d' "$SECRETS_FILE"
 }
 
-# Point only the seven LLM tasks (not embeddings) at one endpoint. The llamacpp
-# branch wires embeddings to a SEPARATE backend (a second llama.cpp instance or
-# Ollama), so unlike set_all_base_urls it leaves infochat.embeddings.base-url for
-# the caller to set (M1-417).
+# Point only the seven LLM tasks (via the shared default, not embeddings) at
+# one endpoint. The llamacpp branch wires embeddings to a SEPARATE backend (a
+# second llama.cpp instance or Ollama), so unlike set_all_base_urls it leaves
+# infochat.embeddings.base-url for the caller to set (M1-417).
 set_llm_base_urls() {
-  local url="$1" task
-  for task in $LLM_TASKS; do
-    set_prop "infochat.llm.${task}.base-url" "$url"
-  done
+  local url="$1"
+  sweep_per_task_routes
+  set_prop infochat.llm.default.base-url "$url"
 }
 
 # Derive a clean GGUF filename from a URL: strip #fragment then ?query (a signed
@@ -468,8 +485,12 @@ case "$backend" in
     echo "  -  translator — translation of the bot's replies; exposes the bot-reply text (can echo your queries)."
     echo "  -  embeddings — run LOCALLY: a small Ollama nomic embedder is started on"
     echo "     this machine, so the post content for vectorization NEVER leaves it (D54)."
-    echo "To keep chat (and any generative task) local too, pick 'ollama'/'llamacpp'"
-    echo "now, or route generative tasks individually later with ./prod/switch-llm.sh."
+    echo "To keep chat (and every generative task) local too, pick 'ollama'/'llamacpp'"
+    echo "now, or switch the whole deployment back to a local backend later with"
+    echo "./prod/switch-llm.sh (a per-task infochat.llm.<task>.base-url override in"
+    echo "the runtime application.properties can still pin one task by hand; the"
+    echo "pinned task does NOT inherit the shared api-key — set the per-task"
+    echo "infochat.llm.<task>.api-key explicitly if the pinned route needs one)."
     echo
     read -rp "Remote OpenAI-compatible base-url (e.g. https://nano-gpt.com/api/v1): " base_url
     if [[ -z "$base_url" ]]; then
@@ -519,11 +540,11 @@ case "$backend" in
     echo "+ ollama pull $NOMIC_OLLAMA_MODEL"
     docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile ollama exec -T ollama ollama pull "$NOMIC_OLLAMA_MODEL"
 
-    # Generative tasks → remote endpoint + API key; embeddings → local Ollama nomic.
+    # Generative tasks → remote endpoint + API key (one shared default each,
+    # D56; set_llm_base_urls swept any old-format per-task lines); embeddings
+    # → local Ollama nomic.
     set_llm_base_urls "$base_url"
-    for task in $LLM_TASKS; do
-      set_prop "infochat.llm.${task}.api-key" '${INFOCHAT_LLM_API_KEY}'
-    done
+    set_prop infochat.llm.default.api-key '${INFOCHAT_LLM_API_KEY}'
     # Drop any infochat.embeddings.api-key a prior (mis-wired) remote run wrote:
     # embeddings now hit the local Ollama nomic endpoint and carry no key, so a
     # lingering ${INFOCHAT_LLM_API_KEY} reference would be stale and contradict the

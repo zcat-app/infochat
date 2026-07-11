@@ -135,6 +135,92 @@ class LlmRouterStartupGuardTest {
     }
 
     @Test
+    void localModelInheritingRemoteSharedDefaultIsFlaggedNamingTheDefaultKey() {
+        // The M1-597 incident judged EFFECTIVELY (D56): the task has NO
+        // per-task base-url, so its route inherits the shared default —
+        // remote — while its model stays a local-runtime name. The scan
+        // must judge the effective triple, and the fix line must name the
+        // DEFAULT key: the per-task key the operator never wrote is the
+        // wrong line to point them at.
+        Map<String, String> snapshot = new LinkedHashMap<>();
+        snapshot.put(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL, DEEPSEEK_BASE_URL);
+        snapshot.put(TAGGER_MODEL_KEY, "llama3.1:8b");
+
+        List<String> findings = LlmRouterStartupGuard.detectProviderModelMismatches(snapshot);
+        String finding = onlyFindingFor(findings, "TAGGER");
+        assertTrue(finding.contains("TAGGER"), "names the task; got: " + finding);
+        assertTrue(finding.contains("api.deepseek.com"),
+            "names the effective (inherited) host; got: " + finding);
+        assertTrue(finding.contains(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL),
+            "the fix must name the shared default key the value came from; got: " + finding);
+        assertFalse(finding.contains(TAGGER_BASE_URL_KEY),
+            "the fix must not point at the per-task key the operator never wrote; got: " + finding);
+    }
+
+    @Test
+    void providerNativeModelInheritingRemoteSharedDefaultIsNotFlagged() {
+        // The supported D56 remote shape: the task inherits the remote
+        // shared default with a provider-native model — a consistent
+        // effective route, proving inheritance lands on the remote endpoint
+        // rather than any loopback fallback. Nothing to flag, even fail-fast.
+        Map<String, String> snapshot = new LinkedHashMap<>();
+        snapshot.put(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL, DEEPSEEK_BASE_URL);
+        snapshot.put(TAGGER_MODEL_KEY, "deepseek-chat");
+
+        assertTrue(LlmRouterStartupGuard.detectProviderModelMismatches(snapshot).isEmpty(),
+            "a provider-native model on the inherited remote default must not be flagged");
+        assertDoesNotThrow(() -> LlmRouterStartupGuard.checkProviderModelMismatch(snapshot, true),
+            "the supported inherited-remote shape must not abort even in fail-fast mode");
+    }
+
+    @Test
+    void orphanPerTaskApiKeyWithNoPerTaskBaseUrlIsFlaggedNamingBothKeys() {
+        // The redteam re-audit shape (2026-07-11): a per-task api-key with NO
+        // per-task base-url rides the shared default endpoint carrying the
+        // per-task credential. The advisory scan must flag exactly that task,
+        // naming both keys, when a shared default base-url exists.
+        Map<String, String> snapshot = new LinkedHashMap<>();
+        snapshot.put(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL, DEEPSEEK_BASE_URL);
+        snapshot.put("infochat.llm.chat.api-key", "sk-orphaned-provider-b-key");
+
+        List<String> findings = LlmRouterStartupGuard.detectOrphanPerTaskApiKeys(snapshot);
+        assertTrue(findings.size() == 1, "exactly one orphan must flag; got: " + findings);
+        String finding = findings.get(0);
+        assertTrue(finding.contains("CHAT_AGENT"), "names the task; got: " + finding);
+        assertTrue(finding.contains("infochat.llm.chat.api-key"),
+            "names the orphaned per-task api-key key; got: " + finding);
+        assertTrue(finding.contains(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL),
+            "names the shared default the key rides to; got: " + finding);
+        assertFalse(finding.contains("sk-orphaned-provider-b-key"),
+            "the finding must NEVER echo the api-key value; got: " + finding);
+    }
+
+    @Test
+    void perTaskApiKeyWithMatchingPerTaskBaseUrlIsNotOrphanFlagged() {
+        // A real pin — both lines present — is not an orphan: the per-task key
+        // travels to the per-task endpoint it was minted for.
+        Map<String, String> snapshot = new LinkedHashMap<>();
+        snapshot.put(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL, DEEPSEEK_BASE_URL);
+        snapshot.put(CHAT_BASE_URL_KEY, OPENAI_FORMAT_REMOTE_BASE_URL);
+        snapshot.put("infochat.llm.chat.api-key", "sk-provider-b-key");
+
+        assertTrue(LlmRouterStartupGuard.detectOrphanPerTaskApiKeys(snapshot).isEmpty(),
+            "a per-task api-key WITH its per-task base-url is a real pin, not an orphan");
+    }
+
+    @Test
+    void orphanPerTaskApiKeyWithNoSharedDefaultIsNotFlagged() {
+        // With no shared default base-url, a task lacking a per-task base-url
+        // fails the required-config boot check instead — the orphan WARN would
+        // be redundant, so it must not fire.
+        Map<String, String> snapshot = new LinkedHashMap<>();
+        snapshot.put("infochat.llm.chat.api-key", "sk-key");
+
+        assertTrue(LlmRouterStartupGuard.detectOrphanPerTaskApiKeys(snapshot).isEmpty(),
+            "no shared default base-url → the orphan WARN is redundant with the boot failure");
+    }
+
+    @Test
     void anthropicRemoteShapeIsNotFlagged() {
         // Supported shape 2: provider=anthropic against an Anthropic host with
         // claude-* models — the correctly-configured Anthropic remote.

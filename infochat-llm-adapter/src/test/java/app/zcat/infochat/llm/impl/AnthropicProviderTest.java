@@ -405,6 +405,122 @@ class AnthropicProviderTest {
             "a positive max-tokens must resolve at the startup scan");
     }
 
+    @Test
+    void sharedDefaultKeysAloneResolveAndCarryDefaultApiKey() {
+        // D56 mirror of OpenAiCompatibleProviderTest: ONLY the shared
+        // infochat.llm.default.{base-url,api-key} plus the per-task
+        // model/max-tokens — the task must inherit the endpoint and the
+        // key, sent as x-api-key (Anthropic auth, not Bearer).
+        AtomicReference<String> capturedApiKey = new AtomicReference<>();
+        mockServer.createContext("/messages", exchange -> {
+            capturedApiKey.set(exchange.getRequestHeaders().getFirst("x-api-key"));
+            byte[] resp = successResponse("ok").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(resp);
+            }
+        });
+        mockServer.start();
+        Config cfg = new StubConfig(Map.of(
+            LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL, baseUrl,
+            LlmRouter.CONFIG_KEY_DEFAULT_API_KEY, "shared-secret-key",
+            "infochat.llm.summarizer.model", MODEL,
+            "infochat.llm.summarizer.max-tokens", "1024"));
+        AnthropicProvider provider = new AnthropicProvider(cfg, HttpClient.newHttpClient());
+
+        LlmResponse response = assertDoesNotThrow(
+            () -> provider.generate(ModelTask.SUMMARIZER, "sys", "usr"),
+            "with only the shared default keys set, SUMMARIZER must resolve and call");
+        assertEquals("ok", response.text(), "the call must land on the shared default endpoint");
+        assertEquals("shared-secret-key", capturedApiKey.get(),
+            "the inherited default api-key must be sent as x-api-key");
+    }
+
+    @Test
+    void perTaskBaseUrlAndApiKeyBeatTheSharedDefault() {
+        // Precedence mirror: the per-task override wins over the shared
+        // default. The default names a connection-refused port, so wrong
+        // precedence would fail the call itself.
+        AtomicReference<String> capturedApiKey = new AtomicReference<>();
+        mockServer.createContext("/messages", exchange -> {
+            capturedApiKey.set(exchange.getRequestHeaders().getFirst("x-api-key"));
+            byte[] resp = successResponse("ok").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(resp);
+            }
+        });
+        mockServer.start();
+        Config cfg = new StubConfig(Map.of(
+            LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL, "http://localhost:9",
+            LlmRouter.CONFIG_KEY_DEFAULT_API_KEY, "default-key",
+            "infochat.llm.summarizer.base-url", baseUrl,
+            "infochat.llm.summarizer.api-key", "per-task-key",
+            "infochat.llm.summarizer.model", MODEL,
+            "infochat.llm.summarizer.max-tokens", "1024"));
+        AnthropicProvider provider = new AnthropicProvider(cfg, HttpClient.newHttpClient());
+
+        LlmResponse response = assertDoesNotThrow(
+            () -> provider.generate(ModelTask.SUMMARIZER, "sys", "usr"),
+            "the per-task base-url must win over the shared default");
+        assertEquals("ok", response.text(), "the call must land on the per-task endpoint");
+        assertEquals("per-task-key", capturedApiKey.get(),
+            "the per-task api-key must win over the shared default key");
+    }
+
+    @Test
+    void perTaskBaseUrlPinDoesNotInheritTheSharedApiKey() {
+        // The coupled-axes rule (redteam 2026-07-11): a task whose base-url
+        // is pinned per-task — with no per-task api-key — must send NO
+        // x-api-key header, not the deployment-wide key the pinned endpoint
+        // was never minted for. Mirrors OpenAiCompatibleProviderTest.
+        AtomicReference<String> capturedApiKey = new AtomicReference<>("unset");
+        mockServer.createContext("/messages", exchange -> {
+            capturedApiKey.set(exchange.getRequestHeaders().getFirst("x-api-key"));
+            byte[] resp = successResponse("ok").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(resp);
+            }
+        });
+        mockServer.start();
+        Config cfg = new StubConfig(Map.of(
+            LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL, "http://localhost:9",
+            LlmRouter.CONFIG_KEY_DEFAULT_API_KEY, "default-key",
+            "infochat.llm.summarizer.base-url", baseUrl,
+            "infochat.llm.summarizer.model", MODEL,
+            "infochat.llm.summarizer.max-tokens", "1024"));
+        AnthropicProvider provider = new AnthropicProvider(cfg, HttpClient.newHttpClient());
+
+        LlmResponse response = assertDoesNotThrow(
+            () -> provider.generate(ModelTask.SUMMARIZER, "sys", "usr"),
+            "a pinned base-url without a per-task key must still call (keyless)");
+        assertEquals("ok", response.text(), "the call must land on the pinned endpoint");
+        assertNull(capturedApiKey.get(),
+            "NO x-api-key header may accompany a per-task base-url pin without a "
+                + "per-task api-key — the shared default key must not follow the pin");
+    }
+
+    @Test
+    void missingBaseUrlOnBothAxesFailsStartupScanNamingBothKeys() {
+        // Neither the per-task base-url nor the shared default is set: the
+        // startup scan must refuse naming BOTH settable keys — the loud
+        // replacement for the M1-597 silent-fallback shape.
+        Config cfg = new StubConfig(Map.of(
+            "infochat.llm.summarizer.model", MODEL,
+            "infochat.llm.summarizer.max-tokens", "1024"));
+        AnthropicProvider provider = new AnthropicProvider(cfg, HttpClient.newHttpClient());
+
+        LlmProvider.TaskConfigUnresolvableException ex = assertThrows(
+            LlmProvider.TaskConfigUnresolvableException.class,
+            () -> provider.assertTaskConfigResolvable(ModelTask.SUMMARIZER),
+            "a task with no effective base-url must fail the startup scan");
+        assertTrue(ex.getMessage().contains("infochat.llm.summarizer.base-url"),
+            "the failure must name the per-task key; got: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL),
+            "the failure must name the shared default key; got: " + ex.getMessage());
+    }
+
     private AnthropicProvider providerFor(ModelTask task, String apiKey) {
         String seg = task.keySegment();
         Config cfg = new StubConfig(Map.of(

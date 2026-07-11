@@ -135,6 +135,30 @@ based on (in priority order):
    the model can produce the target language directly).
 3. The profile default for that task.
 
+**One LLM service by default (D56).** The provider-routing chain above
+selects *which wire dialect* serves a task; the *endpoint and
+credential* resolve separately, on a shared-default-with-override
+model: a task's `base-url` uses the per-task property when set, else
+the deployment-wide `infochat.llm.default.base-url`; its `api-key`
+uses the per-task property when set, else — ONLY when the base-url
+also resolved from the shared default — `infochat.llm.default.api-key`.
+The coupling is a security property: **the default credential travels
+only to the default endpoint.** A task whose base-url is pinned
+per-task never inherits the shared key implicitly (the pinned endpoint
+is a party the key was not minted for); a pinned route that needs a
+credential states it explicitly. In practice one deployment runs one
+LLM service, so the endpoint is stated once and every task — including
+any task added in a future release — inherits it; a per-task override
+still wins when present. **A task with no effective base-url (neither
+key set) refuses startup** with an error naming both settable keys —
+never a silent per-call failure. No per-task endpoint defaults are
+baked into the application: the bare-metal profiles ship a
+profile-scoped shared default pointing at the on-host runtime, and the
+`remote-llm` profile deliberately ships none, so an operator config
+that predates a newly added task fails boot loudly instead of
+inheriting a loopback address the host may not serve. Model choice
+stays per-task (task tuning), not endpoint-inherited.
+
 **Local-only is the most-restrictive posture.** When the operator
 sets the explicit local-only property, the router never picks a
 remote provider — and a per-task override pointing to a remote
@@ -159,11 +183,19 @@ is intentional, not incidental: each service routes live LLM calls
 and embedding generation run in the Collector's ingest pipeline; the
 chat, summarizer, and translator call sites run in the Provider), and both services load
 the same LLM adapter, so each validates the configuration it boots
-with. The guard's scan covers the per-task base-urls, the embedding
-base-url, per-task provider overrides (and the configured default
-provider) that name a cloud-only provider, and cloud-only providers
-made reachable for non-English scopes via a per-provider language
-capability key.
+with. The guard's scan covers the per-task base-urls **as effectively
+resolved** (the per-task key, else the shared default — the same
+resolution the providers perform, so an off-host shared default is an
+offender for every task that inherits it, reported against the default
+key), the embedding base-url, per-task provider overrides (and the
+configured default provider) that name a cloud-only provider, and
+cloud-only providers made reachable for non-English scopes via a
+per-provider language capability key. An **advisory** scan additionally
+warns when a task carries a per-task `api-key` but no per-task
+`base-url` — that credential rides the shared default endpoint (a party
+it may not be minted for), the mirror of the credential-coupling rule;
+it is a WARN, not a boot failure, because the same shape is the
+legitimate "separate credential for the default endpoint" config.
 
 **No fallback chain in v1.** The router resolves `(ModelTask,
 scope_language)` to **exactly one** `LlmProvider`; an unreachable

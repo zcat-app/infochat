@@ -155,7 +155,8 @@ class LlamacppWiringTest {
                 "summarizer timeout-ms must be the local-backend vps recommendation");
         assertEquals("400", props.get("infochat.llm.summarizer.max-tokens"),
                 "summarizer max-tokens must be the local-backend vps recommendation");
-        assertEquals(LLAMACPP_URL, props.get("infochat.llm.chat.base-url"));
+        assertEquals(LLAMACPP_URL, props.get("infochat.llm.default.base-url"),
+                "the generative endpoint must be the shared default key (D56/M1-603)");
         assertEquals(LLAMACPP_EMBED_URL, props.get("infochat.embeddings.base-url"),
                 "embeddings must point at the second llama.cpp instance");
         assertEquals(EMB_GGUF, props.get("infochat.embeddings.model"));
@@ -213,7 +214,8 @@ class LlamacppWiringTest {
         Map<String, String> props = runWizard(tmp, "llamacpp\n\nollama\n" + ACCEPT_TIMING_DEFAULTS);
 
         assertEquals(GEN_GGUF, props.get("infochat.llm.chat.model"));
-        assertEquals(LLAMACPP_URL, props.get("infochat.llm.chat.base-url"));
+        assertEquals(LLAMACPP_URL, props.get("infochat.llm.default.base-url"),
+                "the generative endpoint must be the shared default key (D56/M1-603)");
         assertEquals(OLLAMA_URL, props.get("infochat.embeddings.base-url"),
                 "embeddings must point at the co-running Ollama endpoint");
         assertEquals(OLLAMA_NOMIC, props.get("infochat.embeddings.model"),

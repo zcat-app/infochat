@@ -31,7 +31,9 @@ import java.util.Set;
  * @Startup guard, run by BOTH the Collector and the Provider, that
  * fails Quarkus boot when {@code infochat.llm.local-only=true} is set
  * alongside ANY off-host LLM or embedding route: a per-task
- * {@code base-url} or the {@code infochat.embeddings.base-url} that
+ * {@code base-url} (or the shared {@code infochat.llm.default.base-url}
+ * a task without a per-task key inherits, D56) or the
+ * {@code infochat.embeddings.base-url} that
  * resolves to a non-loopback host, a per-task provider override or the
  * {@code infochat.llm.default.provider} default naming a cloud-only
  * provider (e.g. {@code anthropic}), OR a cloud-only provider made
@@ -208,6 +210,16 @@ public class LlmRouterStartupGuard {
     private static final Set<String> LOCAL_RUNTIME_MODEL_PREFIXES =
         Set.of("llama", "nomic", "qwen", "mistral");
 
+    /**
+     * Non-secret presence marker the snapshot stores in place of a configured
+     * api-key value (redteam re-audit 2026-07-11): the guard needs to know an
+     * api-key is CONFIGURED (for the orphan-key scan) but must never hold the
+     * raw credential in the snapshot map. Any non-empty value would do; a
+     * self-describing literal makes an accidental log-dump legible instead of
+     * leaking a secret.
+     */
+    private static final String API_KEY_CONFIGURED_MARKER = "<configured>";
+
     @Inject
     Config config;
 
@@ -225,6 +237,10 @@ public class LlmRouterStartupGuard {
         boolean mismatchFailFast =
             config.getOptionalValue(CONFIG_KEY_MISMATCH_FAIL_FAST, Boolean.class).orElse(false);
         checkProviderModelMismatch(snapshot, mismatchFailFast);
+        // Advisory: an orphan per-task api-key with no per-task base-url sends
+        // that credential to the SHARED default endpoint (redteam re-audit,
+        // M1-603). WARN-only — the shape is also a legitimate config.
+        warnOrphanPerTaskApiKeys(snapshot);
         router.assertAllTasksResolve();
     }
 
@@ -283,8 +299,11 @@ public class LlmRouterStartupGuard {
         }
         for (PerTaskRoute route : perTaskRoutes(snapshot)) {
             if (route.offHostBaseUrl() != null) {
+                // baseUrlSourceKey, not baseUrlKeyFor(task): a task inheriting
+                // an off-host SHARED default must name the default key — the
+                // per-task key the operator never wrote is the wrong fix line.
                 offenders.add("task=" + route.task().name()
-                    + " key=" + baseUrlKeyFor(route.task())
+                    + " key=" + route.baseUrlSourceKey()
                     + " base-url=" + LlmHttpSupport.redactUserInfo(route.offHostBaseUrl()));
             }
             // A per-task provider override naming a cloud-only provider is
@@ -460,13 +479,21 @@ public class LlmRouterStartupGuard {
         String effectiveDefault = configuredDefault.isEmpty()
             ? OpenAiCompatibleProvider.PROVIDER_NAME : configuredDefault;
 
+        // Effective base-url mirrors the providers' resolution (D56): the
+        // per-task key wins, else the shared default — so the scan judges
+        // the route a call would actually take, and a default-inherited
+        // finding's fix line names the key that supplied the value.
+        String defaultBaseUrl = stripOrEmpty(snapshot.get(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL));
         List<String> findings = new ArrayList<>();
         for (ModelTask task : ModelTask.values()) {
             String override = stripOrEmpty(snapshot.get(providerKeyFor(task))).toLowerCase(Locale.ROOT);
             String provider = override.isEmpty() ? effectiveDefault : override;
-            String baseUrl = stripOrEmpty(snapshot.get(baseUrlKeyFor(task)));
+            String perTaskBaseUrl = stripOrEmpty(snapshot.get(baseUrlKeyFor(task)));
+            String baseUrl = perTaskBaseUrl.isEmpty() ? defaultBaseUrl : perTaskBaseUrl;
+            String baseUrlSourceKey = perTaskBaseUrl.isEmpty()
+                ? LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL : baseUrlKeyFor(task);
             String model = stripOrEmpty(snapshot.get(modelKeyFor(task)));
-            String finding = mismatchFinding(task, provider, baseUrl, model);
+            String finding = mismatchFinding(task, provider, baseUrl, baseUrlSourceKey, model);
             if (finding != null) {
                 findings.add(finding);
             }
@@ -496,7 +523,7 @@ public class LlmRouterStartupGuard {
      * — a missing required base-url surfaces separately at first call).
      */
     private static @Nullable String mismatchFinding(ModelTask task, String provider, String baseUrl,
-            String model) {
+            String baseUrlSourceKey, String model) {
         if (baseUrl.isEmpty()) {
             return null;
         }
@@ -510,7 +537,7 @@ public class LlmRouterStartupGuard {
                 + " not " + ANTHROPIC_API_HOST + "/*." + ANTHROPIC_API_HOST + " and the path carries no"
                 + " Anthropic route such as /anthropic); the Anthropic dialect HTTP-400s against an"
                 + " OpenAI-format endpoint."
-                + " Fix: point " + baseUrlKeyFor(task) + " at an Anthropic-format endpoint (an "
+                + " Fix: point " + baseUrlSourceKey + " at an Anthropic-format endpoint (an "
                 + ANTHROPIC_API_HOST + " host, or a provider's /anthropic route), or set "
                 + providerKeyFor(task) + "=" + OpenAiCompatibleProvider.PROVIDER_NAME + ".";
         }
@@ -525,7 +552,7 @@ public class LlmRouterStartupGuard {
                 + " (llama*/nomic*/qwen*/mistral*), but the base-url host is a remote endpoint that"
                 + " will not serve it; every call will HTTP 400/404."
                 + " Fix: set " + modelKeyFor(task) + " to a model the remote provider actually"
-                + " serves, or point " + baseUrlKeyFor(task) + " at your local Ollama.";
+                + " serves, or point " + baseUrlSourceKey + " at your local Ollama.";
         }
         return null;
     }
@@ -616,25 +643,107 @@ public class LlmRouterStartupGuard {
     }
 
     /**
-     * The per-task off-host facts both branches reuse, computed once per
-     * task: {@code offHostBaseUrl} is the task's base-url when it resolves
-     * off-host (else null), and {@code overrideProvider} is the per-task
-     * provider override lowercased (empty string when unset — the caller
-     * decides cloud-ness via {@link #REMOTE_PROVIDER_NAMES}). Single-sourcing
-     * this keeps the local-only fatal scan and the non-local-only disclosure
-     * WARN from drifting on what counts as an off-host route.
+     * The per-task api-key key {@code infochat.llm.<keySegment>.api-key},
+     * derived the same way the concrete providers read it. Package-private
+     * so the orphan-key scan and the snapshot can spell it identically.
      */
-    private record PerTaskRoute(ModelTask task, @Nullable String offHostBaseUrl, String overrideProvider) {
+    static String apiKeyKeyFor(ModelTask task) {
+        return task.configPrefix() + "api-key";
+    }
+
+    /**
+     * Advisory scan (redteam re-audit 2026-07-11, INFO-LEAK low): a task with
+     * a per-task api-key but NO per-task base-url sends that per-task
+     * credential to the SHARED default endpoint — it inherits
+     * {@link LlmRouter#CONFIG_KEY_DEFAULT_BASE_URL} — which is a party the
+     * per-task key was not minted for when the key belongs to a previously
+     * pinned foreign provider (the shape a partial manual unpin leaves: the
+     * per-task base-url line deleted, its api-key line orphaned). It is the
+     * MIRROR of the coupling rule that stops the DEFAULT key from following a
+     * per-task base-url pin.
+     *
+     * <p>Advisory, never fatal, and it does not gate on
+     * {@link #CONFIG_KEY_MISMATCH_FAIL_FAST}: the same shape is the legitimate
+     * "one default endpoint, a separate billing credential for this task"
+     * config, which only the operator can disambiguate — a WARN surfaces the
+     * key's real destination without refusing a valid deployment. Fires only
+     * when a shared default base-url exists (else a task with no per-task
+     * base-url fails the required-config boot check and this WARN would be
+     * redundant). Package-private pure detector so the test pins exactly which
+     * tasks flag without reasoning about log capture, mirroring
+     * {@link #detectProviderModelMismatches}.
+     */
+    static List<String> detectOrphanPerTaskApiKeys(Map<String, String> snapshot) {
+        String defaultBaseUrl = stripOrEmpty(snapshot.get(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL));
+        if (defaultBaseUrl.isEmpty()) {
+            return List.of();
+        }
+        List<String> findings = new ArrayList<>();
+        for (ModelTask task : ModelTask.values()) {
+            boolean apiKeyPresent = !stripOrEmpty(snapshot.get(apiKeyKeyFor(task))).isEmpty();
+            boolean baseUrlPresent = !stripOrEmpty(snapshot.get(baseUrlKeyFor(task))).isEmpty();
+            if (apiKeyPresent && !baseUrlPresent) {
+                findings.add("LlmRouterStartupGuard: task=" + task.name()
+                    + " has " + apiKeyKeyFor(task) + " set but no " + baseUrlKeyFor(task)
+                    + " — the per-task api-key will be sent to the SHARED default endpoint ("
+                    + LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL + "="
+                    + LlmHttpSupport.redactUserInfo(defaultBaseUrl)
+                    + "), not a pinned per-task endpoint. If the key is stale (a per-task base-url"
+                    + " was removed without its api-key), delete " + apiKeyKeyFor(task)
+                    + "; if it is a deliberate separate credential for the default endpoint,"
+                    + " ignore this line.");
+            }
+        }
+        return findings;
+    }
+
+    private static void warnOrphanPerTaskApiKeys(Map<String, String> snapshot) {
+        for (String finding : detectOrphanPerTaskApiKeys(snapshot)) {
+            LOG.warn(finding);
+        }
+    }
+
+    /**
+     * The per-task off-host facts both branches reuse, computed once per
+     * task: {@code offHostBaseUrl} is the task's EFFECTIVE base-url (the
+     * per-task key, else the shared {@link LlmRouter#CONFIG_KEY_DEFAULT_BASE_URL}
+     * default — the same resolution the providers perform, D56) when it
+     * resolves off-host (else null); {@code baseUrlSourceKey} is the key
+     * that supplied that value, so an offender line names the exact line
+     * the operator must fix (a default-inherited route names the default
+     * key, not the per-task key the operator never wrote); and
+     * {@code overrideProvider} is the per-task provider override lowercased
+     * (empty string when unset — the caller decides cloud-ness via
+     * {@link #REMOTE_PROVIDER_NAMES}). Single-sourcing this keeps the
+     * local-only fatal scan and the non-local-only disclosure WARN from
+     * drifting on what counts as an off-host route.
+     */
+    private record PerTaskRoute(ModelTask task, @Nullable String offHostBaseUrl,
+            String baseUrlSourceKey, String overrideProvider) {
     }
 
     private static List<PerTaskRoute> perTaskRoutes(Map<String, String> snapshot) {
+        String defaultBaseUrl = stripOrEmpty(snapshot.get(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL));
+        // Resolve the shared default's loopback-ness ONCE — per-task
+        // resolution would repeat the identical DNS lookup for every task
+        // that inherits it.
+        boolean defaultRemote = isRemoteBaseUrl(defaultBaseUrl);
         List<PerTaskRoute> routes = new ArrayList<>();
         for (Map.Entry<ModelTask, String> kv : PER_TASK_BASE_URL_KEYS.entrySet()) {
-            String baseUrl = stripOrEmpty(snapshot.get(kv.getValue()));
-            String offHostBaseUrl = isRemoteBaseUrl(baseUrl) ? baseUrl : null;
+            String perTaskBaseUrl = stripOrEmpty(snapshot.get(kv.getValue()));
+            String offHostBaseUrl;
+            String baseUrlSourceKey;
+            if (perTaskBaseUrl.isEmpty()) {
+                offHostBaseUrl = defaultRemote ? defaultBaseUrl : null;
+                baseUrlSourceKey = LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL;
+            } else {
+                offHostBaseUrl = isRemoteBaseUrl(perTaskBaseUrl) ? perTaskBaseUrl : null;
+                baseUrlSourceKey = kv.getValue();
+            }
             String overrideProvider = stripOrEmpty(snapshot.get(providerKeyFor(kv.getKey())))
                 .toLowerCase(Locale.ROOT);
-            routes.add(new PerTaskRoute(kv.getKey(), offHostBaseUrl, overrideProvider));
+            routes.add(new PerTaskRoute(kv.getKey(), offHostBaseUrl, baseUrlSourceKey,
+                overrideProvider));
         }
         return routes;
     }
@@ -788,6 +897,15 @@ public class LlmRouterStartupGuard {
             config.getOptionalValue(CONFIG_KEY_EMBEDDINGS_BASE_URL, String.class).orElse(""));
         snap.put(LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER,
             config.getOptionalValue(LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER, String.class).orElse(""));
+        // The shared default base-url (D56) every task inherits when its
+        // per-task base-url is unset. The shared default API-KEY is
+        // deliberately NOT snapshotted: no scan reads it, and holding a raw
+        // secret in the map the WARN/fatal paths iterate widens the leak
+        // surface a future snapshot-dump could expose (redteam re-audit
+        // 2026-07-11, out-of-model). No base-url value that reaches a log line
+        // does so except through redactUserInfo.
+        snap.put(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL,
+            config.getOptionalValue(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL, String.class).orElse(""));
         for (Map.Entry<ModelTask, String> kv : PER_TASK_BASE_URL_KEYS.entrySet()) {
             snap.put(kv.getValue(), config.getOptionalValue(kv.getValue(), String.class).orElse(""));
             String providerKey = providerKeyFor(kv.getKey());
@@ -797,6 +915,13 @@ public class LlmRouterStartupGuard {
             // base-url and provider reads above.
             String modelKey = modelKeyFor(kv.getKey());
             snap.put(modelKey, config.getOptionalValue(modelKey, String.class).orElse(""));
+            // Per-task api-key PRESENCE only, needed for the orphan-key scan —
+            // stored as a non-secret marker, NEVER the raw value, so the map
+            // holds no credential (redteam re-audit 2026-07-11). A non-empty
+            // marker means "configured"; the scan needs only presence.
+            String apiKeyKey = apiKeyKeyFor(kv.getKey());
+            snap.put(apiKeyKey, config.getOptionalValue(apiKeyKey, String.class)
+                .filter(v -> !v.isBlank()).isPresent() ? API_KEY_CONFIGURED_MARKER : "");
         }
         for (String remoteProvider : REMOTE_PROVIDER_NAMES) {
             String languagesKey = languagesKeyFor(remoteProvider);

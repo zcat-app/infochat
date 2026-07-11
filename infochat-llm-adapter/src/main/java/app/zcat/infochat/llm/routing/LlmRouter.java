@@ -85,6 +85,32 @@ public class LlmRouter {
     public static final String CONFIG_KEY_DEFAULT_PROVIDER = "infochat.llm.default.provider";
 
     /**
+     * Configuration key for the shared default endpoint every
+     * {@link ModelTask} inherits when its per-task
+     * {@code infochat.llm.<task>.base-url} is unset (per-task always
+     * wins). One deployment runs one LLM service in practice (D56), so
+     * the endpoint lives here once instead of being fanned out per
+     * task; a task with NEITHER key refuses startup rather than
+     * inheriting a baked address that may not be served on this host
+     * (the M1-597 classifier incident).
+     */
+    public static final String CONFIG_KEY_DEFAULT_BASE_URL = "infochat.llm.default.base-url";
+
+    /**
+     * Companion shared default for the per-task
+     * {@code infochat.llm.<task>.api-key}: per-task wins; else this key
+     * is inherited ONLY when the task's base-url also resolved from
+     * {@link #CONFIG_KEY_DEFAULT_BASE_URL}; else empty (local backends
+     * need no key). The coupling is a security property (redteam
+     * 2026-07-11, M1-603): the default credential travels only to the
+     * default endpoint — a task whose base-url is pinned per-task never
+     * receives the deployment-wide key implicitly, because the pinned
+     * endpoint is a party that key was not minted for. A pinned route
+     * that needs the key restates it via the per-task api-key.
+     */
+    public static final String CONFIG_KEY_DEFAULT_API_KEY = "infochat.llm.default.api-key";
+
+    /**
      * Single message for the "no provider registered" misconfiguration,
      * shared by both detection sites — the test-seam constructor's
      * {@code entries.isEmpty()} check and the CDI factory's
