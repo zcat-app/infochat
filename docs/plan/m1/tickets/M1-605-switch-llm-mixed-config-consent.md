@@ -1,7 +1,7 @@
 ---
 id: M1-605
 title: "switch-llm.sh must not silently sweep a hand-pinned per-task route on an all-default run: require explicit confirmation when the current config is mixed/pinned (M1-603 consent regression)"
-status: pending
+status: done
 created: 2026-07-11
 last_updated: 2026-07-11
 blocked_by: []
@@ -90,14 +90,59 @@ spec_refs:
 decision_refs:
   - D56
 redteam_findings: []
-redteam_audits: []
-reviews: []
+redteam_audits:
+  - date: 2026-07-11
+    verdict: CLEAN
+    base: main
+    head: m1/M1-605-switch-llm-mixed-config-consent (working tree)
+    verdict_file: docs/plan/m1/redteam/M1-605-2026-07-11.md
+    out_of_model_count: 2
+    note: |
+      In-progress audit before commit. CLEAN — the consent gate hardens BEYOND
+      the threat model (no spec commitment to refuse an Enter-default sweep) and
+      weakens neither the secrets-handling nor the per-task privacy-disclosure
+      commitment. Two advisory out-of-model items: (1) pin-naming echoes the
+      per-task api-key line, which by convention is the literal
+      ${INFOCHAT_LLM_API_KEY} reference (never a raw secret) — a
+      captured-console hardening candidate, not adversary-reachable; (2) typing
+      the CURRENT backend to reach the model prompts counts as consent and
+      sweeps the pin — the ticket's chosen typing==consent semantics, fully
+      disclosed. Neither warrants blocking; recommendations surfaced in chat.
+reviews:
+  - round: 1
+    date: 2026-07-11
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 147
+      removed: 16
 escalations: []
 overrides: []
 revisions: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-11
+  verdict: PASS
+  warnings:
+    - >-
+      risk: low is defensible under the check's literal category list, but this
+      ticket's premise is a privacy-consent footgun in a production config
+      mutator; if the fix touches more than the two scoped files, revisit risk
+      before merging.
+    - >-
+      TEST-CHANGES-AUTHORIZED covers "any existing case whose stdin script
+      changes shape" generically; whether allEnterIsByteIdenticalNoOp /
+      allEnterIsByteIdenticalNoOpOverOldFormatRemoteFile need stdin changes is
+      implementation-dependent (their per-task base-url overrides already equal
+      the classified default).
+  blockers: []
 ---
 
 # M1-605: switch-llm must not silently sweep a hand-pinned route

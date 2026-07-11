@@ -201,6 +201,29 @@ fi
 # so an all-Enter run over an old-format file is a no-op too — the file is
 # migrated to the shared-default shape only by a run that actually changes
 # routing. ------------------------------------------------------------------
+
+# A MIXED/PINNED config carries >=1 per-task infochat.llm.<task>.base-url override
+# — a pre-M1-603 fan-out file, or a deliberate hand pin (e.g. chat kept on local
+# ollama for privacy while the rest are remote, D56). Phase 3 sweeps EVERY
+# per-task base-url/api-key line so the shared default wins, so a switch DISCARDS
+# those pins. Collect the exact lines a sweep would remove (before any mutation):
+# their presence gates the M1-605 consent check below and is named before any
+# write. Detection is base-url presence (the acceptance condition); any adjacent
+# per-task api-key line is collected too so a confirmed switch names it as swept.
+pinned_lines=()
+has_pinned_baseurl=0
+for task in $LLM_TASKS; do
+  pin_url="$(get_prop "infochat.llm.${task}.base-url")"
+  if [[ -n "$pin_url" ]]; then
+    has_pinned_baseurl=1
+    pinned_lines+=("infochat.llm.${task}.base-url=$pin_url")
+  fi
+  pin_key="$(get_prop "infochat.llm.${task}.api-key")"
+  if [[ -n "$pin_key" ]]; then
+    pinned_lines+=("infochat.llm.${task}.api-key=$pin_key")
+  fi
+done
+
 key_needs_write=0
 if [[ "$needs_key" -eq 1 ]] && ! grep -qE '^INFOCHAT_LLM_API_KEY=.+' "$SECRETS_FILE" 2>/dev/null; then
   key_needs_write=1
@@ -220,6 +243,23 @@ done
 
 if [[ "$changed" -eq 0 ]]; then
   echo "No changes — the deployment is already on its selected backend. Nothing to do."
+  exit 0
+fi
+
+# --- Phase 2b: consent gate — never SILENTLY sweep a hand-pinned route on an
+# all-default run (M1-605). We are past the no-op exit, so this run WOULD change
+# a config that carries per-task pins. An empty backend answer means the operator
+# only pressed Enter, accepting the classified default — that is NOT explicit
+# consent to discard a privacy-motivated LOCAL pin (or reroute an old-format
+# fan-out). So name every pin a switch would sweep and REFUSE, requiring an
+# explicit typed backend to proceed. A typed backend answer IS the consent and
+# falls through to the switch (Phase 3 still names each swept line before writing).
+if [[ "$has_pinned_baseurl" -eq 1 && -z "$answer" ]]; then
+  echo "This config has hand-pinned per-task LLM routes:"
+  printf '  - %s\n' "${pinned_lines[@]}"
+  echo "Switching every task to '$backend' would REMOVE these pins (the shared default"
+  echo "then applies). Refusing to do that on an Enter-default — nothing was written."
+  echo "Re-run and TYPE the backend (${VALID_BACKENDS// /|}) to confirm the switch."
   exit 0
 fi
 
@@ -259,6 +299,12 @@ fi
 # stale per-task base-url/api-key lines would WIN over the default keys
 # (per-task beats default, D56), silently pinning tasks to the old endpoint
 # and making this switch a no-op for them. Models stay per-task.
+# Name every hand-pinned line this sweep removes so a confirmed switch never
+# SILENTLY discards a route (M1-605); the backup above already preserves them.
+if [[ "$has_pinned_baseurl" -eq 1 ]]; then
+  echo "Sweeping these hand-pinned per-task routes (superseded by the shared default):"
+  printf '  - %s\n' "${pinned_lines[@]}"
+fi
 for task in $LLM_TASKS; do
   del_prop "infochat.llm.${task}.base-url"
   del_prop "infochat.llm.${task}.api-key"

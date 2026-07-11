@@ -29,14 +29,20 @@ import org.junit.jupiter.api.io.TempDir;
  * base-url/api-key lines on a mutating run — a leftover per-task line would
  * win over the default and silently pin its task to the old endpoint.
  *
- * <p>The switcher carries two security-relevant guarantees this test exists to
- * guard: an all-default run is a byte-identical no-op (so an operator can
- * inspect without fear of churn — including over an OLD-format per-task
- * fan-out file, which is migrated only by a run that actually changes
- * routing), and the {@code infochat.embeddings.*} block is never touched
- * (changing it corrupts pgvector retrieval, rejected at Collector startup).
- * It also writes {@code secrets.env} and prints a per-task privacy disclosure
- * whose exposure claims must be correct.
+ * <p>The switcher carries security-relevant guarantees this test exists to
+ * guard. An all-default (Enter-through) run never silently rewrites the config,
+ * but the shape of that guarantee depends on the config: over a UNIFORM
+ * shared-default file (or an old-format file already uniform on the classified
+ * backend) it is a byte-identical no-op, so an operator can inspect without fear
+ * of churn; over a MIXED/PINNED file — one carrying a per-task base-url override,
+ * e.g. chat hand-pinned to local ollama for privacy while the rest are remote —
+ * a bare Enter would sweep the pin, so the switcher REFUSES and names the pins,
+ * requiring an explicit typed backend to confirm (M1-605 consent gate). A
+ * confirmed switch still names each swept per-task line before the write. The
+ * {@code infochat.embeddings.*} block is never touched (changing it corrupts
+ * pgvector retrieval, rejected at Collector startup). It also writes
+ * {@code secrets.env} and prints a per-task privacy disclosure whose exposure
+ * claims must be correct.
  *
  * <p>The harness drives the real {@code prod/switch-llm.sh} with a fake
  * {@code docker} on {@code PATH} (no-ops the {@code compose up} calls) and
@@ -124,6 +130,27 @@ class SwitchLlmWiringTest {
             + "infochat.embeddings.model=nomic-embed-text\n"
             + "infochat.embeddings.dimension=768\n";
 
+    // A MIXED/PINNED config: the deployment is on the shared REMOTE default, but
+    // chat is hand-pinned to local ollama for privacy (a per-task base-url
+    // override that WINS over the default). The deployment classifier reads the
+    // REMOTE default, so a bare-Enter run classifies 'remote' and — before the
+    // M1-605 gate — would sweep the chat pin, silently routing private DMs remote.
+    private static final String BASELINE_MIXED_CHAT_PINNED_LOCAL =
+            "quarkus.profile=remote-llm\n"
+            + "infochat.llm.default.base-url=" + REMOTE_URL + "\n"
+            + "infochat.llm.default.api-key=" + API_KEY_REF + "\n"
+            + "infochat.llm.chat.base-url=" + OLLAMA_URL + "\n"
+            + "infochat.llm.security.model=gpt-remote\n"
+            + "infochat.llm.tagger.model=gpt-remote\n"
+            + "infochat.llm.entity.model=gpt-remote\n"
+            + "infochat.llm.classifier.model=gpt-remote\n"
+            + "infochat.llm.summarizer.model=gpt-remote\n"
+            + "infochat.llm.chat.model=llama3.2:3b\n"
+            + "infochat.llm.translator.model=gpt-remote\n"
+            + "infochat.embeddings.base-url=" + OLLAMA_URL + "\n"
+            + "infochat.embeddings.model=nomic-embed-text\n"
+            + "infochat.embeddings.dimension=768\n";
+
     private static final String EXISTING_SECRETS = "INFOCHAT_LLM_API_KEY=\"preexisting-secret\"\n";
 
     // Prompt order on a remote run: backend, base-url, then one model per task
@@ -175,6 +202,51 @@ class SwitchLlmWiringTest {
 
         assertEquals(BASELINE_NEW_FORMAT_REMOTE, r.rawConfig,
                 "all-default over a new-format (shared-default) file must be byte-identical:\n" + r.output);
+    }
+
+    // --- M1-605 mixed/pinned consent gate (acceptance items 1, 3) ---------------
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void mixedConfigAllEnterRefusesAndDoesNotSilentlySweepThePin(@TempDir Path tmp) throws Exception {
+        // The regression: a bare-Enter run over a MIXED config (chat pinned local,
+        // rest on the remote default) classifies 'remote' and USED to sweep the
+        // chat pin to remote silently. The gate must refuse instead — the file
+        // stays byte-identical, no backup is written, and the pin is named.
+        RunResult r = runSwitch(tmp, BASELINE_MIXED_CHAT_PINNED_LOCAL, EXISTING_SECRETS,
+                STDIN_ALL_ENTER_REMOTE);
+
+        assertEquals(BASELINE_MIXED_CHAT_PINNED_LOCAL, r.rawConfig,
+                "an all-default run over a mixed/pinned config must NOT silently sweep the"
+                        + " per-task pin — the file must be byte-identical:\n" + r.output);
+        assertTrue(listBackups(r.runtimeDir).isEmpty(),
+                "a refused run writes nothing, so it must create no backup:\n" + r.output);
+        assertTrue(r.output.contains("TYPE the backend"),
+                "the refusal must tell the operator to type the backend explicitly:\n" + r.output);
+        assertTrue(r.output.contains("infochat.llm.chat.base-url=" + OLLAMA_URL),
+                "the refusal must NAME the per-task pin it declined to sweep:\n" + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void mixedConfigExplicitBackendConfirmsSweepAndNamesThePinBeforeWriting(@TempDir Path tmp)
+            throws Exception {
+        // A TYPED backend answer is explicit consent: the switch proceeds, but the
+        // swept per-task pin must still be named before the write, and the backup
+        // must cover the run (acceptance item 3).
+        RunResult r = runSwitch(tmp, BASELINE_MIXED_CHAT_PINNED_LOCAL, EXISTING_SECRETS,
+                "remote\n" + "\n".repeat(8));
+
+        assertNull(r.props.get("infochat.llm.chat.base-url"),
+                "a confirmed switch must sweep the chat pin onto the shared default");
+        assertEquals(REMOTE_URL, r.props.get("infochat.llm.default.base-url"),
+                "the shared default must carry the remote endpoint after the confirmed switch");
+        assertTrue(r.output.contains("Sweeping these hand-pinned per-task routes"),
+                "a confirmed switch must announce the sweep before writing:\n" + r.output);
+        assertTrue(r.output.contains("infochat.llm.chat.base-url=" + OLLAMA_URL),
+                "a confirmed switch must NAME the swept pin, never discard it silently:\n" + r.output);
+        assertFalse(listBackups(r.runtimeDir).isEmpty(),
+                "a confirmed mutating switch must back up before writing:\n" + r.output);
     }
 
     // --- embeddings block is untouched (acceptance item 4) ----------------------
