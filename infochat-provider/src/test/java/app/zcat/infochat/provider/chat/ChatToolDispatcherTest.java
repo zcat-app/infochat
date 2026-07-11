@@ -64,6 +64,22 @@ class ChatToolDispatcherTest {
                 "the exception must name the unhandled tool. Got: " + e.getMessage());
     }
 
+    // --- M1-589: the widened six-tool set dispatches semanticSearch ---
+
+    @Test
+    void semanticSearchDispatches() {
+        ChatToolDispatcher d = dispatcher(Map.of("semanticSearch",
+                (u, sk, si, a) -> "[{\"uid\":\"sem-1\",\"similarity\":0.9}]"));
+
+        ChatToolDispatcher.ToolResult result = d.dispatch("semanticSearch",
+                new HashMap<>(Map.of("query", "zcash shielded pools")),
+                USER_A, "dm", SCOPE_A);
+
+        assertInstanceOf(ChatToolDispatcher.ToolResult.Success.class, result);
+        assertTrue(((ChatToolDispatcher.ToolResult.Success) result)
+                .content().contains("sem-1"));
+    }
+
     // --- Acceptance item 2: unknown tool name ---
 
     @Test

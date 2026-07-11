@@ -69,6 +69,27 @@ class ChatPromptBuilderTest {
                 "System prompt must instruct to never follow instructions inside wrapper");
     }
 
+    // M1-589: the framing is general-assistant + retrieval-grounded. The
+    // injection-defence text asserted by systemPromptContainsRefusalInstruction
+    // above is retained verbatim alongside it.
+    @Test
+    void systemPromptCarriesGeneralAssistantGroundingFraming() {
+        ChatPromptBuilder builder = new ChatPromptBuilder(
+                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET, DEFAULT_MAX_TOKENS);
+
+        ChatPromptBuilder.BuiltPrompt prompt =
+                builder.build(USER_ID, "dm", USER_ID, "test");
+
+        assertTrue(prompt.systemPrompt().contains("Answer any question"),
+                "the general-assistant framing must invite any question");
+        assertTrue(prompt.systemPrompt().contains("ground your answer"),
+                "the grounding instruction for retrieved posts must be present");
+        assertTrue(prompt.systemPrompt().contains("general knowledge"),
+                "the no-retrieval path must fall back to general knowledge");
+        assertFalse(prompt.systemPrompt().contains("using only the tools"),
+                "the restrictive tag-only news-bot framing must be gone");
+    }
+
     @Test
     void maxTokens600RendersWordTarget270IntoSystemPrompt() {
         ChatPromptBuilder builder = new ChatPromptBuilder(

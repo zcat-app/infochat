@@ -64,6 +64,8 @@ public class ChatAgent {
           + "Available tools:\n"
           + "- searchPosts {\"tags\": [\"tag1\"], \"window\": \"P7D\", \"limit\": 10}"
           + " — search posts by tags within a time window\n"
+          + "- semanticSearch {\"query\": \"free-text topic\", \"limit\": 10}"
+          + " — find posts semantically related to a free-text query\n"
           + "- getPost {\"uid\": \"post-uid\"} — retrieve a single post by UID\n"
           + "- getReferences {\"uid\": \"post-uid\"} — get references for a post\n"
           + "- recallMemory {\"keywords\": [\"keyword1\", \"keyword2\"]}"
@@ -183,9 +185,14 @@ public class ChatAgent {
             if (slot.isCancelled()) {
                 return new ChatTurnResult(null, null);
             }
-            // LLM unreachable or any other failure → friendly error.
-            // No session advance, no memory write, no tool invocation
-            // beyond what already ran before the failure: a null commit.
+            // LLM unreachable or any other failure → friendly error, null
+            // commit: the turn is discarded with no session advance, no
+            // memory write, and no model-initiated tool call. The
+            // deterministic semantic pre-fetch (doHandle step 3) may already
+            // have run once before the failure — a bounded, read-only,
+            // rate-capped exception the spec's failure-handling bullet names
+            // explicitly (security.md §Failure handling, "Provider-side
+            // (user-facing) LLM failures").
             SafeLog.error(log, "ChatAgent.handle failed for userId=" + userId, e);
             return new ChatTurnResult(
                     bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE, scopeLanguage), null);
@@ -227,23 +234,41 @@ public class ChatAgent {
         // No user-authored prose in the audit row — only actor + scope.
         writeAuditRow(userId, scopeKind, scopeId);
 
-        // 3. Resolve LLM provider for chat task
+        // 3. Digest-first semantic retrieval (M1-589): dispatched
+        // deterministically on EVERY turn — the D28 pre-fetch pattern — so
+        // grounding never depends on the model choosing to call the tool.
+        // Which posts come back, and in what order, is decided by SQL
+        // inside the tool (D19); its distance threshold gates
+        // grounding-vs-general-knowledge — an empty result folds nothing
+        // in and the model answers from general knowledge.
+        // ONE TurnContext spans the whole turn: the pre-fetch and the
+        // model-initiated calls in runToolLoop share its cache and call
+        // budget, so an identical semanticSearch call is served from the
+        // cache instead of re-executing (no duplicate embed + probe) and
+        // the per-turn execution bound stays the single fixed cap the
+        // spec promises (redteam M1-589 2026-07-11, low DOS finding).
+        ChatToolDispatcher.TurnContext turnContext = new ChatToolDispatcher.TurnContext();
+        String semanticBlock = buildSemanticRetrievalBlock(
+                userId, scopeKind, scopeId, userMessage, turnContext);
+
+        // 4. Resolve LLM provider for chat task
         LlmProvider provider = llmRouter.forTask(ModelTask.CHAT_AGENT, scopeLanguage);
 
-        // 4. Run multi-turn tool loop
+        // 5. Run multi-turn tool loop
         String baseSystemPrompt = prompt.systemPrompt();
         String augmentedSystemPrompt = baseSystemPrompt + TOOL_INSTRUCTIONS;
         String finalText = runToolLoop(provider, augmentedSystemPrompt, baseSystemPrompt,
-                prompt.userPrompt(), userId, scopeKind, scopeId);
+                prompt.userPrompt() + semanticBlock, userId, scopeKind, scopeId,
+                turnContext);
 
-        // 5. Strip any residual TOOL_CALL fragments that leaked past the
+        // 6. Strip any residual TOOL_CALL fragments that leaked past the
         // iteration cap — they are internal protocol, not user-visible.
         // A fragment with balanced braces (possibly nested / multi-line) is
         // removed whole; a partial or unbalanced fragment is removed through
         // end-of-text so a malformed multi-line call cannot leak.
         finalText = stripToolCalls(finalText);
 
-        // 6. Intercept the D21 structured refusal marker BEFORE persistence
+        // 7. Intercept the D21 structured refusal marker BEFORE persistence
         // and delivery (security.md §Prompt-injection defenses). The marker
         // is protocol surface: delivering it verbatim leaks the
         // injection-defense convention to the counterparty it defends
@@ -268,12 +293,12 @@ public class ChatAgent {
                     bundleLoader.get(BundleKeys.ERROR_CHAT_REFUSED, scopeLanguage), null);
         }
 
-        // 7. Sanitize BEFORE persist so admin commands never enter the DB
+        // 8. Sanitize BEFORE persist so admin commands never enter the DB
         String sanitized = outputSanitizer.sanitize(finalText);
         int userTokens = ChatSessionRepository.estimateTokens(userMessage);
         int assistantTokens = ChatSessionRepository.estimateTokens(sanitized);
 
-        // 8. Translate if scope language is non-en. The persisted assistant
+        // 9. Translate if scope language is non-en. The persisted assistant
         // turn is the untranslated `sanitized` text (chat memory is
         // English-canonical, like source post bodies); only the delivered
         // reply is translated.
@@ -284,7 +309,7 @@ public class ChatAgent {
             reply = sanitized;
         }
 
-        // 9. Defer persistence + auto-compress to a post-delivery commit.
+        // 10. Defer persistence + auto-compress to a post-delivery commit.
         // Honoring spec messaging.md §Failure handling requires that a
         // permanent delivery failure leave the context window "as if the
         // message was never generated, and chat_memory is not written" —
@@ -300,6 +325,57 @@ public class ChatAgent {
         return new ChatTurnResult(reply, pendingCommit);
     }
 
+    // Mirrors infochat.chat.tool.input-max-length's default (500): the
+    // dispatcher rejects longer strings at its validation boundary, and the
+    // leading 500 chars of a chat message carry enough signal to embed.
+    // Truncating here (rather than injecting the dispatcher's config key)
+    // keeps the ChatAgent constructor stable; the two values must not
+    // drift, or long messages silently lose retrieval.
+    static final int SEMANTIC_QUERY_MAX_CHARS = 500;
+
+    /**
+     * Runs the semanticSearch tool through the dispatcher — the same
+     * validation, caps, and allowlist a model-initiated call gets — on the
+     * turn's shared {@code TurnContext}, so the result is cached for the
+     * tool loop (an identical model-initiated call re-uses it rather than
+     * re-executing) and the pre-fetch consumes a slot of the same per-turn
+     * call budget. Wraps a non-empty result in the SAME UNTRUSTED_CONTENT
+     * delimiters {@link #runToolLoop} applies to tool results: retrieved
+     * titles/URLs are attacker-influenced content, a prompt-injection
+     * surface. Returns {@code ""} whenever there is nothing to ground on —
+     * no candidate under the distance threshold, a validation rejection, or
+     * an embedding/retrieval failure — so every failure mode degrades to
+     * the general-knowledge path instead of aborting the turn (design 05
+     * §5.4.6: tool failures are not catastrophic).
+     */
+    private String buildSemanticRetrievalBlock(UUID userId, String scopeKind,
+                                               UUID scopeId, String userMessage,
+                                               ChatToolDispatcher.TurnContext turnContext) {
+        String query = userMessage.length() > SEMANTIC_QUERY_MAX_CHARS
+                ? userMessage.substring(0, SEMANTIC_QUERY_MAX_CHARS) : userMessage;
+        ChatToolDispatcher.ToolResult result;
+        try {
+            result = toolDispatcher.dispatch("semanticSearch",
+                    Map.of("query", query), userId, scopeKind, scopeId, turnContext);
+        } catch (RuntimeException e) {
+            // Embedding-backend or DB failure. The exception may wrap
+            // LLM/DB internals but never user prose — safe to log (D37).
+            SafeLog.error(log, "semanticSearch pre-fetch failed for userId=" + userId
+                    + "; answering without retrieval", e);
+            return "";
+        }
+        if (!(result instanceof ChatToolDispatcher.ToolResult.Success success)
+                || "[]".equals(success.content())) {
+            return "";
+        }
+        String marker = UUID.randomUUID().toString();
+        return "\n\nPosts from the user's subscribed feed semantically related "
+                + "to their message:\n"
+                + String.format(ChatPromptBuilder.UNTRUSTED_CONTENT_OPEN_FORMAT, marker)
+                + "\n" + success.content() + "\n"
+                + String.format(ChatPromptBuilder.UNTRUSTED_CONTENT_CLOSE_FORMAT, marker);
+    }
+
     /**
      * Multi-turn tool loop. Calls the LLM, parses for tool calls, executes
      * tools, feeds results back, repeats until no tool calls remain or the
@@ -307,9 +383,9 @@ public class ChatAgent {
      */
     String runToolLoop(LlmProvider provider, String systemPrompt,
                        String baseSystemPrompt, String userPrompt,
-                       UUID userId, String scopeKind, UUID scopeId) {
+                       UUID userId, String scopeKind, UUID scopeId,
+                       ChatToolDispatcher.TurnContext turnContext) {
         StringBuilder conversation = new StringBuilder(userPrompt);
-        ChatToolDispatcher.TurnContext turnContext = new ChatToolDispatcher.TurnContext();
 
         for (int i = 0; i < MAX_TOOL_ITERATIONS; i++) {
             LlmResponse response = provider.generate(

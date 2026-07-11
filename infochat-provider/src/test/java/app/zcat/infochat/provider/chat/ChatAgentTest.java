@@ -45,6 +45,10 @@ class ChatAgentTest {
     private final List<String> persistedRoles = new ArrayList<>();
     private int dispatcherCalls;
     private String dispatcherLastToolName;
+    private int semanticSearchCalls;
+    private String semanticSearchLastQuery;
+    private String semanticSearchResult;
+    private boolean semanticSearchThrow;
     private int auditCalls;
     private AuditAction lastAuditAction;
     private final List<String> persistedTexts = new ArrayList<>();
@@ -63,6 +67,10 @@ class ChatAgentTest {
         persistedRoles.clear();
         persistedTexts.clear();
         dispatcherCalls = 0;
+        semanticSearchCalls = 0;
+        semanticSearchLastQuery = null;
+        semanticSearchResult = "[]";
+        semanticSearchThrow = false;
         auditCalls = 0;
         lastAuditAction = null;
         ceilingGated = false;
@@ -84,7 +92,11 @@ class ChatAgentTest {
         assertEquals(1, auditCalls, "audit row should be written once before LLM call");
         assertEquals(AuditAction.CHAT_MODE, lastAuditAction);
         assertEquals(1, llmProvider.callCount, "LLM should be called once");
-        assertEquals(0, dispatcherCalls, "no tool calls in response");
+        assertEquals(1, dispatcherCalls,
+                "exactly one dispatch: the deterministic semanticSearch pre-fetch "
+                        + "(no tool calls in the LLM response)");
+        assertEquals(1, semanticSearchCalls,
+                "the turn must always dispatch semanticSearch (M1-589)");
         assertEquals(1, sanitizerCalls, "sanitizer should be called once (before persist)");
         assertEquals(2, sessionPersistCalls, "user + assistant turns persisted");
         assertEquals("user", persistedRoles.get(0));
@@ -101,7 +113,9 @@ class ChatAgentTest {
 
         assertEquals(BundleKeys.ERROR_CHAT_UNAVAILABLE, reply);
         assertEquals(0, sessionPersistCalls, "no session persistence on LLM failure");
-        assertEquals(0, dispatcherCalls, "no tool dispatch on LLM failure");
+        assertEquals(1, dispatcherCalls,
+                "only the deterministic semanticSearch pre-fetch (which runs before "
+                        + "the LLM call) — no loop tool dispatch on LLM failure");
         assertFalse(inFlightTracker.isInFlight(USER_ID, SCOPE_KIND, SCOPE_ID),
                 "in-flight slot must be released");
     }
@@ -199,7 +213,8 @@ class ChatAgentTest {
 
         String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "find bitcoin posts");
 
-        assertEquals(1, dispatcherCalls);
+        assertEquals(2, dispatcherCalls,
+                "the deterministic semanticSearch pre-fetch plus the model's searchPosts call");
         assertEquals("searchPosts", dispatcherLastToolName);
         assertEquals(2, llmProvider.callCount);
         assertEquals("I found 3 posts about bitcoin.", reply);
@@ -221,6 +236,117 @@ class ChatAgentTest {
                 "Tool result must be wrapped in UNTRUSTED_CONTENT open delimiter");
         assertTrue(llmProvider.lastUserPrompt.contains("<<<END id=\""),
                 "Tool result must be wrapped in UNTRUSTED_CONTENT close delimiter");
+    }
+
+    // --- M1-589: digest-first semantic retrieval, dispatched
+    // deterministically on EVERY turn (the D28 pre-fetch pattern) — never
+    // left to the model to choose. ---
+
+    @Test
+    void everyTurnDispatchesSemanticSearchWithTheUserMessage() {
+        llmProvider.responses.add(new LlmResponse("Plain answer, no tool calls."));
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "what happened with zcash?");
+
+        assertEquals(1, semanticSearchCalls,
+                "semanticSearch must be dispatched exactly once per turn, "
+                        + "deterministically — not left to the model");
+        assertEquals("what happened with zcash?", semanticSearchLastQuery,
+                "the deterministic pre-fetch must embed the user's message as the query");
+        assertEquals("semanticSearch", dispatcherLastToolName);
+    }
+
+    @Test
+    void semanticResultIsFoldedIntoPromptInsideUntrustedWrapper() {
+        semanticSearchResult =
+                "[{\"uid\":\"sem-post-1\",\"title\":\"T\",\"url\":\"https://e.x/1\",\"similarity\":0.9}]";
+        llmProvider.responses.add(new LlmResponse("Grounded answer."));
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "zcash news?");
+
+        String up = llmProvider.lastUserPrompt;
+        int open = up.indexOf("<<<UNTRUSTED_CONTENT id=\"");
+        int hit = up.indexOf("sem-post-1");
+        int close = up.indexOf("<<<END id=\"");
+        assertTrue(hit >= 0, "the retrieved posts must be folded into the prompt");
+        assertTrue(open >= 0 && open < hit && hit < close,
+                "retrieved posts are attacker-influenced content and must sit inside "
+                        + "the UNTRUSTED_CONTENT wrapper");
+    }
+
+    @Test
+    void emptySemanticResultFoldsNoRetrievalBlock() {
+        // Default stub result "[]" = nothing under the distance threshold.
+        llmProvider.responses.add(new LlmResponse("General-knowledge answer."));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "python vs rust?");
+
+        assertEquals("General-knowledge answer.", reply);
+        assertFalse(llmProvider.lastUserPrompt.contains("subscribed feed"),
+                "an empty retrieval must fold nothing into the prompt "
+                        + "(the general-knowledge path)");
+    }
+
+    @Test
+    void semanticSearchFailureDegradesToGeneralKnowledgeTurn() {
+        semanticSearchThrow = true;
+        llmProvider.responses.add(new LlmResponse("Still a fine answer."));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "hello there");
+
+        assertEquals("Still a fine answer.", reply,
+                "an embedding/retrieval failure must degrade to a normal "
+                        + "general-knowledge turn, not abort it");
+        assertEquals(1, llmProvider.callCount, "the LLM turn still runs");
+    }
+
+    // redteam 2026-07-11 (low DOS) remediation pin: the deterministic
+    // pre-fetch and the model's tool loop share ONE TurnContext, so an
+    // identical model-initiated semanticSearch call is a cache hit — the
+    // tool executes exactly once per turn (no duplicate embed + probe) and
+    // the per-turn call budget covers pre-fetch + loop. Uses a REAL
+    // dispatcher (the counting stub bypasses the cache logic) with a
+    // counting semanticSearch ChatTool.
+    @Test
+    void identicalModelSemanticCallServedFromSharedPerTurnCache() {
+        int[] executions = {0};
+        Map<String, ChatToolRegistry.ChatTool> tools = new HashMap<>();
+        for (String name : new ChatToolRegistry().toolNames()) {
+            tools.put(name, (u, sk, si, a) -> "[]");
+        }
+        tools.put("semanticSearch", (u, sk, si, a) -> {
+            executions[0]++;
+            return "[{\"uid\":\"sem-1\",\"title\":\"T\",\"url\":\"https://e.x/1\",\"similarity\":0.9}]";
+        });
+        ChatToolDispatcher realDispatcher = new ChatToolDispatcher(
+                new ChatToolRegistry(), tools, 500, 200, 20);
+        agent = buildAgent("en", realDispatcher);
+
+        llmProvider.responses.add(
+                new LlmResponse("TOOL_CALL: semanticSearch {\"query\": \"hi\"}"));
+        llmProvider.responses.add(new LlmResponse("done"));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "hi");
+
+        assertEquals("done", reply);
+        assertEquals(1, executions[0],
+                "the model's identical semanticSearch call must be served from the "
+                        + "per-turn cache shared with the deterministic pre-fetch — "
+                        + "one execution per turn, not two");
+    }
+
+    @Test
+    void longMessageIsTruncatedToTheSemanticQueryCap() {
+        llmProvider.responses.add(new LlmResponse("ok"));
+        String longMessage = "z".repeat(ChatAgent.SEMANTIC_QUERY_MAX_CHARS + 100);
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, longMessage);
+
+        assertEquals(1, semanticSearchCalls,
+                "retrieval must still run for messages over the tool input cap");
+        assertEquals(ChatAgent.SEMANTIC_QUERY_MAX_CHARS, semanticSearchLastQuery.length(),
+                "the query must be truncated to the cap the dispatcher would "
+                        + "otherwise reject");
     }
 
     @Test
@@ -335,6 +461,17 @@ class ChatAgentTest {
     }
 
     @Test
+    void toolInstructionsMatchSemanticSearchParams() {
+        String instructions = ChatAgent.TOOL_INSTRUCTIONS;
+        assertTrue(instructions.contains("semanticSearch"), "must mention semanticSearch");
+        int idx = instructions.indexOf("semanticSearch");
+        int lineEnd = instructions.indexOf("\n", idx);
+        String line = instructions.substring(idx,
+                lineEnd > 0 ? lineEnd : instructions.length());
+        assertTrue(line.contains("\"query\""), "semanticSearch must document the query param");
+    }
+
+    @Test
     void toolInstructionsMatchRecallMemoryParams() {
         String instructions = ChatAgent.TOOL_INSTRUCTIONS;
         assertTrue(instructions.contains("recallMemory"), "must mention recallMemory");
@@ -409,6 +546,45 @@ class ChatAgentTest {
     // --- factory + test subclass ---
 
     private TestChatAgent buildAgent(String language) {
+        return buildAgent(language, countingStubDispatcher());
+    }
+
+    // The counting stub OVERRIDES dispatch outright, so it bypasses the
+    // real per-turn cache/budget logic — right for orchestration-sequence
+    // assertions, wrong for cache-behaviour ones (those build a real
+    // dispatcher via the buildAgent(language, dispatcher) overload).
+    private ChatToolDispatcher countingStubDispatcher() {
+        Map<String, ChatToolRegistry.ChatTool> noOpTools = new HashMap<>();
+        for (String name : new ChatToolRegistry().toolNames()) {
+            noOpTools.put(name, (u, sk, si, a) -> "[]");
+        }
+        return new ChatToolDispatcher(
+                new ChatToolRegistry(), noOpTools, 500, 200, 20) {
+            @Override
+            public ToolResult dispatch(String toolName, Map<String, Object> args,
+                                        UUID userId, String scopeKind, UUID scopeId,
+                                        TurnContext turn) {
+                dispatcherCalls++;
+                dispatcherLastToolName = toolName;
+                // The deterministic per-turn semanticSearch pre-fetch
+                // (M1-589) routes through this dispatcher too; give it
+                // its own observable seam. Default result "[]" = the
+                // general-knowledge path, so pre-M1-589 tests observe an
+                // unchanged prompt.
+                if ("semanticSearch".equals(toolName)) {
+                    semanticSearchCalls++;
+                    semanticSearchLastQuery = (String) args.get("query");
+                    if (semanticSearchThrow) {
+                        throw new RuntimeException("embedding backend down");
+                    }
+                    return new ToolResult.Success(semanticSearchResult);
+                }
+                return new ToolResult.Success("[{\"title\": \"test\"}]");
+            }
+        };
+    }
+
+    private TestChatAgent buildAgent(String language, ChatToolDispatcher dispatcher) {
         ChatPromptBuilder promptBuilder = new ChatPromptBuilder(
                 new ChatMemoryPreFetcher() {
                     @Override
@@ -424,22 +600,6 @@ class ChatAgentTest {
             public BuiltPrompt build(UUID u, String sk, UUID si, String msg) {
                 promptBuilderCalls++;
                 return new BuiltPrompt("system", msg, "marker");
-            }
-        };
-
-        Map<String, ChatToolRegistry.ChatTool> noOpTools = new HashMap<>();
-        for (String name : new ChatToolRegistry().toolNames()) {
-            noOpTools.put(name, (u, sk, si, a) -> "[]");
-        }
-        ChatToolDispatcher dispatcher = new ChatToolDispatcher(
-                new ChatToolRegistry(), noOpTools, 500, 200, 20) {
-            @Override
-            public ToolResult dispatch(String toolName, Map<String, Object> args,
-                                        UUID userId, String scopeKind, UUID scopeId,
-                                        TurnContext turn) {
-                dispatcherCalls++;
-                dispatcherLastToolName = toolName;
-                return new ToolResult.Success("[{\"title\": \"test\"}]");
             }
         };
 

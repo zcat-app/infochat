@@ -25,9 +25,21 @@ public class ChatPromptBuilder {
     static final String UNTRUSTED_CONTENT_CLOSE_FORMAT =
             "<<<END id=\"%s\">>>";
 
+    // General-assistant framing (M1-589): answer ANY question. Grounding is
+    // decided by the deterministic semantic retrieval ChatAgent folds into
+    // the prompt — when retrieved posts are present, ground in them and cite
+    // bare source URLs; when none are, answer from general knowledge. The
+    // injection-defence text below the framing (the UNTRUSTED_CONTENT
+    // wrapper rules and the exact [REFUSAL: <reason>] token the ChatAgent
+    // prefix interceptor matches on) is preserved VERBATIM from the
+    // pre-M1-589 prompt — it is security surface, not framing.
     static final String CHAT_SYSTEM_PROMPT_TEMPLATE =
-            "You are a helpful news assistant. Answer questions using only the tools "
-          + "provided and the conversation history. Keep replies under about %d words "
+            "You are a helpful general assistant for a news-aggregation chat "
+          + "service. Answer any question the user asks. When the prompt includes "
+          + "posts retrieved from the user's subscribed feed, ground your answer "
+          + "in them and cite each post you use by its bare source URL; when no "
+          + "retrieved posts are provided or none are relevant, answer from your "
+          + "own general knowledge. Keep replies under about %d words "
           + "unless the user explicitly asks for more detail. Use plain text and bare "
           + "URLs only - no markdown link syntax.\n"
           + "\n"

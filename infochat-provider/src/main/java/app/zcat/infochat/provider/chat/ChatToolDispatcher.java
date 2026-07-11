@@ -5,6 +5,7 @@ import app.zcat.infochat.provider.chat.tool.GetReferencesTool;
 import app.zcat.infochat.provider.chat.tool.ListSavesTool;
 import app.zcat.infochat.provider.chat.tool.RecallMemoryTool;
 import app.zcat.infochat.provider.chat.tool.SearchPostsTool;
+import app.zcat.infochat.provider.chat.tool.SemanticSearchTool;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -67,6 +68,7 @@ public class ChatToolDispatcher {
     @Inject
     public ChatToolDispatcher(ChatToolRegistry registry,
                                SearchPostsTool searchPostsTool,
+                               SemanticSearchTool semanticSearchTool,
                                GetPostTool getPostTool,
                                GetReferencesTool getReferencesTool,
                                RecallMemoryTool recallMemoryTool,
@@ -83,6 +85,7 @@ public class ChatToolDispatcher {
         this.listMaxSize = listMaxSize;
         this.tools = Map.of(
                 "searchPosts", searchPostsTool,
+                "semanticSearch", semanticSearchTool,
                 "getPost", getPostTool,
                 "getReferences", getReferencesTool,
                 "recallMemory", recallMemoryTool,

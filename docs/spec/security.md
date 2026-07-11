@@ -287,6 +287,7 @@ considered untrusted (decision D21):
   | Name | Inputs | Output | Notes |
   |---|---|---|---|
   | `searchPosts` | `tags: list<Tier-1 tag>` (each value validated against the controlled vocabulary), `window: duration`, `limit: int ≤ profile-driven cap` | list of `{uid, title, url, ready_at, tags}` | Returns `READY` posts visible in the calling `(user, scope)` only. Tag filter intersects with the scope's `tag_mode` rules (commands.md §Per-scope tag preferences). The `window` filter and result ordering both bind to `published_at` (the source's claimed publication time): the result is the posts whose `published_at` falls within the window, ordered `published_at` descending. `ready_at` (the pipeline's READY-transition time) is a display field in the result shape only — it drives neither the window nor the ordering, so a post with an old `published_at` but a recent `ready_at` does not surface in a short window. |
+  | `semanticSearch` | `query: string` (free text, length-capped), `limit: int ≤ profile-driven cap` | list of `{uid, title, url, similarity}` | Nearest-neighbour semantic retrieval over the post-embedding store (pgvector cosine distance). Returns `READY` posts visible in the calling `(user, scope)` only — the same subscription predicate as `searchPosts`, so a post outside the caller's subscribed sources can never surface. The query is embedded on the **local** embedding backend (embeddings never leave the deployment, D54); the candidate set and its order are decided by SQL (`ORDER BY embedding <=> query`), never by the LLM (D19). A configured cosine-distance relevance threshold gates results: nothing under the threshold → empty result → the agent answers from general knowledge. The scope's per-tag preferences (`tag_mode`, commands.md §Per-scope tag preferences) intentionally do **not** apply to semantic retrieval — tag preferences filter the tag-driven surfaces (`searchPosts`, digests); semantic retrieval is scoped by subscription only. `similarity` (= 1 − distance) is a display value only; the raw embedding vector is never exposed (D5). Besides being model-callable, the chat agent dispatches this tool **deterministically on every chat turn** (the D28 pre-fetch pattern) and re-injects the result through the untrusted-content wrapper — retrieved titles/URLs are attacker-influenced content. The deterministic pre-fetch shares the tool loop's per-turn dispatch context, so the fixed per-turn call cap and the identical-call cache hold turn-wide. |
   | `getPost` | `uid: string` | `{uid, title, body, url, ready_at, tags}` or `null` | Scope-filtered: returns null for a UID not visible in the calling scope (the same path as a UID that does not exist; the existence-vs-no-access distinction is never exposed). |
   | `getReferences` | `uid: string`, `limit: int ≤ profile-driven cap` | list of `{uid, title, url, link_type, score}` | Edges from the `post_reference` graph. Scope-filtered the same way as `searchPosts`. |
   | `recallMemory` | `keywords: list<string>` (each ≤ a profile-driven length cap) | list of `{compressed_at, summary, references}` | Reads `chat_memory` for the calling `(user, scope)` only — D28. **Not** the user-facing `/recall <keyword>` command, which is v2-deferred per SPEC.md §"Deferred to v2". |
@@ -1019,9 +1020,21 @@ rules:
   `commands.md` §Content (`/summary`).
 - **Chat-mode replies** with the chat-agent LLM unreachable →
   return a localized "chat assistant is unavailable, try again
-  later" friendly error from the bundle (D43); the message never
-  reaches the chat agent loop, no `chat_session` advance, no
-  `chat_memory` write, no tool invocation.
+  later" friendly error from the bundle (D43); the turn is
+  discarded with no `chat_session` advance, no `chat_memory`
+  write, and no **model-initiated** tool call. The one exception is
+  the deterministic digest-first semantic pre-fetch (M1-589), which
+  runs once before the LLM call by design (the D28 "always runs,
+  folded in" pattern): on an LLM-unreachable turn that read-only
+  retrieval may already have executed (one local embed + one
+  scoped pgvector probe) before the failure surfaced. It is
+  bounded — read-only, `statement_timeout`-capped, and gated by the
+  same per-user LLM rate bucket as the turn itself — and it writes
+  nothing, so the "discard the turn" guarantee above is unaffected.
+  A router-side circuit breaker that also skips this pre-fetch while
+  the chat provider is known-unreachable is a v1-follow-up, tracked
+  separately; v1 accepts the bounded pre-fetch cost on the failure
+  path.
 - **No router-side fallback in v1.** When an operator configures
   per-task providers (e.g. Anthropic for SUMMARIZER, Ollama for
   SECURITY_JUDGE), a per-task provider that is unreachable

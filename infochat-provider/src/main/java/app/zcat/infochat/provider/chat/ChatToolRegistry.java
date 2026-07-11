@@ -7,13 +7,14 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-// Holds the closed five-tool allowlist for the chat agent. Additions or
+// Holds the closed six-tool allowlist for the chat agent. Additions or
 // removals are spec amendments (security.md §Prompt-injection defenses).
 @ApplicationScoped
 public class ChatToolRegistry {
 
     private static final Set<String> TOOL_NAMES = Set.of(
             "searchPosts",
+            "semanticSearch",
             "getPost",
             "getReferences",
             "recallMemory",
