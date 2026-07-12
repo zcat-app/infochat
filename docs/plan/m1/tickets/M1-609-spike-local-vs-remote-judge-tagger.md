@@ -1,7 +1,7 @@
 ---
 id: M1-609
 title: "Spike: local vs remote LLM for the security judge and tagger (quality, throughput, VPS CPU cost)"
-status: pending
+status: done
 created: 2026-07-12
 last_updated: 2026-07-12
 blocked_by: []
@@ -102,14 +102,62 @@ spec_refs:
 decision_refs:
   - D22
   - D56
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-12
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PARTIAL
+    diff_stats:
+      files: 5
+      added: 947
+      removed: 7
+  - round: 2
+    date: 2026-07-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 979
+      removed: 8
 escalations: []
 overrides: []
 revisions: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-07-12
+    verdict: CLEAN
+    base: 1a0d24ad490563f3f36e2156f9867e0bb8b6b49b
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-609-2026-07-12.md
+    out_of_model_count: 1
+    note: >-
+      Diff is report + standalone eval harness + fixture under docs/plan/ — no
+      runtime/service code, no auth/authz/ban/audit or routing-surface change.
+      CLEAN. One OUT-OF-MODEL item (harness Bearer-sends INFOCHAT_LLM_API_KEY to
+      the operator-set INFOCHAT_LLM_BASE_URL) is not a threat-model violation
+      (trusted operator config; non-runtime tooling; key never in artifacts) and
+      warrants no follow-up ticket (matches the merged M1-610 harness pattern).
+clarity_check:
+  date: 2026-07-12
+  verdict: WARN
+  warnings:
+    - "COMPLEXITY-RISK-CALIBRATED: complexity:medium may be underclaimed vs the multi-model x multi-task x multi-metric breadth; round_cap:2 is tight. Consider complexity:high / round_cap:3."
+    - "Scope ambiguity: the ## Notes batch-vs-split switch bullet has no acceptance item and is not in out_of_scope; treated as an ANALYTICAL axis in the report only (implementing any routing/design switch falls under out_of_scope item 1)."
+    - "Acceptance items 2 and 3 state no minimum eval-set size; sized a defensible floor (judge spanning BENIGN/INJECTION/MALWARE + synthetic adversarial; tagger across the controlled vocabulary)."
+    - "files_budget:6 / round_cap:2 sized against the 7 acceptance items only; unchanged since the batch-vs-split switch is analysis, not code."
+  blockers: []
 ---
 
 # M1-609: Spike — local vs remote LLM for the security judge and tagger
@@ -190,3 +238,19 @@ recommends.
   security-per-cost bet.
 - Starting scripts: `.scratch` local_eval / deepseek_smoke from 2026-07-12; the
   pulled `llama3.2:3b` is left in Ollama for this work.
+
+## Round 1 rework
+
+Reviewer round-1 REWORK (1 item): commit the judge eval fixture
+`judge-eval-samples.jsonl` that the harness reads, since it was absent from the
+ticket diff.
+
+Disposition: the fixture is **already tracked and committed on `main`** (M1-610
+@`edbd0284`; `git cat-file -e main:docs/plan/m1/spikes/judge-eval-samples.jsonl`
+succeeds), so the branch inherits it and a fresh checkout can re-run the judge
+half of the harness — reproducibility was never broken; the reviewer reasoned
+from the file's absence in *this ticket's* diff. No `git add` is possible (the
+file is unmodified). Addressed the underlying ambiguity by stating the fixture's
+provenance (reused, already-committed M1-610 file) explicitly in the report's
+§Eval sets, so the committed-tree reproducibility is unambiguous to a reader and
+the reviewer.

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 631 |
+| done | 632 |
 | deferred | 1 |
 | abandoned | 11 |
 | **total** | **645** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-609 — Spike: local vs remote LLM for the security judge and tagger (quality, throughput, VPS CPU cost) (complexity: medium, risk: low)
 - M1-611 — Per-operation ProgressNotifier state: concurrent same-scope publishers must not clobber each other's placeholder (complexity: medium, risk: medium)
 
 ---
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-610 | Eval + guard: DeepSeek judge reasoning-ON quality; code-enforce the reasoning/max_tokens coupling | 2026-07-12 | round 1 APPROVE |
+| M1-609 | Spike: local vs remote LLM for the security judge and tagger (quality, throughput, VPS CPU cost) | 2026-07-12 | round 2 APPROVE |
 | M1-608 | DeepSeek provider subclass with per-task reasoning toggle (v4-flash thinking-mode control) | 2026-07-12 | round 1 APPROVE |
 | M1-607 | Wire chat-mode replies into the ProgressNotifier (D31) so slow turns show live progress | 2026-07-12 | round 1 APPROVE |
 | M1-606 | LLM router circuit breaker: fail-fast + pre-fetch skip on unreachable provider | 2026-07-12 | round 1 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-603 | One LLM service by default: shared infochat.llm.default.{base-url,api-key} inherited by every ModelTask; remove the per-task baked base-urls so a task absent from operator config inherits the operator's endpoint — or refuses boot loudly | 2026-07-11 | round 3 APPROVE |
 | M1-589 | Provider chat: digest-first semantic RAG — a general assistant grounded in pgvector nearest-neighbour retrieval, replacing tag-guessing | 2026-07-11 | round 1 APPROVE |
 | M1-602 | test-hygiene: sweep all absolute-fetched_at scan-window fixtures onto a pinned Clock + add a build guard against new time-bombs | 2026-07-10 | round 1 APPROVE |
-| M1-600 | Provider: /grant-admin and /revoke-admin render error.probation.blocked with no MessageFormat args, so the defense-in-depth probation branch would emit literal {0}/{1} (use an arg-free probation key) | 2026-07-10 | round 1 APPROVE |
 
 ---
 
@@ -826,7 +825,7 @@ M1-605 (done)
 M1-606 (done)
 M1-607 (done)
 M1-608 (done)
-M1-609 (pending) ← runnable
+M1-609 (done)
 M1-610 (done)
 M1-611 (pending) ← runnable
 ```
