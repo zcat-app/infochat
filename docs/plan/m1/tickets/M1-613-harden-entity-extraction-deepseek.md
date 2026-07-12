@@ -1,9 +1,20 @@
 ---
 id: M1-613
 title: "Harden entity extraction on DeepSeek: lenient parser + prompt tuning, re-measure v4-flash"
-status: pending
+status: done
 created: 2026-07-12
 last_updated: 2026-07-12
+clarity_check:
+  date: 2026-07-12
+  verdict: WARN
+  warnings:
+    - >-
+      Test-file target ambiguity: acceptance items 2/3 imply adding to the
+      existing EntityExtractorWorkerTest.java, but test_plan.adds names a new
+      EntityExtractorWorkerParseTest.java. Either is within files_scope.
+    - >-
+      docs/spec/llm.md §Per-task routing rules is a loose spec_ref fit — nothing
+      in that section is leaned on; not load-bearing.
 blocked_by: []
 files_budget: 6
 files_scope:
@@ -92,14 +103,41 @@ spec_refs:
   - docs/spec/llm.md §Per-task routing rules
 decision_refs:
   - D22
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 754
+      removed: 12
 escalations: []
 overrides: []
 revisions: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-07-12
+    verdict: CLEAN
+    base: main
+    head: m1/M1-613-harden-entity-extraction-deepseek
+    verdict_file: docs/plan/m1/redteam/M1-613-2026-07-12.md
+    out_of_model_count: 1
+    note: |
+      In-progress audit between review APPROVE and commit. parseEntities
+      leniency parses untrusted LLM output at a system boundary; no
+      auth/authz/ban/audit surface touched, release decision not gated by
+      parser strictness, D22 failure-release preserved. One out-of-model
+      item (spike harness reads a live API key from env, never commits it —
+      operator-side infra risk, out of the documented threat model; same
+      pattern as the accepted M1-609/M1-610 harnesses). No follow-up ticket.
 ---
 
 # M1-613: Harden entity extraction on DeepSeek

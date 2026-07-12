@@ -309,8 +309,10 @@ public class EntityExtractorWorker {
      * {@code {"text":..,"type":..}} objects. Normalizes each
      * {@code entity_text}, drops out-of-vocab types and malformed
      * entries, and collapses duplicates. Returns the (possibly empty)
-     * result, or {@code null} when the reply is schema-violating (not
-     * parseable as a JSON array).
+     * result, or {@code null} when the reply carries no unambiguous
+     * entity array (schema-violating → D22 release-without-entities).
+     * A bare top-level array is parsed as-is; a single-array-valued
+     * wrapping object is unwrapped first (see {@link #entityArray}).
      */
     @Nullable EntityExtractionResult parseEntities(@Nullable String text) {
         if (text == null) {
@@ -322,7 +324,7 @@ public class EntityExtractorWorker {
         }
         // DeepSeek (and other providers at temperature ~1.0) wrap the JSON
         // array in a markdown code fence on a fraction of calls (M1-586);
-        // strip a single enclosing fence before the strict array parse so a
+        // strip a single enclosing fence before the array parse so a
         // fenced-but-valid payload is recovered. A non-fenced or genuinely
         // malformed reply is returned unchanged and still fails the parse
         // below → null, so the D22 release-without-entities path is unchanged.
@@ -333,11 +335,12 @@ public class EntityExtractorWorker {
         } catch (IOException e) {
             return null;
         }
-        if (!root.isArray()) {
+        JsonNode array = entityArray(root);
+        if (array == null) {
             return null;
         }
         Set<Entity> deduped = new LinkedHashSet<>();
-        for (JsonNode node : root) {
+        for (JsonNode node : array) {
             JsonNode textNode = node.get("text");
             JsonNode typeNode = node.get("type");
             if (textNode == null || !textNode.isTextual()
@@ -355,6 +358,57 @@ public class EntityExtractorWorker {
             deduped.add(new Entity(normalizedText, type));
         }
         return new EntityExtractionResult(List.copyOf(deduped));
+    }
+
+    /**
+     * Resolve the JSON array of entity objects from a parsed reply root,
+     * or {@code null} when the reply carries no unambiguous entity array.
+     *
+     * <p>A bare top-level array is returned as-is — the exact shape the
+     * prompt asks for, so the pre-existing behavior is byte-for-byte
+     * unchanged. This unwrap is fail-safe hardening against a known-possible
+     * deviation: a model can wrap the array in an object, e.g.
+     * {@code {"entities":[...]}} — valid JSON but an object, which the strict
+     * {@code isArray()} check discarded. DeepSeek demonstrably drifts into
+     * non-bare-array shapes (the M1-586 fence-wrapping), so recovering the
+     * object wrapper too costs nothing on the happy path and salvages a reply
+     * that would otherwise D22-release without entities. The M1-613 spike
+     * measured 0% wrapping on the live endpoint at the time
+     * (docs/plan/m1/spikes/M1-613-entity-hardening.md); this is insurance
+     * against non-determinism, not a fix for a currently-observed loss. To
+     * recover WITHOUT widening what counts as a valid reply, unwrap
+     * conservatively: when the root is an object, prefer an
+     * {@code entities}-keyed array; else unwrap only when EXACTLY ONE field is
+     * array-valued. An object with no array field, or two-or-more array fields
+     * and no {@code entities} key to disambiguate, is genuinely ambiguous and
+     * stays {@code null} → the D22 release-without-entities path, unchanged.
+     * Leniency unwraps only an unambiguous single array, so "genuine garbage
+     * still fails safe."
+     */
+    private static @Nullable JsonNode entityArray(JsonNode root) {
+        if (root.isArray()) {
+            return root;
+        }
+        if (!root.isObject()) {
+            return null;
+        }
+        JsonNode preferred = root.get("entities");
+        if (preferred != null && preferred.isArray()) {
+            return preferred;
+        }
+        JsonNode sole = null;
+        for (JsonNode value : root) {
+            if (value.isArray()) {
+                if (sole != null) {
+                    // More than one array-valued field with no `entities`
+                    // key to pick — ambiguous, so fail safe rather than
+                    // guess which array holds the entities.
+                    return null;
+                }
+                sole = value;
+            }
+        }
+        return sole;
     }
 
     /** Lower-case via {@link Locale#ROOT} and strip surrounding whitespace. */
