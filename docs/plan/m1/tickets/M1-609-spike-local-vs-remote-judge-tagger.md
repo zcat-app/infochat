@@ -158,6 +158,33 @@ recommends.
   fallback) and the judge (~5% of posts, security-critical, safe-on-UNKNOWN)
   have different profiles — the answer may be "local tagger, remote judge" or the
   reverse, not an all-or-nothing switch.
+- **Evaluate "local judge only" explicitly (operator hypothesis, 2026-07-12).**
+  The judge is the VPS-cheapest task to localize — on the current corpus it runs
+  on only ~0.3% of posts (~18 of ~5,300 got a verdict; Stage 1 flags very few),
+  so a local judge is occasional CPU bursts, not sustained load. BUT the same
+  0.3% creates two counter-forces: localizing it saves almost NO paid-API cost
+  (the judge is nearly free remotely at that volume), and it moves the ONE
+  security-critical task (false-BENIGN = payload into the corpus) onto the
+  weakest local model (3b was the noisiest performer in the quick test). The
+  three lenses conflict — VPS-CPU favours a local judge; cost and security favour
+  keeping the judge remote and (if anything) localizing the tagger. Quantify all
+  three before choosing; do not default to "local judge" just because it is the
+  lightest on CPU.
+- **Explore a batch-vs-split switch for the benign-metadata tasks.** Today
+  TAGGER, ENTITY, and CLASSIFIER are three separate LLM calls per post, each
+  re-sending the body (~3x input tokens on a paid API). Evaluate a configurable
+  switch between (a) BATCHED — one request to ONE provider returning
+  {tags, entities, classification} in a single structured response — and (b) the
+  current SPLIT design. Batched saves round-trips and tokens but is all-or-nothing
+  on failure (one schema violation loses all three), whereas SPLIT degrades each
+  independently via its own fallback (bootstrap_tags / no-entities / unknown) —
+  a robustness difference already observed live (DeepSeek failed the ENTITY schema
+  ~85% while tagging worked). A switch lets a deployment pick per its
+  provider/cost/robustness profile. This interacts with the local-vs-remote
+  choice: batching pays off most on the paid remote API and least on a local
+  model where round-trips are cheap. (Note: the SECURITY_JUDGE and EMBEDDING stay
+  separate regardless — the judge is a gate on pre-redaction content, embeddings
+  are a different SPI.)
 - **Feeds M1-608.** If a local judge is viable, it competes with the M1-608
   remote-judge-with-reasoning path; the spike should say which is the better
   security-per-cost bet.
