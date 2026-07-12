@@ -75,9 +75,9 @@ acceptance:
     max_tokens large enough for reasoning + the answer or the answer truncates;
     for SECURITY_JUDGE a truncated/empty verdict is an infra failure that
     fail-opens. The ticket documents this coupling at the config surface, and a
-    test asserts that with reasoning OFF (the default and the metadata-task
-    setting) the assembled body disables thinking so no phantom reasoning field
-    can crowd out the verdict/label.
+    test asserts that with reasoning OFF (the default for every task) the
+    assembled body disables thinking so no phantom reasoning field can crowd out
+    the verdict/label.
   - >-
     The startup guard treats "deepseek" as a REMOTE provider: DeepSeekProvider's
     PROVIDER_NAME is added to LlmRouterStartupGuard.REMOTE_PROVIDER_NAMES so the
@@ -102,14 +102,38 @@ acceptance:
 test_plan:
   adds:
     - >-
-      DeepSeekProviderTest (body-assembly: thinking disabled by default,
-      enabled+depth when configured; parse-the-body, no network).
-    - Startup-guard test asserting deepseek is a remote provider.
+      DeepSeekProviderTest (NEW file; parse-the-body, no network): (a)
+      reasoning-effort unset/OFF -> assembled body carries
+      "thinking":{"type":"disabled"}; (b) reasoning-effort set to a DeepSeek
+      depth (high|low|medium|max|xhigh) -> body carries thinking ENABLED at that
+      depth; request-structure parity ({model, max_tokens,
+      messages:[{role,content}]} + thinking, POST <base>/chat/completions,
+      response parsed as choices[0].message.content); provider=deepseek resolves
+      to DeepSeekProvider via a hand-built LlmRouter Entry; a bare
+      OpenAiCompatibleProvider assembles NO thinking field (pins the parent seam
+      as a no-op when not overridden). Red-before/green-after on the
+      thinking-disable assembly.
+    - >-
+      LlmRouterStartupGuardLocalOnlyTest.java: ADD one new @Test method (net-new
+      coverage; existing methods untouched) mirroring
+      localOnlyTrueWithRemoteProviderOverrideRefusesStartup — set
+      infochat.llm.chat.provider=deepseek under infochat.llm.local-only=true and
+      assert validateLocalOnlyConfiguration throws LocalOnlyConflictException
+      naming the deepseek route (deepseek treated as remote, exactly as
+      anthropic is).
   modifies:
     - >-
-      Router/registration and startup-guard tests to the extent the new provider
-      name and REMOTE_PROVIDER_NAMES entry change their fixtures — enumerate at
-      start.
+      LlmRouterStartupGuardLanguageRouteDisclosureTest.java: COMMENT-ONLY update
+      to the class Javadoc line "anthropic is the only member of
+      REMOTE_PROVIDER_NAMES" so it names both anthropic and deepseek. No
+      assertion or fixture change — the three test bodies stay green because
+      deepseek's languages key is absent from their hand-built snapshots, so the
+      guard's REMOTE_PROVIDER_NAMES iteration emits no additional warning. This
+      is the ONLY pre-existing test whose content changes: no test asserts
+      REMOTE_PROVIDER_NAMES size/membership, router-resolution tests use
+      hand-built List<Entry>/ListInstance so a new @ApplicationScoped bean never
+      reaches them, and nothing @Injects the concrete OpenAiCompatibleProvider
+      type so the subclass creates no CDI ambiguity.
   preserves:
     - all tests currently green on main
     - >-
@@ -123,7 +147,36 @@ decision_refs:
 reviews: []
 escalations: []
 overrides: []
-revisions: []
+revisions:
+  - date: 2026-07-12
+    reason: >-
+      clarity-fail refine (bounded self-refine via /m1-tick run; prose-only,
+      within existing scope — no files_budget/files_scope/out_of_scope change).
+      Cleared the TEST-CHANGES-AUTHORIZED blocker: test_plan.modifies deferred
+      the required file enumeration ("enumerate at start"). A ground-truth pass
+      over the llm-adapter test tree replaced the deferral with the verified
+      impact — exactly ONE pre-existing test's comment changes; every other
+      assertion is net-new (adds). Also cleared the non-blocking WARNING:
+      acceptance item 3's undefined "metadata-task setting" jargon became "the
+      default for every task" (the concrete assertion is unchanged).
+    snapshot: |
+      test_plan.modifies (verbatim, pre-refine): "Router/registration and
+        startup-guard tests to the extent the new provider name and
+        REMOTE_PROVIDER_NAMES entry change their fixtures — enumerate at start."
+      test_plan.adds (pre-refine): "DeepSeekProviderTest (body-assembly: thinking
+        disabled by default, enabled+depth when configured; parse-the-body, no
+        network)." + "Startup-guard test asserting deepseek is a remote provider."
+      acceptance item 3 tail (verbatim, pre-refine): "... a test asserts that with
+        reasoning OFF (the default and the metadata-task setting) the assembled
+        body disables thinking so no phantom reasoning field can crowd out the
+        verdict/label."
+      clarity_check 2026-07-12: FAIL, 1 blocker (TEST-CHANGES-AUTHORIZED) + 1
+        warning (ACCEPTANCE-RUNNABLE item 3 jargon). Verified findings behind the
+        narrowed enumeration: REMOTE_PROVIDER_NAMES referenced in tests ONLY as a
+        comment (LlmRouterStartupGuardLanguageRouteDisclosureTest line 32); no
+        @QuarkusTest in the llm-adapter test tree; router-resolution tests use a
+        hand-built ListInstance / List<Entry>; nothing @Injects the concrete
+        OpenAiCompatibleProvider type (so the subclass adds no CDI ambiguity).
 aborted_attempts: []
 reopens: []
 redteam_findings: []
