@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 632 |
 | deferred | 1 |
 | abandoned | 11 |
-| **total** | **645** |
+| **total** | **647** |
 
 ---
 
@@ -26,6 +26,8 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-611 — Per-operation ProgressNotifier state: concurrent same-scope publishers must not clobber each other's placeholder (complexity: medium, risk: medium)
+- M1-612 — Measure real DeepSeek per-post token/request cost of the split ingest eval pipeline (complexity: medium, risk: low)
+- M1-613 — Harden entity extraction on DeepSeek: lenient parser + prompt tuning, re-measure v4-flash (complexity: medium, risk: low)
 
 ---
 
@@ -828,4 +830,6 @@ M1-608 (done)
 M1-609 (done)
 M1-610 (done)
 M1-611 (pending) ← runnable
+M1-612 (pending) ← runnable
+M1-613 (pending) ← runnable
 ```
