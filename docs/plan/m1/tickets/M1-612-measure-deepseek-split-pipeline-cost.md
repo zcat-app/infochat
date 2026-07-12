@@ -1,7 +1,7 @@
 ---
 id: M1-612
 title: "Measure real DeepSeek per-post token/request cost of the split ingest eval pipeline"
-status: pending
+status: done
 created: 2026-07-12
 last_updated: 2026-07-12
 blocked_by: []
@@ -83,7 +83,25 @@ spec_refs:
   - docs/spec/llm.md §Per-task routing rules
 decision_refs:
   - D56
-reviews: []
+clarity_check:
+  date: 2026-07-12
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 735
+      removed: 7
 escalations: []
 overrides: []
 revisions: []
