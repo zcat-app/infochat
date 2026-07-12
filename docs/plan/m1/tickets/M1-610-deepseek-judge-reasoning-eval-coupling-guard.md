@@ -1,9 +1,14 @@
 ---
 id: M1-610
 title: "Eval + guard: DeepSeek judge reasoning-ON quality; code-enforce the reasoning/max_tokens coupling"
-status: pending
+status: done
 created: 2026-07-12
 last_updated: 2026-07-12
+clarity_check:
+  date: 2026-07-12
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 6
 complexity: medium
@@ -115,14 +120,44 @@ spec_refs:
   - docs/spec/llm.md §Per-task routing rules
 decision_refs:
   - D56
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 552
+      removed: 9
 escalations: []
 overrides: []
 revisions: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-07-12
+    verdict: CLEAN
+    base: merge-base with main (pre-commit)
+    head: m1/M1-610 working tree
+    verdict_file: docs/plan/m1/redteam/M1-610-2026-07-12.md
+    out_of_model_count: 2
+    note: |
+      Pre-commit audit (run.md step 5 gate). CLEAN — no gap between the threat
+      model and the diff; the change removes a fail-open path (adds a
+      fail-closed startup guard) rather than adding attack surface. Two
+      out-of-model observations, both requiring trusted operator config
+      (reasoning is opt-in) and both describing the documented release-as-READY
+      Stage-2 default: (1) the 4000 floor is a probabilistic mitigation not a
+      proof — deferred to the future operator enable-reasoning decision, the
+      report already caveats it; (2) the guard is startup-scan-only, mirroring
+      the pre-existing parent requirePositiveMaxTokens posture the spec accepts.
+      Neither warrants a follow-up ticket now.
 ---
 
 # M1-610: Eval DeepSeek judge reasoning-ON + code-enforce the reasoning/max_tokens coupling

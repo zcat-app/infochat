@@ -83,6 +83,32 @@ public class DeepSeekProvider extends OpenAiCompatibleProvider {
     private static final Set<String> REASONING_DEPTHS =
         Set.of("high", "low", "medium", "max", "xhigh");
 
+    /** Per-task config leaf: {@code infochat.llm.<task>.max-tokens}. */
+    private static final String MAX_TOKENS_LEAF = "max-tokens";
+
+    /**
+     * The parent's default {@code max-tokens} when the key is unset
+     * ({@link OpenAiCompatibleProvider} resolves an absent {@code max-tokens} to
+     * this). Duplicated here rather than shared as a parent constant to keep the
+     * coupling guard inside the single production file M1-610 modifies; if the
+     * parent's default ever changes, this must track it (the reasoning floor
+     * below only bites when the effective {@code max-tokens} — including this
+     * default — is under-provisioned).
+     */
+    private static final int PARENT_DEFAULT_MAX_TOKENS = 1024;
+
+    /**
+     * Minimum {@code max-tokens} a reasoning-ENABLED task must provision.
+     * Reasoning tokens share the completion budget, so an under-sized
+     * {@code max-tokens} lets reasoning crowd out the verdict; the M1-610 eval
+     * measured the deepest depth ({@code reasoning_effort=max}) consuming up to
+     * ~2063 completion tokens on real judge prompts and TRUNCATING a MALWARE
+     * verdict at the parent's default 1024 cap (a measured fail-open). The floor
+     * is set to ~2x that worst case so a reasoning-on call cannot truncate its
+     * verdict. See {@code docs/plan/m1/spikes/M1-610-judge-reasoning.md}. (M1-610.)
+     */
+    static final int REASONING_MIN_MAX_TOKENS = 4000;
+
     private final Config config;
 
     @Inject
@@ -100,12 +126,50 @@ public class DeepSeekProvider extends OpenAiCompatibleProvider {
      * Validates the base per-task config (via the parent) AND this provider's
      * {@code reasoning-effort} key at the startup scan, so an unrecognized value
      * fails boot naming the property instead of failing the first live call —
-     * the same startup-scan posture the parent uses for {@code max-tokens}.
+     * the same startup-scan posture the parent uses for {@code max-tokens}. When
+     * reasoning is ENABLED for the task, also enforces the reasoning/max-tokens
+     * coupling so a reasoning-on judge cannot boot with an under-provisioned
+     * {@code max-tokens} that would truncate its verdict and fail-open.
      */
     @Override
     public void assertTaskConfigResolvable(ModelTask task) {
         super.assertTaskConfigResolvable(task);
-        resolveReasoningDepth(task);
+        String depth = resolveReasoningDepth(task);
+        if (depth != null) {
+            requireMaxTokensAboveReasoningFloor(task, depth);
+        }
+    }
+
+    /**
+     * Code-enforces the reasoning/max-tokens coupling (M1-610). Reasoning tokens
+     * share the {@code max_tokens} completion budget, so enabling reasoning on a
+     * task whose {@code max-tokens} is below {@link #REASONING_MIN_MAX_TOKENS}
+     * lets reasoning crowd out the answer: the reply truncates to empty/partial,
+     * and for the security judge that unparseable verdict routes to the Stage 2
+     * infra-failure path whose default releases the post as READY — a silent
+     * fail-open of the actual security boundary (the M1-608 redteam OUT-OF-MODEL
+     * item; {@code docs/spec/security.md} §Failure handling). This turns that
+     * process-promise into a boot-time invariant: a reasoning-on task with an
+     * unraised {@code max-tokens} fails the startup scan naming the task and BOTH
+     * properties, mirroring the parent's non-positive-{@code max-tokens} guard.
+     * Reasoning OFF (the default) never reaches this method, so no shipped task
+     * is affected.
+     */
+    private void requireMaxTokensAboveReasoningFloor(ModelTask task, String depth) {
+        String maxTokensProperty = task.configPrefix() + MAX_TOKENS_LEAF;
+        int maxTokens = config.getOptionalValue(maxTokensProperty, Integer.class)
+            .orElse(PARENT_DEFAULT_MAX_TOKENS);
+        if (maxTokens < REASONING_MIN_MAX_TOKENS) {
+            throw new LlmProvider.TaskConfigUnresolvableException(
+                "DeepSeekProvider: reasoning is enabled for " + task + " ("
+                    + task.configPrefix() + REASONING_EFFORT_LEAF + "='" + depth + "') but "
+                    + maxTokensProperty + "=" + maxTokens + " is below the "
+                    + REASONING_MIN_MAX_TOKENS + "-token floor needed for reasoning plus the"
+                    + " verdict — reasoning tokens share the completion budget, so raise "
+                    + maxTokensProperty + " to at least " + REASONING_MIN_MAX_TOKENS
+                    + " (so reasoning cannot truncate the verdict and fail-open), or unset "
+                    + task.configPrefix() + REASONING_EFFORT_LEAF + " to keep thinking disabled.");
+        }
     }
 
     /**

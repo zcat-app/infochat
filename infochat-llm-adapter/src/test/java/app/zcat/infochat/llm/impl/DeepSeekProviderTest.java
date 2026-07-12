@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -162,6 +163,65 @@ class DeepSeekProviderTest {
             "an unrecognized reasoning-effort must fail the startup scan");
         assertTrue(ex.getMessage().contains(property),
             "the failure must name the offending property; got: " + ex.getMessage());
+    }
+
+    @Test
+    void reasoningEnabledWithUnraisedMaxTokensFailsStartupScanNamingTaskAndBothProperties() {
+        // M1-610 coupling guard: enabling reasoning while leaving max-tokens at
+        // the parent default (1024, below the 4000 floor) must FAIL the startup
+        // scan — reasoning tokens share the completion budget, so an unraised
+        // max-tokens truncates the verdict and fail-opens the Stage 2 boundary.
+        // Red-before/green-after: before the guard existed, assertTaskConfigResolvable
+        // validated only the reasoning-effort VALUE and this config booted clean.
+        String reasoningProperty = "infochat.llm.security.reasoning-effort";
+        String maxTokensProperty = "infochat.llm.security.max-tokens";
+        DeepSeekProvider provider = new DeepSeekProvider(new StubConfig(Map.of(
+            "infochat.llm.security.base-url", baseUrl,
+            "infochat.llm.security.model", "deepseek-v4-flash",
+            reasoningProperty, "high")));  // max-tokens unset -> parent default 1024
+
+        LlmProvider.TaskConfigUnresolvableException ex = assertThrows(
+            LlmProvider.TaskConfigUnresolvableException.class,
+            () -> provider.assertTaskConfigResolvable(ModelTask.SECURITY_JUDGE),
+            "reasoning-on with an unraised max-tokens must fail the startup scan");
+        assertTrue(ex.getMessage().contains("SECURITY_JUDGE"),
+            "the failure must name the offending task; got: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains(reasoningProperty),
+            "the failure must name the reasoning-effort property; got: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains(maxTokensProperty),
+            "the failure must name the max-tokens property; got: " + ex.getMessage());
+    }
+
+    @Test
+    void reasoningOffWithTinyMaxTokensPassesStartupScan() {
+        // The guard fires ONLY when reasoning is enabled. Reasoning OFF (the
+        // default) with a max-tokens far below the reasoning floor must still
+        // boot clean — the disabled body spends 0 reasoning tokens, so there is
+        // nothing to crowd out the verdict (the M1-608 default-OFF guarantee).
+        DeepSeekProvider provider = new DeepSeekProvider(new StubConfig(Map.of(
+            "infochat.llm.security.base-url", baseUrl,
+            "infochat.llm.security.model", "deepseek-v4-flash",
+            "infochat.llm.security.max-tokens", "100")));  // no reasoning-effort -> OFF
+
+        assertDoesNotThrow(
+            () -> provider.assertTaskConfigResolvable(ModelTask.SECURITY_JUDGE),
+            "reasoning-off must be unaffected by the coupling floor");
+    }
+
+    @Test
+    void reasoningEnabledWithRaisedMaxTokensPassesStartupScan() {
+        // With reasoning enabled AND max-tokens at the floor, the coupling is
+        // satisfied: reasoning has room to run without truncating the verdict.
+        DeepSeekProvider provider = new DeepSeekProvider(new StubConfig(Map.of(
+            "infochat.llm.security.base-url", baseUrl,
+            "infochat.llm.security.model", "deepseek-v4-flash",
+            "infochat.llm.security.reasoning-effort", "high",
+            "infochat.llm.security.max-tokens",
+            Integer.toString(DeepSeekProvider.REASONING_MIN_MAX_TOKENS))));
+
+        assertDoesNotThrow(
+            () -> provider.assertTaskConfigResolvable(ModelTask.SECURITY_JUDGE),
+            "reasoning-on with max-tokens at the floor must boot clean");
     }
 
     @Test
