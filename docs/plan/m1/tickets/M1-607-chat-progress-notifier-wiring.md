@@ -1,7 +1,7 @@
 ---
 id: M1-607
 title: "Wire chat-mode replies into the ProgressNotifier (D31) so slow turns show live progress"
-status: pending
+status: done
 created: 2026-07-12
 last_updated: 2026-07-12
 blocked_by: []
@@ -156,7 +156,25 @@ spec_refs:
 decision_refs:
   - D31
   - D43
-reviews: []
+clarity_check:
+  date: 2026-07-12
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 14
+      added: 660
+      removed: 66
 escalations: []
 overrides: []
 revisions:
@@ -207,7 +225,17 @@ revisions:
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-07-12
+    verdict: CLEAN
+    base: 193f572f (merge-base main)
+    head: working-tree@m1/M1-607-wire-chat-mode-replies-into-th (pre-commit branch audit)
+    verdict_file: docs/plan/m1/redteam/M1-607-2026-07-12.md
+    out_of_model_count: 0
+    note: >-
+      Pre-commit branch audit (/m1-tick run step 5). CLEAN across all five
+      sensitive surfaces; no findings, no out-of-model items. Audit file
+      folds into the ticket commit per the lifecycle-path exemption.
 ---
 
 # M1-607: Wire chat-mode replies into the ProgressNotifier

@@ -1,7 +1,5 @@
 package app.zcat.infochat.provider.messaging;
 
-import app.zcat.infochat.messaging.FailureCategory;
-import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
@@ -24,9 +22,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * {@code messaging.md} §Failure handling — "the context window remains as
  * if the message was never generated, and chat_memory is not written"), and
  * on a successful delivery both turns persist exactly as before. Drives the
- * real ChatAgent → InboundRouter → OutboundDelivery chokepoint path against
- * the seeded DB; permanent failure is injected by rebinding the reply target
- * to an always-PERMANENT-failing adapter for the one dispatch.
+ * real ChatAgent → InboundRouter → StageProgressNotifier → OutboundDelivery
+ * chokepoint path against the seeded DB; permanent failure is injected by
+ * killing the adapter's message handles mid-generation so the notifier's
+ * terminal finalize aborts PERMANENT (M1-607).
  */
 @QuarkusTest
 class InboundRouterChatDeliveryOrderingIT {
@@ -35,7 +34,6 @@ class InboundRouterChatDeliveryOrderingIT {
     private static final String CONTACT_PREFIX = "chat-order-it-";
 
     @Inject InMemoryAdapter adapter;
-    @Inject InboundRouter router;
     @Inject @SeedDataSource DataSource dataSource;
     @Inject TestLlmProvider testLlmProvider;
 
@@ -70,17 +68,22 @@ class InboundRouterChatDeliveryOrderingIT {
         UUID userId = seedVouchedUser("perm-fail");
         testLlmProvider.setResponseText("Reply that never reaches the user.");
 
-        // Inject a permanent delivery failure: rebind the "inmemory" reply
-        // target to an always-PERMANENT-failing adapter so the chokepoint
-        // aborts the chat reply. Restore the real adapter afterwards so the
-        // shared CDI router is not left with a stale binding.
-        MessagingAdapter failing =
-                FailingMessagingAdapter.alwaysFailing(ADAPTER, FailureCategory.PERMANENT);
-        router.setReplyTarget(failing);
+        // Inject a permanent delivery failure into the notifier-driven
+        // self-delivery path (M1-607): the chat reply now REPLACES the D31
+        // placeholder via finalizeMessage on the adapter the AdapterRegistry
+        // resolves, so the old reply-target rebind can no longer intercept
+        // it. Instead, kill the adapter's message handles mid-generation
+        // (adapter.reset() clears the handle map) — the terminal finalize
+        // then raises the adapter's PERMANENT unknown-handle failure through
+        // the real chokepoint, simulating "the channel died while the LLM
+        // was generating".
+        testLlmProvider.setOnGenerate(adapter::reset);
         try {
             adapter.deliverDm(CONTACT_PREFIX + "perm-fail", "tell me something");
         } finally {
-            router.setReplyTarget(adapter);
+            // The provider bean is shared JVM-wide across @QuarkusTest
+            // classes — never leak the handle-killing hook past this test.
+            testLlmProvider.reset();
         }
 
         assertEquals(0, countChatMessages(userId),

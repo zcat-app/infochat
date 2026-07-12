@@ -11,6 +11,7 @@ import app.zcat.infochat.provider.testing.TestLlmProvider;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -41,6 +42,9 @@ class InboundRouterChatModeIT {
     @Inject BundleLoader bundleLoader;
     @Inject CommandPermissions commandPermissions;
     @Inject TestLlmProvider testLlmProvider;
+
+    @ConfigProperty(name = "infochat.llm.chat.timeout-ms")
+    long chatTimeoutMs;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -93,14 +97,29 @@ class InboundRouterChatModeIT {
 
         adapter.deliverDm(CONTACT_PREFIX + "user-1", "tell me about bitcoin");
 
-        OutboundMessage reply = lastReply();
-        String replyBody = reply.text();
-        // The reply must NOT be the static sentinel
-        assertFalse(replyBody.contains("Chat-mode replies are not in the MVP"),
-                "Should dispatch to ChatAgent, not return the old sentinel");
+        // The chat turn self-delivers via the ProgressNotifier (M1-607):
+        // the reply REPLACES the D31 placeholder, so it is read from the
+        // finalize event, not the last plain send (mirroring SummaryIT).
+        String replyBody = lastFinalizedBody();
+        assertEquals("Hello from the chat agent!", replyBody,
+                "the finalized placeholder must carry the ChatAgent reply");
         // The LLM was called
         assertTrue(testLlmProvider.callCount() > 0,
                 "TestLlmProvider should have been called");
+    }
+
+    /**
+     * BUNDLED TIMEOUT RAISE (M1-607): the committed
+     * infochat.llm.chat.timeout-ms default must resolve above the in-code
+     * 30000ms floor (OpenAiCompatibleProvider/AnthropicProvider configFor
+     * .orElse(30000L)) so a slow-but-working chat generation is not
+     * cancelled and the reply lost (F-live-6).
+     */
+    @Test
+    void chatTimeoutDefaultResolvesAboveInCodeThirtySecondFloor() {
+        assertTrue(chatTimeoutMs > 30000,
+                "infochat.llm.chat.timeout-ms must resolve above the in-code"
+                        + " 30000ms floor; resolved: " + chatTimeoutMs);
     }
 
     @Test
@@ -204,8 +223,9 @@ class InboundRouterChatModeIT {
 
         adapter.deliverDm(CONTACT_PREFIX + "user-4", "hi");
 
-        OutboundMessage reply = lastReply();
-        assertEquals(bundleLoader.get("error.chat.unavailable"), reply.text());
+        // ChatAgent's friendly error is the turn's reply, so it lands via
+        // the notifier's finalize like any other chat reply (M1-607).
+        assertEquals(bundleLoader.get("error.chat.unavailable"), lastFinalizedBody());
     }
 
     @Test
@@ -323,6 +343,12 @@ class InboundRouterChatModeIT {
         var sent = adapter.sentMessages();
         assertFalse(sent.isEmpty(), "Expected at least one reply");
         return sent.getLast();
+    }
+
+    private String lastFinalizedBody() {
+        var finalized = adapter.finalizedBodies();
+        assertFalse(finalized.isEmpty(), "Expected at least one finalized reply");
+        return finalized.getLast();
     }
 
     private UUID seedVouchedUserReturningId(String suffix) throws Exception {

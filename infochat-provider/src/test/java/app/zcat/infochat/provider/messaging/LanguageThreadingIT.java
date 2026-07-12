@@ -104,7 +104,12 @@ class LanguageThreadingIT {
 
         adapter.deliverDm(contact, "ahoj, co je nového?");
 
-        assertEquals(bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE, "cs"), lastReply().text(),
+        // The chat turn self-delivers via the ProgressNotifier (M1-607): the
+        // friendly-error reply REPLACES the D31 placeholder, so it is read
+        // from the finalize event, not the last plain send.
+        var finalized = adapter.finalizedBodies();
+        assertFalse(finalized.isEmpty(), "Expected a finalized chat reply");
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE, "cs"), finalized.getLast(),
                 "/lang cs user's chat-path notice must be the Czech unavailable reply");
     }
 

@@ -2,10 +2,13 @@ package app.zcat.infochat.provider.messaging;
 
 import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.core.log.SafeLog;
+import app.zcat.infochat.llm.ModelTask;
+import app.zcat.infochat.llm.routing.LlmCircuitBreakerRegistry;
 import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.OutboundMessage;
+import app.zcat.infochat.messaging.ProgressStage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.messaging.Utf8;
 import app.zcat.infochat.messaging.metrics.AdapterMetrics;
@@ -318,6 +321,28 @@ public class InboundRouter {
 
     @Inject
     OutboundDelivery outboundDelivery;
+
+    /**
+     * D31 progress publisher for the chat-mode dispatch (M1-607): the
+     * chat turn self-delivers placeholder → coalesced stage edits →
+     * finalized reply, mirroring {@code SummaryCommandHandler}. Injected
+     * as the concrete class (not the {@link app.zcat.infochat.messaging.ProgressNotifier}
+     * SPI) because the chat path alone needs the terminal delivery
+     * outcome ({@link StageProgressNotifier#completeDelivered}) to gate
+     * the deferred post-delivery persist.
+     */
+    @Inject
+    StageProgressNotifier progressNotifier;
+
+    /**
+     * Read-only peek mirroring ChatAgent's M1-606 breaker gate: when the
+     * chat endpoint's breaker would short-circuit, ChatAgent skips the
+     * M1-589 semantic pre-fetch, so the RETRIEVING stage must not be
+     * advertised for that turn. {@code wouldShortCircuit} never
+     * transitions breaker state, so this second peek consumes nothing.
+     */
+    @Inject
+    LlmCircuitBreakerRegistry breakerRegistry;
 
     /**
      * §6.12 adapter-metrics emission point for the inbound chokepoint
@@ -773,14 +798,16 @@ public class InboundRouter {
         // Step 6 — parse + dispatch (slash-command resolver or chat-mode
         // fallback), then deliver. A DispatchResult.AlreadyDelivered means a
         // self-delivering handler already shipped its reply through the
-        // ProgressNotifier, so the router performs NO send for that
-        // invocation (no double-send); a DispatchResult.Reply carries the
-        // body to send and gates the post-delivery chat-turn commit.
+        // ProgressNotifier — the router performs NO send for that invocation
+        // (no double-send), and the chat path has already run its
+        // delivery-gated post-delivery commit inside
+        // dispatchChatSelfDelivering (M1-607). A DispatchResult.Reply
+        // carries a fixed/slash body to send; no Reply path produces a
+        // pending chat commit.
         DispatchResult dispatchResult =
                 dispatchSlashOrChat(msg.scope(), normalized, snapshot.get().id(), dispatchScopeId);
         if (dispatchResult instanceof DispatchResult.Reply reply) {
-            MessageHandle handle = sendReply(msg.scope(), reply.body(), adapterName);
-            runPostDeliveryCommit(msg.scope(), adapterName, handle);
+            sendReply(msg.scope(), reply.body(), adapterName);
         }
     }
 
@@ -854,13 +881,12 @@ public class InboundRouter {
                 return new DispatchResult.Reply(
                         bundleLoader.get(BundleKeys.GROUP_LLM_RATE_LIMIT, inboundContext.effectiveLanguage()));
             }
-            // A null dispatchChat return propagates a /stop-cancelled chat
-            // turn — map to AlreadyDelivered so the router skips the send
-            // (no double-reply; ChatAgent already let the /stop handler reply).
-            @Nullable String chatBody = dispatchChat(actorId, scopeKind, dispatchScopeId, normalized);
-            return chatBody == null
-                    ? new DispatchResult.AlreadyDelivered()
-                    : new DispatchResult.Reply(chatBody);
+            // The chat turn self-delivers through the ProgressNotifier
+            // (placeholder → stage edits → finalized reply, M1-607), so
+            // every dispatched-turn outcome — reply, /stop cancellation,
+            // failure — is AlreadyDelivered; only the pre-dispatch fixed
+            // errors above remain plain router sends.
+            return dispatchChatSelfDelivering(scope, actorId, scopeKind, dispatchScopeId, normalized);
         } catch (RuntimeException e) {
             SafeLog.error(log,
                     "InboundRouter dispatch failed for scope="
@@ -874,19 +900,84 @@ public class InboundRouter {
     }
 
     /**
+     * Chat-mode dispatch with D31 progress publication (M1-607): the turn
+     * self-delivers through the {@link StageProgressNotifier} — placeholder
+     * ({@code STARTED}), coalesced stage edits, then a terminal that
+     * REPLACES the placeholder — mirroring {@code SummaryCommandHandler}.
+     * The stage sequence brackets the compute inside {@link #dispatchChat}:
+     * {@code RETRIEVING} is advertised only when the M1-589 pre-fetch will
+     * actually run (skipped while the chat breaker is OPEN, M1-606 — the
+     * same read-only {@code wouldShortCircuit} peek ChatAgent gates on; the
+     * microsecond TOCTOU between the two peeks costs at most one cosmetic
+     * stage label), and {@code GENERATING} covers the LLM tool loop. Stage
+     * strings are enum-keyed bundle lookups — user input is NEVER
+     * interpolated (messaging.md §Progress notifications).
+     *
+     * <p>Terminals: a computed reply (including ChatAgent's friendly error
+     * strings) finalizes via {@link StageProgressNotifier#completeDelivered},
+     * whose delivery outcome gates the deferred persist — placeholder and
+     * finalize wrap compute+deliver, never the persist, so a permanently-
+     * failed delivery leaves the window "as if the message was never
+     * generated" (messaging.md §Failure handling). A {@code null} reply is
+     * a /stop-cancelled turn: the placeholder is finalized with the D35
+     * stopped terminal — never the stale answer — while the /stop
+     * dispatch's own acknowledgement remains a separate message. A
+     * RuntimeException degrades to {@link StageProgressNotifier#fail}
+     * (localized failure terminal on the placeholder), mirroring the
+     * SummaryCommandHandler failure arm.</p>
+     */
+    private DispatchResult dispatchChatSelfDelivering(ScopeRef scope, UUID actorId,
+                                                      String scopeKind, UUID scopeId,
+                                                      String normalized) {
+        try {
+            progressNotifier.publish(scope, ProgressStage.STARTED);
+            if (!breakerRegistry.wouldShortCircuit(ModelTask.CHAT_AGENT)) {
+                progressNotifier.publish(scope, ProgressStage.RETRIEVING);
+            }
+            progressNotifier.publish(scope, ProgressStage.GENERATING);
+            @Nullable String reply = dispatchChat(actorId, scopeKind, scopeId, normalized);
+            if (reply == null) {
+                // /stop cancelled the turn (the only null-reply source):
+                // terminal stopped text per D35 — complete(), never fail(),
+                // and never the stale answer.
+                progressNotifier.complete(scope,
+                        bundleLoader.get(BundleKeys.PROGRESS_STOPPED,
+                                inboundContext.effectiveLanguage()));
+                return new DispatchResult.AlreadyDelivered();
+            }
+            progressNotifier.publish(scope, ProgressStage.FINALIZING);
+            boolean delivered = progressNotifier.completeDelivered(scope, reply);
+            runPostDeliveryCommit(scope, delivered);
+            return new DispatchResult.AlreadyDelivered();
+        } catch (RuntimeException e) {
+            // Mirror SummaryCommandHandler's failure arm: the notifier's
+            // localized failure terminal replaces the placeholder — never a
+            // second plain reply on top of a dangling one. The exception's
+            // message is not interpolated into any outbound (M1-020).
+            SafeLog.error(log,
+                    "InboundRouter chat dispatch failed for scope="
+                            + ContactIds.redact(scopeIdOf(scope)),
+                    e);
+            progressNotifier.fail(scope);
+            return new DispatchResult.AlreadyDelivered();
+        }
+    }
+
+    /**
      * Post-delivery chat-turn persistence (spec messaging.md §Failure
      * handling). {@link InboundContext#takePendingChatCommit()} is non-null
      * only when this dispatch computed a chat reply; it is read (and cleared)
      * unconditionally so a permanent failure does not strand it. Persist +
-     * auto-compress run ONLY when the reply was delivered (non-null
-     * {@code handle}): on permanent failure the commit is dropped, so neither
-     * turn is written.
+     * auto-compress run ONLY when the reply was delivered ({@code delivered}
+     * — the terminal finalize's outcome): on permanent failure the commit is
+     * dropped, so neither turn is written.
      */
-    private void runPostDeliveryCommit(ScopeRef scope, String adapterName, @Nullable MessageHandle handle) {
+    private void runPostDeliveryCommit(ScopeRef scope, boolean delivered) {
         ChatAgent.PendingCommit pendingChatCommit = inboundContext.takePendingChatCommit();
-        if (handle == null || pendingChatCommit == null) {
+        if (!delivered || pendingChatCommit == null) {
             return;
         }
+        String adapterName = inboundContext.adapterName();
         try {
             Optional<String> autoCompressNotice = pendingChatCommit.commit();
             // Auto-compress fires between turns; its notice now rides a second

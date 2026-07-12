@@ -117,6 +117,17 @@ public class StageProgressNotifier implements ProgressNotifier {
     public void publish(ScopeRef scope, ProgressStage stage) {
         String text = bundleLoader.get(bundleKeyFor(stage), inboundContext.effectiveLanguage());
         MessagingAdapter adapter = resolveAdapter();
+        if (!adapter.capabilities().supportsMessageEdit()) {
+            // Spec messaging.md §Progress notifications: adapters without
+            // supportsMessageEdit collapse to a single final send of the
+            // completed text — no placeholder, no intermediate edits, and
+            // callers never branch on transport (M1-607). With no ScopeState
+            // minted here, the terminal complete()/fail() takes terminate()'s
+            // no-handle branch, which delivers the final text as the one
+            // fresh send; typing is never turned on, so nothing needs
+            // turning off.
+            return;
+        }
         ScopeState state = states.computeIfAbsent(scope, s -> new ScopeState());
         // Register the request-end safety net before any outbound work: if
         // this dispatch abandons the operation without a terminal
@@ -177,7 +188,23 @@ public class StageProgressNotifier implements ProgressNotifier {
 
     @Override
     public void complete(ScopeRef scope, String finalText) {
-        terminate(scope, finalText);
+        completeDelivered(scope, finalText);
+    }
+
+    /**
+     * Terminal success like {@link #complete}, additionally reporting
+     * whether {@code finalText} actually reached the adapter — {@code true}
+     * when the placeholder finalize (or, with no placeholder, the fresh
+     * terminal send) was accepted by the outbound chokepoint, {@code false}
+     * on a permanent/exhausted abort. The chat dispatch gates its deferred
+     * post-delivery persist on this outcome so a permanently-failed reply
+     * leaves the context window "as if the message was never generated"
+     * (spec {@code messaging.md} §Failure handling, M1-607). Not part of
+     * the {@link ProgressNotifier} SPI: handlers that carry no deferred
+     * commit ({@code /summary}) keep the fire-and-forget {@code complete}.
+     */
+    public boolean completeDelivered(ScopeRef scope, String finalText) {
+        return terminate(scope, finalText);
     }
 
     @Override
@@ -210,8 +237,12 @@ public class StageProgressNotifier implements ProgressNotifier {
      * through the outbound chokepoint, which absorbs transport failures
      * (retry/abort) internally — so typing is turned off unconditionally
      * after a finalize, with no exception able to skip it.
+     *
+     * @return whether {@code text} reached the adapter (finalize accepted,
+     *         or the fresh send yielded a handle) — the delivery outcome
+     *         {@link #completeDelivered} reports.
      */
-    private void terminate(ScopeRef scope, String text) {
+    private boolean terminate(ScopeRef scope, String text) {
         MessagingAdapter adapter = resolveAdapter();
         ScopeState state = states.remove(scope);
         MessageHandle handle = state == null ? null : state.handle;
@@ -219,7 +250,8 @@ public class StageProgressNotifier implements ProgressNotifier {
             // The terminal finalize is an in-place edit, so it counts
             // under the §6.12 update outcomes (the fresh-send branch
             // below is counted by the chokepoint as a send).
-            if (outboundDelivery.finalizeInPlace(adapter, handle, text)) {
+            boolean finalized = outboundDelivery.finalizeInPlace(adapter, handle, text);
+            if (finalized) {
                 adapterMetrics.updateOutcome(adapter.name(), scope,
                         AdapterMetrics.UpdateOutcome.OK);
                 adapterMetrics.messageBytes(adapter.name(),
@@ -230,9 +262,9 @@ public class StageProgressNotifier implements ProgressNotifier {
             }
             // Typing was only turned on if a placeholder was acquired.
             adapter.setTyping(scope, false);
-        } else {
-            outboundDelivery.deliver(adapter, outbound(scope, text));
+            return finalized;
         }
+        return outboundDelivery.deliver(adapter, outbound(scope, text)) != null;
     }
 
     private MessagingAdapter resolveAdapter() {

@@ -49,10 +49,21 @@ public class TestLlmProvider implements LlmProvider {
     private final AtomicReference<String> translatorResponseText =
             new AtomicReference<>(null);
     private final AtomicBoolean throwOnCall = new AtomicBoolean(false);
+    // Optional mid-turn action, run on every generate() call before the
+    // canned response is returned. Lets an IT mutate transport state at the
+    // one point that is guaranteed to sit between the D31 placeholder
+    // acquisition and the terminal finalize of a chat turn (M1-607) — e.g.
+    // killing the adapter's message handles to force a PERMANENT finalize
+    // failure, simulating "the channel died while the LLM was generating".
+    private final AtomicReference<Runnable> onGenerate = new AtomicReference<>(null);
 
     @Override
     public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
         callCount.incrementAndGet();
+        Runnable midTurnAction = onGenerate.get();
+        if (midTurnAction != null) {
+            midTurnAction.run();
+        }
         if (throwOnCall.get()) {
             throw new RuntimeException("LLM unreachable (TestLlmProvider stub)");
         }
@@ -87,10 +98,20 @@ public class TestLlmProvider implements LlmProvider {
         throwOnCall.set(shouldThrow);
     }
 
+    /**
+     * Set an action to run inside every {@code generate()} call, before the
+     * canned response is returned. Leaving it unset (the reset default)
+     * keeps generate() side-effect-free for every other caller.
+     */
+    public void setOnGenerate(Runnable action) {
+        onGenerate.set(action);
+    }
+
     public void reset() {
         callCount.set(0);
         responseText.set("default test summary");
         translatorResponseText.set(null);
         throwOnCall.set(false);
+        onGenerate.set(null);
     }
 }

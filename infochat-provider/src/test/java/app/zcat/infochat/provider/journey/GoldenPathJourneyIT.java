@@ -243,13 +243,18 @@ class GoldenPathJourneyIT {
         adapter.reset();
 
         // ----- Hop 7 — a chat-mode turn returns the stubbed reply ----------
+        // Like /summary in hop 6, the chat turn delivers via placeholder
+        // send + in-place finalize (M1-607): the agent reply lands on the
+        // finalized body, not the last plain send.
         String chatMarker = "JOURNEY-CHAT-REPLY-" + PREFIX;
         testLlmProvider.reset();
         testLlmProvider.setResponseText(chatMarker);
         adapter.deliverDm(user, "tell me about the news");
-        assertTrue(lastReply().text().contains(chatMarker),
+        assertEquals(1, adapter.finalizedBodies().size(),
+                "hop 7: the chat turn must deliver exactly one finalized reply body");
+        assertTrue(adapter.finalizedBodies().get(0).contains(chatMarker),
                 "hop 7: a post-graduation chat turn must return the stubbed agent reply; got: "
-                        + lastReply().text());
+                        + adapter.finalizedBodies().get(0));
         assertTrue(testLlmProvider.callCount() > 0,
                 "hop 7: the chat agent must have invoked the LLM");
         adapter.reset();

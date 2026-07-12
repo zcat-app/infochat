@@ -31,6 +31,10 @@ final class RecordingMessagingAdapter implements MessagingAdapter {
     // coalescing tests pin). A test that needs the adapter floor to win sets a
     // non-zero value via withMinEditInterval().
     private Duration minEditInterval = Duration.ZERO;
+    // TRUE by default (every v1 adapter declares it); the M1-607 degraded-
+    // path contract test flips it via withSupportsMessageEdit(false) to pin
+    // the notifier's collapse-to-single-final-send behaviour.
+    private boolean supportsMessageEdit = true;
     private final AtomicInteger handleIds = new AtomicInteger();
     final List<String> sends = new ArrayList<>();
     final List<String> updates = new ArrayList<>();
@@ -48,6 +52,12 @@ final class RecordingMessagingAdapter implements MessagingAdapter {
     /** Set the adapter-declared minEditInterval surfaced through {@link #capabilities()}. */
     RecordingMessagingAdapter withMinEditInterval(Duration interval) {
         this.minEditInterval = interval;
+        return this;
+    }
+
+    /** Set the supportsMessageEdit capability surfaced through {@link #capabilities()}. */
+    RecordingMessagingAdapter withSupportsMessageEdit(boolean supported) {
+        this.supportsMessageEdit = supported;
         return this;
     }
 
@@ -84,8 +94,9 @@ final class RecordingMessagingAdapter implements MessagingAdapter {
 
     @Override
     public CapabilityFlags capabilities() {
-        // Only minEditInterval is read by StageProgressNotifier; the rest are
-        // benign placeholders sufficient for the notifier's coalescing path.
+        // Only minEditInterval and supportsMessageEdit are read by
+        // StageProgressNotifier; the rest are benign placeholders
+        // sufficient for the notifier's coalescing path.
         return new CapabilityFlags(
                 /* supportsMentionByContactId */ false,
                 /* supportsMembershipEvents    */ false,
@@ -93,7 +104,7 @@ final class RecordingMessagingAdapter implements MessagingAdapter {
                 /* supportsMarkdownLinks       */ false,
                 /* maxInboundMessageBytes      */ 65536,
                 /* maxSendsPerSecond           */ 1,
-                /* supportsMessageEdit         */ true,
+                supportsMessageEdit,
                 /* supportsTypingIndicator     */ true,
                 /* minEditInterval             */ minEditInterval);
     }

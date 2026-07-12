@@ -1,15 +1,21 @@
 package app.zcat.infochat.provider.messaging;
 
 import app.zcat.infochat.core.audit.AuditLogWriter;
+import app.zcat.infochat.llm.routing.LlmCircuitBreakerRegistry;
 import app.zcat.infochat.messaging.Identity;
 import app.zcat.infochat.messaging.InboundMessage;
+import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.group.GroupAutoPromoteService;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -50,9 +56,21 @@ class InboundRouterAcquisitionCountTest {
                 return "chat-reply";
             }
         };
+        InboundContext context = new InboundContext();
+        RecordingMessagingAdapter target = new RecordingMessagingAdapter();
         router.outboundDelivery = TestOutboundDelivery.passThrough();
         router.dataSource = counting;
-        router.inboundContext = new InboundContext();
+        router.inboundContext = context;
+        // M1-607 self-delivery wiring: the chat reply now ships placeholder →
+        // finalize through the notifier (JDBC-free, so the router-owned
+        // acquisition count under test is unchanged); the breaker peek reads
+        // no config key, so RETRIEVING is published and nothing else changes.
+        router.progressNotifier = newNotifier(target, context);
+        // Closed-breaker idiom (ChatAgentRefusalInterceptTest): no endpoint
+        // resolves, so wouldShortCircuit is false and the clock is never read
+        // — Clock.fixed pins that this test has no wall-clock dependence.
+        router.breakerRegistry = new LlmCircuitBreakerRegistry(
+                3, 30_000, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), key -> Optional.empty());
         router.rateCapBucket = new AdmitAllRateCapBucket();
         // §7a wiring: both doubles are JDBC-free, so the router-owned
         // acquisition count under test is unchanged.
@@ -82,15 +100,14 @@ class InboundRouterAcquisitionCountTest {
         router.maxInboundBodyBytes = 65536;
         router.chatBodyCap = 65536;
         router.commandBodyCap = 65536;
-        CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
 
         router.onMessage(groupInbound("hello acquisition count"), ADAPTER);
 
-        assertEquals(1, target.captured.size(),
-                "the chat dispatch must produce exactly one reply; got: " + target.captured);
-        assertEquals("chat-reply", target.captured.get(0).text(),
-                "the reply must come from the chat dispatch seam");
+        assertEquals(1, target.sends.size(),
+                "the chat dispatch must acquire exactly one placeholder send; got: " + target.sends);
+        assertEquals(List.of("chat-reply"), target.finalizes,
+                "the finalized reply must come from the chat dispatch seam");
         assertEquals(1, counting.connectionCount(),
                 "a group chat dispatch must borrow exactly one router-owned"
                         + " connection for the pre-LLM read phase; executed: "
@@ -116,5 +133,27 @@ class InboundRouterAcquisitionCountTest {
                 body,
                 Instant.now(),
                 "msg-1");
+    }
+
+    /**
+     * A real {@link StageProgressNotifier} over the recording adapter,
+     * sharing the router's {@link InboundContext} so {@code resolveAdapter}
+     * finds the adapter under the dispatch's adapterName. JDBC-free by
+     * construction, keeping the acquisition count under test router-owned.
+     */
+    private static StageProgressNotifier newNotifier(RecordingMessagingAdapter adapter,
+                                                     InboundContext context) {
+        StageProgressNotifier notifier = new StageProgressNotifier();
+        notifier.adapterRegistry = new AdapterRegistry() {
+            @Override
+            public List<MessagingAdapter> activatedAdapters() {
+                return List.of(adapter);
+            }
+        };
+        notifier.inboundContext = context;
+        notifier.bundleLoader = new NoopBundleLoader();
+        notifier.minEditIntervalMs = 0;
+        notifier.outboundDelivery = TestOutboundDelivery.passThrough();
+        return notifier;
     }
 }
