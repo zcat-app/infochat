@@ -106,12 +106,19 @@ public class StageProgressNotifier implements ProgressNotifier {
     long minEditIntervalMs;
 
     /**
-     * Per-scope notifier state. Created on the first publish for a
-     * scope, removed on the terminal call. Concurrent publishes for the
-     * SAME scope are serialized on the value monitor; different scopes
-     * never share a state object.
+     * Per-operation notifier state, keyed by the request-scoped
+     * {@link InboundContext#operationId()} (one inbound dispatch = one
+     * operation), NOT by the destination scope. Created on the first publish
+     * of an operation, removed on that operation's terminal call. Keying by
+     * operation is what lets two operations publishing concurrently into the
+     * SAME scope — two users' chat turns in one approved group, or a chat turn
+     * alongside {@code /summary} — each own an independent placeholder,
+     * instead of the second taking the UPDATE path against the first's handle
+     * and whichever terminal lands first finalizing the wrong operation's text
+     * (M1-611). Concurrent publishes of the SAME operation are serialized on
+     * the value monitor.
      */
-    private final ConcurrentHashMap<ScopeRef, ScopeState> states = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ScopeState> states = new ConcurrentHashMap<>();
 
     @Override
     public void publish(ScopeRef scope, ProgressStage stage) {
@@ -128,14 +135,18 @@ public class StageProgressNotifier implements ProgressNotifier {
             // turning off.
             return;
         }
-        ScopeState state = states.computeIfAbsent(scope, s -> new ScopeState());
+        String operationId = inboundContext.operationId();
+        ScopeState state = states.computeIfAbsent(operationId, id -> new ScopeState());
         // Register the request-end safety net before any outbound work: if
         // this dispatch abandons the operation without a terminal
         // complete()/fail(), the @RequestScoped InboundContext's @PreDestroy
-        // drains the scope so the placeholder is finalized and typing turned
-        // off — the publish->terminate lifecycle is never left dangling, not
-        // only the paths that reach terminate() (M1-334). Idempotent per scope.
-        inboundContext.registerProgressCleanup(scope, () -> terminateAbandoned(scope));
+        // drains it so the placeholder is finalized and typing turned off —
+        // the publish->terminate lifecycle is never left dangling, not only
+        // the paths that reach terminate() (M1-334). The cleanup captures THIS
+        // operation's id so, under concurrent same-scope operations, an
+        // abandoned operation terminates only its own placeholder and never a
+        // live concurrent one's (M1-611). Idempotent per scope.
+        inboundContext.registerProgressCleanup(scope, () -> terminateAbandoned(operationId, scope));
         synchronized (state) {
             if (state.handle == null) {
                 // Step 1+2: acquire the placeholder via the outbound
@@ -204,28 +215,35 @@ public class StageProgressNotifier implements ProgressNotifier {
      * commit ({@code /summary}) keep the fire-and-forget {@code complete}.
      */
     public boolean completeDelivered(ScopeRef scope, String finalText) {
-        return terminate(scope, finalText);
+        return terminate(inboundContext.operationId(), scope, finalText);
     }
 
     @Override
     public void fail(ScopeRef scope) {
-        terminate(scope, bundleLoader.get(BundleKeys.PROGRESS_FAILED, inboundContext.effectiveLanguage()));
+        terminate(inboundContext.operationId(), scope, failedText());
+    }
+
+    private String failedText() {
+        return bundleLoader.get(BundleKeys.PROGRESS_FAILED, inboundContext.effectiveLanguage());
     }
 
     /**
-     * Request-end safety net (M1-334): finalize a placeholder this scope
-     * still holds because its dispatch abandoned the operation without a
-     * terminal {@link #complete}/{@link #fail}. Degrades to the documented
-     * {@link #fail} outcome — friendly failed text, typing OFF — so the user
-     * is never left with a perpetual typing indicator and the next operation
-     * in the scope starts clean (no stale {@code handle != null} on its first
-     * publish). A no-op once the scope has terminated normally (its
+     * Request-end safety net (M1-334): finalize a placeholder the operation
+     * identified by {@code operationId} still holds because its dispatch
+     * abandoned it without a terminal {@link #complete}/{@link #fail}.
+     * Degrades to the documented {@link #fail} outcome — friendly failed text,
+     * typing OFF — so the user is never left with a perpetual typing
+     * indicator. Keyed by the abandoning operation's id (captured in the
+     * cleanup closure at publish time, not re-read from the request-scoped
+     * context being torn down), so it terminates ONLY that operation's
+     * placeholder and never a live concurrent operation's in the same scope
+     * (M1-611). A no-op once that operation terminated normally (its
      * {@code states} entry is already removed), so the normal lifecycle is
      * untouched. Invoked by {@link InboundContext#drainAbandonedProgress()}.
      */
-    void terminateAbandoned(ScopeRef scope) {
-        if (states.containsKey(scope)) {
-            fail(scope);
+    void terminateAbandoned(String operationId, ScopeRef scope) {
+        if (states.containsKey(operationId)) {
+            terminate(operationId, scope, failedText());
         }
     }
 
@@ -242,9 +260,9 @@ public class StageProgressNotifier implements ProgressNotifier {
      *         or the fresh send yielded a handle) — the delivery outcome
      *         {@link #completeDelivered} reports.
      */
-    private boolean terminate(ScopeRef scope, String text) {
+    private boolean terminate(String operationId, ScopeRef scope, String text) {
         MessagingAdapter adapter = resolveAdapter();
-        ScopeState state = states.remove(scope);
+        ScopeState state = states.remove(operationId);
         MessageHandle handle = state == null ? null : state.handle;
         if (handle != null) {
             // The terminal finalize is an in-place edit, so it counts

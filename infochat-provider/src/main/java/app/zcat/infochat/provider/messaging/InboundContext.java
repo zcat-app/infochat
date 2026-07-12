@@ -8,6 +8,7 @@ import org.jspecify.annotations.Nullable;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Per-inbound-dispatch context bean. Carries the originating
@@ -46,6 +47,16 @@ public class InboundContext {
     private String adapterName;
     @SuppressWarnings("NullAway.Init")
     private String senderContactId;
+    // A stable identity for this one inbound dispatch — one dispatch = one
+    // "operation" (a chat turn, a /summary). StageProgressNotifier keys its
+    // per-operation progress state by this so two operations publishing
+    // concurrently into the SAME scope (two users' chat turns in one approved
+    // group, or a chat turn alongside /summary) never share a placeholder and
+    // never finalize each other's message (M1-611). Distinct from
+    // senderContactId because the same user can drive two concurrent
+    // operations in one scope, which must still be told apart. Request-scoped,
+    // so each dispatch gets a fresh value at construction.
+    private final String operationId = UUID.randomUUID().toString();
     // Eagerly defaulted (not router-set) because some reply paths
     // legitimately fire before any language is resolvable — see
     // effectiveLanguage().
@@ -99,6 +110,16 @@ public class InboundContext {
 
     public void setSenderContactId(String senderContactId) {
         this.senderContactId = senderContactId;
+    }
+
+    /**
+     * A stable per-dispatch operation identity (one inbound dispatch = one
+     * operation). Read by {@link StageProgressNotifier} to key its
+     * per-operation progress state so two operations publishing concurrently
+     * into one scope do not clobber each other's placeholder (M1-611).
+     */
+    public String operationId() {
+        return operationId;
     }
 
     /**

@@ -1,9 +1,24 @@
 ---
 id: M1-611
 title: "Per-operation ProgressNotifier state: concurrent same-scope publishers must not clobber each other's placeholder"
-status: pending
+status: done
 created: 2026-07-12
 last_updated: 2026-07-12
+clarity_check:
+  date: 2026-07-12
+  verdict: WARN
+  warnings:
+    - >-
+      Acceptance item 5's named test vehicle, RecordingMessagingAdapter,
+      currently discards the MessageHandle argument on both update and
+      finalizeMessage, so it cannot today produce the "no update/finalize
+      lands on the other operation's handle" evidence the item demands.
+      Either authorize an additive change to that shared test-support class,
+      or have the new test bring its own handle-attributing double.
+    - >-
+      files_budget 6 is generous relative to the ~2-3 files mental math
+      suggests; not implausible, just loose.
+  blockers: []
 blocked_by: []
 files_budget: 6
 complexity: medium
@@ -93,7 +108,20 @@ spec_refs:
   - docs/spec/messaging.md §Progress notifications
 decision_refs:
   - D31
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 387
+      removed: 31
 escalations: []
 overrides: []
 revisions: []
