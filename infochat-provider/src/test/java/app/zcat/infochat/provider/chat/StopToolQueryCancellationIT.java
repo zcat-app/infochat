@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -69,10 +71,21 @@ class StopToolQueryCancellationIT {
                     inFlightTracker.tryAcquire(userId, scopeKind, scopeId);
             try (Connection conn = dataSource.getConnection()) {
                 cancellationService.armToolConnection(conn, userId, scopeKind, scopeId);
+                // Widen THIS connection's statement_timeout so pg_cancel_backend
+                // deterministically beats the backstop even under full-suite
+                // load (M1-615). SET LOCAL inside the transaction that
+                // armToolConnection opened overrides its %test 5s value for
+                // this transaction only — the shared profile value and every
+                // other test are untouched. 15s stays below the 20s
+                // worker.join so a genuinely lost cancel still surfaces as
+                // the discriminating "statement timeout" message.
+                try (Statement widen = conn.createStatement()) {
+                    widen.execute("SET LOCAL statement_timeout = 15000");
+                }
                 armed.countDown();
                 // 30s sleep >> the cancel arrival (~ms): pg_cancel_backend
-                // aborts it long before the sleep elapses (and before the
-                // %test 5s statement_timeout backstop).
+                // aborts it long before the sleep elapses (and before this
+                // connection's widened 15s statement_timeout backstop).
                 try (PreparedStatement ps = conn.prepareStatement("SELECT pg_sleep(30)")) {
                     ps.execute();
                 }
@@ -98,6 +111,33 @@ class StopToolQueryCancellationIT {
         }
         assertTrue(handle.hasPgBackendPid(),
                 "the armed tool connection must register its pg backend pid");
+
+        // PostgreSQL discards pg_cancel_backend against an idle backend, and
+        // the armed latch counts down BEFORE ps.execute() reaches the server —
+        // so a descheduled worker would silently lose a cancel issued now and
+        // the statement_timeout backstop would fire instead (the full-suite
+        // flake this gate removes, M1-615). Only issue /stop once the slow
+        // query is observably executing on the registered backend.
+        boolean slowQueryActive = false;
+        long activeDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        try (Connection probe = dataSource.getConnection();
+             PreparedStatement stateQuery = probe.prepareStatement(
+                     "SELECT state FROM pg_stat_activity"
+                             + " WHERE pid = ? AND query LIKE '%pg_sleep%'")) {
+            stateQuery.setInt(1, handle.pgBackendPid());
+            while (System.nanoTime() < activeDeadline) {
+                try (ResultSet rs = stateQuery.executeQuery()) {
+                    if (rs.next() && "active".equals(rs.getString(1))) {
+                        slowQueryActive = true;
+                        break;
+                    }
+                }
+                Thread.sleep(20);
+            }
+        }
+        assertTrue(slowQueryActive,
+                "the slow query must be observed running (pg_stat_activity"
+                        + " state=active) before /stop is issued");
 
         boolean cancelled = cancellationService.cancel(userId, scopeKind, scopeId);
         assertTrue(cancelled, "cancel must report that an in-flight slot existed");

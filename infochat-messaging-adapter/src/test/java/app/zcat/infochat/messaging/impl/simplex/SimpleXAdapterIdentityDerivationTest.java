@@ -66,6 +66,12 @@ class SimpleXAdapterIdentityDerivationTest {
             adapter.setInboundHandler(delivered::add);
             try {
                 adapter.start();
+                // start() connects the WS client asynchronously; await the
+                // completed handshake before pushing frames, or sendFrame
+                // races the connect and throws "client has not connected
+                // yet" under full-suite load (M1-615). Same guard as the
+                // restart test below.
+                fake.awaitClient(WAIT);
 
                 fake.sendFrame(groupMentionFrame(BOT_MEMBER_ID, OTHER_MEMBER_ID, "route-item-1"));
                 fake.sendFrame(groupMentionFrame(BOT_MEMBER_ID, BOT_MEMBER_ID, "route-item-2"));

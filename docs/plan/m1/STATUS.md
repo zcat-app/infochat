@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 635 |
+| done | 636 |
 | deferred | 1 |
 | abandoned | 11 |
 | **total** | **649** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-612 — Measure real DeepSeek per-post token/request cost of the split ingest eval pipeline (complexity: medium, risk: low)
-- M1-615 — Fix two full-suite timing-race flaky tests (complexity: medium, risk: low)
 
 ---
 
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-615 | Fix two full-suite timing-race flaky tests | 2026-07-12 | round 1 APPROVE |
 | M1-614 | Setup wizard: deepseek provider option + provider docs | 2026-07-12 | round 1 APPROVE |
 | M1-613 | Harden entity extraction on DeepSeek: lenient parser + prompt tuning, re-measure v4-flash | 2026-07-12 | round 1 APPROVE |
 | M1-611 | Per-operation ProgressNotifier state: concurrent same-scope publishers must not clobber each other's placeholder | 2026-07-12 | round 1 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-607 | Wire chat-mode replies into the ProgressNotifier (D31) so slow turns show live progress | 2026-07-12 | round 1 APPROVE |
 | M1-606 | LLM router circuit breaker: fail-fast + pre-fetch skip on unreachable provider | 2026-07-12 | round 1 APPROVE |
 | M1-605 | switch-llm.sh must not silently sweep a hand-pinned per-task route on an all-default run: require explicit confirmation when the current config is mixed/pinned (M1-603 consent regression) | 2026-07-11 | round 1 APPROVE |
-| M1-604 | Doc alignment for remote-llm ingest routing: record the all-generative-remote decision + add the classifier rows missing from design §5.7 (M1-603 already shipped the props comment + Anthropic-block removal) | 2026-07-11 | round 1 APPROVE |
 
 ---
 
@@ -832,5 +831,5 @@ M1-611 (done)
 M1-612 (pending) ← runnable
 M1-613 (done)
 M1-614 (done)
-M1-615 (pending) ← runnable
+M1-615 (done)
 ```

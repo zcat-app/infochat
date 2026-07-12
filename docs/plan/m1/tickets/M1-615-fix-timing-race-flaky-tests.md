@@ -1,7 +1,7 @@
 ---
 id: M1-615
 title: "Fix two full-suite timing-race flaky tests"
-status: pending
+status: done
 created: 2026-07-12
 last_updated: 2026-07-12
 blocked_by: []
@@ -82,12 +82,36 @@ test_plan:
 spec_refs:
   - docs/spec/commands.md §Conversation control
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 65
+      removed: 10
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-12
+  verdict: WARN
+  warnings:
+    - >-
+      Ticket cites sibling method routesGroupMentionByMemberIdAfterRestart
+      (lines 66, 131, 167) which does not exist in
+      SimpleXAdapterIdentityDerivationTest.java; the actual method that already
+      does the awaitClient-before-send handshake is
+      groupMentionRoutingSurvivesRestart (line 90, awaitClient at line 109).
+      Fix direction itself is correct and self-sufficient.
+  blockers: []
 ---
 
 # M1-615: Fix two full-suite timing-race flaky tests
