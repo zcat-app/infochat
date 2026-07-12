@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 628 |
 | deferred | 1 |
 | abandoned | 11 |
-| **total** | **641** |
+| **total** | **642** |
 
 ---
 
@@ -26,6 +26,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-607 — Wire chat-mode replies into the ProgressNotifier (D31) so slow turns show live progress (complexity: medium, risk: low)
+- M1-608 — DeepSeek provider subclass with per-task reasoning toggle (v4-flash thinking-mode control) (complexity: medium, risk: medium)
 
 ---
 
@@ -824,4 +825,5 @@ M1-604 (done)
 M1-605 (done)
 M1-606 (done)
 M1-607 (pending) ← runnable
+M1-608 (pending) ← runnable
 ```

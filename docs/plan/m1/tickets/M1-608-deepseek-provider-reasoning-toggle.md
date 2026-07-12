@@ -1,0 +1,191 @@
+---
+id: M1-608
+title: "DeepSeek provider subclass with per-task reasoning toggle (v4-flash thinking-mode control)"
+status: pending
+created: 2026-07-12
+last_updated: 2026-07-12
+blocked_by: []
+files_budget: 12
+complexity: medium
+risk: medium
+round_cap: 2
+security_relevant: true
+migration_touch: false
+provenance: >-
+  M1-606 discussion + live smoke test 2026-07-12. DeepSeek is deprecating the
+  deepseek-chat / deepseek-reasoner model IDs on 2026-07-24, merging them into
+  deepseek-v4-flash with a thinking-mode toggle. Smoke test findings: our exact
+  request shape works against v4-flash; requesting model=deepseek-v4-flash
+  DEFAULTS TO THINKING ON (burns reasoning tokens, slower, risks truncating the
+  answer under max_tokens); the current model=deepseek-chat already resolves to
+  v4-flash NON-thinking server-side. The only way to force non-thinking is the
+  DeepSeek-specific body field "thinking":{"type":"disabled"} (confirmed: 0
+  reasoning tokens; reasoning_effort only tunes depth high|low|medium|max|xhigh
+  and cannot turn thinking off; thinking:false as a boolean is a 400). A naive
+  config swap to deepseek-v4-flash would therefore regress every task into slow,
+  costly reasoning — hence a DeepSeek-scoped adapter that controls the field.
+out_of_scope:
+  - >-
+    Flipping SECURITY_JUDGE (or any task) to reasoning-ON in production. This
+    ticket delivers the toggle DEFAULTED OFF for every task; whether reasoning
+    actually improves injection detection is an untested hypothesis to settle by
+    a separate eval (measuring detection quality AND the fail-open rate) before
+    enabling it. No task's effective behaviour changes when this lands.
+  - >-
+    The runtime deployment config switch (provider=deepseek,
+    model=deepseek-v4-flash in prod/runtime/application.properties). That file is
+    operator-owned / gitignored — the switch is a DEPLOY step gated on this code
+    landing, documented in the deployment notes, to be performed on/before the
+    2026-07-24 deepseek-chat sunset.
+  - >-
+    Embeddings. They stay on the local backend (nomic-embed-text, D54);
+    DeepSeekProvider is a chat-completion LlmProvider only, never an
+    EmbeddingProvider.
+  - >-
+    Moving the judge / tagging to LOCAL models. That cost-vs-fragility eval is a
+    separate future spike, not this ticket.
+  - >-
+    Changing the shared OpenAiCompatibleProvider behaviour for the generic
+    (real-OpenAI / Ollama) case. The parent gains ONE protected no-op body-
+    customization seam; its existing request shape is byte-identical when the
+    seam is not overridden (the AnthropicProvider and generic paths are
+    untouched).
+acceptance:
+  - >-
+    A DeepSeekProvider (LlmProvider) exists as a subclass of
+    OpenAiCompatibleProvider registered under provider name "deepseek",
+    inheriting the shared HTTP send / non-2xx / parse / per-task config
+    resolution logic and overriding ONLY the request-body assembly via a new
+    protected seam on the parent (a no-op hook the generic path leaves
+    untouched). A per-task route with provider=deepseek resolves to
+    DeepSeekProvider through LlmRouter.forTask exactly as provider=openai-
+    compatible resolves today.
+  - >-
+    Per-task reasoning control via an optional config key
+    infochat.llm.<task>.reasoning-effort. Its OFF sentinel (the DEFAULT for
+    every task when unset) makes DeepSeekProvider inject
+    "thinking":{"type":"disabled"} into the request body — confirmed non-thinking
+    (0 reasoning tokens). A depth value (one of DeepSeek's high|low|medium|max|
+    xhigh) enables thinking at that depth. Default OFF everywhere, so the
+    migration preserves the current deepseek-chat non-thinking behaviour and
+    token cost with no per-task config required.
+  - >-
+    max_tokens coupling is documented and guarded. Because reasoning tokens
+    consume the completion budget, a task with reasoning ENABLED must carry a
+    max_tokens large enough for reasoning + the answer or the answer truncates;
+    for SECURITY_JUDGE a truncated/empty verdict is an infra failure that
+    fail-opens. The ticket documents this coupling at the config surface, and a
+    test asserts that with reasoning OFF (the default and the metadata-task
+    setting) the assembled body disables thinking so no phantom reasoning field
+    can crowd out the verdict/label.
+  - >-
+    The startup guard treats "deepseek" as a REMOTE provider: DeepSeekProvider's
+    PROVIDER_NAME is added to LlmRouterStartupGuard.REMOTE_PROVIDER_NAMES so the
+    local-only conflict check and the language-route disclosure check cover it,
+    matching the existing AnthropicProvider handling. A deepseek route under
+    infochat.llm.local-only=true fails boot loudly.
+  - >-
+    Request-structure parity with the live API (verified 2026-07-12): the body
+    carries {model, max_tokens, messages:[{role,content}]} plus the thinking
+    field, POSTs to <base>/chat/completions, and the response is parsed as
+    choices[0].message.content (the extra reasoning_content field is ignored).
+  - >-
+    NAMED TESTS. A DeepSeekProviderTest asserts the assembled request body
+    carries "thinking":{"type":"disabled"} when reasoning-effort is unset/OFF and
+    a thinking-enabled body at the configured depth when a level is set (parse
+    the JSON body the provider builds — do NOT hit the network). A
+    router/registration test asserts provider=deepseek resolves to
+    DeepSeekProvider. A startup-guard test asserts deepseek is treated as remote
+    (local-only conflict fires). Red-before/green-after on the thinking-field
+    assembly (a body without the disable field defaults to thinking-on).
+  - mvn verify is green from the repo root.
+test_plan:
+  adds:
+    - >-
+      DeepSeekProviderTest (body-assembly: thinking disabled by default,
+      enabled+depth when configured; parse-the-body, no network).
+    - Startup-guard test asserting deepseek is a remote provider.
+  modifies:
+    - >-
+      Router/registration and startup-guard tests to the extent the new provider
+      name and REMOTE_PROVIDER_NAMES entry change their fixtures — enumerate at
+      start.
+  preserves:
+    - all tests currently green on main
+    - >-
+      the generic OpenAiCompatibleProvider and AnthropicProvider request shapes
+      (the parent's new seam is a no-op unless overridden).
+spec_refs:
+  - docs/spec/llm.md §SPI shape
+  - docs/spec/llm.md §Per-task routing rules
+decision_refs:
+  - D56
+reviews: []
+escalations: []
+overrides: []
+revisions: []
+aborted_attempts: []
+reopens: []
+redteam_findings: []
+redteam_audits: []
+---
+
+# M1-608: DeepSeek provider subclass with per-task reasoning toggle
+
+## Context
+
+DeepSeek is retiring the `deepseek-chat` and `deepseek-reasoner` model IDs on
+**2026-07-24**, folding both into `deepseek-v4-flash` — one model with a
+thinking-mode switch (`deepseek-chat` = non-thinking, `deepseek-reasoner` =
+thinking). Our runtime routes every LLM task (security judge, tagger, entity,
+classifier, chat, summarizer, translator) to DeepSeek via the generic
+`provider=openai-compatible` adapter today.
+
+A live smoke test on 2026-07-12 (scripts under `.scratch`) established:
+
+- Our exact request shape works against `deepseek-v4-flash` and the response
+  still parses as `choices[0].message.content`.
+- **`model=deepseek-v4-flash` defaults to thinking ON** — it spent 32 reasoning
+  tokens to answer "pong", slower, and (critically) reasoning tokens count
+  against `max_tokens`, so on a real classification prompt the JSON answer can
+  be truncated → schema violation / empty verdict.
+- **`model=deepseek-chat` already resolves to v4-flash NON-thinking** server-side
+  — so today's behaviour is the non-thinking one, and we have runway until the
+  alias sunset.
+- The **only** off-switch is the DeepSeek-specific body field
+  `"thinking":{"type":"disabled"}`. `reasoning_effort` only tunes depth
+  (`high|low|medium|max|xhigh`, no "off"); a boolean `thinking:false` is a 400.
+
+Because the generic OpenAI adapter must NOT send `thinking` to a real OpenAI /
+Ollama endpoint (unknown field → 400), the control has to be DeepSeek-scoped —
+a subclass, as proposed in the M1-606 discussion.
+
+## Shape (refine at start / plan)
+
+- **`DeepSeekProvider extends OpenAiCompatibleProvider`**, `@ApplicationScoped`,
+  `PROVIDER_NAME = "deepseek"`. Inherits send/parse/config; overrides a new
+  **protected seam** on the parent — e.g. `protected void customizeRequestBody(
+  ObjectNode root, ModelTask task)` called inside `doCall` after the base body
+  is assembled (a no-op in the parent, so the generic and Anthropic paths are
+  byte-identical).
+- **Per-task reasoning toggle**: `infochat.llm.<task>.reasoning-effort`, optional,
+  default OFF. OFF → `root.set("thinking", {"type":"disabled"})`. A depth level →
+  thinking enabled at that depth (verify the exact enabled-form + `reasoning_effort`
+  pairing with a quick smoke call during implementation; the disable form is
+  confirmed).
+- **Startup guard**: add `"deepseek"` to `REMOTE_PROVIDER_NAMES` so the
+  local-only / disclosure checks cover it like `anthropic`.
+- **Default OFF everywhere** preserves current behaviour + cost; the judge-on
+  capability exists but is not exercised (see out_of_scope).
+
+## Notes
+
+- **The security angle of the toggle (why security_relevant):** the toggle sits
+  on the SECURITY_JUDGE's LLM call. Reasoning-ON there is plausibly better at
+  injection detection, but (a) it must raise the judge's `max_tokens` or a
+  reasoning-crowded-out verdict fail-opens, and (b) the benefit is unproven.
+  This ticket ships the control defaulted OFF; enabling it for the judge is
+  gated on a follow-up eval, not assumed here.
+- **Follow-up (not this ticket):** measure the judge + tagger on LOCAL small
+  models — whether local inference matches remote quality and saves paid-API
+  cost, or is too fragile and we standardize on remote. A separate spike.
