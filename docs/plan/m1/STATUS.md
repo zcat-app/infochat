@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 628 |
 | deferred | 1 |
 | abandoned | 11 |
-| **total** | **640** |
+| **total** | **641** |
 
 ---
 
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-607 — Wire chat-mode replies into the ProgressNotifier (D31) so slow turns show live progress (complexity: medium, risk: low)
 
 ---
 
@@ -823,4 +823,5 @@ M1-603 (done)
 M1-604 (done)
 M1-605 (done)
 M1-606 (done)
+M1-607 (pending) ← runnable
 ```
