@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 636 |
 | deferred | 1 |
 | abandoned | 11 |
-| **total** | **649** |
+| **total** | **651** |
 
 ---
 
@@ -26,6 +26,8 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-612 — Measure real DeepSeek per-post token/request cost of the split ingest eval pipeline (complexity: medium, risk: low)
+- M1-616 — Calibrate infochat.chat.semantic-threshold: measure semantic-retrieval recall/precision on the live corpus (complexity: medium, risk: low)
+- M1-617 — Chat retrieval-recovery: provenance transparency + hybrid semantic/lexical (RRF) post retrieval (complexity: high, risk: medium)
 
 ---
 
@@ -832,4 +834,6 @@ M1-612 (pending) ← runnable
 M1-613 (done)
 M1-614 (done)
 M1-615 (done)
+M1-616 (pending) ← runnable
+M1-617 (pending) ← runnable
 ```
