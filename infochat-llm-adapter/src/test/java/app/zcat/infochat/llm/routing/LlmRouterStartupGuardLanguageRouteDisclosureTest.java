@@ -29,8 +29,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Plain JUnit5 (no Quarkus boot), same direct
  * {@link LlmRouterStartupGuard#validateLocalOnlyConfiguration(Map)} seam and
  * {@link CapturingHandler} the sibling {@code LlmRouterStartupGuardRedactionTest}
- * uses. {@code anthropic} is the only member of {@code REMOTE_PROVIDER_NAMES};
- * its languages key is resolved through the guard's own
+ * uses. {@code anthropic} is one member of {@code REMOTE_PROVIDER_NAMES}
+ * (alongside {@code deepseek}, M1-608); this test exercises the {@code anthropic}
+ * member, whose languages key is resolved through the guard's own
  * {@link LlmRouterStartupGuard#languagesKeyFor(String)} seam so the test cannot
  * drift from the key the production path reads.
  */

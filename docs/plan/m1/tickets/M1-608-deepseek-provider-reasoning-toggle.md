@@ -1,9 +1,14 @@
 ---
 id: M1-608
 title: "DeepSeek provider subclass with per-task reasoning toggle (v4-flash thinking-mode control)"
-status: pending
+status: done
 created: 2026-07-12
 last_updated: 2026-07-12
+clarity_check:
+  date: 2026-07-12
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 12
 complexity: medium
@@ -144,7 +149,20 @@ spec_refs:
   - docs/spec/llm.md §Per-task routing rules
 decision_refs:
   - D56
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 409
+      removed: 13
 escalations: []
 overrides: []
 revisions:
@@ -180,7 +198,20 @@ revisions:
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-07-12
+    verdict: CLEAN
+    base: ab8f9d53b0f114cfa8e66c9304afc1a796405cd0
+    head: working-tree (m1/M1-608 branch tip, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-608-2026-07-12.md
+    out_of_model_count: 1
+    note: |
+      CLEAN, 0 findings. One out-of-model item: the reasoning-effort -> max-tokens
+      coupling is a JavaDoc-promised gate not enforced in code, but operator config
+      is trusted (not adversary-reachable) and the risk is dormant under the shipped
+      default-OFF the diff introduces to prevent judge-verdict truncation (the diff
+      strengthens the judge path). Structural coupling guard belongs with the future
+      reasoning-enable eval, not M1-608. Surfaced to the user; not auto-filed.
 ---
 
 # M1-608: DeepSeek provider subclass with per-task reasoning toggle

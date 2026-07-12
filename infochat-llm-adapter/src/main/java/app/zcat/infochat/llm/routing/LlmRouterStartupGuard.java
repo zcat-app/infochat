@@ -4,6 +4,7 @@ import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.llm.ModelTask;
 import app.zcat.infochat.llm.impl.AnthropicProvider;
+import app.zcat.infochat.llm.impl.DeepSeekProvider;
 import app.zcat.infochat.llm.impl.LlmHttpSupport;
 import app.zcat.infochat.llm.impl.OpenAiCompatibleProvider;
 import io.quarkus.runtime.Startup;
@@ -161,13 +162,16 @@ public class LlmRouterStartupGuard {
      * per-task provider override under local-only is a configuration
      * conflict regardless of that task's base-url, because the operator's
      * intent (a cloud provider) contradicts the local-only commitment.
-     * {@code anthropic} targets the Anthropic cloud API.
+     * {@code anthropic} targets the Anthropic cloud API; {@code deepseek}
+     * targets the DeepSeek cloud API (M1-608) — both name a specific cloud
+     * service, so their remoteness is fixed regardless of base-url.
      * {@code openai-compatible} is deliberately excluded — it is
      * host-neutral (it fronts a local Ollama by default), so its
      * remoteness is decided by its base-url, which the per-task base-url
      * scan already covers. A future cloud-only provider adds its name here.
      */
-    private static final Set<String> REMOTE_PROVIDER_NAMES = Set.of(AnthropicProvider.PROVIDER_NAME);
+    private static final Set<String> REMOTE_PROVIDER_NAMES =
+        Set.of(AnthropicProvider.PROVIDER_NAME, DeepSeekProvider.PROVIDER_NAME);
 
     /**
      * Opt-in operator switch: when {@code true}, a detected

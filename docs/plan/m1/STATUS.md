@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 628 |
+| done | 629 |
 | deferred | 1 |
 | abandoned | 11 |
 | **total** | **643** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-607 — Wire chat-mode replies into the ProgressNotifier (D31) so slow turns show live progress (complexity: medium, risk: low)
-- M1-608 — DeepSeek provider subclass with per-task reasoning toggle (v4-flash thinking-mode control) (complexity: medium, risk: medium)
 - M1-609 — Spike: local vs remote LLM for the security judge and tagger (quality, throughput, VPS CPU cost) (complexity: medium, risk: low)
 
 ---
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-608 | DeepSeek provider subclass with per-task reasoning toggle (v4-flash thinking-mode control) | 2026-07-12 | round 1 APPROVE |
 | M1-606 | LLM router circuit breaker: fail-fast + pre-fetch skip on unreachable provider | 2026-07-12 | round 1 APPROVE |
 | M1-605 | switch-llm.sh must not silently sweep a hand-pinned per-task route on an all-default run: require explicit confirmation when the current config is mixed/pinned (M1-603 consent regression) | 2026-07-11 | round 1 APPROVE |
 | M1-604 | Doc alignment for remote-llm ingest routing: record the all-generative-remote decision + add the classifier rows missing from design §5.7 (M1-603 already shipped the props comment + Anthropic-block removal) | 2026-07-11 | round 1 APPROVE |
@@ -72,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-600 | Provider: /grant-admin and /revoke-admin render error.probation.blocked with no MessageFormat args, so the defense-in-depth probation branch would emit literal {0}/{1} (use an arg-free probation key) | 2026-07-10 | round 1 APPROVE |
 | M1-601 | test: de-rot ReEvalVerdictNotifyIT scan-window fixture by pinning the injected Clock (2026-07-09 time-bomb) | 2026-07-09 | round 1 APPROVE |
 | M1-598 | Provider: render real per-post classification in /summary (union, drop 'unknown' unless sole) | 2026-07-09 | round 1 APPROVE |
-| M1-594 | Provider: /summary emits a misleading \"Translating...\" progress step for an English scope (suppress the TRANSLATING stage when scope language == source) | 2026-07-09 | — |
 
 ---
 
@@ -826,6 +825,6 @@ M1-604 (done)
 M1-605 (done)
 M1-606 (done)
 M1-607 (pending) ← runnable
-M1-608 (pending) ← runnable
+M1-608 (done)
 M1-609 (pending) ← runnable
 ```

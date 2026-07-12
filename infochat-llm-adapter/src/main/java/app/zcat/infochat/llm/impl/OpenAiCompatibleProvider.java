@@ -136,7 +136,7 @@ public class OpenAiCompatibleProvider implements LlmProvider {
     @Override
     public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
         TaskConfig cfg = configFor(task);
-        return doCall(cfg, systemPrompt, userPrompt);
+        return doCall(task, cfg, systemPrompt, userPrompt);
     }
 
     /**
@@ -213,7 +213,7 @@ public class OpenAiCompatibleProvider implements LlmProvider {
         }
     }
 
-    private LlmResponse doCall(TaskConfig cfg, String systemPrompt, String userPrompt) {
+    private LlmResponse doCall(ModelTask task, TaskConfig cfg, String systemPrompt, String userPrompt) {
         // Assemble the request body. Jackson handles the JSON escape
         // for any quote, backslash, newline, or non-ASCII codepoint
         // inside the prompt strings — a hand-rolled concat would
@@ -230,6 +230,11 @@ public class OpenAiCompatibleProvider implements LlmProvider {
             ObjectNode user = messages.addObject();
             user.put("role", "user");
             user.put("content", userPrompt);
+            // Provider-specific body seam: a no-op here, so the generic
+            // OpenAI/Ollama body is sent unchanged. A subclass overrides it to
+            // inject provider-only fields (e.g. DeepSeekProvider's thinking
+            // toggle) before serialization.
+            customizeRequestBody(root, task);
             body = LlmHttpSupport.JSON.writeValueAsString(root);
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new LlmCallFailedException(
@@ -250,6 +255,25 @@ public class OpenAiCompatibleProvider implements LlmProvider {
 
         return LlmHttpSupport.executeJsonCall(
             http, config, request, "OpenAiCompatibleProvider", OpenAiCompatibleProvider::parseChoiceText);
+    }
+
+    /**
+     * Body-customization seam for subclasses. Called inside {@link #doCall}
+     * after the base OpenAI-compatible body ({@code model}, {@code max_tokens},
+     * {@code messages}) is assembled and BEFORE it is serialized, so a subclass
+     * may add provider-specific fields to {@code root}. The base implementation
+     * is a NO-OP: the generic OpenAI/Ollama path keeps a byte-identical body to
+     * its pre-seam behaviour (a separate {@link AnthropicProvider} assembles its
+     * own Anthropic-format body and never reaches this seam). {@code DeepSeekProvider}
+     * overrides it to inject the DeepSeek {@code thinking} reasoning toggle.
+     *
+     * @param root the mutable request-body root, pre-populated with the base
+     *             fields; a subclass mutates it in place.
+     * @param task the task this call serves, so a subclass can read a per-task
+     *             config key (e.g. {@code infochat.llm.<task>.reasoning-effort}).
+     */
+    protected void customizeRequestBody(ObjectNode root, ModelTask task) {
+        // No-op: the generic OpenAI-compatible body is sent unchanged.
     }
 
     private static LlmResponse parseChoiceText(String responseBody, URI uri) {

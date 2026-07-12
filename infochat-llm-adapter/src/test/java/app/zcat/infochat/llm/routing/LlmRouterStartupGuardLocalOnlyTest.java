@@ -1,6 +1,7 @@
 package app.zcat.infochat.llm.routing;
 
 import app.zcat.infochat.llm.impl.AnthropicProvider;
+import app.zcat.infochat.llm.impl.DeepSeekProvider;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -101,6 +102,28 @@ class LlmRouterStartupGuardLocalOnlyTest {
         assertTrue(msg.contains("CHAT_AGENT"),
             "fatal message must name the offending task; got: " + msg);
         assertTrue(msg.contains(AnthropicProvider.PROVIDER_NAME),
+            "fatal message must name the offending provider; got: " + msg);
+        assertTrue(msg.contains("infochat.llm.chat.provider"),
+            "fatal message must name the offending provider key; got: " + msg);
+    }
+
+    @Test
+    void localOnlyTrueWithRemoteDeepSeekProviderOverrideRefusesStartup() {
+        // deepseek is remote BY IDENTITY (REMOTE_PROVIDER_NAMES), exactly like
+        // anthropic (M1-608): a per-task provider=deepseek override under
+        // local-only=true is a conflict regardless of that task's base-url.
+        Map<String, String> conflict = new LinkedHashMap<>();
+        conflict.put(LlmRouterStartupGuard.CONFIG_KEY_LOCAL_ONLY, "true");
+        conflict.put("infochat.llm.chat.provider", DeepSeekProvider.PROVIDER_NAME);
+
+        LlmRouterStartupGuard.LocalOnlyConflictException ex = assertThrows(
+            LlmRouterStartupGuard.LocalOnlyConflictException.class,
+            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(conflict),
+            "remote deepseek provider override under local-only=true must throw");
+        String msg = ex.getMessage();
+        assertTrue(msg.contains("CHAT_AGENT"),
+            "fatal message must name the offending task; got: " + msg);
+        assertTrue(msg.contains(DeepSeekProvider.PROVIDER_NAME),
             "fatal message must name the offending provider; got: " + msg);
         assertTrue(msg.contains("infochat.llm.chat.provider"),
             "fatal message must name the offending provider key; got: " + msg);
