@@ -5,9 +5,9 @@ status: pending
 created: 2026-07-12
 last_updated: 2026-07-12
 blocked_by: []
-files_budget: 10
+files_budget: 12
 complexity: medium
-risk: low
+risk: medium
 round_cap: 2
 security_relevant: true
 migration_touch: false
@@ -33,12 +33,12 @@ out_of_scope:
     ticket only adds progress-event publication around the existing chat compute
     path; the compute path itself is unchanged.
   - >-
-    A chat-specific request timeout knob. Chat currently inherits the 30s
-    infochat.llm.chat.timeout-ms default, so a long generation is cancelled and
-    the reply lost regardless of progress UX. Raising that default (or adding a
-    separate general-chat timeout) is a RELATED but distinct one-line-config
-    follow-up — progress UX does not stop the 30s cancel. Decide at start whether
-    to bundle it here or split it; it is out of scope as written.
+    The companion chat max-tokens default (1024, resolved in
+    OpenAiCompatibleProvider/AnthropicProvider configFor) — the other half of
+    the F-live-6 "reply lost / truncated" failure mode. This ticket bundles ONLY
+    the chat request-timeout raise (see acceptance "BUNDLED TIMEOUT RAISE");
+    raising the chat max-tokens default is a RELATED but separate follow-up, out
+    of scope here.
   - >-
     New localization-bundle keys. The ProgressStage labels are already
     enum-keyed and localized (D43); chat reuses the existing stage strings, so no
@@ -82,6 +82,17 @@ acceptance:
     substring of the user's message or of a retrieved title; a test asserts the
     supportsMessageEdit=false path collapses to exactly one final send; a test
     asserts a /stop-cancelled turn does not finalize a stale reply.
+  - >-
+    BUNDLED TIMEOUT RAISE. A committed infochat.llm.chat.timeout-ms default
+    (> 30000) is added to infochat-provider application.properties so a
+    slow-but-working chat generation is no longer cut at the in-code 30000ms
+    floor (OpenAiCompatibleProvider/AnthropicProvider configFor .orElse(30000L),
+    applied as the JDK HttpClient request timeout on each generate call) and the
+    reply lost. No Java change is required — infochat.llm.chat.timeout-ms is a
+    real per-task key (ModelTask.CHAT_AGENT) whose read path already exists
+    (M1-548/M1-603); this only supplies a committed default above the 30s floor,
+    following the existing per-task/per-profile config convention. A NAMED test
+    asserts the resolved chat timeout (infochat.llm.chat.timeout-ms) is > 30000.
   - mvn verify is green from the repo root.
 test_plan:
   adds:
@@ -89,17 +100,56 @@ test_plan:
       Chat progress-lifecycle test (stage sequence, finalize carries the reply,
       no-user-input-in-stage-strings, supportsMessageEdit=false collapse,
       /stop terminal path).
+    - >-
+      Chat timeout config test asserting the committed
+      infochat.llm.chat.timeout-ms default resolves to > 30000 (guards against
+      regressing to the in-code 30s cancel floor).
   modifies:
     - >-
-      Existing ChatAgent / InboundRouter chat-dispatch tests, to the extent the
-      progress hand-off changes their construction or the dispatch return
-      contract — enumerate the exact files at start.
+      InboundRouterChatModeIT — the dispatched chat reply now lands via the
+      notifier's finalize, not the router's plain send (self-delivery mirroring
+      SummaryCommandHandler). Update the reply-reading cases
+      (chatModeDispatchesToAgent, llmUnreachableReturnsFriendlyError) to read
+      adapter.finalizedBodies() instead of sentMessages().getLast() (mirroring
+      SummaryIT). Pre-dispatch fixed-error replies (body_too_large,
+      probation_blocked, llm_rate_cap) stay plain sends and are unchanged.
+    - >-
+      InboundRouterChatDeliveryOrderingIT — pins chat-message persistence on
+      delivery outcome (0 rows on permanent delivery failure; 2 rows + next_seq
+      on success). Preserve those row-count invariants under the notifier-driven
+      self-delivery path (acceptance item 4); adjust the always-failing-adapter
+      injection and/or delivery-gating assertions so they still hold.
+    - >-
+      InboundRouterClearCompressIT — reads the reply via sentMessages().getLast()
+      and asserts the auto-compress notice / compress-failed error. The
+      auto-compress notice stays a separate plain send (unaffected); if the
+      compress-failed-as-reply branch delivers via the notifier, move that read
+      to finalizedBodies().
+    - >-
+      InboundRouterAcquisitionCountTest — its dispatchChat override + single-send
+      assertion on a send-only CapturingAdapter (which throws on update/finalize)
+      reflects the old "router sends the returned reply" model. Update to the
+      self-delivery contract — swap CapturingAdapter for RecordingMessagingAdapter
+      (supports update/finalize) or keep the override intercepting the whole chat
+      sub-call — preserving its pool-acquisition-count focus.
+    - >-
+      InboundRouterChatPersistFailureTest — its dispatchChat override +
+      assertEquals(1, target.sends.size()) on RecordingMessagingAdapter reflects
+      the old router-send model. Update to the self-delivery contract; the
+      persist-failure behavior it pins is preserved (acceptance item 4).
   preserves:
     - all tests currently green on main
     - >-
       the M1-589 chat behaviour (deterministic pre-fetch, shared-TurnContext
       cache) and the M1-606 breaker skip — progress publication wraps them,
       never alters them.
+    - >-
+      ChatAgentTest, ChatAgentAuditActorTest, ChatAgentRefusalInterceptTest stay
+      unchanged — the chat COMPUTE path and ChatAgent's constructor are untouched
+      (out_of_scope: publication wraps the dispatch, not ChatAgent), so no
+      13-arg-constructor test breaks. RouterNoDoubleSendTest (slash-only) also
+      stays green — it is the no-double-send precedent the chat self-delivery
+      mirrors.
 spec_refs:
   - docs/spec/messaging.md §Progress notifications
   - docs/spec/messaging.md §Failure handling
@@ -109,7 +159,51 @@ decision_refs:
 reviews: []
 escalations: []
 overrides: []
-revisions: []
+revisions:
+  - date: 2026-07-12
+    reason: >-
+      clarity-fail refine via /m1-tick run (bounded self-refine) PLUS a
+      user-directed scope change decided at start. Cleared the
+      TEST-CHANGES-AUTHORIZED blocker: test_plan.modifies deferred the required
+      file enumeration ("enumerate the exact files at start"). A ground-truth
+      pass over the chat/InboundRouter test tree replaced the deferral with the
+      verified impact — 5 named InboundRouter chat-delivery tests change because
+      the reply migrates from one plain router send to a notifier placeholder +
+      finalize (self-delivery mirroring SummaryCommandHandler); the three
+      ChatAgent constructor tests are confirmed UNCHANGED (compute path untouched
+      per out_of_scope). Also, per the ticket's "decide at start" note and an
+      explicit user decision, BUNDLED the chat request-timeout raise:
+      files_budget 10 -> 12, risk low -> medium, out_of_scope item 3 (timeout
+      knob) replaced with the companion max-tokens exclusion, plus a new
+      acceptance item + adds test for a committed infochat.llm.chat.timeout-ms
+      default > 30000.
+    snapshot: |
+      files_budget (pre-refine): 10.  risk (pre-refine): low.
+      test_plan.modifies (verbatim, pre-refine): "Existing ChatAgent /
+        InboundRouter chat-dispatch tests, to the extent the progress hand-off
+        changes their construction or the dispatch return contract — enumerate
+        the exact files at start."
+      out_of_scope item 3 (verbatim, pre-refine): "A chat-specific request
+        timeout knob. Chat currently inherits the 30s
+        infochat.llm.chat.timeout-ms default, so a long generation is cancelled
+        and the reply lost regardless of progress UX. Raising that default (or
+        adding a separate general-chat timeout) is a RELATED but distinct
+        one-line-config follow-up — progress UX does not stop the 30s cancel.
+        Decide at start whether to bundle it here or split it; it is out of
+        scope as written."
+      clarity_check 2026-07-12: FAIL, 1 blocker (TEST-CHANGES-AUTHORIZED) + 1
+        warning (COMPLEXITY-RISK-CALIBRATED: risk low is light given the
+        load-bearing M1-589 persist-ordering guarantee). Ground truth behind the
+        enumeration: ChatAgent has a 13-arg @Inject constructor (break
+        candidates ChatAgentTest/ChatAgentAuditActorTest/
+        ChatAgentRefusalInterceptTest) but out_of_scope keeps the compute path
+        unchanged; InboundRouter is field-injected (no constructor break); the
+        reply currently read via adapter.sentMessages().getLast() migrates to
+        finalizedBodies() under self-delivery (SummaryIT pattern). Timeout
+        premise verified real: 30s is the in-code
+        OpenAiCompatible/AnthropicProvider .orElse(30000L) default on the
+        per-task key infochat.llm.chat.timeout-ms, not a mis-citation of
+        infochat.llm.security.timeout-ms.
 aborted_attempts: []
 reopens: []
 redteam_findings: []
@@ -153,11 +247,15 @@ UX D31 was designed for.
 
 ## Notes
 
-- **Related but separate:** chat inherits the 30s `infochat.llm.chat.timeout-ms`
-  default, so a genuinely slow generation is still cancelled and lost even with
-  a progress placeholder showing. A chat-specific (higher) timeout is a
-  one-line-config follow-up worth bundling here or splitting — it is
-  out_of_scope as written; decide at start.
+- **Bundled (decided at start, 2026-07-12):** the chat request-timeout raise is
+  now IN scope (see acceptance "BUNDLED TIMEOUT RAISE"). The 30s cut is the
+  in-code `.orElse(30000L)` default in `OpenAiCompatibleProvider` /
+  `AnthropicProvider` `configFor`, applied as the JDK `HttpClient` request
+  timeout on each `generate` call — `infochat.llm.chat.timeout-ms` is a real
+  per-task key (`ModelTask.CHAT_AGENT`), just not committed to
+  `application.properties`. Add a committed default above 30000 (the read path
+  already exists; no Java change). The companion chat `max-tokens` 1024 default
+  is the other half of the F-live-6 failure mode and stays out of scope.
 - **Placement:** `SummaryCommandHandler` is the reference implementation — it
   owns its `ProgressNotifier` lifecycle (placeholder → coalesced stage updates
   → finalize/fail) via the injected notifier. Mirror that shape for the chat
