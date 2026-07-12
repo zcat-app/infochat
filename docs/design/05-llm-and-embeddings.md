@@ -510,9 +510,10 @@ HNSW property; an `ivfflat` profile would need to re-establish it (or accept
 the coarse density side channel) when that design is un-deferred. A non-empty
 result is folded into the
 prompt inside the same `UNTRUSTED_CONTENT` wrapper as in-loop tool results.
-`infochat.chat.semantic-threshold` (cosine distance, default 0.5 —
-deliberately a separate key from `infochat.linking.semantic-threshold`,
-which tunes the different post-to-post-linking decision) gates
+`infochat.chat.semantic-threshold` (cosine distance, default 0.40 —
+calibrated against the live corpus in M1-616; deliberately a separate key from
+`infochat.linking.semantic-threshold`, whose 0.18 gates the different
+post-to-post-linking decision over a smaller distance distribution) gates
 grounding-vs-general-knowledge: nothing under the threshold → empty result →
 the model answers from general knowledge. `infochat.chat.semantic-limit`
 (default 8) sizes the grounded set. The retrieved set and its order are

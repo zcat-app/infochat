@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 637 |
+| done | 638 |
 | deferred | 1 |
 | abandoned | 11 |
 | **total** | **652** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-616 — Calibrate infochat.chat.semantic-threshold: measure semantic-retrieval recall/precision on the live corpus (complexity: medium, risk: low)
 - M1-617 — Chat retrieval-recovery: provenance transparency + hybrid semantic/lexical (RRF) post retrieval (complexity: high, risk: medium)
 
 ---
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-616 | Calibrate infochat.chat.semantic-threshold: measure semantic-retrieval recall/precision on the live corpus | 2026-07-12 | round 2 APPROVE |
 | M1-615 | Fix two full-suite timing-race flaky tests | 2026-07-12 | round 1 APPROVE |
 | M1-614 | Setup wizard: deepseek provider option + provider docs | 2026-07-12 | round 1 APPROVE |
 | M1-613 | Harden entity extraction on DeepSeek: lenient parser + prompt tuning, re-measure v4-flash | 2026-07-12 | round 1 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-609 | Spike: local vs remote LLM for the security judge and tagger (quality, throughput, VPS CPU cost) | 2026-07-12 | round 2 APPROVE |
 | M1-608 | DeepSeek provider subclass with per-task reasoning toggle (v4-flash thinking-mode control) | 2026-07-12 | round 1 APPROVE |
 | M1-607 | Wire chat-mode replies into the ProgressNotifier (D31) so slow turns show live progress | 2026-07-12 | round 1 APPROVE |
-| M1-606 | LLM router circuit breaker: fail-fast + pre-fetch skip on unreachable provider | 2026-07-12 | round 1 APPROVE |
 
 ---
 
@@ -833,7 +832,7 @@ M1-612 (done)
 M1-613 (done)
 M1-614 (done)
 M1-615 (done)
-M1-616 (pending) ← runnable
+M1-616 (done)
 M1-617 (pending) ← runnable
   └── M1-618 (pending)
 ```

@@ -1,11 +1,22 @@
 ---
 id: M1-616
 title: "Calibrate infochat.chat.semantic-threshold: measure semantic-retrieval recall/precision on the live corpus"
-status: pending
+status: done
 created: 2026-07-12
 last_updated: 2026-07-12
+clarity_check:
+  date: 2026-07-12
+  verdict: WARN
+  warnings:
+    - >-
+      FILES-BUDGET-PLAUSIBLE: if the calibration recommends changing
+      infochat.chat.semantic-threshold away from 0.5, the documented default in
+      docs/design/05-llm-and-embeddings.md:513 goes stale and isn't in the
+      acceptance list or files_budget; bump files_budget to 5 or note the
+      design-doc default is intentionally left as descriptive prose.
+  blockers: []
 blocked_by: []
-files_budget: 4
+files_budget: 6
 complexity: medium
 risk: low
 round_cap: 2
@@ -30,9 +41,13 @@ provenance: >-
 out_of_scope:
   - >-
     Implementing hybrid semantic/lexical retrieval, provenance transparency, or
-    any change to the chat retrieval CODE PATH — that is M1-617. This ticket
-    measures the existing semantic-only path and (at most) tunes the single
-    threshold config value.
+    any change to the chat retrieval LOGIC — that is M1-617. This ticket
+    measures the existing semantic-only path and tunes the threshold. EXCEPTION
+    (2026-07-12 escalation refine): applying the calibrated value also updates
+    the `@ConfigProperty defaultValue` constant in SemanticSearchTool.java,
+    because application.properties documents (lines 391-392) that the two "must
+    not drift"; this is the single non-drift twin of the config value, NOT a
+    change to the retrieval query/logic, which stays M1-617's.
   - >-
     Re-ranking, query rewriting, HyDE, or any LLM-in-the-retrieval-loop
     technique. Those change the RETRIEVED SET as a function of non-deterministic
@@ -62,12 +77,16 @@ acceptance:
     threshold sees, so the two thresholds are not directly comparable and the
     chat gate cannot simply borrow the linking value.
   - >-
-    A decision: if the measurement supports a different default, update the
-    single `infochat.chat.semantic-threshold` value in
-    infochat-provider/.../application.properties to the recommended figure;
-    otherwise state explicitly in the report that 0.5 is retained and why. The
-    retrieval remains a hard deterministic cosine-distance gate either way
-    (D19) — this ticket only moves the number, not the mechanism.
+    A decision: if the measurement supports a different default, update
+    `infochat.chat.semantic-threshold` to the recommended figure; otherwise state
+    explicitly in the report that 0.5 is retained and why. The measurement
+    supported 0.40; per the 2026-07-12 escalation (operator chose "apply now"),
+    the value is moved in ALL THREE places the default lives so nothing drifts:
+    infochat-provider/.../application.properties, the SemanticSearchTool.java
+    `@ConfigProperty defaultValue` non-drift twin, and the stale documented
+    default in docs/design/05-llm-and-embeddings.md. The retrieval remains a hard
+    deterministic cosine-distance gate (D19) — only the number moves, not the
+    mechanism.
   - >-
     mvn verify is green from the repo root IF the properties value (or any
     Java/config/DB file) changes; if the deliverable is a standalone harness +
@@ -86,10 +105,58 @@ spec_refs:
 decision_refs:
   - D19
   - D54
-reviews: []
-escalations: []
+reviews:
+  - round: 1
+    date: 2026-07-12
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PARTIAL
+    diff_stats:
+      files: 8
+      added: 672
+      removed: 24
+  - round: 2
+    date: 2026-07-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 705
+      removed: 25
+escalations:
+  - date: 2026-07-12
+    reason: files-budget-exceeded
+    trigger: >-
+      The measurement supported lowering the default (0.50 -> 0.40). Applying it
+      without drift requires application.properties + the SemanticSearchTool
+      defaultValue non-drift twin + the design-doc default = 6 files vs
+      files_budget:4, and touches the out_of_scope §1 code-path fence. Surfaced
+      the choice (measurement-only+follow-up / apply-now-with-refine /
+      app.properties-only).
+    resolution: >-
+      Operator chose "apply 0.40 now (refine budget)". Refine: files_budget 4->6,
+      out_of_scope §1 carved out the non-drift defaultValue twin, acceptance item
+      3 broadened to the three files.
 overrides: []
-revisions: []
+revisions:
+  - date: 2026-07-12
+    what: >-
+      files_budget 4->6; out_of_scope §1 exception for the SemanticSearchTool
+      defaultValue non-drift twin; acceptance item 3 broadened to name the three
+      files the 0.40 value lives in.
+    why: >-
+      Operator-approved (2026-07-12 escalation) scope expansion to apply the
+      calibrated 0.40 threshold without violating the documented "must not drift"
+      invariant between application.properties and SemanticSearchTool.
 aborted_attempts: []
 reopens: []
 redteam_findings: []
@@ -139,3 +206,14 @@ threshold (0.18) is not re-tuned.
   the hybrid fusion, so landing this first gives M1-617 a tuned semantic input.
   They are not hard-blocking (M1-617 can proceed on 0.5), but sequencing this
   first is cheaper.
+
+## Round 1 rework
+
+Reviewer (round 1) — REWORK, 1 item (ACCEPTANCE-CHECK: PARTIAL):
+- The report's TL;DR and §7 still described the PRE-escalation state ("the apply
+  decision is escalated", "0.50 is retained in code", "vs files_budget: 4",
+  code-path fence blocking), contradicting the same diff, which applied 0.40 to
+  all three sites after the operator's "apply now" decision. Fixed: TL;DR and §7
+  rewritten to state the operator approved applying 0.40 and that 0.40 is now the
+  in-code default in application.properties, the SemanticSearchTool defaultValue
+  twin, and the design doc. Docs-only fix; no Java/config/test change.

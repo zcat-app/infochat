@@ -50,7 +50,7 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                               // defaultValue duplicates the explicit key in
                               // application.properties; the two must not drift.
                               @ConfigProperty(name = "infochat.chat.semantic-threshold",
-                                      defaultValue = "0.5") double distanceThreshold,
+                                      defaultValue = "0.40") double distanceThreshold,
                               @ConfigProperty(name = "infochat.chat.semantic-limit",
                                       defaultValue = "8") int defaultLimit) {
         this.dataSource = dataSource;
