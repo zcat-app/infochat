@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 631 |
 | deferred | 1 |
 | abandoned | 11 |
-| **total** | **644** |
+| **total** | **645** |
 
 ---
 
@@ -26,6 +26,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-609 — Spike: local vs remote LLM for the security judge and tagger (quality, throughput, VPS CPU cost) (complexity: medium, risk: low)
+- M1-611 — Per-operation ProgressNotifier state: concurrent same-scope publishers must not clobber each other's placeholder (complexity: medium, risk: medium)
 
 ---
 
@@ -827,4 +828,5 @@ M1-607 (done)
 M1-608 (done)
 M1-609 (pending) ← runnable
 M1-610 (done)
+M1-611 (pending) ← runnable
 ```
