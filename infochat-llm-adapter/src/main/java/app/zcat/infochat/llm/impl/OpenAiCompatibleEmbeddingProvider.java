@@ -185,9 +185,19 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
         String responseBody = LlmHttpSupport.sendForBody(http, request,
             LlmHttpSupport.clampBodyCapBytes(maxResponseBytes),
             "OpenAiCompatibleEmbeddingProvider",
-            (message, cause) -> cause == null
-                ? new EmbeddingCallFailedException(message)
-                : new EmbeddingCallFailedException(message, cause));
+            (message, cause, unreachable) -> {
+                if (unreachable) {
+                    // cause is always non-null here (only the IOException
+                    // path classifies unreachable); the null-split form is
+                    // what the nullness analysis can verify.
+                    return cause == null
+                        ? new EmbeddingProviderUnreachableException(message)
+                        : new EmbeddingProviderUnreachableException(message, cause);
+                }
+                return cause == null
+                    ? new EmbeddingCallFailedException(message)
+                    : new EmbeddingCallFailedException(message, cause);
+            });
 
         return parseEmbeddings(responseBody, uri, texts.size());
     }
@@ -294,14 +304,42 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
      * JSON, missing required response fields, and assembly errors on
      * the request side. The worker's one-failure-fails-batch retry
      * catches this type uniformly.
+     *
+     * <p>Not {@code final}: {@link EmbeddingProviderUnreachableException}
+     * subtypes it so the transport-unreachable failure class stays
+     * catchable under this one family — the embedding-side mirror of
+     * {@link LlmCallFailedException.ProviderUnreachableException} (M1-606).</p>
      */
-    public static final class EmbeddingCallFailedException extends RuntimeException {
+    public static class EmbeddingCallFailedException extends RuntimeException {
 
         public EmbeddingCallFailedException(String message) {
             super(message);
         }
 
         public EmbeddingCallFailedException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /**
+     * The transport-unreachable subclass of the embedding call-failure
+     * family: connection refused, DNS failure, no route, or a
+     * connect/read timeout — decided by
+     * {@link LlmHttpSupport#isTransportUnreachable} at the shared
+     * {@code sendForBody} catch site. Only THIS type advances the circuit
+     * breaker's consecutive-failure count for the embedding endpoint, and
+     * the breaker's OPEN short-circuit throws it too; application-level
+     * failures (non-2xx, body cap, parse, wrong shape) stay the plain
+     * {@link EmbeddingCallFailedException} and prove reachability. (M1-606)
+     */
+    public static final class EmbeddingProviderUnreachableException
+            extends EmbeddingCallFailedException {
+
+        public EmbeddingProviderUnreachableException(String message) {
+            super(message);
+        }
+
+        public EmbeddingProviderUnreachableException(String message, Throwable cause) {
             super(message, cause);
         }
     }

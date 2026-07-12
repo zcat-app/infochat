@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.chat;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
+import app.zcat.infochat.llm.routing.LlmCircuitBreakerRegistry;
 import app.zcat.infochat.llm.routing.LlmRouter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
@@ -13,6 +14,9 @@ import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -262,6 +266,14 @@ class ChatAgentRefusalInterceptTest {
         return context;
     }
 
+    // Inert seam-constructed breaker registry (fixed clock, empty config →
+    // no endpoint → never open): satisfies the M1-606 constructor param
+    // without touching the refusal-intercept behaviour under test.
+    private static LlmCircuitBreakerRegistry closedBreakerRegistry() {
+        return new LlmCircuitBreakerRegistry(3, 30_000,
+                Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), key -> Optional.empty());
+    }
+
     // Subclass that overrides writeAuditRow so no JDBC is needed.
     static class TestChatAgent extends ChatAgent {
 
@@ -272,7 +284,7 @@ class ChatAgentRefusalInterceptTest {
                       AutoCompressTrigger autoCompressTrigger) {
             super(tracker, builder, dispatcher, repo, router,
                     sanitizer, pipeline, bundle, autoCompressTrigger, null, null,
-                    inboundContextEn());
+                    inboundContextEn(), closedBreakerRegistry());
         }
 
         @Override

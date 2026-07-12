@@ -1,11 +1,17 @@
 ---
 id: M1-606
 title: "LLM router circuit breaker: fail-fast + pre-fetch skip on unreachable provider"
-status: pending
+status: done
 created: 2026-07-11
-last_updated: 2026-07-11
+last_updated: 2026-07-12
 blocked_by: []
-files_budget: 12
+clarity_check:
+  date: 2026-07-11
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-606.md
+files_budget: 15
 complexity: high
 risk: medium
 round_cap: 3
@@ -40,15 +46,24 @@ out_of_scope:
     re-probes). No new table, no migration.
 acceptance:
   - >-
-    A per-endpoint circuit breaker guards LlmRouter.forTask(...)'s resolved
-    LlmProvider (infochat-llm-adapter): CLOSED by default; after N consecutive
-    provider-unreachable failures on that endpoint it trips to OPEN; an OPEN
-    breaker short-circuits generate()/embed() with a typed
-    "provider-unreachable" signal WITHOUT attempting the HTTP call; after a
-    configured cooldown it goes HALF-OPEN and lets exactly one probe through;
-    a successful probe closes it, a failed probe re-opens it. N (failure
-    threshold) and the cooldown are config-driven (infochat.llm.breaker.*)
-    with documented per-profile defaults.
+    A per-endpoint circuit breaker guards the two LLM-transport SPIs in
+    infochat-llm-adapter: LlmRouter.forTask(...)'s resolved LlmProvider
+    (generate()) AND the separate EmbeddingProvider (embed()). These are
+    DISTINCT SPIs — embed() is NOT a method on LlmProvider and is NOT resolved
+    through forTask; the embedding provider is a single per-deployment endpoint
+    keyed by infochat.embeddings.base-url — so each SPI is wrapped by its own
+    breaker-decorator over its own endpoint. Per endpoint: CLOSED by default;
+    after N consecutive provider-unreachable failures on that endpoint it trips
+    to OPEN; an OPEN breaker short-circuits the call (generate() or embed())
+    with a typed "provider-unreachable" signal WITHOUT attempting the HTTP
+    call; after a configured cooldown it goes HALF-OPEN and lets exactly one
+    probe through; a successful probe closes it, a failed probe re-opens it.
+    The typed signal SUBTYPES each SPI's existing failure family
+    (LlmCallFailedException for generate(), the EmbeddingProvider's
+    EmbeddingCallFailedException for embed()) so every existing consumer catch
+    still catches the short-circuit and degrades rather than crashing. N
+    (failure threshold) and the cooldown are config-driven
+    (infochat.llm.breaker.*) with documented per-profile defaults.
   - >-
     Failure attribution is precise: only TRANSPORT/timeout failures
     (connection refused, DNS failure, read timeout — the provider is
@@ -61,10 +76,17 @@ acceptance:
     classify LLM-transport failures.
   - >-
     Time that drives the cooldown/HALF-OPEN decision is read from an injected
-    java.time.Clock (engineering-rules §9), pinned in tests via
-    QuarkusMock.installMockForType(Clock.fixed(...), Clock.class). No inline
-    Instant.now() in the breaker's decision logic. ReEvaluationJob (M1-444) is
-    the reference implementation.
+    java.time.Clock (engineering-rules §9). No inline Instant.now() in the
+    breaker's decision logic. Because the breaker lives in infochat-llm-adapter,
+    whose tests are plain JUnit5 (no quarkus-junit5 on the module's test
+    classpath, and no infochat-core Clock producer there), the breaker's Clock
+    is pinned via a constructor Clock seam — the ReEvaluationJob (M1-444)
+    field-default pattern (Clock clock = Clock.systemUTC(); a hand-constructed
+    registry receives Clock.fixed(...) directly while the managed CDI bean
+    receives the ThrottledAdminNotifier.systemUtcClock() producer) — NOT
+    QuarkusMock.installMockForType, which requires the Quarkus test harness this
+    module does not have. ReEvaluationJob (M1-444) is the reference
+    implementation for the injected-Clock contract.
   - >-
     ChatAgent consults the breaker before the deterministic semanticSearch
     pre-fetch (M1-589 doHandle step 3): when the chat endpoint's breaker is
@@ -89,15 +111,29 @@ acceptance:
     failure re-opens; an application-error response does NOT trip the breaker.
     A ChatAgent test asserts the semanticSearch pre-fetch is skipped (tool
     dispatch count 0) when the chat breaker is OPEN, and runs normally when
-    CLOSED. Red-before/green-after on the OPEN-skip and the transport-vs-
+    CLOSED. A transport-classification unit test in the impl package asserts
+    the IOException-subtype walk directly: ConnectException,
+    UnknownHostException, NoRouteToHostException, and HttpTimeoutException
+    (direct or cause-chain-wrapped) classify as provider-unreachable, while
+    a bare IOException (the body-cap shape) and other IOException subtypes
+    do not. Red-before/green-after on the OPEN-skip and the transport-vs-
     application attribution.
   - >-
     mvn verify is green from the repo root.
 test_plan:
   adds:
     - Breaker unit/IT (fixed-Clock state-machine + short-circuit assertions).
+    - >-
+      LlmHttpSupport transport-classification unit (impl package; direct
+      IOException-subtype walk assertions).
   modifies:
-    - ChatAgent tests (pre-fetch skip when breaker OPEN; attribution narrowing).
+    - >-
+      ChatAgentTest — pre-fetch skip when breaker OPEN (tool dispatch count 0)
+      and normal dispatch when CLOSED; attribution narrowing.
+    - >-
+      ChatAgentAuditActorTest and ChatAgentRefusalInterceptTest — mechanical
+      constructor-ripple only (they construct ChatAgent directly and gain the
+      new breaker-registry parameter as a CLOSED double; no behaviour change).
   preserves:
     - all tests currently green on main
     - >-
@@ -110,14 +146,119 @@ spec_refs:
 decision_refs:
   - D54
   - D56
-reviews: []
-escalations: []
+reviews:
+  - round: 1
+    date: 2026-07-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 17
+      added: 1464
+      removed: 67
+escalations:
+  - date: 2026-07-11
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (budget-breach surfaced at plan time by the complexity:high
+      plan-writer outline, target/m1-tick-outline-M1-606.md: 14 actual files
+      to touch vs files_budget 12. User chose escalation-menu option 1
+      — refine, keep whole — over decompose.)
+  - date: 2026-07-12
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (budget-breach surfaced by the developer at implementation time:
+      LlmCallFailedException turned out to be `final`, so the unreachable
+      subtype had to nest inside that family file — an unplanned 14th
+      production-file touch that consumed the slot the outline had for the
+      transport-classification unit test. The developer initially held the
+      14-file budget by covering the IOException-subtype walk only
+      indirectly; the user rejected that trade — "we should not play the
+      limits ... refine and add the test" — and directed refine.)
 overrides: []
-revisions: []
+revisions:
+  - date: 2026-07-11
+    reason: >-
+      budget-breach refine (escalation menu option 1, user-directed keep-whole).
+      The complexity:high plan-writer outline (target/m1-tick-outline-M1-606.md)
+      ground-truthed the code and found the ticket under-counted: (1) generate()
+      and embed() are DISTINCT SPIs (LlmProvider vs EmbeddingProvider), so the
+      breaker needs two decorators + two exception subtypes, not one; (2) the
+      transport-vs-application attribution touches LlmHttpSupport AND the
+      embedding provider; (3) per-profile breaker config lands in TWO
+      application.properties; (4) the ChatAgent constructor param ripples to two
+      sibling test files beyond the one named. Real file count is 14, not 12.
+      Refine is precision, not scope change: raise files_budget 12->14; sharpen
+      acceptance item 1 to name both SPIs and require the typed signal to subtype
+      each SPI's existing failure family (else consumers crash on the
+      short-circuit); correct acceptance item 3's Clock mechanism to the
+      constructor-seam pattern (infochat-llm-adapter has no quarkus-junit5, so
+      QuarkusMock.installMockForType is unusable there); enumerate the two extra
+      ChatAgent test files in test_plan.modifies. out_of_scope, decision_refs,
+      and the CLOSED-path determinism guarantee are unchanged.
+    prior_values: |
+      files_budget: 12
+      acceptance[1]: guarded only "LlmRouter.forTask(...)'s resolved LlmProvider"
+        and "short-circuits generate()/embed() with a typed provider-unreachable
+        signal" — no dual-SPI (LlmProvider vs EmbeddingProvider) distinction, a
+        singular signal type, and no requirement that the signal subtype each
+        SPI's existing failure family.
+      acceptance[3]: "pinned in tests via QuarkusMock.installMockForType(
+        Clock.fixed(...), Clock.class)" — mandated QuarkusMock, unusable in the
+        non-Quarkus infochat-llm-adapter test module.
+      test_plan.modifies: ["ChatAgent tests (pre-fetch skip when breaker OPEN;
+        attribution narrowing)."] — did not enumerate the
+        ChatAgentAuditActorTest / ChatAgentRefusalInterceptTest constructor
+        ripple.
+  - date: 2026-07-12
+    reason: >-
+      budget-breach refine #2 (user-directed, mid-implementation). The outline
+      assumed the LLM-side unreachable subtype would be a NEW file, but
+      LlmCallFailedException was `final` — subtyping required touching that
+      family file, making it the 14th file and leaving no slot for a direct
+      unit test on LlmHttpSupport.isTransportUnreachable (package-private in
+      impl; the breaker test lives in routing and cannot reach it). The
+      developer initially shipped attribution coverage only at the decorator
+      level to hold files_budget 14 and flagged the residual; the user
+      rejected fitting-the-limit over coverage and directed the refine:
+      files_budget 14->15; acceptance item 6 gains the named
+      transport-classification unit test (direct + cause-chain-wrapped
+      unreachable subtypes classify true; bare body-cap-shaped IOException
+      and other subtypes classify false); test_plan.adds names the new test
+      file. No scope or behaviour change — the production diff is untouched.
+    prior_values: |
+      files_budget: 14
+      acceptance[6]: named only the breaker unit/IT and the ChatAgent
+        pre-fetch tests; no direct transport-classification unit test.
+      test_plan.adds: ["Breaker unit/IT (fixed-Clock state-machine +
+        short-circuit assertions)."]
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-07-12
+    verdict: CLEAN
+    base: 53266cc002e81b310922228d08b6a8129d6eaa49
+    head: m1/M1-606-llm-router-circuit-breaker (branch tip 1fb9ee2d + working tree)
+    verdict_file: docs/plan/m1/redteam/M1-606-2026-07-12.md
+    out_of_model_count: 2
+    note: |
+      Pre-commit audit of the round-1-APPROVEd working tree (lifecycle
+      redteam gate; security_relevant: true). CLEAN across all severities.
+      Two out-of-model advisories, both explicitly judged NOT
+      threat-model gaps by the auditor: (1) user-influenced read-timeouts
+      count toward the shared chat-endpoint breaker trip — bounded by the
+      per-user LLM rate buckets, input caps, and the breaker's self-healing
+      probe; a per-task breaker split stays the ticket's documented v2
+      refinement (out_of_scope item 3). (2) On a merely-flaky Collector
+      endpoint the shared breaker can widen the Stage 2 fail-open window
+      for one cooldown; the documented mitigations are the profile-driven
+      fail-closed invert and re-eval. No follow-up ticket filed; both ride
+      the existing spec commitments.
 ---
 
 # M1-606: LLM router circuit breaker — fail-fast + pre-fetch skip

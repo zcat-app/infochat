@@ -4,6 +4,8 @@ import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
+import app.zcat.infochat.llm.impl.LlmCallFailedException;
+import app.zcat.infochat.llm.routing.LlmCircuitBreakerRegistry;
 import app.zcat.infochat.llm.routing.LlmRouter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
@@ -14,6 +16,9 @@ import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -53,6 +58,7 @@ class ChatAgentTest {
     private AuditAction lastAuditAction;
     private final List<String> persistedTexts = new ArrayList<>();
     private boolean ceilingGated;
+    private boolean chatBreakerOpen;
     private TestChatAgent agent;
 
     @BeforeEach
@@ -74,6 +80,7 @@ class ChatAgentTest {
         auditCalls = 0;
         lastAuditAction = null;
         ceilingGated = false;
+        chatBreakerOpen = false;
 
         agent = buildAgent("en");
     }
@@ -298,6 +305,45 @@ class ChatAgentTest {
                 "an embedding/retrieval failure must degrade to a normal "
                         + "general-knowledge turn, not abort it");
         assertEquals(1, llmProvider.callCount, "the LLM turn still runs");
+    }
+
+    // --- M1-606: circuit-breaker pre-fetch skip + narrowed LLM-failure
+    // catch. The CLOSED-breaker complement (pre-fetch runs normally) is
+    // everyTurnDispatchesSemanticSearchWithTheUserMessage above:
+    // chatBreakerOpen defaults to false in setUp. ---
+
+    @Test
+    void preFetchSkippedWhenChatBreakerOpen() {
+        chatBreakerOpen = true;
+        llmProvider.responses.add(new LlmResponse("Answer despite outage."));
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "what happened with zcash?");
+
+        assertEquals(0, dispatcherCalls,
+                "an OPEN chat breaker must skip the deterministic semanticSearch "
+                        + "pre-fetch — no tool dispatch at all (M1-606)");
+        assertEquals(0, semanticSearchCalls,
+                "no embed round-trip and no pgvector probe on a doomed turn");
+        assertEquals(1, auditCalls,
+                "the chat-mode audit row still writes — the intent occurred; "
+                        + "only the pre-fetch is skipped");
+    }
+
+    @Test
+    void typedProviderUnreachableDegradesViaNarrowedLlmFailureArm() {
+        // The breaker's OPEN short-circuit (and a classified transport
+        // failure) surface as the typed subtype; the narrowed
+        // LlmCallFailedException catch must degrade exactly like the
+        // generic-failure arm — friendly error, nothing persisted.
+        llmProvider.throwException =
+                new LlmCallFailedException.ProviderUnreachableException("breaker OPEN");
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "hi");
+
+        assertEquals(BundleKeys.ERROR_CHAT_UNAVAILABLE, reply);
+        assertEquals(0, sessionPersistCalls, "no session persistence on LLM failure");
+        assertFalse(inFlightTracker.isInFlight(USER_ID, SCOPE_KIND, SCOPE_ID),
+                "in-flight slot must be released");
     }
 
     // redteam 2026-07-11 (low DOS) remediation pin: the deterministic
@@ -665,9 +711,23 @@ class ChatAgentTest {
             }
         };
 
+        // Seam-constructed registry (fixed clock, empty config → no
+        // endpoint → inert); the override reads the test's chatBreakerOpen
+        // field so the OPEN-skip path is drivable without real breaker
+        // state — the ceilingGated idiom.
+        LlmCircuitBreakerRegistry breakerRegistry = new LlmCircuitBreakerRegistry(
+                3, 30_000, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
+                key -> Optional.empty()) {
+            @Override
+            public boolean wouldShortCircuit(ModelTask task) {
+                return chatBreakerOpen;
+            }
+        };
+
         return new TestChatAgent(
                 inFlightTracker, promptBuilder, dispatcher, sessionRepo,
-                router, sanitizer, pipeline, bundle, noopTrigger, language);
+                router, sanitizer, pipeline, bundle, noopTrigger, language,
+                breakerRegistry);
     }
 
     // Builds a test-scoped InboundContext carrying the scope language the
@@ -690,10 +750,10 @@ class ChatAgentTest {
                       LlmRouter router, LlmOutputSanitizer sanitizer,
                       TranslationPipeline pipeline, BundleLoader bundle,
                       AutoCompressTrigger autoCompressTrigger,
-                      String language) {
+                      String language, LlmCircuitBreakerRegistry breakerRegistry) {
             super(tracker, builder, dispatcher, repo, router,
                     sanitizer, pipeline, bundle, autoCompressTrigger, null, null,
-                    inboundContextWith(language));
+                    inboundContextWith(language), breakerRegistry);
         }
 
         @Override
@@ -707,6 +767,11 @@ class ChatAgentTest {
         final List<LlmResponse> responses = new ArrayList<>();
         int callCount;
         boolean throwOnGenerate;
+        // When set, generate() throws exactly this — for tests driving the
+        // typed LLM-failure classes (M1-606 narrowed catch) rather than the
+        // generic RuntimeException throwOnGenerate models. Null by default,
+        // so existing tests are unaffected.
+        RuntimeException throwException;
         String lastUserPrompt;
         String lastSystemPrompt;
         // Runs at the top of generate() (before the throw path) so a test can
@@ -718,6 +783,9 @@ class ChatAgentTest {
         public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
             if (beforeGenerate != null) {
                 beforeGenerate.run();
+            }
+            if (throwException != null) {
+                throw throwException;
             }
             if (throwOnGenerate) {
                 throw new RuntimeException("LLM unreachable");

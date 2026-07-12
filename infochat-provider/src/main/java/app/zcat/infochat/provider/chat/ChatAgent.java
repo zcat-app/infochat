@@ -9,6 +9,8 @@ import app.zcat.infochat.core.util.JsonEscaper;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
+import app.zcat.infochat.llm.impl.LlmCallFailedException;
+import app.zcat.infochat.llm.routing.LlmCircuitBreakerRegistry;
 import app.zcat.infochat.llm.routing.LlmRouter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
@@ -88,6 +90,7 @@ public class ChatAgent {
     private final AuditLogWriter auditLogWriter;
     private final DataSource dataSource;
     private final InboundContext inboundContext;
+    private final LlmCircuitBreakerRegistry breakerRegistry;
 
     @Inject
     public ChatAgent(InFlightTracker inFlightTracker,
@@ -101,7 +104,8 @@ public class ChatAgent {
                      AutoCompressTrigger autoCompressTrigger,
                      AuditLogWriter auditLogWriter,
                      DataSource dataSource,
-                     InboundContext inboundContext) {
+                     InboundContext inboundContext,
+                     LlmCircuitBreakerRegistry breakerRegistry) {
         this.inFlightTracker = inFlightTracker;
         this.promptBuilder = promptBuilder;
         this.toolDispatcher = toolDispatcher;
@@ -114,6 +118,7 @@ public class ChatAgent {
         this.auditLogWriter = auditLogWriter;
         this.dataSource = dataSource;
         this.inboundContext = inboundContext;
+        this.breakerRegistry = breakerRegistry;
     }
 
     /**
@@ -177,6 +182,30 @@ public class ChatAgent {
                 return new ChatTurnResult(null, null);
             }
             return result;
+        } catch (LlmCallFailedException e) {
+            // Narrowed LLM-failure arm (M1-606): the chat/translator LLM
+            // call itself failed — transport-unreachable (the typed
+            // subtype, thrown classified or breaker-short-circuited) or an
+            // application error. Classified here so the log attributes the
+            // failure to the LLM transport, never conflating it with a
+            // downstream non-LLM failure (DB error in a tool), which takes
+            // the arm below. Same /stop guard and same degrade as that
+            // arm: friendly error, null commit — the turn is discarded
+            // with no session advance, no memory write, and no
+            // model-initiated tool call. The deterministic semantic
+            // pre-fetch (doHandle step 3) may have run once before the
+            // failure — bounded, read-only, and SKIPPED entirely once the
+            // breaker is OPEN, so an outage window pays it at most once
+            // (security.md §Failure handling, "Provider-side (user-facing)
+            // LLM failures").
+            if (slot.isCancelled()) {
+                return new ChatTurnResult(null, null);
+            }
+            boolean unreachable = e instanceof LlmCallFailedException.ProviderUnreachableException;
+            SafeLog.error(log, "ChatAgent.handle: LLM call failed for userId=" + userId
+                    + " (provider-unreachable=" + unreachable + ")", e);
+            return new ChatTurnResult(
+                    bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE, scopeLanguage), null);
         } catch (Exception e) {
             // A landed cancellation interrupt surfaces here as an exception.
             // When /stop marked this request the /stop handler already
@@ -185,14 +214,10 @@ public class ChatAgent {
             if (slot.isCancelled()) {
                 return new ChatTurnResult(null, null);
             }
-            // LLM unreachable or any other failure → friendly error, null
-            // commit: the turn is discarded with no session advance, no
-            // memory write, and no model-initiated tool call. The
-            // deterministic semantic pre-fetch (doHandle step 3) may already
-            // have run once before the failure — a bounded, read-only,
-            // rate-capped exception the spec's failure-handling bullet names
-            // explicitly (security.md §Failure handling, "Provider-side
-            // (user-facing) LLM failures").
+            // Any non-LLM failure → same friendly error, null commit: the
+            // turn is discarded with no session advance, no memory write,
+            // and no model-initiated tool call (security.md §Failure
+            // handling, "Provider-side (user-facing) LLM failures").
             SafeLog.error(log, "ChatAgent.handle failed for userId=" + userId, e);
             return new ChatTurnResult(
                     bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE, scopeLanguage), null);
@@ -248,8 +273,21 @@ public class ChatAgent {
         // the per-turn execution bound stays the single fixed cap the
         // spec promises (redteam M1-589 2026-07-11, low DOS finding).
         ChatToolDispatcher.TurnContext turnContext = new ChatToolDispatcher.TurnContext();
-        String semanticBlock = buildSemanticRetrievalBlock(
-                userId, scopeKind, scopeId, userMessage, turnContext);
+        // Breaker gate (M1-606), checked AFTER the step-2 audit (the
+        // chat-mode intent occurred either way) and BEFORE the pre-fetch:
+        // when the chat endpoint's breaker is OPEN the turn is doomed —
+        // generate() below will short-circuit — so skip the pre-fetch's
+        // embed round-trip and pgvector probe outright. The turn still
+        // flows to the LLM call, whose typed short-circuit takes the
+        // normal unavailable degrade; once the cooldown admits a probe
+        // this returns false and the probe turn gets its grounding.
+        String semanticBlock;
+        if (breakerRegistry.wouldShortCircuit(ModelTask.CHAT_AGENT)) {
+            semanticBlock = "";
+        } else {
+            semanticBlock = buildSemanticRetrievalBlock(
+                    userId, scopeKind, scopeId, userMessage, turnContext);
+        }
 
         // 4. Resolve LLM provider for chat task
         LlmProvider provider = llmRouter.forTask(ModelTask.CHAT_AGENT, scopeLanguage);

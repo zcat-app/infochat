@@ -7,11 +7,15 @@ import org.jboss.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
+import java.net.ConnectException;
+import java.net.NoRouteToHostException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -114,10 +118,46 @@ public final class LlmHttpSupport {
      * provider its own {@code EmbeddingCallFailedException} — so the shared
      * {@link #sendForBody} pipeline can surface the failure under the type
      * the caller's downstream (LLM router vs. EmbeddingWorker) expects.
+     *
+     * <p>{@code providerUnreachable} carries {@link #isTransportUnreachable}'s
+     * verdict out of the one catch site that sees the raw transport
+     * exception, so each factory can pick its family's unreachable subtype
+     * — the typed signal only the circuit breaker trips on (M1-606) —
+     * versus the plain application-failure type.</p>
      */
     @FunctionalInterface
     interface CallFailureFactory {
-        RuntimeException create(String message, @Nullable Throwable cause);
+        RuntimeException create(String message, @Nullable Throwable cause, boolean providerUnreachable);
+    }
+
+    /**
+     * True iff the failure says the endpoint itself was unreachable —
+     * connection refused ({@link ConnectException}), DNS failure
+     * ({@link UnknownHostException}), no route
+     * ({@link NoRouteToHostException}), or a connect/read timeout
+     * ({@link HttpTimeoutException}) — as opposed to an application-level
+     * failure from an endpoint that answered. The cause chain is walked
+     * because the JDK {@link HttpClient} wraps the discriminating exception
+     * at varying depths (e.g. a DNS failure surfaces as a
+     * {@code ConnectException} whose cause names the unresolved address).
+     * The bounded-body-cap {@link IOException} and an
+     * {@link InterruptedException} deliberately classify as NOT unreachable:
+     * the first proves the endpoint responded (too much), the second is a
+     * caller-side cancellation that says nothing about the endpoint — and
+     * the safe mis-classification direction is "not unreachable" (the
+     * breaker trips less eagerly; a missed trip merely keeps today's
+     * fail-slow behaviour). (M1-606)
+     */
+    static boolean isTransportUnreachable(IOException e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof ConnectException
+                    || t instanceof UnknownHostException
+                    || t instanceof NoRouteToHostException
+                    || t instanceof HttpTimeoutException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -145,10 +185,13 @@ public final class LlmHttpSupport {
         try {
             response = http.send(request, boundedStringHandler(cap));
         } catch (IOException e) {
-            throw failure.create(providerLabel + ": HTTP call failed for " + uri, e);
+            throw failure.create(providerLabel + ": HTTP call failed for " + uri, e,
+                isTransportUnreachable(e));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw failure.create(providerLabel + ": HTTP call interrupted for " + uri, e);
+            // Not unreachable: an interrupt is caller-side cancellation, no
+            // evidence about the endpoint (see isTransportUnreachable).
+            throw failure.create(providerLabel + ": HTTP call interrupted for " + uri, e, false);
         }
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
@@ -159,8 +202,9 @@ public final class LlmHttpSupport {
             String host = uri.getHost();
             LOG.warnf("%s: non-2xx %d from %s",
                 providerLabel, response.statusCode(), host);
+            // Not unreachable: a status line means the endpoint answered.
             throw failure.create(providerLabel + ": non-2xx status " + response.statusCode()
-                + " from " + host, null);
+                + " from " + host, null, false);
         }
 
         return response.body();
@@ -184,10 +228,19 @@ public final class LlmHttpSupport {
         long cap = clampBodyCapBytes(
             config.getOptionalValue("infochat.llm.max-response-bytes", Long.class)
                 .orElse(DEFAULT_BODY_CAP_BYTES));
-        String body = sendForBody(http, request, cap, providerLabel, (message, cause) ->
-            cause == null
+        String body = sendForBody(http, request, cap, providerLabel, (message, cause, unreachable) -> {
+            if (unreachable) {
+                // cause is always non-null here (only the IOException path
+                // classifies unreachable); the null-split form is what the
+                // nullness analysis can verify.
+                return cause == null
+                    ? new LlmCallFailedException.ProviderUnreachableException(message)
+                    : new LlmCallFailedException.ProviderUnreachableException(message, cause);
+            }
+            return cause == null
                 ? new LlmCallFailedException(message)
-                : new LlmCallFailedException(message, cause));
+                : new LlmCallFailedException(message, cause);
+        });
         return parser.parse(body, request.uri());
     }
 

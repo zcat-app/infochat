@@ -1028,22 +1028,52 @@ rules:
   folded in" pattern): on an LLM-unreachable turn that read-only
   retrieval may already have executed (one local embed + one
   scoped pgvector probe) before the failure surfaced. It is
-  bounded — read-only, `statement_timeout`-capped, and gated by the
-  same per-user LLM rate bucket as the turn itself — and it writes
-  nothing, so the "discard the turn" guarantee above is unaffected.
-  A router-side circuit breaker that also skips this pre-fetch while
-  the chat provider is known-unreachable is a v1-follow-up, tracked
-  separately; v1 accepts the bounded pre-fetch cost on the failure
-  path.
+  bounded — read-only, capped in time (the pgvector probe by
+  `statement_timeout`, the embed HTTP call by
+  `infochat.embeddings.timeout-ms`), and gated by the same per-user
+  LLM rate bucket as the turn itself — and it writes nothing, so
+  the "discard the turn" guarantee above is unaffected. Once the
+  chat endpoint's circuit breaker (below) is OPEN, the pre-fetch is
+  **skipped entirely** — no embed round-trip, no pgvector probe —
+  so an outage window pays that bounded cost at most once per
+  breaker cycle: only the failures that precede the trip (and the
+  cooldown-expiry probe turn, which legitimately needs its
+  grounding) run it (M1-606).
+- **Fail-fast on a known-unreachable provider (circuit breaker,
+  M1-606).** An in-memory circuit breaker keyed by resolved provider
+  endpoint (base-url; all tasks routed to one endpoint share its
+  state, matching the D56 one-LLM-service topology — the embedding
+  endpoint is tracked separately) guards every LLM/embedding
+  transport call. After a configured count of CONSECUTIVE
+  transport-unreachable failures (connection refused, DNS failure,
+  no route, connect/read timeout) the endpoint's breaker trips OPEN
+  and subsequent calls short-circuit with the typed
+  provider-unreachable signal **without an HTTP attempt**; after a
+  configured cooldown a single probe is admitted — success closes
+  the breaker, failure re-opens it. Only transport failures trip
+  it: an application error (non-2xx status, over-cap body,
+  unparseable reply) proves the endpoint answers and counts as
+  reachable, and downstream non-LLM failures never reach the
+  breaker (attribution happens at the provider-call boundary).
+  Threshold and cooldown are `infochat.llm.breaker.*` properties;
+  the shipped defaults (threshold 3, cooldown 30s) apply to all
+  profiles. State is in-memory only — a restart resets to CLOSED
+  and the first call re-probes. Fail-fast changes WHEN a doomed
+  call fails, never WHERE it goes or how the task degrades: the
+  short-circuit surfaces as the same failure the consumer already
+  handles.
 - **No router-side fallback in v1.** When an operator configures
   per-task providers (e.g. Anthropic for SUMMARIZER, Ollama for
   SECURITY_JUDGE), a per-task provider that is unreachable
   degrades **only that task** to its task-specific failure path
   above; the router does NOT silently switch to a different
-  configured provider. Operators who require high availability
-  for a per-task LLM must over-provision that provider; v1's
-  per-task routing is a single resolution per call, not a
-  fallback chain. Adding a fallback chain is a v2 candidate
+  configured provider. The circuit breaker above is fail-FAST, not
+  fail-OVER: an OPEN breaker short-circuits the doomed call, it
+  never re-routes it — the task's degrade path is identical with
+  the breaker tripped or not. Operators who require high
+  availability for a per-task LLM must over-provision that
+  provider; v1's per-task routing is a single resolution per call,
+  not a fallback chain. Adding a fallback chain is a v2 candidate
   (`llm.md` §Per-task routing rules).
 
 A complete LLM outage degrades quality, not safety.
