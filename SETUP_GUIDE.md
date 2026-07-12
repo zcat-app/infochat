@@ -277,8 +277,15 @@ custom embeddings model must produce 768-dimensional vectors, so the wizard asks
 you to confirm); if you pick `ollama`, there is no model prompt. Either way,
 embeddings always run separately from the chat model.
 
-If you pick **remote**, the wizard asks for your provider's base URL and API key
-(the key is stored in `secrets.env`, never in plain config). Only the generative
+If you pick **remote**, the wizard first asks which **provider dialect** your
+endpoint speaks — **openai-compatible** (the default: any generic OpenAI-style
+API, e.g. NanoGPT, OpenAI, OpenRouter) or **deepseek** (DeepSeek's own
+`api.deepseek.com`). Choose **deepseek** only for a DeepSeek endpoint: it turns
+off DeepSeek's "thinking" mode so the model answers directly instead of spending
+your token budget on hidden reasoning, and it fills in `https://api.deepseek.com`
+and the `deepseek-v4-flash` model for you. For **openai-compatible** the wizard
+asks for the base URL and the model name to use. Either way it then asks for your
+API key (stored in `secrets.env`, never in plain config). Only the generative
 tasks — chat, summaries, tagging — use the remote provider; **embeddings always
 run locally**. The wizard starts a small Ollama alongside and downloads the nomic
 embedder for you, so your remote provider does **not** need to offer an
@@ -820,7 +827,7 @@ signal.
 |---|---|---|---|---|---|---|
 | **ollama** (`llama3.2:3b`, 2 GB) | ~3.6 GB | all cores | ~55 tok/s | ~10 tok/s | ~50 s | good, coherent |
 | **llama.cpp** (pinned gemma, 4.2 GB) | ~5.3 GB | all cores | ~35 tok/s | ~8–10 tok/s | ~75–80 s | good, coherent |
-| **remote** (DeepSeek `deepseek-chat`) | ~0 (offloaded) | ~0 | — | ~55 tok/s | ~10–15 s | best |
+| **remote** (DeepSeek `deepseek-v4-flash`) | ~0 (offloaded) | ~0 | — | ~55 tok/s | ~10–15 s | best |
 
 What this means in practice:
 

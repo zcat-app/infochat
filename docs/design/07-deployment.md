@@ -225,11 +225,27 @@ infochat.adapters.signal.admin=${INFOCHAT_SIGNAL_ADMIN_CONTACT_ID}
 # infochat.embeddings.provider=ollama
 # infochat.embeddings.model=nomic-embed-text
 
-# Remote provider example (NanoGPT)
+# Remote provider example (NanoGPT — the generic openai-compatible dialect)
 # infochat.llm.summarizer.provider=openai-compatible
 # infochat.llm.summarizer.base-url=https://nano-gpt.com/api/v1
 # infochat.llm.summarizer.api-key=${NANOGPT_API_KEY}
 # infochat.llm.summarizer.model=llama-3.1-70b-instruct
+
+# Remote provider example (DeepSeek — the dedicated `deepseek` dialect, M1-608).
+# The wizard (4-llm.sh step 4 / switch-llm.sh) writes the shared-default form:
+# one endpoint + key for every task (D56), provider=deepseek so deepseek-v4-flash
+# runs thinking-off (deepseek-chat is deprecated 2026-07-24). No reasoning-effort
+# key — thinking stays off (M1-610). Set the model on every generative task.
+# infochat.llm.default.provider=deepseek
+# infochat.llm.default.base-url=https://api.deepseek.com
+# infochat.llm.default.api-key=${INFOCHAT_LLM_API_KEY}
+# infochat.llm.security.model=deepseek-v4-flash
+# infochat.llm.tagger.model=deepseek-v4-flash
+# infochat.llm.entity.model=deepseek-v4-flash
+# infochat.llm.classifier.model=deepseek-v4-flash
+# infochat.llm.summarizer.model=deepseek-v4-flash
+# infochat.llm.chat.model=deepseek-v4-flash
+# infochat.llm.translator.model=deepseek-v4-flash
 
 # ── Translation ────────────────────────────────────────────────────────
 # (defaults reuse llm.translator.* which falls back to summarizer)

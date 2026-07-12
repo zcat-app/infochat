@@ -51,6 +51,12 @@ class RemoteLlmWiringTest {
     // The remote endpoint + key the operator types; arbitrary test values.
     private static final String REMOTE_BASE_URL = "https://remote.example.com/v1";
     private static final String REMOTE_API_KEY = "sk-test-remote-key";
+    // The generative model the operator enters for the openai-compatible dialect
+    // (M1-614). Deliberately NOT a local-runtime prefix (llama/nomic/qwen/mistral)
+    // so a remote base-url + this model does not trip the M1-577 mismatch scan.
+    private static final String REMOTE_MODEL = "gpt-oss-120b";
+    private static final String DEEPSEEK_MODEL = "deepseek-v4-flash";
+    private static final String DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 
     // Four Enter answers accepting the recommended values at M1-550's step-4
     // prompt_timing reads (chat/summarizer × timeout-ms/max-tokens) — every
@@ -60,10 +66,12 @@ class RemoteLlmWiringTest {
     @Test
     @EnabledOnOs(OS.LINUX)
     void remoteBackendWiresGenerativeRemoteButEmbeddingsLocal(@TempDir Path tmp) throws Exception {
-        // stdin: backend=remote, then the base-url, then the API key (no key yet in
-        // secrets.env, so the branch reads it from stdin), timing defaults (4× Enter).
+        // stdin: backend=remote, provider dialect Enter (accepts openai-compatible),
+        // base-url, model (M1-614), then the API key (no key yet in secrets.env, so
+        // the branch reads it from stdin), timing defaults (4× Enter).
         Map<String, String> props = runWizard(tmp,
-                "remote\n" + REMOTE_BASE_URL + "\n" + REMOTE_API_KEY + "\n" + ACCEPT_TIMING_DEFAULTS);
+                "remote\n" + "\n" + REMOTE_BASE_URL + "\n" + REMOTE_MODEL + "\n"
+                        + REMOTE_API_KEY + "\n" + ACCEPT_TIMING_DEFAULTS);
 
         // Generative tasks → the SHARED default endpoint + API-key reference,
         // written ONCE (D56/M1-603). Because inheritance is task-agnostic, a
@@ -74,15 +82,24 @@ class RemoteLlmWiringTest {
                 "the remote endpoint must be written once as the shared default");
         assertEquals("${INFOCHAT_LLM_API_KEY}", props.get("infochat.llm.default.api-key"),
                 "the shared default must reference the API key from secrets.env");
+        // The openai-compatible dialect (Enter default) is written explicitly for a
+        // self-describing config (M1-614), even though it equals the LlmRouter
+        // default.
+        assertEquals("openai-compatible", props.get("infochat.llm.default.provider"),
+                "the openai-compatible dialect must be written on the shared default");
         // No per-task route lines: a stale per-task line would win over the
         // shared default and silently pin its task to the old endpoint, so the
-        // wizard writes none — the classifier (M1-599) included.
+        // wizard writes none — the classifier (M1-599) included. The generative
+        // MODEL, however, IS written per task (M1-614): leaving the baked local
+        // model on a remote task 400s every call and trips the M1-577 mismatch scan.
         for (String task : new String[]{
                 "security", "tagger", "entity", "classifier", "summarizer", "chat", "translator"}) {
             assertNull(props.get("infochat.llm." + task + ".base-url"),
                     task + " must carry no per-task base-url (inherits the shared default)");
             assertNull(props.get("infochat.llm." + task + ".api-key"),
                     task + " must carry no per-task api-key (inherits the shared default)");
+            assertEquals(REMOTE_MODEL, props.get("infochat.llm." + task + ".model"),
+                    task + " must carry the operator-entered remote model");
         }
 
         // Embeddings → local Ollama nomic, never the remote endpoint (the F11 guard).
@@ -108,6 +125,59 @@ class RemoteLlmWiringTest {
                 "summarizer max-tokens must be the remote-backend recommendation");
 
         // The API key lives in secrets.env (never in application.properties).
+        String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));
+        assertTrue(secrets.contains("INFOCHAT_LLM_API_KEY=\"" + REMOTE_API_KEY + "\""),
+                "the wizard must mint the API key into secrets.env:\n" + secrets);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void remoteBackendDeepseekWritesProviderAndFixedModel(@TempDir Path tmp) throws Exception {
+        // stdin: backend=remote, dialect=deepseek, base-url Enter (accepts the
+        // https://api.deepseek.com default), NO model prompt (deepseek pins one
+        // model), the API key, timing defaults (M1-614).
+        Map<String, String> props = runWizard(tmp,
+                "remote\n" + "deepseek\n" + "\n" + REMOTE_API_KEY + "\n" + ACCEPT_TIMING_DEFAULTS);
+
+        // The deepseek dialect routes through the dedicated DeepSeekProvider:
+        // provider=deepseek + deepseek-v4-flash on every task, endpoint defaulted
+        // to DeepSeek. This triple passes the M1-577 mismatch scan cleanly
+        // (deepseek is unscrutinized and in the remote-provider set).
+        assertEquals("deepseek", props.get("infochat.llm.default.provider"),
+                "the deepseek dialect must write provider=deepseek on the shared default");
+        assertEquals(DEEPSEEK_BASE_URL, props.get("infochat.llm.default.base-url"),
+                "the deepseek base-url must default to the DeepSeek endpoint");
+        assertEquals("${INFOCHAT_LLM_API_KEY}", props.get("infochat.llm.default.api-key"),
+                "the shared default must reference the API key from secrets.env");
+        for (String task : new String[]{
+                "security", "tagger", "entity", "classifier", "summarizer", "chat", "translator"}) {
+            assertEquals(DEEPSEEK_MODEL, props.get("infochat.llm." + task + ".model"),
+                    task + " must be pinned to deepseek-v4-flash");
+            assertNull(props.get("infochat.llm." + task + ".base-url"),
+                    task + " must carry no per-task base-url (inherits the shared default)");
+            // deepseek runs thinking-off by default (M1-610), so the wizard writes
+            // no reasoning-effort key — a set reasoning-effort with the wizard's
+            // default max-tokens would trip the M1-610 coupling guard.
+            assertNull(props.get("infochat.llm." + task + ".reasoning-effort"),
+                    task + " must carry no reasoning-effort key (deepseek thinking-off)");
+        }
+
+        // The F11 guard still holds: embeddings run on the local Ollama nomic
+        // endpoint regardless of the remote dialect.
+        assertEquals(OLLAMA_URL, props.get("infochat.embeddings.base-url"),
+                "embeddings must point at the local Ollama endpoint even for deepseek");
+        assertEquals(OLLAMA_NOMIC, props.get("infochat.embeddings.model"),
+                "embeddings must use the local nomic model");
+        assertEquals(EMBEDDINGS_DIMENSION, props.get("infochat.embeddings.dimension"),
+                "embeddings dimension must stay 768");
+
+        // deepseek is a remote backend, so it takes the backend-first remote timing
+        // recommendation (a remote API answers prose in seconds).
+        assertEquals("60000", props.get("infochat.llm.chat.timeout-ms"),
+                "chat timeout-ms must be the remote-backend recommendation");
+        assertEquals("1024", props.get("infochat.llm.chat.max-tokens"),
+                "chat max-tokens must be the remote-backend recommendation");
+
         String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));
         assertTrue(secrets.contains("INFOCHAT_LLM_API_KEY=\"" + REMOTE_API_KEY + "\""),
                 "the wizard must mint the API key into secrets.env:\n" + secrets);

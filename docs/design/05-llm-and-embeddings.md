@@ -110,6 +110,40 @@ infochat.llm.summarizer.model=llama-3.1-70b-instruct
 ```                                                                                   
 The provider key ollama is a thin alias of openai-compatible with the local URL pre-filled.
 
+DeepSeekProvider
+
+A specialization of `OpenAiCompatibleProvider` for `api.deepseek.com`
+(`provider=deepseek`, M1-608). It reuses the OpenAI `/chat/completions` wire
+path but overrides the request-body seam to inject DeepSeek's `thinking`
+toggle: by default it sends `"thinking":{"type":"disabled"}` so a task runs
+NON-thinking on `deepseek-v4-flash` — the current model (`deepseek-chat` is
+deprecated 2026-07-24) — which otherwise defaults thinking-ON and burns the
+`max-tokens` budget on thought tokens before any visible output (the same
+F-live-8 hazard the compose `llamacpp` service pins `LLAMA_ARG_REASONING=off`
+for). An optional per-task `infochat.llm.<task>.reasoning-effort`
+(`low`|`medium`|`high`|`max`|`xhigh`) turns thinking back on at that depth for
+that one task; when it is set, DeepSeekProvider enforces a `max-tokens` ≥ 4000
+floor so a truncated reasoning response cannot fail-open (M1-610). The setup
+wizard writes NO `reasoning-effort` key — every task runs thinking-off, the
+M1-610 measured recommendation.
+
+`deepseek` is a distinct provider rather than `provider=openai-compatible`
+against `api.deepseek.com` because the generic adapter must stay wire-neutral
+for OpenAI / NanoGPT / OpenRouter and cannot send a DeepSeek-specific
+`thinking` field unconditionally — a vendor that rejects an unknown body field
+would 400 every call. `deepseek` IS a recognized REMOTE provider: it is in
+`LlmRouterStartupGuard`'s remote-provider set (so `infochat.llm.local-only=true`
+rejects it, exactly like `anthropic`), and its `(provider, base-url, model)`
+triple passes the M1-577 mismatch scan cleanly — that scan scrutinizes only the
+`anthropic` and `openai-compatible` shapes (§"Provider/base-url/model
+consistency guard"), never a `deepseek` triple.
+
+The three valid `provider` values are `openai-compatible` (the default when the
+key is unset), `deepseek`, and `anthropic`. The setup wizard (`4-llm.sh` step 4
+and the post-setup `switch-llm.sh`) offers `openai-compatible` and `deepseek`
+for a remote backend; `anthropic` stays manual (MVP-deferred, see
+docs/design/00-mvp.md).
+
 **Shared endpoint defaults (D56, M1-603).** `base-url` resolves
 per-task-key-first, else the deployment-wide `infochat.llm.default.base-url`;
 `api-key` resolves per-task-key-first, else — ONLY when the base-url also

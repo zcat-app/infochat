@@ -168,11 +168,37 @@ esac
 
 needs_key=0
 new_url=""
+# The provider dialect the write phase will reconcile: remote picks it below;
+# a local backend is openai-compatible via the ollama alias / the default.
+new_provider="openai-compatible"
 if [[ "$backend" == "remote" ]]; then
   needs_key=1
+  # Remote provider dialect (M1-614), symmetric with prod/scripts/4-llm.sh:
+  # openai-compatible (default) or deepseek (the dedicated DeepSeekProvider,
+  # M1-608, which injects the DeepSeek `thinking` toggle so deepseek-v4-flash
+  # runs thinking-off). Default to the CURRENT dialect so an all-Enter run over
+  # a deepseek deployment stays a no-op; a non-deepseek/absent current resolves
+  # to openai-compatible (the LlmRouter default).
+  if [[ "$(get_prop infochat.llm.default.provider)" == "deepseek" ]]; then
+    default_dialect="deepseek"
+  else
+    default_dialect="openai-compatible"
+  fi
+  read -rp "  Remote provider dialect (openai-compatible|deepseek) [${default_dialect}]: " dialect
+  dialect="${dialect:-$default_dialect}"
+  case " openai-compatible deepseek " in
+    *" $dialect "*) ;;
+    *) echo "FAIL: unknown remote provider dialect '$dialect' (expected: openai-compatible|deepseek)" >&2; exit 1 ;;
+  esac
+  new_provider="$dialect"
   if [[ "$cur_deploy_backend" == "remote" && -n "$cur_deploy_url" ]]; then
     read -rp "  Remote base-url [${cur_deploy_url}]: " url
     new_url="${url:-$cur_deploy_url}"
+  elif [[ "$dialect" == "deepseek" ]]; then
+    # deepseek speaks the OpenAI wire path at api.deepseek.com; offer it as the
+    # default when there is no current remote url to preserve.
+    read -rp "  Remote base-url [https://api.deepseek.com]: " url
+    new_url="${url:-https://api.deepseek.com}"
   else
     read -rp "  Remote base-url (e.g. https://nano-gpt.com/api/v1): " url
     if [[ -z "$url" ]]; then
@@ -181,15 +207,24 @@ if [[ "$backend" == "remote" ]]; then
     fi
     new_url="$url"
   fi
-  # Models are task tuning and rarely valid across backends: a llama3.1:8b
-  # left in place against a remote endpoint 400s every call (and trips the
-  # startup mismatch scan), so the remote path re-prompts each task's model,
-  # defaulting to its current value.
-  for task in $LLM_TASKS; do
-    cur_model="$(get_prop "infochat.llm.${task}.model")"
-    read -rp "  ${task} model [${cur_model}]: " model
-    new_model[$task]="${model:-$cur_model}"
-  done
+  if [[ "$dialect" == "deepseek" ]]; then
+    # deepseek pins one model for every task (deepseek-chat is deprecated
+    # 2026-07-24); no per-task prompt, and no reasoning-effort key (M1-610
+    # keeps thinking off).
+    for task in $LLM_TASKS; do
+      new_model[$task]="deepseek-v4-flash"
+    done
+  else
+    # Models are task tuning and rarely valid across backends: a llama3.1:8b
+    # left in place against a remote endpoint 400s every call (and trips the
+    # startup mismatch scan), so the remote path re-prompts each task's model,
+    # defaulting to its current value.
+    for task in $LLM_TASKS; do
+      cur_model="$(get_prop "infochat.llm.${task}.model")"
+      read -rp "  ${task} model [${cur_model}]: " model
+      new_model[$task]="${model:-$cur_model}"
+    done
+  fi
 else
   new_url="$OLLAMA_URL"
   if [[ "$backend" == "llamacpp" ]]; then new_url="$LLAMACPP_URL"; fi
@@ -229,6 +264,14 @@ if [[ "$needs_key" -eq 1 ]] && ! grep -qE '^INFOCHAT_LLM_API_KEY=.+' "$SECRETS_F
   key_needs_write=1
 fi
 changed="$key_needs_write"
+# Provider-dialect change (M1-614): a deepseek<->openai-compatible flip with
+# every other value identical must still count as a change, else the switch is a
+# no-op and the deployment keeps the old thinking behavior. An absent provider
+# line resolves to the openai-compatible default (mirrors LlmRouter), so an
+# all-Enter openai-compatible run over a provider-less file stays a no-op.
+cur_provider_effective="$(get_prop infochat.llm.default.provider)"
+cur_provider_effective="${cur_provider_effective:-openai-compatible}"
+if [[ "$new_provider" != "$cur_provider_effective" ]]; then changed=1; fi
 for task in $LLM_TASKS; do
   cur_url="$(effective_url "$task")"
   if [[ "$cur_url" != "$new_url" ]]; then changed=1; fi
@@ -310,6 +353,15 @@ for task in $LLM_TASKS; do
   del_prop "infochat.llm.${task}.api-key"
 done
 set_prop infochat.llm.default.base-url "$new_url"
+# Reconcile the provider dialect (M1-614): write provider=deepseek only for a
+# deepseek route; every other case (openai-compatible remote, or a local
+# backend) CLEARS the line so routing falls back to the openai-compatible
+# default — this also drops a stale provider=deepseek when leaving DeepSeek.
+if [[ "$new_provider" == "deepseek" ]]; then
+  set_prop infochat.llm.default.provider deepseek
+else
+  del_prop infochat.llm.default.provider
+fi
 if [[ "$backend" == "remote" ]]; then
   set_prop infochat.llm.default.api-key '${INFOCHAT_LLM_API_KEY}'
   for task in $LLM_TASKS; do

@@ -167,11 +167,13 @@ set_secret() {
   printf '%s="%s"\n' "$key" "$(dotenv_escape "$value")" >> "$SECRETS_FILE"
 }
 
-# Remove the remote-backend credentials a prior `remote` run wrote, for a re-run
-# that switches AWAY to a local backend (M1-530): the seven
+# Remove the remote-backend credentials + provider a prior `remote` run wrote,
+# for a re-run that switches AWAY to a local backend (M1-530): the seven
 # infochat.llm.<task>.api-key lines + any infochat.embeddings.api-key from
-# application.properties (a local backend carries no key), and INFOCHAT_LLM_API_KEY
-# from secrets.env (referenced by nothing once remote is de-selected). Mirrors the
+# application.properties (a local backend carries no key), the
+# infochat.llm.default.provider line (M1-614 — a local backend is
+# openai-compatible via the default), and INFOCHAT_LLM_API_KEY from secrets.env
+# (referenced by nothing once remote is de-selected). Mirrors the
 # adapter-admin de-selection reconcile in 6-adapter.sh and the embeddings-api-key
 # clear M1-529 added inside the remote branch. Idempotent — a no-op on a fresh run
 # with no prior remote credentials. Both callers (ollama/llamacpp) reach this only
@@ -179,6 +181,12 @@ set_secret() {
 # set_secret); the remote branch legitimately writes these keys and must NOT call it.
 clear_remote_llm_creds() {
   sed -i -e '/^infochat\.llm\..*\.api-key=/d' -e '/^infochat\.embeddings\.api-key=/d' "$CONFIG_FILE"
+  # A prior `remote` run may have written infochat.llm.default.provider (deepseek
+  # or openai-compatible, M1-614). A local ollama/llamacpp backend is
+  # openai-compatible via the default, so a lingering provider=deepseek would
+  # route a localhost endpoint through the DeepSeek thinking-toggle path — drop
+  # it so the local backend falls back to the openai-compatible default cleanly.
+  sed -i '/^infochat\.llm\.default\.provider=/d' "$CONFIG_FILE"
   sed -i '/^INFOCHAT_LLM_API_KEY=/d' "$SECRETS_FILE"
 }
 
@@ -492,10 +500,48 @@ case "$backend" in
     echo "pinned task does NOT inherit the shared api-key — set the per-task"
     echo "infochat.llm.<task>.api-key explicitly if the pinned route needs one)."
     echo
-    read -rp "Remote OpenAI-compatible base-url (e.g. https://nano-gpt.com/api/v1): " base_url
-    if [[ -z "$base_url" ]]; then
-      echo "FAIL: a base-url is required for the remote backend." >&2
-      exit 1
+    # Remote provider dialect (M1-614): openai-compatible (default — the generic
+    # OpenAI-family path: NanoGPT, OpenAI, OpenRouter) or deepseek (the dedicated
+    # DeepSeekProvider, M1-608, which injects the DeepSeek `thinking` toggle so
+    # deepseek-v4-flash — which defaults thinking-ON — runs non-thinking and does
+    # not burn the max-tokens budget). The generic openai-compatible adapter cannot
+    # send `thinking` unconditionally, which is why deepseek is its own dialect.
+    # The choice drives infochat.llm.default.provider + the generative model below.
+    DEFAULT_REMOTE_PROVIDER="openai-compatible"
+    VALID_REMOTE_PROVIDERS="openai-compatible deepseek"
+    read -rp "Remote provider dialect (${VALID_REMOTE_PROVIDERS// /|}) [${DEFAULT_REMOTE_PROVIDER}]: " remote_provider
+    remote_provider="${remote_provider:-$DEFAULT_REMOTE_PROVIDER}"
+    case " $VALID_REMOTE_PROVIDERS " in
+      *" $remote_provider "*) ;;
+      *) echo "FAIL: unknown remote provider dialect '$remote_provider' (expected: $VALID_REMOTE_PROVIDERS)" >&2; exit 1 ;;
+    esac
+    # deepseek speaks the OpenAI wire path at api.deepseek.com, so offer that as
+    # the default base-url (Enter accepts it); the operator can still point at a
+    # DeepSeek-compatible gateway on another host. openai-compatible has no single
+    # canonical endpoint, so its base-url stays required.
+    if [[ "$remote_provider" == "deepseek" ]]; then
+      read -rp "Remote base-url [https://api.deepseek.com]: " base_url
+      base_url="${base_url:-https://api.deepseek.com}"
+    else
+      read -rp "Remote OpenAI-compatible base-url (e.g. https://nano-gpt.com/api/v1): " base_url
+      if [[ -z "$base_url" ]]; then
+        echo "FAIL: a base-url is required for the remote backend." >&2
+        exit 1
+      fi
+    fi
+    # Generative model for all seven tasks: pinned deepseek-v4-flash for deepseek
+    # (deepseek-chat is deprecated 2026-07-24), else the operator-entered model.
+    # Writing the model closes the pre-existing gap where remote tasks kept the
+    # profile's baked local model names — a local name against a remote endpoint
+    # 400s every call and trips the M1-577 provider/model mismatch scan.
+    if [[ "$remote_provider" == "deepseek" ]]; then
+      remote_model="deepseek-v4-flash"
+    else
+      read -rp "Remote model name (applied to all generative tasks, e.g. gpt-4o-mini): " remote_model
+      if [[ -z "$remote_model" ]]; then
+        echo "FAIL: a model name is required for the remote backend." >&2
+        exit 1
+      fi
     fi
     # The API key is a secret, so it lives in secrets.env (§7.3 — secrets never
     # enter application.properties), reusing any value a prior step-4 run already
@@ -545,6 +591,15 @@ case "$backend" in
     # → local Ollama nomic.
     set_llm_base_urls "$base_url"
     set_prop infochat.llm.default.api-key '${INFOCHAT_LLM_API_KEY}'
+    # Provider dialect + generative model on every task (M1-614): deepseek routes
+    # through the DeepSeekProvider (passes the M1-577 guard cleanly, in the remote
+    # set); openai-compatible is written explicitly for a self-describing config
+    # even though it equals the LlmRouter default. No reasoning-effort key is
+    # written — deepseek runs thinking-off by default (M1-610 keeps it off).
+    set_prop infochat.llm.default.provider "$remote_provider"
+    for task in $LLM_TASKS; do
+      set_prop "infochat.llm.${task}.model" "$remote_model"
+    done
     # Drop any infochat.embeddings.api-key a prior (mis-wired) remote run wrote:
     # embeddings now hit the local Ollama nomic endpoint and carry no key, so a
     # lingering ${INFOCHAT_LLM_API_KEY} reference would be stale and contradict the
@@ -553,7 +608,7 @@ case "$backend" in
     set_prop infochat.embeddings.base-url "$OLLAMA_URL"
     set_prop infochat.embeddings.model "$NOMIC_OLLAMA_MODEL"
     set_prop infochat.embeddings.dimension "$EMBEDDINGS_DIMENSION"
-    echo "remote backend ready: generative tasks via $base_url; embeddings via local Ollama $OLLAMA_URL"
+    echo "remote backend ready: generative tasks via $base_url (provider=$remote_provider, model=$remote_model); embeddings via local Ollama $OLLAMA_URL"
     ;;
 esac
 

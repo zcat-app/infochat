@@ -153,15 +153,22 @@ class SwitchLlmWiringTest {
 
     private static final String EXISTING_SECRETS = "INFOCHAT_LLM_API_KEY=\"preexisting-secret\"\n";
 
-    // Prompt order on a remote run: backend, base-url, then one model per task
-    // (7), then — only when secrets.env has no key — the API key prompt.
+    // Prompt order on a remote run: backend, provider dialect (M1-614), base-url,
+    // then one model per task (7), then — only when secrets.env has no key — the
+    // API key prompt. The dialect answer here is Enter (accepts the
+    // openai-compatible default), so these drive the openai-compatible path.
     private static final String STDIN_SWITCH_TO_REMOTE_WITH_KEY =
-            "remote\n" + REMOTE_URL + "\n" + "gpt-test\n".repeat(7) + "sk-test-key\n";
+            "remote\n" + "\n" + REMOTE_URL + "\n" + "gpt-test\n".repeat(7) + "sk-test-key\n";
     private static final String STDIN_SWITCH_TO_REMOTE_KEY_REUSED =
-            "remote\n" + REMOTE_URL + "\n" + "gpt-test\n".repeat(7);
-    // All-Enter over a remote-backend file: backend + base-url + 7 models, key
-    // reused from secrets.env (no prompt).
-    private static final String STDIN_ALL_ENTER_REMOTE = "\n".repeat(9);
+            "remote\n" + "\n" + REMOTE_URL + "\n" + "gpt-test\n".repeat(7);
+    // All-Enter over a remote-backend file: backend + dialect + base-url + 7
+    // models, key reused from secrets.env (no prompt).
+    private static final String STDIN_ALL_ENTER_REMOTE = "\n".repeat(10);
+    // Switch to the deepseek dialect (M1-614): backend, dialect=deepseek, base-url
+    // Enter (accepts the https://api.deepseek.com default), key reused. deepseek
+    // pins one model for every task, so there are NO per-task model prompts.
+    private static final String STDIN_SWITCH_TO_REMOTE_DEEPSEEK =
+            "remote\n" + "deepseek\n" + "\n";
 
     // --- byte-identical no-op (acceptance item 2) -------------------------------
 
@@ -235,7 +242,7 @@ class SwitchLlmWiringTest {
         // swept per-task pin must still be named before the write, and the backup
         // must cover the run (acceptance item 3).
         RunResult r = runSwitch(tmp, BASELINE_MIXED_CHAT_PINNED_LOCAL, EXISTING_SECRETS,
-                "remote\n" + "\n".repeat(8));
+                "remote\n" + "\n".repeat(9));
 
         assertNull(r.props.get("infochat.llm.chat.base-url"),
                 "a confirmed switch must sweep the chat pin onto the shared default");
@@ -287,6 +294,35 @@ class SwitchLlmWiringTest {
         String secrets = Files.readString(r.runtimeDir.resolve("secrets.env"));
         assertTrue(secrets.contains("INFOCHAT_LLM_API_KEY=\"sk-test-key\""),
                 "the key must be recorded dotenv-quoted in secrets.env:\n" + secrets);
+    }
+
+    // --- routing to the deepseek dialect (M1-614) -------------------------------
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void switchToRemoteDeepseekWritesProviderAndFixedModel(@TempDir Path tmp) throws Exception {
+        // The deepseek dialect: provider=deepseek + deepseek-v4-flash on every
+        // task, base-url defaulted to the DeepSeek endpoint (Enter), key reused.
+        // No per-task model prompt (deepseek pins one model) and NO reasoning-effort
+        // key — deepseek runs thinking-off by default (M1-610 keeps it off).
+        List<String> beforeEmbeddings = embeddingsLines(BASELINE_OLD_FORMAT_OLLAMA);
+        RunResult r = runSwitch(tmp, BASELINE_OLD_FORMAT_OLLAMA, EXISTING_SECRETS,
+                STDIN_SWITCH_TO_REMOTE_DEEPSEEK);
+
+        assertEquals("deepseek", r.props.get("infochat.llm.default.provider"),
+                "a deepseek switch must write provider=deepseek on the shared default");
+        assertEquals("https://api.deepseek.com", r.props.get("infochat.llm.default.base-url"),
+                "the deepseek default base-url must be the DeepSeek endpoint");
+        assertEquals(API_KEY_REF, r.props.get("infochat.llm.default.api-key"),
+                "the shared default must reference the reused API key");
+        for (String task : TASKS) {
+            assertEquals("deepseek-v4-flash", r.props.get("infochat.llm." + task + ".model"),
+                    task + " must be pinned to deepseek-v4-flash");
+            assertNull(r.props.get("infochat.llm." + task + ".reasoning-effort"),
+                    task + " must carry no reasoning-effort key (deepseek runs thinking-off)");
+        }
+        assertEquals(beforeEmbeddings, embeddingsLines(r.rawConfig),
+                "the embeddings block must be untouched by a deepseek switch:\n" + r.rawConfig);
     }
 
     @Test
