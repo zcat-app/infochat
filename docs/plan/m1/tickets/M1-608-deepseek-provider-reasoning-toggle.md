@@ -186,6 +186,31 @@ a subclass, as proposed in the M1-606 discussion.
   reasoning-crowded-out verdict fail-opens, and (b) the benefit is unproven.
   This ticket ships the control defaulted OFF; enabling it for the judge is
   gated on a follow-up eval, not assumed here.
+- **Alternatives considered — DeepSeek's Anthropic-format endpoint (rejected,
+  smoke-tested 2026-07-12).** DeepSeek also serves an Anthropic-dialect API at
+  `https://api.deepseek.com/anthropic`, and our existing `AnthropicProvider`
+  shape (POST `/messages`, `x-api-key`, `anthropic-version`) works against it
+  (both `/anthropic/v1/messages` and `/anthropic/messages` return 200). Tempting
+  as a "reuse AnthropicProvider + config, no new class" path — but the smoke
+  test killed it: the `/anthropic` endpoint ALSO defaults thinking-ON (content
+  blocks `["thinking","text"]`), and the SAME `"thinking":{"type":"disabled"}`
+  is needed to turn it off (confirmed → `["text"]`, 2 output tokens). So it does
+  not avoid the thinking-control work, it just moves it to the Anthropic body;
+  and because `AnthropicProvider` is shared with REAL Claude (whose thinking API
+  differs — omit-to-disable, `budget_tokens` to enable), it would need its own
+  DeepSeek subclass there too. Net: same structural cost as the OpenAI subclass,
+  plus a bigger deviation from the current openai-compatible deployment. The
+  `/anthropic` pairing stays a valid, guard-supported fallback if ever needed.
+- **Rate limits + timeout interaction (DeepSeek docs, 2026-07-12).** DeepSeek
+  publishes NO RPM/TPM limit — only a CONCURRENCY cap (v4-flash = 2,500
+  concurrent; HTTP 429 on exceed). Our per-task `max-concurrency` is 2-8, ~3
+  orders of magnitude under it — not a practical concern. Two interactions worth
+  keeping: (a) a 429 is a non-2xx APPLICATION error, so the M1-606 breaker
+  correctly does NOT trip on it (429 = reachable, just throttled — the task's own
+  retry/degrade handles it); (b) thinking-mode responses are SLOWER, so leaving
+  thinking ON for a task risks hitting the ~30s client timeout, which M1-606
+  then classifies as transport-unreachable and could trip the breaker — another
+  reason the toggle DEFAULTS OFF.
 - **Follow-up (not this ticket):** measure the judge + tagger on LOCAL small
   models — whether local inference matches remote quality and saves paid-API
-  cost, or is too fragile and we standardize on remote. A separate spike.
+  cost, or is too fragile and we standardize on remote. A separate spike (M1-609).
