@@ -2,6 +2,8 @@ package app.zcat.infochat.messaging;
 
 import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
+import java.util.Optional;
+
 /**
  * Transport contract between Provider and a messaging backend
  * (SimpleX, Signal, in-memory test harness, future protocols). One
@@ -263,6 +265,28 @@ public interface MessagingAdapter {
      */
     default void joinGroup(String adapterGroupId) throws MessagingException {
         // No-op — overridden by adapters that can join a group by id.
+    }
+
+    /**
+     * The bot's own shareable onboarding contact for this adapter — the
+     * value a new person enters into their app to reach the bot (a SimpleX
+     * contact URL, a Signal number). Fetched live where the transport can
+     * be queried, so the value reflects the contact as it currently is,
+     * not a boot-time snapshot ({@code docs/spec/messaging.md} §Required
+     * SPI surface).
+     *
+     * <p>The returned value is display-only: it is surfaced once in a
+     * command reply and MUST never be logged at any level or persisted to
+     * any file (D37). Default is empty — "this adapter has no shareable
+     * contact" — so adapters without one need no change.</p>
+     *
+     * @return the shareable contact, or empty when the adapter has none.
+     * @throws MessagingException when a live transport query for the
+     *         value fails or times out — a transient condition, distinct
+     *         from the empty "unsupported" answer.
+     */
+    default Optional<String> connectContact() throws MessagingException {
+        return Optional.empty();
     }
 
     /**

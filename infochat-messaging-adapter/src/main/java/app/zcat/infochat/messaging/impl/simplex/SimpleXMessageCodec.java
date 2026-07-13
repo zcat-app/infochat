@@ -176,6 +176,16 @@ final class SimpleXMessageCodec {
         return envelope(corrId, "/_join #" + adapterGroupId);
     }
 
+    /**
+     * Encode the self-address query ({@code /show_address}) whose
+     * {@code userContactLink} response carries the bot's own shareable
+     * contact link. Takes no ids from any caller, so there is nothing to
+     * queue-address-validate — the command string is a constant.
+     */
+    static String encodeShowAddressCommand(String corrId) {
+        return envelope(corrId, "/show_address");
+    }
+
     private static String targetSelector(ScopeRef scope) throws MessagingException {
         return switch (scope) {
             case ScopeRef.Dm dm -> {
@@ -315,6 +325,7 @@ final class SimpleXMessageCodec {
             case "newChatItems" -> decodeNewChatItems(corrId, resp);
             case "receivedGroupInvitation" -> decodeReceivedGroupInvitation(resp);
             case "sentMessage", "apiSendMessageResponse" -> decodeSendAck(corrId, resp);
+            case "userContactLink" -> decodeUserContactLink(corrId, resp);
             case "chatCmdError", "chatItemUpdateError" -> decodeError(corrId, resp);
             // Fixed sentinel — same rule as the chatType-non-direct branch
             // below. The top-level resp.type is attacker-influenceable
@@ -862,6 +873,36 @@ final class SimpleXMessageCodec {
         return isValidQueueAddressId(id) ? id : null;
     }
 
+    /**
+     * Decode the {@code userContactLink} response to a {@code /show_address}
+     * query (live v6.5.4.1: the link lives at
+     * {@code resp.contactLink.connLinkContact.{connShortLink,connFullLink}}).
+     * The short link is preferred — it is the human-shareable form the
+     * operator tooling treats as the bot address — with the full link as the
+     * fallback for addresses created without short-link support.
+     *
+     * <p>A corrId-bearing frame that lacks a link decodes to a
+     * {@link CommandError} rather than {@link Ignored}: an Ignored frame
+     * would strand the caller's pending future until its full ack timeout,
+     * while the error completes it in seconds. The detail is a fixed
+     * sentinel — never frame bytes; the link value is display-only and must
+     * not reach a log through {@code CommandError.detail()} (D37).</p>
+     */
+    private static DecodedFrame decodeUserContactLink(@Nullable String corrId, JsonNode resp) {
+        if (corrId == null) {
+            // Only ever a response to our own query; without a corrId there
+            // is no pending future to complete, so it is not actionable.
+            return new Ignored("userContactLink-without-corrId");
+        }
+        JsonNode connLink = resp.path("contactLink").path("connLinkContact");
+        String link = firstTextual(connLink.get("connShortLink"), connLink.get("connFullLink"));
+        if (link == null) {
+            return new CommandError(corrId, FailureCategory.PERMANENT,
+                    "userContactLink-without-link");
+        }
+        return new ContactAddress(corrId, link);
+    }
+
     private static DecodedFrame decodeSendAck(@Nullable String corrId, JsonNode resp) {
         // Known simplex-chat shapes only: the chat-item id lives either
         // directly on the response, on a chatItems container object, or — on
@@ -1016,7 +1057,7 @@ final class SimpleXMessageCodec {
     /** Sealed hierarchy of frame variants returned by {@link #decode}. */
     sealed interface DecodedFrame
             permits Inbound, GroupCandidate, ReceivedGroupInvitation, OversizeDropped,
-                    SendAck, CommandError, Ignored {
+                    SendAck, ContactAddress, CommandError, Ignored {
     }
 
     /** A direct-message inbound that should be delivered to Provider. */
@@ -1077,6 +1118,14 @@ final class SimpleXMessageCodec {
 
     /** Response to a command we previously issued, carrying the chat-item id. */
     record SendAck(String corrId, String chatItemId) implements DecodedFrame {
+    }
+
+    /**
+     * Response to a {@code /show_address} query, carrying the bot's own
+     * shareable contact link. Display-only (D37): the value completes the
+     * pending command future and must never flow into a log line.
+     */
+    record ContactAddress(String corrId, String contactLink) implements DecodedFrame {
     }
 
     /** Error response to a command, with the categorised failure. */

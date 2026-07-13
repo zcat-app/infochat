@@ -682,6 +682,33 @@ public final class BundleKeys {
     /** {@code /invite revoke} success. */
     public static final String REPLY_INVITE_REVOKED = "reply.invite.revoked";
 
+    /**
+     * {@code /invite bot-contact} success — the bot's own shareable connect
+     * contact, displayed once and never logged (D37, M1-620). Tokens:
+     * {@code {0}} = adapter name, {@code {1}} = the contact value (a SimpleX
+     * contact URL or a Signal number), rendered as a bare value on its own
+     * line per the plain-text output convention.
+     */
+    public static final String REPLY_INVITE_BOT_CONTACT = "reply.invite.bot_contact";
+
+    /** {@code /invite bot-contact} against an adapter with no shareable contact. {@code {0}} = adapter name. */
+    public static final String ERROR_INVITE_BOT_CONTACT_UNSUPPORTED =
+            "error.invite.bot_contact_unsupported";
+
+    /** {@code /invite bot-contact} when the live address query fails or times out. {@code {0}} = adapter name. */
+    public static final String ERROR_INVITE_BOT_CONTACT_UNAVAILABLE =
+            "error.invite.bot_contact_unavailable";
+
+    /**
+     * {@code /invite bot-contact --adapter <name>} where {@code <name>} matches no
+     * activated adapter. Distinct from {@link #ERROR_INVITE_UNKNOWN_ADAPTER}
+     * (whose text belongs to the out-of-scope {@code create} flow) because
+     * acceptance requires this reply to NAME the valid choices. Tokens:
+     * {@code {0}} = the rejected name, {@code {1}} = the activated adapter names.
+     */
+    public static final String ERROR_INVITE_BOT_CONTACT_UNKNOWN_ADAPTER =
+            "error.invite.bot_contact_unknown_adapter";
+
     // ----- Pre-dispatch confirm gate (M1-051) -----------------------------
     // Per docs/spec/commands.md §Surface conventions ("Confirmation for
     // destructive commands") + docs/spec/security.md §What's intentionally

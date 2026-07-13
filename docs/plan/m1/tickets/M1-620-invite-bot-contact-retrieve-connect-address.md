@@ -1,11 +1,11 @@
 ---
 id: M1-620
 title: "Admin subcommand /invite bot-contact: retrieve the bot's own connect contact in-band (SimpleX current URL / Signal number) so admins onboard new contacts without server access"
-status: pending
+status: done
 created: 2026-07-13
 last_updated: 2026-07-13
 blocked_by: []
-files_budget: 12
+files_budget: 15
 complexity: high
 risk: medium
 round_cap: 2
@@ -156,11 +156,48 @@ decision_refs:
   - D44
   - D46
   - D51
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-13
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 17
+      added: 692
+      removed: 19
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-07-13
+    verdict: CLEAN
+    base: 31d5791914068ac297f660568e67d0fe081e1c04
+    head: working tree (pre-commit, branch m1/M1-620-invite-bot-contact-retrieve-connect-address)
+    verdict_file: docs/plan/m1/redteam/M1-620-2026-07-13.md
+    out_of_model_count: 1
+    note: |
+      Pre-commit audit (between review APPROVE and commit) per operator
+      directive 2026-07-13. CLEAN — zero findings at every severity. One
+      advisory out-of-model observation recorded in the verdict file; no
+      remediation ticket needed.
+outline_file: target/m1-tick-outline-M1-620.md
+clarity_check:
+  date: 2026-07-13
+  verdict: WARN
+  warnings:
+    - >-
+      files_budget (12) is plausibly ~2 files short of the ticket's own
+      test_plan-implied file count (~14: handler+test, 5 production adapter/SPI
+      files, 2 spec docs, BundleKeys, en+cs bundles, plus the new SimpleX and
+      Signal test additions). Not severe enough to block, but worth bumping to
+      avoid a mid-implementation files-budget escalation.
+  blockers: []
 ---
 
 # M1-620: /invite bot-contact — retrieve the bot's own connect contact in-band
@@ -244,6 +281,9 @@ of the M1-518-removed mention-anchor derivation.
   read it once from provisioning), but filed as a v1 ticket per operator
   decision: in-band retrieval is the expected onboarding UX and shell access
   should not be required per invite.
+- **files_budget bumped 12→15 pre-start (operator-approved, 2026-07-13):** the
+  clarity pre-flight enumerated ~14 test_plan-implied files against the filed
+  budget of 12; bumped with headroom for a captured-frame fixture resource.
 - **Design forks RESOLVED (operator, 2026-07-13, pre-start):** subcommand shape
   (`/invite bot-contact`), Signal-returns-the-number, and live per-call SimpleX
   query all CONFIRMED as filed. The `--adapter <name>` override was PROMOTED

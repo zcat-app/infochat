@@ -1075,6 +1075,20 @@ contacts and contradict the registration-state model
   adapter, and expiry.
 - `/invite revoke <code>` — immediately transition a PENDING code to REVOKED.
   Requires confirm.
+- `/invite bot-contact [--adapter <name>]` — return the bot's own shareable
+  connect contact in-band, so an admin can onboard a new person without shell
+  access to the server (M1-620): SimpleX answers its **live current** contact
+  URL (queried from the running simplex-chat at command time, never a boot-time
+  snapshot), Signal answers its registered number. The target adapter is the
+  inbound one by default; `--adapter <name>` selects any single activated
+  adapter (the same cross-adapter posture as `/invite create`, and validated
+  the same way — an unknown or non-activated name is a friendly error that
+  names the valid choices). An adapter with no shareable contact, or whose
+  live query fails, gets a friendly reply — never a crash. The value is not an
+  invite code and grants no access by itself; pull-only, DM-only, bot-admin
+  only, displayed once in the reply and **never logged or persisted** (D37).
+  Not audit-logged: this is a read of the bot's own non-secret address, the
+  same posture as the un-audited `/invite list` read.
 - `/vouch <contact>` — immediately graduate a user from the slow-start
   probation tier to full access (decision D45). Sets
   `probation_until = NULL`. No-op with a friendly reply if the user
@@ -1223,7 +1237,7 @@ cannot silently shrink across versions.
 
 - **Bot-admin only:** `/grant-admin`, `/revoke-admin`, `/ban`,
   `/unban`, `/promote`, `/demote`, `/vouch`, `/invite create`,
-  `/invite list`, `/invite revoke`, `/quarantine list`,
+  `/invite list`, `/invite revoke`, `/invite bot-contact`, `/quarantine list`,
   `/quarantine approve`, `/quarantine reject`, `/audit`, `/pending`,
   `/remove-source`, `/source-enable`, `/source-disable`,
   `/list-sources --all`, `/list-sources --include-deleted`,

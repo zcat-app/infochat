@@ -110,6 +110,7 @@ public class LlmOutputSanitizer {
             "/invite create",
             "/invite list",
             "/invite revoke",
+            "/invite bot-contact",
             "/quarantine list",
             "/quarantine approve",
             "/quarantine reject",

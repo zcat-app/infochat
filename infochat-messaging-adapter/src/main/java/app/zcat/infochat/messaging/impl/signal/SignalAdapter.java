@@ -15,6 +15,7 @@ import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 import java.util.Locale;
+import java.util.Optional;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -194,6 +195,17 @@ public final class SignalAdapter implements MessagingAdapter {
     @Override
     public boolean isWellFormedContactId(String contactId) {
         return SignalIdentity.isWellFormed(contactId);
+    }
+
+    @Override
+    public Optional<String> connectContact() {
+        // The registered account IS Signal's shareable contact (an E.164
+        // number a person can enter into their app — unlike botAci, a UUID
+        // nobody can dial), and it is already in-process: no signal-cli
+        // round-trip. Null only under the capability-introspection
+        // constructor, where empty ("no shareable contact") is the honest
+        // answer.
+        return Optional.ofNullable(account);
     }
 
     /**

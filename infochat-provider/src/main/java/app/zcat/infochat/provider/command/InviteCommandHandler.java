@@ -6,6 +6,7 @@ import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.messaging.MessagingAdapter;
+import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
@@ -40,14 +41,15 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Implements {@code /invite create / list / revoke} per
+ * Implements {@code /invite create / list / revoke / bot-contact} per
  * {@code docs/spec/security.md} §Invite-code registration and
  * {@code docs/spec/commands.md} §Admin (bot admin).
  *
  * <p>The handler dispatches on the first whitespace-delimited
  * subcommand token to a {@code "create"} / {@code "list"} /
- * {@code "revoke"} branch; any other token → {@code error.invite
- * .unknown_subcommand} (acceptance item 16). Each branch executes
+ * {@code "revoke"} / {@code "bot-contact"} branch; any other token →
+ * {@code error.invite.unknown_subcommand} (acceptance item 16). The
+ * mutating branches execute
  * the audit-before-effect transaction shape that
  * {@link BanCommandHandler} pins for {@code /ban}: the audit row
  * INSERT runs FIRST inside the same transaction as the state
@@ -214,8 +216,69 @@ public class InviteCommandHandler implements CommandHandler {
             case "create" -> handleCreate(scope, actor, inboundAdapter, remainder);
             case "list" -> handleList(scope, remainder);
             case "revoke" -> handleRevoke(scope, actor, inboundAdapter, remainder);
+            case "bot-contact" -> handleBotContact(scope, inboundAdapter, remainder);
             default -> reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_UNKNOWN_SUBCOMMAND, inboundContext.effectiveLanguage()));
         };
+    }
+
+    // ------------------------------------------------------------------
+    // /invite bot-contact [--adapter <name>]
+    // ------------------------------------------------------------------
+
+    /**
+     * Returns the bot's own shareable onboarding contact in-band (M1-620):
+     * the value an admin hands a new person so their app can reach the bot
+     * — pull-only, DM-only, bot-admin-only (both gates already ran in
+     * {@link #handle} before dispatch). The target adapter is the inbound
+     * one by default, or the single activated adapter named via
+     * {@code --adapter <name>} (operator decision 2026-07-13). No audit
+     * row, deliberately: this is a read of the bot's OWN non-secret
+     * address — the same posture as the un-audited {@code /invite list}
+     * read — not a privileged user-PII read (Invariant 7 binds mutations
+     * and user-data reads). D37: the contact value is displayed once in
+     * the reply and never logged or persisted.
+     */
+    private OutboundMessage handleBotContact(ScopeRef scope,
+                                             String inboundAdapter,
+                                             String remainder) {
+        String targetName = Optional.ofNullable(CreateArgs.parse(remainder).adapter())
+                .orElse(inboundAdapter);
+        MessagingAdapter target = null;
+        for (MessagingAdapter adapter : adapterRegistry.activatedAdapters()) {
+            if (adapter.name().equals(targetName)) {
+                target = adapter;
+                break;
+            }
+        }
+        if (target == null) {
+            // Only reachable via --adapter: the inbound adapter is activated
+            // by definition (it just delivered this command). The reply names
+            // the valid choices per the M1-620 acceptance.
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_INVITE_BOT_CONTACT_UNKNOWN_ADAPTER, inboundContext.effectiveLanguage()),
+                    targetName, String.join(", ", enabledAdapterNames())));
+        }
+        Optional<String> contact;
+        try {
+            contact = target.connectContact();
+        } catch (MessagingException e) {
+            // Live query failed or timed out. The exception's message is
+            // adapter-internal detail (fixed sentinels by codec contract) —
+            // the contact value is never in it, and nothing is logged here.
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_INVITE_BOT_CONTACT_UNAVAILABLE, inboundContext.effectiveLanguage()),
+                    targetName));
+        }
+        if (contact.isEmpty()) {
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_INVITE_BOT_CONTACT_UNSUPPORTED, inboundContext.effectiveLanguage()),
+                    targetName));
+        }
+        // Displayed once in the reply; the outbound path omits reply bodies
+        // from logs, so the value reaches the admin's DM and nothing else (D37).
+        return reply(scope, MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_INVITE_BOT_CONTACT, inboundContext.effectiveLanguage()),
+                targetName, contact.get()));
     }
 
     // ------------------------------------------------------------------
@@ -729,6 +792,9 @@ public class InviteCommandHandler implements CommandHandler {
      * {--contact <id> | --open}}. The required-vs-optional shape and
      * mutually-exclusive validation live in {@link #handleCreate}; the
      * parser only extracts the supplied flag values.
+     * {@code /invite bot-contact} reuses this parser for its optional
+     * {@code --adapter} flag (same tokenizer, same flag grammar) and
+     * reads only {@link #adapter}.
      */
     record CreateArgs(@Nullable String adapter, @Nullable String contact, boolean open) {
 

@@ -113,6 +113,18 @@ Every adapter implements:
   because the underlying protocol provides no such mechanism) MUST
   rely solely on the application-level cap and document this in its
   design note.
+- **Bot connect contact.** Optional. Returns the bot's own shareable
+  onboarding contact for this adapter — the value a new person enters
+  into their app to reach the bot (SimpleX: the **live current**
+  contact URL, queried from the running transport at command time;
+  Signal: the registered number). Default answer is "no shareable
+  contact", so adapters without one need no change. The value is
+  display-only: surfaced once in the `/invite bot-contact` admin reply
+  (`commands.md` §Admin) and never logged at any level or persisted to
+  any file (D37). Exactly one SPI method — this is not a general
+  adapter-introspection or metadata surface, and it exposes no other
+  identity material (not the SimpleX queue keypair, not signal-cli
+  credentials).
 - **Capability flags.** A static description of what the adapter
   supports: identity trust level, markdown rendering, message edits,
   edit minimum interval, typing indicator, membership events, and

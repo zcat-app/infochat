@@ -1,12 +1,20 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.core.log.ContactIds;
+import app.zcat.infochat.messaging.AdapterTrustLevel;
+import app.zcat.infochat.messaging.CapabilityFlags;
+import app.zcat.infochat.messaging.FailureCategory;
+import app.zcat.infochat.messaging.MessageHandle;
+import app.zcat.infochat.messaging.MessagingAdapter;
+import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.messaging.AdapterRegistry;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
+import app.zcat.infochat.provider.user.UserRepository;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterEach;
@@ -20,6 +28,7 @@ import java.sql.ResultSet;
 import java.text.MessageFormat;
 import java.time.Clock;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -54,6 +63,7 @@ class InviteCommandHandlerTest {
     @Inject BundleLoader bundleLoader;
     @Inject InboundContext inboundContext;
     @Inject ConfirmStateService confirmStateService;
+    @Inject UserRepository userRepository;
 
     @AfterEach
     void restoreClock() {
@@ -652,6 +662,195 @@ class InviteCommandHandlerTest {
     }
 
     // ----- helpers ---------------------------------------------------------
+
+    // ----- /invite bot-contact (M1-620) -----------------------------------
+
+    @Test
+    void botContactInGroupScopeReturnsCommandDmOnly() {
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Group(PREFIX + "grp-bot-contact"), "/invite bot-contact");
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY), reply.text(),
+                "/invite bot-contact in group scope must return error.command_dm_only");
+    }
+
+    @Test
+    void botContactFromNonAdminReturnsAdminOnly() throws Exception {
+        String actor = PREFIX + "botContact-nonAdmin";
+        seedUser(actor, /* isAdmin */ false);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor), "/invite bot-contact");
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY), reply.text());
+    }
+
+    @Test
+    void botContactForAdapterWithoutShareableContactReturnsUnsupported() throws Exception {
+        // The in-memory adapter keeps the SPI default (no shareable contact),
+        // so the real %test registry exercises the unsupported leg unmocked.
+        String actor = PREFIX + "botContact-unsup";
+        seedUser(actor, true);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor), "/invite bot-contact");
+
+        assertEquals(MessageFormat.format(
+                        bundleLoader.get(BundleKeys.ERROR_INVITE_BOT_CONTACT_UNSUPPORTED), ADAPTER),
+                reply.text());
+    }
+
+    @Test
+    void botContactWithUnknownAdapterNamesValidChoices() throws Exception {
+        String actor = PREFIX + "botContact-unk";
+        seedUser(actor, true);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor),
+                "/invite bot-contact --adapter not-a-real-adapter");
+
+        assertTrue(reply.text().contains("not-a-real-adapter"),
+                "the reply must interpolate the rejected name — got: " + reply.text());
+        assertTrue(reply.text().contains(ADAPTER),
+                "the reply must NAME the valid adapter names (M1-620 acceptance 2d) — got: "
+                        + reply.text());
+    }
+
+    @Test
+    void botContactReturnsInboundAdapterContact() throws Exception {
+        String actor = PREFIX + "botContact-ok";
+        seedUser(actor, true);
+        String contact = "https://smp.example.test/a#botContactFixture";
+        InviteCommandHandler wired = handlerWith(fakeRegistry(
+                stubAdapter(ADAPTER, () -> Optional.of(contact))));
+
+        OutboundMessage reply = wired.handle(new ScopeRef.Dm(actor), "/invite bot-contact");
+
+        assertEquals(MessageFormat.format(
+                        bundleLoader.get(BundleKeys.REPLY_INVITE_BOT_CONTACT), ADAPTER, contact),
+                reply.text());
+    }
+
+    @Test
+    void botContactAdapterOverrideReturnsNamedAdaptersContact() throws Exception {
+        String actor = PREFIX + "botContact-xadapter";
+        seedUser(actor, true);
+        String inboundContact = "https://smp.example.test/a#inboundValue";
+        String otherContact = "+4700000001";
+        InviteCommandHandler wired = handlerWith(fakeRegistry(
+                stubAdapter(ADAPTER, () -> Optional.of(inboundContact)),
+                stubAdapter("stub-signal", () -> Optional.of(otherContact))));
+
+        OutboundMessage reply = wired.handle(new ScopeRef.Dm(actor),
+                "/invite bot-contact --adapter stub-signal");
+
+        assertEquals(MessageFormat.format(
+                        bundleLoader.get(BundleKeys.REPLY_INVITE_BOT_CONTACT),
+                        "stub-signal", otherContact),
+                reply.text());
+        assertFalse(reply.text().contains(inboundContact),
+                "--adapter must return the NAMED adapter's contact, not the inbound one");
+    }
+
+    @Test
+    void botContactUnavailableWhenLiveQueryFails() throws Exception {
+        String actor = PREFIX + "botContact-fail";
+        seedUser(actor, true);
+        InviteCommandHandler wired = handlerWith(fakeRegistry(
+                stubAdapter(ADAPTER, () -> {
+                    throw new MessagingException(FailureCategory.TRANSIENT, "query timed out");
+                })));
+
+        OutboundMessage reply = wired.handle(new ScopeRef.Dm(actor), "/invite bot-contact");
+
+        assertEquals(MessageFormat.format(
+                        bundleLoader.get(BundleKeys.ERROR_INVITE_BOT_CONTACT_UNAVAILABLE), ADAPTER),
+                reply.text());
+    }
+
+    /**
+     * Hand-wired handler with a substitute {@link AdapterRegistry}.
+     * {@code QuarkusMock.installMockForType} would install the substitute
+     * for the remainder of the JVM-wide test run and leak it into unrelated
+     * test classes that read the registry, so the scenarios that need a
+     * controllable adapter set wire the handler manually with the REAL CDI
+     * collaborators (gates, bundles, inbound context) plus the fake registry
+     * — the same {@code handle()} entry point and gate path, zero leakage.
+     */
+    private InviteCommandHandler handlerWith(AdapterRegistry registry) {
+        InviteCommandHandler wired = new InviteCommandHandler();
+        wired.bundleLoader = bundleLoader;
+        wired.inboundContext = inboundContext;
+        wired.userRepository = userRepository;
+        wired.adapterRegistry = registry;
+        return wired;
+    }
+
+    private static AdapterRegistry fakeRegistry(MessagingAdapter... adapters) {
+        List<MessagingAdapter> activated = List.of(adapters);
+        return new AdapterRegistry() {
+            @Override
+            public List<MessagingAdapter> activatedAdapters() {
+                return activated;
+            }
+        };
+    }
+
+    @FunctionalInterface
+    private interface ContactSource {
+        Optional<String> get() throws MessagingException;
+    }
+
+    /** Stub adapter for the bot-contact path, which reads only {@code name()} + {@code connectContact()}. */
+    private static MessagingAdapter stubAdapter(String name, ContactSource contact) {
+        return new MessagingAdapter() {
+            @Override
+            public String name() {
+                return name;
+            }
+
+            @Override
+            public Optional<String> connectContact() throws MessagingException {
+                return contact.get();
+            }
+
+            @Override
+            public CapabilityFlags capabilities() {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public AdapterTrustLevel trustLevel() {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public boolean isWellFormedContactId(String contactId) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public MessageHandle send(OutboundMessage msg) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void update(MessageHandle handle, String body) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void finalizeMessage(MessageHandle handle, String body) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void setTyping(ScopeRef scope, boolean typing) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void setInboundHandler(InboundHandler handler) {
+                throw new UnsupportedOperationException();
+            }
+        };
+    }
 
     private UUID seedUser(String contactId, boolean isAdmin) throws Exception {
         return seedUserWithBanned(contactId, isAdmin, false, "vouched");

@@ -525,6 +525,14 @@ final class SimpleXWebSocketClient {
                     dispatchAsync(inv.inviterContactId(),
                             () -> groupInvitationConsumer.onGroupInvitation(inv));
             case SimpleXMessageCodec.SendAck ack -> completePending(ack.corrId(), ack.chatItemId());
+            // Completes on the listener thread exactly like SendAck — the
+            // caller may be the single inbound-dispatch thread blocked in
+            // sendCommand (a handler resolving the bot address synchronously
+            // from onMessage), so queueing this behind it via dispatchAsync
+            // would deadlock the same-adapter query. The link value flows only
+            // into the pending future, never a log line (D37).
+            case SimpleXMessageCodec.ContactAddress addr ->
+                    completePending(addr.corrId(), addr.contactLink());
             case SimpleXMessageCodec.CommandError err -> failPending(err);
             case SimpleXMessageCodec.OversizeDropped od -> {
                 // §6.3.10 transport size-cap shed: silent at the boundary (no

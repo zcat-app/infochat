@@ -28,6 +28,7 @@ import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -713,6 +714,20 @@ public final class SimpleXAdapter implements MessagingAdapter {
         // membership transition invited→connected lands later as an async event
         // (M1-515).
         ws.sendNoAck(corrId, SimpleXMessageCodec.encodeJoinGroupCommand(corrId, adapterGroupId));
+    }
+
+    @Override
+    public Optional<String> connectContact() throws MessagingException {
+        SimpleXWebSocketClient ws = requireConnected();
+        String corrId = nextCorrId();
+        // One-off control command (not a paced user message) — same
+        // no-rate-token posture as joinGroup. The ack payload IS the current
+        // contact link, so the value is live at command time, never a
+        // boot-time snapshot; it flows only into this return value (D37 —
+        // never logged, never persisted).
+        String link = ws.sendCommand(corrId,
+                SimpleXMessageCodec.encodeShowAddressCommand(corrId), ACK_TIMEOUT);
+        return Optional.of(link);
     }
 
     // -- internals -----------------------------------------------------------
