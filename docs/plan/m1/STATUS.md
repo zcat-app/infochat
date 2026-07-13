@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 640 |
 | deferred | 1 |
 | abandoned | 11 |
-| **total** | **652** |
+| **total** | **653** |
 
 ---
 
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-619 — Recalibrate the chat confident-grounding cutoff (M1-618 CONFIDENT_SIMILARITY_CUTOFF): measure clarify-vs-affordance separation on the labeled query set (complexity: medium, risk: low)
 
 ---
 
@@ -835,4 +835,5 @@ M1-615 (done)
 M1-616 (done)
 M1-617 (done)
   └── M1-618 (done)
+M1-619 (pending) ← runnable
 ```
