@@ -1,7 +1,9 @@
 # v1 release — execution handoff (for a fresh session)
 
-> **Written:** 2026-07-13. **main @ `db23f561`** (pushed). **Start a fresh
-> session and drive this.**
+> **Written:** 2026-07-13. **Updated:** 2026-07-13 (§1 done; M1-620 filed +
+> paused — see the callout below). **main @ `c12c3e03`** (local, **+1 unpushed**:
+> the M1-620 filing; origin still `a47b4786`). **Start a fresh session and drive
+> this.**
 >
 > **READ FIRST:** `docs/plan/v1-verification-truth.md` — the dated,
 > provenance-tagged record of what's verified vs. owed. **This doc is the ACTION
@@ -10,11 +12,64 @@
 
 ## Current state (one line)
 
-Code complete + pushed (642 done, 0 open). Both adapters live-verified 2026-07-04
-(`docs/plan/live-e2e/`), **Signal-adapter code frozen since → still valid**.
-Stack **paused** on **pre-M1-619 images** (`c731ef63`); only `postgres`+`ollama`
-up. DB intentionally reset to prod-state: **4 simplex users** (1 admin vouched,
-3 invited), **0 signal, 0 groups**, 5,547 posts, schema v58.
+642 done + **1 pending (M1-620, paused — see below)**. Both adapters
+live-verified 2026-07-04 (`docs/plan/live-e2e/`), **Signal-adapter code frozen
+since → still valid**. **§1 DONE 2026-07-13: stack REBUILT + UP on `c12c3e03`**
+(M1-619's `0.65` cutoff confirmed in the running bytecode). All 4 containers up
+(collector+provider+postgres+ollama), both readiness UP, `adapter_connection_status`=1.0
+for simplex+signal. DB unchanged from prod-state: **4 simplex users** (1 admin
+vouched, 3 invited), **0 signal, 0 groups**, 5,547 posts, schema v58.
+
+## ⏸ Paused — resolve M1-620 FIRST (operator directive 2026-07-13)
+
+While reviewing this handoff the operator hit an operability gap and asked to
+**pause the release plan and land a fix before continuing**: a bot admin has no
+in-band way to get the bot's own connect address to onboard new people — the
+SimpleX contact URL is only printed to the terminal at provisioning (D37), so
+onboarding a new SimpleX contact currently needs **shell access to the server**.
+(The address is NOT classified secret in `security.md`; D37 only forbids
+*persisting* it to logs/config — not an admin viewing it in-band. Verified.)
+
+- **Filed:** `M1-620` — DM-only, bot-admin-only **`/invite bot-contact`**
+  subcommand that returns the bot's own connect contact in-band: **SimpleX →
+  live current contact URL**, **Signal → registered number**. Ticket at
+  `docs/plan/m1/tickets/M1-620-invite-bot-contact-retrieve-connect-address.md`,
+  `status: pending`, committed `c12c3e03` (unpushed). `complexity: high`,
+  `security_relevant: true`, `files_budget: 12`, no `files_scope`.
+- **NOT started.** `/m1-tick start M1-620` was invoked but **halted at the
+  grounding checkpoint** — no branch, no status flip. Fully clean: on `main`,
+  ticket still `pending`.
+- **Design already scoped** (Explore survey done — don't re-derive): it's a
+  subcommand of the existing `InviteCommandHandler` (reuses its DM-only + admin
+  gate ~L193/L202-205 → **no new command bean, no command-index change**).
+  **The real cost:** there is **no runtime path to the SimpleX self-address** —
+  the `MessagingAdapter` SPI has no self-identity method, `/show_address` was
+  removed as consumer-less in **M1-518 (D51)**, and the SimpleX WS codec has no
+  encode/decode for it. So SimpleX needs a new SPI method + a new simplex-chat
+  **WS address-query codec** (encode the query + decode the response — use a
+  **REAL captured v6.5.4.1 frame** as the fixture, `[[simplex-live-frame-capture]]`).
+  **Signal is cheap:** it already holds `account`/`botAci` in-process
+  (`SignalAdapter` L98/L107) — just add an accessor. Command reply bodies are
+  **already not logged** (D37 satisfied on the outbound path).
+- **OPEN design questions the operator paused on — resolve these in the fresh
+  session BEFORE `/m1-tick start`:**
+  1. Subcommand name `/invite bot-contact` vs. a standalone command.
+  2. Signal: return the number (current plan) vs. decline.
+  3. Cross-adapter `--adapter` flag (currently **out-of-scope** for v1).
+  4. SimpleX value: **live query each call** (current plan — matches "current")
+     vs. cached-at-startup / persisted-at-provision (simpler, but the latter
+     needs a D37 clarification and can go stale). Notes-section fork in the ticket.
+- **Then drive it in the MAIN session** (`/m1-tick start M1-620` → implement →
+  `/m1-tick review` → `/redteam M1-620` (security_relevant) → commit → merge).
+  **NOT via the Workflow tool** — it can't nest the gate subagents
+  (`[[m1-tick-workflow-cannot-nest-gates]]`).
+- **Sequencing gotcha:** implementing needs `mvn verify`, which wants the app
+  stack **paused** (clean-verify rule) — but capturing the real SimpleX WS
+  response frame needs the bot **UP**. So **capture the frame first (bot up),
+  then pause the stack for verify.**
+
+Only after M1-620 is merged does the release plan below resume (§2 onward). §1 is
+already done.
 
 ## Before you start (coordination)
 
@@ -29,16 +84,25 @@ up. DB intentionally reset to prod-state: **4 simplex users** (1 admin vouched,
 
 ## The work — ordered (each: goal · recipe · acceptance)
 
-### 1. Rebuild + restart from current main
-- **Goal:** deploy `db23f561` (includes M1-619's calibrated `0.65` cutoff) so
-  live checks exercise shipped code.
-- **Recipe:** `prod/scripts/7-apps.sh` — runs `docker compose ... build
-  infochat-collector infochat-provider`, then starts Collector (Flyway under
-  advisory lock) → waits healthy → starts Provider. Idempotent. **Launch
-  detached** per the clean-verify rule. Env: `--env-file prod/runtime/secrets.env`.
-- **Acceptance:** all 5 containers healthy; both readiness 200;
-  `adapter_connection_status`=1.0 for **both** simplex+signal at `/q/metrics`.
-  Confirm `ChatAgent CONFIDENT_SIMILARITY_CUTOFF=0.65` is in the running image.
+### 1. Rebuild + restart from current main — ✅ DONE 2026-07-13
+- **Done on `c12c3e03`** via `prod/scripts/7-apps.sh` (launched detached). Exit 0:
+  both images built, SimpleX identity provisioned (idempotent no-op on the
+  existing profile — address did NOT rotate), Collector healthy (Flyway applied),
+  Provider started.
+- **Acceptance all green:** collector *(healthy)* + provider *(ready)* + postgres
+  + ollama up; provider & collector readiness **UP**; `adapter_connection_status`
+  = **1.0** for both simplex + signal; and `javap` on the running provider
+  bytecode confirms `CONFIDENT_SIMILARITY_CUTOFF = 0.65d`. Note: only 4 infochat
+  containers exist (compose defines postgres+collector+provider, ollama alongside);
+  Signal+SimpleX run **embedded in the provider**, not as sidecars — the doc's
+  "5 containers" was a loose count. Provider has **no compose healthcheck** (only
+  collector does); verify it via its readiness endpoint (`docker exec … curl
+  127.0.0.1:8081/q/health/ready`).
+- **Aside (rotation myth, resolved):** an image rebuild/restart does NOT
+  disconnect existing contacts — a SimpleX contact address is bootstrap-only;
+  established contacts talk over their own pairwise connection. The bind-mounted
+  profile DBs are preserved across rebuilds. Current stable address is in
+  `.scratch/bot-address.txt` (with a corrected note).
 
 ### 2. Add the Signal bootstrap-admin ACI (operator action)
 - **Goal:** none is configured now (`docs/plan/v1-verification-truth.md` §2) — a
