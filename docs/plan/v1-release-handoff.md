@@ -1,11 +1,12 @@
 # v1 release — execution handoff (for a fresh session)
 
 > **Written:** 2026-07-13. **Updated:** 2026-07-13 (§1 done; **M1-620
-> IMPLEMENTED + MERGED @`cf48bc8c`** — review APPROVE r1 + redteam CLEAN; the
-> pause is CLEARED, release plan resumes at §2). Origin still `a47b4786`; local
-> main is ahead (unpushed). **Rebuild owed to make M1-620 live** — it is merged
-> to main but NOT yet in the running provider bytecode (stack was restarted on
-> the pre-M1-620 images after the merge).
+> MERGED @`cf48bc8c`**; **TWO NEW PRIORITY TICKETS M1-621 + M1-622 filed —
+> address these BEFORE the release plan §2**, see §"⏭ Next priority" below).
+> Origin still `a47b4786`; local main is ahead (unpushed). **Rebuild owed** —
+> M1-620 is merged but not in the running provider bytecode; **fold that rebuild
+> to after M1-621+M1-622 land** so one rebuild brings all three live and applies
+> M1-621's V59 migration in the same restart.
 >
 > **READ FIRST:** `docs/plan/v1-verification-truth.md` — the dated,
 > provenance-tagged record of what's verified vs. owed. **This doc is the ACTION
@@ -14,15 +15,17 @@
 
 ## Current state (one line)
 
-**643 done, 0 pending** (M1-620 merged @`cf48bc8c` 2026-07-13). Both adapters
-live-verified 2026-07-04 (`docs/plan/live-e2e/`), **Signal-adapter code frozen
-since → still valid**. **§1 DONE 2026-07-13: stack REBUILT + UP on `c12c3e03`**
-(M1-619's `0.65` cutoff confirmed in the running bytecode). All 4 containers up
+**642 done, 2 pending (M1-621, M1-622 — the new priority; see §"⏭ Next
+priority")**. M1-620 merged @`cf48bc8c` 2026-07-13. Both adapters live-verified
+2026-07-04 (`docs/plan/live-e2e/`), **Signal-adapter code frozen since → still
+valid**. **§1 DONE 2026-07-13: stack REBUILT + UP on `c12c3e03`** (M1-619's
+`0.65` cutoff confirmed in the running bytecode). All 4 containers up
 (collector+provider+postgres+ollama), both readiness UP, `adapter_connection_status`=1.0
 for simplex+signal. DB unchanged from prod-state: **4 simplex users** (1 admin
-vouched, 3 invited), **0 signal, 0 groups**, 5,547 posts, schema v58. **The
-running images are still pre-M1-620** — a rebuild is owed before `/invite
-bot-contact` can be live-driven (§4).
+vouched, 3 invited), **0 signal, 0 groups**, 5,547 posts, **schema v58**
+(M1-621 will add **V59**). **The running images are still pre-M1-620** — the
+owed rebuild is deferred to after M1-621+M1-622 (one rebuild, applies V59, makes
+all three live), then `/invite bot-contact` is live-driven (§4).
 
 ## ✅ M1-620 landed — pause cleared (2026-07-13)
 
@@ -83,8 +86,58 @@ onboarding a new SimpleX contact currently needs **shell access to the server**.
   response frame needs the bot **UP**. So **capture the frame first (bot up),
   then pause the stack for verify.**
 
-Only after M1-620 is merged does the release plan below resume (§2 onward). §1 is
+Only after M1-620 is merged does the release plan below resume — but **two new
+priority tickets (M1-621, M1-622) now come first**; see the next section. §1 is
 already done.
+
+## ⏭ Next priority — M1-621 → M1-622 BEFORE the release plan §2 (operator directive 2026-07-13)
+
+The v1 subscription/tag model has a UX gap (empty feed until `/follow-all-sources`;
+confusing source-subscription-vs-`/follow-tag` overlap; no non-admin source
+browsing). It was redesigned 2026-07-13 — design authority
+`docs/plan/subscription-model-redesign.md`, tracked as the §6b gap in
+`docs/plan/v1-verification-truth.md`. These two tickets are the **build** of that
+redesign and the operator wants them landed **before** the rest of the release
+plan (§2 onward). Filed `e4c3a033` / `6d2bf0f3` (unpushed).
+
+**Sequence is fixed (M1-622 is `blocked_by: M1-621`):**
+
+1. **M1-621 — subscription model, end-to-end** (`complexity: high`, `round_cap: 3`,
+   `security_relevant: true`, **`migration_touch: true`**, `files_budget: 18`,
+   `blocked_by: []` → runnable now). Delivers the whole model as one feature:
+   Flyway **V59** adds `source.source_origin` (`bootstrap`|`user`, default `user`
+   = fail-closed private, existing rows → `bootstrap`) + a per-scope exclusion
+   representation; the four retrieval/digest queries (`EligiblePostQuery`,
+   `SemanticSearchTool`, `SearchPostsTool`, `GetReferencesTool`) become "bootstrap
+   (not excluded) OR my subscriptions" so bootstrap is an implicit public corpus
+   and customs stay private; command surface (`/list-sources` shows bootstrap +
+   own customs, `/unfollow-source` opts a scope out of a bootstrap source,
+   `/follow-all-sources` re-includes, `/add-source` marks `user`); RAG decoupled
+   from `/follow-tag` (digest keeps the tag narrowing); spec amendment **D59** in
+   `commands.md` + `decisions.md` + `schema.md`. **Privacy is the load-bearing
+   property** — the predicate must be exactly "`origin='bootstrap'` AND
+   not-excluded, OR `source_id IN` (this scope's subscriptions)".
+2. **M1-622 — subscription guidance copy** (`complexity: low`, `files_budget: 6`,
+   **`blocked_by: M1-621`** → runs only after 621 merges). Pure bilingual (en+cs,
+   D43) string work: new-user welcome ("you're following all our sources; use
+   `/follow-tag <topic>` to focus your digest — chat still searches everything"),
+   a `/follow-tag` + `/unfollow-tag` clarifier that narrowing affects the DIGEST
+   only, and an empty-digest nudge. No behaviour change.
+
+**Drive each in the MAIN session** via `/m1-tick start <id>` → implement →
+`/m1-tick review` → (`/redteam M1-621` — it's `security_relevant`) → commit →
+merge. **NOT via the Workflow tool** (can't nest the gate subagents,
+`[[m1-tick-workflow-cannot-nest-gates]]`). Same clean-verify discipline as M1-620
+(pause the stack for `mvn verify`; M1-621 has no live-frame-capture step, so the
+stack can stay paused for the whole 621→622 batch and be rebuilt once at the end).
+
+**Migration note:** M1-621 is the only `migration_touch: true` ticket in flight —
+do not parallelize anything against it; the V59 it adds applies on the deferred
+rebuild, bumping the live DB v58→v59.
+
+Only after M1-621 **and** M1-622 are merged does the release plan below resume
+(§2 onward), starting with the single deferred rebuild that makes M1-620/621/622
+all live.
 
 ## Before you start (coordination)
 
