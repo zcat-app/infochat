@@ -1,9 +1,11 @@
 # v1 release — execution handoff (for a fresh session)
 
-> **Written:** 2026-07-13. **Updated:** 2026-07-13 (§1 done; M1-620 filed;
-> design questions RESOLVED + ticket amended — see the callout below; next step
-> is `/m1-tick start M1-620`). Origin still `a47b4786`; local main is ahead
-> (unpushed).
+> **Written:** 2026-07-13. **Updated:** 2026-07-13 (§1 done; **M1-620
+> IMPLEMENTED + MERGED @`cf48bc8c`** — review APPROVE r1 + redteam CLEAN; the
+> pause is CLEARED, release plan resumes at §2). Origin still `a47b4786`; local
+> main is ahead (unpushed). **Rebuild owed to make M1-620 live** — it is merged
+> to main but NOT yet in the running provider bytecode (stack was restarted on
+> the pre-M1-620 images after the merge).
 >
 > **READ FIRST:** `docs/plan/v1-verification-truth.md` — the dated,
 > provenance-tagged record of what's verified vs. owed. **This doc is the ACTION
@@ -12,15 +14,27 @@
 
 ## Current state (one line)
 
-642 done + **1 pending (M1-620, paused — see below)**. Both adapters
+**643 done, 0 pending** (M1-620 merged @`cf48bc8c` 2026-07-13). Both adapters
 live-verified 2026-07-04 (`docs/plan/live-e2e/`), **Signal-adapter code frozen
 since → still valid**. **§1 DONE 2026-07-13: stack REBUILT + UP on `c12c3e03`**
 (M1-619's `0.65` cutoff confirmed in the running bytecode). All 4 containers up
 (collector+provider+postgres+ollama), both readiness UP, `adapter_connection_status`=1.0
 for simplex+signal. DB unchanged from prod-state: **4 simplex users** (1 admin
-vouched, 3 invited), **0 signal, 0 groups**, 5,547 posts, schema v58.
+vouched, 3 invited), **0 signal, 0 groups**, 5,547 posts, schema v58. **The
+running images are still pre-M1-620** — a rebuild is owed before `/invite
+bot-contact` can be live-driven (§4).
 
-## ⏸ Paused — resolve M1-620 FIRST (operator directive 2026-07-13)
+## ✅ M1-620 landed — pause cleared (2026-07-13)
+
+The operability gap that paused the plan is fixed and merged. DM-only,
+bot-admin-only **`/invite bot-contact`** now returns the bot's own connect
+contact in-band (SimpleX **live current** URL / Signal number), with an
+optional single-target `--adapter <name>` override — so onboarding no longer
+needs shell access. Merged @`cf48bc8c` (review APPROVE r1, redteam CLEAN,
+full verify green twice). **Add it to the §4 live-drive matrix** once the
+rebuild lands: as the admin, `/invite bot-contact` should return the SimpleX
+short-link URL (matches `.scratch/bot-address.txt`); a group-scope or
+non-admin call must be refused. Original pause context (now historical):
 
 While reviewing this handoff the operator hit an operability gap and asked to
 **pause the release plan and land a fix before continuing**: a bot admin has no
