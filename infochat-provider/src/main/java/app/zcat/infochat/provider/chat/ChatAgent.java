@@ -91,13 +91,17 @@ public class ChatAgent {
     // reproducibility story simplest. It sits deliberately ABOVE the default
     // grounding floor (1 - 0.40 = 0.60, the M1-616-calibrated threshold), so
     // retrieved semantic posts span (0.60, 1.0] and the marginal band is
-    // (0.60, 0.75). A much-tighter threshold override (floor above 0.75)
+    // (0.60, 0.65). A much-tighter threshold override (floor above 0.65)
     // would admit only posts already past the cutoff, so the clarify path
     // simply never fires — a benign no-op, since grounding is then genuinely
-    // confident. Conservative first cut; the clarifying question is
-    // non-blocking (see CLARIFY_DIRECTIVE), so a false-positive costs the
-    // user one extra line, not a wrong answer.
-    static final double CONFIDENT_SIMILARITY_CUTOFF = 0.75;
+    // confident. Calibrated to 0.65 by M1-619 (whole-corpus nomic-embed-text
+    // sweep: on-domain groundings cluster at similarity 0.62-0.73, so the
+    // original 0.75 first cut downgraded ~64% of genuine groundings to a
+    // needless clarify; 0.65 keeps the lone spurious near-match out of the
+    // confident band while restoring the affordance path to ~82% recall). The
+    // clarifying question is non-blocking (see CLARIFY_DIRECTIVE), so a
+    // false-positive still costs the user one extra line, not a wrong answer.
+    static final double CONFIDENT_SIMILARITY_CUTOFF = 0.65;
 
     // M1-618 conversational-refinement directives, appended per-turn AFTER
     // the untrusted retrieval block (a trusted region — the model's own

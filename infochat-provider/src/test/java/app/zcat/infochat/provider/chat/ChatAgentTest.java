@@ -38,10 +38,10 @@ class ChatAgentTest {
     private static final UUID SCOPE_ID = UUID.randomUUID();
     private static final String SCOPE_KIND = "dm";
 
-    // ChatAgent.CONFIDENT_SIMILARITY_CUTOFF is 0.75: a best similarity >= 0.75
-    // is CONFIDENT (more-like-this affordance) and < 0.75 is MARGINAL (clarify
-    // question). The M1-618 tests pick 0.90 and 0.66 to sit clearly on each
-    // side of that boundary.
+    // ChatAgent.CONFIDENT_SIMILARITY_CUTOFF is 0.65 (M1-619-calibrated): a best
+    // similarity >= 0.65 is CONFIDENT (more-like-this affordance) and < 0.65 is
+    // MARGINAL (clarify question). The M1-618 tests pick 0.90 and 0.62 to sit
+    // clearly on each side of that boundary.
 
     private InFlightTracker inFlightTracker;
     private StubLlmProvider llmProvider;
@@ -408,13 +408,13 @@ class ChatAgentTest {
 
     @Test
     void lowConfidenceGroundingTriggersClarifyDirective() {
-        // Strongest match 0.66 sits below the confident cutoff (0.75), so the
+        // Strongest match 0.62 sits below the confident cutoff (0.65), so the
         // grounding is MARGINAL: the agent must be told to ask ONE clarifying
         // question rather than ground a weak answer, and the turn ships no
         // grounded-provenance claim.
         semanticSearchResult =
-                "[{\"uid\":\"p1\",\"title\":\"A\",\"url\":\"https://e.x/1\",\"similarity\":0.66},"
-              + "{\"uid\":\"p2\",\"title\":\"B\",\"url\":\"https://e.x/2\",\"similarity\":0.63}]";
+                "[{\"uid\":\"p1\",\"title\":\"A\",\"url\":\"https://e.x/1\",\"similarity\":0.62},"
+              + "{\"uid\":\"p2\",\"title\":\"B\",\"url\":\"https://e.x/2\",\"similarity\":0.61}]";
         llmProvider.responses.add(new LlmResponse("Did you mean X or Y?"));
 
         ChatAgent.ChatTurnResult result =
@@ -431,7 +431,7 @@ class ChatAgentTest {
 
     @Test
     void confidentGroundingSurfacesMoreLikeThisAffordanceAndDoesNotClarify() {
-        // Strongest match 0.90 clears the confident cutoff (0.75): the agent
+        // Strongest match 0.90 clears the confident cutoff (0.65): the agent
         // answers, surfaces the more-like-this affordance, and asks no
         // clarifying question. Grounded provenance still rides along.
         semanticSearchResult =
@@ -471,10 +471,11 @@ class ChatAgentTest {
         // APPENDS a directive after the untrusted retrieval block. The tool's
         // exact JSON must appear verbatim in the prompt, and the directive
         // must sit strictly AFTER the wrapper's close delimiter (in the
-        // trusted tail), never interleaved into the folded content.
+        // trusted tail), never interleaved into the folded content. Fixtures
+        // pinned below the 0.65 cutoff so this stays a marginal/clarify turn.
         String retrieved =
-                "[{\"uid\":\"p1\",\"title\":\"A\",\"url\":\"https://e.x/1\",\"similarity\":0.66},"
-              + "{\"uid\":\"p2\",\"title\":\"B\",\"url\":\"https://e.x/2\",\"similarity\":0.70}]";
+                "[{\"uid\":\"p1\",\"title\":\"A\",\"url\":\"https://e.x/1\",\"similarity\":0.62},"
+              + "{\"uid\":\"p2\",\"title\":\"B\",\"url\":\"https://e.x/2\",\"similarity\":0.61}]";
         semanticSearchResult = retrieved;
         llmProvider.responses.add(new LlmResponse("Which one?"));
 
@@ -493,16 +494,16 @@ class ChatAgentTest {
 
     @Test
     void isMarginalGroundingSeparatesConfidentFromWeak() {
-        // Unit test of the deterministic Java confidence signal (cutoff 0.75).
-        double cutoff = 0.75;
+        // Unit test of the deterministic Java confidence signal (cutoff 0.65).
+        double cutoff = 0.65;
         assertFalse(ChatAgent.isMarginalGrounding(
                         "[{\"uid\":\"a\",\"similarity\":0.90}]", cutoff),
                 "a strong match is confident");
         assertTrue(ChatAgent.isMarginalGrounding(
-                        "[{\"uid\":\"a\",\"similarity\":0.66}]", cutoff),
+                        "[{\"uid\":\"a\",\"similarity\":0.62}]", cutoff),
                 "a best match below the cutoff is marginal");
         assertFalse(ChatAgent.isMarginalGrounding(
-                        "[{\"uid\":\"a\",\"similarity\":0.66},{\"uid\":\"b\",\"similarity\":0.95}]",
+                        "[{\"uid\":\"a\",\"similarity\":0.62},{\"uid\":\"b\",\"similarity\":0.95}]",
                         cutoff),
                 "confident if ANY retrieved post clears the cutoff");
         assertTrue(ChatAgent.isMarginalGrounding(

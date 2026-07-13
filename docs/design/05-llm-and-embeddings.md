@@ -604,16 +604,23 @@ directive is appended strictly after its `UNTRUSTED_CONTENT` close.
   `ChatAgent.isMarginalGrounding` reads the per-post `similarity`
   (= 1 − cosine distance) the pre-fetch already emits and compares the
   BEST semantic match against `ChatAgent.CONFIDENT_SIMILARITY_CUTOFF`, a
-  fixed code constant (`0.75`). It is a code constant, not config, because
+  fixed code constant (`0.65`, calibrated by M1-619 — see
+  `docs/plan/m1/spikes/M1-619-confidence-cutoff-calibration.md`). It is a
+  code constant, not config, because
   it changes reply PROSE only — never the retrieved set (D19) — so it needs
   no per-deployment tuning knob, and a stable constant keeps the D19
   reproducibility story simplest. It sits deliberately ABOVE the default
   grounding floor (1 − 0.40 = 0.60, the M1-616-calibrated
   `infochat.chat.semantic-threshold`), so retrieved semantic posts span
-  (0.60, 1.0] and the marginal band is (0.60, 0.75); a much-tighter
-  threshold override (floor above 0.75) would admit only posts already past
+  (0.60, 1.0] and the marginal band is (0.60, 0.65); a much-tighter
+  threshold override (floor above 0.65) would admit only posts already past
   the cutoff, so the clarify path simply never fires — a benign no-op, since
-  grounding is then genuinely confident. A result whose posts are ALL
+  grounding is then genuinely confident. M1-619 measured that on
+  `nomic-embed-text` on the live corpus on-domain groundings cluster at
+  similarity 0.62–0.73, so the original 0.75 first cut downgraded almost
+  every genuine grounding to a needless clarify; 0.65 restores the affordance
+  path (~82% of genuine groundings) while keeping the lone spurious off-domain
+  near-match out of the confident band. A result whose posts are ALL
   lexical-arm-only
   (`similarity:null` — a keyword hit with no semantic support) has no
   semantic best and is treated as marginal too; an unparsable payload

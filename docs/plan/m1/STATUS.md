@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 640 |
+| done | 641 |
 | deferred | 1 |
 | abandoned | 11 |
 | **total** | **653** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-619 — Recalibrate the chat confident-grounding cutoff (M1-618 CONFIDENT_SIMILARITY_CUTOFF): measure clarify-vs-affordance separation on the labeled query set (complexity: medium, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -61,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-619 | Recalibrate the chat confident-grounding cutoff (M1-618 CONFIDENT_SIMILARITY_CUTOFF): measure clarify-vs-affordance separation on the labeled query set | 2026-07-13 | round 1 APPROVE |
 | M1-618 | Chat conversational-refinement recovery: clarifying-question on low-confidence retrieval + surface getReferences as 'more like this' | 2026-07-13 | round 1 APPROVE |
 | M1-617 | Chat retrieval-recovery: provenance transparency + hybrid semantic/lexical (RRF) post retrieval | 2026-07-13 | round 1 APPROVE |
 | M1-616 | Calibrate infochat.chat.semantic-threshold: measure semantic-retrieval recall/precision on the live corpus | 2026-07-12 | round 2 APPROVE |
@@ -70,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-612 | Measure real DeepSeek per-post token/request cost of the split ingest eval pipeline | 2026-07-12 | round 1 APPROVE |
 | M1-611 | Per-operation ProgressNotifier state: concurrent same-scope publishers must not clobber each other's placeholder | 2026-07-12 | round 1 APPROVE |
 | M1-610 | Eval + guard: DeepSeek judge reasoning-ON quality; code-enforce the reasoning/max_tokens coupling | 2026-07-12 | round 1 APPROVE |
-| M1-609 | Spike: local vs remote LLM for the security judge and tagger (quality, throughput, VPS CPU cost) | 2026-07-12 | round 2 APPROVE |
 
 ---
 
@@ -835,5 +835,5 @@ M1-615 (done)
 M1-616 (done)
 M1-617 (done)
   └── M1-618 (done)
-M1-619 (pending) ← runnable
+M1-619 (done)
 ```
