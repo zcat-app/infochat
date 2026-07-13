@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 641 |
 | deferred | 1 |
 | abandoned | 11 |
-| **total** | **653** |
+| **total** | **654** |
 
 ---
 
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-620 — Admin subcommand /invite bot-contact: retrieve the bot's own connect contact in-band (SimpleX current URL / Signal number) so admins onboard new contacts without server access (complexity: high, risk: medium)
 
 ---
 
@@ -836,4 +836,5 @@ M1-616 (done)
 M1-617 (done)
   └── M1-618 (done)
 M1-619 (done)
+M1-620 (pending) ← runnable
 ```
