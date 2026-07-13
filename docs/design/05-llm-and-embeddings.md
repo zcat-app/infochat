@@ -591,7 +591,62 @@ two-path rule — the translator path would also bypass the sanitizer
 ordering). Degrade/rejection turns (unavailable, in-flight,
 ceiling-gated, refusal intercept, /stop-cancelled) carry a `null` notice:
 those replies are deterministic notices, not answers.
-                                                                                                                                                                                                                                                      
+
+**Conversational-refinement recovery (M1-618).** Two affordances sit on
+top of the retrieval + provenance surface for the case where the first
+answer still is not what the user wanted. Both change reply PROSE only —
+the retrieved set stays SQL-decided and byte-identical (D19); a
+determinism guard test (`refinementDirectiveIsAppendedWithoutAltering...`)
+asserts the folded retrieval block is verbatim the tool output and the
+directive is appended strictly after its `UNTRUSTED_CONTENT` close.
+
+- **Deterministic low-confidence signal → clarifying question.**
+  `ChatAgent.isMarginalGrounding` reads the per-post `similarity`
+  (= 1 − cosine distance) the pre-fetch already emits and compares the
+  BEST semantic match against `ChatAgent.CONFIDENT_SIMILARITY_CUTOFF`, a
+  fixed code constant (`0.75`). It is a code constant, not config, because
+  it changes reply PROSE only — never the retrieved set (D19) — so it needs
+  no per-deployment tuning knob, and a stable constant keeps the D19
+  reproducibility story simplest. It sits deliberately ABOVE the default
+  grounding floor (1 − 0.40 = 0.60, the M1-616-calibrated
+  `infochat.chat.semantic-threshold`), so retrieved semantic posts span
+  (0.60, 1.0] and the marginal band is (0.60, 0.75); a much-tighter
+  threshold override (floor above 0.75) would admit only posts already past
+  the cutoff, so the clarify path simply never fires — a benign no-op, since
+  grounding is then genuinely confident. A result whose posts are ALL
+  lexical-arm-only
+  (`similarity:null` — a keyword hit with no semantic support) has no
+  semantic best and is treated as marginal too; an unparsable payload
+  fails open to non-marginal (answer normally). When the pre-fetch is
+  non-empty AND marginal, ChatAgent appends `CLARIFY_DIRECTIVE` after the
+  retrieval block instructing the model to ask ONE narrowing question
+  about the user's intent instead of grounding a weak guess. The signal
+  is computed in Java (the LLM never invents "confidence"; it only writes
+  the question). The question never BLOCKS: the directive tells the model
+  to proceed with the best available grounding once the conversation
+  history shows the user answered a clarifying question or asked to
+  proceed. A clarify turn ships a `null` provenance notice (it is a
+  narrowing question, not an answer grounded in specific posts — the same
+  `null`-notice router path the degrade replies use).
+- **"More like this" affordance on a confident grounded reply.** When the
+  pre-fetch is non-empty and NOT marginal, ChatAgent appends
+  `AFFORDANCE_DIRECTIVE` telling the model to add one short line letting
+  the user know they can ask for posts related to one it cited — surfacing
+  the otherwise-hidden `getReferences` tool (already registered,
+  deterministic, subscription-isolated on both endpoints). It is an OFFER,
+  never an unconditional pre-fetch: `getReferences` runs only if the user
+  then asks (the D28 pre-fetch pattern is deliberately NOT extended to it —
+  an always-on extra fetch adds latency for no asked-for value).
+
+Both directives are FIXED bot instructions embedded in the prompt (not
+user-facing bundle prose): they refer to the retrieved posts abstractly
+and never quote or list post content, so no untrusted text escapes the
+`UNTRUSTED_CONTENT` wrapper (security.md §Prompt-injection defenses). The
+clarifying question / affordance line the model then writes IS user-facing
+chat output and routes through the normal sanitize + per-scope translate
+path like any other reply — so it is translation-safe without a new
+en/cs bundle key (D43's bilateral-keyset rule has nothing new to cover).
+
 ### 5.4.7 /compress (long-term memory)                                                                                                                                                                                                                    
                                                                                  
 prompts/compress.md:                                                                                                                                                                                                                                  

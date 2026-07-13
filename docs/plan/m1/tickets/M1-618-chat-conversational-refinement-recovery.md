@@ -1,9 +1,16 @@
 ---
 id: M1-618
 title: "Chat conversational-refinement recovery: clarifying-question on low-confidence retrieval + surface getReferences as 'more like this'"
-status: pending
+status: done
 created: 2026-07-12
-last_updated: 2026-07-12
+last_updated: 2026-07-13
+clarity_check:
+  date: 2026-07-13
+  verdict: WARN
+  warnings:
+    - "FILES-BUDGET-PLAUSIBLE: estimated 7-9 files touched vs files_budget: 6; bump budget or consolidate at plan time."
+    - "SECURITY-FLAG-CONSISTENT: security_relevant: false despite acceptance item 3 reasoning about prompt-injection containment (UNTRUSTED_CONTENT wrapper) for new LLM-authored prose."
+  blockers: []
 blocked_by:
   - M1-617
 files_budget: 6
@@ -101,14 +108,39 @@ spec_refs:
 decision_refs:
   - D19
   - D28
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-13
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 367
+      removed: 34
 escalations: []
 overrides: []
 revisions: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-07-13
+    verdict: CLEAN
+    base: "merge-base main (fork point 3bdd9f64)"
+    head: "working tree (uncommitted, in-review)"
+    verdict_file: docs/plan/m1/redteam/M1-618-2026-07-13.md
+    out_of_model_count: 0
+    note: |
+      Extra-rigor audit (security_relevant:false) prompted by the clarity
+      check flagging acceptance item 3's prompt-injection requirement and the
+      diff touching LLM chat-prompt assembly. CLEAN — refinement directives sit
+      after the UNTRUSTED_CONTENT close and never echo post content; confidence
+      signal is a read over tool JSON that leaves the retrieved set unchanged.
 ---
 
 # M1-618: Chat conversational-refinement recovery

@@ -1279,6 +1279,26 @@ feed-derived text. Degrade and rejection replies (unavailable, in-flight,
 ceiling-gated, refusal, /stop) carry no provenance notice. Exact wording
 lives in design notes (05 §5.4.6).
 
+**Conversational refinement recovers a weak or ambiguous first answer.**
+In a plain-text messaging surface there are no buttons or facets, so a
+follow-up question or an offered pivot is the only recovery UX. When the
+deterministic retrieval is confident, the agent grounds its answer and
+surfaces the (otherwise hidden) related-posts capability as a "more like
+this" affordance — letting the user know they can ask for posts related to
+one it cited. When retrieval is weak or ambiguous — the strongest match
+only marginally clears the grounding threshold, or the query matched only
+by keyword with no semantic support — the agent asks ONE clarifying
+question to narrow intent instead of grounding a weak guess. The
+low-confidence signal is computed deterministically in Java from the
+retrieval metadata (D19: the LLM never decides confidence, it only writes
+the resulting question); the retrieved set itself is unchanged — this is
+reply prose, not a retrieval change. The clarifying question never blocks:
+if the user re-asks or tells the agent to proceed, it answers with the best
+available grounding. A clarify turn carries no grounded-provenance notice,
+since it is a narrowing question rather than an answer grounded in specific
+posts. The confidence heuristic and directive wording live in design notes
+(05 §5.4.6).
+
 ## Onboarding
 
 **DM first interaction** requires a valid invite code (decision D44). An

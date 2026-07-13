@@ -81,6 +81,50 @@ public class ChatAgent {
           + "your final answer as plain text. Do NOT call a tool and provide a "
           + "final answer in the same response.";
 
+    // M1-618 conversational-refinement: the similarity (1 - cosine distance)
+    // a retrieved post's strongest match must reach for the grounding to
+    // count as CONFIDENT. Below it the best match is only marginally related,
+    // so a general assistant should ask a narrowing question rather than
+    // ground a weak guess. A fixed code constant (not config) because it
+    // changes reply PROSE only — never the retrieved set (D19) — so it needs
+    // no per-deployment tuning knob, and a stable constant keeps the D19
+    // reproducibility story simplest. It sits deliberately ABOVE the default
+    // grounding floor (1 - 0.40 = 0.60, the M1-616-calibrated threshold), so
+    // retrieved semantic posts span (0.60, 1.0] and the marginal band is
+    // (0.60, 0.75). A much-tighter threshold override (floor above 0.75)
+    // would admit only posts already past the cutoff, so the clarify path
+    // simply never fires — a benign no-op, since grounding is then genuinely
+    // confident. Conservative first cut; the clarifying question is
+    // non-blocking (see CLARIFY_DIRECTIVE), so a false-positive costs the
+    // user one extra line, not a wrong answer.
+    static final double CONFIDENT_SIMILARITY_CUTOFF = 0.75;
+
+    // M1-618 conversational-refinement directives, appended per-turn AFTER
+    // the untrusted retrieval block (a trusted region — the model's own
+    // instruction surface). They shape the reply; they never quote or list
+    // retrieved post content, so no untrusted text escapes the
+    // UNTRUSTED_CONTENT wrapper (security.md §Prompt-injection defenses,
+    // acceptance item 3). The clarifying question / affordance prose the
+    // model then writes is user-facing chat output and routes through the
+    // normal sanitize + per-scope translate path like any other reply, so it
+    // is translation-safe without a fixed bundle string.
+    static final String CLARIFY_DIRECTIVE =
+            "\n\nThe posts retrieved above are only weakly related to the user's "
+          + "message, so you cannot confidently ground an answer in them. Do NOT "
+          + "answer the question yet. Instead, ask ONE short clarifying question "
+          + "that narrows what the user is looking for. Ask about their intent "
+          + "only; do not quote or list the retrieved posts. If the conversation "
+          + "history shows the user already answered a clarifying question, or "
+          + "the user asks you to just proceed, answer with the best available "
+          + "grounding instead of asking again.";
+
+    static final String AFFORDANCE_DIRECTIVE =
+            "\n\nYou can ground your answer in the posts retrieved above. After "
+          + "answering, add one short line letting the user know they can see "
+          + "more posts related to any one you mention by asking about it (for "
+          + "example: tell me more about that first article). Keep it to a brief "
+          + "offer and do not fetch anything unless the user actually asks.";
+
     private final InFlightTracker inFlightTracker;
     private final ChatPromptBuilder promptBuilder;
     private final ChatToolDispatcher toolDispatcher;
@@ -146,11 +190,12 @@ public class ChatAgent {
      * (M1-617, D58). {@code pendingCommit} is {@code null} for every
      * non-persisting outcome — a {@code /stop} cancellation, an in-flight
      * rejection, a ceiling-gated rejection, and an LLM failure all carry
-     * no turn to commit. {@code provenanceNotice} is non-null ONLY for a
-     * successfully computed turn (grounded or general-knowledge); every
-     * degrade/rejection path carries {@code null} — those replies are
-     * deterministic notices, not answers, so a provenance claim on them
-     * would be noise.
+     * no turn to commit. {@code provenanceNotice} is non-null for a
+     * successfully computed ANSWER (grounded or general-knowledge); it is
+     * {@code null} for every degrade/rejection path AND for a low-confidence
+     * CLARIFY turn (M1-618) — those replies are notices or narrowing
+     * questions, not answers grounded in specific posts, so a provenance
+     * claim on them would misrepresent them.
      */
     public record ChatTurnResult(@Nullable String reply, @Nullable PendingCommit pendingCommit,
                                  @Nullable String provenanceNotice) {}
@@ -296,12 +341,35 @@ public class ChatAgent {
         // flows to the LLM call, whose typed short-circuit takes the
         // normal unavailable degrade; once the cooldown admits a probe
         // this returns false and the probe turn gets its grounding.
-        String semanticBlock;
+        SemanticPreFetch preFetch;
         if (breakerRegistry.wouldShortCircuit(ModelTask.CHAT_AGENT)) {
-            semanticBlock = "";
+            preFetch = SemanticPreFetch.EMPTY;
         } else {
-            semanticBlock = buildSemanticRetrievalBlock(
+            preFetch = buildSemanticRetrievalBlock(
                     userId, scopeKind, scopeId, userMessage, turnContext, retrievedPostUids);
+        }
+        String semanticBlock = preFetch.promptBlock();
+
+        // 3b. Conversational-refinement directive (M1-618), derived from the
+        // deterministic pre-fetch signal and appended AFTER the untrusted
+        // retrieval block (a trusted region). MARGINAL grounding -> instruct
+        // the model to ask ONE clarifying question instead of grounding a weak
+        // guess; CONFIDENT grounding -> instruct it to surface the
+        // getReferences "more like this" affordance. Empty retrieval -> no
+        // directive (unchanged general-knowledge path). The signal is decided
+        // here in Java, never by the model (D19); the model only writes the
+        // resulting question/offer. `clarifyTurn` is captured pre-loop because
+        // the directive influences the loop and the provenance notice below
+        // must reflect the clarify DECISION, not the post-loop retrieved set.
+        boolean groundedPreFetch = !retrievedPostUids.isEmpty();
+        boolean clarifyTurn = groundedPreFetch && preFetch.marginalGrounding();
+        String refinementDirective;
+        if (!groundedPreFetch) {
+            refinementDirective = "";
+        } else if (clarifyTurn) {
+            refinementDirective = CLARIFY_DIRECTIVE;
+        } else {
+            refinementDirective = AFFORDANCE_DIRECTIVE;
         }
 
         // 4. Resolve LLM provider for chat task
@@ -311,8 +379,8 @@ public class ChatAgent {
         String baseSystemPrompt = prompt.systemPrompt();
         String augmentedSystemPrompt = baseSystemPrompt + TOOL_INSTRUCTIONS;
         String finalText = runToolLoop(provider, augmentedSystemPrompt, baseSystemPrompt,
-                prompt.userPrompt() + semanticBlock, userId, scopeKind, scopeId,
-                turnContext, retrievedPostUids);
+                prompt.userPrompt() + semanticBlock + refinementDirective,
+                userId, scopeKind, scopeId, turnContext, retrievedPostUids);
 
         // 6. Strip any residual TOOL_CALL fragments that leaked past the
         // iteration cap — they are internal protocol, not user-visible.
@@ -385,11 +453,21 @@ public class ChatAgent {
         // influenced text into a deterministic surface is the D31 class.
         // The empty-set wording claims non-grounding, not "found nothing" —
         // it also covers the breaker-open pre-fetch skip above (M1-606).
-        String provenanceNotice = retrievedPostUids.isEmpty()
-                ? bundleLoader.get(BundleKeys.CHAT_PROVENANCE_GENERAL_KNOWLEDGE, scopeLanguage)
-                : MessageFormat.format(
-                        bundleLoader.get(BundleKeys.CHAT_PROVENANCE_GROUNDED, scopeLanguage),
-                        retrievedPostUids.size());
+        // A low-confidence CLARIFY turn (M1-618) ships NO notice: the reply
+        // is a narrowing question, not an answer grounded in specific posts,
+        // so a "based on N posts" claim would misrepresent it — the router
+        // omits a null notice exactly as it does for the degrade paths.
+        String provenanceNotice;
+        if (clarifyTurn) {
+            provenanceNotice = null;
+        } else if (retrievedPostUids.isEmpty()) {
+            provenanceNotice =
+                    bundleLoader.get(BundleKeys.CHAT_PROVENANCE_GENERAL_KNOWLEDGE, scopeLanguage);
+        } else {
+            provenanceNotice = MessageFormat.format(
+                    bundleLoader.get(BundleKeys.CHAT_PROVENANCE_GROUNDED, scopeLanguage),
+                    retrievedPostUids.size());
+        }
         return new ChatTurnResult(reply, pendingCommit, provenanceNotice);
     }
 
@@ -402,6 +480,18 @@ public class ChatAgent {
     static final int SEMANTIC_QUERY_MAX_CHARS = 500;
 
     /**
+     * The deterministic semantic pre-fetch outcome: the prompt block to fold
+     * in (empty when nothing grounds), plus whether the grounding is only
+     * MARGINAL (M1-618) — the signal that drives the clarifying-question
+     * path. {@code marginalGrounding} is meaningful only when
+     * {@code promptBlock} is non-empty; the empty case is the
+     * general-knowledge path, never a clarify turn.
+     */
+    record SemanticPreFetch(String promptBlock, boolean marginalGrounding) {
+        static final SemanticPreFetch EMPTY = new SemanticPreFetch("", false);
+    }
+
+    /**
      * Runs the semanticSearch tool through the dispatcher — the same
      * validation, caps, and allowlist a model-initiated call gets — on the
      * turn's shared {@code TurnContext}, so the result is cached for the
@@ -410,14 +500,16 @@ public class ChatAgent {
      * call budget. Wraps a non-empty result in the SAME UNTRUSTED_CONTENT
      * delimiters {@link #runToolLoop} applies to tool results: retrieved
      * titles/URLs are attacker-influenced content, a prompt-injection
-     * surface. Returns {@code ""} whenever there is nothing to ground on —
-     * no candidate under the distance threshold, a validation rejection, or
-     * an embedding/retrieval failure — so every failure mode degrades to
-     * the general-knowledge path instead of aborting the turn (design 05
-     * §5.4.6: tool failures are not catastrophic). A folded result also
-     * feeds {@code retrievedPostUids} for the provenance notice (M1-617).
+     * surface. Returns {@link SemanticPreFetch#EMPTY} whenever there is
+     * nothing to ground on — no candidate under the distance threshold, a
+     * validation rejection, or an embedding/retrieval failure — so every
+     * failure mode degrades to the general-knowledge path instead of
+     * aborting the turn (design 05 §5.4.6: tool failures are not
+     * catastrophic). A folded result also feeds {@code retrievedPostUids}
+     * for the provenance notice (M1-617) and carries the marginal-grounding
+     * confidence signal for the clarifying-question path (M1-618).
      */
-    private String buildSemanticRetrievalBlock(UUID userId, String scopeKind,
+    private SemanticPreFetch buildSemanticRetrievalBlock(UUID userId, String scopeKind,
                                                UUID scopeId, String userMessage,
                                                ChatToolDispatcher.TurnContext turnContext,
                                                Set<String> retrievedPostUids) {
@@ -432,19 +524,62 @@ public class ChatAgent {
             // LLM/DB internals but never user prose — safe to log (D37).
             SafeLog.error(log, "semanticSearch pre-fetch failed for userId=" + userId
                     + "; answering without retrieval", e);
-            return "";
+            return SemanticPreFetch.EMPTY;
         }
         if (!(result instanceof ChatToolDispatcher.ToolResult.Success success)
                 || "[]".equals(success.content())) {
-            return "";
+            return SemanticPreFetch.EMPTY;
         }
         collectPostUids("semanticSearch", success.content(), retrievedPostUids);
+        boolean marginal = isMarginalGrounding(success.content(), CONFIDENT_SIMILARITY_CUTOFF);
         String marker = UUID.randomUUID().toString();
-        return "\n\nPosts from the user's subscribed feed semantically related "
+        String block = "\n\nPosts from the user's subscribed feed semantically related "
                 + "to their message:\n"
                 + String.format(ChatPromptBuilder.UNTRUSTED_CONTENT_OPEN_FORMAT, marker)
                 + "\n" + success.content() + "\n"
                 + String.format(ChatPromptBuilder.UNTRUSTED_CONTENT_CLOSE_FORMAT, marker);
+        return new SemanticPreFetch(block, marginal);
+    }
+
+    /**
+     * Deterministic retrieval-confidence signal (M1-618): TRUE when the
+     * strongest semantic match in a non-empty pre-fetch result only
+     * marginally clears the grounding floor — the case where a general
+     * assistant should ask ONE narrowing question rather than ground a weak
+     * guess. Computed in Java from the {@code similarity} (= 1 - cosine
+     * distance) each fused result already carries; the LLM never invents
+     * "confidence" (D19 — this is a read over the SQL-decided set, it does
+     * not change it). A result whose posts are ALL lexical-arm-only
+     * (similarity JSON {@code null} — a keyword hit with no semantic support)
+     * has no semantic best and is treated as marginal too. An unparsable or
+     * non-array payload degrades to NOT-marginal (answer normally), matching
+     * the pre-fetch's own fail-open posture — the folded content is JSON our
+     * own tool built, so this is boundary-tolerant parsing, not a paranoid
+     * internal guard.
+     */
+    static boolean isMarginalGrounding(String semanticResultJson, double confidentCutoff) {
+        JsonNode root;
+        try {
+            root = TOOL_ARGS_MAPPER.readTree(semanticResultJson);
+        } catch (JsonProcessingException e) {
+            return false;
+        }
+        if (root == null || !root.isArray() || root.isEmpty()) {
+            return false;
+        }
+        double bestSimilarity = Double.NEGATIVE_INFINITY;
+        for (JsonNode element : root) {
+            JsonNode similarity = element.path("similarity");
+            if (similarity.isNumber()) {
+                bestSimilarity = Math.max(bestSimilarity, similarity.asDouble());
+            }
+        }
+        // No numeric similarity anywhere → the whole result is lexical-only,
+        // no semantic support → treat as marginal (ask to narrow).
+        if (bestSimilarity == Double.NEGATIVE_INFINITY) {
+            return true;
+        }
+        return bestSimilarity < confidentCutoff;
     }
 
     /**

@@ -38,6 +38,11 @@ class ChatAgentTest {
     private static final UUID SCOPE_ID = UUID.randomUUID();
     private static final String SCOPE_KIND = "dm";
 
+    // ChatAgent.CONFIDENT_SIMILARITY_CUTOFF is 0.75: a best similarity >= 0.75
+    // is CONFIDENT (more-like-this affordance) and < 0.75 is MARGINAL (clarify
+    // question). The M1-618 tests pick 0.90 and 0.66 to sit clearly on each
+    // side of that boundary.
+
     private InFlightTracker inFlightTracker;
     private StubLlmProvider llmProvider;
     private int promptBuilderCalls;
@@ -393,6 +398,118 @@ class ChatAgentTest {
         assertEquals(ChatAgent.SEMANTIC_QUERY_MAX_CHARS, semanticSearchLastQuery.length(),
                 "the query must be truncated to the cap the dispatcher would "
                         + "otherwise reject");
+    }
+
+    // --- M1-618: conversational-refinement recovery — a deterministic
+    // low-confidence signal (computed in Java from the pre-fetch's per-post
+    // similarity) drives a clarifying-question directive; a confident
+    // grounding surfaces the getReferences "more like this" affordance. Both
+    // are reply PROSE only — the retrieved set stays SQL-decided (D19). ---
+
+    @Test
+    void lowConfidenceGroundingTriggersClarifyDirective() {
+        // Strongest match 0.66 sits below the confident cutoff (0.75), so the
+        // grounding is MARGINAL: the agent must be told to ask ONE clarifying
+        // question rather than ground a weak answer, and the turn ships no
+        // grounded-provenance claim.
+        semanticSearchResult =
+                "[{\"uid\":\"p1\",\"title\":\"A\",\"url\":\"https://e.x/1\",\"similarity\":0.66},"
+              + "{\"uid\":\"p2\",\"title\":\"B\",\"url\":\"https://e.x/2\",\"similarity\":0.63}]";
+        llmProvider.responses.add(new LlmResponse("Did you mean X or Y?"));
+
+        ChatAgent.ChatTurnResult result =
+                agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "tell me about it");
+
+        assertTrue(llmProvider.lastUserPrompt.contains(ChatAgent.CLARIFY_DIRECTIVE),
+                "a marginal grounding must inject the clarifying-question directive");
+        assertFalse(llmProvider.lastUserPrompt.contains(ChatAgent.AFFORDANCE_DIRECTIVE),
+                "the affordance directive must not also fire on a clarify turn");
+        assertNull(result.provenanceNotice(),
+                "a clarify turn ships no 'based on N posts' provenance notice — the "
+                        + "reply is a narrowing question, not a grounded answer");
+    }
+
+    @Test
+    void confidentGroundingSurfacesMoreLikeThisAffordanceAndDoesNotClarify() {
+        // Strongest match 0.90 clears the confident cutoff (0.75): the agent
+        // answers, surfaces the more-like-this affordance, and asks no
+        // clarifying question. Grounded provenance still rides along.
+        semanticSearchResult =
+                "[{\"uid\":\"p1\",\"title\":\"A\",\"url\":\"https://e.x/1\",\"similarity\":0.90}]";
+        llmProvider.responses.add(new LlmResponse("Here is what I found."));
+
+        ChatAgent.ChatTurnResult result =
+                agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "zcash news?");
+
+        assertTrue(llmProvider.lastUserPrompt.contains(ChatAgent.AFFORDANCE_DIRECTIVE),
+                "a confident grounding must surface the more-like-this affordance");
+        assertFalse(llmProvider.lastUserPrompt.contains(ChatAgent.CLARIFY_DIRECTIVE),
+                "no clarifying-question directive on a confident grounding");
+        assertEquals(BundleKeys.CHAT_PROVENANCE_GROUNDED, result.provenanceNotice(),
+                "a confident grounded answer keeps its grounded provenance notice");
+    }
+
+    @Test
+    void emptyRetrievalInjectsNoRefinementDirective() {
+        // Default "[]" result = general-knowledge path: neither directive
+        // fires — there is nothing to ground on, so nothing to clarify or
+        // offer related posts for.
+        llmProvider.responses.add(new LlmResponse("General answer."));
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "python vs rust?");
+
+        assertFalse(llmProvider.lastUserPrompt.contains(ChatAgent.CLARIFY_DIRECTIVE),
+                "no clarify directive when nothing was retrieved");
+        assertFalse(llmProvider.lastUserPrompt.contains(ChatAgent.AFFORDANCE_DIRECTIVE),
+                "no affordance directive when nothing was retrieved");
+    }
+
+    @Test
+    void refinementDirectiveIsAppendedWithoutAlteringTheRetrievedSet() {
+        // D19 determinism regression guard: the M1-618 confidence/prose layer
+        // must not change WHICH posts are retrieved or their order — it only
+        // APPENDS a directive after the untrusted retrieval block. The tool's
+        // exact JSON must appear verbatim in the prompt, and the directive
+        // must sit strictly AFTER the wrapper's close delimiter (in the
+        // trusted tail), never interleaved into the folded content.
+        String retrieved =
+                "[{\"uid\":\"p1\",\"title\":\"A\",\"url\":\"https://e.x/1\",\"similarity\":0.66},"
+              + "{\"uid\":\"p2\",\"title\":\"B\",\"url\":\"https://e.x/2\",\"similarity\":0.70}]";
+        semanticSearchResult = retrieved;
+        llmProvider.responses.add(new LlmResponse("Which one?"));
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "that thing");
+
+        String prompt = llmProvider.lastUserPrompt;
+        int blockAt = prompt.indexOf(retrieved);
+        assertTrue(blockAt >= 0,
+                "the retrieved posts must be folded in verbatim — the set is unchanged");
+        int closeAt = prompt.indexOf("<<<END id=\"", blockAt);
+        int directiveAt = prompt.indexOf(ChatAgent.CLARIFY_DIRECTIVE);
+        assertTrue(closeAt > blockAt && directiveAt > closeAt,
+                "the directive is appended AFTER the untrusted retrieval block, never "
+                        + "interleaved into it — retrieval stays byte-identical");
+    }
+
+    @Test
+    void isMarginalGroundingSeparatesConfidentFromWeak() {
+        // Unit test of the deterministic Java confidence signal (cutoff 0.75).
+        double cutoff = 0.75;
+        assertFalse(ChatAgent.isMarginalGrounding(
+                        "[{\"uid\":\"a\",\"similarity\":0.90}]", cutoff),
+                "a strong match is confident");
+        assertTrue(ChatAgent.isMarginalGrounding(
+                        "[{\"uid\":\"a\",\"similarity\":0.66}]", cutoff),
+                "a best match below the cutoff is marginal");
+        assertFalse(ChatAgent.isMarginalGrounding(
+                        "[{\"uid\":\"a\",\"similarity\":0.66},{\"uid\":\"b\",\"similarity\":0.95}]",
+                        cutoff),
+                "confident if ANY retrieved post clears the cutoff");
+        assertTrue(ChatAgent.isMarginalGrounding(
+                        "[{\"uid\":\"a\",\"similarity\":null}]", cutoff),
+                "a lexical-only result (no semantic similarity) is marginal");
+        assertFalse(ChatAgent.isMarginalGrounding("not json", cutoff),
+                "an unparsable payload fails open to non-marginal (answer normally)");
     }
 
     @Test
