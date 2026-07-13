@@ -136,8 +136,25 @@ these are the release re-test target, §6):
 3. **Signal: not required** — code frozen since the 07-04 verified run.
 4. Standard release gates: release `/redteam`, backup/restore + migration on the
    current build, fresh-install smoke — `docs/design/08-verification.md §8.10`.
+5. **User-facing message audit** — scan every string in `bundles/{en,cs}.properties`
+   against actual command behavior (stale flags, removed-feature refs, wrong
+   examples, outdated hints). Known-stale already: `help.cmd.summary.short`
+   advertises `--since/--tag` but `/summary` is positional `[tag]` + `-w`. No guard
+   catches text-correctness (`BundleLoaderTest` = key-presence/keyset only, D43).
+   Partition across read-only subagents; optional follow-up = a usage-flag↔parser
+   parity test so copy can't silently rot.
 
 **Far smaller than "re-test everything on both adapters."**
+
+## 6b. v1 subscription-UX gap (design decided, build pending)
+
+Distinct from the verification gaps above — this is a v1 **feature** gap, the one
+honest asterisk on "code complete" (§1). The subscription/tag model has confusing
+overlap (source subscription vs `/follow-tag`), no non-admin source browsing, and
+no subscribe-by-tag. A redesign was **decided 2026-07-13**: bootstrap = implicit
+public corpus, custom sources private, `/follow-tag` = the one user knob, chat/RAG
+stays broad, add `source.source_origin` — full write-up in
+**`docs/plan/subscription-model-redesign.md`**. NOT yet spec'd or ticketed.
 
 ## 7. Resolved gaps (was OPEN, closed 2026-07-13 by operator)
 
@@ -168,3 +185,7 @@ these are the release re-test target, §6):
 - [ ] Live-drive the **§3b UNVERIFIED command set** (SimpleX, rebuilt image).
 - [ ] Release gates: `/redteam` at release, backup/restore + migration on current
   build, fresh-install smoke.
+- [ ] **User-facing message audit** — scan `bundles/{en,cs}` copy vs actual command
+  behavior (§6 item 5); the `/summary` help string is already known-stale.
+- [ ] **Build the v1 subscription-UX redesign** (§6b) — spec amendment + ticket(s),
+  input = `docs/plan/subscription-model-redesign.md`.

@@ -169,6 +169,11 @@ Mark each ✅/❌ and fold results into `v1-verification-truth.md` §3b.
 - **Fresh-install smoke:** wizard on an empty box comes up clean.
 - **`docs/design/08-verification.md §8.10`** manual checklist (note it predates
   Signal/assets/chat-RAG — extend as you go).
+- **User-facing message audit** — scan every `bundles/{en,cs}.properties` string
+  vs actual command behavior (stale flags / removed features / wrong examples).
+  Known-stale already: `help.cmd.summary.short` (`--since/--tag` vs the real
+  `[tag]` `-w`). No guard catches text-correctness. Partition across read-only
+  subagents. See `docs/plan/v1-verification-truth.md §6` item 5.
 
 ## Fixtures & tooling (reuse, don't rebuild)
 

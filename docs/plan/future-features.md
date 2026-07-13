@@ -8,6 +8,10 @@
 > the live ticket board (`docs/plan/m1/STATUS.md`) — not the stale
 > `docs/plan/v1-completion-plan.md` (a 2026-05-26 snapshot, now mostly done).
 >
+> **Note:** the subscription/tag-model redesign (subscribe-by-tag, source
+> browsing, private custom sources) was pulled into **v1** — see
+> `docs/plan/subscription-model-redesign.md`, not this wishlist.
+>
 > Each item records: **what**, **current state** (verified against code on
 > the date above), **prerequisites / tensions**, and a **verdict**:
 > `realistic-now` · `v2-milestone` · `needs-analysis` · `parked`.
