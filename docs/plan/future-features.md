@@ -3,8 +3,9 @@
 > **Created:** 2026-07-13, brainstorming session.
 > **Scope:** deferred / candidate features to consider **after** v1 ships.
 > This is a wishlist, not a commitment and not a v1 tracker. For what
-> remains before the v1 *release*, see the live ticket board
-> (`docs/plan/m1/STATUS.md`) and owed operational items — not the stale
+> remains before the v1 *release*, see `docs/plan/v1-verification-truth.md`
+> (the dated, provenance-tagged record of what's verified vs. still owed) and
+> the live ticket board (`docs/plan/m1/STATUS.md`) — not the stale
 > `docs/plan/v1-completion-plan.md` (a 2026-05-26 snapshot, now mostly done).
 >
 > Each item records: **what**, **current state** (verified against code on
