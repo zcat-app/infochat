@@ -158,7 +158,10 @@ these are the release re-test target, §6):
 
 ## 9. TODO / owed operational actions
 
-- [ ] **Rebuild collector+provider images from `a19db4c9`, restart** (gates all live checks).
+> **Execution plan (recipes + acceptance criteria, for a fresh session):**
+> `docs/plan/v1-release-handoff.md`.
+
+- [ ] **Rebuild collector+provider images from current main, restart** (gates all live checks).
 - [ ] **Add a Signal bootstrap-admin ACI** — operator's own secondary account
   (currently none; §2).
 - [ ] Re-verify **M1-619 calibrated 0.65 cutoff** live (SimpleX).
