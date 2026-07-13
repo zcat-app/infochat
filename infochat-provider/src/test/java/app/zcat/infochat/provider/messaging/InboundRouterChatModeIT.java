@@ -100,9 +100,15 @@ class InboundRouterChatModeIT {
         // The chat turn self-delivers via the ProgressNotifier (M1-607):
         // the reply REPLACES the D31 placeholder, so it is read from the
         // finalize event, not the last plain send (mirroring SummaryIT).
+        // The outbound carries the M1-617 provenance notice after the
+        // reply — general-knowledge here, since this user has no
+        // subscriptions and the pre-fetch retrieves nothing.
         String replyBody = lastFinalizedBody();
-        assertEquals("Hello from the chat agent!", replyBody,
-                "the finalized placeholder must carry the ChatAgent reply");
+        assertEquals("Hello from the chat agent!\n\n"
+                        + bundleLoader.get("reply.chat.provenance.general_knowledge"),
+                replyBody,
+                "the finalized placeholder must carry the ChatAgent reply plus "
+                        + "the retrieval-provenance notice (M1-617)");
         // The LLM was called
         assertTrue(testLlmProvider.callCount() > 0,
                 "TestLlmProvider should have been called");

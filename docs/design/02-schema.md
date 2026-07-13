@@ -739,6 +739,16 @@ CREATE TABLE post (
   social_score    INT,                               -- 2 * reposts + likes; see docs/design/05-llm.md §5.4
   likes           INT,
   reposts         INT,
+  search_tsv      tsvector
+    GENERATED ALWAYS AS (
+      to_tsvector('english',
+                  coalesce(title, '') || ' ' || coalesce(body, ''))
+    ) STORED,                                        -- lexical arm of hybrid chat retrieval
+                                                     --   (05-llm §5.4.6, D58; V58, M1-617).
+                                                     --   2-arg to_tsvector REQUIRED: the 1-arg
+                                                     --   form is GUC-dependent (only STABLE) —
+                                                     --   rejected in a generated column and a
+                                                     --   D19 determinism hazard.
   PRIMARY KEY (id, fetched_at),                      -- Postgres requires partition key in PK
   UNIQUE (uid, fetched_at),                          -- per-window dedup; cross-window dedup is the
                                                      --   fetcher's responsibility (see UID derivation
@@ -767,6 +777,8 @@ CREATE INDEX idx_post_status_changed ON post(status_changed_at, id)
 -- stored?" (§2.4.3). The UNIQUE (source_id, upstream_identifier,
 -- fetched_at) constraint is unusable without the leading source_id.
 CREATE INDEX idx_post_upstream_identifier ON post(upstream_identifier);
+-- Lexical retrieval arm (hybrid chat retrieval, 05-llm §5.4.6 / D58):
+CREATE INDEX idx_post_search_tsv ON post USING gin (search_tsv);
 ```
 
 **Post status state machine.** `RAW → READY` (clean Stage 1 / Stage 2 BENIGN);

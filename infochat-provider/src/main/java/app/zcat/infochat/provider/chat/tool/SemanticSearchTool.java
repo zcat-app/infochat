@@ -18,12 +18,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-// Digest-first semantic retrieval (M1-589): embeds the free-text query on
-// the LOCAL embedding backend (D54 — embeddings never leave the
-// deployment) and runs a pgvector nearest-neighbour probe over
-// post_embedding, scoped to the caller's subscribed sources. The
-// candidate set and its order are decided entirely by SQL
-// (ORDER BY embedding <=> query — D19); the LLM never picks the set.
+// Hybrid semantic + lexical retrieval (M1-589 semantic arm; M1-617 lexical
+// arm + RRF fusion, D58): embeds the free-text query on the LOCAL embedding
+// backend (D54 — embeddings never leave the deployment) and runs ONE fused
+// SQL statement joining a pgvector nearest-neighbour probe over
+// post_embedding with a full-text probe over post.search_tsv (V58), fused
+// by Reciprocal Rank Fusion. Both arms carry the READY + subscription
+// predicates INSIDE the arm, and the fused set and its order are decided
+// entirely by SQL (D19); the LLM never picks the set. The lexical arm
+// recovers keyword-exact posts (CVE ids, product names) whose embeddings
+// fall outside the semantic threshold.
 @ApplicationScoped
 public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
 
@@ -36,6 +40,18 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
      * are dropped, nearest-first (the ORDER BY) ordering kept.
      */
     static final int MAX_RESULT_BYTES = 16 * 1024;
+
+    /**
+     * Reciprocal Rank Fusion constant: fused score = Σ 1/(k + rank_arm).
+     * k=60 is the standard from the original RRF paper (Cormack et al.
+     * 2009); it damps the head-of-list dominance so a post ranked well by
+     * BOTH arms outranks a post ranked first by one arm only. A fixed code
+     * constant (not config) because varying it would silently change the
+     * retrieved set across deployments — the D19 reproducibility story is
+     * simplest when the only retrieval inputs are DB state, query, and the
+     * calibrated threshold/limit properties.
+     */
+    static final int RRF_K = 60;
 
     private final DataSource dataSource;
     private final CancellationService cancellationService;
@@ -80,7 +96,7 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
         try (Connection conn = dataSource.getConnection()) {
             cancellationService.armToolConnection(conn, userId, scopeKind, scopeId);
             enableIterativeScan(conn);
-            return queryNearestPosts(conn, scopeKind, scopeId, vectorLiteral, limit);
+            return queryFusedPosts(conn, scopeKind, scopeId, vectorLiteral, query, limit);
         }
     }
 
@@ -103,30 +119,77 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
         }
     }
 
-    private String queryNearestPosts(Connection conn, String scopeKind, UUID scopeId,
-                                     String vectorLiteral, int limit) throws SQLException {
-        // Single filtered probe: the distance-only ORDER BY + LIMIT drives
-        // the HNSW index; the iterative scan (armed above) evaluates the
-        // subscription predicate (SearchPostsTool's — a post outside the
-        // (user, scope)'s subscribed sources can never surface), READY, and
-        // the relevance threshold per candidate, walking deeper until LIMIT
-        // survivors. The outer re-sort adds the deterministic post_id
-        // tie-break without disturbing the index-driven inner ORDER BY.
+    private String queryFusedPosts(Connection conn, String scopeKind, UUID scopeId,
+                                   String vectorLiteral, String query, int limit)
+            throws SQLException {
+        // ONE fused statement, two arms, both fully filtered BEFORE their
+        // LIMIT — the isolation predicates (READY + subscription, the same
+        // subquery SearchPostsTool uses) sit INSIDE each arm so no
+        // over-fetch-then-filter path can leak an unsubscribed post
+        // (redteam M1-589 2026-07-11 leak class).
+        //
+        // Semantic arm: unchanged filtered HNSW probe — the distance-only
+        // ORDER BY + LIMIT drives the index; the iterative scan (armed
+        // above) evaluates the predicates per candidate, walking deeper
+        // until LIMIT survivors.
+        //
+        // Lexical arm (M1-617): full-text probe over the V58 generated
+        // column; the model-supplied query text reaches plainto_tsquery
+        // ONLY as a bind parameter, with the regconfig pinned to 'english'
+        // (matching the stored column — a mismatched or GUC-derived config
+        // would silently miss the GIN index and make results
+        // session-dependent).
+        //
+        // Fusion is Reciprocal Rank Fusion computed in SQL: each arm's
+        // rank comes from ROW_NUMBER() over an explicit total order
+        // (distance/ts_rank, tie-broken by post_id — never input row
+        // order), and the outer ORDER BY (fused_score, post_id) is total
+        // too, so same DB state -> same set, same order (D19).
         final String sql =
             "SELECT uid, title, url, distance "
                 + "  FROM ( "
-                + "    SELECT p.uid, p.title, p.url, pe.post_id AS post_id, "
-                + "           (pe.embedding <=> ?::vector) AS distance "
-                + "      FROM post_embedding pe "
-                + "      JOIN post p ON p.id = pe.post_id "
-                + "     WHERE p.status = 'READY' "
-                + "       AND p.source_id IN (SELECT source_id FROM source_subscription "
-                + "           WHERE scope_kind = ? AND scope_id = ?) "
-                + "       AND (pe.embedding <=> ?::vector) < ? "
-                + "     ORDER BY pe.embedding <=> ?::vector "
-                + "     LIMIT ? "
-                + "  ) hits "
-                + " ORDER BY distance ASC, post_id ASC";
+                + "    SELECT COALESCE(s.post_id, l.post_id) AS post_id, "
+                + "           COALESCE(s.uid, l.uid) AS uid, "
+                + "           COALESCE(s.title, l.title) AS title, "
+                + "           COALESCE(s.url, l.url) AS url, "
+                + "           s.distance AS distance, "
+                + "           COALESCE(1.0 / (" + RRF_K + " + s.arm_rank), 0) "
+                + "             + COALESCE(1.0 / (" + RRF_K + " + l.arm_rank), 0) AS fused_score "
+                + "      FROM ( "
+                + "        SELECT hits.*, ROW_NUMBER() OVER "
+                + "               (ORDER BY distance ASC, post_id ASC) AS arm_rank "
+                + "          FROM ( "
+                + "            SELECT p.uid, p.title, p.url, pe.post_id AS post_id, "
+                + "                   (pe.embedding <=> ?::vector) AS distance "
+                + "              FROM post_embedding pe "
+                + "              JOIN post p ON p.id = pe.post_id "
+                + "             WHERE p.status = 'READY' "
+                + "               AND p.source_id IN (SELECT source_id FROM source_subscription "
+                + "                   WHERE scope_kind = ? AND scope_id = ?) "
+                + "               AND (pe.embedding <=> ?::vector) < ? "
+                + "             ORDER BY pe.embedding <=> ?::vector "
+                + "             LIMIT ? "
+                + "          ) hits "
+                + "      ) s "
+                + "      FULL OUTER JOIN ( "
+                + "        SELECT lhits.*, ROW_NUMBER() OVER "
+                + "               (ORDER BY lex_score DESC, post_id ASC) AS arm_rank "
+                + "          FROM ( "
+                + "            SELECT p.uid, p.title, p.url, p.id AS post_id, "
+                + "                   ts_rank(p.search_tsv, "
+                + "                           plainto_tsquery('english', ?)) AS lex_score "
+                + "              FROM post p "
+                + "             WHERE p.status = 'READY' "
+                + "               AND p.source_id IN (SELECT source_id FROM source_subscription "
+                + "                   WHERE scope_kind = ? AND scope_id = ?) "
+                + "               AND p.search_tsv @@ plainto_tsquery('english', ?) "
+                + "             ORDER BY lex_score DESC, post_id ASC "
+                + "             LIMIT ? "
+                + "          ) lhits "
+                + "      ) l ON s.post_id = l.post_id "
+                + "  ) fused "
+                + " ORDER BY fused_score DESC, post_id ASC "
+                + " LIMIT ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, vectorLiteral);
             ps.setString(2, scopeKind);
@@ -135,17 +198,28 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
             ps.setDouble(5, distanceThreshold);
             ps.setString(6, vectorLiteral);
             ps.setInt(7, limit);
+            ps.setString(8, query);
+            ps.setString(9, scopeKind);
+            ps.setObject(10, scopeId);
+            ps.setString(11, query);
+            ps.setInt(12, limit);
+            ps.setInt(13, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 // '[' + ']' — every appended entry adds its own bytes (plus
                 // a joining comma) against MAX_RESULT_BYTES, exactly as
                 // SearchPostsTool bounds its own aggregate. similarity is
                 // 1 - distance (LinkingJob's computation) — a display value
-                // only; the raw embedding vector is never emitted (D5).
+                // only; the raw embedding vector is never emitted (D5). A
+                // lexical-only row may have NO post_embedding row at all
+                // (embedding-failure posts are released without a vector),
+                // so its similarity is emitted as JSON null, not 0.
                 StringBuilder json = new StringBuilder("[");
                 int budgetUsed = 2;
                 boolean first = true;
                 while (rs.next()) {
-                    float similarity = (float) (1.0 - rs.getDouble("distance"));
+                    double distance = rs.getDouble("distance");
+                    String similarity = rs.wasNull()
+                            ? "null" : Float.toString((float) (1.0 - distance));
                     StringBuilder entry = new StringBuilder();
                     entry.append("{\"uid\":").append(SearchPostsTool.jsonStr(rs.getString("uid")))
                          .append(",\"title\":").append(SearchPostsTool.jsonStr(rs.getString("title")))

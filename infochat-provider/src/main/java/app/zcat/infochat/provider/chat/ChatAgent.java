@@ -29,12 +29,15 @@ import org.slf4j.LoggerFactory;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -67,7 +70,7 @@ public class ChatAgent {
           + "- searchPosts {\"tags\": [\"tag1\"], \"window\": \"P7D\", \"limit\": 10}"
           + " — search posts by tags within a time window\n"
           + "- semanticSearch {\"query\": \"free-text topic\", \"limit\": 10}"
-          + " — find posts semantically related to a free-text query\n"
+          + " — find posts semantically or by keyword related to a free-text query\n"
           + "- getPost {\"uid\": \"post-uid\"} — retrieve a single post by UID\n"
           + "- getReferences {\"uid\": \"post-uid\"} — get references for a post\n"
           + "- recallMemory {\"keywords\": [\"keyword1\", \"keyword2\"]}"
@@ -137,14 +140,20 @@ public class ChatAgent {
 
     /**
      * The outcome of computing a chat turn: the reply to deliver (or
-     * {@code null} when {@code /stop} cancelled the request) and the
-     * deferred {@link PendingCommit} to run after delivery succeeds.
-     * {@code pendingCommit} is {@code null} for every non-persisting
-     * outcome — a {@code /stop} cancellation, an in-flight rejection, a
-     * ceiling-gated rejection, and an LLM failure all carry no turn to
-     * commit.
+     * {@code null} when {@code /stop} cancelled the request), the
+     * deferred {@link PendingCommit} to run after delivery succeeds, and
+     * the retrieval-provenance notice the router appends after the reply
+     * (M1-617, D58). {@code pendingCommit} is {@code null} for every
+     * non-persisting outcome — a {@code /stop} cancellation, an in-flight
+     * rejection, a ceiling-gated rejection, and an LLM failure all carry
+     * no turn to commit. {@code provenanceNotice} is non-null ONLY for a
+     * successfully computed turn (grounded or general-knowledge); every
+     * degrade/rejection path carries {@code null} — those replies are
+     * deterministic notices, not answers, so a provenance claim on them
+     * would be noise.
      */
-    public record ChatTurnResult(@Nullable String reply, @Nullable PendingCommit pendingCommit) {}
+    public record ChatTurnResult(@Nullable String reply, @Nullable PendingCommit pendingCommit,
+                                 @Nullable String provenanceNotice) {}
 
     /**
      * Handle a chat-mode message, computing the reply WITHOUT persisting.
@@ -168,7 +177,7 @@ public class ChatAgent {
                 inFlightTracker.tryAcquire(userId, scopeKind, scopeId);
         if (slot == null) {
             return new ChatTurnResult(
-                    bundleLoader.get(BundleKeys.ERROR_CHAT_IN_FLIGHT, scopeLanguage), null);
+                    bundleLoader.get(BundleKeys.ERROR_CHAT_IN_FLIGHT, scopeLanguage), null, null);
         }
         try {
             ChatTurnResult result = doHandle(userId, scopeKind, scopeId, userMessage, scopeLanguage);
@@ -179,7 +188,7 @@ public class ChatAgent {
             // is not delivered or persisted as a second, stale turn alongside
             // the /stop acknowledgement.
             if (slot.isCancelled()) {
-                return new ChatTurnResult(null, null);
+                return new ChatTurnResult(null, null, null);
             }
             return result;
         } catch (LlmCallFailedException e) {
@@ -199,20 +208,20 @@ public class ChatAgent {
             // (security.md §Failure handling, "Provider-side (user-facing)
             // LLM failures").
             if (slot.isCancelled()) {
-                return new ChatTurnResult(null, null);
+                return new ChatTurnResult(null, null, null);
             }
             boolean unreachable = e instanceof LlmCallFailedException.ProviderUnreachableException;
             SafeLog.error(log, "ChatAgent.handle: LLM call failed for userId=" + userId
                     + " (provider-unreachable=" + unreachable + ")", e);
             return new ChatTurnResult(
-                    bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE, scopeLanguage), null);
+                    bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE, scopeLanguage), null, null);
         } catch (Exception e) {
             // A landed cancellation interrupt surfaces here as an exception.
             // When /stop marked this request the /stop handler already
             // replied — return null (no content) rather than double-replying
             // with the unavailable notice.
             if (slot.isCancelled()) {
-                return new ChatTurnResult(null, null);
+                return new ChatTurnResult(null, null, null);
             }
             // Any non-LLM failure → same friendly error, null commit: the
             // turn is discarded with no session advance, no memory write,
@@ -220,7 +229,7 @@ public class ChatAgent {
             // handling, "Provider-side (user-facing) LLM failures").
             SafeLog.error(log, "ChatAgent.handle failed for userId=" + userId, e);
             return new ChatTurnResult(
-                    bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE, scopeLanguage), null);
+                    bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE, scopeLanguage), null, null);
         } finally {
             inFlightTracker.release(userId, scopeKind, scopeId, slot);
         }
@@ -248,7 +257,7 @@ public class ChatAgent {
         // rejected turn carries no commit (null) — nothing is persisted.
         if (autoCompressTrigger.isCeilingGated(userId, scopeKind, scopeId)) {
             return new ChatTurnResult(
-                    bundleLoader.get(BundleKeys.ERROR_COMPRESS_FAILED, scopeLanguage), null);
+                    bundleLoader.get(BundleKeys.ERROR_COMPRESS_FAILED, scopeLanguage), null, null);
         }
 
         // 1. Build prompt (pre-fetches memory internally)
@@ -273,6 +282,12 @@ public class ChatAgent {
         // the per-turn execution bound stays the single fixed cap the
         // spec promises (redteam M1-589 2026-07-11, low DOS finding).
         ChatToolDispatcher.TurnContext turnContext = new ChatToolDispatcher.TurnContext();
+        // Turn-wide DISTINCT union of the post UIDs the turn actually
+        // retrieved — the pre-fetch below plus every model-initiated
+        // post-corpus tool call in runToolLoop — feeding the provenance
+        // notice (M1-617, D58). Memory/saves tools are excluded: recalling
+        // a conversation memory is not feed grounding.
+        Set<String> retrievedPostUids = new LinkedHashSet<>();
         // Breaker gate (M1-606), checked AFTER the step-2 audit (the
         // chat-mode intent occurred either way) and BEFORE the pre-fetch:
         // when the chat endpoint's breaker is OPEN the turn is doomed —
@@ -286,7 +301,7 @@ public class ChatAgent {
             semanticBlock = "";
         } else {
             semanticBlock = buildSemanticRetrievalBlock(
-                    userId, scopeKind, scopeId, userMessage, turnContext);
+                    userId, scopeKind, scopeId, userMessage, turnContext, retrievedPostUids);
         }
 
         // 4. Resolve LLM provider for chat task
@@ -297,7 +312,7 @@ public class ChatAgent {
         String augmentedSystemPrompt = baseSystemPrompt + TOOL_INSTRUCTIONS;
         String finalText = runToolLoop(provider, augmentedSystemPrompt, baseSystemPrompt,
                 prompt.userPrompt() + semanticBlock, userId, scopeKind, scopeId,
-                turnContext);
+                turnContext, retrievedPostUids);
 
         // 6. Strip any residual TOOL_CALL fragments that leaked past the
         // iteration cap — they are internal protocol, not user-visible.
@@ -328,7 +343,7 @@ public class ChatAgent {
         if (trimmedFinalText.startsWith("[REFUSAL:")) {
             log.warn("CHAT_AGENT returned refusal marker for userId={}; degrading turn", userId);
             return new ChatTurnResult(
-                    bundleLoader.get(BundleKeys.ERROR_CHAT_REFUSED, scopeLanguage), null);
+                    bundleLoader.get(BundleKeys.ERROR_CHAT_REFUSED, scopeLanguage), null, null);
         }
 
         // 8. Sanitize BEFORE persist so admin commands never enter the DB
@@ -360,7 +375,22 @@ public class ChatAgent {
             sessionRepository.persistTurn(userId, scopeKind, scopeId, "assistant", sanitized, assistantTokens);
             return autoCompressTrigger.checkAndCompress(userId, scopeKind, scopeId, scopeLanguage);
         };
-        return new ChatTurnResult(reply, pendingCommit);
+
+        // 11. Retrieval-provenance notice (M1-617, D58): deterministic bot
+        // prose, so it takes the bundle path in the scope language — NEVER
+        // the translator (D43 two-path rule; routing it through
+        // TranslationPipeline would also re-open the sanitizer bypass the
+        // pipeline exists to avoid). Grounded interpolates the COUNT only:
+        // uids/titles are feed-derived, and interpolating attacker-
+        // influenced text into a deterministic surface is the D31 class.
+        // The empty-set wording claims non-grounding, not "found nothing" —
+        // it also covers the breaker-open pre-fetch skip above (M1-606).
+        String provenanceNotice = retrievedPostUids.isEmpty()
+                ? bundleLoader.get(BundleKeys.CHAT_PROVENANCE_GENERAL_KNOWLEDGE, scopeLanguage)
+                : MessageFormat.format(
+                        bundleLoader.get(BundleKeys.CHAT_PROVENANCE_GROUNDED, scopeLanguage),
+                        retrievedPostUids.size());
+        return new ChatTurnResult(reply, pendingCommit, provenanceNotice);
     }
 
     // Mirrors infochat.chat.tool.input-max-length's default (500): the
@@ -384,11 +414,13 @@ public class ChatAgent {
      * no candidate under the distance threshold, a validation rejection, or
      * an embedding/retrieval failure — so every failure mode degrades to
      * the general-knowledge path instead of aborting the turn (design 05
-     * §5.4.6: tool failures are not catastrophic).
+     * §5.4.6: tool failures are not catastrophic). A folded result also
+     * feeds {@code retrievedPostUids} for the provenance notice (M1-617).
      */
     private String buildSemanticRetrievalBlock(UUID userId, String scopeKind,
                                                UUID scopeId, String userMessage,
-                                               ChatToolDispatcher.TurnContext turnContext) {
+                                               ChatToolDispatcher.TurnContext turnContext,
+                                               Set<String> retrievedPostUids) {
         String query = userMessage.length() > SEMANTIC_QUERY_MAX_CHARS
                 ? userMessage.substring(0, SEMANTIC_QUERY_MAX_CHARS) : userMessage;
         ChatToolDispatcher.ToolResult result;
@@ -406,6 +438,7 @@ public class ChatAgent {
                 || "[]".equals(success.content())) {
             return "";
         }
+        collectPostUids("semanticSearch", success.content(), retrievedPostUids);
         String marker = UUID.randomUUID().toString();
         return "\n\nPosts from the user's subscribed feed semantically related "
                 + "to their message:\n"
@@ -422,7 +455,8 @@ public class ChatAgent {
     String runToolLoop(LlmProvider provider, String systemPrompt,
                        String baseSystemPrompt, String userPrompt,
                        UUID userId, String scopeKind, UUID scopeId,
-                       ChatToolDispatcher.TurnContext turnContext) {
+                       ChatToolDispatcher.TurnContext turnContext,
+                       Set<String> retrievedPostUids) {
         StringBuilder conversation = new StringBuilder(userPrompt);
 
         for (int i = 0; i < MAX_TOOL_ITERATIONS; i++) {
@@ -451,7 +485,10 @@ public class ChatAgent {
                     toolDispatcher.dispatch(toolName, args, userId, scopeKind, scopeId, turnContext);
 
             String resultText = switch (result) {
-                case ChatToolDispatcher.ToolResult.Success s -> s.content();
+                case ChatToolDispatcher.ToolResult.Success s -> {
+                    collectPostUids(toolName, s.content(), retrievedPostUids);
+                    yield s.content();
+                }
                 case ChatToolDispatcher.ToolResult.ValidationError v -> "Error: " + v.reason();
             };
 
@@ -475,6 +512,53 @@ public class ChatAgent {
         LlmResponse finalResponse = provider.generate(
                 ModelTask.CHAT_AGENT, baseSystemPrompt, conversation.toString());
         return finalResponse.text();
+    }
+
+    /**
+     * The tools whose Success results ground a reply in feed posts for the
+     * provenance signal (M1-617). recallMemory and listSaves are excluded:
+     * a conversation memory or a bookmark list is user-scoped state, not
+     * feed-post grounding.
+     */
+    private static final Set<String> POST_CORPUS_TOOLS =
+            Set.of("searchPosts", "semanticSearch", "getPost", "getReferences");
+
+    /**
+     * Folds the DISTINCT {@code "uid"} values of a post-corpus tool's
+     * Success JSON (an array of post objects, or getPost's single object)
+     * into the turn-wide set feeding the provenance notice. Non-post-corpus
+     * tools are ignored. Tool output is JSON our own tools built, but an
+     * unparsable or uid-less payload is simply skipped — the signal then
+     * degrades toward general-knowledge rather than aborting the turn,
+     * matching the pre-fetch's own failure posture.
+     */
+    static void collectPostUids(String toolName, String content, Set<String> sink) {
+        if (!POST_CORPUS_TOOLS.contains(toolName)) {
+            return;
+        }
+        JsonNode root;
+        try {
+            root = TOOL_ARGS_MAPPER.readTree(content);
+        } catch (JsonProcessingException e) {
+            return;
+        }
+        if (root == null) {
+            return;
+        }
+        if (root.isArray()) {
+            for (JsonNode element : root) {
+                collectUidField(element, sink);
+            }
+        } else {
+            collectUidField(root, sink);
+        }
+    }
+
+    private static void collectUidField(JsonNode node, Set<String> sink) {
+        JsonNode uid = node.path("uid");
+        if (uid.isTextual()) {
+            sink.add(uid.asText());
+        }
     }
 
     /**

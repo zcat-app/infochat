@@ -1348,7 +1348,16 @@ public class InboundRouter {
         // Null reply propagates a /stop-cancelled chat turn: ChatAgent
         // already let the /stop handler reply, so the router's null-body
         // branch skips the send (no double-reply).
-        return result.reply();
+        String reply = result.reply();
+        String provenanceNotice = result.provenanceNotice();
+        if (reply == null || provenanceNotice == null) {
+            return reply;
+        }
+        // Retrieval-provenance notice (M1-617, D58) rides the SAME outbound
+        // as the reply, blank-line separated — a second adapter send could
+        // reorder against the terminal finalize and doubles delivery cost.
+        // Degrade/rejection turns carry a null notice and ship unchanged.
+        return reply + "\n\n" + provenanceNotice;
     }
 
     /**

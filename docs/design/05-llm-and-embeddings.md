@@ -523,6 +523,74 @@ vector (D5). The tool is also model-callable mid-loop for refined queries
 (registry row in security.md §Prompt-injection defenses); the deterministic
 pre-fetch and the loop share ONE per-turn dispatch context, so the fixed
 call cap and identical-call cache hold across the whole turn.
+
+**Hybrid semantic/lexical retrieval + RRF fusion (M1-617, D58).** The
+`semanticSearch` tool runs ONE fused SQL statement with two arms:
+
+- **Semantic arm** — the M1-589 filtered HNSW probe above, unchanged
+  (embed → `ORDER BY embedding <=> query LIMIT k` under the distance
+  threshold).
+- **Lexical arm** — Postgres full-text over `post.search_tsv`, a STORED
+  generated column (V58) `to_tsvector('english', coalesce(title,'') || ' '
+  || coalesce(body,''))` with a GIN index declared on the partitioned
+  parent (`idx_post_search_tsv`). The query text reaches
+  `plainto_tsquery('english', ?)` ONLY as a bind parameter — never
+  string-concatenated — and the regconfig is pinned to `'english'` on both
+  the column and the query side: the 1-arg forms read
+  `default_text_search_config`, which Postgres rejects in a generated
+  column and which would make the retrieved set session-GUC-dependent (a
+  D19 hazard). Ranked by `ts_rank` descending, `post_id` ascending.
+
+Both arms carry the `status='READY'` + subscription predicates INSIDE the
+arm before its `LIMIT` (the M1-589 no-over-fetch-then-filter property,
+now on both arms), each arm is capped at `infochat.chat.semantic-limit`,
+and per-arm ranks come from `ROW_NUMBER()` over an explicit total order
+(distance / `ts_rank`, tie-broken by `post_id` — never input row order).
+The arms are FULL OUTER JOINed on `post_id` and fused by **Reciprocal
+Rank Fusion**: `fused_score = Σ 1/(k + rank_arm)` with **k = 60** (the
+Cormack et al. 2009 standard), a fixed code constant
+(`SemanticSearchTool.RRF_K`) rather than a config key — varying it would
+silently change the retrieved set across deployments. The outer order is
+`fused_score DESC, post_id ASC LIMIT limit` — total, so same DB state →
+same set, same order (D19). Emission shape is unchanged
+(`uid/title/url/similarity`); a **lexical-only row emits
+`"similarity":null`** — such a post may have NO `post_embedding` row at
+all (embedding-failure posts are released without a vector), so a number
+would be fabricated. A single-arm result degrades to that arm's own order
+(RRF over one list is order-preserving), which is why the semantic-only
+behaviour and its tests are unchanged. LLM-in-the-retrieval-loop
+alternatives (query rewriting, HyDE, LLM/cross-encoder re-ranking) are
+considered-and-deferred in D58 — each makes the retrieved set a function
+of non-deterministic model output (D19), and cross-encoder re-rank is
+additionally blocked by the CPU-only posture (M1-609).
+
+**Retrieval-provenance notice (M1-617, D58).** ChatAgent tracks the
+DISTINCT post UIDs the turn retrieved — the deterministic pre-fetch plus
+every model-initiated post-corpus tool Success (`searchPosts`,
+`semanticSearch`, `getPost`, `getReferences`; `recallMemory`/`listSaves`
+are user-scoped state, not feed grounding) — and attaches a notice to
+every successfully computed turn, which the router appends to the reply
+(blank-line separated, one outbound). Bundle keys (en/cs pair, D43;
+plain text, D30):
+
+- `reply.chat.provenance.grounded` — "Based on {0,choice,1#1 post|1<{0}
+  posts} from your subscribed feed." The **count only** is interpolated:
+  uids/titles are feed-derived text, and interpolating
+  attacker-influenced content into a deterministic surface is the D31
+  class. (The model's own prose already cites UIDs per the system
+  prompt.)
+- `reply.chat.provenance.general_knowledge` — "Not based on your feed
+  posts; answered from general knowledge." Deliberately claims
+  NON-GROUNDING, not "searched and found nothing": the breaker-open path
+  (M1-606) skips the pre-fetch entirely and lands on this same signal,
+  which stays truthful under that wording.
+
+The notice is deterministic bot prose: it takes the bundle path in the
+scope language and is NEVER routed through TranslationPipeline (the D43
+two-path rule — the translator path would also bypass the sanitizer
+ordering). Degrade/rejection turns (unavailable, in-flight,
+ceiling-gated, refusal intercept, /stop-cancelled) carry a `null` notice:
+those replies are deterministic notices, not answers.
                                                                                                                                                                                                                                                       
 ### 5.4.7 /compress (long-term memory)                                                                                                                                                                                                                    
                                                                                  

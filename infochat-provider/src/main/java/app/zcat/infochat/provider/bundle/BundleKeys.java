@@ -1214,6 +1214,20 @@ public final class BundleKeys {
     /** Chat LLM emitted the D21 structured refusal marker; this deterministic notice replaces it — the marker is protocol surface and is never delivered (security.md §Prompt-injection defenses). */
     public static final String ERROR_CHAT_REFUSED = "error.chat.refused";
 
+    // ----- Chat retrieval provenance (M1-617) --------------------------------
+    // Per docs/spec/commands.md §Chat mode + D58: every successful chat
+    // reply carries a deterministic, bundle-localized signal saying whether
+    // it was grounded in feed posts or answered from general knowledge.
+    // Composed by ChatAgent AFTER sanitize + translate and appended by the
+    // router — deterministic bot prose takes the bundle path, never the
+    // translator (D43 two-path rule).
+
+    /** Grounded reply: {0} = count of distinct feed posts consulted this turn. Count-only — feed-derived text (uids/titles) is never interpolated into a deterministic surface (the D31 class). */
+    public static final String CHAT_PROVENANCE_GROUNDED = "reply.chat.provenance.grounded";
+
+    /** No feed post informed the reply. Also covers the breaker-open pre-fetch skip (M1-606), so the wording claims non-grounding only, never "searched and found nothing". */
+    public static final String CHAT_PROVENANCE_GENERAL_KNOWLEDGE = "reply.chat.provenance.general_knowledge";
+
     // ----- Progress notifier stage strings (M1-212) --------------------------
     // Per docs/spec/messaging.md §Progress notifications + decision D43.
     // One key per ProgressStage value; the ProgressNotifier renders each

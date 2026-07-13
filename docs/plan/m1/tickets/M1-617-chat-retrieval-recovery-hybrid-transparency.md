@@ -1,11 +1,29 @@
 ---
 id: M1-617
 title: "Chat retrieval-recovery: provenance transparency + hybrid semantic/lexical (RRF) post retrieval"
-status: pending
+status: done
 created: 2026-07-12
-last_updated: 2026-07-12
+last_updated: 2026-07-13
+clarity_check:
+  date: 2026-07-12
+  verdict: WARN
+  warnings:
+    - >-
+      FILES-BUDGET-PLAUSIBLE: mental estimate (~13 files) is at or slightly
+      over the stated files_budget: 12. Consider raising the budget to 14-15
+      or pre-committing to the transparency/hybrid-retrieval split the
+      ticket's own §Notes already floats, so the plan-gate isn't the first
+      place this gets decided.
+    - >-
+      COMPLEXITY-RISK-CALIBRATED: risk: medium is defensible but sits low
+      given migration_touch: true + security_relevant: true + an explicitly
+      described isolation-leak failure mode with a recommended /redteam pass.
+      Consider risk: high, or leave as-is with the redteam pass as the
+      compensating control.
+  blockers: []
+outline_file: target/m1-tick-outline-M1-617.md
 blocked_by: []
-files_budget: 12
+files_budget: 15
 complexity: high
 risk: medium
 round_cap: 3
@@ -112,8 +130,18 @@ test_plan:
       Provenance-signal test (grounded reply names cited UIDs; empty-retrieval
       reply carries the general-knowledge signal), including the en/cs bundle
       key-pair presence (BundleLoaderTest keyset parity, D43).
+  modifies:
+    - >-
+      InboundRouterChatModeIT.chatModeDispatchesToAgent — update the pinned
+      finalize-body expectation to reply + blank line + the
+      reply.chat.provenance.general_knowledge bundle string: the assertion
+      pins the exact outbound surface acceptance item 4 changes (authorized
+      via escalate->refine 2026-07-13; the empty-retrieval turn now signals
+      instead of staying silent).
   preserves:
-    - all tests currently green on main
+    - >-
+      all tests currently green on main (except the one expectation named
+      under modifies, updated to the new specified outbound)
     - >-
       the D19 determinism guarantee for chat retrieval (retrieved set is
       SQL-decided, reproducible on unchanged DB state)
@@ -126,14 +154,103 @@ decision_refs:
   - D19
   - D28
   - D54
-reviews: []
-escalations: []
+reviews:
+  - round: 1
+    date: 2026-07-13
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 17
+      added: 1294
+      removed: 70
+escalations:
+  - date: 2026-07-12
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (pre-implementation). Plan-writer outline (target/m1-tick-outline-M1-617.md)
+      enumerates 11 production/doc files + 3 new test files = 14 total vs
+      files_budget: 12 (ticket-template: budget counts tests; only STATUS.md and
+      the ticket file are exempt). Clarity pre-flight had already WARNed the same
+      (~13 estimate) and suggested raising to 14-15 or splitting per ticket §Notes.
+  - date: 2026-07-13
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (r1 mvn verify, pre-review). Full suite red with EXACTLY ONE failure:
+      InboundRouterChatModeIT.chatModeDispatchesToAgent:104 pins the finalized
+      chat outbound to the bare agent reply; under this ticket's acceptance the
+      outbound is now reply + blank line + provenance notice (actual:
+      "Hello from the chat agent!\n\nNot based on your feed posts; answered
+      from general knowledge." — the designed general-knowledge signal). The
+      fix is a one-line expectation update in that pre-existing IT, which (a)
+      test_plan does not authorize (no `modifies`) and (b) is a 15th file vs
+      files_budget: 14. Both gates forbid proceeding silently. All other 257
+      provider ITs green, incl. llmUnreachableReturnsFriendlyError proving the
+      null-notice degrade path end-to-end.
 overrides: []
-revisions: []
+revisions:
+  - date: 2026-07-13
+    reason: >-
+      budget-breach refine (user-directed via /m1-tick run escalation menu):
+      files_budget: 12 cannot fit the enumerated implementation surface; the
+      plan-writer outline needs 14 files (11 production/doc + 3 new test files;
+      budget counts tests per ticket-template). Clarity pre-flight had WARNed
+      the same overrun (~13 estimate, suggested 14-15).
+    snapshot: |
+      files_budget (pre-refine): 12
+      resolution: raise files_budget to 14 — the exact enumerated need
+        (V58 migration; SemanticSearchTool, ChatAgent, InboundRouter,
+        BundleKeys; en/cs bundle pair; 02-schema.md, commands.md,
+        design 05, decisions.md D58; SemanticSearchToolHybridIT,
+        ChatAgentProvenanceTest, InboundRouterChatProvenanceTest).
+        No slack added; a 15th file re-escalates. All other sizing fields
+        (complexity: high, risk: medium, round_cap: 3) unchanged.
+  - date: 2026-07-13
+    reason: >-
+      budget-breach refine #2 (user-directed via /m1-tick run escalation
+      menu): r1 verify red with exactly one failure —
+      InboundRouterChatModeIT.chatModeDispatchesToAgent:104 pins the
+      finalized chat outbound to the bare reply, the exact surface
+      acceptance item 4 changes (reply + blank line + provenance notice).
+      test_plan had no `modifies` authorization and the file is a 15th
+      file vs files_budget: 14.
+    snapshot: |
+      files_budget (pre-refine): 14
+      test_plan (pre-refine): adds + preserves only, no `modifies` key;
+        preserves item 1 read "all tests currently green on main".
+      resolution: files_budget 14 -> 15; add test_plan.modifies naming
+        InboundRouterChatModeIT.chatModeDispatchesToAgent (one-line
+        expectation update to reply + blank line +
+        reply.chat.provenance.general_knowledge, asserted via bundle key
+        per the file's own style); scope preserves item 1 accordingly.
+        All other sizing fields (complexity: high, risk: medium,
+        round_cap: 3) unchanged.
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-07-13
+    verdict: CLEAN
+    base: 4dcbe3765a947d7494fb9b0677493aa89a83d501
+    head: m1/M1-617-chat-retrieval-recovery-hybrid-transparency (working tree, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-617-2026-07-13.md
+    out_of_model_count: 1
+    note: |
+      CLEAN, no findings. One out-of-model item: docs/spec/security.md
+      §Prompt-injection defenses still describes semanticSearch as
+      semantic-only (threshold-gated), not the new hybrid semantic+lexical
+      arm — classified as retrieval-relevance/UX doc staleness, NOT a
+      trust-boundary gap (subscription isolation, READY filter, D19 ordering,
+      local embedding, similarity-display-only all remain delivered; the
+      verification.md CI gate keys on the unchanged tool-name set). Not
+      folded into M1-617 (acceptance item 5 authorizes only commands.md /
+      design 05 / decisions.md; security.md is outside the approved file
+      set). Recommended follow-up: a pure-doc spec: commit resyncing the
+      security.md semanticSearch row after merge.
 ---
 
 # M1-617: Chat retrieval-recovery — provenance transparency + hybrid semantic/lexical retrieval

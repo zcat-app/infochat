@@ -1255,6 +1255,30 @@ isolation as every other state in the system: a `/stop` from one user
 never affects another user's in-flight request, even within the same
 group.
 
+**Post retrieval is hybrid and deterministic** (decision D58). The chat
+agent's post retrieval runs two SQL arms — semantic (pgvector
+nearest-neighbour under the calibrated distance threshold) and lexical
+(full-text over title + body) — fused by Reciprocal Rank Fusion entirely
+in SQL, so the retrieved set and its order stay reproducible on unchanged
+DB state (D19: the LLM never picks the set). Both arms enforce
+`status='READY'` and per-(user, scope) subscription isolation inside the
+query. The lexical arm recovers keyword-exact queries (CVE ids, product
+names) whose embeddings fall outside the semantic threshold.
+
+**Retrieval provenance is explicit in every reply** (decision D58). Every
+successful chat reply carries a deterministic, bundle-localized notice
+(D43 en/cs pair; plain text per D30) stating either that the answer is
+grounded in the user's feed — with the count of distinct posts consulted
+across the whole turn (pre-fetch plus model-initiated post-corpus tool
+calls) — or that it is not based on feed posts. The
+previously-silent empty-retrieval path is silent no more: the user can
+always tell a "found nothing" answer from a "didn't look" answer (the
+wording also covers the breaker-open pre-fetch skip truthfully). The
+notice interpolates the count only — never post UIDs, titles, or other
+feed-derived text. Degrade and rejection replies (unavailable, in-flight,
+ceiling-gated, refusal, /stop) carry no provenance notice. Exact wording
+lives in design notes (05 §5.4.6).
+
 ## Onboarding
 
 **DM first interaction** requires a valid invite code (decision D44). An
