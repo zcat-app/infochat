@@ -1,9 +1,9 @@
 # v1 release — execution handoff (for a fresh session)
 
-> **Written:** 2026-07-13. **Updated:** 2026-07-13 (§1 done; M1-620 filed +
-> paused — see the callout below). **main @ `c12c3e03`** (local, **+1 unpushed**:
-> the M1-620 filing; origin still `a47b4786`). **Start a fresh session and drive
-> this.**
+> **Written:** 2026-07-13. **Updated:** 2026-07-13 (§1 done; M1-620 filed;
+> design questions RESOLVED + ticket amended — see the callout below; next step
+> is `/m1-tick start M1-620`). Origin still `a47b4786`; local main is ahead
+> (unpushed).
 >
 > **READ FIRST:** `docs/plan/v1-verification-truth.md` — the dated,
 > provenance-tagged record of what's verified vs. owed. **This doc is the ACTION
@@ -51,14 +51,15 @@ onboarding a new SimpleX contact currently needs **shell access to the server**.
   **Signal is cheap:** it already holds `account`/`botAci` in-process
   (`SignalAdapter` L98/L107) — just add an accessor. Command reply bodies are
   **already not logged** (D37 satisfied on the outbound path).
-- **OPEN design questions the operator paused on — resolve these in the fresh
-  session BEFORE `/m1-tick start`:**
-  1. Subcommand name `/invite bot-contact` vs. a standalone command.
-  2. Signal: return the number (current plan) vs. decline.
-  3. Cross-adapter `--adapter` flag (currently **out-of-scope** for v1).
-  4. SimpleX value: **live query each call** (current plan — matches "current")
-     vs. cached-at-startup / persisted-at-provision (simpler, but the latter
-     needs a D37 clarification and can go stale). Notes-section fork in the ticket.
+- **Design questions RESOLVED (operator, 2026-07-13, in-session — ticket
+  amended accordingly, nothing left to re-ask):**
+  1. Subcommand `/invite bot-contact` — **confirmed as filed.**
+  2. Signal returns the registered number — **confirmed as filed.**
+  3. Cross-adapter `--adapter <name>` — **IN scope for v1** (operator choice;
+     moved from out_of_scope to acceptance. Cheap: InviteCommandHandler already
+     injects AdapterRegistry + iterates activatedAdapters(), adapters expose
+     name(). Multi-adapter enumeration per reply stays out).
+  4. SimpleX value: **live query each call — confirmed as filed.**
 - **Then drive it in the MAIN session** (`/m1-tick start M1-620` → implement →
   `/m1-tick review` → `/redteam M1-620` (security_relevant) → commit → merge).
   **NOT via the Workflow tool** — it can't nest the gate subagents

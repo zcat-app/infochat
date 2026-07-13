@@ -19,10 +19,11 @@ out_of_scope:
     invite code and grants no access by itself. The existing create/list/revoke
     behaviour, argument parsing, and PENDING caps are untouched.
   - >-
-    Cross-adapter retrieval (`/invite bot-contact --adapter <other>`). v1
-    returns the contact for the INBOUND adapter only. Add an `--adapter`
-    override ONLY if it falls out trivially from the resolution path; otherwise
-    it is a deliberate deferral, not a silent omission.
+    Enumerating multiple adapters' contacts in one reply (`--adapter all`, or
+    any no-arg listing of every adapter). Each invocation returns exactly ONE
+    adapter's contact: the inbound adapter by default, or the single activated
+    adapter named via `--adapter <name>` (the override itself is IN scope per
+    operator decision 2026-07-13).
   - >-
     Exposing any other identity or secret. NOT the SimpleX queue keypair, NOT
     signal-cli credentials, NOT other users' contact ids, NOT the admin roster —
@@ -47,8 +48,9 @@ acceptance:
   - >-
     A new DM-only, bot-admin-only subcommand `/invite bot-contact` on the
     existing InviteCommandHandler. In a DM from a bot admin it returns the bot's
-    shareable onboarding contact for the INBOUND adapter, displayed once in the
-    reply. A non-admin caller gets the existing admin-only refusal
+    shareable onboarding contact for the INBOUND adapter — or, with an optional
+    `--adapter <name>` argument, for the named activated adapter — displayed
+    once in the reply. A non-admin caller gets the existing admin-only refusal
     (BundleKeys.ERROR_ADMIN_ONLY); a group-scope caller gets the existing
     `/invite` DM-only refusal. Because it is a subcommand of the already-indexed
     `/invite` handler (no new CommandHandler bean), CommandCatalogueParityTest is
@@ -68,6 +70,11 @@ acceptance:
     yields a clear friendly reply ("no shareable contact for <adapter>" or a
     transient "address unavailable, try again"), never a crash, a stack trace, or
     a blank line.
+    (d) The target adapter is the inbound one by default, or the activated
+    adapter whose name() matches `--adapter <name>` (resolved against
+    AdapterRegistry's activated set, which InviteCommandHandler already
+    injects). An unknown or non-activated name yields a clear friendly reply
+    naming the valid adapter names — never a crash.
   - >-
     D37 no-log: the returned contact value is surfaced in the command reply ONLY
     and is never written to any log at any level. The existing outbound path
@@ -106,6 +113,11 @@ test_plan:
     - >-
       A Signal test that the new self-account accessor returns the configured
       account/number.
+    - >-
+      Handler `--adapter` override tests: admin+DM with `--adapter <other>`
+      returns the NAMED activated adapter's contact (not the inbound one); an
+      unknown or non-activated adapter name gets the friendly unknown-adapter
+      reply.
     - >-
       en.properties + cs.properties keys for the bot-contact reply and the
       no-shareable-contact / unavailable messages (bilateral, D43).
@@ -185,7 +197,10 @@ request/response codec path; Signal needs only an accessor.
 See the YAML `acceptance:` list. In prose: add a DM-only, bot-admin-only
 `/invite bot-contact` subcommand to InviteCommandHandler (reusing its existing
 gates, so no new command bean and no command-index change); resolve the contact
-per inbound adapter through one new MessagingAdapter SPI method — SimpleX returns
+for the target adapter — inbound by default, or the activated adapter named via
+an optional `--adapter <name>` argument, with a friendly reply naming the valid
+choices when the name matches nothing — through one new MessagingAdapter SPI
+method — SimpleX returns
 its **live current** contact URL by querying the running simplex-chat over the
 existing loopback WS (new codec encode + response decode), Signal returns its
 registered number via a new accessor, and an unsupported/unavailable adapter
@@ -196,11 +211,12 @@ strings are bilateral en+cs bundle keys.
 
 ## Out-of-scope
 
-No change to the invite-CODE flow or the D44 gate; no cross-adapter `--adapter`
-override in v1; no exposure of any other identity/secret and no general
-adapter-introspection surface; no non-admin/group access and no pushing the
-contact into digests/welcome/broadcasts; no relaxation of D37 for USER data; no
-restoration of the M1-518-removed mention-anchor derivation.
+No change to the invite-CODE flow or the D44 gate; no multi-adapter enumeration
+in one reply (the single-target `--adapter <name>` override IS in scope); no
+exposure of any other identity/secret and no general adapter-introspection
+surface; no non-admin/group access and no pushing the contact into
+digests/welcome/broadcasts; no relaxation of D37 for USER data; no restoration
+of the M1-518-removed mention-anchor derivation.
 
 ## Notes
 
@@ -228,6 +244,14 @@ restoration of the M1-518-removed mention-anchor derivation.
   read it once from provisioning), but filed as a v1 ticket per operator
   decision: in-band retrieval is the expected onboarding UX and shell access
   should not be required per invite.
+- **Design forks RESOLVED (operator, 2026-07-13, pre-start):** subcommand shape
+  (`/invite bot-contact`), Signal-returns-the-number, and live per-call SimpleX
+  query all CONFIRMED as filed. The `--adapter <name>` override was PROMOTED
+  from deferral to v1 scope by operator choice — it falls out cheaply because
+  InviteCommandHandler already injects AdapterRegistry and iterates
+  activatedAdapters(), and adapters expose name(); the override is a name-match
+  over that set, with a friendly unknown-name reply. Multi-adapter enumeration
+  in one reply stays out of scope.
 - **Design fork for the plan phase, already narrowed:** the live-query approach
   above is the chosen path (it honors D37 without persisting anything and
   delivers the "current" value). The alternative — persist the address at
