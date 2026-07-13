@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 642 |
 | deferred | 1 |
 | abandoned | 11 |
-| **total** | **654** |
+| **total** | **655** |
 
 ---
 
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-621 — Subscription model foundation: source.source_origin + implicit-bootstrap retrieval/digest scoping + spec amendment (complexity: high, risk: medium)
 
 ---
 
@@ -837,4 +837,5 @@ M1-617 (done)
   └── M1-618 (done)
 M1-619 (done)
 M1-620 (done)
+M1-621 (pending) ← runnable
 ```
