@@ -1,12 +1,13 @@
 # v1 release — execution handoff (for a fresh session)
 
-> **Written:** 2026-07-13. **Updated:** 2026-07-13 (§1 done; **M1-620
-> MERGED @`cf48bc8c`**; **TWO NEW PRIORITY TICKETS M1-621 + M1-622 filed —
-> address these BEFORE the release plan §2**, see §"⏭ Next priority" below).
-> Origin still `a47b4786`; local main is ahead (unpushed). **Rebuild owed** —
-> M1-620 is merged but not in the running provider bytecode; **fold that rebuild
-> to after M1-621+M1-622 land** so one rebuild brings all three live and applies
-> M1-621's V59 migration in the same restart.
+> **Written:** 2026-07-13. **Updated:** 2026-07-14 (§1 done; **M1-620 MERGED
+> @`cf48bc8c`**; **M1-621 MERGED @`6eaeadc3`** — the subscription-model feature +
+> V59; **only M1-622 (guidance copy) remains** before the release plan §2, now
+> runnable, see §"⏭ Next priority"). Origin still `a47b4786`; local main is ahead
+> (unpushed). **Rebuild owed** — M1-620 + M1-621 are merged but not in the running
+> bytecode; **fold that rebuild to after M1-622 lands** so one rebuild brings all
+> three live and applies M1-621's V59 migration (v58→v59) in the same restart.
+> Stack is currently PAUSED (collector+provider stopped for the verify batch).
 >
 > **READ FIRST:** `docs/plan/v1-verification-truth.md` — the dated,
 > provenance-tagged record of what's verified vs. owed. **This doc is the ACTION
@@ -102,21 +103,26 @@ plan (§2 onward). Filed `e4c3a033` / `6d2bf0f3` (unpushed).
 
 **Sequence is fixed (M1-622 is `blocked_by: M1-621`):**
 
-1. **M1-621 — subscription model, end-to-end** (`complexity: high`, `round_cap: 3`,
-   `security_relevant: true`, **`migration_touch: true`**, `files_budget: 18`,
-   `blocked_by: []` → runnable now). Delivers the whole model as one feature:
-   Flyway **V59** adds `source.source_origin` (`bootstrap`|`user`, default `user`
-   = fail-closed private, existing rows → `bootstrap`) + a per-scope exclusion
-   representation; the four retrieval/digest queries (`EligiblePostQuery`,
-   `SemanticSearchTool`, `SearchPostsTool`, `GetReferencesTool`) become "bootstrap
-   (not excluded) OR my subscriptions" so bootstrap is an implicit public corpus
-   and customs stay private; command surface (`/list-sources` shows bootstrap +
-   own customs, `/unfollow-source` opts a scope out of a bootstrap source,
-   `/follow-all-sources` re-includes, `/add-source` marks `user`); RAG decoupled
-   from `/follow-tag` (digest keeps the tag narrowing); spec amendment **D59** in
-   `commands.md` + `decisions.md` + `schema.md`. **Privacy is the load-bearing
-   property** — the predicate must be exactly "`origin='bootstrap'` AND
-   not-excluded, OR `source_id IN` (this scope's subscriptions)".
+1. **M1-621 — subscription model, end-to-end** — ✅ **DONE, merged to `main`
+   @`6eaeadc3` 2026-07-14** (unpushed; origin still `a47b4786`). Shipped the whole
+   D59 model: Flyway **V59** (`source.source_origin` `bootstrap`|`user`, default
+   AND existing-row backfill `user` = fail-closed after a red-team fix — the loader's
+   same-boot ON CONFLICT promote marks operator-listed rows `bootstrap`; separate
+   `source_exclusion` table). The world predicate — "live non-excluded bootstrap OR
+   my subscriptions" — landed at **nine** sites (the plan surfaced 5 the ticket
+   missed: `DigestPostCollector` is the real periodic digest, plus `GetPostTool`,
+   `SaveCommandHandler`, the `UnfollowTagCommandHandler` seed, `SummaryCommandHandler`
+   steer), shared via `SearchPostsTool.worldPredicateSql`. Command surface + RAG/
+   follow-tag decoupling + spec amendment **D59** (commands/decisions/schema/security).
+   `files_budget` grew 18→36 (outline-fail refine). **Flow:** clarity WARN → plan
+   PASS → implement → review APPROVE r1 → redteam **FINDINGS** (1 med + 2 low, all
+   fixed in-branch: fail-closed backfill, audited `/follow-all-sources` exclusion
+   clear via new `AuditAction.FOLLOW_ALL_SOURCES`, `/unfollow-source` unknown-id
+   collapse) → review APPROVE r2 → redteam **CLEAN** → commit → merge. Red-team
+   record `docs/plan/m1/redteam/M1-621-2026-07-14.md`; 3 out-of-model items disposed
+   (1 in-scope Invariant-4 rider; 2 → future-features E5/E6 @`040c3d55`). Full verify
+   green ×3 (r1 after 2 own-diff fixes, r2, rcommit). **DB now needs V59** — applies
+   on the deferred rebuild, v58→v59.
 2. **M1-622 — subscription guidance copy** (`complexity: low`, `files_budget: 6`,
    **`blocked_by: M1-621`** → runs only after 621 merges). Pure bilingual (en+cs,
    D43) string work: new-user welcome ("you're following all our sources; use
@@ -131,13 +137,15 @@ merge. **NOT via the Workflow tool** (can't nest the gate subagents,
 (pause the stack for `mvn verify`; M1-621 has no live-frame-capture step, so the
 stack can stay paused for the whole 621→622 batch and be rebuilt once at the end).
 
-**Migration note:** M1-621 is the only `migration_touch: true` ticket in flight —
-do not parallelize anything against it; the V59 it adds applies on the deferred
-rebuild, bumping the live DB v58→v59.
+**Migration note:** M1-621 (the only `migration_touch: true` ticket) is now
+merged; its V59 applies on the deferred rebuild, bumping the live DB v58→v59.
 
-Only after M1-621 **and** M1-622 are merged does the release plan below resume
-(§2 onward), starting with the single deferred rebuild that makes M1-620/621/622
-all live.
+**⏭ Only M1-622 remains before the release plan resumes.** It's `complexity: low`,
+pure bilingual copy, `blocked_by: M1-621` now satisfied → **runnable** (STATUS
+board confirms). Drive it in the MAIN session via `/m1-tick run M1-622` (no
+redteam gate — not `security_relevant`; the stack is already paused for the
+batch). Then the single deferred rebuild makes M1-620/621/622 all live + applies
+V59, and the release plan below resumes (§2 onward).
 
 ## Before you start (coordination)
 
