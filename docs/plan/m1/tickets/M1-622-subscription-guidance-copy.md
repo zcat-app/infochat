@@ -3,7 +3,7 @@ id: M1-622
 title: "Subscription guidance copy: welcome + /follow-tag hints + empty-digest nudge (en+cs)"
 status: pending
 created: 2026-07-13
-last_updated: 2026-07-13
+last_updated: 2026-07-14
 blocked_by:
   - M1-621
 files_budget: 6
@@ -37,10 +37,13 @@ acceptance:
     scope's sources — so a user who narrows tags is not surprised that chat stays
     broad.
   - >-
-    The empty / narrowed-digest reply (the /summary no-eligible-posts path) nudges
-    the user toward `/follow-tag` where appropriate, consistent with the implicit
-    -bootstrap model (a scope always has the bootstrap corpus, so the old
-    "follow no sources" framing no longer applies).
+    The empty-window /summary reply (reply.summary.no_posts_yet — the
+    subscribed-but-empty-window path, which under D59's implicit bootstrap is the
+    normal empty case for every scope) nudges the user toward `/follow-tag`,
+    consistent with the implicit-bootstrap model (a scope always has the bootstrap
+    corpus, so the old "follow no sources" framing no longer applies). The
+    separate zero-visible-sources reply (reply.summary.no_subscriptions) already
+    steers to /follow-all-sources and is NOT in scope here.
   - >-
     Every new string is added as a bilateral en.properties AND cs.properties key
     (D43 — a one-sided key fails BundleLoaderTest), routed through the localization
@@ -49,17 +52,26 @@ acceptance:
 test_plan:
   adds:
     - >-
-      A handler/bundle test asserting the welcome, /follow-tag clarifier, and
-      empty-digest nudge render the new keys (and that the keys resolve in both
-      en and cs).
+      A bundle test asserting the updated welcome, the /follow-tag + /unfollow-tag
+      digest-vs-chat clarifier, and the empty-window nudge guidance strings
+      resolve in both en and cs and carry the expected guidance (the
+      implicit-following welcome framing, the digest-only distinction, the
+      /follow-tag nudge).
   modifies:
     - >-
-      The new-user welcome/greeting handler, FollowTagCommandHandler /
-      UnfollowTagCommandHandler (clarifier line), and the /summary empty-case
-      reply path, plus BundleKeys.java.
-    - >-
-      bundles/en.properties AND bundles/cs.properties (the new guidance keys,
-      bilateral).
+      bundles/en.properties AND bundles/cs.properties ONLY (D43 bilateral):
+      extend the VALUES of existing keys in place — reply.welcome.dm_fresh
+      (item 1, replacing the stale "Content starts once you follow sources with
+      /follow-all-sources" clause left by M1-621's implicit-bootstrap switch),
+      the tag-narrowing success replies reply.follow_tag.success_from_all /
+      reply.follow_tag.success_in_place / reply.unfollow_tag.success_from_all /
+      reply.unfollow_tag.success_in_place (item 2 digest-vs-chat clarifier), and
+      reply.summary.no_posts_yet (item 3 nudge). NO new BundleKeys constants, NO
+      handler changes, NO reply concatenation: the welcome / follow-tag /
+      unfollow-tag / summary handlers already render these keys, so editing the
+      value alone surfaces the new copy AND keeps every existing exact-equality
+      test green (each derives its expected string from the same key via
+      bundleLoader.get(...) or a key-derived FakeBundleLoader stub).
   preserves:
     - all tests currently green on main
     - >-
@@ -78,6 +90,39 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+revisions:
+  - date: 2026-07-14
+    reason: >-
+      clarity-fail refine (run decision-C bounded self-refine — prose-only,
+      scope-shrinking, first attempt). The clarity pre-flight FAILed on
+      TEST-CHANGES-AUTHORIZED: test_plan.modifies listed BundleKeys.java + handler
+      mods, implying new bundle keys concatenated onto existing composed replies,
+      which would break the exact-equality assertions in
+      FollowTagCommandHandlerTest, UnfollowTagCommandHandlerTest,
+      SummaryCommandHandlerTest, and InboundRouterIntakeOrderingTest (none
+      authorized to change) and violate test_plan.preserves "all tests green on
+      main". A ground-truth read of those four tests confirmed each derives its
+      expected string from the SAME bundle key (bundleLoader.get(...) or a
+      key-derived FakeBundleLoader.stubFor(...)), so editing the key VALUE in
+      place surfaces the new copy with zero test churn.
+    snapshot: |
+      test_plan.modifies (pre-refine): the welcome/greeting handler,
+        FollowTagCommandHandler / UnfollowTagCommandHandler (clarifier line),
+        the /summary empty-case reply path, PLUS BundleKeys.java; and
+        bundles/{en,cs}.properties ("the new guidance keys, bilateral").
+      test_plan.adds (pre-refine): "render the new keys".
+      acceptance item 3 (pre-refine): nudge toward /follow-tag "where
+        appropriate" (soft qualifier — clarity WARN).
+      resolution: switched to value-edit-in-place strategy (arm a) — extend the
+        VALUES of existing keys reply.welcome.dm_fresh,
+        reply.follow_tag.success_{from_all,in_place},
+        reply.unfollow_tag.success_{from_all,in_place}, and
+        reply.summary.no_posts_yet; dropped BundleKeys.java + handler edits +
+        reply concatenation from scope. Footprint now bundles/{en,cs}.properties
+        + 1 bundle test (~3 files, well under files_budget: 6). acceptance item 3
+        pinned to reply.summary.no_posts_yet + the concrete D59 empty-window
+        condition ("where appropriate" dropped). files_budget / complexity /
+        risk / round_cap / security_relevant / migration_touch unchanged.
 clarity_check: {}
 ---
 
