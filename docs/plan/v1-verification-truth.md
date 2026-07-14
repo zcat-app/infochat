@@ -65,8 +65,8 @@ than writing a new `.scratch` snapshot. When a tag changes, say why.
 | **SimpleX — Phase 4b + groups** | 7 gated scenarios, D51 mentions, GROUP binding; operator confirms SimpleX group flow exercised | live-e2e + operator | 07-03/04 · 07-13 | ✅ / 🗣 |
 | **Dual-adapter same deployment** | `/zcash` + LLM chat green on both | live-e2e | 07-04 | ✅ |
 | **Migration round-trip** | pack→wipe→restore, RESTORE_EXIT=0 | live-e2e | 07-05 | ✅ |
-| **Chat RAG (M1-616/617/618)** | provenance, lexical recall, clarify, "more like this" | operator (ran RAG test today) + m1-619-handoff | 07-13 | 🗣 |
-| **Chat RAG (M1-619 calibrated 0.65 cutoff)** | **NOT re-verified live after calibration** | operator + m1-619-handoff | 07-13 | ✅ (not-done) |
+| **Chat RAG (M1-616/617/618)** | provenance, lexical recall, clarify, "more like this" — re-confirmed live on rebuilt image via the 07-14 band drives | operator + m1-619-handoff + live-drive | 07-13 · 07-14 | ✅ |
+| **Chat RAG (M1-619 calibrated 0.65 cutoff)** | **verified live** on rebuilt image: ransomware (0.727) → affordance + no clarify; CISA advisory (0.622) + Tenda (lexical-only) → clarify; hiking (off-domain) → general-knowledge | live-drive (SimpleX contact 7) | 07-14 | ✅ |
 
 **Signal coverage still valid for the current build.** ⇒ DERIVED: `git log`
 shows **zero changes to any Signal-adapter source since 2026-07-05**, so the
@@ -100,13 +100,14 @@ these are the release re-test target, §6):
 
 ## 4. Current runtime / stack state
 
-- **Running:** `postgres` + `ollama` only. **Collector + provider paused.**
-  ✅ VERIFIED (07-13).
-- **Deployed images: pre-M1-619** (`c731ef63`); the **calibrated 0.65 cutoff was
-  NOT re-verified live** after M1-619. DB schema v58. ✅ CONFIRMED (operator +
-  handoff, 07-13).
+- **Running:** all 4 containers UP — `postgres` + `ollama` + collector *(healthy)*
+  + provider *(ready)*. Rebuilt + restarted 07-14. ✅ VERIFIED (07-14).
+- **Deployed images: main `39a054cc`** (M1-620/621/622 all live in bytecode;
+  supersedes pre-M1-619 `c731ef63`); the **calibrated 0.65 cutoff is now verified
+  live** (§3 above). DB schema **v59** (V59 applied v58→v59). ✅ VERIFIED
+  (containers + DB + bytecode, 07-14).
 - **Live DB:** users = 4 simplex (1 admin vouched, 3 invited), 0 signal; groups 0;
-  post 5,547. ✅ VERIFIED (DB, 07-13).
+  post 6,261. ✅ VERIFIED (DB, 07-14).
 - **DB was intentionally reset to a prod-state baseline; test users (the rented
   Signal numbers) were removed.** ✅ CONFIRMED (operator, 07-13). So the empty
   Signal/group state is by design, not data loss.
@@ -127,9 +128,10 @@ these are the release re-test target, §6):
 
 ⇒ DERIVED from §3–§5:
 
-1. **Rebuild images from `a19db4c9`, restart the stack.** (Gate for all live checks.)
+1. **Rebuild images from `39a054cc`, restart the stack.** ✅ DONE 07-14 (all 4 up,
+   DB v59). (Was the gate for all live checks.)
 2. **Re-verify over the SimpleX test user (contact 7), on the rebuilt image:**
-   - **M1-619's calibrated 0.65 cutoff** (never verified live — §4).
+   - **M1-619's calibrated 0.65 cutoff** — ✅ VERIFIED LIVE 07-14 (§3 ledger).
    - The **§3b UNVERIFIED command set** (ban/unban, export, forget,
      save/saved/unsave, add-source SSRF, prompt-injection, multi-turn memory).
    - Optional re-confirm of `/lang cs`, `/monero` on the new image.
@@ -178,14 +180,16 @@ stays broad, add `source.source_origin` — full write-up in
 > **Execution plan (recipes + acceptance criteria, for a fresh session):**
 > `docs/plan/v1-release-handoff.md`.
 
-- [ ] **Rebuild collector+provider images from current main, restart** (gates all live checks).
+- [x] **Rebuild collector+provider images from current main, restart** — DONE 07-14
+  (`39a054cc`, DB v59, all 4 up).
 - [ ] **Add a Signal bootstrap-admin ACI** — operator's own secondary account
   (currently none; §2).
-- [ ] Re-verify **M1-619 calibrated 0.65 cutoff** live (SimpleX).
+- [x] Re-verify **M1-619 calibrated 0.65 cutoff** live (SimpleX) — DONE 07-14
+  (ransomware → affordance/no-clarify; CISA + Tenda → clarify; hiking → general-knowledge).
 - [ ] Live-drive the **§3b UNVERIFIED command set** (SimpleX, rebuilt image).
 - [ ] Release gates: `/redteam` at release, backup/restore + migration on current
   build, fresh-install smoke.
 - [ ] **User-facing message audit** — scan `bundles/{en,cs}` copy vs actual command
   behavior (§6 item 5); the `/summary` help string is already known-stale.
-- [ ] **Build the v1 subscription-UX redesign** (§6b) — spec amendment + ticket(s),
-  input = `docs/plan/subscription-model-redesign.md`.
+- [x] **Build the v1 subscription-UX redesign** (§6b) — DONE 07-14: M1-621
+  (@`6eaeadc3`, V59) + M1-622 (@`53ec54b7`, guidance copy), merged + live.
