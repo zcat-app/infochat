@@ -208,6 +208,28 @@ single at-a-glance operator view (e.g. a `/source-health` summary) so silent
 staleness is *seen*, not discovered in a live test. **Verdict: `realistic-now`**
 (surfacing only; no new tracking).
 
+### E5. Content-world user-state integrity invariants (D59 hardening)
+The M1-621 red-team flagged (out-of-model, inside the accepted §DB-roles
+residual) that a Provider SQL-injection foothold could mass-insert/delete
+`source_exclusion` rows to blank chosen bootstrap sources out of every scope's
+digest/retrieval — but the same foothold could already mass-mutate
+`source_subscription` (Provider has held full DML there since V7), so the delta
+is small. Still, exclusion + subscription rows are the user-state whose
+presence/absence reshapes every scope's content world; a future row-count
+invariant or trigger over BOTH tables would catch such tampering. **Verdict:
+`parked`** (post-v1 hardening; not a threat-model violation today).
+
+### E6. Digest-cache invalidation on exclusion change (D59)
+`/unfollow-source` (bootstrap exclude) and `/follow-all-sources` (clear
+exclusions) do not bump `scope_preferences.source_subscription_version`, so a
+cached group digest can transiently include a just-excluded bootstrap source
+until the next slot recompute. Currently harmless: the version column is
+**inert** (stored, never compared on read — M1-621 plan-phase ground truth), and
+excluded content is public bootstrap corpus (a preference opt-out, not a
+confidentiality control). If a future ticket makes `source_subscription_version`
+load-bearing for cache invalidation, the exclusion paths must bump it too.
+**Verdict: `parked`** (correctness quirk, no current effect).
+
 ---
 
 ## F. Parked
