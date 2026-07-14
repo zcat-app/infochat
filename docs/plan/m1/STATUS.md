@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 643 |
+| done | 644 |
 | deferred | 1 |
 | abandoned | 11 |
 | **total** | **656** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-622 — Subscription guidance copy: welcome + /follow-tag hints + empty-digest nudge (en+cs) (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -61,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-622 | Subscription guidance copy: welcome + /follow-tag hints + empty-digest nudge (en+cs) | 2026-07-14 | round 1 APPROVE |
 | M1-621 | Subscription model: implicit-bootstrap corpus, private custom sources, command surface + spec amendment | 2026-07-14 | round 2 APPROVE |
 | M1-620 | Admin subcommand /invite bot-contact: retrieve the bot's own connect contact in-band (SimpleX current URL / Signal number) so admins onboard new contacts without server access | 2026-07-13 | round 1 APPROVE |
 | M1-619 | Recalibrate the chat confident-grounding cutoff (M1-618 CONFIDENT_SIMILARITY_CUTOFF): measure clarify-vs-affordance separation on the labeled query set | 2026-07-13 | round 1 APPROVE |
@@ -70,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-615 | Fix two full-suite timing-race flaky tests | 2026-07-12 | round 1 APPROVE |
 | M1-614 | Setup wizard: deepseek provider option + provider docs | 2026-07-12 | round 1 APPROVE |
 | M1-613 | Harden entity extraction on DeepSeek: lenient parser + prompt tuning, re-measure v4-flash | 2026-07-12 | round 1 APPROVE |
-| M1-612 | Measure real DeepSeek per-post token/request cost of the split ingest eval pipeline | 2026-07-12 | round 1 APPROVE |
 
 ---
 
@@ -838,5 +838,5 @@ M1-617 (done)
 M1-619 (done)
 M1-620 (done)
 M1-621 (done)
-  └── M1-622 (pending) ← runnable
+  └── M1-622 (done)
 ```

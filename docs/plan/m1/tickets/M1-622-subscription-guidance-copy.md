@@ -1,7 +1,7 @@
 ---
 id: M1-622
 title: "Subscription guidance copy: welcome + /follow-tag hints + empty-digest nudge (en+cs)"
-status: pending
+status: done
 created: 2026-07-13
 last_updated: 2026-07-14
 blocked_by:
@@ -85,7 +85,20 @@ spec_refs:
   - docs/spec/commands.md §Content
 decision_refs:
   - D43
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 116
+      removed: 20
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -123,7 +136,11 @@ revisions:
         pinned to reply.summary.no_posts_yet + the concrete D59 empty-window
         condition ("where appropriate" dropped). files_budget / complexity /
         risk / round_cap / security_relevant / migration_touch unchanged.
-clarity_check: {}
+clarity_check:
+  date: 2026-07-14
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-622: Subscription guidance copy — welcome + /follow-tag hints + empty-digest nudge
