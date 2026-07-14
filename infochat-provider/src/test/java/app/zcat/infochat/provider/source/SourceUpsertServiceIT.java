@@ -6,6 +6,7 @@ import app.zcat.infochat.provider.source.SourceUpsertService.UpsertResult;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.jspecify.annotations.Nullable;
@@ -117,6 +118,8 @@ class SourceUpsertServiceIT {
         assertEquals("news", row.category);
         assertEquals(List.of("m1-036-tag-a", "m1-036-tag-b"), row.bootstrapTags);
         assertTrue(row.deletedAt == null, "fresh insert must leave deleted_at NULL");
+        assertEquals("user", row.sourceOrigin,
+                "an /add-source'd source is a private custom — origin must be 'user' (D59)");
 
         assertEquals(2L, countTags("m1-036-tag-a", "m1-036-tag-b"),
                 "both supplied --tags must be unioned into the controlled vocabulary");
@@ -124,6 +127,56 @@ class SourceUpsertServiceIT {
                 "one source_subscription row must exist for the caller's DM scope");
         assertEquals(0L, countAuditRows(result.sourceId(), caller),
                 "Branch A writes NO audit row (only Branch C does, per spec §Source management)");
+    }
+
+    // D59: /add-source against an existing BOOTSTRAP row must not demote
+    // it to 'user' — the DO UPDATE arm deliberately never touches
+    // source_origin (a demote would silently privatize a public source;
+    // the promote direction is collector-side only).
+    @Test
+    void upsertAgainstBootstrapRowDoesNotDemoteOrigin() throws Exception {
+        UUID caller = insertUser("m1-036-caller-boot", false);
+        UUID bootstrapId;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO source (kind, identifier, display_name, category, "
+                             + "bootstrap_tags, status, source_origin) "
+                             + "VALUES ('rss', 'https://example.com/m1-036-boot.xml', "
+                             + "'Boot Feed', 'news', '{}', 'active', 'bootstrap') "
+                             + "RETURNING id")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                bootstrapId = (UUID) rs.getObject("id");
+            }
+        }
+
+        UpsertResult result = service.upsert(
+                caller, false, "dm", caller, SourceKind.RSS,
+                "https://example.com/m1-036-boot.xml", "Boot Feed Re-add", "news",
+                List.of("m1-036-tag-a"));
+
+        assertEquals(Outcome.SUBSCRIBED_EXISTING, result.outcome());
+        assertEquals("bootstrap", readSource(bootstrapId).sourceOrigin,
+                "re-adding a bootstrap source must not demote its origin to 'user'");
+        assertEquals(1L, countSubscriptions(caller, bootstrapId),
+                "the re-add still subscribes the caller (their per-source re-include)");
+    }
+
+    // A bootstrap-origin fixture must not outlive this class: under the
+    // D59 world predicate it would enter every other class's world.
+    @AfterEach
+    void cleanupBootstrapFixtures() throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            execute(conn,
+                    "DELETE FROM source_subscription WHERE source_id IN ("
+                            + "  SELECT id FROM source "
+                            + "   WHERE identifier LIKE 'https://example.com/m1-036-%' "
+                            + "     AND source_origin = 'bootstrap')");
+            execute(conn,
+                    "DELETE FROM source "
+                            + "WHERE identifier LIKE 'https://example.com/m1-036-%' "
+                            + "  AND source_origin = 'bootstrap'");
+        }
     }
 
     // (d) Idempotency: a SECOND /add-source for the same URL by the SAME
@@ -304,13 +357,14 @@ class SourceUpsertServiceIT {
             String status,
             String category,
             List<String> bootstrapTags,
-            java.sql.Timestamp deletedAt) {}
+            java.sql.Timestamp deletedAt,
+            String sourceOrigin) {}
 
     private SourceRow readSource(UUID sourceId) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "SELECT kind, identifier, status, category, bootstrap_tags, deleted_at "
-                             + "FROM source WHERE id = ?")) {
+                     "SELECT kind, identifier, status, category, bootstrap_tags, deleted_at, "
+                             + "source_origin FROM source WHERE id = ?")) {
             ps.setObject(1, sourceId);
             try (ResultSet rs = ps.executeQuery()) {
                 assertTrue(rs.next(), "source row must exist for id=" + sourceId);
@@ -322,7 +376,8 @@ class SourceUpsertServiceIT {
                         rs.getString("status"),
                         rs.getString("category"),
                         Arrays.asList(tags),
-                        rs.getTimestamp("deleted_at"));
+                        rs.getTimestamp("deleted_at"),
+                        rs.getString("source_origin"));
             }
         }
     }

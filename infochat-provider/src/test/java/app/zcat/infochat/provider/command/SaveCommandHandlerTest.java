@@ -9,6 +9,7 @@ import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -89,9 +90,13 @@ class SaveCommandHandlerTest {
                     "DELETE FROM post WHERE source_id IN ("
                             + "SELECT id FROM source WHERE identifier LIKE ?)",
                     PREFIX + "%");
-            // subscription rows must go before their FK target source.
+            // subscription + exclusion rows must go before their FK target source.
             exec(conn,
                     "DELETE FROM source_subscription WHERE source_id IN ("
+                            + "SELECT id FROM source WHERE identifier LIKE ?)",
+                    PREFIX + "%");
+            exec(conn,
+                    "DELETE FROM source_exclusion WHERE source_id IN ("
                             + "SELECT id FROM source WHERE identifier LIKE ?)",
                     PREFIX + "%");
             // source rows under the prefix.
@@ -454,6 +459,44 @@ class SaveCommandHandlerTest {
     }
 
     @Test
+    void saveOfBootstrapPostSucceedsForSubscriptionlessCaller() throws Exception {
+        // Acceptance test (c), /save half (M1-621): a bootstrap-origin post
+        // is in every scope's world, so a caller with zero subscriptions and
+        // no groups can bookmark it — no search-visible-but-unsavable state.
+        String contactId = PREFIX + "bootsave-actor";
+        seedUser(contactId);
+        UUID sourceId = seedBootstrapSource(PREFIX + "bootsave-source");
+        String uid = PREFIX + "bootsave-uid";
+        seedPost(sourceId, uid, "READY", "Title B", "Body B", null, null, null);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/save " + uid);
+
+        assertEquals(MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_SAVE_SUCCESS), uid),
+                reply.text(),
+                "/save must admit a bootstrap post for a subscription-less caller");
+    }
+
+    @Test
+    void saveOfDmExcludedBootstrapPostReturnsUnknownUid() throws Exception {
+        // The caller's DM exclusion removes the bootstrap source from their
+        // world; with no group leg, /save falls into the same empty-result
+        // path as an unknown UID (existence-vs-no-access never exposed).
+        String contactId = PREFIX + "bootexcl-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedBootstrapSource(PREFIX + "bootexcl-source");
+        seedDmExclusion(userId, sourceId);
+        String uid = PREFIX + "bootexcl-uid";
+        seedPost(sourceId, uid, "READY", "Title E", "Body E", null, null, null);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/save " + uid);
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_SAVE_UNKNOWN_UID), reply.text(),
+                "a DM-excluded bootstrap post must surface error.save.unknown_uid");
+        assertEquals(0L, countSavedPosts(contactId),
+                "no saved_post row may be written for an excluded post");
+    }
+
+    @Test
     void saveViaDepartedGroupMembershipReturnsUnknownUid() throws Exception {
         String contactId = PREFIX + "left-actor";
         UUID userId = seedUser(contactId);
@@ -525,6 +568,63 @@ class SaveCommandHandlerTest {
                 rs.next();
                 return (UUID) rs.getObject("id");
             }
+        }
+    }
+
+    /**
+     * A live bootstrap-origin source — implicitly in every scope's world
+     * (D59). Cleaned by both the prefix cleanup and the {@code @AfterEach}
+     * below: a bootstrap fixture that outlives this class would enter
+     * every other class's world.
+     */
+    private UUID seedBootstrapSource(String identifier) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO source (kind, identifier, display_name, category, "
+                             + "bootstrap_tags, source_origin) "
+                             + "VALUES ('rss', ?, ?, 'news', '{}', 'bootstrap') "
+                             + "RETURNING id")) {
+            ps.setString(1, identifier);
+            ps.setString(2, "Test Source " + identifier);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return (UUID) rs.getObject("id");
+            }
+        }
+    }
+
+    private void seedDmExclusion(UUID userId, UUID sourceId) throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            exec(conn,
+                    "INSERT INTO source_exclusion (scope_kind, scope_id, source_id) "
+                            + "VALUES ('dm', ?, ?)",
+                    userId, sourceId);
+        }
+    }
+
+    @AfterEach
+    void cleanupBootstrapFixtures() throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            // saved_post FK-references source: the successful bootstrap
+            // /save writes a snapshot row that must go before its source.
+            exec(conn,
+                    "DELETE FROM saved_post WHERE source_id IN ("
+                            + "SELECT id FROM source WHERE identifier LIKE ? "
+                            + "AND source_origin = 'bootstrap')",
+                    PREFIX + "%");
+            exec(conn,
+                    "DELETE FROM post WHERE source_id IN ("
+                            + "SELECT id FROM source WHERE identifier LIKE ? "
+                            + "AND source_origin = 'bootstrap')",
+                    PREFIX + "%");
+            exec(conn,
+                    "DELETE FROM source_exclusion WHERE source_id IN ("
+                            + "SELECT id FROM source WHERE identifier LIKE ?)",
+                    PREFIX + "%");
+            exec(conn,
+                    "DELETE FROM source WHERE identifier LIKE ? "
+                            + "AND source_origin = 'bootstrap'",
+                    PREFIX + "%");
         }
     }
 

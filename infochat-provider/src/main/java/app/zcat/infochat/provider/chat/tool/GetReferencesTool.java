@@ -26,7 +26,8 @@ import static app.zcat.infochat.provider.chat.tool.SearchPostsTool.jsonStr;
  * silently dropped from the response (Invariant 1), matching the
  * {@link GetPostTool} precedent. The agent sees an empty array when
  * either (a) the requested post has no links yet or (b) every linked
- * post falls outside the caller's subscription set.
+ * post falls outside the caller's world (D59: implicit bootstrap minus
+ * the scope's exclusions, plus its subscriptions).
  *
  * <p>Output JSON shape per docs/spec/security.md §Prompt-injection
  * defenses: {@code [{"uid": ..., "title": ..., "url": ...,
@@ -81,11 +82,11 @@ public class GetReferencesTool implements ChatToolRegistry.ChatTool {
         // The join shape: post_reference rows out of the requested post,
         // joined back to post for the linked-post metadata. The scope
         // filter mirrors GetPostTool: the linked post (p2) must be in the
-        // caller scope's source_subscription set; the source post (p1)
-        // is the one whose uid the caller supplied — it must also be in
-        // scope, otherwise we leak the existence of a non-scope post.
-        // Both p1 and p2 are required READY so unreviewed quarantine
-        // placeholders never surface.
+        // caller scope's D59 world (SearchPostsTool.worldPredicateSql);
+        // the source post (p1) is the one whose uid the caller supplied —
+        // it must also be in the world, otherwise we leak the existence
+        // of a non-visible post. Both p1 and p2 are required READY so
+        // unreviewed quarantine placeholders never surface.
         final String sql =
             "SELECT p2.uid AS to_uid, p2.title AS to_title, p2.url AS to_url, "
                 + "       pr.link_type, pr.score "
@@ -95,21 +96,26 @@ public class GetReferencesTool implements ChatToolRegistry.ChatTool {
                 + " WHERE p1.uid = ? "
                 + "   AND p1.status = 'READY' "
                 + "   AND p2.status = 'READY' "
-                + "   AND p1.source_id IN (SELECT source_id FROM source_subscription "
-                + "                         WHERE scope_kind = ? AND scope_id = ?) "
-                + "   AND p2.source_id IN (SELECT source_id FROM source_subscription "
-                + "                         WHERE scope_kind = ? AND scope_id = ?) "
+                + "   AND " + SearchPostsTool.worldPredicateSql("p1")
+                + "   AND " + SearchPostsTool.worldPredicateSql("p2")
                 + " ORDER BY pr.score DESC, p2.uid ASC "
                 + " LIMIT ?";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             cancellationService.armToolConnection(conn, userId, scopeKind, scopeId);
+            // p1's and p2's world predicates each bind two
+            // (scope_kind, scope_id) pairs: exclusion probe, then
+            // subscription arm (worldPredicateSql bind contract).
             ps.setString(1, uid);
             ps.setString(2, scopeKind);
             ps.setObject(3, scopeId);
             ps.setString(4, scopeKind);
             ps.setObject(5, scopeId);
-            ps.setInt(6, limit);
+            ps.setString(6, scopeKind);
+            ps.setObject(7, scopeId);
+            ps.setString(8, scopeKind);
+            ps.setObject(9, scopeId);
+            ps.setInt(10, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 StringBuilder json = new StringBuilder("[");
                 // '[' + ']' — every appended entry adds its own bytes (plus a

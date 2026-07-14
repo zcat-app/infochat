@@ -65,9 +65,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       {@link OutboundMessage} and exercises {@link EligiblePostQuery}
  *       exactly once.</li>
  *   <li>Empty-eligible-set branches (prose generator NOT invoked):
- *       zero subscriptions → no_subscriptions steer, subscribed but
- *       empty window → no_posts_yet; the subscription count is read
- *       only on the empty branch (M1-593).</li>
+ *       an empty world (zero non-excluded bootstrap sources AND zero
+ *       subscriptions, M1-621) → the no_subscriptions-keyed steer;
+ *       non-empty world but empty window → no_posts_yet; the world
+ *       count is read only on the empty branch.</li>
  *   <li>Happy path: 3 posts → 3 clusters → 3 prose calls → the
  *       handler self-delivers via the {@link RecordingProgressNotifier}
  *       ({@code handle} returns null), and the body passed to
@@ -175,53 +176,56 @@ class SummaryCommandHandlerTest {
     }
 
     @Test
-    void zeroSubscriptionsProducesNoSubscriptionsReplyWithoutLlmCall() {
-        // Empty eligible set AND zero source subscriptions → the distinct
-        // no_subscriptions steer (M1-593), NOT the window-blaming no_posts_yet;
-        // the handler short-circuits before reaching the prose generator.
+    void emptyWorldProducesSteerReplyWithoutLlmCall() {
+        // Empty eligible set AND an empty world — zero non-excluded
+        // bootstrap sources and zero subscriptions (M1-621) → the distinct
+        // steer reply, NOT the window-blaming no_posts_yet; the handler
+        // short-circuits before reaching the prose generator.
         eligiblePostQuery.seedNoPosts();
-        eligiblePostQuery.setSubscriptionCount(0);
+        eligiblePostQuery.setWorldSourceCount(0);
 
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "nosub"), "/summary");
 
         assertEquals(bundleLoader.get(BundleKeys.REPLY_SUMMARY_NO_SUBSCRIPTIONS, "en"), reply.text(),
-                "zero subscriptions → no_subscriptions reply. Got: " + reply.text());
-        assertEquals(1, eligiblePostQuery.countSubscriptionsCallCount(),
-                "the empty branch reads the subscription count exactly once");
+                "empty world → the steer reply. Got: " + reply.text());
+        assertEquals(1, eligiblePostQuery.countWorldSourcesCallCount(),
+                "the empty branch reads the world count exactly once");
         assertEquals(0, proseGenerator.callCount(),
-                "zero-subscription path must NOT call the LLM");
+                "empty-world path must NOT call the LLM");
     }
 
     @Test
-    void emptyEligibleSetWithSubscriptionsProducesNoPostsYetReply() {
-        // Empty eligible set but the scope HAS subscriptions (count > 0) → the
-        // unchanged no_posts_yet reply, NOT the no_subscriptions steer (M1-593
-        // acceptance item 7b). Proves the countSubscriptions RESULT drives the
-        // branch, not merely that the branch exists.
+    void emptyEligibleSetWithNonEmptyWorldProducesNoPostsYetReply() {
+        // Empty eligible set but the scope's world is non-empty (count > 0 —
+        // under D59's implicit bootstrap this is every fresh scope) → the
+        // window-blaming no_posts_yet, NOT the steer. Proves the
+        // countWorldSources RESULT drives the branch, not merely that the
+        // branch exists.
         eligiblePostQuery.seedNoPosts();
-        eligiblePostQuery.setSubscriptionCount(2);
+        eligiblePostQuery.setWorldSourceCount(2);
 
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "hassub"), "/summary");
 
         assertEquals(bundleLoader.get(BundleKeys.REPLY_SUMMARY_NO_POSTS_YET, "en"), reply.text(),
-                "subscribed-but-empty-window → no_posts_yet. Got: " + reply.text());
+                "non-empty-world-but-empty-window → no_posts_yet. Got: " + reply.text());
         assertEquals(0, proseGenerator.callCount(),
                 "empty-window path must NOT call the LLM");
     }
 
     @Test
-    void nonEmptySummaryDoesNotReadSubscriptionCount() {
-        // Acceptance item 2 (M1-593): the subscription count is read ONLY on the
-        // empty branch, so a /summary that returns posts runs no additional
-        // query. A non-empty result must never touch countSubscriptions.
+    void nonEmptySummaryDoesNotReadWorldSourceCount() {
+        // The world count is read ONLY on the empty branch (M1-593 shape,
+        // M1-621 semantics), so a /summary that returns posts runs no
+        // additional query. A non-empty result must never touch
+        // countWorldSources.
         eligiblePostQuery.seedPosts(
                 List.of(post(PREFIX + "np", "Headline", Instant.now())), /* excludedCount */ 0);
         proseGenerator.setResponseText("Summary prose for the cluster.");
 
         handler.handle(new ScopeRef.Dm(PREFIX + "haspost"), "/summary");
 
-        assertEquals(0, eligiblePostQuery.countSubscriptionsCallCount(),
-                "a non-empty /summary must not read the subscription count (no extra query)");
+        assertEquals(0, eligiblePostQuery.countWorldSourcesCallCount(),
+                "a non-empty /summary must not read the world count (no extra query)");
     }
 
     @Test
@@ -616,19 +620,19 @@ class SummaryCommandHandlerTest {
      */
     private static final class RecordingEligiblePostQuery extends EligiblePostQuery {
         private final AtomicInteger fetchCallCount = new AtomicInteger();
-        private final AtomicInteger countSubscriptionsCallCount = new AtomicInteger();
+        private final AtomicInteger countWorldSourcesCallCount = new AtomicInteger();
         private Result seeded =
                 new Result(List.of(), 0, 0, 200, "laptop", Optional.empty());
-        // Default models a SUBSCRIBED scope so the empty-window branch resolves
-        // to no_posts_yet; the zero-subscription case seeds 0 explicitly (M1-593).
-        private int subscriptionCount = 1;
+        // Default models a NON-EMPTY world so the empty-window branch resolves
+        // to no_posts_yet; the empty-world case seeds 0 explicitly (M1-621).
+        private int worldSourceCount = 1;
 
         void seedNoPosts() {
             seeded = new Result(List.of(), 0, 0, 200, "laptop", Optional.empty());
         }
 
-        void setSubscriptionCount(int count) {
-            this.subscriptionCount = count;
+        void setWorldSourceCount(int count) {
+            this.worldSourceCount = count;
         }
 
         void seedPosts(List<Post> posts, int excludedCount) {
@@ -655,17 +659,17 @@ class SummaryCommandHandlerTest {
         }
 
         @Override
-        public int countSubscriptions(String scopeKind, UUID scopeId) {
-            countSubscriptionsCallCount.incrementAndGet();
-            return subscriptionCount;
+        public int countWorldSources(String scopeKind, UUID scopeId) {
+            countWorldSourcesCallCount.incrementAndGet();
+            return worldSourceCount;
         }
 
         int fetchCallCount() {
             return fetchCallCount.get();
         }
 
-        int countSubscriptionsCallCount() {
-            return countSubscriptionsCallCount.get();
+        int countWorldSourcesCallCount() {
+            return countWorldSourcesCallCount.get();
         }
     }
 

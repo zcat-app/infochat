@@ -238,7 +238,13 @@ connect with (see decision D34 and `security.md`).
   `identifier` is the URL for HTTP-shaped sources or the filter spec for
   stream sources (decision D38). Carries an opaque per-kind `config`
   block, category, bootstrap tags (the tagger's deterministic fallback
-  per decision D22), status, and soft-delete state. Hard delete is
+  per decision D22), status, soft-delete state, and a closed
+  `source_origin ∈ {bootstrap, user}` discriminator (decision D59):
+  `bootstrap` rows are the implicit public corpus every scope
+  retrieves, `user` rows are private customs reachable only via a
+  subscription. The column default is `user` — fail-closed private —
+  and the bootstrap loader writes (and on re-list, promotes to)
+  `bootstrap`. Hard delete is
   forbidden in v1 so saved-post references always resolve.
 
   **Status state machine.** A source is in exactly one of three statuses:
@@ -262,7 +268,19 @@ connect with (see decision D34 and `security.md`).
   rows are global per D7 (a group admin cannot pause a source the
   whole deployment shares).
 - **Source subscription.** A (scope, source) link. DM scope is per user;
-  group scope is shared.
+  group scope is shared. Under decision D59 subscriptions carry the
+  PRIVATE half of a scope's world — its custom (`user`-origin)
+  sources; bootstrap opt-outs live in the exclusion entity below, not
+  here.
+- **Source exclusion.** A (scope, source) opt-out of one bootstrap
+  source (decision D59): `/unfollow-source` on a bootstrap source
+  writes it, `/follow-all-sources` clears the scope's rows. A separate
+  entity from Source subscription — a kind/flag column there would
+  silently change the semantics of every `source_id IN
+  (source subscriptions)` sub-select. Rows are insert/delete-only.
+  Exclusions of soft-deleted sources are inert (the world predicate's
+  bootstrap arm already filters `deleted_at`), and an exclusion
+  re-applies if the source is later revived — the scope opted out.
 - **Tag.** A row in the controlled vocabulary (Tier 1, decision D5).
   Seeded by the bootstrap loader and extended by `/add-source --tags`.
   **Stored form.** Every tag value is stored in its
@@ -272,12 +290,14 @@ connect with (see decision D34 and `security.md`).
   ingest and at every read/write site, so two values that hash
   differently before normalization (e.g. NFC vs NFKC homoglyph
   variants, mixed-case duplicates) collapse to a single row.
-- **Scope tag.** Per-scope follow / unfollow preference for digest content.
-  Each row corresponds 1-1 with a `/follow-tag` user action; `/unfollow-tag`
-  removes the row. Default for a fresh scope is "all tags from subscribed
-  sources" (decision D15) — the absence of any rows in this entity for a
-  scope means "all tags," not "no tags." The set of legal tag values is
-  the controlled vocabulary.
+- **Scope tag.** Per-scope follow / unfollow preference for digest content
+  — the DIGEST only (decision D59): chat/RAG retrieval ignores this
+  entity. Each row corresponds 1-1 with a `/follow-tag` user action;
+  `/unfollow-tag` removes the row. Default for a fresh scope is "all
+  tags from the scope's world sources" (decision D15 as reshaped by
+  D59) — the absence of any rows in this entity for a scope means "all
+  tags," not "no tags." The set of legal tag values is the controlled
+  vocabulary.
 
   **Vocabulary lifecycle (v1).** The controlled vocabulary is
   **append-only in v1**: tags enter via the bootstrap loader's
@@ -693,7 +713,7 @@ them together. They are tested in CI (see `verification.md`).
 3. **At most one group admin per group.** Enforced by a partial unique index
    so the "first @mention wins" auto-promote path is race-safe (decision D9).
 4. **Soft-delete only for sources.** `source` is never hard-deleted; FKs from
-   `post` and `saved_post` rely on this.
+   `post`, `saved_post`, and `source_exclusion` (decision D59) rely on this.
 5. **Outbox.** Posts are persisted before they are enqueued for evaluation.
    A startup rehydrator picks up any post left in `RAW` after a crash.
    Posts in `RAW` with one or more stage-outcome flags already set

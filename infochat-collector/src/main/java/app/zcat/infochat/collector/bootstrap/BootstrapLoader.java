@@ -160,14 +160,18 @@ public class BootstrapLoader {
         // The INSERT branch cannot fire when (kind, identifier) already
         // exists (the UNIQUE constraint), so the soft-deleted row's
         // old columns remain intact.
+        // source_origin = 'bootstrap' on BOTH branches (D59): the file is
+        // operator intent, so listing a previously /add-source'd ('user')
+        // source promotes it into the implicit public corpus.
         final String sql =
-            "INSERT INTO source (kind, identifier, display_name, category, bootstrap_tags, config) "
-                + "VALUES (?, ?, ?, ?, ?, ?::JSONB) "
+            "INSERT INTO source (kind, identifier, display_name, category, bootstrap_tags, config, source_origin) "
+                + "VALUES (?, ?, ?, ?, ?, ?::JSONB, 'bootstrap') "
                 + "ON CONFLICT (kind, identifier) DO UPDATE "
                 + "SET display_name = EXCLUDED.display_name, "
                 + "    category = EXCLUDED.category, "
                 + "    bootstrap_tags = EXCLUDED.bootstrap_tags, "
-                + "    config = EXCLUDED.config "
+                + "    config = EXCLUDED.config, "
+                + "    source_origin = 'bootstrap' "
                 + "WHERE source.deleted_at IS NULL";
 
         try (PreparedStatement ps = conn.prepareStatement(sql)) {

@@ -143,6 +143,40 @@ class UnfollowTagCommandHandlerTest {
                 "scope_tag must NOT contain the unfollowed tag B");
     }
 
+    // ----- (a2) ALL → EXPLICIT seeds from the WORLD, not subscriptions ----
+
+    @Test
+    void unfollowTagInAllModeOnSubscriptionlessScopeSeedsFromBootstrapWorld() throws Exception {
+        // Acceptance test (d) (M1-621): the ALL → EXPLICIT seed draws from
+        // the scope's D59 world — here the implicit bootstrap corpus — so a
+        // fresh scope with ZERO subscriptions still seeds
+        // all-bootstrap-tags-minus-one instead of the empty set that would
+        // zero its digest.
+        String actor = PREFIX + "worldSeed-actor";
+        UUID actorId = seedUser(actor);
+        UUID tagA = seedTag(PREFIX + "a");
+        UUID tagB = seedTag(PREFIX + "b");
+        UUID tagC = seedTag(PREFIX + "c");
+        seedBootstrapSourceWithTags(PREFIX + "boot-src",
+                PREFIX + "a", PREFIX + "b", PREFIX + "c");
+        seedScopePreferences(actorId, "ALL");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/unfollow-tag " + PREFIX + "b");
+
+        assertEquals(expectedSuccessFromAll(PREFIX + "b"), reply.text(),
+                "ALL → EXPLICIT must succeed for a subscription-less scope");
+        assertEquals("EXPLICIT", tagModeOf(actorId),
+                "tag_mode must flip to EXPLICIT");
+        assertEquals(2L, countScopeTag(actorId),
+                "the seed must draw from the bootstrap world, not the (empty) subscription set");
+        assertTrue(scopeTagContains(actorId, tagA), "scope_tag must contain tag A");
+        assertTrue(scopeTagContains(actorId, tagC), "scope_tag must contain tag C");
+        assertFalse(scopeTagContains(actorId, tagB),
+                "scope_tag must NOT contain the unfollowed tag B");
+    }
+
     // ----- (b) EXPLICIT mode: remove in place (followed set non-empty) ----
 
     @Test
@@ -461,6 +495,38 @@ class UnfollowTagCommandHandlerTest {
                 rs.next();
                 return (UUID) rs.getObject("id");
             }
+        }
+    }
+
+    /**
+     * A live bootstrap-origin source — implicitly in every scope's world
+     * (D59), so no subscription row accompanies it. Deleted by the
+     * bootstrap-specific {@code @AfterEach} below: a bootstrap fixture
+     * that outlives this class would enter EVERY other class's world.
+     */
+    private UUID seedBootstrapSourceWithTags(String identifier, String... bootstrapTags)
+            throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO source (kind, identifier, display_name, category, "
+                             + "bootstrap_tags, source_origin) "
+                             + "VALUES ('rss', ?, ?, 'news', ?, 'bootstrap') RETURNING id")) {
+            ps.setString(1, identifier);
+            ps.setString(2, identifier);
+            Array tagsArray = conn.createArrayOf("TEXT", bootstrapTags);
+            ps.setArray(3, tagsArray);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return (UUID) rs.getObject("id");
+            }
+        }
+    }
+
+    @AfterEach
+    void cleanupBootstrapFixtures() throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            exec(conn, "DELETE FROM source WHERE identifier LIKE ? "
+                    + "AND source_origin = 'bootstrap'", PREFIX + "%");
         }
     }
 

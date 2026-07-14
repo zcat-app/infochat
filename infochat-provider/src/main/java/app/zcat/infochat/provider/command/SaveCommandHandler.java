@@ -98,29 +98,40 @@ public class SaveCommandHandler implements CommandHandler {
     // the latest READY version. The JOIN on source supplies the
     // current bootstrap_tags for snapshot_tags.
     //
-    // The two EXISTS legs are the any-caller-scope visibility filter
-    // (spec §Content visibility-of-target rules): the post's source
-    // must be subscribed in the caller's DM scope (scope_id = the
-    // caller's users.id) or in an approved, non-removed group where
-    // the caller holds an active membership. A READY post outside
-    // that union falls into the same empty-result path as an unknown
-    // UID, so the existence-vs-no-access distinction is never exposed
-    // (the getPost contract, security.md §Prompt-injection defenses).
+    // The two legs are the any-caller-scope visibility filter (spec
+    // §Content visibility-of-target rules), each now the D59 world of
+    // one caller scope: the post's source must be in the caller's DM
+    // world (a live, non-DM-excluded bootstrap source, or a DM
+    // subscription; scope_id = the caller's users.id) or in the world
+    // of an approved, non-removed group where the caller holds an
+    // active membership (same bootstrap∨subscription form, exclusion
+    // keyed by that group's id). A READY post outside that union falls
+    // into the same empty-result path as an unknown UID, so the
+    // existence-vs-no-access distinction is never exposed (the getPost
+    // contract, security.md §Prompt-injection defenses).
     private static final String SELECT_POST_SQL =
             "SELECT p.id, p.title, p.body, p.url, p.author, p.published_at, "
                     + "p.source_id, s.bootstrap_tags "
                     + "FROM post p JOIN source s ON s.id = p.source_id "
                     + "WHERE p.uid = ? AND p.status = 'READY' "
-                    + "AND (EXISTS (SELECT 1 FROM source_subscription ss "
-                    + "WHERE ss.source_id = p.source_id "
-                    + "AND ss.scope_kind = 'dm' AND ss.scope_id = ?) "
+                    + "AND (((s.source_origin = 'bootstrap' AND s.deleted_at IS NULL "
+                    + "AND NOT EXISTS (SELECT 1 FROM source_exclusion e "
+                    + "WHERE e.scope_kind = 'dm' AND e.scope_id = ? "
+                    + "AND e.source_id = p.source_id)) "
                     + "OR EXISTS (SELECT 1 FROM source_subscription ss "
-                    + "JOIN group_membership gm ON gm.group_id = ss.scope_id "
-                    + "JOIN groups g ON g.id = gm.group_id "
                     + "WHERE ss.source_id = p.source_id "
-                    + "AND ss.scope_kind = 'group' "
-                    + "AND gm.user_id = ? AND gm.removed_at IS NULL "
-                    + "AND g.approval_status = 'approved' AND g.removed_at IS NULL)) "
+                    + "AND ss.scope_kind = 'dm' AND ss.scope_id = ?)) "
+                    + "OR EXISTS (SELECT 1 FROM group_membership gm "
+                    + "JOIN groups g ON g.id = gm.group_id "
+                    + "WHERE gm.user_id = ? AND gm.removed_at IS NULL "
+                    + "AND g.approval_status = 'approved' AND g.removed_at IS NULL "
+                    + "AND ((s.source_origin = 'bootstrap' AND s.deleted_at IS NULL "
+                    + "AND NOT EXISTS (SELECT 1 FROM source_exclusion e "
+                    + "WHERE e.scope_kind = 'group' AND e.scope_id = g.id "
+                    + "AND e.source_id = p.source_id)) "
+                    + "OR EXISTS (SELECT 1 FROM source_subscription ss "
+                    + "WHERE ss.source_id = p.source_id "
+                    + "AND ss.scope_kind = 'group' AND ss.scope_id = g.id)))) "
                     + "ORDER BY p.fetched_at DESC LIMIT 1";
 
     private static final String SELECT_ALREADY_SAVED_SQL =
@@ -278,9 +289,13 @@ public class SaveCommandHandler implements CommandHandler {
     private Optional<PostSnapshot> lookupVisibleReadyPost(Connection conn, String uid,
                                                           UUID actorId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(SELECT_POST_SQL)) {
+            // Binds: DM-world exclusion probe (the caller's users.id is the
+            // DM scope_id), DM subscription arm, then gm.user_id for the
+            // group-world leg (the group legs' scope ids correlate to g.id).
             ps.setString(1, uid);
             ps.setObject(2, actorId);
             ps.setObject(3, actorId);
+            ps.setObject(4, actorId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
                     return Optional.empty();

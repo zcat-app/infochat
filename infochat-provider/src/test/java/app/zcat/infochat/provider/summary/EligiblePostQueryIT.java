@@ -7,6 +7,7 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -47,10 +48,19 @@ class EligiblePostQueryIT {
 
     @Inject EligiblePostQuery query;
 
+    // @AfterEach too: a bootstrap-origin fixture source is visible to EVERY
+    // scope under the D59 world predicate, so one left behind would pollute
+    // other classes' scope-isolated retrieval assertions. The before-run
+    // cleanup alone (this class's original isolation) is not enough once
+    // bootstrap fixtures exist.
     @BeforeEach
+    @AfterEach
     void cleanup() throws Exception {
         try (Connection conn = dataSource.getConnection()) {
             exec(conn, "DELETE FROM post WHERE uid LIKE '" + PREFIX + "%'");
+            exec(conn, "DELETE FROM source_exclusion "
+                    + "WHERE source_id IN (SELECT id FROM source "
+                    + "                     WHERE identifier LIKE '" + PREFIX + "%')");
             exec(conn, "DELETE FROM source_subscription "
                     + "WHERE source_id IN (SELECT id FROM source "
                     + "                     WHERE identifier LIKE '" + PREFIX + "%')");
@@ -385,21 +395,96 @@ class EligiblePostQueryIT {
     }
 
     @Test
-    void countSubscriptionsReturnsActiveSubscriptionCountForScope() throws Exception {
-        // Live-DB coverage of the M1-593 countSubscriptions SQL. The handler-tier
+    void countWorldSourcesCountsBootstrapAndSubscriptions() throws Exception {
+        // Live-DB coverage of the M1-621 countWorldSources SQL. The handler-tier
         // SummaryCommandHandlerTest replaces this query with a test double, so
         // this IT is the only place the real SQL runs against a schema.
+        // Delta-based assertions: the bootstrap arm counts EVERY live
+        // bootstrap source globally, so an absolute count would couple this
+        // test to unrelated fixtures.
         UUID subscribedUser = insertUser("countsub-user");
         UUID unsubscribedUser = insertUser("countsub-other");
+        int baseline = query.countWorldSources("dm", unsubscribedUser);
+
         UUID sourceA = insertSource("countsub-a", "CSA");
         UUID sourceB = insertSource("countsub-b", "CSB");
         insertSubscription("dm", subscribedUser, sourceA);
         insertSubscription("dm", subscribedUser, sourceB);
+        assertEquals(baseline + 2, query.countWorldSources("dm", subscribedUser),
+                "the subscription arm adds the scope's own ('user'-origin) subscriptions");
+        assertEquals(baseline, query.countWorldSources("dm", unsubscribedUser),
+                "another scope's custom subscriptions never enter this scope's world");
 
-        assertEquals(2, query.countSubscriptions("dm", subscribedUser),
-                "counts exactly the scope's active source_subscription rows");
-        assertEquals(0, query.countSubscriptions("dm", unsubscribedUser),
-                "a scope following no sources counts 0 (the fresh-user empty-feed cliff)");
+        UUID bootstrapSource = insertBootstrapSource("countsub-boot", "CSBOOT");
+        assertEquals(baseline + 1, query.countWorldSources("dm", unsubscribedUser),
+                "a live bootstrap source is implicitly in every scope's world");
+
+        insertExclusion("dm", unsubscribedUser, bootstrapSource);
+        assertEquals(baseline, query.countWorldSources("dm", unsubscribedUser),
+                "the scope's exclusion removes the bootstrap source from ITS world only");
+        assertEquals(baseline + 3, query.countWorldSources("dm", subscribedUser),
+                "the other scope still sees the bootstrap source (per-scope exclusion)");
+    }
+
+    @Test
+    void bootstrapPostVisibleToSubscriptionlessScopeAndExclusionHidesIt() throws Exception {
+        // Acceptance item 2 test (a), EligiblePostQuery half: a
+        // bootstrap-origin post is retrieved by a scope with NO
+        // subscriptions; the scope's exclusion then hides it for that
+        // scope only.
+        UUID userId = insertUser("boot-user");
+        UUID otherUserId = insertUser("boot-other");
+        UUID bootstrapSource = insertBootstrapSource("boot-src", "BOOT");
+        insertPost("boot-post", bootstrapSource, "Bootstrap post", Instant.now(), "READY",
+                List.of(PREFIX + "news"));
+
+        Result result = query.fetch("dm", userId, Optional.empty(), Duration.ofHours(24));
+        assertEquals(1, result.posts().size(),
+                "the implicit bootstrap corpus reaches a subscription-less scope");
+        assertEquals("Bootstrap post", result.posts().get(0).title());
+
+        insertExclusion("dm", userId, bootstrapSource);
+        assertTrue(query.fetch("dm", userId, Optional.empty(), Duration.ofHours(24))
+                        .posts().isEmpty(),
+                "the excluding scope no longer sees the bootstrap post");
+        assertEquals(1, query.fetch("dm", otherUserId, Optional.empty(), Duration.ofHours(24))
+                        .posts().size(),
+                "a different scope still sees it (exclusion is per-scope)");
+    }
+
+    @Test
+    void top3RestrictionComputesOverBootstrapWorldForSubscriptionlessScope() throws Exception {
+        // topActiveFollowedTags is a world-predicate site too (M1-621): a
+        // subscription-less scope following >5 tags must compute a
+        // non-empty top-3 over the bootstrap corpus, not an empty set.
+        UUID userId = insertUser("boottop3-user");
+        UUID bootstrapSource = insertBootstrapSource("boottop3-src", "BT3");
+        String[] tagNames = { "bt-a", "bt-b", "bt-c", "bt-d", "bt-e", "bt-f" };
+        for (String t : tagNames) {
+            insertScopeTag("dm", userId, insertTag(t));
+        }
+        insertScopePreferences("dm", userId, "ALL");
+        Instant now = Instant.now();
+        // bt-a=3, bt-b=2, bt-c=1 posts; bt-d/e/f zero.
+        for (int i = 0; i < 3; i++) {
+            insertPost("boottop3-a" + i, bootstrapSource, "A" + i,
+                    now.minus(Duration.ofMinutes(i)), "READY", List.of(PREFIX + "bt-a"));
+        }
+        for (int i = 0; i < 2; i++) {
+            insertPost("boottop3-b" + i, bootstrapSource, "B" + i,
+                    now.minus(Duration.ofMinutes(10 + i)), "READY", List.of(PREFIX + "bt-b"));
+        }
+        insertPost("boottop3-c0", bootstrapSource, "C0",
+                now.minus(Duration.ofMinutes(20)), "READY", List.of(PREFIX + "bt-c"));
+
+        Result result = query.fetch("dm", userId, Optional.empty(), Duration.ofHours(24));
+        assertTrue(result.topTagRestriction().isPresent(),
+                ">5 followed tags → restriction fires even with zero subscriptions");
+        assertEquals(List.of(PREFIX + "bt-a", PREFIX + "bt-b", PREFIX + "bt-c"),
+                result.topTagRestriction().get().topTagNames(),
+                "the top-3 computes over the bootstrap world, not an empty subscription join");
+        assertEquals(6, result.totalBeforeCap(),
+                "all six bootstrap posts carry a top-3 tag and match");
     }
 
     @Test
@@ -462,6 +547,35 @@ class EligiblePostQueryIT {
                 rs.next();
                 return (UUID) rs.getObject(1);
             }
+        }
+    }
+
+    /** A live bootstrap-origin source — implicitly in every scope's world (D59). */
+    private UUID insertBootstrapSource(String suffix, String displayName) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO source (kind, identifier, display_name, category, "
+                             + "bootstrap_tags, status, source_origin) "
+                             + "VALUES ('rss', ?, ?, 'news', '{}', 'active', 'bootstrap') "
+                             + "RETURNING id")) {
+            ps.setString(1, PREFIX + suffix);
+            ps.setString(2, displayName);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return (UUID) rs.getObject(1);
+            }
+        }
+    }
+
+    private void insertExclusion(String scopeKind, UUID scopeId, UUID sourceId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO source_exclusion (scope_kind, scope_id, source_id) "
+                             + "VALUES (?, ?, ?)")) {
+            ps.setString(1, scopeKind);
+            ps.setObject(2, scopeId);
+            ps.setObject(3, sourceId);
+            ps.executeUpdate();
         }
     }
 

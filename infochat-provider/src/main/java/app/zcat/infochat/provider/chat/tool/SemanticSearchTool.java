@@ -23,11 +23,12 @@ import java.util.UUID;
 // backend (D54 — embeddings never leave the deployment) and runs ONE fused
 // SQL statement joining a pgvector nearest-neighbour probe over
 // post_embedding with a full-text probe over post.search_tsv (V58), fused
-// by Reciprocal Rank Fusion. Both arms carry the READY + subscription
-// predicates INSIDE the arm, and the fused set and its order are decided
-// entirely by SQL (D19); the LLM never picks the set. The lexical arm
-// recovers keyword-exact posts (CVE ids, product names) whose embeddings
-// fall outside the semantic threshold.
+// by Reciprocal Rank Fusion. Both arms carry the READY + D59 world
+// (implicit-bootstrap-not-excluded OR subscribed) predicates INSIDE the
+// arm, and the fused set and its order are decided entirely by SQL (D19);
+// the LLM never picks the set. The lexical arm recovers keyword-exact
+// posts (CVE ids, product names) whose embeddings fall outside the
+// semantic threshold.
 @ApplicationScoped
 public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
 
@@ -123,10 +124,10 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                                    String vectorLiteral, String query, int limit)
             throws SQLException {
         // ONE fused statement, two arms, both fully filtered BEFORE their
-        // LIMIT — the isolation predicates (READY + subscription, the same
-        // subquery SearchPostsTool uses) sit INSIDE each arm so no
-        // over-fetch-then-filter path can leak an unsubscribed post
-        // (redteam M1-589 2026-07-11 leak class).
+        // LIMIT — the isolation predicates (READY + the shared D59 world
+        // predicate, SearchPostsTool.worldPredicateSql) sit INSIDE each arm
+        // so no over-fetch-then-filter path can leak a post outside the
+        // caller's world (redteam M1-589 2026-07-11 leak class).
         //
         // Semantic arm: unchanged filtered HNSW probe — the distance-only
         // ORDER BY + LIMIT drives the index; the iterative scan (armed
@@ -164,8 +165,7 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                 + "              FROM post_embedding pe "
                 + "              JOIN post p ON p.id = pe.post_id "
                 + "             WHERE p.status = 'READY' "
-                + "               AND p.source_id IN (SELECT source_id FROM source_subscription "
-                + "                   WHERE scope_kind = ? AND scope_id = ?) "
+                + "               AND " + SearchPostsTool.worldPredicateSql("p")
                 + "               AND (pe.embedding <=> ?::vector) < ? "
                 + "             ORDER BY pe.embedding <=> ?::vector "
                 + "             LIMIT ? "
@@ -180,8 +180,7 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                 + "                           plainto_tsquery('english', ?)) AS lex_score "
                 + "              FROM post p "
                 + "             WHERE p.status = 'READY' "
-                + "               AND p.source_id IN (SELECT source_id FROM source_subscription "
-                + "                   WHERE scope_kind = ? AND scope_id = ?) "
+                + "               AND " + SearchPostsTool.worldPredicateSql("p")
                 + "               AND p.search_tsv @@ plainto_tsquery('english', ?) "
                 + "             ORDER BY lex_score DESC, post_id ASC "
                 + "             LIMIT ? "
@@ -191,19 +190,26 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                 + " ORDER BY fused_score DESC, post_id ASC "
                 + " LIMIT ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            // Each arm's world predicate binds two (scope_kind, scope_id)
+            // pairs: exclusion probe, then subscription arm
+            // (SearchPostsTool.worldPredicateSql bind contract).
             ps.setString(1, vectorLiteral);
             ps.setString(2, scopeKind);
             ps.setObject(3, scopeId);
-            ps.setString(4, vectorLiteral);
-            ps.setDouble(5, distanceThreshold);
+            ps.setString(4, scopeKind);
+            ps.setObject(5, scopeId);
             ps.setString(6, vectorLiteral);
-            ps.setInt(7, limit);
-            ps.setString(8, query);
-            ps.setString(9, scopeKind);
-            ps.setObject(10, scopeId);
-            ps.setString(11, query);
-            ps.setInt(12, limit);
-            ps.setInt(13, limit);
+            ps.setDouble(7, distanceThreshold);
+            ps.setString(8, vectorLiteral);
+            ps.setInt(9, limit);
+            ps.setString(10, query);
+            ps.setString(11, scopeKind);
+            ps.setObject(12, scopeId);
+            ps.setString(13, scopeKind);
+            ps.setObject(14, scopeId);
+            ps.setString(15, query);
+            ps.setInt(16, limit);
+            ps.setInt(17, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 // '[' + ']' — every appended entry adds its own bytes (plus
                 // a joining comma) against MAX_RESULT_BYTES, exactly as

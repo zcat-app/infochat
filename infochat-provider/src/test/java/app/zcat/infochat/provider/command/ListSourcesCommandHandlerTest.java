@@ -8,6 +8,7 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -87,6 +88,24 @@ class ListSourcesCommandHandlerTest {
                     PREFIX + "%");
             exec(conn, "DELETE FROM groups WHERE upstream_group_id LIKE ?", PREFIX + "%");
             exec(conn, "DELETE FROM users WHERE contact_id LIKE ?", PREFIX + "%");
+        }
+    }
+
+    // A bootstrap-origin fixture is visible to EVERY scope under the D59
+    // world predicate, so it must not outlive this class — the @BeforeEach
+    // prefix cleanup alone would leave it polluting other classes' runs.
+    @AfterEach
+    void cleanupBootstrapFixtures() throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            exec(conn,
+                    "DELETE FROM source_subscription WHERE source_id IN ("
+                            + "  SELECT id FROM source WHERE identifier LIKE ? "
+                            + "  AND source_origin = 'bootstrap')",
+                    "https://example.com/" + PREFIX + "%");
+            exec(conn,
+                    "DELETE FROM source WHERE identifier LIKE ? "
+                            + "AND source_origin = 'bootstrap'",
+                    "https://example.com/" + PREFIX + "%");
         }
     }
 
@@ -172,6 +191,48 @@ class ListSourcesCommandHandlerTest {
                 "DM listing must include the caller's subscribed source — got: " + body);
         assertFalse(body.contains(PREFIX + "dmCaller-theirs-name"),
                 "DM listing must NOT include another user's subscribed source — got: " + body);
+    }
+
+    @Test
+    void listSourcesBareShowsBootstrapCatalogueToSubscriptionlessCaller() throws Exception {
+        // Acceptance item 4 (M1-621): the bare listing is the caller's D59
+        // world catalogue — every live bootstrap source appears even with
+        // zero subscriptions, while another scope's custom ('user'-origin)
+        // source stays hidden (privacy).
+        String actor = PREFIX + "worldCaller";
+        String other = PREFIX + "worldOther";
+        seedUser(actor, false);
+        UUID otherId = seedUser(other, false);
+        seedBootstrapSource("world-boot");
+        UUID theirsSourceId = seedSource("world-theirs", "active", false);
+        seedSubscription("dm", otherId, theirsSourceId);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor), "/list-sources");
+        String body = reply.text();
+
+        assertTrue(body.contains(PREFIX + "world-boot-name"),
+                "a subscription-less caller must see the bootstrap catalogue — got: " + body);
+        assertFalse(body.contains(PREFIX + "world-theirs-name"),
+                "another scope's custom source must stay hidden — got: " + body);
+    }
+
+    @Test
+    void listSourcesDoesNotDoubleListSubscribedBootstrapSource() throws Exception {
+        // A legacy (pre-V59 bulk-subscribe) or re-added subscription to a
+        // bootstrap source must not render the source twice: the world
+        // catalogue is one row per source.
+        String actor = PREFIX + "dedupCaller";
+        UUID actorId = seedUser(actor, false);
+        UUID bootSrcId = seedBootstrapSource("dedup-boot");
+        seedSubscription("dm", actorId, bootSrcId);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor), "/list-sources");
+        String body = reply.text();
+
+        int first = body.indexOf(PREFIX + "dedup-boot-name");
+        assertTrue(first >= 0, "the subscribed bootstrap source must list — got: " + body);
+        assertEquals(-1, body.indexOf(PREFIX + "dedup-boot-name", first + 1),
+                "a subscribed bootstrap source must list exactly once — got: " + body);
     }
 
     @Test
@@ -391,6 +452,27 @@ class ListSourcesCommandHandlerTest {
             ps.setString(1, ADAPTER);
             ps.setString(2, contactId);
             ps.setBoolean(3, isAdmin);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return (UUID) rs.getObject("id");
+            }
+        }
+    }
+
+    /**
+     * A live bootstrap-origin source — implicitly in every scope's world
+     * catalogue (D59). The prefix cleanup removes it; it must not outlive
+     * this class (a leftover would enter every other class's world).
+     */
+    private UUID seedBootstrapSource(String slug) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO source (kind, identifier, display_name, category, "
+                             + "  bootstrap_tags, status, source_origin) "
+                             + "VALUES ('rss', ?, ?, 'news', '{}', 'active', 'bootstrap') "
+                             + "RETURNING id")) {
+            ps.setString(1, "https://example.com/" + PREFIX + slug);
+            ps.setString(2, PREFIX + slug + "-name");
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return (UUID) rs.getObject("id");

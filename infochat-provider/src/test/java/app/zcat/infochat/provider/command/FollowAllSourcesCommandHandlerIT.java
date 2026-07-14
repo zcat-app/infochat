@@ -8,6 +8,7 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -20,27 +21,21 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Shape B (Thin-SQL) tests for {@link FollowAllSourcesCommandHandler}
- * against the DevServices Postgres container (M1-576).
+ * against the DevServices Postgres container (M1-576; repurposed by
+ * M1-621/D59 from bulk-subscribe to "re-include all bootstrap sources").
  *
- * <p>The command's behavior IS the set-based idempotent INSERT over
- * {@code source_subscription}, so the assertions run over real rows
+ * <p>The command's behavior IS the scoped set-based {@code DELETE} over
+ * {@code source_exclusion}, so the assertions run over real rows
  * (mirroring {@code UnfollowSourceCommandHandlerTest}).</p>
- *
- * <p><b>Shared-DB counting.</b> The bulk subscribe targets EVERY live
- * {@code source} row in the container — including rows other test classes
- * seeded — so expected counts are queried ({@code countLiveSources()}) at
- * assertion time, never hardcoded, and cleanup deletes
- * {@code source_subscription} rows by this class's scope ids (the command
- * subscribes the test scopes to non-prefixed sources too, which a
- * source-prefix delete would miss).</p>
  *
  * <p>Test isolation: every fixture row carries the class-wide
  * {@code m1-576-} prefix; {@link #cleanup()} deletes only rows under that
- * prefix plus the test scopes' subscription rows.</p>
+ * prefix. Bootstrap-origin fixture sources are additionally removed
+ * {@code @AfterEach} — under the D59 world predicate a leftover would
+ * enter every other class's world.</p>
  */
 @QuarkusTest
 class FollowAllSourcesCommandHandlerIT {
@@ -58,17 +53,44 @@ class FollowAllSourcesCommandHandlerIT {
     void cleanup() throws Exception {
         inboundContext.setAdapterName(ADAPTER);
         inboundContext.setSenderContactId(null);
+        cleanupFixtures();
+    }
+
+    @AfterEach
+    void tearDown() throws Exception {
+        cleanupFixtures();
+    }
+
+    private void cleanupFixtures() throws Exception {
         try (Connection conn = dataSource.getConnection()) {
-            // Scope-id delete first: the bulk command subscribes the test
-            // scopes to ALL live sources (prefixed and not), so a
-            // source-prefix delete alone would strand rows and break the
-            // 0→N precondition on the next test.
+            // audit_log is append-only via V5 triggers and actor_user_id
+            // FK-references users, so the effective-clear audit rows must
+            // go (via the established disable-trigger dance) before the
+            // prefix users can be deleted.
+            exec(conn, "ALTER TABLE audit_log DISABLE TRIGGER trg_audit_log_no_update");
+            exec(conn, "ALTER TABLE audit_log DISABLE TRIGGER trg_audit_log_no_delete");
+            try {
+                exec(conn,
+                        "DELETE FROM audit_log WHERE actor_user_id IN ("
+                                + "  SELECT id FROM users WHERE contact_id LIKE ?)",
+                        PREFIX + "%");
+            } finally {
+                exec(conn, "ALTER TABLE audit_log ENABLE TRIGGER trg_audit_log_no_update");
+                exec(conn, "ALTER TABLE audit_log ENABLE TRIGGER trg_audit_log_no_delete");
+            }
+            // Exclusion rows by test scope AND by prefixed source: both
+            // directions, so neither a foreign-source exclusion for a test
+            // scope nor a test-source exclusion for a foreign scope strands.
             exec(conn,
-                    "DELETE FROM source_subscription WHERE scope_id IN ("
+                    "DELETE FROM source_exclusion WHERE scope_id IN ("
                             + "  SELECT id FROM users WHERE contact_id LIKE ?"
                             + "  UNION ALL"
                             + "  SELECT id FROM groups WHERE upstream_group_id LIKE ?)",
                     PREFIX + "%", PREFIX + "%");
+            exec(conn,
+                    "DELETE FROM source_exclusion WHERE source_id IN ("
+                            + "  SELECT id FROM source WHERE identifier LIKE ?)",
+                    "https://example.com/" + PREFIX + "%");
             exec(conn,
                     "DELETE FROM source_subscription WHERE source_id IN ("
                             + "  SELECT id FROM source WHERE identifier LIKE ?)",
@@ -85,82 +107,57 @@ class FollowAllSourcesCommandHandlerIT {
     }
 
     @Test
-    void freshDmScopeGoesFromZeroToEveryLiveSourceWithMatchingReplyCounts() throws Exception {
+    void clearingExclusionsReIncludesForCallerScopeOnlyAndReportsCount() throws Exception {
         String actor = PREFIX + "dm-actor";
+        String other = PREFIX + "dm-other";
         UUID actorId = seedUser(actor, false);
-        seedSource("dm-a");
-        seedSource("dm-b");
-        seedSource("dm-c");
-        long liveSources = countLiveSources();
-        assertEquals(0L, countSubscriptions("dm", actorId),
-                "precondition: a fresh scope must start with zero subscriptions");
+        UUID otherId = seedUser(other, false);
+        UUID sourceA = seedBootstrapSource("dm-a");
+        UUID sourceB = seedBootstrapSource("dm-b");
+        seedExclusion("dm", actorId, sourceA);
+        seedExclusion("dm", actorId, sourceB);
+        seedExclusion("dm", otherId, sourceA);
 
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor), "/follow-all-sources");
 
-        assertEquals(liveSources, countSubscriptions("dm", actorId),
-                "one call must subscribe the scope to every live source");
-        // Subscription completeness: no live source is missing from the
-        // scope's subscription set. This is the precondition /summary's
-        // eligibility filter (source_id IN scope subscriptions) needs to
-        // surface newly-followed sources — acceptance item 3's mechanism.
-        assertEquals(0L, countLiveSourcesNotSubscribed("dm", actorId),
-                "every live source must have a subscription row for the scope");
-        assertEquals(expectedDoneReply((int) liveSources, liveSources), reply.text(),
-                "reply must report the newly-subscribed count and the scope total");
+        assertEquals(0L, countExclusions("dm", actorId),
+                "the calling scope's exclusions must all be cleared");
+        assertEquals(1L, countExclusions("dm", otherId),
+                "another scope's exclusions must survive (per-scope privacy boundary)");
+        assertEquals(expectedDoneReply(2), reply.text(),
+                "reply must report the re-included (cleared) count");
+        assertEquals(1L, countFollowAllAudits(actorId),
+                "an effective clear writes exactly one FOLLOW_ALL_SOURCES audit row "
+                        + "(audit-before-effect; red-team 2026-07-14)");
     }
 
     @Test
-    void reRunIsIdempotentAndReportsOnlyTheDelta() throws Exception {
+    void reRunIsIdempotentAndReportsZero() throws Exception {
         String actor = PREFIX + "rerun-actor";
         UUID actorId = seedUser(actor, false);
-        seedSource("rerun-a");
-        seedSource("rerun-b");
-        long liveBefore = countLiveSources();
+        UUID sourceId = seedBootstrapSource("rerun-a");
+        seedExclusion("dm", actorId, sourceId);
 
         handler.handle(new ScopeRef.Dm(actor), "/follow-all-sources");
-        assertEquals(liveBefore, countSubscriptions("dm", actorId));
-
-        // Re-run with nothing new: a pure no-op — zero newly subscribed,
-        // total unchanged, no duplicate rows (the PK upsert guarantees it,
-        // but the count proves no other row shape slipped in).
         OutboundMessage noopReply = handler.handle(new ScopeRef.Dm(actor), "/follow-all-sources");
-        assertEquals(liveBefore, countSubscriptions("dm", actorId),
-                "a re-run must not change the subscription count");
-        assertEquals(expectedDoneReply(0, liveBefore), noopReply.text(),
-                "a no-op re-run must report 0 newly subscribed and the unchanged total");
 
-        // A source added after the first run: the next run subscribes ONLY
-        // the missing one (the acceptance's "adds only the sources not
-        // already followed").
-        seedSource("rerun-late");
-        OutboundMessage deltaReply = handler.handle(new ScopeRef.Dm(actor), "/follow-all-sources");
-        assertEquals(liveBefore + 1, countSubscriptions("dm", actorId),
-                "the delta run must add exactly the one not-yet-followed source");
-        assertEquals(expectedDoneReply(1, liveBefore + 1), deltaReply.text(),
-                "the delta run must report exactly 1 newly subscribed");
+        assertEquals(0L, countExclusions("dm", actorId));
+        assertEquals(expectedDoneReply(0), noopReply.text(),
+                "a re-run with nothing excluded must report 0 re-included");
+        assertEquals(1L, countFollowAllAudits(actorId),
+                "only the effective clear audits — the zero-clear no-op writes no row "
+                        + "(the no-effect-doesn't-audit pattern)");
     }
 
     @Test
-    void softDeletedSourceIsNeverSubscribed() throws Exception {
-        String actor = PREFIX + "softdel-actor";
-        UUID actorId = seedUser(actor, false);
-        UUID deletedSourceId = seedSoftDeletedSource("softdel");
-
-        handler.handle(new ScopeRef.Dm(actor), "/follow-all-sources");
-
-        assertFalse(isSubscribed("dm", actorId, deletedSourceId),
-                "a soft-deleted source (deleted_at IS NOT NULL) must be excluded "
-                        + "from the bulk subscribe");
-    }
-
-    @Test
-    void groupPlainMemberIsRefusedAndNoGroupSubscriptionIsWritten() throws Exception {
+    void groupPlainMemberIsRefusedAndExclusionsSurvive() throws Exception {
         String upstreamGroupId = PREFIX + "grp-plain";
         UUID groupId = seedGroup(upstreamGroupId);
         String member = PREFIX + "plain-member";
         UUID memberId = seedUser(member, false);
         seedGroupMembership(groupId, memberId, false);
-        seedSource("grpPlain");
+        UUID sourceId = seedBootstrapSource("grpPlain");
+        seedExclusion("group", groupId, sourceId);
         inboundContext.setSenderContactId(member);
 
         OutboundMessage reply = handler.handle(new ScopeRef.Group(upstreamGroupId),
@@ -169,28 +166,29 @@ class FollowAllSourcesCommandHandlerIT {
         assertEquals(bundleLoader.get(BundleKeys.ERROR_FOLLOW_ALL_SOURCES_GROUP_ADMIN_ONLY),
                 reply.text(),
                 "a plain group member must be refused with the group-admin-only error");
-        assertEquals(0L, countSubscriptions("group", groupId),
-                "a refused call must write no group subscription rows");
+        assertEquals(1L, countExclusions("group", groupId),
+                "a refused call must clear nothing");
     }
 
     @Test
-    void groupAdminBulkSubscribesTheGroupScope() throws Exception {
+    void groupAdminClearsTheGroupScopeExclusionsOnly() throws Exception {
         String upstreamGroupId = PREFIX + "grp-admin";
         UUID groupId = seedGroup(upstreamGroupId);
         String admin = PREFIX + "grp-admin-user";
         UUID adminId = seedUser(admin, false);
         seedGroupMembership(groupId, adminId, true);
-        seedSource("grpAdmin");
-        long liveSources = countLiveSources();
+        UUID sourceId = seedBootstrapSource("grpAdmin");
+        seedExclusion("group", groupId, sourceId);
+        seedExclusion("dm", adminId, sourceId);
         inboundContext.setSenderContactId(admin);
 
         OutboundMessage reply = handler.handle(new ScopeRef.Group(upstreamGroupId),
                 "/follow-all-sources");
 
-        assertEquals(liveSources, countSubscriptions("group", groupId),
-                "the group admin's call must subscribe the GROUP scope to every live source");
-        assertEquals(expectedDoneReply((int) liveSources, liveSources), reply.text());
-        assertEquals(0L, countSubscriptions("dm", adminId),
+        assertEquals(0L, countExclusions("group", groupId),
+                "the group admin's call must clear the GROUP scope's exclusions");
+        assertEquals(expectedDoneReply(1), reply.text());
+        assertEquals(1L, countExclusions("dm", adminId),
                 "the group-scope call must not touch the admin's own DM scope "
                         + "(per-scope isolation)");
     }
@@ -214,10 +212,10 @@ class FollowAllSourcesCommandHandlerIT {
 
     // ----- helpers ---------------------------------------------------------
 
-    private String expectedDoneReply(int newlySubscribed, long totalFollowed) {
+    private String expectedDoneReply(int reIncluded) {
         return MessageFormat.format(
                 bundleLoader.get(BundleKeys.REPLY_FOLLOW_ALL_SOURCES_DONE),
-                newlySubscribed, totalFollowed);
+                reIncluded);
     }
 
     private UUID seedUser(String contactId, boolean isAdmin) throws Exception {
@@ -235,12 +233,14 @@ class FollowAllSourcesCommandHandlerIT {
         }
     }
 
-    private UUID seedSource(String slug) throws Exception {
+    /** A live bootstrap-origin source — the only kind exclusions target. */
+    private UUID seedBootstrapSource(String slug) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO source (kind, identifier, display_name, category, "
-                             + "  bootstrap_tags, status) "
-                             + "VALUES ('rss', ?, ?, 'news', '{}', 'active') RETURNING id")) {
+                             + "  bootstrap_tags, status, source_origin) "
+                             + "VALUES ('rss', ?, ?, 'news', '{}', 'active', 'bootstrap') "
+                             + "RETURNING id")) {
             ps.setString(1, "https://example.com/" + PREFIX + slug);
             ps.setString(2, PREFIX + slug + "-name");
             try (ResultSet rs = ps.executeQuery()) {
@@ -250,19 +250,15 @@ class FollowAllSourcesCommandHandlerIT {
         }
     }
 
-    private UUID seedSoftDeletedSource(String slug) throws Exception {
+    private void seedExclusion(String scopeKind, UUID scopeId, UUID sourceId) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO source (kind, identifier, display_name, category, "
-                             + "  bootstrap_tags, status, deleted_at) "
-                             + "VALUES ('rss', ?, ?, 'news', '{}', 'active', now()) "
-                             + "RETURNING id")) {
-            ps.setString(1, "https://example.com/" + PREFIX + slug);
-            ps.setString(2, PREFIX + slug + "-name");
-            try (ResultSet rs = ps.executeQuery()) {
-                rs.next();
-                return (UUID) rs.getObject("id");
-            }
+                     "INSERT INTO source_exclusion (scope_kind, scope_id, source_id) "
+                             + "VALUES (?, ?, ?)")) {
+            ps.setString(1, scopeKind);
+            ps.setObject(2, scopeId);
+            ps.setObject(3, sourceId);
+            ps.executeUpdate();
         }
     }
 
@@ -294,14 +290,23 @@ class FollowAllSourcesCommandHandlerIT {
         }
     }
 
-    private long countLiveSources() throws Exception {
-        return queryLong("SELECT count(*) FROM source WHERE deleted_at IS NULL");
-    }
-
-    private long countSubscriptions(String scopeKind, UUID scopeId) throws Exception {
+    private long countFollowAllAudits(UUID actorUserId) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "SELECT count(*) FROM source_subscription "
+                     "SELECT count(*) FROM audit_log "
+                             + "WHERE action = 'FOLLOW_ALL_SOURCES' AND actor_user_id = ?")) {
+            ps.setObject(1, actorUserId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        }
+    }
+
+    private long countExclusions(String scopeKind, UUID scopeId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT count(*) FROM source_exclusion "
                              + "WHERE scope_kind = ? AND scope_id = ?")) {
             ps.setString(1, scopeKind);
             ps.setObject(2, scopeId);
@@ -309,46 +314,6 @@ class FollowAllSourcesCommandHandlerIT {
                 rs.next();
                 return rs.getLong(1);
             }
-        }
-    }
-
-    private long countLiveSourcesNotSubscribed(String scopeKind, UUID scopeId) throws Exception {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "SELECT count(*) FROM source s WHERE s.deleted_at IS NULL "
-                             + "AND NOT EXISTS (SELECT 1 FROM source_subscription ss "
-                             + "  WHERE ss.scope_kind = ? AND ss.scope_id = ? "
-                             + "    AND ss.source_id = s.id)")) {
-            ps.setString(1, scopeKind);
-            ps.setObject(2, scopeId);
-            try (ResultSet rs = ps.executeQuery()) {
-                rs.next();
-                return rs.getLong(1);
-            }
-        }
-    }
-
-    private boolean isSubscribed(String scopeKind, UUID scopeId, UUID sourceId)
-            throws Exception {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "SELECT 1 FROM source_subscription "
-                             + "WHERE scope_kind = ? AND scope_id = ? AND source_id = ?")) {
-            ps.setString(1, scopeKind);
-            ps.setObject(2, scopeId);
-            ps.setObject(3, sourceId);
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next();
-            }
-        }
-    }
-
-    private long queryLong(String sql) throws Exception {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
-            rs.next();
-            return rs.getLong(1);
         }
     }
 

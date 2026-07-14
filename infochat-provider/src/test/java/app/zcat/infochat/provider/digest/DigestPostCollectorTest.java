@@ -71,7 +71,12 @@ class DigestPostCollectorTest {
     }
 
     @Test
-    void collectForGroup_returnsEmptyWhenNoSubscriptions() throws SQLException {
+    void collectForGroup_returnsEmptyWhenWorldHasNoEligiblePosts() throws SQLException {
+        // An empty SQL result maps to an empty CollectionResult. (Pre-D59
+        // this test was named for the no-subscriptions empty cliff; under
+        // the implicit-bootstrap world a subscription-less group is NOT
+        // empty by construction — the behavioural proof lives in
+        // DigestPostCollectorIT. This unit test only pins the mapping.)
         collector.dataSource = new StubDataSource("ALL", 0L, 0L, List.of());
 
         DigestPostCollector.CollectionResult result =

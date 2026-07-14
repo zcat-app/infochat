@@ -175,6 +175,16 @@ public enum AuditAction implements AuditVerb {
     // /unfollow-source is not confirm-gated (a per-scope unsubscribe is
     // not a deployment-wide destructive act).
     UNFOLLOW_SOURCE,
+    // FOLLOW_ALL_SOURCES (M1-621/D59) records the repurposed bulk
+    // re-include: the calling scope's source_exclusion rows are cleared in
+    // one set-based DELETE (target_kind='source', target_id='all' — the
+    // LIST_SOURCES_ALL sentinel for a non-single-row source target).
+    // Written audit-before-effect only when at least one exclusion is
+    // cleared — the idempotent zero-clear no-op writes no row (the
+    // UNFOLLOW_SOURCE pattern). Closes the one-directional audit gap the
+    // 2026-07-14 red-team flagged: exclusion writes were audited, their
+    // bulk reversal was not.
+    FOLLOW_ALL_SOURCES,
     LIST_SOURCES_ALL,
     AUDIT_READ,
     QUARANTINE_LIST,

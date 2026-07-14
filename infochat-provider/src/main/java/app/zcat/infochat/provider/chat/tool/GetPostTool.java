@@ -55,18 +55,24 @@ public class GetPostTool implements ChatToolRegistry.ChatTool {
         }
 
         // Scope-filtered: returns null for invisible UIDs (same path as
-        // nonexistent — the distinction is never exposed).
+        // nonexistent — the distinction is never exposed). Visibility is
+        // the D59 world predicate — the same one the search tools apply —
+        // so every uid search can return resolves here (no
+        // search-visible-but-unfetchable post).
         String sql = "SELECT p.uid, p.title, p.body, p.url, p.ready_at, p.tags "
                    + "FROM post p "
                    + "WHERE p.uid = ? AND p.status = 'READY' "
-                   + "AND p.source_id IN (SELECT source_id FROM source_subscription "
-                   + "WHERE scope_kind = ? AND scope_id = ?)";
+                   + "AND " + SearchPostsTool.worldPredicateSql("p");
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             cancellationService.armToolConnection(conn, userId, scopeKind, scopeId);
+            // World predicate binds: exclusion probe pair, then
+            // subscription pair (worldPredicateSql bind contract).
             ps.setString(1, uid);
             ps.setString(2, scopeKind);
             ps.setObject(3, scopeId);
+            ps.setString(4, scopeKind);
+            ps.setObject(5, scopeId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) return "null";
 

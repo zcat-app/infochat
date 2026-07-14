@@ -261,16 +261,17 @@ them to the marked region — doing so would red the build.
   truncated with a "+N more" footer. **Empty window**: when no
   eligible posts exist in the window, `/summary` returns a friendly
   "no posts yet" reply (deterministic localization-bundle string,
-  no LLM invocation, no empty summary block). If the calling scope
-  has zero active subscriptions, `/summary` instead returns a
-  distinct "no subscriptions" reply (a separate deterministic
-  localization-bundle string, still no LLM invocation) that
-  attributes the emptiness to following no sources and steers the
-  user to `/follow-all-sources`. The subscription count is read only
-  when the eligible set is empty, so a non-empty `/summary` runs no
-  extra query — and the two empty sub-cases, "subscribed but nothing
-  arrived" (no posts yet) vs. "nothing subscribed" (no
-  subscriptions), are reported distinctly.
+  no LLM invocation, no empty summary block). If the calling scope's
+  world is EMPTY — every bootstrap source excluded and nothing
+  subscribed (impossible for a fresh scope under D59's implicit
+  corpus) — `/summary` instead returns a distinct empty-world reply
+  (a separate deterministic localization-bundle string, still no LLM
+  invocation) that attributes the emptiness to the empty world and
+  steers the user to `/follow-all-sources`. The world-source count is
+  read only when the eligible set is empty, so a non-empty `/summary`
+  runs no extra query — and the two empty sub-cases, "sources present
+  but nothing arrived" (no posts yet) vs. "empty world", are reported
+  distinctly.
   **Posts with Stage 1 redactions retained** (`stage2_failed=true`,
   released `READY` per `security.md` §Failure handling) are included
   in the eligible set; the LLM summarizer sees the redacted body
@@ -303,11 +304,11 @@ them to the marked region — doing so would red the build.
   `NEEDS_REVIEW` posts are never user-visible — they are reachable
   only by bot admins via `/quarantine list --all`. A `READY` post is
   additionally subject to an **any-caller-scope visibility filter**:
-  `/save` admits the post only if its source is subscribed in at
-  least one of the caller's scopes — the caller's own DM
-  subscriptions, or a group subscription of an approved, non-removed
-  group in which the caller holds an active membership
-  (`group_membership.removed_at IS NULL`). The filter is evaluated
+  `/save` admits the post only if its source is in at least one of
+  the caller's scopes' D59 worlds — the caller's DM world (a live,
+  non-DM-excluded bootstrap source, or a DM subscription), or the
+  world of an approved, non-removed group in which the caller holds
+  an active membership (`group_membership.removed_at IS NULL`). The filter is evaluated
   against the caller, not the calling scope — a post visible in a
   group the user belongs to may be saved from DM, consistent with
   saves being per-user-globally (decision D13). A `READY` post
@@ -452,6 +453,21 @@ Source rows are global; subscriptions are per-scope (decision D7). DM
 subscriptions are private to the user; group subscriptions are
 shared across the group and writable only by group admins.
 
+**The D59 subscription model (implicit bootstrap corpus).** Every
+source row carries a closed `source_origin ∈ {bootstrap, user}`
+discriminator. Bootstrap-origin sources (operator-seeded via
+`bootstrap-sources.json`; the loader marks — and on re-list,
+promotes — its rows `bootstrap`) form an **implicit public corpus**:
+every scope retrieves them without subscribing, and a scope opts out
+per-source via `/unfollow-source` (a per-scope exclusion; re-include
+via `/follow-all-sources` or `/add-source`). User-origin sources
+(`/add-source`'d customs, marked `user` — the fail-closed column
+default) are **private to their subscribers** and never surface to
+another scope. A scope's retrieval/digest world is exactly "live,
+non-excluded bootstrap sources OR the scope's subscriptions".
+`/follow-tag` narrows the DIGEST only; chat/RAG search stays broad
+over the whole world (§Per-scope tag preferences).
+
 - `/add-source <url> --tags … [--type <kind>] [--category <name>]` —
   DM: any non-banned user adds to their own scope. Group: group admin
   only. Tags are mandatory (decision D14). Identity is
@@ -586,8 +602,12 @@ shared across the group and writable only by group admins.
   documentation alone. The disclosure is omitted on the
   already-existed paths because the URL was already in the global
   set; subscribing to a known URL exposes nothing new.
-- `/list-sources [--all] [--include-deleted] [--page N]` — sources
-  subscribed by the calling scope; `--all` is bot-admin only and
+- `/list-sources [--all] [--include-deleted] [--page N]` — the
+  calling scope's world catalogue (D59): every live bootstrap source
+  PLUS the scope's own subscribed (custom) sources, one row per
+  source. Another scope's custom sources never appear; excluded
+  bootstrap sources still list (an exclusion affects retrieval, not
+  browsing). `--all` is bot-admin only and
   lists **every source row globally where `deleted_at IS NULL`**
   (across all kinds, all scopes, regardless of subscription).
   `failed` and `disabled` status rows are included with their
@@ -599,8 +619,22 @@ shared across the group and writable only by group admins.
   state and visible to bot admins via `--all`. Users adding
   private feeds should treat URLs as operator-visible
   (`security.md` §Source URL visibility).
-- `/unfollow-source <id>` — per-scope unsubscribe. Different from
-  `/remove-source`: does not touch the global source row.
+- `/unfollow-source <id>` — per-scope opt-out for any source in the
+  caller's world, branching on `source_origin` (D59): a CUSTOM
+  (`user`) source's subscription row is deleted, as before; a
+  BOOTSTRAP source gets a per-scope **exclusion** so it drops from
+  the caller's retrieval/digest — and only the caller's — with any
+  surviving subscription row for it deleted in the same transaction
+  (a pre-D59 bulk-subscribe row would otherwise keep the source
+  visible through the world predicate's subscription arm).
+  Re-include via `/follow-all-sources` (clears all the scope's
+  exclusions) or `/add-source` (re-subscribes past the exclusion).
+  A `user`-origin source outside the caller's world answers with the
+  same unknown-id reply as a nonexistent id — the
+  existence-vs-no-access discipline (`security.md` §Prompt-injection
+  defenses) extended to the newly-private source entity.
+  Different from `/remove-source`: never touches the global source
+  row.
   **Permission (v1).** DM: the caller's own subscription only.
   Group: **group admin or bot admin only** — a plain group member
   cannot unfollow a group subscription. The earlier "any group
@@ -610,19 +644,22 @@ shared across the group and writable only by group admins.
   "last contributor leaves" edge case) that no review report
   flagged as necessary. v2 may revisit if user requests
   materialize.
-- `/follow-all-sources` — bulk per-scope subscribe: upserts a
-  `source_subscription` row for the calling scope for **every live
-  source row (`deleted_at IS NULL`)** in one call. Idempotent — a
-  re-run subscribes only the sources not already followed and never
-  duplicates; the reply reports the newly-subscribed count and the
-  scope's new total. Exists to resolve the empty-feed cliff: bootstrap
-  seeding creates `source` rows but no subscriptions, so a fresh
-  approved user's `/summary` is empty until they follow feeds; this
-  removes the one-feed-at-a-time `/add-source` toil while keeping
-  subscription an explicit per-scope opt-in (no auto-subscribe at
-  registration). Soft-deleted rows are excluded; `disabled`/`failed`
-  rows are included (they are subscribable, matching `/add-source`
-  semantics — the scheduler simply isn't fetching them right now).
+- `/follow-all-sources` — re-include all bootstrap sources: clears
+  the calling scope's `/unfollow-source` exclusions in one idempotent
+  set-based delete; the reply reports the re-included count (zero on
+  a re-run with nothing excluded). An effective clear is audited
+  audit-before-effect in the same transaction (Invariant 7 — the bulk
+  re-include is as attributable as the exclusions it reverses); the
+  zero-clear no-op writes no audit row. Repurposed by D59: under the
+  implicit bootstrap corpus a fresh scope already retrieves every
+  bootstrap source — the empty-feed cliff this command originally
+  existed to resolve is gone, and its pre-D59 bulk-subscribe reading
+  would be a silent no-op — so the command keeps its "give me
+  everything" spirit with a coherent effect. (D59 explicitly
+  supersedes the prior "no auto-subscribe at registration / explicit
+  per-scope opt-in" stance recorded here.) Exclusion rows for
+  soft-deleted sources are inert either way (the world predicate's
+  bootstrap arm filters `deleted_at`).
   **Permission (v1)** mirrors `/add-source`: DM — any registered
   caller, own scope only; group — **group admin or bot admin only**.
   Blocked during slow-start probation (not in the §Slow-start allowed
@@ -680,13 +717,18 @@ breaks down on edge cases like `/unfollow-tag` against an empty set
 and makes the digest query depend on row presence.
 
 - `/follow-tag <tag>` / `/unfollow-tag <tag>` — controls which tags
-  appear in the scope's periodic digest. **Default for a fresh scope
-  is "all tags from subscribed sources" (decision D15) — and the
-  default is dynamic, recomputed at each digest run.** A scope in
+  appear in the scope's periodic digest — **the DIGEST only (D59)**:
+  chat/RAG retrieval (`searchPosts`, `semanticSearch`,
+  `getReferences`, `getPost`) intentionally ignores
+  `tag_mode`/`scope_tag`, so narrowing your digest never narrows what
+  chat can search. **Default for a fresh scope is "all tags from the
+  scope's world sources" (decision D15 as reshaped by D59: the
+  non-excluded bootstrap corpus plus the scope's subscriptions) — and
+  the default is dynamic, recomputed at each digest run.** A scope in
   `ALL` mode opts into the union of tags currently attached to its
-  subscribed sources at digest time, so a `/add-source` that
-  introduces a new tag to that union takes effect on the next
-  digest without requiring an explicit `/follow-tag`.
+  world sources at digest time, so a `/add-source` that introduces a
+  new tag to that union takes effect on the next digest without
+  requiring an explicit `/follow-tag`.
 
   Mode transitions:
 
@@ -694,16 +736,17 @@ and makes the digest query depend on row presence.
     `scope_tag` rows for **the followed tag only**. Matches the user
     mental model: "I asked for X, only X."
   - `ALL` mode + `/unfollow-tag <tag>` → flip to `EXPLICIT` and seed
-    rows for **all currently subscribed-source `bootstrap_tags`
-    minus the unfollowed tag**. Matches the user mental model: "I
-    want everything except X."
+    rows for **all the scope's world-source `bootstrap_tags`
+    minus the unfollowed tag** (D59: a fresh, subscription-less scope
+    seeds from the bootstrap corpus — never an empty set). Matches
+    the user mental model: "I want everything except X."
   - `EXPLICIT` mode + `/follow-tag` / `/unfollow-tag` → add or
     remove the row in place. When the row count drops to 0, the
     mode flips back to `ALL`.
 
-  Digest query: `ALL` mode uses the union of subscribed-source
-  `bootstrap_tags`; `EXPLICIT` mode uses only the tags whose
-  `scope_tag` rows exist for that scope.
+  Digest query: `ALL` mode uses the union of the scope's
+  world-source `bootstrap_tags`; `EXPLICIT` mode uses only the tags
+  whose `scope_tag` rows exist for that scope.
 
 - `/unfollow-tag --all` — bulk reset. Requires confirm. In any
   mode, deletes all `scope_tag` rows for the scope and sets
@@ -1399,8 +1442,8 @@ follow-up `/summary` from the same group during the cache TTL is
 served from cache (no second LLM call).
 
 **Zero-eligible-posts digest.** When a digest slot fires and there
-are no eligible posts for the group (no active subscriptions, or
-subscribed but nothing arrived in the window), the digest sends a
+are no eligible posts for the group (an empty world, or nothing
+arrived in the window), the digest sends a
 fixed **"no posts yet"** reply — the same deterministic
 localization-bundle string as `/summary` §Content empty window —
 rather than silently sending nothing. A silent digest slot would

@@ -41,8 +41,10 @@ public class DigestPostCollector {
             long sourceSubscriptionVersion) {}
 
     /**
-     * Collects posts matching the group's active subscriptions published since
-     * the given instant, plus the current subscription versions for cache-keying.
+     * Collects posts in the group's D59 world (implicit bootstrap corpus
+     * minus the group's exclusions, plus its subscriptions) published since
+     * the given instant, plus the current subscription versions for
+     * cache-keying.
      */
     public CollectionResult collectForGroup(UUID groupId, Instant since)
             throws SQLException {
@@ -69,6 +71,9 @@ public class DigestPostCollector {
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 int idx = 1;
                 ps.setTimestamp(idx++, Timestamp.from(since));
+                // Two groupId binds: the world predicate's exclusion probe,
+                // then its subscription arm.
+                ps.setObject(idx++, groupId);
                 ps.setObject(idx++, groupId);
                 if ("EXPLICIT".equals(tagMode)) {
                     ps.setObject(idx++, groupId);
@@ -113,7 +118,11 @@ public class DigestPostCollector {
               FROM scope_preferences
              WHERE scope_kind = 'group' AND scope_id = ?""";
 
-    // Source-subscription filter only; all tags pass.
+    // D59 world predicate; all tags pass. Bootstrap-origin sources (live,
+    // not excluded by this group) are implicitly visible; subscriptions add
+    // the rest. deleted_at IS NULL guards the bootstrap arm only — the
+    // subscription arm relies on /remove-source cascade-deleting
+    // subscription rows, as before.
     private static final String POSTS_ALL_SQL = """
             SELECT p.id, p.uid, p.source_id, s.display_name, p.title,
                    p.url, p.body, p.published_at, p.tags
@@ -121,12 +130,17 @@ public class DigestPostCollector {
               JOIN source s ON s.id = p.source_id
              WHERE p.status = 'READY'
                AND p.published_at >= ?
-               AND p.source_id IN (SELECT source_id FROM source_subscription
-                                    WHERE scope_kind = 'group' AND scope_id = ?)
+               AND ((s.source_origin = 'bootstrap' AND s.deleted_at IS NULL
+                     AND NOT EXISTS (SELECT 1 FROM source_exclusion e
+                                      WHERE e.scope_kind = 'group' AND e.scope_id = ?
+                                        AND e.source_id = s.id))
+                 OR p.source_id IN (SELECT source_id FROM source_subscription
+                                     WHERE scope_kind = 'group' AND scope_id = ?))
              ORDER BY p.published_at DESC, p.id DESC
              LIMIT ?""";
 
-    // Source-subscription + EXPLICIT tag-subscription filter.
+    // D59 world predicate + EXPLICIT tag-subscription filter (the digest
+    // KEEPS follow-tag narrowing — only chat/RAG decoupled, M1-621).
     private static final String POSTS_EXPLICIT_SQL = """
             SELECT p.id, p.uid, p.source_id, s.display_name, p.title,
                    p.url, p.body, p.published_at, p.tags
@@ -134,8 +148,12 @@ public class DigestPostCollector {
               JOIN source s ON s.id = p.source_id
              WHERE p.status = 'READY'
                AND p.published_at >= ?
-               AND p.source_id IN (SELECT source_id FROM source_subscription
-                                    WHERE scope_kind = 'group' AND scope_id = ?)
+               AND ((s.source_origin = 'bootstrap' AND s.deleted_at IS NULL
+                     AND NOT EXISTS (SELECT 1 FROM source_exclusion e
+                                      WHERE e.scope_kind = 'group' AND e.scope_id = ?
+                                        AND e.source_id = s.id))
+                 OR p.source_id IN (SELECT source_id FROM source_subscription
+                                     WHERE scope_kind = 'group' AND scope_id = ?))
                AND p.tags && (SELECT COALESCE(array_agg(t.name), ARRAY[]::TEXT[])
                                 FROM scope_tag st
                                 JOIN tag t ON t.id = st.tag_id

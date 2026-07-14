@@ -83,8 +83,11 @@ public class UnfollowTagCommandHandler implements CommandHandler {
     private static final String COUNT_SCOPE_TAG_FOR_SCOPE_SQL =
             "SELECT count(*) FROM scope_tag WHERE scope_kind = ? AND scope_id = ?";
 
-    // The seed-all-minus-one INSERT joins the actor's
-    // source_subscription set with each source's bootstrap_tags array
+    // The seed-all-minus-one INSERT joins the scope's D59 world source
+    // set (live, non-excluded bootstrap sources plus the scope's
+    // subscriptions — NOT source_subscription alone, or a fresh
+    // subscription-less scope would seed an empty EXPLICIT set and zero
+    // its digest; M1-621) with each source's bootstrap_tags array
     // (UNNEST), then resolves each name → tag(id) via the tag table.
     // The ON CONFLICT DO NOTHING keeps the INSERT idempotent against
     // ALL → EXPLICIT retries; the WHERE clause excludes the
@@ -94,11 +97,15 @@ public class UnfollowTagCommandHandler implements CommandHandler {
     private static final String INSERT_SEED_ALL_MINUS_ONE_SQL =
             "INSERT INTO scope_tag (scope_kind, scope_id, tag_id) "
                     + "SELECT DISTINCT ?, ?, t.id "
-                    + "FROM source_subscription ss "
-                    + "JOIN source s ON s.id = ss.source_id "
+                    + "FROM source s "
                     + "JOIN UNNEST(s.bootstrap_tags) AS bt(name) ON TRUE "
                     + "JOIN tag t ON t.name = bt.name "
-                    + "WHERE ss.scope_kind = ? AND ss.scope_id = ? "
+                    + "WHERE ((s.source_origin = 'bootstrap' AND s.deleted_at IS NULL "
+                    + "        AND NOT EXISTS (SELECT 1 FROM source_exclusion e "
+                    + "                         WHERE e.scope_kind = ? AND e.scope_id = ? "
+                    + "                           AND e.source_id = s.id)) "
+                    + "    OR s.id IN (SELECT source_id FROM source_subscription "
+                    + "                 WHERE scope_kind = ? AND scope_id = ?)) "
                     + "  AND t.id <> ? "
                     + "ON CONFLICT (scope_kind, scope_id, tag_id) DO NOTHING";
 
@@ -374,11 +381,15 @@ public class UnfollowTagCommandHandler implements CommandHandler {
     private void insertSeedAllMinusOne(Connection conn, String scopeKind, UUID scopeId,
                                        UUID excludedTagId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(INSERT_SEED_ALL_MINUS_ONE_SQL)) {
+            // Binds 3-6: the world predicate's exclusion probe pair, then
+            // its subscription-arm pair.
             ps.setString(1, scopeKind);
             ps.setObject(2, scopeId);
             ps.setString(3, scopeKind);
             ps.setObject(4, scopeId);
-            ps.setObject(5, excludedTagId);
+            ps.setString(5, scopeKind);
+            ps.setObject(6, scopeId);
+            ps.setObject(7, excludedTagId);
             ps.executeUpdate();
         }
     }

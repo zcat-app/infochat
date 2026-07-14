@@ -8,6 +8,7 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -69,6 +70,10 @@ class UnfollowSourceCommandHandlerTest {
             }
             exec(conn,
                     "DELETE FROM source_subscription WHERE source_id IN ("
+                            + "  SELECT id FROM source WHERE identifier LIKE ?)",
+                    "https://example.com/" + PREFIX + "%");
+            exec(conn,
+                    "DELETE FROM source_exclusion WHERE source_id IN ("
                             + "  SELECT id FROM source WHERE identifier LIKE ?)",
                     "https://example.com/" + PREFIX + "%");
             exec(conn, "DELETE FROM source WHERE identifier LIKE ?",
@@ -164,21 +169,115 @@ class UnfollowSourceCommandHandlerTest {
                 "the group subscription must be deleted by the group admin");
     }
 
+    // ----- bootstrap-origin branch: per-scope exclusion (D59, M1-621) ------
+
     @Test
-    void callerNotSubscribedReturnsNotSubscribedReply() throws Exception {
-        String actor = PREFIX + "notSub-actor";
-        seedUser(actor, false);
-        // Source exists, but the caller never subscribed to it.
-        UUID sourceId = seedSource("notSub");
+    void bootstrapUnfollowRecordsExclusionForCallerScopeOnlyAndAudits() throws Exception {
+        String actor = PREFIX + "boot-actor";
+        String other = PREFIX + "boot-other";
+        UUID actorId = seedUser(actor, false);
+        UUID otherId = seedUser(other, false);
+        UUID sourceId = seedBootstrapSource("boot");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor),
+                "/unfollow-source " + sourceId);
+
+        assertTrue(reply.text().contains(PREFIX + "boot-name"),
+                "success reply must name the excluded source — got: " + reply.text());
+        assertTrue(isExcluded("dm", actorId, sourceId),
+                "a source_exclusion row must exist for the caller's scope");
+        assertFalse(isExcluded("dm", otherId, sourceId),
+                "no other scope gains an exclusion (per-scope opt-out)");
+        assertTrue(isSourcePresent(sourceId),
+                "the global source row must survive — exclusion is per-scope only");
+        assertEquals(1L, countAuditByActionForTarget("UNFOLLOW_SOURCE", sourceId),
+                "the exclusion write must be audited (audit-before-effect)");
+    }
+
+    @Test
+    void bootstrapUnfollowAlsoDeletesLegacySubscriptionRow() throws Exception {
+        // A pre-V59 scope that bulk-subscribed holds a subscription row for
+        // every bootstrap source; the world predicate's OR arm would keep
+        // the source visible through it, so the exclusion and the
+        // subscription delete must land together.
+        String actor = PREFIX + "legacy-actor";
+        UUID actorId = seedUser(actor, false);
+        UUID sourceId = seedBootstrapSource("legacy");
+        seedSubscription("dm", actorId, sourceId);
+
+        handler.handle(new ScopeRef.Dm(actor), "/unfollow-source " + sourceId);
+
+        assertTrue(isExcluded("dm", actorId, sourceId),
+                "the exclusion row must be recorded");
+        assertFalse(isSubscribed("dm", actorId, sourceId),
+                "the legacy subscription row must be deleted in the same transaction");
+    }
+
+    @Test
+    void bootstrapUnfollowAlreadyExcludedIsFriendlyNoOpWithoutAudit() throws Exception {
+        String actor = PREFIX + "reexcl-actor";
+        UUID actorId = seedUser(actor, false);
+        UUID sourceId = seedBootstrapSource("reexcl");
+        seedExclusion("dm", actorId, sourceId);
 
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor),
                 "/unfollow-source " + sourceId);
 
         assertEquals(bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_SOURCE_NOT_SUBSCRIBED),
                 reply.text(),
-                "an un-subscribed caller must get the friendly not-subscribed reply");
+                "already-excluded and not re-subscribed → friendly no-op");
         assertEquals(0L, countAuditByActionForTarget("UNFOLLOW_SOURCE", sourceId),
-                "a not-subscribed no-op must write no audit row");
+                "a no-effect call must not write an audit row");
+    }
+
+    @Test
+    void bootstrapUnfollowAfterReAddReExcludesDespiteExistingExclusionRow() throws Exception {
+        // Exclude → /add-source re-subscribes past the exclusion → unfollow
+        // again. The no-op check must NOT fire while a subscription row
+        // survives, or the source could never be re-hidden.
+        String actor = PREFIX + "readd-actor";
+        UUID actorId = seedUser(actor, false);
+        UUID sourceId = seedBootstrapSource("readd");
+        seedExclusion("dm", actorId, sourceId);
+        seedSubscription("dm", actorId, sourceId);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor),
+                "/unfollow-source " + sourceId);
+
+        assertTrue(reply.text().contains(PREFIX + "readd-name"),
+                "the re-exclude must succeed, not no-op — got: " + reply.text());
+        assertFalse(isSubscribed("dm", actorId, sourceId),
+                "the re-added subscription row must be deleted");
+        assertTrue(isExcluded("dm", actorId, sourceId),
+                "the exclusion row remains in force");
+        assertEquals(1L, countAuditByActionForTarget("UNFOLLOW_SOURCE", sourceId),
+                "the effective re-exclude is audited once");
+    }
+
+    @Test
+    void unsubscribedCustomSourceIsIndistinguishableFromUnknownId() throws Exception {
+        // Existence-vs-no-access collapse (red-team 2026-07-14): another
+        // scope's private ('user'-origin) custom must answer with the SAME
+        // unknown-id reply as a nonexistent id — the former not-subscribed
+        // reply confirmed the private source id existed.
+        String actor = PREFIX + "notSub-actor";
+        String owner = PREFIX + "notSub-owner";
+        seedUser(actor, false);
+        UUID ownerId = seedUser(owner, false);
+        // Custom source in ANOTHER scope's world only.
+        UUID sourceId = seedSource("notSub");
+        seedSubscription("dm", ownerId, sourceId);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor),
+                "/unfollow-source " + sourceId);
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_UNFOLLOW_SOURCE_UNKNOWN_ID),
+                reply.text(),
+                "an out-of-world custom must be indistinguishable from an unknown id");
+        assertEquals(0L, countAuditByActionForTarget("UNFOLLOW_SOURCE", sourceId),
+                "a no-effect call must write no audit row");
+        assertTrue(isSubscribed("dm", ownerId, sourceId),
+                "the owner's subscription is untouched by another scope's probe");
     }
 
     @Test
@@ -272,6 +371,74 @@ class UnfollowSourceCommandHandlerTest {
                 rs.next();
                 return (UUID) rs.getObject("id");
             }
+        }
+    }
+
+    /**
+     * A live bootstrap-origin source — implicitly in every scope's world
+     * (D59). The prefix cleanup and the {@code @AfterEach} below remove
+     * it; a leftover would enter every other class's world.
+     */
+    private UUID seedBootstrapSource(String slug) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO source (kind, identifier, display_name, category, "
+                             + "  bootstrap_tags, status, source_origin) "
+                             + "VALUES ('rss', ?, ?, 'news', '{}', 'active', 'bootstrap') "
+                             + "RETURNING id")) {
+            ps.setString(1, "https://example.com/" + PREFIX + slug);
+            ps.setString(2, PREFIX + slug + "-name");
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return (UUID) rs.getObject("id");
+            }
+        }
+    }
+
+    private void seedExclusion(String scopeKind, UUID scopeId, UUID sourceId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO source_exclusion (scope_kind, scope_id, source_id) "
+                             + "VALUES (?, ?, ?)")) {
+            ps.setString(1, scopeKind);
+            ps.setObject(2, scopeId);
+            ps.setObject(3, sourceId);
+            ps.executeUpdate();
+        }
+    }
+
+    private boolean isExcluded(String scopeKind, UUID scopeId, UUID sourceId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT 1 FROM source_exclusion "
+                             + "WHERE scope_kind = ? AND scope_id = ? AND source_id = ?")) {
+            ps.setString(1, scopeKind);
+            ps.setObject(2, scopeId);
+            ps.setObject(3, sourceId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    @AfterEach
+    void cleanupBootstrapFixtures() throws Exception {
+        // Bootstrap-origin fixtures must not outlive this class (they are
+        // visible to EVERY scope under the D59 world predicate).
+        try (Connection conn = dataSource.getConnection()) {
+            exec(conn,
+                    "DELETE FROM source_exclusion WHERE source_id IN ("
+                            + "  SELECT id FROM source WHERE identifier LIKE ?)",
+                    "https://example.com/" + PREFIX + "%");
+            exec(conn,
+                    "DELETE FROM source_subscription WHERE source_id IN ("
+                            + "  SELECT id FROM source WHERE identifier LIKE ? "
+                            + "  AND source_origin = 'bootstrap')",
+                    "https://example.com/" + PREFIX + "%");
+            exec(conn,
+                    "DELETE FROM source WHERE identifier LIKE ? "
+                            + "AND source_origin = 'bootstrap'",
+                    "https://example.com/" + PREFIX + "%");
         }
     }
 

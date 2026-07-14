@@ -41,8 +41,6 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
      */
     static final int MAX_RESULT_BYTES = 16 * 1024;
 
-    private enum TagMode { ALL, EXPLICIT }
-
     private final DataSource dataSource;
     private final CancellationService cancellationService;
 
@@ -84,12 +82,13 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
 
             validateTagsKnown(conn, tags);
 
-            TagMode tagMode = readTagMode(conn, scopeKind, scopeId);
-            EffectiveTags effectiveTags =
-                    computeEffectiveTags(conn, tags, tagMode, scopeKind, scopeId);
+            // The scope's /follow-tag preferences intentionally do NOT apply
+            // here: tag preferences narrow the DIGEST only; chat/RAG search
+            // stays broad over the scope's whole world (D59, M1-621). Only
+            // the caller-requested tags (validated above) filter.
             Instant cutoff = clock.instant().minus(window);
 
-            return queryPosts(conn, scopeKind, scopeId, effectiveTags, cutoff, limit);
+            return queryPosts(conn, scopeKind, scopeId, tags, cutoff, limit);
         }
     }
 
@@ -122,75 +121,8 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
         }
     }
 
-    private TagMode readTagMode(Connection conn, String scopeKind, UUID scopeId)
-            throws SQLException {
-        String sql = "SELECT tag_mode FROM scope_preferences "
-                   + "WHERE scope_kind = ? AND scope_id = ?";
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, scopeKind);
-            ps.setObject(2, scopeId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) return TagMode.ALL;
-                String raw = rs.getString("tag_mode");
-                return raw != null && raw.equalsIgnoreCase("EXPLICIT")
-                        ? TagMode.EXPLICIT : TagMode.ALL;
-            }
-        }
-    }
-
-    /**
-     * The resolved tag filter for a search. {@code constrained} separates
-     * "no tag constraint was requested" (ALL mode, no tags → the unfiltered
-     * subscribed feed) from "a constraint that resolved to the empty set"
-     * (EXPLICIT mode whose intersection or followed-set is empty → zero
-     * posts). Both leave {@code tags} empty, so the flag — not the list's
-     * emptiness — decides whether {@code queryPosts} applies the tag clause.
-     */
-    private record EffectiveTags(List<String> tags, boolean constrained) {}
-
-    private EffectiveTags computeEffectiveTags(Connection conn, List<String> requestedTags,
-                                               TagMode tagMode, String scopeKind, UUID scopeId)
-            throws SQLException {
-        if (!requestedTags.isEmpty()) {
-            if (tagMode == TagMode.EXPLICIT) {
-                Set<String> scopeTags = readScopeTags(conn, scopeKind, scopeId);
-                List<String> intersection = new ArrayList<>();
-                for (String tag : requestedTags) {
-                    if (scopeTags.contains(tag)) intersection.add(tag);
-                }
-                // EXPLICIT mode narrows the request to the scope's followed
-                // tags; an empty intersection is a constraint that matched
-                // nothing, so it must yield zero posts — not the unfiltered
-                // feed that an unconstrained empty list would yield.
-                return new EffectiveTags(intersection, true);
-            }
-            return new EffectiveTags(requestedTags, true);
-        }
-        if (tagMode == TagMode.EXPLICIT) {
-            return new EffectiveTags(
-                    new ArrayList<>(readScopeTags(conn, scopeKind, scopeId)), true);
-        }
-        return new EffectiveTags(List.of(), false);
-    }
-
-    private Set<String> readScopeTags(Connection conn, String scopeKind, UUID scopeId)
-            throws SQLException {
-        String sql = "SELECT t.name FROM scope_tag st "
-                   + "JOIN tag t ON t.id = st.tag_id "
-                   + "WHERE st.scope_kind = ? AND st.scope_id = ?";
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, scopeKind);
-            ps.setObject(2, scopeId);
-            try (ResultSet rs = ps.executeQuery()) {
-                Set<String> names = new LinkedHashSet<>();
-                while (rs.next()) names.add(rs.getString("name"));
-                return names;
-            }
-        }
-    }
-
     private String queryPosts(Connection conn, String scopeKind, UUID scopeId,
-                               EffectiveTags effectiveTags, Instant cutoff,
+                               List<String> requestedTags, Instant cutoff,
                                int limit) throws SQLException {
         StringBuilder sql = new StringBuilder();
         // published_at stays the window filter and sort key below; the
@@ -200,20 +132,18 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
            .append("FROM post p ")
            .append("WHERE p.status = 'READY' ")
            .append("AND p.published_at >= ? ")
-           .append("AND p.source_id IN (SELECT source_id FROM source_subscription ")
-           .append("WHERE scope_kind = ? AND scope_id = ?) ");
+           .append("AND ").append(worldPredicateSql("p")).append(' ');
 
         List<Object> params = new ArrayList<>();
         params.add(Timestamp.from(cutoff));
         params.add(scopeKind);
         params.add(scopeId);
+        params.add(scopeKind);
+        params.add(scopeId);
 
-        if (effectiveTags.constrained()) {
-            // A constrained empty list binds an empty TEXT[]; p.tags && '{}'
-            // overlaps nothing, so the EXPLICIT empty-intersection case yields
-            // zero posts (mirroring EligiblePostQuery's followed-set filter).
+        if (!requestedTags.isEmpty()) {
             sql.append("AND p.tags && ?::TEXT[] ");
-            params.add(effectiveTags.tags().toArray(new String[0]));
+            params.add(requestedTags.toArray(new String[0]));
         }
 
         sql.append("ORDER BY p.published_at DESC, p.id DESC LIMIT ?");
@@ -253,6 +183,31 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
                 return json.toString();
             }
         }
+    }
+
+    /**
+     * The D59 world predicate for post-visibility sites without a
+     * {@code source} join, parameterized by the post alias: the post's
+     * source is visible to the calling scope iff it is a live
+     * ({@code deleted_at IS NULL}), non-excluded bootstrap source, OR in
+     * the scope's {@code source_subscription}. Binds two
+     * {@code (scope_kind, scope_id)} pairs in order — the exclusion probe
+     * first, then the subscription arm. Shared by the chat tools so the
+     * privacy-bearing predicate cannot drift per site (M1-621); the inner
+     * aliases {@code s_w}/{@code e_w} avoid colliding with callers' own
+     * table aliases.
+     */
+    static String worldPredicateSql(String postAlias) {
+        return "(EXISTS (SELECT 1 FROM source s_w "
+             + "          WHERE s_w.id = " + postAlias + ".source_id "
+             + "            AND s_w.source_origin = 'bootstrap' "
+             + "            AND s_w.deleted_at IS NULL "
+             + "            AND NOT EXISTS (SELECT 1 FROM source_exclusion e_w "
+             + "                             WHERE e_w.scope_kind = ? AND e_w.scope_id = ? "
+             + "                               AND e_w.source_id = s_w.id)) "
+             + " OR " + postAlias + ".source_id IN "
+             + "    (SELECT source_id FROM source_subscription "
+             + "      WHERE scope_kind = ? AND scope_id = ?))";
     }
 
     private static void bindParams(PreparedStatement ps, Connection conn,

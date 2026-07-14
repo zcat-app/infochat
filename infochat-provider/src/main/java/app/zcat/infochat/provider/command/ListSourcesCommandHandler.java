@@ -41,13 +41,18 @@ import java.util.UUID;
  *
  * <p>The four happy paths:</p>
  * <ul>
- *   <li><b>(a) no flags, DM scope</b> — caller's own
- *       {@code source_subscription} rows
- *       ({@code scope_kind='dm' AND scope_id=actor.id}).</li>
- *   <li><b>(b) no flags, group scope</b> — the group's subscriptions
- *       (per spec D7, visible to every group member);
- *       {@code scope_kind='group' AND scope_id=groups.id} after
- *       mapping the adapter-local upstream group id.</li>
+ *   <li><b>(a) no flags, DM scope</b> — the caller's world catalogue
+ *       (D59, M1-621): every live bootstrap source PLUS the caller's
+ *       own subscribed sources ({@code scope_kind='dm' AND
+ *       scope_id=actor.id}) — which under D59 means their private
+ *       customs. Another scope's custom ({@code origin='user'}) source
+ *       never appears. Excluded bootstrap sources still list (the
+ *       catalogue is unfiltered — an exclusion affects retrieval, not
+ *       browsing).</li>
+ *   <li><b>(b) no flags, group scope</b> — the same world catalogue for
+ *       the group's scope ({@code scope_kind='group' AND
+ *       scope_id=groups.id} after mapping the adapter-local upstream
+ *       group id), visible to every group member (per spec D7).</li>
  *   <li><b>(c) {@code --all} (admin)</b> — every source row globally
  *       where {@code deleted_at IS NULL}, regardless of subscription.
  *       Reply header includes the URL-visibility caveat.</li>
@@ -76,12 +81,18 @@ public class ListSourcesCommandHandler implements CommandHandler {
             "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ? "
                     + "AND removed_at IS NULL";
 
+    // The scope's world catalogue (D59): every live bootstrap source plus
+    // the scope's own subscriptions. Single-table OR form — one row per
+    // source, so a subscribed bootstrap source (legacy pre-V59 rows, or
+    // /add-source re-adds) cannot double-list. Exclusions intentionally
+    // not filtered: they affect retrieval, not browsing.
     private static final String SELECT_SCOPED_SOURCES_SQL =
             "SELECT s.id, s.display_name, s.identifier, s.kind, s.status, s.deleted_at "
                     + "FROM source s "
-                    + "JOIN source_subscription ss ON ss.source_id = s.id "
-                    + "WHERE ss.scope_kind = ? AND ss.scope_id = ? "
-                    + "  AND s.deleted_at IS NULL "
+                    + "WHERE s.deleted_at IS NULL "
+                    + "  AND (s.source_origin = 'bootstrap' "
+                    + "       OR s.id IN (SELECT source_id FROM source_subscription "
+                    + "                    WHERE scope_kind = ? AND scope_id = ?)) "
                     + "ORDER BY s.display_name "
                     + "LIMIT ? OFFSET ?";
 

@@ -80,10 +80,18 @@ public class SourceUpsertService {
                     + "SELECT t, t, 'user' FROM unnest(?::text[]) AS t "
                     + "ON CONFLICT (name) DO NOTHING";
 
+    // source_origin: explicit 'user' on the INSERT branch (D59 — a custom
+    // source is private to its subscribers; stated inline rather than
+    // leaning on the V59 column default so the privacy-bearing value is
+    // visible at the write site). The DO UPDATE branch must NOT touch
+    // source_origin: EXCLUDED.source_origin would demote an existing
+    // bootstrap row to 'user' on re-add, and the provider role's
+    // column-scoped UPDATE grant (V31) does not include source_origin —
+    // the promote direction is collector-side (BootstrapLoader) only.
     private static final String UPSERT_SOURCE_SQL =
             "INSERT INTO source "
-                    + "(kind, identifier, display_name, category, bootstrap_tags, status, added_by) "
-                    + "VALUES (?, ?, ?, ?, ?, 'active', ?) "
+                    + "(kind, identifier, display_name, category, bootstrap_tags, status, added_by, source_origin) "
+                    + "VALUES (?, ?, ?, ?, ?, 'active', ?, 'user') "
                     + "ON CONFLICT (kind, identifier) DO UPDATE "
                     + "SET bootstrap_tags = CASE "
                     + "      WHEN ? AND source.deleted_at IS NULL THEN EXCLUDED.bootstrap_tags "

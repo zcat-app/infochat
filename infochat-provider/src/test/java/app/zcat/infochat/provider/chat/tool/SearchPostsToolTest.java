@@ -197,13 +197,16 @@ class SearchPostsToolTest {
     }
 
     @Test
-    void explicitModeRequestingUnfollowedTagReturnsEmpty() throws Exception {
+    void requestedTagOutsideFollowedSetStillReturnsHits() throws Exception {
         UUID userId = seedUser("explicit-miss");
         UUID sourceId = seedSource("explicit-miss-src", "Explicit-miss source");
         seedSubscription("dm", userId, sourceId);
         // Scope follows alpha only; beta is a known tag the scope does NOT
-        // follow. A beta-tagged, subscribed, in-window post is present, so if
-        // the empty intersection were treated as "no filter" it would surface.
+        // follow. Under D59 the scope's /follow-tag preferences narrow the
+        // DIGEST only — chat search stays broad (M1-621) — so a
+        // beta-tagged, in-world, in-window post MUST surface for an
+        // explicit beta request. (Pre-D59, the EXPLICIT-mode intersection
+        // made this empty.)
         UUID alpha = seedTag(TAG_PREFIX + "alpha");
         seedTag(TAG_PREFIX + "beta");
         followTag("dm", userId, alpha);
@@ -216,9 +219,9 @@ class SearchPostsToolTest {
         String json = tool.execute(userId, "dm", userId,
                 Map.of("tags", List.of(TAG_PREFIX + "beta")));
 
-        assertEquals("[]", json,
-            "EXPLICIT mode requesting a tag the scope does not follow has an empty "
-                + "intersection and must yield zero posts, not the unfiltered feed; got: " + json);
+        assertTrue(json.contains(PREFIX + "beta-post"),
+            "chat search is decoupled from /follow-tag: requesting a known tag outside "
+                + "the followed set still returns its posts; got: " + json);
     }
 
     @Test
@@ -269,7 +272,7 @@ class SearchPostsToolTest {
     }
 
     @Test
-    void explicitSearchPostsMatchesSummaryEligiblePostQueryForSameScopeState() throws Exception {
+    void searchStaysBroadWhileSummaryNarrowsForSameExplicitScopeState() throws Exception {
         UUID userId = seedUser("parity");
         UUID sourceId = seedSource("parity-src", "Parity source");
         seedSubscription("dm", userId, sourceId);
@@ -284,26 +287,26 @@ class SearchPostsToolTest {
         seedReadyPostWithTags("beta-post", sourceId, publishedAt,
                 publishedAt.plus(5, ChronoUnit.MINUTES), TAG_PREFIX + "beta");
 
-        // searchPosts in EXPLICIT mode with no requested tags filters by the
-        // scope's followed set; EligiblePostQuery (the deterministic /summary
-        // sibling) with no positional tag does the same. For one scope state
-        // the two must agree on the post set.
+        // Intentional divergence (D59, M1-621): searchPosts ignores the
+        // scope's followed set — chat/RAG searches the scope's whole world —
+        // while EligiblePostQuery, the /summary digest sibling, KEEPS the
+        // follow-tag narrowing. One scope state, two deliberate contracts
+        // (this replaced the pre-D59 parity assertion).
         String json = tool.execute(userId, "dm", userId,
                 Map.of("window", "PT24H"));
         Set<String> searchUids = uidsFromJson(json);
+        assertEquals(Set.of(PREFIX + "alpha-post", PREFIX + "beta-post"), searchUids,
+            "EXPLICIT scope with a narrow followed set: searchPosts still returns hits "
+                + "outside those tags; got: " + searchUids);
 
         EligiblePostQuery.Result summaryResult = eligiblePostQuery.fetch(
                 "dm", userId, Optional.empty(), Duration.ofHours(24));
         Set<String> summaryUids = summaryResult.posts().stream()
                 .map(EligiblePostQuery.Post::uid)
                 .collect(Collectors.toSet());
-
-        assertEquals(summaryUids, searchUids,
-            "EXPLICIT searchPosts and the /summary EligiblePostQuery must return the same "
-                + "post set for the same scope state; search=" + searchUids
-                + " summary=" + summaryUids);
-        assertEquals(Set.of(PREFIX + "alpha-post"), searchUids,
-            "both must return only the followed-tag post; got: " + searchUids);
+        assertEquals(Set.of(PREFIX + "alpha-post"), summaryUids,
+            "the digest (EligiblePostQuery) still narrows to the followed set; got: "
+                + summaryUids);
     }
 
     @Test

@@ -75,6 +75,15 @@ class BootstrapLoaderIT {
                 assertTrue(names.contains("nostr"), "tags must include 'nostr'; got: " + names);
             }
 
+            // (a) Every loader-written source row is bootstrap-origin
+            // (D59, M1-621) — the implicit-public-corpus discriminator.
+            try (ResultSet rs = st.executeQuery(
+                "SELECT count(*) FROM source WHERE source_origin = 'bootstrap'")) {
+                rs.next();
+                assertEquals(3, rs.getInt(1),
+                    "the loader marks every row source_origin='bootstrap'");
+            }
+
             // (a) Exactly one BOOTSTRAP_SOURCE_LOAD audit row from the
             // startup run.
             try (ResultSet rs = st.executeQuery(
@@ -164,7 +173,8 @@ class BootstrapLoaderIT {
         String rssIdentifier = "https://www.example.com/news/feed.xml";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "UPDATE source SET deleted_at = now(), display_name = ?, category = ? "
+                 "UPDATE source SET deleted_at = now(), display_name = ?, category = ?, "
+                     + "source_origin = 'user' "
                      + "WHERE kind = ? AND identifier = ?")) {
             ps.setString(1, "tombstone-marker");
             ps.setString(2, "tombstone-category");
@@ -177,7 +187,7 @@ class BootstrapLoaderIT {
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "SELECT display_name, category, deleted_at FROM source "
+                 "SELECT display_name, category, deleted_at, source_origin FROM source "
                      + "WHERE kind = ? AND identifier = ?")) {
             ps.setString(1, "rss");
             ps.setString(2, rssIdentifier);
@@ -189,12 +199,48 @@ class BootstrapLoaderIT {
                     "soft-deleted source row's category must remain operator-intent");
                 assertNotNull(rs.getTimestamp("deleted_at"),
                     "deleted_at must remain set after the loader's no-op pass");
+                assertEquals("user", rs.getString("source_origin"),
+                    "the deleted_at IS NULL gate must block the origin promote too — "
+                        + "a soft-deleted row's origin stays untouched");
             }
         }
     }
 
     @Test
     @Order(4)
+    void loaderPromotesUserOriginRowBackToBootstrap() throws Exception {
+        // A source the operator lists in bootstrap-sources.json is public
+        // by operator intent (D59, M1-621): if the same (kind, identifier)
+        // was previously /add-source'd as a private custom ('user'), the
+        // loader's ON CONFLICT branch promotes it to 'bootstrap'. Uses the
+        // bluesky fixture row — the rss row was soft-deleted by @Order(3).
+        String blueskyIdentifier =
+            "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=example.dev";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "UPDATE source SET source_origin = 'user' "
+                     + "WHERE kind = 'bluesky' AND identifier = ?")) {
+            ps.setString(1, blueskyIdentifier);
+            assertEquals(1, ps.executeUpdate(), "fixture bluesky row must exist");
+        }
+
+        loader.runLoad();
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT source_origin FROM source "
+                     + "WHERE kind = 'bluesky' AND identifier = ?")) {
+            ps.setString(1, blueskyIdentifier);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals("bootstrap", rs.getString(1),
+                    "re-listing a 'user' row in the bootstrap file must promote it");
+            }
+        }
+    }
+
+    @Test
+    @Order(5)
     void invalidTagInBootstrapJsonFailsFast(@TempDir Path tempDir) throws IOException {
         Path fixture = tempDir.resolve("invalid-tags.json");
         Files.writeString(fixture, """

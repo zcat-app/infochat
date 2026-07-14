@@ -193,7 +193,11 @@ public class EligiblePostQuery {
         // The SELECT pins:
         //   - status='READY' (exclude RAW, QUARANTINED, NEEDS_REVIEW)
         //   - published_at >= cutoff (window filter)
-        //   - source_id IN (SELECT FROM source_subscription WHERE scope=?) (subscription filter)
+        //   - the D59 world predicate: bootstrap-origin sources (live, not
+        //     excluded by this scope) are implicitly visible, OR the source
+        //     is in this scope's source_subscription. deleted_at IS NULL
+        //     guards the bootstrap arm only — the subscription arm relies on
+        //     /remove-source cascade-deleting subscription rows, as today.
         //   - optional positional tag → post.tags @> ARRAY[?]
         //   - optional scope_preferences.tag_mode='EXPLICIT' → tags intersect scope_tag
         //   - optional top-3 restricted tags → tags intersect restricted set
@@ -212,10 +216,16 @@ public class EligiblePostQuery {
            .append("  JOIN source s ON s.id = p.source_id ")
            .append(" WHERE p.status = 'READY' ")
            .append("   AND p.published_at >= ? ")
-           .append("   AND p.source_id IN (SELECT source_id FROM source_subscription ")
-           .append("                        WHERE scope_kind = ? AND scope_id = ?) ");
+           .append("   AND ((s.source_origin = 'bootstrap' AND s.deleted_at IS NULL ")
+           .append("         AND NOT EXISTS (SELECT 1 FROM source_exclusion e ")
+           .append("                          WHERE e.scope_kind = ? AND e.scope_id = ? ")
+           .append("                            AND e.source_id = s.id)) ")
+           .append("     OR p.source_id IN (SELECT source_id FROM source_subscription ")
+           .append("                         WHERE scope_kind = ? AND scope_id = ?)) ");
         List<Object> params = new ArrayList<>();
         params.add(Timestamp.from(cutoff));
+        params.add(scopeKind);
+        params.add(scopeId);
         params.add(scopeKind);
         params.add(scopeId);
 
@@ -294,19 +304,25 @@ public class EligiblePostQuery {
      */
     private List<String> topActiveFollowedTags(Connection conn, String scopeKind, UUID scopeId, Instant cutoff) {
         // unnest(p.tags) intersected with the scope's followed tag set,
-        // counted per tag, ordered count DESC + name ASC.
+        // counted per tag, ordered count DESC + name ASC. Posts come from
+        // the scope's D59 world (implicit bootstrap OR subscribed) — a
+        // subscription-less scope with >5 followed tags must still compute
+        // a non-empty top-3 over the bootstrap corpus (M1-621).
         String sql =
                 "SELECT t.name, COUNT(*) AS post_count "
               + "  FROM post p "
-              + "  JOIN source_subscription sub "
-              + "    ON sub.source_id = p.source_id "
-              + "   AND sub.scope_kind = ? AND sub.scope_id = ? "
+              + "  JOIN source s ON s.id = p.source_id "
               + " CROSS JOIN unnest(p.tags) AS tag_name "
-              + "  JOIN scope_tag st ON st.scope_kind = sub.scope_kind "
-              + "                    AND st.scope_id = sub.scope_id "
+              + "  JOIN scope_tag st ON st.scope_kind = ? AND st.scope_id = ? "
               + "  JOIN tag t ON t.id = st.tag_id AND t.name = tag_name "
               + " WHERE p.status = 'READY' "
               + "   AND p.published_at >= ? "
+              + "   AND ((s.source_origin = 'bootstrap' AND s.deleted_at IS NULL "
+              + "         AND NOT EXISTS (SELECT 1 FROM source_exclusion e "
+              + "                          WHERE e.scope_kind = ? AND e.scope_id = ? "
+              + "                            AND e.source_id = s.id)) "
+              + "     OR p.source_id IN (SELECT source_id FROM source_subscription "
+              + "                         WHERE scope_kind = ? AND scope_id = ?)) "
               + " GROUP BY t.name "
               + " ORDER BY post_count DESC, t.name ASC "
               + " LIMIT ?";
@@ -314,7 +330,11 @@ public class EligiblePostQuery {
             ps.setString(1, scopeKind);
             ps.setObject(2, scopeId);
             ps.setTimestamp(3, Timestamp.from(cutoff));
-            ps.setInt(4, TOP_TAG_RESTRICTION_TOP_N);
+            ps.setString(4, scopeKind);
+            ps.setObject(5, scopeId);
+            ps.setString(6, scopeKind);
+            ps.setObject(7, scopeId);
+            ps.setInt(8, TOP_TAG_RESTRICTION_TOP_N);
             try (ResultSet rs = ps.executeQuery()) {
                 List<String> out = new ArrayList<>();
                 while (rs.next()) {
@@ -370,26 +390,37 @@ public class EligiblePostQuery {
     }
 
     /**
-     * Count the calling scope's active source subscriptions. The /summary
-     * empty branch reads this ONLY when the eligible set came back empty, to
-     * tell "subscribed but nothing arrived in the window" (→ no_posts_yet)
-     * apart from "following no sources yet" (→ no_subscriptions) — the
-     * fresh-user empty-feed cliff (M1-593, commands.md §Content). Keeps its
-     * own connection (like {@link #readVocabulary}); the happy /summary path
-     * never calls it, so a normal summary pays no extra round-trip.
+     * Count the sources in the calling scope's D59 world: live, non-excluded
+     * bootstrap sources plus the scope's subscriptions. The /summary empty
+     * branch reads this ONLY when the eligible set came back empty, to tell
+     * "sources exist but nothing arrived in the window" (→ no_posts_yet)
+     * apart from "empty world — every bootstrap source excluded and nothing
+     * subscribed" (→ the empty-world steer; M1-621, commands.md §Content).
+     * Keeps its own connection (like {@link #readVocabulary}); the happy
+     * /summary path never calls it, so a normal summary pays no extra
+     * round-trip.
      */
-    public int countSubscriptions(String scopeKind, UUID scopeId) {
-        String sql = "SELECT COUNT(*) FROM source_subscription WHERE scope_kind = ? AND scope_id = ?";
+    public int countWorldSources(String scopeKind, UUID scopeId) {
+        String sql =
+                "SELECT COUNT(*) FROM source s "
+              + " WHERE (s.source_origin = 'bootstrap' AND s.deleted_at IS NULL "
+              + "        AND NOT EXISTS (SELECT 1 FROM source_exclusion e "
+              + "                         WHERE e.scope_kind = ? AND e.scope_id = ? "
+              + "                           AND e.source_id = s.id)) "
+              + "    OR s.id IN (SELECT source_id FROM source_subscription "
+              + "                 WHERE scope_kind = ? AND scope_id = ?)";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = prepareTimed(conn, sql)) {
             ps.setString(1, scopeKind);
             ps.setObject(2, scopeId);
+            ps.setString(3, scopeKind);
+            ps.setObject(4, scopeId);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getInt(1);
             }
         } catch (SQLException e) {
-            throw new IllegalStateException("EligiblePostQuery.countSubscriptions failed", e);
+            throw new IllegalStateException("EligiblePostQuery.countWorldSources failed", e);
         }
     }
 

@@ -5,6 +5,7 @@ import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.Nullable;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -55,15 +56,8 @@ class DigestPostCollectorIT {
 
     @BeforeEach
     void setUp() throws Exception {
-        try (Connection conn = dataSource.getConnection()) {
-            exec(conn, "DELETE FROM post WHERE uid LIKE '" + PREFIX + "%'");
-            exec(conn, "DELETE FROM source_subscription "
-                    + "WHERE source_id IN (SELECT id FROM source "
-                    + "                     WHERE identifier LIKE '" + PREFIX + "%')");
-            exec(conn, "DELETE FROM source WHERE identifier LIKE '" + PREFIX + "%'");
-            exec(conn, "DELETE FROM groups WHERE upstream_group_id LIKE '" + PREFIX + "%'");
-        }
-        groupId = insertGroup();
+        cleanupFixtures();
+        groupId = insertGroup("group");
         sourceId = insertSource();
         insertSubscription(groupId, sourceId);
 
@@ -71,6 +65,34 @@ class DigestPostCollectorIT {
         collector.dataSource = dataSource;
         collector.cancellationService = cancellationService;
         collector.clusterCap = 2;
+    }
+
+    // @AfterEach too: a bootstrap-origin fixture source is visible to EVERY
+    // scope under the D59 world predicate, so one left behind would pollute
+    // other classes' scope-isolated retrieval assertions.
+    @AfterEach
+    void tearDown() throws Exception {
+        cleanupFixtures();
+    }
+
+    private void cleanupFixtures() throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            exec(conn, "DELETE FROM post WHERE uid LIKE '" + PREFIX + "%'");
+            exec(conn, "DELETE FROM scope_tag "
+                    + "WHERE tag_id IN (SELECT id FROM tag WHERE name LIKE '" + PREFIX + "%')");
+            exec(conn, "DELETE FROM scope_preferences "
+                    + "WHERE scope_id IN (SELECT id FROM groups "
+                    + "                    WHERE upstream_group_id LIKE '" + PREFIX + "%')");
+            exec(conn, "DELETE FROM tag WHERE name LIKE '" + PREFIX + "%'");
+            exec(conn, "DELETE FROM source_exclusion "
+                    + "WHERE source_id IN (SELECT id FROM source "
+                    + "                     WHERE identifier LIKE '" + PREFIX + "%')");
+            exec(conn, "DELETE FROM source_subscription "
+                    + "WHERE source_id IN (SELECT id FROM source "
+                    + "                     WHERE identifier LIKE '" + PREFIX + "%')");
+            exec(conn, "DELETE FROM source WHERE identifier LIKE '" + PREFIX + "%'");
+            exec(conn, "DELETE FROM groups WHERE upstream_group_id LIKE '" + PREFIX + "%'");
+        }
     }
 
     @Test
@@ -94,6 +116,64 @@ class DigestPostCollectorIT {
     }
 
     @Test
+    void bootstrapPostCollectedForGroupWithZeroSubscriptions() throws Exception {
+        // Acceptance item 2 test (a), periodic-digest half (M1-621): the
+        // implicit bootstrap corpus reaches a group that never subscribed
+        // to anything — the empty-digest cliff this redesign removes.
+        UUID freshGroup = insertGroup("fresh-group");
+        UUID bootstrapSource = insertBootstrapSource("boot-src");
+        insertPost("boot-0", bootstrapSource, "Bootstrap digest post",
+                Instant.now().minus(Duration.ofMinutes(1)));
+
+        DigestPostCollector.CollectionResult result =
+                collector.collectForGroup(freshGroup, Instant.now().minus(Duration.ofHours(1)));
+
+        assertEquals(1, result.posts().size(),
+                "a subscription-less group's digest collects the bootstrap corpus");
+        assertEquals("Bootstrap digest post", result.posts().get(0).title());
+    }
+
+    @Test
+    void exclusionHidesBootstrapSourceForThatGroupOnly() throws Exception {
+        UUID excludingGroup = insertGroup("excl-group");
+        UUID otherGroup = insertGroup("other-group");
+        UUID bootstrapSource = insertBootstrapSource("excl-src");
+        insertPost("excl-0", bootstrapSource, "Excluded for one group",
+                Instant.now().minus(Duration.ofMinutes(1)));
+        insertExclusion(excludingGroup, bootstrapSource);
+
+        Instant since = Instant.now().minus(Duration.ofHours(1));
+        assertTrue(collector.collectForGroup(excludingGroup, since).posts().isEmpty(),
+                "the excluding group's digest drops the source");
+        assertEquals(1, collector.collectForGroup(otherGroup, since).posts().size(),
+                "another group still collects it (exclusion is per-scope)");
+    }
+
+    @Test
+    void explicitTagModeStillNarrowsTheDigest() throws Exception {
+        // The digest KEEPS follow-tag narrowing under D59 (only chat/RAG
+        // decoupled, acceptance item 3): an EXPLICIT group collects only
+        // posts carrying a followed tag, bootstrap corpus included.
+        UUID explicitGroup = insertGroup("explicit-group");
+        UUID bootstrapSource = insertBootstrapSource("explicit-src");
+        UUID alphaTag = insertTag("alpha");
+        insertScopeTag(explicitGroup, alphaTag);
+        insertScopePreferences(explicitGroup, "EXPLICIT");
+        Instant now = Instant.now();
+        insertPost("explicit-a", bootstrapSource, "Alpha post",
+                now.minus(Duration.ofMinutes(1)), List.of(PREFIX + "alpha"));
+        insertPost("explicit-b", bootstrapSource, "Beta post",
+                now.minus(Duration.ofMinutes(2)), List.of(PREFIX + "beta"));
+
+        DigestPostCollector.CollectionResult result =
+                collector.collectForGroup(explicitGroup, now.minus(Duration.ofHours(1)));
+
+        assertEquals(1, result.posts().size(),
+                "EXPLICIT mode narrows the digest to followed tags");
+        assertEquals("Alpha post", result.posts().get(0).title());
+    }
+
+    @Test
     void collectForGroupQueriesRunUnderStatementTimeout() throws Exception {
         RecordingDataSource recordingDataSource = new RecordingDataSource(dataSource);
         collector.dataSource = recordingDataSource;
@@ -108,12 +188,12 @@ class DigestPostCollectorIT {
 
     // -- fixture helpers ------------------------------------------------------
 
-    private UUID insertGroup() throws Exception {
+    private UUID insertGroup(String suffix) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO groups (adapter, upstream_group_id, display_name, timezone) "
                              + "VALUES ('inmemory', ?, 'Collector IT Group', 'UTC') RETURNING id")) {
-            ps.setString(1, PREFIX + "group");
+            ps.setString(1, PREFIX + suffix);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return (UUID) rs.getObject(1);
@@ -136,6 +216,70 @@ class DigestPostCollectorIT {
         }
     }
 
+    /** A live bootstrap-origin source — implicitly in every scope's world (D59). */
+    private UUID insertBootstrapSource(String suffix) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO source (kind, identifier, display_name, category, "
+                             + "bootstrap_tags, status, source_origin) "
+                             + "VALUES ('rss', ?, 'Collector IT Bootstrap', 'news', '{}', "
+                             + "'active', 'bootstrap') RETURNING id")) {
+            ps.setString(1, PREFIX + suffix);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return (UUID) rs.getObject(1);
+            }
+        }
+    }
+
+    private void insertExclusion(UUID scopeId, UUID excludedSourceId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO source_exclusion (scope_kind, scope_id, source_id) "
+                             + "VALUES ('group', ?, ?)")) {
+            ps.setObject(1, scopeId);
+            ps.setObject(2, excludedSourceId);
+            ps.executeUpdate();
+        }
+    }
+
+    private UUID insertTag(String suffix) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO tag (name, display, source_origin) "
+                             + "VALUES (?, ?, 'user') RETURNING id")) {
+            ps.setString(1, PREFIX + suffix);
+            ps.setString(2, PREFIX + suffix);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return (UUID) rs.getObject(1);
+            }
+        }
+    }
+
+    private void insertScopeTag(UUID scopeId, UUID tagId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO scope_tag (scope_kind, scope_id, tag_id) "
+                             + "VALUES ('group', ?, ?)")) {
+            ps.setObject(1, scopeId);
+            ps.setObject(2, tagId);
+            ps.executeUpdate();
+        }
+    }
+
+    private void insertScopePreferences(UUID scopeId, String tagMode) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO scope_preferences (scope_kind, scope_id, tag_mode) "
+                             + "VALUES ('group', ?, ?) ON CONFLICT (scope_kind, scope_id) "
+                             + "DO UPDATE SET tag_mode = EXCLUDED.tag_mode")) {
+            ps.setObject(1, scopeId);
+            ps.setString(2, tagMode);
+            ps.executeUpdate();
+        }
+    }
+
     private void insertSubscription(UUID scopeId, UUID subscribedSourceId) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -148,17 +292,28 @@ class DigestPostCollectorIT {
     }
 
     private void insertPost(String uidSuffix, String title, Instant publishedAt) throws Exception {
+        insertPost(uidSuffix, sourceId, title, publishedAt, List.of());
+    }
+
+    private void insertPost(String uidSuffix, UUID postSourceId, String title,
+                            Instant publishedAt) throws Exception {
+        insertPost(uidSuffix, postSourceId, title, publishedAt, List.of());
+    }
+
+    private void insertPost(String uidSuffix, UUID postSourceId, String title,
+                            Instant publishedAt, List<String> tags) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO post (uid, source_id, title, body, published_at, status, tags, "
                              + "upstream_identifier) "
-                             + "VALUES (?, ?, ?, ?, ?, 'READY', '{}', ?)")) {
+                             + "VALUES (?, ?, ?, ?, ?, 'READY', ?, ?)")) {
             ps.setString(1, PREFIX + uidSuffix);
-            ps.setObject(2, sourceId);
+            ps.setObject(2, postSourceId);
             ps.setString(3, title);
             ps.setString(4, "Body for " + title);
             ps.setTimestamp(5, Timestamp.from(publishedAt));
-            ps.setString(6, PREFIX + uidSuffix);
+            ps.setArray(6, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
+            ps.setString(7, PREFIX + uidSuffix);
             ps.executeUpdate();
         }
     }

@@ -1,9 +1,9 @@
 ---
 id: M1-621
 title: "Subscription model: implicit-bootstrap corpus, private custom sources, command surface + spec amendment"
-status: pending
+status: done
 created: 2026-07-13
-last_updated: 2026-07-13
+last_updated: 2026-07-14
 escalations:
   - date: 2026-07-13
     reason: outline-fail
@@ -28,10 +28,40 @@ escalations:
       tests to test_plan.modifies, decide the /summary empty-branch semantics);
       not decompose, because the predicate flip is atomic — any split produces
       broken intermediate states (search-visible but unfetchable posts).
+  - date: 2026-07-14
+    reason: plan-risk (spec-coherence; user-directed refine via /m1-tick run halt menu)
+    reviewer_verdict_excerpt: |
+      Plan outline PASS risks R1/R2 (citations verified against the files):
+      security.md §Prompt-injection defenses tool-catalogue rows for
+      searchPosts ("Tag filter intersects with the scope's tag_mode rules") and
+      semanticSearch ("this tool is scoped by subscription only ... tag
+      preferences filter the tag-driven surfaces (searchPosts, digests)")
+      become false under acceptance items 2-3; commands.md §Content /summary
+      no-subscriptions steer + /save any-caller-scope subscription filter and
+      §Periodic group digests "no active subscriptions" describe behaviour this
+      ticket changes, outside the acceptance-named sections. R5: risk: medium
+      twice-WARNed by clarity.
+  - date: 2026-07-14
+    reason: redteam-finding
+    reviewer_verdict_excerpt: |
+      RED-TEAM VERDICT: FINDINGS (0 critical, 0 high, 1 medium, 2 low; 2
+      out-of-model). medium INFO-LEAK: the V59 backfill marks every
+      pre-existing source row 'bootstrap', permanently publicizing any
+      pre-V59 /add-source'd private custom (acceptance item 1 itself pins
+      this direction; safer: backfill 'user' and let BootstrapLoader's
+      same-boot ON CONFLICT promote mark exactly the operator-listed rows).
+      low AUDIT-EVASION: repurposed /follow-all-sources clears the scope's
+      source_exclusion rows with no audit row (write direction is audited;
+      bulk reversal is not). low INFO-LEAK: /unfollow-source's unknown-id
+      vs not-subscribed reply split is an existence oracle for another
+      scope's newly-private custom source ids; collapse out-of-world
+      'user'-origin sources into the unknown-id reply (the getPost//save
+      discipline). Full record:
+      docs/plan/m1/redteam/M1-621-2026-07-14.md.
 blocked_by: []
 files_budget: 36
 complexity: high
-risk: medium
+risk: high
 round_cap: 3
 security_relevant: true
 migration_touch: true
@@ -59,17 +89,23 @@ acceptance:
   - >-
     A new Flyway migration V59 adds a NOT NULL `source.source_origin` column,
     CHECK (source_origin IN ('bootstrap','user')), DEFAULT 'user' (the
-    privacy-safe default — a forgotten insert is private, not public), backfilling
-    existing rows to 'bootstrap' (they are operator-seeded), and creates the
-    per-scope bootstrap-exclusion table (a separate table, NOT a kind-column on
-    source_subscription — see Notes). BootstrapLoader sets 'bootstrap' on its
-    upsert INSERT and its ON CONFLICT update promotes an existing 'user' row to
-    'bootstrap' (operator seeding makes a source public); the /add-source insert
-    path sets 'user'. A migration/repository test asserts the column, CHECK,
-    default, backfill, the exclusion table, that a bootstrap-loaded source is
-    'bootstrap' while an /add-source'd source is 'user', and the user→bootstrap
-    promote on upsert conflict. The migration applies cleanly on a fresh DB and
-    a prod-shaped DB.
+    privacy-safe default — a forgotten insert is private, not public), with
+    existing rows backfilling to 'user' AS WELL (redteam 2026-07-14: no
+    pre-V59 row may be presumed operator-seeded — a pre-upgrade
+    /add-source'd private custom must never be publicized; BootstrapLoader's
+    ON CONFLICT promote in the same collector boot — Flyway runs before the
+    @Startup loader — marks exactly the operator-listed rows 'bootstrap', so
+    the corpus is never mislabelled and the dark window is zero), and
+    creates the per-scope bootstrap-exclusion table (a separate table, NOT a
+    kind-column on source_subscription — see Notes). BootstrapLoader sets
+    'bootstrap' on its upsert INSERT and its ON CONFLICT update promotes an
+    existing 'user' row to 'bootstrap' (operator seeding makes a source
+    public); the /add-source insert path sets 'user'. A migration/repository
+    test asserts the column, CHECK, default, the 'user' backfill of pre-V59
+    rows, the exclusion table, that a bootstrap-loaded source is 'bootstrap'
+    while an /add-source'd source is 'user', and the user→bootstrap promote
+    on upsert conflict. The migration applies cleanly on a fresh DB and a
+    prod-shaped DB.
   - >-
     Retrieval + digest scoping becomes "source.source_origin='bootstrap' AND the
     source is not excluded by this scope, OR source_id IN (this scope's
@@ -115,9 +151,20 @@ acceptance:
     caller's retrieval/digest — and only the caller's. /follow-all-sources is
     repurposed to "re-include all bootstrap (clear this scope's exclusions)" so it
     retains a coherent role rather than silently no-opping; it stays in the
-    command catalogue (no CommandCatalogueParityTest / closed-set change). Tests
-    prove: exclude-a-bootstrap-source hides it for that scope only; re-include
-    restores it; custom unfollow is unchanged.
+    command catalogue (no CommandCatalogueParityTest / closed-set change).
+    Redteam additions (2026-07-14): the exclusion clear is AUDITED
+    audit-before-effect in the same transaction (a new free-enum AuditAction
+    verb, no migration; a no-effect clear writes no audit row, matching the
+    established no-effect-doesn't-audit pattern); and /unfollow-source
+    returns the unknown-id reply for a 'user'-origin source outside the
+    caller's world, collapsing the existence-vs-no-access distinction for
+    newly-private source ids (not-subscribed remains only for the bootstrap
+    already-excluded friendly no-op). Tests prove:
+    exclude-a-bootstrap-source hides it for that scope only; re-include
+    restores it; custom unfollow (by its subscriber) is unchanged; an
+    effective clear writes the audit row and an idempotent re-run does not;
+    an unsubscribed custom source id is indistinguishable from an unknown
+    id.
   - >-
     Spec updated: docs/spec/commands.md §Source management + §Per-scope tag
     preferences describe the model — bootstrap sources are an implicit public
@@ -127,7 +174,19 @@ acceptance:
     "implicit bootstrap corpus" and explicitly supersedes the prior "no
     auto-subscribe at registration / explicit per-scope opt-in" stance.
     docs/spec/schema.md §Sources and tags gains source_origin and the exclusion
-    representation. All parity tests stay green; `mvn verify` is green.
+    representation. Spec passages the behaviour change falsifies are updated in
+    the same commit (refine 2026-07-14): docs/spec/security.md §Prompt-injection
+    defenses tool-catalogue — the searchPosts row's tag_mode-intersection
+    sentence and the semanticSearch row's "scoped by subscription only" wording
+    move to the world predicate (bootstrap-not-excluded OR subscribed) with tag
+    preferences narrowing the digest only; docs/spec/commands.md §Content — the
+    /summary zero-subscription steer becomes the empty-world variant and the
+    /save any-caller-scope subscription filter becomes the caller's world
+    union; and the §Periodic group digests zero-eligible wording drops "no
+    active subscriptions" as the empty cause. docs/spec/schema.md
+    §Invariants item 4 enumerates the new source_exclusion FK among the
+    reasons `source` is never hard-deleted (redteam out-of-model rider,
+    2026-07-14). All parity tests stay green; `mvn verify` is green.
 test_plan:
   adds:
     - >-
@@ -166,7 +225,14 @@ test_plan:
       added) for the functional reply strings this ticket's commands need (D43
       bilateral keyset).
     - >-
-      docs/spec/commands.md, docs/spec/decisions.md (new D59), docs/spec/schema.md.
+      app.zcat.infochat.core.audit.AuditAction (new verb for the audited
+      /follow-all-sources exclusion clear; free enum, no migration).
+    - >-
+      docs/spec/commands.md (§Source management, §Per-scope tag preferences,
+      §Content /summary + /save passages, §Periodic group digests phrase),
+      docs/spec/decisions.md (new D59), docs/spec/schema.md, and
+      docs/spec/security.md (§Prompt-injection defenses: the searchPosts +
+      semanticSearch tool-catalogue rows).
   preserves:
     - all tests currently green on main
     - >-
@@ -187,7 +253,33 @@ decision_refs:
   - D5
   - D7
   - D15
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 37
+      added: 2147
+      removed: 582
+  - round: 2
+    date: 2026-07-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 39
+      added: 2627
+      removed: 585
 revisions:
   - date: 2026-07-13
     reason: >-
@@ -227,11 +319,184 @@ revisions:
         pinned to a separate table (a kind-column would poison the ~10
         untouched source_subscription subqueries). complexity / risk /
         round_cap / security_relevant / migration_touch unchanged.
+  - date: 2026-07-14
+    reason: >-
+      redteam-finding refine (user-directed via the escalation menu, "refine
+      and apply the changes"): the 2026-07-14 in-progress audit found the
+      acceptance-mandated V59 backfill direction unsafe (medium INFO-LEAK —
+      backfilling existing rows to 'bootstrap' permanently publicizes any
+      pre-V59 /add-source'd private custom) plus two low findings (unaudited
+      /follow-all-sources exclusion clear; /unfollow-source existence oracle
+      on newly-private custom ids). Out-of-model items resolved without
+      code, per user agreement: provider mass-write on exclusions is inside
+      the accepted DB-roles residual (source_subscription has carried
+      same-or-wider provider grants since V7) — future-features note
+      post-merge; the exclusion FK joins schema.md Invariant 4's existing
+      never-hard-delete rationale — one-line enumeration rider here.
+    snapshot: |
+      acceptance item 1 (pre-refine, gist): "... DEFAULT 'user' ...,
+        backfilling existing rows to 'bootstrap' (they are operator-seeded)
+        ..." via a two-step default; migration test asserts the 'bootstrap'
+        backfill.
+      acceptance item 5 (pre-refine, gist): /follow-all-sources repurposed
+        to clear exclusions — no audit requirement stated; /unfollow-source
+        reply split (unknown-id vs not-subscribed) unspecified for
+        out-of-world customs.
+      acceptance item 6 (pre-refine): no Invariant 4 mention.
+      resolution: item 1 backfills existing rows to 'user' as well (single
+        default, no two-step trick; no pre-V59 row is presumed
+        operator-seeded) with BootstrapLoader's same-boot ON CONFLICT
+        promote as the mechanism that marks exactly the operator-listed
+        rows 'bootstrap' (Flyway runs before the @Startup loader, so the
+        exposure window is zero); the migration test asserts pre-V59 rows
+        read 'user'. item 5 gains: the exclusion clear is audited
+        audit-before-effect in the same transaction (new free-enum
+        AuditAction verb, no migration; a no-effect clear writes no audit
+        row) and /unfollow-source returns the unknown-id reply for a
+        'user'-origin source outside the caller's world (the getPost//save
+        existence-vs-no-access discipline; not-subscribed stays only for
+        the bootstrap already-excluded no-op). item 6 gains the schema.md
+        Invariant 4 FK-enumeration rider (source_exclusion). AuditAction is
+        the single new implementation file — 36/36 files_budget, at cap.
+        decisions.md D59 records the fail-closed backfill posture.
+  - date: 2026-07-14
+    reason: >-
+      plan-risk refine (user-directed via /m1-tick run halt AskUserQuestion,
+      both options accepted): authorize the spec-coherence edits the plan
+      outline's R1/R2 identified, so the commit that changes behaviour cannot
+      leave the spec asserting falsehoods; bump risk to high (R5; clarity
+      WARNed the calibration twice).
+    snapshot: |
+      risk (pre-refine): medium.
+      acceptance item 6 (pre-refine, gist): spec updates named commands.md
+        §Source management + §Per-scope tag preferences, decisions.md (D59),
+        schema.md §Sources and tags only; security.md and commands.md §Content
+        / §Periodic group digests not authorized.
+      test_plan.modifies spec entry (pre-refine): commands.md, decisions.md,
+        schema.md only.
+      resolution: risk medium->high; acceptance item 6 + test_plan.modifies
+        gain security.md's two §Prompt-injection tool-catalogue rows
+        (searchPosts tag-filter sentence, semanticSearch subscription-only
+        wording) and commands.md §Content (/summary empty-world steer, /save
+        world-based visibility filter) + the §Periodic group digests phrase.
+        files_budget 36 unchanged (outline projects 35/36).
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-07-14
+    category: INFO-LEAK
+    severity: medium
+    promise: |
+      security.md §Prompt-injection defenses semanticSearch row (as amended
+      by this diff): a post outside the caller's world (a private custom the
+      scope never subscribed, ...) can never surface. D59/schema.md: "'user'
+      rows are private customs reachable only via a subscription. The column
+      default is 'user' — fail-closed private."
+    gap: |
+      V59 backfills EVERY pre-existing source row to 'bootstrap'; the
+      "pre-V59 rows are operator-seeded" assumption is false for any
+      deployment where a user ran /add-source before the upgrade. Every such
+      custom is permanently promoted into the implicit public corpus (posts
+      enter every scope's summary/digest/chat tools; URL lists in every
+      /list-sources) with no demote path. A discriminator existed
+      (source.added_by NULL = loader-seeded) and the safer direction —
+      backfill 'user', let the loader's next-boot re-list promote exactly
+      the operator-listed rows — is the mechanism the migration already
+      applies to future inserts.
+    repro: |
+      Pre-V59: Alice /add-source's a private feed; nobody else subscribes.
+      Apply V59 → row backfills 'bootstrap'. Bob (any registered user, zero
+      subscriptions) runs /list-sources → sees Alice's feed URL; his
+      /summary, digests, searchPosts, semanticSearch surface its posts.
+    suggested_fix_class: other
+  - date: 2026-07-14
+    category: AUDIT-EVASION
+    severity: low
+    promise: |
+      security.md §Authorization model step 8 "Audit-log the intent" +
+      Invariant 7; the diff itself audits the exclusion WRITE direction
+      (/unfollow-source on bootstrap = audit-before-effect).
+    gap: |
+      Repurposed /follow-all-sources mutates state (set-based DELETE of the
+      scope's source_exclusion rows) with no audit row; the exclusion
+      lifecycle is audited in one direction only, so /audit misrepresents
+      standing intent and the bulk re-include is unattributable.
+    repro: |
+      Group admin A /unfollow-source <bootstrap-id> (audited). Group admin B
+      runs /follow-all-sources: every exclusion cleared, world silently
+      widens, zero audit rows; /audit still shows A's exclusion standing.
+    suggested_fix_class: audit-log-coverage
+  - date: 2026-07-14
+    category: INFO-LEAK
+    severity: low
+    promise: |
+      security.md getPost row: "the existence-vs-no-access distinction is
+      never exposed" (extended by this diff to /save) + D59 "user-origin
+      sources are private to their subscribers and never surface to another
+      scope."
+    gap: |
+      /unfollow-source distinguishes "id not recognized" from "exists but
+      not followed" (lookupSource reads the global source table with no
+      world filter), so for another scope's private custom the caller gets
+      the not-subscribed reply — confirming the private source id exists.
+      Pre-existing reply split, but sources only acquired a privacy property
+      in this diff, which did not extend the existence-vs-no-access
+      discipline to the newly-private entity. Bounded by 122-bit UUID space
+      (needs a candidate id from elsewhere) — hence low.
+    repro: |
+      Attacker with a candidate UUID (screenshot of another user's
+      /list-sources) sends /unfollow-source <uuid> in own DM: "aren't
+      following" reply = exists; "not recognized" = absent.
+    suggested_fix_class: trust-boundary-tightening
+outline_file: target/m1-tick-outline-M1-621.md
+redteam_audits:
+  - date: 2026-07-14
+    verdict: FINDINGS
+    base: 17c57bb6
+    head: working tree on m1/M1-621-… (pre-commit; branch tip d53e05d7 + uncommitted implementation)
+    verdict_file: docs/plan/m1/redteam/M1-621-2026-07-14.md
+    findings_count: 3
+    out_of_model_count: 2
+    note: |
+      Gate audit between review APPROVE (r1) and commit. 1 medium (V59
+      backfill publicizes pre-V59 /add-source'd customs — the acceptance
+      item 1 backfill direction itself; fix = backfill 'user' + rely on the
+      loader's same-boot promote, needs an acceptance refine), 2 low
+      (/follow-all-sources exclusion-clear unaudited; /unfollow-source
+      existence oracle on newly-private source ids). 2 out-of-model
+      (provider-foothold exclusion mass-write inside accepted DB-roles
+      residual; source_exclusion FK blocks the admin hard-delete escape
+      hatch — runbook note). Resolution via /m1-tick escalate M1-621
+      redteam-finding.
+  - date: 2026-07-14
+    verdict: CLEAN
+    base: 17c57bb6
+    head: working tree on m1/M1-621-… (pre-commit; branch tip bf2cb660 + remediated implementation)
+    verdict_file: docs/plan/m1/redteam/M1-621-2026-07-14.md
+    out_of_model_count: 3
+    note: |
+      Re-audit after the in-branch remediation of all three findings
+      (revisions[2]): CLEAN. Out-of-model: the two prior items re-reported
+      (provider exclusion mass-write = accepted DB-roles residual,
+      future-features note; FK hard-delete friction = retired by the
+      Invariant 4 rider) plus one new — exclusion paths don't bump
+      scope_preferences.source_subscription_version, so a cached group
+      digest can transiently include a just-excluded bootstrap source. The
+      version column is inert (stored, never compared on read — plan-phase
+      ground truth) and the outline explicitly directed not to wire into
+      it; public-corpus preference, not confidentiality. Future-features
+      note post-merge.
+clarity_check:
+  date: 2026-07-13
+  verdict: WARN
+  warnings:
+    - >-
+      COMPLEXITY-RISK-CALIBRATED: risk: medium likely undersells a
+      migration-with-backfill, privacy-critical predicate change spanning ~9
+      query sites; consider bumping to risk: high before /m1-tick start. Does
+      not block the start.
+  blockers: []
 ---
 
 # M1-621: Subscription model — implicit-bootstrap corpus, private customs, command surface
