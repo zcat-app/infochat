@@ -2,13 +2,15 @@
 
 > **Written:** 2026-07-13. **Updated:** 2026-07-14 (§1 done; **M1-620 MERGED
 > @`cf48bc8c`**; **M1-621 MERGED @`6eaeadc3`** — the subscription-model feature +
-> V59; **only M1-622 (guidance copy) remains** before the release plan §2, now
-> runnable, see §"⏭ Next priority"). **PUSHED — `origin/main` @`4fc5dfa2`
-> 2026-07-14** (M1-620 + M1-621 + all process commits through the handoff update
-> are now on origin; prior "unpushed / origin `a47b4786`" notes are stale).
-> **Rebuild owed** — M1-620 + M1-621 are merged but not in the running
-> bytecode; **fold that rebuild to after M1-622 lands** so one rebuild brings all
-> three live and applies M1-621's V59 migration (v58→v59) in the same restart.
+> V59; **M1-622 MERGED @`53ec54b7`** (2026-07-14) — the subscription guidance
+> copy. **All three priority tickets (M1-620/621/622) are now merged; the release
+> plan §2 onward is the next step**, see §"⏭ Next priority"). **origin/main
+> @`4fc5dfa2`** — M1-620 + M1-621 + process commits are pushed; **M1-622
+> (@`53ec54b7`) and its clarity-fail refine (@`2619913f`) are LOCAL/UNPUSHED**
+> (push remains the operator's call).
+> **Rebuild owed** — M1-620/621/622 are merged but NOT in the running bytecode;
+> **the next action is that single rebuild** so one restart brings all three live
+> and applies M1-621's V59 migration (v58→v59) in the same restart.
 > Stack is currently PAUSED (collector+provider stopped for the verify batch).
 >
 > **READ FIRST:** `docs/plan/v1-verification-truth.md` — the dated,
@@ -18,8 +20,8 @@
 
 ## Current state (one line)
 
-**642 done, 2 pending (M1-621, M1-622 — the new priority; see §"⏭ Next
-priority")**. M1-620 merged @`cf48bc8c` 2026-07-13. Both adapters live-verified
+**644 done, 0 pending — M1-620/621/622 all merged.** M1-622 merged @`53ec54b7`
+2026-07-14; M1-621 @`6eaeadc3`; M1-620 @`cf48bc8c` 2026-07-13. Both adapters live-verified
 2026-07-04 (`docs/plan/live-e2e/`), **Signal-adapter code frozen since → still
 valid**. **§1 DONE 2026-07-13: stack REBUILT + UP on `c12c3e03`** (M1-619's
 `0.65` cutoff confirmed in the running bytecode). All 4 containers up
@@ -125,8 +127,9 @@ plan (§2 onward). Filed `e4c3a033` / `6d2bf0f3` (unpushed).
    (1 in-scope Invariant-4 rider; 2 → future-features E5/E6 @`040c3d55`). Full verify
    green ×3 (r1 after 2 own-diff fixes, r2, rcommit). **DB now needs V59** — applies
    on the deferred rebuild, v58→v59.
-2. **M1-622 — subscription guidance copy** (`complexity: low`, `files_budget: 6`,
-   **`blocked_by: M1-621`** → runs only after 621 merges). Pure bilingual (en+cs,
+2. **M1-622 — subscription guidance copy** — ✅ **DONE, merged @`53ec54b7`
+   2026-07-14** (`complexity: low`, `files_budget: 6`,
+   `blocked_by: M1-621` satisfied). Pure bilingual (en+cs,
    D43) string work: new-user welcome ("you're following all our sources; use
    `/follow-tag <topic>` to focus your digest — chat still searches everything"),
    a `/follow-tag` + `/unfollow-tag` clarifier that narrowing affects the DIGEST
@@ -142,12 +145,17 @@ stack can stay paused for the whole 621→622 batch and be rebuilt once at the e
 **Migration note:** M1-621 (the only `migration_touch: true` ticket) is now
 merged; its V59 applies on the deferred rebuild, bumping the live DB v58→v59.
 
-**⏭ Only M1-622 remains before the release plan resumes.** It's `complexity: low`,
-pure bilingual copy, `blocked_by: M1-621` now satisfied → **runnable** (STATUS
-board confirms). Drive it in the MAIN session via `/m1-tick run M1-622` (no
-redteam gate — not `security_relevant`; the stack is already paused for the
-batch). Then the single deferred rebuild makes M1-620/621/622 all live + applies
-V59, and the release plan below resumes (§2 onward).
+**⏭ M1-622 DONE — merged to `main` @`53ec54b7` 2026-07-14** (unpushed) via
+`/m1-tick run M1-622`. Pure bilingual copy: extended the VALUES of six existing
+bundle keys in place (welcome, the four /follow-tag + /unfollow-tag success
+replies, and reply.summary.no_posts_yet) across en+cs (D43) + a new
+`SubscriptionGuidanceCopyTest`; no behaviour change, no new BundleKeys/handler
+edits. Flow: clarity FAIL (TEST-CHANGES-AUTHORIZED) → bounded self-refine to a
+value-edit-in-place strategy (arm a, @`2619913f`) → clarity PASS → verify green
+→ review APPROVE r1 → commit @`4d47dfdc` → squash-merge @`53ec54b7`.
+**No priority tickets remain.** The next action is the single deferred rebuild
+(makes M1-620/621/622 all live + applies V59, v58→v59), after which the release
+plan below resumes (§2 onward).
 
 ## Before you start (coordination)
 
