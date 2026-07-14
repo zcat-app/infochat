@@ -3,8 +3,10 @@
 > **Written:** 2026-07-13. **Updated:** 2026-07-14 (§1 done; **M1-620 MERGED
 > @`cf48bc8c`**; **M1-621 MERGED @`6eaeadc3`** — the subscription-model feature +
 > V59; **only M1-622 (guidance copy) remains** before the release plan §2, now
-> runnable, see §"⏭ Next priority"). Origin still `a47b4786`; local main is ahead
-> (unpushed). **Rebuild owed** — M1-620 + M1-621 are merged but not in the running
+> runnable, see §"⏭ Next priority"). **PUSHED — `origin/main` @`4fc5dfa2`
+> 2026-07-14** (M1-620 + M1-621 + all process commits through the handoff update
+> are now on origin; prior "unpushed / origin `a47b4786`" notes are stale).
+> **Rebuild owed** — M1-620 + M1-621 are merged but not in the running
 > bytecode; **fold that rebuild to after M1-622 lands** so one rebuild brings all
 > three live and applies M1-621's V59 migration (v58→v59) in the same restart.
 > Stack is currently PAUSED (collector+provider stopped for the verify batch).
