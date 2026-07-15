@@ -17,7 +17,11 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.time.OffsetDateTime;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -252,6 +256,55 @@ class ListSourcesCommandHandlerTest {
         assertTrue(body.contains(srcId.toString()),
                 "list-sources line must include the source UUID for copy into "
                         + "/unfollow-source <id> — got: " + body);
+    }
+
+    @Test
+    void listSourcesAbovePageLimitShowsPageIndicatorAndReachesEverySource() throws Exception {
+        // M1-625 (acceptance items 1 + 3): a source count above the per-page
+        // limit must render a completeness indicator (page N/M), not silently
+        // truncate, AND every source must be reachable by paging. 25 caller
+        // subscriptions comfortably exceed the 20-per-page limit
+        // (ListSourcesCommandHandler.PAGE_SIZE). The caller's D59 world
+        // catalogue also folds in any live bootstrap rows, so the total page
+        // count is read back from the reply rather than hard-coded — the
+        // assertions hold regardless of how many bootstrap rows the DB carries.
+        String actor = PREFIX + "pagCaller";
+        UUID actorId = seedUser(actor, false);
+        int seeded = 25;
+        for (int i = 0; i < seeded; i++) {
+            UUID srcId = seedSource(String.format("pag-%02d", i), "active", false);
+            seedSubscription("dm", actorId, srcId);
+        }
+
+        String firstBody = handler.handle(new ScopeRef.Dm(actor), "/list-sources").text();
+        Matcher indicator = Pattern.compile("page 1/(\\d+)").matcher(firstBody);
+        assertTrue(indicator.find(),
+                "a listing above the per-page limit must render a `page 1/M` indicator "
+                        + "(not a silent cut) — got: " + firstBody);
+        int totalPages = Integer.parseInt(indicator.group(1));
+        assertTrue(totalPages >= 2,
+                "25 caller sources exceed the 20-per-page limit, so the listing must span "
+                        + ">1 page — got totalPages=" + totalPages);
+
+        // Walk every page; the union of caller sources seen must be all 25 —
+        // none stranded beyond the truncation point.
+        Set<String> reached = new HashSet<>();
+        for (int page = 1; page <= totalPages; page++) {
+            String body = handler.handle(new ScopeRef.Dm(actor),
+                    "/list-sources --page " + page).text();
+            assertTrue(body.contains("page " + page + "/" + totalPages),
+                    "page " + page + " must carry the `page " + page + "/" + totalPages
+                            + "` indicator — got: " + body);
+            for (int i = 0; i < seeded; i++) {
+                if (body.contains(PREFIX + String.format("pag-%02d", i) + "-name")) {
+                    reached.add(String.format("pag-%02d", i));
+                }
+            }
+        }
+        assertEquals(seeded, reached.size(),
+                "every caller source must be reachable across the pages (no source stranded "
+                        + "beyond the first page's truncation) — reached " + reached.size()
+                        + " of " + seeded);
     }
 
     @Test

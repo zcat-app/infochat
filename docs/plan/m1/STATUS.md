@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 646 |
+| done | 647 |
 | deferred | 1 |
 | abandoned | 11 |
 | **total** | **663** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-625 — /list-sources (and /get-sources) silently truncates at ~20 of N sources with no pagination hint (complexity: low, risk: low)
 - M1-626 — /invite create --open: default to the sole enabled adapter; replace confusing empty-adapter error (complexity: low, risk: low)
 - M1-627 — /approve-group and /reject-group: clarify which group id token to pass (complexity: low, risk: low)
 - M1-628 — Asset commands (/zcash, /monero): inconsistent leading indentation on some reply lines (complexity: low, risk: low)
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-625 | /list-sources (and /get-sources) silently truncates at ~20 of N sources with no pagination hint | 2026-07-15 | round 1 APPROVE |
 | M1-624 | Bootstrap-admin token claim shows a probation welcome instead of an admin welcome (en+cs) | 2026-07-15 | round 1 APPROVE |
 | M1-623 | /summary degrades ungracefully on a large post window (cap before the summarizer LLM call) | 2026-07-15 | round 1 APPROVE |
 | M1-622 | Subscription guidance copy: welcome + /follow-tag hints + empty-digest nudge (en+cs) | 2026-07-14 | round 1 APPROVE |
@@ -74,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-618 | Chat conversational-refinement recovery: clarifying-question on low-confidence retrieval + surface getReferences as 'more like this' | 2026-07-13 | round 1 APPROVE |
 | M1-617 | Chat retrieval-recovery: provenance transparency + hybrid semantic/lexical (RRF) post retrieval | 2026-07-13 | round 1 APPROVE |
 | M1-616 | Calibrate infochat.chat.semantic-threshold: measure semantic-retrieval recall/precision on the live corpus | 2026-07-12 | round 2 APPROVE |
-| M1-615 | Fix two full-suite timing-race flaky tests | 2026-07-12 | round 1 APPROVE |
 
 ---
 
@@ -845,7 +844,7 @@ M1-621 (done)
   └── M1-622 (done)
 M1-623 (done)
 M1-624 (done)
-M1-625 (pending) ← runnable
+M1-625 (done)
 M1-626 (pending) ← runnable
 M1-627 (pending) ← runnable
 M1-628 (pending) ← runnable

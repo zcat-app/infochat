@@ -97,6 +97,42 @@ class GetSourcesAliasTest {
                 "/get-sources must list the caller's subscribed source — got: " + viaGetSources);
     }
 
+    // ----- (a2) alias paginates identically above the per-page limit -------
+
+    @Test
+    void getSourcesPaginatesIdenticallyToListSourcesAbovePageLimit() throws Exception {
+        // M1-625 acceptance item 2: the /get-sources alias must behave
+        // identically to /list-sources for a >page-limit scope — same page
+        // indicator, same rows per page. Both delegate to the same SQL, so a
+        // page-for-page full-body equality is the tightest pin.
+        String actor = PREFIX + "pagAlias";
+        UUID actorId = seedUser(actor, false);
+        for (int i = 0; i < 25; i++) {
+            UUID srcId = seedSource(String.format("pag-%02d", i), "active");
+            seedSubscription("dm", actorId, srcId);
+        }
+
+        String firstViaList =
+                listSourcesHandler.handle(new ScopeRef.Dm(actor), "/list-sources").text();
+        assertTrue(firstViaList.contains("page 1/"),
+                "precondition: /list-sources over 25 sources must render a page indicator "
+                        + "— got: " + firstViaList);
+
+        String p1Get =
+                getSourcesHandler.handle(new ScopeRef.Dm(actor), "/get-sources --page 1").text();
+        String p1List =
+                listSourcesHandler.handle(new ScopeRef.Dm(actor), "/list-sources --page 1").text();
+        assertEquals(p1List, p1Get,
+                "/get-sources --page 1 must render identically to /list-sources --page 1 "
+                        + "(same indicator, same rows)");
+        String p2Get =
+                getSourcesHandler.handle(new ScopeRef.Dm(actor), "/get-sources --page 2").text();
+        String p2List =
+                listSourcesHandler.handle(new ScopeRef.Dm(actor), "/list-sources --page 2").text();
+        assertEquals(p2List, p2Get,
+                "/get-sources --page 2 must render identically to /list-sources --page 2");
+    }
+
     // ----- (b) --all is ignored: the privileged enumeration is unreachable -
 
     @Test

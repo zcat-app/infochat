@@ -62,10 +62,11 @@ import java.util.UUID;
  * </ul>
  *
  * <p>{@code --page N} is parsed (1-indexed, page size 20 per design
- * notes); paging is intentionally minimal in v1 (the acceptance
- * enumeration does not include a paging assertion). The handler
- * applies {@code LIMIT 20 OFFSET (N-1)*20}; a page beyond the result
- * set returns the empty reply.</p>
+ * notes). The handler applies {@code LIMIT 20 OFFSET (N-1)*20} and the
+ * reply header carries a {@code page N/M} indicator (M1-625) so a
+ * listing longer than one page announces its remaining pages instead
+ * of silently truncating; the total is a {@code count(*)} twin of the
+ * page SELECT. A page beyond the result set returns the empty reply.</p>
  *
  * <p>This is a read-only handler — no audit row, no state mutation.
  * Per Invariant 7, audit-on-intent fires only on confirm-gated
@@ -105,6 +106,23 @@ public class ListSourcesCommandHandler implements CommandHandler {
             "SELECT id, display_name, identifier, kind, status, deleted_at "
                     + "FROM source "
                     + "ORDER BY display_name LIMIT ? OFFSET ?";
+
+    // Total-count twins of the three SELECTs above — same WHERE predicate,
+    // no ORDER/LIMIT/OFFSET. The count drives the "page N/M" indicator so a
+    // listing longer than one page announces its remaining pages instead of
+    // silently truncating (M1-625).
+    private static final String COUNT_SCOPED_SOURCES_SQL =
+            "SELECT count(*) FROM source s "
+                    + "WHERE s.deleted_at IS NULL "
+                    + "  AND (s.source_origin = 'bootstrap' "
+                    + "       OR s.id IN (SELECT source_id FROM source_subscription "
+                    + "                    WHERE scope_kind = ? AND scope_id = ?))";
+
+    private static final String COUNT_ALL_NON_DELETED_SOURCES_SQL =
+            "SELECT count(*) FROM source WHERE deleted_at IS NULL";
+
+    private static final String COUNT_ALL_INCLUDING_DELETED_SOURCES_SQL =
+            "SELECT count(*) FROM source";
 
     @Inject
     BundleLoader bundleLoader;
@@ -189,19 +207,24 @@ public class ListSourcesCommandHandler implements CommandHandler {
     }
 
     private OutboundMessage scopedPath(ScopeRef scope, String scopeKind, UUID scopeId, int page) {
+        long totalCount = countScopedSources(scopeKind, scopeId);
         List<SourceRow> rows = selectScopedSources(scopeKind, scopeId, page);
+        // rows.isEmpty() covers both an empty scope (totalCount == 0) and a
+        // --page N beyond the last page (documented v1 behavior); either way
+        // there is nothing on this page to render.
         if (rows.isEmpty()) {
             return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_EMPTY, inboundContext.effectiveLanguage()));
         }
-        return reply(scope, renderReply(rows, /* withVisibilityCaveat */ false));
+        return reply(scope, renderReply(rows, /* withVisibilityCaveat */ false, totalCount, page));
     }
 
     private OutboundMessage adminAllPath(ScopeRef scope, boolean includeDeleted, int page) {
+        long totalCount = countAllSources(includeDeleted);
         List<SourceRow> rows = selectAllSources(includeDeleted, page);
         if (rows.isEmpty()) {
             return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_EMPTY, inboundContext.effectiveLanguage()));
         }
-        return reply(scope, renderReply(rows, /* withVisibilityCaveat */ true));
+        return reply(scope, renderReply(rows, /* withVisibilityCaveat */ true, totalCount, page));
     }
 
     private void writePrivilegedReadAuditRow(UserRow actor, @Nullable String callerContactId,
@@ -246,9 +269,17 @@ public class ListSourcesCommandHandler implements CommandHandler {
         }
     }
 
-    private String renderReply(List<SourceRow> rows, boolean withVisibilityCaveat) {
+    private String renderReply(List<SourceRow> rows, boolean withVisibilityCaveat,
+                               long totalCount, int page) {
+        int totalPages = (int) Math.ceil((double) totalCount / PAGE_SIZE);
         StringBuilder sb = new StringBuilder();
-        sb.append(bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_HEADER, inboundContext.effectiveLanguage()));
+        // Page indicator (M1-625) so a >PAGE_SIZE listing announces its
+        // remaining pages instead of silently cutting off. Args are passed as
+        // strings so MessageFormat renders raw integers, not locale-grouped
+        // numbers ("1,234") — matching AuditCommandHandler's header.
+        sb.append(MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_HEADER, inboundContext.effectiveLanguage()),
+                String.valueOf(totalCount), String.valueOf(page), String.valueOf(totalPages)));
         if (withVisibilityCaveat) {
             sb.append('\n');
             sb.append(bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_URL_VISIBILITY_CAVEAT, inboundContext.effectiveLanguage()));
@@ -315,6 +346,42 @@ public class ListSourcesCommandHandler implements CommandHandler {
                     "ListSourcesCommandHandler.selectScopedSources failed for scopeKind="
                             + scopeKind,
                     e);
+        }
+    }
+
+    private long countScopedSources(String scopeKind, UUID scopeId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(COUNT_SCOPED_SOURCES_SQL)) {
+            ps.setString(1, scopeKind);
+            ps.setObject(2, scopeId);
+            return countOf(ps);
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "ListSourcesCommandHandler.countScopedSources failed for scopeKind="
+                            + scopeKind,
+                    e);
+        }
+    }
+
+    private long countAllSources(boolean includeDeleted) {
+        String sql = includeDeleted
+                ? COUNT_ALL_INCLUDING_DELETED_SOURCES_SQL
+                : COUNT_ALL_NON_DELETED_SOURCES_SQL;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            return countOf(ps);
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "ListSourcesCommandHandler.countAllSources failed (includeDeleted="
+                            + includeDeleted + ")",
+                    e);
+        }
+    }
+
+    private static long countOf(PreparedStatement ps) throws SQLException {
+        try (ResultSet rs = ps.executeQuery()) {
+            rs.next();
+            return rs.getLong(1);
         }
     }
 
