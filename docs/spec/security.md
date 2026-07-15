@@ -747,15 +747,19 @@ should pick admin placement deliberately:
 The invite-code system (decision D44) is the application-level entry gate for
 DM access, applied uniformly across all adapters:
 
-- A bot admin issues `/invite create --adapter <name>` with exactly one of two
+- A bot admin issues `/invite create --adapter <name>` with at most one of two
   mutually exclusive flags:
   - `--contact <id>` — strict invite, bound to a specific (contact\_id,
     adapter) pair. No confirmation required; risk is bounded to one identity.
   - `--open` — adapter-bound invite, not pre-bound to a contact\_id; the
     first unknown contact on that adapter to present the code is registered.
     Requires confirm (broader blast radius).
-  Providing neither flag returns a hint listing both options; no code is
-  created. Providing both is an error; no code is created.
+  Providing neither flag defaults to `--open` (decision D60) and passes
+  through the same confirm gate; no code is created until the admin confirms.
+  Malformed issuance input — an unrecognized token, a value-less `--contact`,
+  or a stray bare argument — is rejected with an explicit error; no code is
+  created and no confirm is armed. Providing both is an error; no code is
+  created.
   The code is shown to the admin once in the reply and stored with status
   `PENDING`.
 - An unknown DM contact's first message is checked against the invite table.

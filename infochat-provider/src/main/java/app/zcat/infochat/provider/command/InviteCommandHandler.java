@@ -294,8 +294,7 @@ public class InviteCommandHandler implements CommandHandler {
         // ("No confirmation required (risk is bounded to one specific
         // identity)"); a body ending in ` confirm` against --contact
         // still reaches the first-call path and falls through to
-        // missing-flag / mutually-exclusive validation since "confirm"
-        // is not a flag.
+        // mutually-exclusive validation since "confirm" is not a flag.
         String trimmed = remainder.trim();
         if (trimmed.equals("confirm") || trimmed.endsWith(" confirm")) {
             // Confirm-call: identifier "invite:create:open" — namespaced
@@ -313,14 +312,31 @@ public class InviteCommandHandler implements CommandHandler {
 
         CreateArgs args = CreateArgs.parse(remainder);
 
-        // Flag combination checks before adapter-name validation: the
-        // spec's friendly errors fire in this priority order (mutually
-        // exclusive before missing, both before unknown adapter / cap).
+        // Input-shape checks before adapter-name validation, in priority
+        // order: malformed first, then mutually-exclusive; unknown
+        // adapter / cap fire later.
+        //
+        // Malformed = any token went unconsumed (typo'd flag, value-less
+        // --contact, stray bare argument). Fail safe with zero state
+        // change: without this gate a botched STRICT-invite attempt would
+        // parse to "no flags" and be normalized into the broader-blast-
+        // radius --open flow below (redteam M1-632 medium finding; D60
+        // defaults only a TRULY-bare create).
+        if (args.malformed) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_CREATE_MALFORMED, inboundContext.effectiveLanguage()));
+        }
         if (args.contact != null && args.open) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_MUTUALLY_EXCLUSIVE, inboundContext.effectiveLanguage()));
         }
+        // D60: a truly-bare create (neither flag, nothing unconsumed)
+        // defaults to --open — the only practically-usable onboarding path
+        // for a brand-new person, who has no contactId yet. Normalizing
+        // here routes the bare form through the unchanged --open machinery
+        // below (adapter inference M1-626, confirm gate M1-051, per-adapter
+        // open cap), so every --open backstop fires exactly as for an
+        // explicit --open.
         if (args.contact == null && !args.open) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_MISSING_FLAG, inboundContext.effectiveLanguage()));
+            args = new CreateArgs(args.adapter, null, true, false);
         }
 
         // Adapter validation against the currently-enabled set.
@@ -810,18 +826,23 @@ public class InviteCommandHandler implements CommandHandler {
      * Parsed form of {@code /invite create --adapter <name>
      * {--contact <id> | --open}}. The required-vs-optional shape and
      * mutually-exclusive validation live in {@link #handleCreate}; the
-     * parser only extracts the supplied flag values.
+     * parser extracts the supplied flag values and records whether any
+     * token went unconsumed ({@link #malformed}) so {@code handleCreate}
+     * can fail safe on a typo'd flag or a value-less {@code --contact}
+     * instead of mistaking it for a bare create (D60; redteam M1-632).
      * {@code /invite bot-contact} reuses this parser for its optional
      * {@code --adapter} flag (same tokenizer, same flag grammar) and
      * reads only {@link #adapter}.
      */
-    record CreateArgs(@Nullable String adapter, @Nullable String contact, boolean open) {
+    record CreateArgs(@Nullable String adapter, @Nullable String contact, boolean open,
+                      boolean malformed) {
 
         static CreateArgs parse(String remainder) {
             List<String> tokens = CommandTokenizer.tokenize(remainder);
             String adapter = null;
             String contact = null;
             boolean open = false;
+            boolean malformed = false;
             int i = 0;
             while (i < tokens.size()) {
                 String tok = tokens.get(i);
@@ -841,10 +862,14 @@ public class InviteCommandHandler implements CommandHandler {
                     open = true;
                     i++;
                 } else {
+                    // Unconsumed: a typo'd flag, a value-less --contact/
+                    // --adapter, or a stray bare argument. Recorded, not
+                    // skipped-and-forgotten, so create can fail safe (D60).
+                    malformed = true;
                     i++;
                 }
             }
-            return new CreateArgs(adapter, contact, open);
+            return new CreateArgs(adapter, contact, open, malformed);
         }
     }
 

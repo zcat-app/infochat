@@ -657,11 +657,16 @@ public final class BundleKeys {
     /** {@code /invite} with no subcommand or an unrecognized one. */
     public static final String ERROR_INVITE_UNKNOWN_SUBCOMMAND = "error.invite.unknown_subcommand";
 
-    /** {@code /invite create} with neither {@code --contact} nor {@code --open}; value lists both options per spec §Invite-code registration. */
-    public static final String ERROR_INVITE_MISSING_FLAG = "error.invite.missing_flag";
-
     /** {@code /invite create} with both {@code --contact} and {@code --open}. */
     public static final String ERROR_INVITE_MUTUALLY_EXCLUSIVE = "error.invite.mutually_exclusive";
+
+    /**
+     * {@code /invite create} whose remainder has an unconsumed token — a
+     * typo'd flag, a value-less {@code --contact}, or a stray bare argument.
+     * Fails safe with no state change instead of being defaulted into the
+     * {@code --open} flow (D60; redteam M1-632 medium finding).
+     */
+    public static final String ERROR_INVITE_CREATE_MALFORMED = "error.invite.create_malformed";
 
     /** {@code /invite create --adapter <name>} where {@code <name>} is not a currently-enabled adapter. {@code {0}} = the rejected name. */
     public static final String ERROR_INVITE_UNKNOWN_ADAPTER = "error.invite.unknown_adapter";

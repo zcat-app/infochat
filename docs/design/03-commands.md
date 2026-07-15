@@ -1254,8 +1254,8 @@ chosen to interact again (§3.11 Onboarding — previously-banned).
 
 ### `/invite create --adapter <name> {--contact <id> | --open}`
 
-Generates a single-use UUID invite code (decision D44). Exactly one of
-`--contact` or `--open` is required:
+Generates a single-use UUID invite code (decision D44). At most one of
+`--contact` or `--open` may be given (decision D60):
 
 - `--contact <id>` — strict invite, bound to a specific
   (contact_id, adapter) pair. **No confirmation required** (risk is
@@ -1264,10 +1264,13 @@ Generates a single-use UUID invite code (decision D44). Exactly one of
   first unknown contact on that adapter to present the code is registered.
   **Requires confirm** (broader blast radius than `--contact`).
 
-Providing neither flag returns a hint listing both options; no code is
-created. Providing both is an error; no code is created. The code is
-displayed once in the reply and stored as `PENDING`. Audit-logged before
-effect.
+Providing neither flag defaults to `--open` (decision D60) and passes through
+the same confirm gate; no code is created until the admin confirms. Malformed
+create input — an unrecognized token, a value-less `--contact`, or a stray
+bare argument — returns `error.invite.create_malformed`; no code is created
+and no confirm is armed. Providing both is an error; no code is created. The
+code is displayed once in the reply and stored as `PENDING`. Audit-logged
+before effect.
 
 **Cross-adapter invite creation is permitted by design** — `/invite create`
 is the one admin command that may name any adapter the deployment supports

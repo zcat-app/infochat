@@ -1100,8 +1100,12 @@ contacts and contradict the registration-state model
   code bound to the adapter only; the first unknown contact on that adapter to
   present the code is registered. Requires confirm (broader blast radius than
   `--contact`). Audit-logged before effect.
-- `--contact` and `--open` are mutually exclusive. Providing neither returns a
-  hint listing both flags and their trade-offs; no invite is created.
+- `--contact` and `--open` are mutually exclusive. Providing neither recognized
+  flag defaults to `--open` (decision D60): the bare form runs the same adapter
+  resolution and confirm gate as an explicit `--open`; no invite is created
+  until the admin confirms. Malformed create input — an unrecognized token, a
+  value-less `--contact`, or a stray bare argument — is not treated as bare: it
+  returns an explicit error and neither creates an invite nor arms a confirm.
 - **Cross-adapter invite creation is permitted by design.** Unlike
   `/grant-admin` and `/vouch` (which are restricted to the inbound adapter),
   `/invite create` carries an explicit `--adapter <name>` argument and may

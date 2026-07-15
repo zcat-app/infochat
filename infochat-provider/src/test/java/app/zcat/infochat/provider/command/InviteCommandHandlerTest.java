@@ -149,19 +149,71 @@ class InviteCommandHandlerTest {
                 "/invite with no subcommand must not write any invite_code row");
     }
 
-    // ----- (22) /invite create with neither flag → missing_flag -----------
+    // ----- (22, reworked by M1-632) bare /invite create defaults to --open
+    // D60: providing neither --contact nor --open no longer returns the
+    // retired missing-flag hint — the bare form is normalized into the
+    // --open path, so single-adapter inference (M1-626) and the confirm
+    // gate (M1-051) fire exactly as for an explicit --open.
 
     @Test
-    void inviteCreateWithoutContactOrOpenReturnsMissingFlag() throws Exception {
-        String actor = PREFIX + "noFlag-actor";
-        seedUser(actor, true);
+    void inviteCreateBareDefaultsToOpenConfirmPrompt() throws Exception {
+        String bareActor = PREFIX + "bareOpen-actor";
+        String explicitActor = PREFIX + "bareOpenExplicit-actor";
+        UUID bareActorId = seedUser(bareActor, true);
+        seedUser(explicitActor, true);
 
-        OutboundMessage reply = handler.handle(
+        OutboundMessage bareReply = handler.handle(
+                new ScopeRef.Dm(bareActor),
+                "/invite create");
+        OutboundMessage explicitReply = handler.handle(
+                new ScopeRef.Dm(explicitActor),
+                "/invite create --open");
+
+        assertEquals(expectedOpenPrompt(ADAPTER), bareReply.text(),
+                "bare /invite create must return the --open confirm prompt (D60), "
+                        + "not the retired missing-flag hint");
+        assertEquals(explicitReply.text(), bareReply.text(),
+                "bare and explicit --open first-call replies must match");
+        assertEquals(0L, countInvitesByCreator(bareActorId),
+                "the first (prompt) call must not write an invite_code row");
+    }
+
+    // ----- (M1-632 r2) malformed create fails safe, arms nothing ----------
+    // Redteam M1-632 medium finding: a malformed STRICT-invite attempt (a
+    // typo'd flag, a value-less --contact) must NOT be normalized into the
+    // --open flow. It returns error.invite.create_malformed, writes no
+    // INVITE_CREATE_INTENT audit row, and arms no pending confirm — so a
+    // reflexive follow-up `/invite create confirm` finds no pending.
+
+    @Test
+    void inviteCreateMalformedInputFailsSafeAndArmsNothing() throws Exception {
+        String actor = PREFIX + "malformed-actor";
+        UUID actorId = seedUser(actor, true);
+        long intentBefore = countAuditByActorAndAction(actorId, "INVITE_CREATE_INTENT");
+
+        // Value-less --contact: the id was lost to a paste failure — the
+        // shape the redteam repro used.
+        OutboundMessage valueLess = handler.handle(
                 new ScopeRef.Dm(actor),
-                "/invite create --adapter " + ADAPTER);
+                "/invite create --adapter " + ADAPTER + " --contact");
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_INVITE_CREATE_MALFORMED), valueLess.text(),
+                "a value-less --contact must fail safe, not default to --open");
 
-        assertEquals(bundleLoader.get(BundleKeys.ERROR_INVITE_MISSING_FLAG), reply.text());
-        assertEquals(0L, countInvitesByCreator(userId(actor)));
+        // Typo'd flag with the target id present.
+        OutboundMessage typoFlag = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/invite create --contcat " + PREFIX + "malformed-target");
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_INVITE_CREATE_MALFORMED), typoFlag.text(),
+                "a typo'd flag must fail safe, not default to --open");
+
+        assertEquals(0L, countInvitesByCreator(actorId),
+                "malformed create must not write any invite_code row");
+        assertEquals(intentBefore, countAuditByActorAndAction(actorId, "INVITE_CREATE_INTENT"),
+                "malformed create must not write an INVITE_CREATE_INTENT audit row");
+        Optional<ConfirmStateService.PendingConfirm> peeked =
+                confirmStateService.peek(actorId, new ScopeRef.Dm(actor));
+        assertFalse(peeked.isPresent(),
+                "malformed create must not arm a pending confirm");
     }
 
     // ----- (23) /invite create with both flags → mutually_exclusive -------

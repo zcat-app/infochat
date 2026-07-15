@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 649 |
+| done | 650 |
 | deferred | 1 |
 | abandoned | 13 |
 | **total** | **668** |
@@ -27,7 +27,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-627 — /approve-group and /reject-group: clarify which group id token to pass (complexity: low, risk: low)
 - M1-628 — Asset commands (/zcash, /monero): inconsistent leading indentation on some reply lines (complexity: low, risk: low)
-- M1-632 — Default bare /invite create to --open (D60) (complexity: medium, risk: medium)
+- M1-633 — In-band contactId sourcing for --contact invites (D60) (complexity: medium, risk: medium)
 - M1-634 — Concurrent interruptible dispatch so the in-flight guard and /stop are reachable over live transports (complexity: high, risk: high)
 
 ---
@@ -45,7 +45,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-633 — blocked_by: M1-632 (pending)
+_(none)_
 
 ---
 
@@ -64,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-632 | Default bare /invite create to --open (D60) | 2026-07-15 | round 2 APPROVE |
 | M1-630 | /list-sources & /get-sources: inline next-page hint on multi-page lists | 2026-07-15 | round 1 APPROVE |
 | M1-626 | /invite create --open: default to the sole enabled adapter; replace confusing empty-adapter error | 2026-07-15 | round 1 APPROVE |
 | M1-625 | /list-sources (and /get-sources) silently truncates at ~20 of N sources with no pagination hint | 2026-07-15 | round 1 APPROVE |
@@ -73,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-621 | Subscription model: implicit-bootstrap corpus, private custom sources, command surface + spec amendment | 2026-07-14 | round 2 APPROVE |
 | M1-620 | Admin subcommand /invite bot-contact: retrieve the bot's own connect contact in-band (SimpleX current URL / Signal number) so admins onboard new contacts without server access | 2026-07-13 | round 1 APPROVE |
 | M1-619 | Recalibrate the chat confident-grounding cutoff (M1-618 CONFIDENT_SIMILARITY_CUTOFF): measure clarify-vs-affordance separation on the labeled query set | 2026-07-13 | round 1 APPROVE |
-| M1-618 | Chat conversational-refinement recovery: clarifying-question on low-confidence retrieval + surface getReferences as 'more like this' | 2026-07-13 | round 1 APPROVE |
 
 ---
 
@@ -853,7 +853,7 @@ M1-628 (pending) ← runnable
 M1-629 (abandoned)
 M1-630 (done)
 M1-631 (abandoned)
-M1-632 (pending) ← runnable
-  └── M1-633 (pending)
+M1-632 (done)
+  └── M1-633 (pending) ← runnable
 M1-634 (pending) ← runnable
 ```
