@@ -103,8 +103,13 @@ class GetSourcesAliasTest {
     void getSourcesPaginatesIdenticallyToListSourcesAbovePageLimit() throws Exception {
         // M1-625 acceptance item 2: the /get-sources alias must behave
         // identically to /list-sources for a >page-limit scope — same page
-        // indicator, same rows per page. Both delegate to the same SQL, so a
-        // page-for-page full-body equality is the tightest pin.
+        // indicator, same rows per page. Both delegate to the same SQL.
+        // M1-630 relaxes this from a byte-for-byte equality to "identical
+        // modulo the command token": the next-page hint footer echoes the
+        // INVOKED command name (the resolved open-decision), so /get-sources'
+        // hint reads "/get-sources --page N" where /list-sources' reads
+        // "/list-sources --page N". Normalising that one token restores the
+        // full-body equality that pins "same indicator, same rows".
         String actor = PREFIX + "pagAlias";
         UUID actorId = seedUser(actor, false);
         for (int i = 0; i < 25; i++) {
@@ -122,15 +127,32 @@ class GetSourcesAliasTest {
                 getSourcesHandler.handle(new ScopeRef.Dm(actor), "/get-sources --page 1").text();
         String p1List =
                 listSourcesHandler.handle(new ScopeRef.Dm(actor), "/list-sources --page 1").text();
-        assertEquals(p1List, p1Get,
+        // M1-630 invoked-name decision: /get-sources' own hint must name
+        // /get-sources (the command the user typed), not /list-sources.
+        assertTrue(p1Get.contains("/get-sources --page 2"),
+                "/get-sources page 1 next-page hint must echo the /get-sources command the "
+                        + "caller invoked (M1-630 invoked-name decision) — got: " + p1Get);
+        assertEquals(p1List, normaliseHintToken(p1Get),
                 "/get-sources --page 1 must render identically to /list-sources --page 1 "
-                        + "(same indicator, same rows)");
+                        + "(same indicator, same rows), modulo the command token echoed in "
+                        + "the M1-630 next-page hint");
         String p2Get =
                 getSourcesHandler.handle(new ScopeRef.Dm(actor), "/get-sources --page 2").text();
         String p2List =
                 listSourcesHandler.handle(new ScopeRef.Dm(actor), "/list-sources --page 2").text();
-        assertEquals(p2List, p2Get,
-                "/get-sources --page 2 must render identically to /list-sources --page 2");
+        assertEquals(p2List, normaliseHintToken(p2Get),
+                "/get-sources --page 2 must render identically to /list-sources --page 2, "
+                        + "modulo the command token echoed in the M1-630 next-page hint");
+    }
+
+    /**
+     * Rewrite the {@code /get-sources} next-page hint token to
+     * {@code /list-sources} so the two aliases' bodies compare equal. The
+     * {@code "<cmd> --page"} affordance appears only in the footer hint, so
+     * this touches nothing else (rows/header carry no such token).
+     */
+    private static String normaliseHintToken(String getSourcesBody) {
+        return getSourcesBody.replace("/get-sources --page", "/list-sources --page");
     }
 
     // ----- (b) --all is ignored: the privileged enumeration is unreachable -

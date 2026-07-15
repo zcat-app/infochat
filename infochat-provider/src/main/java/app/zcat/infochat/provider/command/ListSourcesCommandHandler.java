@@ -66,7 +66,11 @@ import java.util.UUID;
  * reply header carries a {@code page N/M} indicator (M1-625) so a
  * listing longer than one page announces its remaining pages instead
  * of silently truncating; the total is a {@code count(*)} twin of the
- * page SELECT. A page beyond the result set returns the empty reply.</p>
+ * page SELECT. Every page but the last also carries a next-page hint
+ * footer (M1-630) echoing the invoked command name ({@code /list-sources}
+ * or the {@code /get-sources} alias) with the next page number, so the
+ * {@code --page} affordance is discoverable in-band. A page beyond the
+ * result set returns the empty reply.</p>
  *
  * <p>This is a read-only handler — no audit row, no state mutation.
  * Per Invariant 7, audit-on-intent fires only on confirm-gated
@@ -147,6 +151,7 @@ public class ListSourcesCommandHandler implements CommandHandler {
     @Override
     public OutboundMessage handle(ScopeRef scope, String rawText) {
         ListSourcesArgs args = ListSourcesArgs.parse(rawText);
+        String commandToken = commandTokenOf(rawText);
         String adapter = inboundContext.adapterName();
         String callerContactId = contactIdOf(scope);
 
@@ -184,7 +189,7 @@ public class ListSourcesCommandHandler implements CommandHandler {
             // open (matching the established read-only-doesn't-audit
             // pattern, e.g. SummaryCommandHandler).
             writePrivilegedReadAuditRow(actor.get(), callerContactId, adapter, args.includeDeleted);
-            return adminAllPath(scope, args.includeDeleted, args.page);
+            return adminAllPath(scope, args.includeDeleted, args.page, commandToken);
         }
 
         // No admin flags — caller-subscription path. Works in both DM
@@ -194,19 +199,20 @@ public class ListSourcesCommandHandler implements CommandHandler {
             if (actor.isEmpty()) {
                 return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_EMPTY, inboundContext.effectiveLanguage()));
             }
-            return scopedPath(scope, "dm", actor.get().id, args.page);
+            return scopedPath(scope, "dm", actor.get().id, args.page, commandToken);
         }
         if (scope instanceof ScopeRef.Group group) {
             Optional<UUID> groupId = lookupGroupId(adapter, group.adapterGroupId());
             if (groupId.isEmpty()) {
                 return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_EMPTY, inboundContext.effectiveLanguage()));
             }
-            return scopedPath(scope, "group", groupId.get(), args.page);
+            return scopedPath(scope, "group", groupId.get(), args.page, commandToken);
         }
         return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_EMPTY, inboundContext.effectiveLanguage()));
     }
 
-    private OutboundMessage scopedPath(ScopeRef scope, String scopeKind, UUID scopeId, int page) {
+    private OutboundMessage scopedPath(ScopeRef scope, String scopeKind, UUID scopeId, int page,
+                                       String commandToken) {
         long totalCount = countScopedSources(scopeKind, scopeId);
         List<SourceRow> rows = selectScopedSources(scopeKind, scopeId, page);
         // rows.isEmpty() covers both an empty scope (totalCount == 0) and a
@@ -215,16 +221,17 @@ public class ListSourcesCommandHandler implements CommandHandler {
         if (rows.isEmpty()) {
             return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_EMPTY, inboundContext.effectiveLanguage()));
         }
-        return reply(scope, renderReply(rows, /* withVisibilityCaveat */ false, totalCount, page));
+        return reply(scope, renderReply(rows, /* withVisibilityCaveat */ false, totalCount, page, commandToken));
     }
 
-    private OutboundMessage adminAllPath(ScopeRef scope, boolean includeDeleted, int page) {
+    private OutboundMessage adminAllPath(ScopeRef scope, boolean includeDeleted, int page,
+                                         String commandToken) {
         long totalCount = countAllSources(includeDeleted);
         List<SourceRow> rows = selectAllSources(includeDeleted, page);
         if (rows.isEmpty()) {
             return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_EMPTY, inboundContext.effectiveLanguage()));
         }
-        return reply(scope, renderReply(rows, /* withVisibilityCaveat */ true, totalCount, page));
+        return reply(scope, renderReply(rows, /* withVisibilityCaveat */ true, totalCount, page, commandToken));
     }
 
     private void writePrivilegedReadAuditRow(UserRow actor, @Nullable String callerContactId,
@@ -270,7 +277,7 @@ public class ListSourcesCommandHandler implements CommandHandler {
     }
 
     private String renderReply(List<SourceRow> rows, boolean withVisibilityCaveat,
-                               long totalCount, int page) {
+                               long totalCount, int page, String commandToken) {
         int totalPages = (int) Math.ceil((double) totalCount / PAGE_SIZE);
         StringBuilder sb = new StringBuilder();
         // Page indicator (M1-625) so a >PAGE_SIZE listing announces its
@@ -289,6 +296,17 @@ public class ListSourcesCommandHandler implements CommandHandler {
             sb.append(MessageFormat.format(
                     bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_LINE, inboundContext.effectiveLanguage()),
                     row.displayName, row.identifier, row.kind, statusLabel(row), row.id));
+        }
+        // Next-page hint (M1-630): a footer on every page but the last, echoing
+        // the invoked command name (/list-sources or the /get-sources alias) so a
+        // multi-page listing tells the user how to reach the next page instead of
+        // leaving the --page syntax discoverable only via /help. page < totalPages
+        // holds iff a further page exists, so the last page carries no dangling hint.
+        if (page < totalPages) {
+            sb.append('\n');
+            sb.append(MessageFormat.format(
+                    bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_NEXT_PAGE_HINT, inboundContext.effectiveLanguage()),
+                    commandToken, String.valueOf(page + 1)));
         }
         return sb.toString();
     }
@@ -426,6 +444,18 @@ public class ListSourcesCommandHandler implements CommandHandler {
 
     private static @Nullable String contactIdOf(ScopeRef scope) {
         return scope instanceof ScopeRef.Dm dm ? dm.contactId() : null;
+    }
+
+    /**
+     * The command token the caller invoked — {@code rawText}'s first
+     * whitespace-delimited token ({@code /list-sources}, or {@code /get-sources}
+     * when reached through the alias, which forwards the name token intact).
+     * Dispatch only routes here when that token equals a registered command
+     * name ({@code InboundRouter.handleSlash}), so it is a fixed command literal,
+     * never free-form user text — safe to echo into the next-page hint (M1-630).
+     */
+    private static String commandTokenOf(String rawText) {
+        return rawText.trim().split("\\s+")[0];
     }
 
     private record UserRow(UUID id, boolean isAdmin) {}

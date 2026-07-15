@@ -1,7 +1,7 @@
 ---
 id: M1-630
 title: "/list-sources & /get-sources: inline next-page hint on multi-page lists"
-status: pending
+status: done
 created: 2026-07-15
 last_updated: 2026-07-15
 blocked_by: []
@@ -11,6 +11,32 @@ risk: low
 round_cap: 2
 security_relevant: false
 migration_touch: false
+clarity_check:
+  date: 2026-07-15
+  verdict: WARN
+  warnings:
+    - >-
+      SECURITY-FLAG-CONSISTENT: renderReply is shared with the audited admin
+      --all path; confirm the diff only appends a rendering line and does not
+      touch the admin gate or the audit write (accepted precedent M1-625).
+    - >-
+      Open-decision (command-name token in the hint) has no automatic start
+      prompt; default is "Lean: invoked name" absent an explicit operator ask.
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-15
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 153
+      removed: 22
 out_of_scope:
   - >-
     The `page N/M` indicator itself (added by M1-625, merged) and the --page
@@ -49,3 +75,12 @@ equality assertion — OR the INVOKED command name, so /get-sources shows
 modulo the command token"? Lean: invoked name. If the invoked-name option is chosen,
 updating that one M1-625 alias test is authorized by this ticket (it is the only
 pre-existing test whose expectation the change touches).
+
+RESOLVED (2026-07-15, operator at /m1-tick run): INVOKED command name. The hint
+echoes the command the caller typed — `/get-sources --page N` via the alias,
+`/list-sources --page N` via the primary command. The one authorised M1-625 alias
+test (GetSourcesAliasTest.getSourcesPaginatesIdenticallyToListSourcesAbovePageLimit)
+is relaxed to "identical modulo the command token". No design-note change is needed:
+docs/design/03-commands.md:733 prescribes the `/list-sources` footer for the
+`/list-sources` command, which this approach still honours; the note is silent on the
+alias's own footer, so echoing `/get-sources` there does not contradict it.

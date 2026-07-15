@@ -966,6 +966,15 @@ public final class BundleKeys {
     /** Reply when zero rows would be returned for the requested view. */
     public static final String REPLY_LIST_SOURCES_EMPTY = "reply.list_sources.empty";
 
+    /**
+     * Next-page hint footer (M1-630), appended on every page EXCEPT the last.
+     * Tokens: {@code {0}} = the command name the caller invoked
+     * ({@code /list-sources} or its {@code /get-sources} alias, echoed so the
+     * hint points back at what the user typed), {@code {1}} = next page number.
+     */
+    public static final String REPLY_LIST_SOURCES_NEXT_PAGE_HINT =
+            "reply.list_sources.next_page_hint";
+
     /** {@code /get-tags} header line printed before the per-tag rows (explains the {@code *} followed-marker). */
     public static final String REPLY_GET_TAGS_HEADER = "reply.get_tags.header";
 

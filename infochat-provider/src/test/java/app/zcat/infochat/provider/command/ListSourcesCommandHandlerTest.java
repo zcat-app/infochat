@@ -308,6 +308,51 @@ class ListSourcesCommandHandlerTest {
     }
 
     @Test
+    void listSourcesNextPageHintOnEveryPageButLast() throws Exception {
+        // M1-630 (acceptance items 1 + 3): every page EXCEPT the last carries an
+        // inline next-page hint naming the correct next page number; the last
+        // page carries no dangling hint. 25 caller subscriptions exceed the
+        // 20-per-page limit so the listing spans >1 page. The caller's D59 world
+        // catalogue may fold in live bootstrap rows, so totalPages is read back
+        // from the header rather than hard-coded — the boundary assertions hold
+        // regardless of how many bootstrap rows the DB carries.
+        // The affordance token ("<cmd> --page N") appears ONLY in the footer
+        // hint — never in the header ("page N/M") or the per-row lines — so its
+        // presence/absence is an exact proxy for the hint itself.
+        String actor = PREFIX + "hintCaller";
+        UUID actorId = seedUser(actor, false);
+        int seeded = 25;
+        for (int i = 0; i < seeded; i++) {
+            UUID srcId = seedSource(String.format("hint-%02d", i), "active", false);
+            seedSubscription("dm", actorId, srcId);
+        }
+
+        String firstBody = handler.handle(new ScopeRef.Dm(actor), "/list-sources").text();
+        Matcher indicator = Pattern.compile("page 1/(\\d+)").matcher(firstBody);
+        assertTrue(indicator.find(),
+                "precondition: a multi-page listing must render a `page 1/M` indicator "
+                        + "— got: " + firstBody);
+        int totalPages = Integer.parseInt(indicator.group(1));
+        assertTrue(totalPages >= 2,
+                "25 caller sources exceed the 20-per-page limit, so the listing must span "
+                        + ">1 page — got totalPages=" + totalPages);
+
+        for (int page = 1; page <= totalPages; page++) {
+            String body = handler.handle(new ScopeRef.Dm(actor),
+                    "/list-sources --page " + page).text();
+            if (page < totalPages) {
+                assertTrue(body.contains("/list-sources --page " + (page + 1)),
+                        "non-last page " + page + " must carry an inline next-page hint naming "
+                                + "the next page (--page " + (page + 1) + ") — got: " + body);
+            } else {
+                assertFalse(body.contains("/list-sources --page"),
+                        "the last page (" + page + ") must carry no dangling next-page hint "
+                                + "— got: " + body);
+            }
+        }
+    }
+
+    @Test
     void listSourcesGroupReturnsGroupSubscriptionsForEveryMember() throws Exception {
         // Decision D7: group subscriptions are visible to every group
         // member. The handler keys on group scope (not caller id), so
