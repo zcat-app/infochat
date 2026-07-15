@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 649 |
 | deferred | 1 |
-| abandoned | 11 |
-| **total** | **665** |
+| abandoned | 12 |
+| **total** | **667** |
 
 ---
 
@@ -27,8 +27,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-627 — /approve-group and /reject-group: clarify which group id token to pass (complexity: low, risk: low)
 - M1-628 — Asset commands (/zcash, /monero): inconsistent leading indentation on some reply lines (complexity: low, risk: low)
-- M1-629 — Investigate per-scope LLM request queuing under a burst (multi-minute-late replies) (complexity: medium, risk: low)
-- M1-631 — Default /invite create to --open; fix/retire --contact (complexity: medium, risk: medium)
+- M1-629 — Investigate the one-in-flight-per-(user, scope) guard under a chat/summary burst (multi-minute-late replies) (complexity: medium, risk: low)
+- M1-632 — Default bare /invite create to --open (D60) (complexity: medium, risk: medium)
 
 ---
 
@@ -45,7 +45,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-633 — blocked_by: M1-632 (pending)
 
 ---
 
@@ -88,12 +88,13 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 Tickets decided against — not implemented as this ticket. Terminal: not reopenable via the driver's `reopen`. `abandoned_reason` records why (`decomposed` = split into shipped children; `superseded` = absorbed by another ticket; `obsoleted-by-spec-amend` = a spec change dropped the requirement; `wont-do-infeasible` = evaluated and judged not worth building). See `docs/process/workflow.md` §Status values.
 
-### decomposed (5)
+### decomposed (6)
 - M1-034 — Tagger + Embedding pipeline + status→READY + new_post NOTIFY
 - M1-318 — Derive per-adapter bot contact id from adapter identity material (SimpleX queue address, Signal ACI)
 - M1-493 — Schema hardening: NOT NULL upstream_identifier + approve_quarantine phantom NOTIFY
 - M1-511 — SimpleX groups: v6.5.4.1 mention recognition + auto-accept group invitations
 - M1-522 — Free auto_joined_group slots when the bot leaves a group
+- M1-631 — Default /invite create to --open; fix/retire --contact
 
 ### obsoleted-by-spec-amend (1)
 - M1-314 — Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed
@@ -850,5 +851,7 @@ M1-627 (pending) ← runnable
 M1-628 (pending) ← runnable
 M1-629 (pending) ← runnable
 M1-630 (done)
-M1-631 (pending) ← runnable
+M1-631 (abandoned)
+M1-632 (pending) ← runnable
+  └── M1-633 (pending)
 ```

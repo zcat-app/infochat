@@ -1,9 +1,25 @@
 ---
 id: M1-631
 title: "Default /invite create to --open; fix/retire --contact"
-status: pending
+status: abandoned
 created: 2026-07-15
 last_updated: 2026-07-15
+abandoned_reason: decomposed
+deferred_on: M1-632, M1-633
+escalations:
+  - date: 2026-07-15
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — pre-start decision-gate resolution (operator, 2026-07-15):
+      (1) bare `/invite create` DEFAULTS TO --open (confirm gate + open cap
+      remain the backstop); (2) --contact is KEPT and gains an in-band
+      contactId-sourcing surface for connected-but-unregistered contacts.
+      Combined scope needs ~9-10 files (InviteCommandHandler, its test,
+      BundleKeys, en/cs bundles, AuditAction for the privileged PII read,
+      commands.md, security.md, decisions.md) vs files_budget: 8 — the
+      decompose-at-start case the ticket body anticipated. Resolved via
+      decompose into M1-632 (default-to-open + D60) and M1-633 (contactId
+      sourcing surface, blocked_by M1-632). Operand fully replaced.
 blocked_by: []
 files_budget: 8
 complexity: medium
