@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 648 |
+| done | 649 |
 | deferred | 1 |
 | abandoned | 11 |
 | **total** | **664** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-626 — /invite create --open: default to the sole enabled adapter; replace confusing empty-adapter error (complexity: low, risk: low)
 - M1-627 — /approve-group and /reject-group: clarify which group id token to pass (complexity: low, risk: low)
 - M1-628 — Asset commands (/zcash, /monero): inconsistent leading indentation on some reply lines (complexity: low, risk: low)
 - M1-629 — Investigate per-scope LLM request queuing under a burst (multi-minute-late replies) (complexity: medium, risk: low)
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-630 | /list-sources & /get-sources: inline next-page hint on multi-page lists | 2026-07-15 | round 1 APPROVE |
+| M1-626 | /invite create --open: default to the sole enabled adapter; replace confusing empty-adapter error | 2026-07-15 | round 1 APPROVE |
 | M1-625 | /list-sources (and /get-sources) silently truncates at ~20 of N sources with no pagination hint | 2026-07-15 | round 1 APPROVE |
 | M1-624 | Bootstrap-admin token claim shows a probation welcome instead of an admin welcome (en+cs) | 2026-07-15 | round 1 APPROVE |
 | M1-623 | /summary degrades ungracefully on a large post window (cap before the summarizer LLM call) | 2026-07-15 | round 1 APPROVE |
@@ -73,7 +73,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-620 | Admin subcommand /invite bot-contact: retrieve the bot's own connect contact in-band (SimpleX current URL / Signal number) so admins onboard new contacts without server access | 2026-07-13 | round 1 APPROVE |
 | M1-619 | Recalibrate the chat confident-grounding cutoff (M1-618 CONFIDENT_SIMILARITY_CUTOFF): measure clarify-vs-affordance separation on the labeled query set | 2026-07-13 | round 1 APPROVE |
 | M1-618 | Chat conversational-refinement recovery: clarifying-question on low-confidence retrieval + surface getReferences as 'more like this' | 2026-07-13 | round 1 APPROVE |
-| M1-617 | Chat retrieval-recovery: provenance transparency + hybrid semantic/lexical (RRF) post retrieval | 2026-07-13 | round 1 APPROVE |
 
 ---
 
@@ -845,7 +844,7 @@ M1-621 (done)
 M1-623 (done)
 M1-624 (done)
 M1-625 (done)
-M1-626 (pending) ← runnable
+M1-626 (done)
 M1-627 (pending) ← runnable
 M1-628 (pending) ← runnable
 M1-629 (pending) ← runnable

@@ -326,6 +326,25 @@ public class InviteCommandHandler implements CommandHandler {
         // Adapter validation against the currently-enabled set.
         Set<String> enabled = enabledAdapterNames();
         String targetAdapter = args.adapter;
+
+        // --open with no explicit --adapter: an open invite binds to the
+        // adapter only, so a single-adapter deployment has one unambiguous
+        // target — resolve it rather than forcing the admin to name it.
+        // When the target can't be inferred (more than one enabled adapter)
+        // name the requirement and the choices, instead of falling through
+        // to the empty-backtick "Unknown adapter ``" the null case would
+        // otherwise render (M1-626). The --contact path is deliberately
+        // excluded (out of scope): it stays explicitly adapter-scoped.
+        if (args.open && targetAdapter == null) {
+            if (enabled.size() == 1) {
+                targetAdapter = enabled.iterator().next();
+            } else {
+                return reply(scope, MessageFormat.format(
+                        bundleLoader.get(BundleKeys.ERROR_INVITE_ADAPTER_REQUIRED, inboundContext.effectiveLanguage()),
+                        String.join(", ", enabled)));
+            }
+        }
+
         if (targetAdapter == null || !enabled.contains(targetAdapter)) {
             String body = MessageFormat.format(
                     bundleLoader.get(BundleKeys.ERROR_INVITE_UNKNOWN_ADAPTER, inboundContext.effectiveLanguage()),

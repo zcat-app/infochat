@@ -310,6 +310,80 @@ class InviteCommandHandlerTest {
         assertEquals(1L, countAuditRowsForCode("INVITE_CREATE", code));
     }
 
+    // ----- (M1-626) --open defaults to the sole enabled adapter -----------
+    // In a single-adapter deployment (%test exposes exactly ADAPTER),
+    // /invite create --open needs no --adapter: an open invite binds to the
+    // adapter only, so the lone enabled adapter is the unambiguous target.
+    // Proven by the confirm prompt naming ADAPTER and the OPEN_ADAPTER row
+    // recording that adapter on confirm.
+
+    @Test
+    void inviteCreateOpenWithoutAdapterDefaultsToSoleEnabledAdapter() throws Exception {
+        String actor = PREFIX + "openDefault-actor";
+        UUID actorId = seedUser(actor, true);
+        long invitesBefore = countInvitesByCreator(actorId);
+
+        OutboundMessage promptReply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/invite create --open");
+        assertEquals(expectedOpenPrompt(ADAPTER), promptReply.text(),
+                "/invite create --open with no --adapter must default to the sole "
+                        + "enabled adapter and return its confirm prompt");
+        assertEquals(invitesBefore, countInvitesByCreator(actorId),
+                "the first (prompt) call must not write an invite_code row");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/invite create --open confirm");
+        UUID code = extractUuid(reply.text());
+        assertNotNull(code, "confirm reply must contain the new code's UUID");
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT invite_type, adapter, expected_contact_id, status "
+                             + "FROM invite_code WHERE code = ?")) {
+            ps.setObject(1, code);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "invite_code row must exist post-create");
+                assertEquals("OPEN_ADAPTER", rs.getString("invite_type"));
+                assertEquals(ADAPTER, rs.getString("adapter"),
+                        "the defaulted invite must target the sole enabled adapter");
+                assertEquals(null, rs.getString("expected_contact_id"),
+                        "OPEN_ADAPTER row must have expected_contact_id=NULL");
+                assertEquals("PENDING", rs.getString("status"));
+            }
+        }
+    }
+
+    // ----- (M1-626) --open, no --adapter, multiple enabled → adapter_required
+    // With more than one enabled adapter the target can't be inferred, so the
+    // reply names the requirement and the choices rather than rendering the
+    // confusing empty-backtick "Unknown adapter ``". handlerWith(fakeRegistry)
+    // presents a two-adapter set without leaking a mock across the JVM run;
+    // this path returns before any DB write, so no invite_code row appears.
+
+    @Test
+    void inviteCreateOpenWithoutAdapterMultiAdapterReturnsAdapterRequired() throws Exception {
+        String actor = PREFIX + "openAmbiguous-actor";
+        UUID actorId = seedUser(actor, true);
+        InviteCommandHandler wired = handlerWith(fakeRegistry(
+                stubAdapter("simplex", () -> Optional.empty()),
+                stubAdapter("signal", () -> Optional.empty())));
+
+        OutboundMessage reply = wired.handle(
+                new ScopeRef.Dm(actor),
+                "/invite create --open");
+
+        assertEquals(MessageFormat.format(
+                        bundleLoader.get(BundleKeys.ERROR_INVITE_ADAPTER_REQUIRED), "simplex, signal"),
+                reply.text(),
+                "multi-adapter --open with no --adapter must name the requirement and the choices");
+        assertFalse(reply.text().contains("Unknown adapter ``"),
+                "the confusing empty-backtick error must not appear");
+        assertEquals(0L, countInvitesByCreator(actorId),
+                "no invite_code row may be written when the adapter can't be resolved");
+    }
+
     // ----- (28) Contact cap met → contact_cap_met -------------------------
 
     @Test

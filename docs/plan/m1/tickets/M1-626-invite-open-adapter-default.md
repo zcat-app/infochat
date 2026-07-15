@@ -1,7 +1,7 @@
 ---
 id: M1-626
 title: "/invite create --open: default to the sole enabled adapter; replace confusing empty-adapter error"
-status: pending
+status: done
 created: 2026-07-15
 last_updated: 2026-07-15
 blocked_by: []
@@ -11,6 +11,33 @@ risk: low
 round_cap: 2
 security_relevant: false
 migration_touch: false
+clarity_check:
+  date: 2026-07-15
+  verdict: WARN
+  warnings:
+    - >-
+      COMPLEXITY-RISK-CALIBRATED: risk:low is defensible given the narrow
+      scope, but the touched surface (bot-admin invite-issuance) would also
+      support risk:medium.
+    - >-
+      SECURITY-FLAG-CONSISTENT: security_relevant:false while modifying
+      /invite create adapter resolution — narrowed scope (no auth/cap/audit
+      change) is the stated justification for keeping it false.
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-15
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 123
+      removed: 7
 out_of_scope:
   - >-
     The per-adapter invite semantics (D44) and the confirm-gate. Only the adapter-

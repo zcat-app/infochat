@@ -666,6 +666,16 @@ public final class BundleKeys {
     /** {@code /invite create --adapter <name>} where {@code <name>} is not a currently-enabled adapter. {@code {0}} = the rejected name. */
     public static final String ERROR_INVITE_UNKNOWN_ADAPTER = "error.invite.unknown_adapter";
 
+    /**
+     * {@code /invite create --open} with no {@code --adapter} in a deployment
+     * where the target can't be inferred (more than one enabled adapter).
+     * Names the requirement and the valid choices, replacing the confusing
+     * empty-backtick {@link #ERROR_INVITE_UNKNOWN_ADAPTER} for the omitted-flag
+     * {@code --open} case (M1-626). {@code {0}} = the enabled adapter names,
+     * comma-separated.
+     */
+    public static final String ERROR_INVITE_ADAPTER_REQUIRED = "error.invite.adapter_required";
+
     /** {@code /invite create --contact <id>} against a {@code is_banned=TRUE} row; points the admin at {@code /unban}. */
     public static final String ERROR_INVITE_BANNED_TARGET = "error.invite.banned_target";
 
