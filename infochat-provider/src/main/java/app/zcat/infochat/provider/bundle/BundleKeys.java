@@ -530,6 +530,16 @@ public final class BundleKeys {
     public static final String REPLY_SUMMARY_DEGRADED_NOTICE = "reply.summary.degraded_notice";
 
     /**
+     * Window over the summarizer post cap (M1-623): reply prefix
+     * announcing the explicit-decision degraded form + the narrow-with--w
+     * steer. Two interpolation tokens: {@code {0}} = total eligible posts
+     * in the window (before the retrieval cap), {@code {1}} = the
+     * summarizer post cap.
+     */
+    public static final String REPLY_SUMMARY_WINDOW_TOO_LARGE_NOTICE =
+            "reply.summary.window_too_large_notice";
+
+    /**
      * Cluster-cap excess prefix. Four interpolation tokens:
      * {@code {0}} = included count (= cap), {@code {1}} = total eligible
      * before cap, {@code {2}} = profile name (e.g. {@code laptop}),

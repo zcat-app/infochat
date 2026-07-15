@@ -128,6 +128,50 @@ class SummaryIT {
     }
 
     @Test
+    void windowOverSummarizerPostCapSkipsLlmAndSteersToNarrow() throws Exception {
+        UUID userId = insertUser(USER_CONTACT_ID);
+        UUID source1Id = insertSource(PREFIX + "src-1", "MvpNews");
+        insertSubscription(userId, source1Id);
+
+        // 6 READY posts > summarizer-post-cap=5 (profile override below):
+        // the M1-623 explicit size decision must fire BEFORE any LLM call.
+        Instant now = Instant.now();
+        for (int i = 1; i <= 6; i++) {
+            insertPost(PREFIX + "p" + i, source1Id, "MVP capped headline " + i,
+                    now.minus(Duration.ofMinutes(i)), "READY",
+                    new String[] { PREFIX + "news" });
+        }
+
+        // A summarizer call on this path would be a regression even if it
+        // succeeded — make one fail loudly AND assert the count stays 0.
+        mockLlm.setThrowOnCall(true);
+
+        adapter.deliverDm(USER_CONTACT_ID, "/summary -w 24h");
+
+        // The gate branch is a plain guard reply through the router —
+        // no ProgressNotifier placeholder lifecycle.
+        List<OutboundMessage> sent = adapter.sentMessages();
+        assertEquals(1, sent.size(), "exactly one direct guard reply");
+        assertEquals(0, adapter.finalizedBodies().size(),
+                "no placeholder lifecycle on the over-cap path");
+        String body = sent.get(0).text();
+
+        assertEquals(0, mockLlm.callCount(),
+                "over-cap window must make zero summarizer LLM calls");
+        assertTrue(body.contains("more than the 5-post summarizer limit"),
+                "reply must explain the window is over the summarizer cap. Got: " + body);
+        assertTrue(body.contains("-w"),
+                "reply must steer the user to narrow with -w. Got: " + body);
+        assertFalse(body.contains("LLM is unreachable"),
+                "over-cap degrade must NOT claim the LLM is unreachable. Got: " + body);
+        // Degraded blocks still render: headline + uid per post.
+        assertTrue(body.contains("MVP capped headline 1"),
+                "degraded blocks include the headlines");
+        assertTrue(body.contains(PREFIX + "p6"),
+                "degraded blocks include the post UIDs");
+    }
+
+    @Test
     void mvpExitCriterionSixDegradedFallbackWhenLlmThrows() throws Exception {
         UUID userId = insertUser(USER_CONTACT_ID);
         UUID source1Id = insertSource(PREFIX + "src-1", "MvpNews");
@@ -229,6 +273,9 @@ class SummaryIT {
                     "infochat.adapters", "inmemory",
                     "infochat.adapters.inmemory.allow-low-trust", "true",
                     "infochat.summary.cluster-cap", "200",
+                    // M1-623 boundary pin: 5 keeps the 4-post MVP tests on the
+                    // prose path while the 6-post over-cap test trips the gate.
+                    "infochat.summary.summarizer-post-cap", "5",
                     "infochat.profile.label", "laptop");
         }
     }

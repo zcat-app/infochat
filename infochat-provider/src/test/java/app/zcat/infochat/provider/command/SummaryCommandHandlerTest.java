@@ -119,6 +119,10 @@ class SummaryCommandHandlerTest {
         handler.summaryAnchorRepository = anchorRepository;
         handler.inFlightTracker = tracker;
         handler.llmRateCap = new LlmRateCap(10);
+        // Manual field injection misses @ConfigProperty defaults: an unset
+        // summarizerPostCap would be 0 and every window would trip the
+        // M1-623 over-cap gate. Mirror the production default.
+        handler.summarizerPostCap = 50;
         progressNotifier = new RecordingProgressNotifier();
         handler.progressNotifier = progressNotifier;
         InboundContext context = new InboundContext();

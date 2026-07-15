@@ -1,9 +1,42 @@
 ---
 id: M1-623
 title: "/summary degrades ungracefully on a large post window (cap before the summarizer LLM call)"
-status: pending
+status: done
 created: 2026-07-15
 last_updated: 2026-07-15
+reviews:
+  - round: 1
+    date: 2026-07-15
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 171
+      removed: 7
+clarity_check:
+  date: 2026-07-15
+  verdict: WARN
+  warnings:
+    - >-
+      Acceptance item 1's example text "narrow with --since" names a flag /summary
+      does not have; the real narrowing flag is -w <duration> (SummaryArgs.java:75).
+      Do not ship the example verbatim.
+    - >-
+      out_of_scope entry 2 describes a "remote-llm=500 post render cap" distinct from
+      the LLM prompt, but no separate render cap exists: infochat.summary.cluster-cap
+      bounds both the SQL retrieval and the per-cluster generation fan-out (one LLM
+      call per cluster); reply.summary.cap_excess_notice prefixes the reply but does
+      not skip generation.
+    - >-
+      Acceptance items 1 and 3 refer to "the cap" without pinning whether it is the
+      existing infochat.summary.cluster-cap retuned or a new distinct threshold; left
+      as implementer discretion.
+  blockers: []
 blocked_by: []
 files_budget: 8
 complexity: medium

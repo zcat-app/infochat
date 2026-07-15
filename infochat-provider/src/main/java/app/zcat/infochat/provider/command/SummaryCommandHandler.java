@@ -27,6 +27,7 @@ import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -117,6 +118,19 @@ public class SummaryCommandHandler implements CommandHandler {
 
     /** Max fuzzy-suggestion entries surfaced in the unknown-tag error. */
     private static final int FUZZY_SUGGESTION_MAX = 5;
+
+    /**
+     * Max posts allowed into LLM prose generation per /summary
+     * invocation (M1-623). Distinct from {@code
+     * infochat.summary.cluster-cap}, which bounds the SQL retrieval
+     * set: a window can be under the retrieval cap yet still too large
+     * for one summarizer pass — the per-cluster prompts (or their
+     * count) blow the summarizer timeout and the run degrades with a
+     * misleading "unreachable" notice. Over THIS cap the handler skips
+     * the summarizer entirely and degrades by explicit decision.
+     */
+    @ConfigProperty(name = "infochat.summary.summarizer-post-cap", defaultValue = "50")
+    int summarizerPostCap;
 
     @Inject
     BundleLoader bundleLoader;
@@ -232,6 +246,23 @@ public class SummaryCommandHandler implements CommandHandler {
                     ? BundleKeys.REPLY_SUMMARY_NO_SUBSCRIPTIONS
                     : BundleKeys.REPLY_SUMMARY_NO_POSTS_YET;
             return reply(scope, bundleLoader.get(emptyKey, inboundContext.effectiveLanguage()));
+        }
+
+        // Explicit size decision (M1-623): a window over the summarizer
+        // post cap never reaches the LLM — the doomed call would only
+        // burn the timeout and mislabel the outcome "unreachable".
+        // Render the same degraded form the LLM-failure path uses
+        // (headlines + bare URLs + UIDs via ClusterBlockRenderer, which
+        // bypasses sanitize/translate for degraded prose) plus an honest
+        // too-large notice steering the user to narrow with -w. Like the
+        // other guard branches this path is deterministic and makes no
+        // LLM call, so it consumes no rate-cap token and holds no
+        // in-flight slot. No summary anchor is written either: a written
+        // anchor would let /retry replay the over-cap set straight into
+        // the doomed per-cluster calls this gate exists to prevent.
+        if (result.posts().size() > summarizerPostCap) {
+            String scopeLanguage = readScopeLanguage(scopeKind, scopeId.get());
+            return reply(scope, composeWindowTooLargeReply(result, scopeLanguage));
         }
 
         // At most one in-flight interruptible request per (user, scope)
@@ -366,6 +397,44 @@ public class SummaryCommandHandler implements CommandHandler {
         } finally {
             inFlightTracker.release(actorId, scopeKind, scopeId.get(), slot);
         }
+    }
+
+    /**
+     * Compose the window-too-large reply (M1-623): the same prefix
+     * ordering as the terminal path (top-3 restriction, cap-excess),
+     * then the too-large notice in the slot the degraded notice
+     * occupies on the LLM-failure path, then one degraded block per
+     * cluster. Clustering still runs — it is deterministic DB+memory
+     * work — so the degraded blocks are byte-identical to what the
+     * LLM-failure path would have rendered for the same posts.
+     */
+    private String composeWindowTooLargeReply(Result result, String scopeLanguage) {
+        List<Cluster> clusters = clusterTraversal.cluster(result.posts());
+        StringBuilder out = new StringBuilder();
+        if (result.topTagRestriction().isPresent()) {
+            out.append(format(BundleKeys.REPLY_SUMMARY_TOP_3_OF_N_PREFIX,
+                    result.topTagRestriction().get().followedTagCount()));
+            out.append("\n\n");
+        }
+        if (result.excludedCount() > 0) {
+            out.append(format(BundleKeys.REPLY_SUMMARY_CAP_EXCESS_NOTICE,
+                    result.posts().size(),
+                    result.totalBeforeCap(),
+                    result.profileLabel(),
+                    result.excludedCount()));
+            out.append("\n\n");
+        }
+        out.append(format(BundleKeys.REPLY_SUMMARY_WINDOW_TOO_LARGE_NOTICE,
+                result.totalBeforeCap(), summarizerPostCap));
+        out.append("\n\n");
+        ClusterBlockRenderer clusterBlockRenderer =
+                new ClusterBlockRenderer(llmOutputSanitizer, translationPipeline, bundleLoader);
+        for (Cluster cluster : clusters) {
+            clusterBlockRenderer.appendClusterBlock(out,
+                    new ClusterProse(cluster, SummaryProseGenerator.degradedProseFor(cluster), true),
+                    scopeLanguage);
+        }
+        return out.toString().stripTrailing();
     }
 
     /**
