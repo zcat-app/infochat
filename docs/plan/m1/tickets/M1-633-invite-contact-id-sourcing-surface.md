@@ -36,9 +36,12 @@ out_of_scope:
   - >-
     The --open confirm gate (M1-051), the per-adapter open cap, the global
     --contact cap, and the audit-before-effect transaction shape for
-    create/revoke. This ticket ADDS a read-only sourcing surface; it does not
-    change how invites are minted. No Flyway migration — invite_code_attempt
-    already exists and audit_action is free-text (no enum-constrained column).
+    create/revoke — all UNCHANGED. This ticket's primary surface is read-only;
+    beyond it, the only write-path touch is the narrow empty-`--contact=` parse
+    hardening (acceptance item 5), which rejects malformed input at the parse
+    boundary and does not alter the mint transaction itself. No Flyway
+    migration — invite_code_attempt already exists and audit_action is free-text
+    (no enum-constrained column).
 acceptance:
   - >-
     A new read-only in-band admin surface (a `/invite` subcommand) lists the
@@ -66,8 +69,27 @@ acceptance:
     connected-but-unregistered contacts on the inbound adapter, writes the new
     audit action before disclosure, and is rejected for a non-admin caller and
     in group scope. mvn verify is green.
+  - >-
+    Empty-equals hardening, folded in from the M1-632 redteam out-of-model item
+    (docs/plan/m1/redteam/M1-632-2026-07-15-remediation.md): CreateArgs.parse
+    treats an empty value after `--contact=` (and, for consistency, `--adapter=`)
+    as malformed rather than a present-but-empty flag value, so the existing
+    malformed gate returns error.invite.create_malformed and no CONTACT_BOUND
+    invite is ever minted bound to "". The fix lives ONLY at the parse/validation
+    boundary — no guard is added in createContactBound, because the malformed gate
+    makes an empty expected_contact_id unreachable there (a downstream check would
+    be forbidden internal defensive code). This makes the code honor M1-632's
+    already-shipped security.md promise that a value-less --contact is rejected
+    (M1-632 caught the space form; the equals form slipped through). No new bundle
+    key (error.invite.create_malformed already exists from M1-632).
+    InviteCommandHandlerTest pins the `--contact=` shape: no invite_code row, no
+    INVITE_CREATE_INTENT audit row, no pending confirm.
 test_plan:
-  adds: []
+  adds:
+    - >-
+      InviteCommandHandlerTest empty-`--contact=` scenario — the equals-empty form
+      is rejected with error.invite.create_malformed and mints/arms nothing (folds
+      in the M1-632 redteam out-of-model item).
   preserves:
     - all tests currently green on main
 reviews: {}
@@ -118,9 +140,23 @@ value records the disclosure before the ids are returned, the same posture as
 `docs/spec/security.md` §Invite-code registration records the deliberate
 contactId disclosure and its bounds.
 
+**Hardening (folded in from the M1-632 redteam out-of-model item).** `CreateArgs.parse`
+treats an empty value after `--contact=` (and `--adapter=`) as malformed, so the
+existing malformed gate returns `error.invite.create_malformed` and no
+`CONTACT_BOUND` invite is minted bound to `""`. This closes the letter-of-spec
+gap M1-632's new "value-less `--contact` is rejected" wording left open: M1-632's
+parser caught the *space* form (`--contact` with no following token) but the
+*equals* form (`--contact=`) set `contact=""` (non-null) and slipped past both the
+malformed gate and the bare→open path into `createContactBound`. The fix is
+parse-boundary-only — no guard in `createContactBound` (the gate makes an empty id
+unreachable there, so a downstream check would be forbidden defensive code); no
+new bundle key.
+
 **Tests.** `InviteCommandHandlerTest` pins full-id disclosure for connected-
 unregistered contacts on the inbound adapter, the audit-before-disclosure order,
-and rejection for non-admin callers and group scope. `mvn verify` is green.
+and rejection for non-admin callers and group scope. It also pins the
+empty-`--contact=` shape: rejected with `error.invite.create_malformed`, no
+invite row, no intent audit row, no pending confirm. `mvn verify` is green.
 
 ## Out-of-scope
 
@@ -128,7 +164,9 @@ and rejection for non-admin callers and group scope. `mvn verify` is green.
   ticket's blocker). D60 already exists at start; do not re-edit `decisions.md`.
 - Invite-minting machinery: the `--open` confirm gate (M1-051), the per-adapter
   open cap, the global `--contact` cap, and the create/revoke audit-before-
-  effect transaction shape. This ticket adds a read-only surface only.
+  effect transaction shape. Beyond the read-only surface, the only write-path
+  touch is the empty-`--contact=` parse hardening (acceptance item 5); the mint
+  transaction itself is unchanged.
 - No Flyway migration: `invite_code_attempt` exists and `audit_action` is
   free-text.
 - `InviteCommandHandlerTest`: existing tests preserved; only additions.
@@ -152,5 +190,14 @@ and rejection for non-admin callers and group scope. `mvn verify` is green.
   (the `/invite <sub>` dispatch this extends). The subcommand name is the
   implementer's call (e.g. `/invite pending-contacts`) — pin it in the spec
   amendment and the test.
+- Empty-`--contact=` hardening (acceptance item 5) folds in the M1-632 redteam
+  out-of-model item instead of a standalone `remediates: M1-632` ticket, since
+  M1-633 already owns the `--contact` surface and touches these exact files
+  (`InviteCommandHandler` + its test) — avoiding a third churn of the invite
+  handler. Lineage: `docs/plan/m1/redteam/M1-632-2026-07-15-remediation.md`
+  (OUT-OF-MODEL). The threat-actor's second suggestion (reject empty
+  `expected_contact_id` at issuance) is intentionally NOT taken — once the parse
+  gate rejects `--contact=`, an empty id cannot reach `createContactBound`, so an
+  issuance guard would be forbidden defensive code (CLAUDE.md §No defensive code).
 - Decision family: D44 (per-adapter invite), D45 (probation), D55 (no general
   /list-users), D60 (created by M1-632).
