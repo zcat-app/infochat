@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 649 |
 | deferred | 1 |
 | abandoned | 11 |
-| **total** | **664** |
+| **total** | **665** |
 
 ---
 
@@ -28,6 +28,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-627 — /approve-group and /reject-group: clarify which group id token to pass (complexity: low, risk: low)
 - M1-628 — Asset commands (/zcash, /monero): inconsistent leading indentation on some reply lines (complexity: low, risk: low)
 - M1-629 — Investigate per-scope LLM request queuing under a burst (multi-minute-late replies) (complexity: medium, risk: low)
+- M1-631 — Default /invite create to --open; fix/retire --contact (complexity: medium, risk: medium)
 
 ---
 
@@ -849,4 +850,5 @@ M1-627 (pending) ← runnable
 M1-628 (pending) ← runnable
 M1-629 (pending) ← runnable
 M1-630 (done)
+M1-631 (pending) ← runnable
 ```
