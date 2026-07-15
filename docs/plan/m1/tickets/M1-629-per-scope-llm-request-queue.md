@@ -1,7 +1,10 @@
 ---
 id: M1-629
 title: "Investigate the one-in-flight-per-(user, scope) guard under a chat/summary burst (multi-minute-late replies)"
-status: pending
+status: abandoned
+abandoned_reason: decomposed
+decomposed_into:
+  - M1-634
 created: 2026-07-15
 last_updated: 2026-07-15
 blocked_by: []
@@ -90,3 +93,47 @@ out of scope; only the admission behaviour is in scope.
 
 If a pre-existing test pins a contrary (queueing) behaviour for these paths, this
 ticket does NOT pre-authorize modifying it — escalate instead.
+
+## Outcome (2026-07-15) — investigation complete, decomposed into M1-634
+
+The investigation (acceptance item 1) is **done**; the finding is below. Because
+the fix it implies is a materially larger, higher-risk change than this
+investigation ticket was sized or gated for (`complexity: medium`,
+`security_relevant: false`, `files_budget: 6`, no plan-writer outline), the
+implementation is carried by a fresh, correctly-gated ticket — **M1-634**
+(`complexity: high`, `security_relevant: true`, plan-writer + redteam gates).
+This ticket is `abandoned` / `decomposed`; M1-634 fully replaces it.
+
+**Finding — the guard is correct but unreachable over live transports.**
+
+- The per-`(user, scope)` guard EXISTS and is implemented correctly:
+  `InFlightTracker` keys on `(userId, scopeKind, scopeId)` via `putIfAbsent`
+  (`infochat-provider/.../chat/InFlightTracker.java`), and every interruptible
+  surface brackets its work with a `tryAcquire` → reject path:
+  `ChatAgent.handleTurn` (`ChatAgent.java:225-230`, reply
+  `BundleKeys.ERROR_CHAT_IN_FLIGHT`), `SummaryCommandHandler` (`:277-280`),
+  `RetryCommandHandler` (`:188-191`).
+- It can never fire over a real transport. `SimpleXWebSocketClient` hands
+  inbound delivery to a **single-threaded** dispatch executor
+  (`ThreadPoolExecutor(1, 1, …)`, bounded FIFO queue, M1-177 / M1-224;
+  `SignalJsonRpcClient` mirrors it), and `AdapterRegistry` wires
+  `setInboundHandler → InboundRouter.onMessage` **synchronously**
+  (`AdapterRegistry.java:382`). So the whole LLM turn runs inline on that one
+  dispatch thread; a second same-`(user, scope)` request waits in the transport
+  queue and is only dequeued AFTER the first finishes and has already released
+  its slot. The guard therefore observes no contention — requests drain
+  serially (the observed multi-minute backlog), never rejected.
+- **Same root cause makes `/stop` dead over live transports.** D35 says `/stop`
+  cancels "immediately, freeing the worker for others," but `/stop` queues
+  behind the very in-flight LLM call it is meant to cancel, so it cannot be
+  processed until that call finishes on its own.
+- This is a **spec-vs-design-doc tension**, resolved in the spec's favour:
+  `commands.md` §Surface conventions (guard) and D35 (`/stop` immediately) both
+  require a second request to arrive-and-be-handled while the first is still
+  running — which the `06-messaging.md` §6.3 single-dispatch-thread model cannot
+  deliver. Spec outranks the "not spec, may change" design note, so the fix is
+  to make provider-side interruptible dispatch concurrent AND correct the design
+  doc — an implementation change, not a spec amendment. M1-634 carries both.
+
+The `/stop` reachability gap is a real, previously-unfiled defect surfaced by
+this investigation; M1-634's acceptance pins it alongside the guard.
