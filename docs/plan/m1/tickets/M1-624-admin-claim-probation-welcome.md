@@ -1,7 +1,7 @@
 ---
 id: M1-624
 title: "Bootstrap-admin token claim shows a probation welcome instead of an admin welcome (en+cs)"
-status: pending
+status: done
 created: 2026-07-15
 last_updated: 2026-07-15
 blocked_by: []
@@ -67,6 +67,48 @@ revisions:
       false->true, because the diff sits in the SimpleX bootstrap-admin claim
       branch of the DM-intake gate (D50) — flipping security_relevant makes the
       redteam gate run. files_budget and out_of_scope unchanged.
+clarity_check:
+  date: 2026-07-15
+  verdict: PASS
+  warnings:
+    - >-
+      Body omits the ## Context / ## Acceptance / ## Out-of-scope / ## Notes
+      headings; all substance is load-bearing in the YAML frontmatter
+      (informational only).
+    - >-
+      Re-evaluation after the 2026-07-15 clarity-fail refine; the prior FAIL
+      (TEST-CHANGES-AUTHORIZED) and the two WARNs are verified fixed.
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-15
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 56
+      removed: 20
+redteam_findings: []
+redteam_audits:
+  - date: 2026-07-15
+    verdict: CLEAN
+    base: c8ff68b1755e166cb64f41f5f9b08b4ffedad6dc
+    head: working-tree (uncommitted M1-624 impl on m1/M1-624-admin-claim-probation-welcome)
+    verdict_file: docs/plan/m1/redteam/M1-624-2026-07-15.md
+    out_of_model_count: 0
+    note: |
+      In-progress audit before commit (run step 5, security_relevant: true).
+      CLEAN — the change only swaps the reply string sent on an already-decided
+      SimpleX bootstrap-admin Claimed outcome (D50) for a distinct admin welcome;
+      no auth/authz/ban/audit logic is touched. Audited the working-tree code
+      diff vs fork c8ff68b1 (the branch had 0 commits beyond main, and the
+      standard merged-form would have matched the same-prefix refine commit).
+      Full bucket detail in the verdict_file.
 ---
 
 Found in the 2026-07-14/15 isolated live test. Sending the bootstrap admin claim-token

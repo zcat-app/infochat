@@ -528,7 +528,13 @@ public class InboundRouter {
                 // keeping this router adapter-agnostic.
                 if (simpleXAdminClaim.claim(adapterName, contactId, normalized)
                         instanceof SimpleXAdminClaim.Claimed) {
-                    sendReply(msg.scope(), welcomeReply(lang), adapterName);
+                    // A claimed bootstrap admin is is_admin=true + vouched with
+                    // no probation (D50), so it gets the distinct admin welcome
+                    // — the shared probation welcomeReply would tell someone who
+                    // just became the administrator they are on probation (M1-624).
+                    sendReply(msg.scope(),
+                            bundleLoader.get(BundleKeys.REPLY_WELCOME_ADMIN_CLAIM, lang),
+                            adapterName);
                     return;
                 }
                 InviteCodeConsumer.Outcome outcome =

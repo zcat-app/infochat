@@ -595,6 +595,17 @@ public final class BundleKeys {
      */
     public static final String REPLY_WELCOME_DM_FRESH = "reply.welcome.dm_fresh";
 
+    /**
+     * Welcome reply sent after a successful SimpleX bootstrap-admin claim
+     * (D50). A claimed contact is created is_admin=true + vouched with no
+     * probation, so it gets a distinct admin welcome rather than the shared
+     * {@link #REPLY_WELCOME_DM_FRESH} probation welcome, which would misstate
+     * a claimed admin's access (M1-624). Carries no {@code {0}} placeholder —
+     * an admin has the full command surface, so the router sends it via the
+     * raw {@code bundleLoader.get} rather than MessageFormat.
+     */
+    public static final String REPLY_WELCOME_ADMIN_CLAIM = "reply.welcome.admin_claim";
+
     // ----- Admin command handler errors + replies (M1-044c) ---------------
     // Per docs/spec/security.md §User ban + §Invite-code registration +
     // §Authorization model, and docs/spec/commands.md §Admin (bot admin).
