@@ -5,7 +5,7 @@ status: pending
 created: 2026-07-15
 last_updated: 2026-07-15
 blocked_by: []
-files_budget: 14
+files_budget: 21
 complexity: high
 risk: high
 round_cap: 3
@@ -96,20 +96,78 @@ test_plan:
   modifies:
     - >-
       Router / chat-dispatch tests that assert outbound sends SYNCHRONOUSLY
-      immediately after InboundRouter.onMessage() returns must be updated to await
-      async completion once interruptible dispatch is offloaded — the asserted
-      reject-with-guidance, progress-notifier, and no-double-send BEHAVIOURS are
-      PRESERVED or strengthened, never weakened. Confirmed instances to update:
-      InboundRouterChatProgressTest, RouterNoDoubleSendTest. The plan-writer MUST
-      enumerate the complete set (every router/dispatch test with the
-      synchronous-assert-after-onMessage shape — candidates include
-      InboundRouterChatModeIT, InboundRouterAcquisitionCountTest,
-      InboundRouterChatPersistFailureTest) and name each edit in the outline
-      before implementation.
+      immediately after an interruptible body enters InboundRouter.onMessage()
+      must be updated to await async completion once interruptible dispatch is
+      offloaded — the asserted reject-with-guidance, progress-notifier, and
+      no-double-send BEHAVIOURS are PRESERVED or strengthened, never weakened.
+      The complete authorized set below is the plan-writer's start-time
+      ground-truth census (2026-07-15) — the enumeration behind the
+      files_budget 14->21 refine. All 16 pre-existing test files live under
+      infochat-provider/src/test/java/app/zcat/infochat/provider/. No entry is
+      droppable: leaving any un-awaited converts a deterministic green into a
+      timing flake, which "PRESERVED or strengthened, never weakened" forbids.
+    - "messaging/InboundRouterChatProgressTest.java — chat drives at 77, 99, 115, 152, 173 (ticket-confirmed)"
+    - "messaging/RouterNoDoubleSendTest.java — /summary at 47 (ticket-confirmed)"
+    - "messaging/InboundRouterAcquisitionCountTest.java — chat at 105"
+    - "messaging/InboundRouterChatPersistFailureTest.java — chat at 100"
+    - "messaging/InboundRouterChatModeIT.java — chat at 98, 230, 244, 249"
+    - "messaging/InboundRouterTest.java — chat at 181; group-chat LLM-bucket drives at 326, 407, 492 with synchronous asserts"
+    - "messaging/InboundRouterChatDeliveryOrderingIT.java — chat at 82, 99; synchronous countChatMessages asserts at 89, 101"
+    - "messaging/InboundRouterStopRetryIT.java — /retry at 83, 105, 128 with direct reply asserts"
+    - "messaging/InboundRouterClearCompressIT.java — chat drive at 96"
+    - "messaging/LanguageThreadingIT.java — chat drive at 105"
+    - "command/SummaryIT.java — /summary at 93, 149, 185; synchronous adapter.sentMessages() asserts at 100-127"
+    - "command/SummaryGroupScopeIT.java — /summary at 122, 167, 168, 205, 206"
+    - "command/SummaryAdapterScopeIT.java — /summary at 98"
+    - "command/RetryCommandHandlerGroupScopeIT.java — /summary + /retry at 116, 122, 148, 151"
+    - "journey/GoldenPathJourneyIT.java — /summary at 237, chat at 252"
+    - "translation/TranslationPipelineIT.java — /summary at 122, 169"
+    - >-
+      Explicitly NOT modified (verified non-interruptible or non-router — do
+      not touch): digest/DigestRoundtripIT.java (drives only /retry --digest,
+      D35 non-interruptible); chat/StopToolQueryCancellationIT.java (drives
+      ChatAgent directly, not through the router);
+      messaging/InboundRouterIntakeOrderingTest.java (its chat body terminates
+      pre-offload at the step-3.5 SilentDrop).
   preserves:
     - all tests currently green on main
 reviews: {}
-overrides: []
+overrides:
+  - date: 2026-07-15
+    kind: start-precondition
+    what: >-
+      User-approved parallel start while M1-632 was in-progress in a concurrent
+      session, despite M1-634 having no files_scope (numeric files_budget only),
+      which the --parallel gate normally requires for a disjointness proof.
+      Estimated file sets are disjoint (M1-632: invite command/bundles/spec;
+      M1-634: router/chat dispatch/design doc); second-to-merge rebases on any
+      conflict.
+escalations:
+  - date: 2026-07-15
+    reason: outline-fail
+    reviewer_verdict_excerpt: |
+      OUTLINE FAILED — the honest file set exceeds files_budget: 14. Full
+      enumeration of tests with the synchronous-assert-after-interruptible-
+      dispatch shape found 16 pre-existing test files (not 2 confirmed + 3
+      candidates as the ticket estimated); with minimum production surface
+      (InboundRouter.java, one new worker-seam bean, 06-messaging.md) and the
+      new concurrency tests folded into a single class, the minimum is 20
+      files, realistically 21. SUGGESTED ESCALATION: refine — raise
+      files_budget to ~21; the enumerated set becomes the authorized
+      test_plan.modifies list. Full block with the per-file census: ticket
+      body §OUTLINE FAILED (2026-07-15).
+revisions:
+  - date: 2026-07-15
+    reason: outline-fail rework
+    snapshot:
+      status: escalated
+      files_budget: 14
+      escalation_reason: outline-fail
+      clarity_check:
+        date: 2026-07-15
+        verdict: WARN
+        warnings:
+          - "FILES-BUDGET-PLAUSIBLE: files_budget 14 plausible-but-tight (~13-16 files); test_plan.modifies explicitly incomplete pending the plan-writer's enumeration."
 aborted_attempts: []
 reopens: []
 redteam_findings: []
@@ -203,9 +261,82 @@ or bounded queue, not multi-in-flight outbound, not changing the LLM cap values.
   enter provider code, already TCCL-pinned per M1-543), `InFlightTracker`,
   `CancellationService`, `ChatAgent.handleTurn`, `SummaryCommandHandler`,
   `RetryCommandHandler`, `StopCommandHandler`, `InboundContext`.
-- **files_budget: 14** is an estimate for a change spanning the router, request
-  context propagation, a likely small dispatch/worker seam, the design doc, and
-  several test files. The plan-writer must validate it — if the honest file set
-  exceeds it, escalate `budget-breach` at start rather than trimming scope.
+- **files_budget: 21** is the plan-writer's 2026-07-15 start-time ground-truth
+  count (16 enumerated pre-existing tests + `InboundRouter.java` + a per-request
+  worker-seam bean + `InboundContext` propagation + the design doc + one new
+  concurrency-test class), raised from the original 14 estimate via the
+  outline-fail refine (see `revisions:` / `escalations:` and the §OUTLINE FAILED
+  census below). The mandatory fresh Plan pass on the next `start` must
+  re-validate it — if the honest file set still exceeds 21, escalate
+  `budget-breach` at start rather than trimming scope.
 - **Decision family:** D35 (cancellation), D31 (progress notifier), D46
   (per-process LLM concurrency cap / multi-adapter topology).
+
+## OUTLINE FAILED (2026-07-15)
+
+Verbatim from the plan-writer pass at `start` (escalation `outline-fail`):
+
+REASON: The honest file set exceeds the `files_budget: 14` hard ceiling. Both
+spec_refs resolve cleanly (commands.md line 8 "Surface conventions"; llm.md
+line 439 "Bounded concurrency and observability") and the design shape is
+implementable exactly as the ticket frames it (offload the interruptible
+step-6 stage — chat-mode, `/summary`, `/retry` without `--digest` — from
+`InboundRouter.onMessage` onto a bounded per-request worker seam, keeping the
+pre-LLM intake gates on the transport dispatch thread; `/stop` and all other
+slash commands stay inline, which is what makes `CancellationService.cancel`
+reachable). But the ticket's test_plan.modifies is explicitly incomplete and
+instructs the plan-writer to enumerate the complete set of tests that assert
+outbound sends synchronously after an interruptible body enters
+`InboundRouter.onMessage`. I performed that enumeration by grepping every
+`onMessage(...)`/`deliverDm(...)`/`deliverGroupMention(...)` drive in the
+provider test tree and classifying each body against the D35 interruptible
+class: **16 pre-existing test files** carry the
+synchronous-assert-after-interruptible-dispatch shape and must be updated to
+await async completion — not the 2 confirmed + 3 candidate the ticket names.
+Adding the minimum production surface (modify `InboundRouter.java`; create one
+worker-seam bean; modify `docs/design/06-messaging.md` §6.3.7 lines 420/425)
+and even folding all three new acceptance-concurrency tests into a single new
+test class yields 16 + 3 + 1 = **20 files minimum, realistically 21** — well
+past 14. The ticket's own Notes pre-authorize exactly this outcome: "if the
+honest file set exceeds it, escalate `budget-breach` at start rather than
+trimming scope," and the clarity_check WARN (FILES-BUDGET-PLAUSIBLE) predicted
+the breach would be decided by this enumeration. No affected test is
+droppable: leaving any of them un-awaited converts a deterministic green into
+a timing flake, which the test_plan forbids (behaviours "PRESERVED or
+strengthened, never weakened").
+
+SUGGESTED ESCALATION: refine — raise `files_budget` to ~21 (scope unchanged;
+the enumerated set below becomes the authorized test_plan.modifies list).
+
+EVIDENCE: Ground-truthed census of affected pre-existing tests (all paths
+under `infochat-provider/src/test/java/app/zcat/infochat/provider/`), each
+with the interruptible drive line:
+
+1. `messaging/InboundRouterChatProgressTest.java` — chat drives at 77, 99, 115, 152, 173 (ticket-confirmed)
+2. `messaging/RouterNoDoubleSendTest.java` — `/summary` at 47 (ticket-confirmed)
+3. `messaging/InboundRouterAcquisitionCountTest.java` — chat at 105 (ticket candidate, confirmed)
+4. `messaging/InboundRouterChatPersistFailureTest.java` — chat at 100 (ticket candidate, confirmed)
+5. `messaging/InboundRouterChatModeIT.java` — chat at 98, 230, 244, 249 (ticket candidate, confirmed)
+6. `messaging/InboundRouterTest.java` — chat at 181; group-chat LLM-bucket drives at 326, 407, 492 with synchronous asserts
+7. `messaging/InboundRouterChatDeliveryOrderingIT.java` — chat at 82, 99; synchronous `countChatMessages` asserts at 89, 101
+8. `messaging/InboundRouterStopRetryIT.java` — `/retry` at 83, 105, 128 with direct reply asserts
+9. `messaging/InboundRouterClearCompressIT.java` — chat drive at 96
+10. `messaging/LanguageThreadingIT.java` — chat drive at 105
+11. `command/SummaryIT.java` — `/summary` at 93, 149, 185; synchronous `adapter.sentMessages()` asserts at 100-127
+12. `command/SummaryGroupScopeIT.java` — `/summary` at 122, 167, 168, 205, 206
+13. `command/SummaryAdapterScopeIT.java` — `/summary` at 98
+14. `command/RetryCommandHandlerGroupScopeIT.java` — `/summary`+`/retry` at 116, 122, 148, 151
+15. `journey/GoldenPathJourneyIT.java` — `/summary` at 237, chat at 252
+16. `translation/TranslationPipelineIT.java` — `/summary` at 122, 169
+
+Not affected (verified): `digest/DigestRoundtripIT.java:221` drives only
+`/retry --digest`, which D35 (decisions.md line 52) classifies
+non-interruptible and the classification predicate must exclude from offload;
+`chat/StopToolQueryCancellationIT.java` drives ChatAgent directly, not through
+the router; `messaging/InboundRouterIntakeOrderingTest.java` line 508's chat
+body terminates pre-offload at the step-3.5 SilentDrop; all other census hits
+are non-interruptible slash or pre-dispatch fixed-reply paths (caps, ban,
+probation, invite), which stay synchronous.
+
+*(Main-session spot-check 2026-07-15: census entries 10, 13, 15, 16 verified
+against source — all real interruptible drives with synchronous asserts.)*
