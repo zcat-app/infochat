@@ -8,6 +8,7 @@ import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
+import app.zcat.infochat.provider.testsupport.DispatchAwaits;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -42,6 +43,7 @@ class InboundRouterChatModeIT {
     @Inject BundleLoader bundleLoader;
     @Inject CommandPermissions commandPermissions;
     @Inject TestLlmProvider testLlmProvider;
+    @Inject InterruptibleDispatcher interruptibleDispatcher;
 
     @ConfigProperty(name = "infochat.llm.chat.timeout-ms")
     long chatTimeoutMs;
@@ -102,7 +104,10 @@ class InboundRouterChatModeIT {
         // finalize event, not the last plain send (mirroring SummaryIT).
         // The outbound carries the M1-617 provenance notice after the
         // reply — general-knowledge here, since this user has no
-        // subscriptions and the pre-fetch retrieves nothing.
+        // subscriptions and the pre-fetch retrieves nothing. Interruptible
+        // dispatch is offloaded (M1-634), so await the terminal.
+        DispatchAwaits.await(() -> !adapter.finalizedBodies().isEmpty(),
+                "chat turn's finalized terminal");
         String replyBody = lastFinalizedBody();
         assertEquals("Hello from the chat agent!\n\n"
                         + bundleLoader.get("reply.chat.provenance.general_knowledge"),
@@ -112,6 +117,10 @@ class InboundRouterChatModeIT {
         // The LLM was called
         assertTrue(testLlmProvider.callCount() > 0,
                 "TestLlmProvider should have been called");
+        // Post-delivery commit runs after the finalize — drain it so the
+        // chat_session write cannot bleed past this test's end.
+        DispatchAwaits.await(() -> interruptibleDispatcher.inFlightTaskCount() == 0,
+                "chat turn fully complete (incl. post-delivery commit)");
     }
 
     /**
@@ -230,8 +239,13 @@ class InboundRouterChatModeIT {
         adapter.deliverDm(CONTACT_PREFIX + "user-4", "hi");
 
         // ChatAgent's friendly error is the turn's reply, so it lands via
-        // the notifier's finalize like any other chat reply (M1-607).
+        // the notifier's finalize like any other chat reply (M1-607);
+        // await it across the M1-634 worker hop.
+        DispatchAwaits.await(() -> !adapter.finalizedBodies().isEmpty(),
+                "friendly-error finalized terminal");
         assertEquals(bundleLoader.get("error.chat.unavailable"), lastFinalizedBody());
+        DispatchAwaits.await(() -> interruptibleDispatcher.inFlightTaskCount() == 0,
+                "failed turn's worker fully drained");
     }
 
     @Test
@@ -239,18 +253,32 @@ class InboundRouterChatModeIT {
         seedVouchedUser("user-5");
         testLlmProvider.setResponseText("ok");
 
-        // %test cap is 3 per minute — send 4 messages in quick succession
+        // %test cap is 3 per minute — send 3 messages, awaiting each turn's
+        // terminal so the turns run one at a time: rapid-fire same-(user,
+        // scope) messages would now contend on the M1-634 in-flight guard
+        // instead of consuming the cap deterministically.
         for (int i = 0; i < 3; i++) {
             adapter.deliverDm(CONTACT_PREFIX + "user-5", "msg " + i);
+            int expectedTerminals = i + 1;
+            DispatchAwaits.await(
+                    () -> adapter.finalizedBodies().size() >= expectedTerminals,
+                    "turn " + expectedTerminals + " terminal before the next drive");
         }
         int callsBeforeCap = testLlmProvider.callCount();
 
-        // 4th message should be rejected by the rate cap
+        // 4th message should be rejected by the rate cap; the rejection is
+        // a plain worker-side send (4th send after the 3 placeholders).
         adapter.deliverDm(CONTACT_PREFIX + "user-5", "one too many");
 
+        DispatchAwaits.await(() -> adapter.sentMessages().size() >= 4,
+                "rate-cap rejection reply");
         OutboundMessage reply = lastReply();
         assertEquals(bundleLoader.get("error.chat.llm_rate_cap"), reply.text(),
                 "4th message should get the LLM rate cap error");
+        // Negative assert — pool quiescence makes "no further LLM call can
+        // arrive" a happens-before fact.
+        DispatchAwaits.await(() -> interruptibleDispatcher.inFlightTaskCount() == 0,
+                "dispatch pool quiescent before the no-LLM-call assert");
         assertEquals(callsBeforeCap, testLlmProvider.callCount(),
                 "LLM should NOT be called when rate cap is exceeded");
     }
@@ -263,6 +291,11 @@ class InboundRouterChatModeIT {
 
         deliverGroup(CONTACT_PREFIX + "user-group-1",
                 GROUP_PREFIX + "group-1", "hello from group");
+
+        // The chat_session write happens in the worker's post-delivery
+        // commit (M1-634 offload) — await pool quiescence before reading.
+        DispatchAwaits.await(() -> interruptibleDispatcher.inFlightTaskCount() == 0,
+                "group chat turn fully complete (incl. post-delivery commit)");
 
         // chat_session.scope_id must be the group UUID, not the actor UUID
         try (Connection conn = dataSource.getConnection();
@@ -302,6 +335,12 @@ class InboundRouterChatModeIT {
         // Send a non-/retry group message — should clear the group-scope anchor
         deliverGroup(CONTACT_PREFIX + "user-anchor-1",
                 GROUP_PREFIX + "group-anchor-1", "hello triggers anchor clear");
+
+        // The anchor clear itself is inline intake (step 4.6, pre-offload);
+        // the await only keeps the turn's worker from bleeding past this
+        // test's end (M1-634 hygiene).
+        DispatchAwaits.await(() -> interruptibleDispatcher.inFlightTaskCount() == 0,
+                "group chat turn fully complete");
 
         // The group-scope anchor must be deleted
         try (Connection conn = dataSource.getConnection();

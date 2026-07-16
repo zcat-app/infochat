@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.dev;
 
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
+import app.zcat.infochat.provider.messaging.InterruptibleDispatcher;
 import io.quarkus.arc.properties.IfBuildProperty;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -11,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -53,7 +55,14 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 @ApplicationScoped
 public class DevTerminalHarness {
 
+    // Bound on how long one directive waits for its interruptible reply to
+    // land before the harness gives up and writes whatever was captured.
+    // Generous — the harness is a dev tool and this only guards against a
+    // hung worker, never a tuning knob.
+    private static final Duration INTERRUPTIBLE_CAPTURE_TIMEOUT = Duration.ofSeconds(30);
+
     private final InMemoryAdapter adapter;
+    private final InterruptibleDispatcher interruptibleDispatcher;
     private final Path inputFile;
     private final Path outputFile;
 
@@ -63,11 +72,13 @@ public class DevTerminalHarness {
 
     DevTerminalHarness(
             InMemoryAdapter adapter,
+            InterruptibleDispatcher interruptibleDispatcher,
             @ConfigProperty(name = "infochat.dev.harness.input-file",
                     defaultValue = "data/dev-harness-in.txt") String inputFile,
             @ConfigProperty(name = "infochat.dev.harness.output-file",
                     defaultValue = "data/dev-harness-out.txt") String outputFile) {
         this.adapter = adapter;
+        this.interruptibleDispatcher = interruptibleDispatcher;
         this.inputFile = Path.of(inputFile);
         this.outputFile = Path.of(outputFile);
     }
@@ -150,11 +161,22 @@ public class DevTerminalHarness {
      * (e.g. {@code /summary}, which sends a placeholder then finalizes the real
      * summary in place). Cursoring on the pre-injection sizes isolates this
      * directive's replies from earlier ones in the same session.
+     *
+     * <p><b>Interruptible dispatch (M1-634).</b> The D35 interruptible class
+     * (chat-mode, {@code /summary}, {@code /retry} re-roll) no longer delivers
+     * inline: {@code onMessage} returns once the stage is handed to the
+     * {@link InterruptibleDispatcher} worker pool, so the reply is not on the
+     * adapter yet when this method resumes. Await pool quiescence before
+     * capturing — without it the harness would silently drop every
+     * interruptible directive's reply. The wait is bounded so a hung worker
+     * cannot stall the scheduler thread forever; a non-interruptible directive
+     * finds the pool already idle and does not wait.
      */
     private void injectAndCapture(Runnable injection) {
         int sentBefore = adapter.sentMessages().size();
         int finalizedBefore = adapter.finalizedBodies().size();
         injection.run();
+        awaitInterruptibleDispatchIdle();
         List<OutboundMessage> sent = adapter.sentMessages();
         List<String> finalized = adapter.finalizedBodies();
         List<String> replies = new ArrayList<>();
@@ -163,6 +185,30 @@ public class DevTerminalHarness {
         }
         replies.addAll(finalized.subList(finalizedBefore, finalized.size()));
         writeReplies(replies);
+    }
+
+    /**
+     * Block the scheduler thread until the interruptible worker pool is idle
+     * (this directive's offloaded reply has been delivered), bounded by
+     * {@link #INTERRUPTIBLE_CAPTURE_TIMEOUT}. Directives are processed one at a
+     * time on the single scheduler thread and each awaits its own completion,
+     * so a zero in-flight count means this directive's worker finished. Uses
+     * {@code nanoTime} for the deadline — a mechanical timeout, not a business
+     * decision gate, so the injected-Clock rule does not apply.
+     */
+    private void awaitInterruptibleDispatchIdle() {
+        long deadlineNanos = System.nanoTime() + INTERRUPTIBLE_CAPTURE_TIMEOUT.toNanos();
+        while (interruptibleDispatcher.inFlightTaskCount() != 0) {
+            if (System.nanoTime() - deadlineNanos > 0) {
+                return;
+            }
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 
     private void writeReplies(List<String> replies) {

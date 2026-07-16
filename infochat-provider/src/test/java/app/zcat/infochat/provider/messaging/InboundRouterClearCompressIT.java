@@ -1,10 +1,10 @@
 package app.zcat.infochat.provider.messaging;
 
-import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
+import app.zcat.infochat.provider.testsupport.DispatchAwaits;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -17,9 +17,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.UUID;
-
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * End-to-end integration test for /clear, /compress, and auto-compress
@@ -95,22 +92,15 @@ class InboundRouterClearCompressIT {
         // threshold and trigger auto-compress after the reply.
         adapter.deliverDm(contactId, "trigger auto-compress please");
 
-        // Read the reply. deliverDm drives the router synchronously, so the
-        // outbound message is already recorded — no async wait is needed.
-        var sent = adapter.sentMessages();
-        assertFalse(sent.isEmpty(), "Expected at least one reply");
-        OutboundMessage reply = sent.getLast();
-
-        // The reply should contain either the auto-compress notice
-        // (if LLM succeeded) or the compress-failed error (if LLM failed).
-        String replyText = reply.text();
-        boolean hasAutoCompressNotice = replyText.contains(
-                bundleLoader.get(BundleKeys.REPLY_AUTO_COMPRESS_NOTICE));
-        boolean hasCompressFailedError = replyText.contains(
-                bundleLoader.get(BundleKeys.ERROR_COMPRESS_FAILED));
-        assertTrue(hasAutoCompressNotice || hasCompressFailedError,
-                "Reply should include auto-compress notification (success or failure). "
-              + "Got: " + replyText);
+        // The chat turn runs on the M1-634 worker and the auto-compress
+        // notice ships from its post-delivery commit — await the notice
+        // (success or failure form) instead of reading synchronously.
+        DispatchAwaits.await(() -> adapter.sentMessages().stream().anyMatch(outbound ->
+                        outbound.text().contains(
+                                bundleLoader.get(BundleKeys.REPLY_AUTO_COMPRESS_NOTICE))
+                        || outbound.text().contains(
+                                bundleLoader.get(BundleKeys.ERROR_COMPRESS_FAILED))),
+                "auto-compress notification (success or failure form)");
     }
 
     // --- helpers ---

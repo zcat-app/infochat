@@ -60,7 +60,9 @@ class CancellationServiceTest {
         boolean cancelled = service.cancel(USER_A, "dm", SCOPE_A);
 
         assertTrue(cancelled, "cancel must return true when an in-flight slot existed");
-        assertTrue(handle.workerThread().isInterrupted(),
+        // The slot was acquired on this thread, so this thread is the
+        // captured worker the gate-checked interrupt must reach.
+        assertTrue(Thread.currentThread().isInterrupted(),
                 "cancel must interrupt the worker thread");
         assertTrue(recordingDataSource.executedSql.stream()
                         .anyMatch(s -> s.contains("pg_cancel_backend")),
@@ -97,6 +99,37 @@ class CancellationServiceTest {
     void cancelReturnsFalseWhenNothingInFlight() {
         boolean cancelled = service.cancel(USER_A, "dm", SCOPE_A);
         assertFalse(cancelled, "cancel must return false when no in-flight slot exists");
+    }
+
+    /**
+     * M1-634 redteam remediation pin (stale-interrupt window): once the
+     * worker has closed its cancellation gate (end of the in-flight
+     * section), a cancel that already looked up the handle must issue
+     * NEITHER the thread interrupt (the pool thread may have recycled to a
+     * different user's turn) NOR pg_cancel_backend (the pid's pooled
+     * connection may be serving another borrower's query).
+     */
+    @Test
+    void cancelAfterWorkerReleaseInterruptsNothingAndSkipsPgCancel() {
+        tracker.tryAcquire(USER_A, "dm", SCOPE_A);
+        InFlightTracker.CancellationHandle handle =
+                tracker.getCancellationHandle(USER_A, "dm", SCOPE_A).orElseThrow();
+        handle.registerPgBackendPid(42);
+
+        // The worker finishes its in-flight section; the slot mapping is
+        // still present, modelling a /stop that read the handle before the
+        // worker completed and was delayed past its completion.
+        handle.releaseWorker();
+
+        boolean cancelled = service.cancel(USER_A, "dm", SCOPE_A);
+
+        assertTrue(cancelled, "the slot existed at lookup, so cancel reports an attempt");
+        assertFalse(Thread.currentThread().isInterrupted(),
+                "a cancel arriving after the worker released its section must not interrupt");
+        assertTrue(recordingDataSource.executedSql.isEmpty(),
+                "pg_cancel_backend must be suppressed once the worker released its section");
+        assertFalse(tracker.isInFlight(USER_A, "dm", SCOPE_A),
+                "cancel still releases the in-flight slot");
     }
 
     @Test

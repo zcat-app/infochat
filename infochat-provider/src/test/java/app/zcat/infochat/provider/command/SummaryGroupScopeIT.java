@@ -1,7 +1,9 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
+import app.zcat.infochat.provider.messaging.InterruptibleDispatcher;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
+import app.zcat.infochat.provider.testsupport.DispatchAwaits;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -69,6 +71,8 @@ class SummaryGroupScopeIT {
 
     @Inject TestLlmProvider mockLlm;
 
+    @Inject InterruptibleDispatcher interruptibleDispatcher;
+
     @BeforeEach
     void cleanup() throws Exception {
         adapter.reset();
@@ -121,6 +125,10 @@ class SummaryGroupScopeIT {
 
         adapter.deliverGroupMention(group, member, "/summary");
 
+        // /summary runs on an M1-634 worker — drain before the
+        // exactly-one bounds and anchor reads.
+        awaitDispatchIdle();
+
         // (1a) the summary flow ran: one placeholder send + one finalized
         // reply (self-delivered via the notifier), NOT the no_posts_yet
         // reply every group invocation produced before M1-288.
@@ -167,6 +175,10 @@ class SummaryGroupScopeIT {
         adapter.deliverGroupMention(group, memberA, "/summary");
         adapter.deliverGroupMention(group, memberB, "/summary");
 
+        // Distinct (user, scope) keys → the two turns may run
+        // concurrently on M1-634 workers; drain before the anchor reads.
+        awaitDispatchIdle();
+
         List<AnchorKey> anchors = anchorsForGroup(groupId);
         assertEquals(2, anchors.size(),
                 "each member must get their own per-(user, group) personal anchor");
@@ -205,6 +217,10 @@ class SummaryGroupScopeIT {
         adapter.deliverDm(user, "/summary");
         adapter.deliverGroupMention(group, user, "/summary");
 
+        // Different scopes for the same user → concurrent M1-634 workers;
+        // drain before the anchor reads.
+        awaitDispatchIdle();
+
         // The same user now holds two distinct anchors: one DM-keyed
         // (scope_kind='dm', scope_id = user id) and one group-keyed
         // (scope_kind='group', scope_id = group id). Neither overwrote the
@@ -223,6 +239,12 @@ class SummaryGroupScopeIT {
     }
 
     // ----- helpers ------------------------------------------------------
+
+    /** Await M1-634 worker-pool quiescence so negative asserts are race-free. */
+    private void awaitDispatchIdle() {
+        DispatchAwaits.await(() -> interruptibleDispatcher.inFlightTaskCount() == 0,
+                "interruptible dispatch pool quiescent");
+    }
 
     private record AnchorKey(UUID userId, String scopeKind, UUID scopeId) {}
 

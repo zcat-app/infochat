@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.messaging;
 
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
+import app.zcat.infochat.provider.testsupport.DispatchAwaits;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -36,6 +37,7 @@ class InboundRouterChatDeliveryOrderingIT {
     @Inject InMemoryAdapter adapter;
     @Inject @SeedDataSource DataSource dataSource;
     @Inject TestLlmProvider testLlmProvider;
+    @Inject InterruptibleDispatcher interruptibleDispatcher;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -80,6 +82,13 @@ class InboundRouterChatDeliveryOrderingIT {
         testLlmProvider.setOnGenerate(adapter::reset);
         try {
             adapter.deliverDm(CONTACT_PREFIX + "perm-fail", "tell me something");
+            // Await the M1-634 worker INSIDE the try: resetting the
+            // provider before the worker reaches generate() would clear
+            // the handle-killing hook and turn this into a successful
+            // delivery — the drained pool is also what makes the
+            // zero-rows negative assert below race-free.
+            DispatchAwaits.await(() -> interruptibleDispatcher.inFlightTaskCount() == 0,
+                    "failed turn's worker fully complete");
         } finally {
             // The provider bean is shared JVM-wide across @QuarkusTest
             // classes — never leak the handle-killing hook past this test.
@@ -97,6 +106,11 @@ class InboundRouterChatDeliveryOrderingIT {
         testLlmProvider.setResponseText("Here is your answer.");
 
         adapter.deliverDm(CONTACT_PREFIX + "success", "ask a question");
+
+        // Persistence is the worker's post-delivery commit (M1-634) —
+        // await pool quiescence before reading the rows.
+        DispatchAwaits.await(() -> interruptibleDispatcher.inFlightTaskCount() == 0,
+                "chat turn fully complete (incl. post-delivery commit)");
 
         assertEquals(2, countChatMessages(userId),
                 "a delivered chat reply must persist both the user and assistant turns");

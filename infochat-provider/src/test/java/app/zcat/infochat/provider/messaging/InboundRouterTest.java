@@ -8,6 +8,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
+import app.zcat.infochat.provider.testsupport.DispatchAwaits;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -96,6 +97,9 @@ class InboundRouterTest {
     @Inject
     TestLlmProvider testLlmProvider;
 
+    @Inject
+    InterruptibleDispatcher interruptibleDispatcher;
+
     @BeforeEach
     void resetAdapterState() throws Exception {
         inMemoryAdapter.reset();
@@ -180,6 +184,10 @@ class InboundRouterTest {
     void chatModeBodyDispatchesToChatAgent() {
         inMemoryAdapter.deliverDm("alice", "hello there");
 
+        // Chat dispatch is offloaded (M1-634): await the worker's full
+        // completion, then the exactly-one assert (a negative bound) is
+        // race-free — no further send can arrive from a drained pool.
+        awaitDispatchIdle();
         List<OutboundMessage> sent = inMemoryAdapter.sentMessages();
         assertEquals(1, sent.size(),
                 "chat-mode body should produce exactly one outbound reply");
@@ -325,6 +333,10 @@ class InboundRouterTest {
 
         inMemoryAdapter.deliverGroupMention(upstreamGroup, member, "hello group chat");
 
+        // The rate-cap rejection now ships from the M1-634 worker — drain
+        // the pool so both the exactly-one and the no-LLM-call negative
+        // asserts are race-free.
+        awaitDispatchIdle();
         List<OutboundMessage> sent = inMemoryAdapter.sentMessages();
         assertEquals(1, sent.size(),
                 "group-LLM overflow must produce exactly one fixed reply, got: " + sent);
@@ -406,6 +418,10 @@ class InboundRouterTest {
 
         inMemoryAdapter.deliverGroupMention(upstreamGroup, member, "hello group chat");
 
+        // Worker-side rejection (M1-634): drain before the exactly-one
+        // assert; the refund precedes the reply send, so a drained pool
+        // also guarantees the refund landed before the probe below.
+        awaitDispatchIdle();
         List<OutboundMessage> sent = inMemoryAdapter.sentMessages();
         assertEquals(1, sent.size(),
                 "group-LLM overflow must produce exactly one fixed reply, got: " + sent);
@@ -491,11 +507,20 @@ class InboundRouterTest {
 
         inMemoryAdapter.deliverGroupMention(upstreamGroup, member, "hello group chat");
 
+        // Full chat turn on the M1-634 worker — drain before the
+        // exactly-one negative bound.
+        awaitDispatchIdle();
         List<OutboundMessage> sent = inMemoryAdapter.sentMessages();
         assertEquals(1, sent.size(),
                 "chat dispatch must still reply while the group-command bucket is exhausted, got: " + sent);
         assertNotEquals(bundleLoader.get(BundleKeys.GROUP_COMMAND_RATE_LIMIT), sent.get(0).text(),
                 "chat dispatch must not be gated by the per-group command bucket");
+    }
+
+    /** Await M1-634 worker-pool quiescence so negative asserts are race-free. */
+    private void awaitDispatchIdle() {
+        DispatchAwaits.await(() -> interruptibleDispatcher.inFlightTaskCount() == 0,
+                "interruptible dispatch pool quiescent");
     }
 
     /**

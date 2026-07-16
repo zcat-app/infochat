@@ -62,10 +62,20 @@ public class CancellationService {
         // Interrupt the worker thread — this propagates through the
         // LlmProvider.generate() HTTP call (virtual thread interruption
         // raises ClosedByInterruptException on the underlying channel).
-        handle.workerThread().interrupt();
+        // Gated on the worker still executing this handle's in-flight
+        // section: an ungated interrupt delayed past the turn's completion
+        // would land on the recycled pool thread mid-way through a
+        // DIFFERENT (user, scope)'s turn (M1-634 redteam, 2026-07-16).
+        boolean workerInterrupted = handle.interruptWorker();
 
-        // Best-effort pg_cancel_backend on any registered tool-call connection.
-        if (handle.hasPgBackendPid()) {
+        // Best-effort pg_cancel_backend on any registered tool-call
+        // connection — suppressed once the worker finished its in-flight
+        // section, because the pid's pooled connection may already be
+        // serving another borrower's query (the interrupt's stale-cancel
+        // hazard, DB flavor). The residual race between the gate check and
+        // the cancel reaching PostgreSQL is inherent to pg_cancel_backend
+        // and bounded by Postgres discarding cancels against idle backends.
+        if (workerInterrupted && handle.hasPgBackendPid()) {
             cancelPgBackend(handle.pgBackendPid());
         }
 

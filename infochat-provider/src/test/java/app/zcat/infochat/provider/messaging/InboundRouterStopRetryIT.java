@@ -5,6 +5,7 @@ import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
+import app.zcat.infochat.provider.testsupport.DispatchAwaits;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -82,6 +83,9 @@ class InboundRouterStopRetryIT {
 
         adapter.deliverDm(CONTACT_PREFIX + "retry-1", "/retry");
 
+        // Bare /retry is D35-interruptible → offloaded (M1-634); await its reply.
+        DispatchAwaits.await(() -> !adapter.sentMessages().isEmpty(),
+                "/retry no-anchor reply");
         OutboundMessage reply = lastReply();
         assertTrue(reply.text().contains("Nothing to retry"),
                 "/retry with no anchor must return friendly error. Got: " + reply.text());
@@ -103,6 +107,9 @@ class InboundRouterStopRetryIT {
         testLlmProvider.setResponseText("Retried summary prose.");
 
         adapter.deliverDm(contactId, "/retry");
+        // Interruptible re-roll runs on the M1-634 worker; await its reply.
+        DispatchAwaits.await(() -> !adapter.sentMessages().isEmpty(),
+                "/retry re-generated reply");
         OutboundMessage retryReply = lastReply();
 
         assertTrue(retryReply.text().contains("Retried summary prose")
@@ -121,11 +128,14 @@ class InboundRouterStopRetryIT {
         summaryAnchorRepository.write(userId, "dm", userId, "summary", "hash2",
                 List.of(postUid), null);
 
-        // Any non-/retry input clears the anchor
+        // Any non-/retry input clears the anchor (/help replies inline)
         adapter.deliverDm(contactId, "/help");
 
-        // Now /retry should fail because the anchor was cleared
+        // Now /retry should fail because the anchor was cleared; its
+        // reply arrives from the M1-634 worker — await the second send.
         adapter.deliverDm(contactId, "/retry");
+        DispatchAwaits.await(() -> adapter.sentMessages().size() >= 2,
+                "/retry reply after the inline /help reply");
         OutboundMessage retryReply = lastReply();
         assertTrue(retryReply.text().contains("Nothing to retry"),
                 "anchor must be cleared by non-/retry input. Got: " + retryReply.text());

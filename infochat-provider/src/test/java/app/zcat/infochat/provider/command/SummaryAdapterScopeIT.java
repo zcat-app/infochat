@@ -2,7 +2,9 @@ package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
+import app.zcat.infochat.provider.messaging.InterruptibleDispatcher;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
+import app.zcat.infochat.provider.testsupport.DispatchAwaits;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -57,6 +59,8 @@ class SummaryAdapterScopeIT {
 
     @Inject LlmProvider llmProvider;
 
+    @Inject InterruptibleDispatcher interruptibleDispatcher;
+
     private TestLlmProvider mockLlm() {
         return (TestLlmProvider) llmProvider;
     }
@@ -96,6 +100,11 @@ class SummaryAdapterScopeIT {
         mockLlm().setResponseText("ProseFor(m1-040si)");
 
         adapter.deliverDm(SHARED_CONTACT_ID, "/summary");
+
+        // /summary runs on an M1-634 worker — drain the pool so the
+        // exactly-one and never-BRAVO negative asserts are race-free.
+        DispatchAwaits.await(() -> interruptibleDispatcher.inFlightTaskCount() == 0,
+                "interruptible dispatch pool quiescent");
 
         // The notifier delivers via placeholder send + in-place finalize
         // on the SAME adapter the inbound arrived through (inmemory). The

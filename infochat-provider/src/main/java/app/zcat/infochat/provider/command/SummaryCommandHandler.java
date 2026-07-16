@@ -396,6 +396,9 @@ public class SummaryCommandHandler implements CommandHandler {
             return null;
         } finally {
             inFlightTracker.release(actorId, scopeKind, scopeId.get(), slot);
+            // Gate close + interrupt-status clear, LAST in the section —
+            // see CancellationHandle.releaseWorker (M1-634).
+            slot.releaseWorker();
         }
     }
 

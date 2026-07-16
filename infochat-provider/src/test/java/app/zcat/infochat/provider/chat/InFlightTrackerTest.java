@@ -71,6 +71,63 @@ class InFlightTrackerTest {
         assertTrue(held.isCancelled(), "markCancelled() flips the flag to true");
     }
 
+    /**
+     * The open-gate half of the M1-634 stale-interrupt confinement: while
+     * the worker is inside its in-flight section, interruptWorker() must
+     * reach the captured thread — this is the D35 cancellation actually
+     * landing.
+     */
+    @Test
+    void interruptWorkerBeforeReleaseInterruptsCapturedThread() {
+        CancellationHandle held = tracker.tryAcquire(USER_A, "dm", SCOPE_A);
+        assertNotNull(held);
+        try {
+            assertTrue(held.interruptWorker(),
+                    "an open gate must report the interrupt as issued");
+            assertTrue(Thread.currentThread().isInterrupted(),
+                    "the captured worker thread must receive the interrupt");
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    /**
+     * M1-634 redteam remediation pin (stale-interrupt window): after the
+     * worker closes the gate at the end of its in-flight section, a delayed
+     * interruptWorker() — the /stop thread descheduled between reading the
+     * handle and interrupting — must be a no-op, because the pool thread
+     * may already be running a different (user, scope)'s turn.
+     */
+    @Test
+    void interruptWorkerAfterReleaseWorkerIsNoOp() {
+        CancellationHandle held = tracker.tryAcquire(USER_A, "dm", SCOPE_A);
+        assertNotNull(held);
+        held.releaseWorker();
+
+        assertFalse(held.interruptWorker(),
+                "a closed gate must report the interrupt as suppressed");
+        assertFalse(Thread.currentThread().isInterrupted(),
+                "no interrupt may reach the (recycled) thread after the gate closed");
+    }
+
+    /**
+     * The already-landed half of the confinement: an interrupt that fired
+     * while the gate was open but was never consumed by a blocking call
+     * must not survive the section — releaseWorker() clears it in the same
+     * atomic step that closes the gate.
+     */
+    @Test
+    void releaseWorkerClearsPendingInterruptStatus() {
+        CancellationHandle held = tracker.tryAcquire(USER_A, "dm", SCOPE_A);
+        assertNotNull(held);
+        assertTrue(held.interruptWorker());
+
+        held.releaseWorker();
+
+        assertFalse(Thread.currentThread().isInterrupted(),
+                "releaseWorker must clear an already-landed stale interrupt");
+    }
+
     @Test
     void staleReleaseByPreviousWorkerDoesNotEvictNewHoldersSlot() {
         CancellationHandle first = tracker.tryAcquire(USER_A, "dm", SCOPE_A);

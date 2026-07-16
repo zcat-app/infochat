@@ -5,6 +5,7 @@ import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
+import app.zcat.infochat.provider.testsupport.DispatchAwaits;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -106,9 +107,11 @@ class LanguageThreadingIT {
 
         // The chat turn self-delivers via the ProgressNotifier (M1-607): the
         // friendly-error reply REPLACES the D31 placeholder, so it is read
-        // from the finalize event, not the last plain send.
+        // from the finalize event, not the last plain send — awaited across
+        // the M1-634 worker hop.
+        DispatchAwaits.await(() -> !adapter.finalizedBodies().isEmpty(),
+                "cs chat turn's finalized terminal");
         var finalized = adapter.finalizedBodies();
-        assertFalse(finalized.isEmpty(), "Expected a finalized chat reply");
         assertEquals(bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE, "cs"), finalized.getLast(),
                 "/lang cs user's chat-path notice must be the Czech unavailable reply");
     }

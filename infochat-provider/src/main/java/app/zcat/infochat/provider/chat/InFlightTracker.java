@@ -34,12 +34,49 @@ public class InFlightTracker {
         // interruptible points never observes the interrupt at all — so the
         // flag, not the interrupt, decides whether a result is discarded.
         private final AtomicBoolean cancelled = new AtomicBoolean(false);
+        // Gate for cancellation side effects (M1-634 redteam, 2026-07-16):
+        // closed by the worker at the end of its in-flight section. Guarded
+        // by the handle monitor so interruptWorker()'s check-then-interrupt
+        // and releaseWorker()'s close-then-clear are mutually atomic —
+        // without the gate, a /stop descheduled between reading the handle
+        // and interrupting could land the interrupt on the pool thread AFTER
+        // it recycled to a different (user, scope)'s turn.
+        private boolean workerReleased;
 
         public CancellationHandle(Thread workerThread) {
             this.workerThread = workerThread;
         }
 
-        public Thread workerThread() { return workerThread; }
+        /**
+         * Interrupt the captured worker thread iff it is still inside this
+         * handle's in-flight section ({@link #releaseWorker()} has not run).
+         * Returns whether the interrupt was issued, so the caller can
+         * suppress companion cancellation side effects (pg_cancel_backend)
+         * on the same staleness signal. Atomic with {@link #releaseWorker()}
+         * via the handle monitor: once the gate is closed, no interrupt from
+         * this handle can reach the (possibly recycled) thread.
+         */
+        public synchronized boolean interruptWorker() {
+            if (workerReleased) {
+                return false;
+            }
+            workerThread.interrupt();
+            return true;
+        }
+
+        /**
+         * Close the cancellation gate at the end of the in-flight section
+         * and clear the calling thread's interrupt status in the same atomic
+         * step, so a /stop interrupt that already landed — or is being
+         * issued concurrently under the monitor — never leaks past this
+         * section into the pool thread's next, possibly different-user,
+         * task. MUST run on the captured worker thread as the last statement
+         * of the in-flight {@code finally}.
+         */
+        public synchronized void releaseWorker() {
+            workerReleased = true;
+            Thread.interrupted();
+        }
 
         /** Mark this in-flight request as cancelled by /stop. */
         public void markCancelled() { cancelled.set(true); }

@@ -354,6 +354,19 @@ public class InboundRouter {
     @Inject
     AdapterMetrics adapterMetrics = AdapterMetrics.noop();
 
+    /**
+     * Bounded worker seam for the D35 interruptible dispatch class
+     * (M1-634): step 6 of an interruptible inbound runs on a per-request
+     * worker so the one-in-flight guard observes real contention and
+     * {@code /stop} — dispatched inline like every other slash command —
+     * stays reachable while a worker holds the LLM call. The
+     * {@link InterruptibleDispatcher#direct()} initializer keeps the
+     * hand-constructed plain-JUnit router tests synchronous and
+     * unmodified; CDI replaces it with the managed bounded pool.
+     */
+    @Inject
+    InterruptibleDispatcher interruptibleDispatcher = InterruptibleDispatcher.direct();
+
     @ConfigProperty(name = "infochat.chat.body-cap", defaultValue = "2048")
     int chatBodyCap;
 
@@ -802,19 +815,92 @@ public class InboundRouter {
         // and nothing may pin a connection under an LLM call.
 
         // Step 6 — parse + dispatch (slash-command resolver or chat-mode
-        // fallback), then deliver. A DispatchResult.AlreadyDelivered means a
-        // self-delivering handler already shipped its reply through the
-        // ProgressNotifier — the router performs NO send for that invocation
-        // (no double-send), and the chat path has already run its
-        // delivery-gated post-delivery commit inside
-        // dispatchChatSelfDelivering (M1-607). A DispatchResult.Reply
-        // carries a fixed/slash body to send; no Reply path produces a
-        // pending chat commit.
-        DispatchResult dispatchResult =
-                dispatchSlashOrChat(msg.scope(), normalized, snapshot.get().id(), dispatchScopeId);
-        if (dispatchResult instanceof DispatchResult.Reply reply) {
-            sendReply(msg.scope(), reply.body(), adapterName);
+        // fallback), then deliver — extracted into runDispatchStage so the
+        // interruptible class can run it on a worker (below) while every
+        // other body runs it inline right here.
+        //
+        // M1-634 fork: the D35 interruptible class (chat-mode, user-issued
+        // /summary, user-issued /retry re-roll) is handed to the bounded
+        // InterruptibleDispatcher so the transport's single dispatch thread
+        // is freed the moment intake ends. That concurrency is what makes
+        // the spec'd behaviours reachable over live transports: a second
+        // same-(user, scope) request is admitted WHILE the first holds its
+        // InFlightTracker slot (reject-with-guidance, commands.md §Surface
+        // conventions), and /stop — non-interruptible, dispatched inline —
+        // can cancel a worker-held LLM call "immediately" (D35). Everything
+        // non-interruptible keeps the transport thread's arrival order.
+        //
+        // The closure captures plain VALUES only (senderContactId /
+        // effectiveLanguage are read from the intake context HERE, before
+        // submit): this request context is destroyed when onMessage
+        // returns, and a worker-side read of it would be a cross-user
+        // isolation leak. The worker runs the stage under its own fresh,
+        // seeded context (see InterruptibleDispatcher.runStage).
+        UUID actorId = snapshot.get().id();
+        ScopeRef scope = msg.scope();
+        UUID stageScopeId = dispatchScopeId;
+        if (isInterruptible(normalized)) {
+            interruptibleDispatcher.dispatch(
+                    adapterName,
+                    inboundContext.senderContactId(),
+                    inboundContext.effectiveLanguage(),
+                    () -> runDispatchStage(scope, normalized, actorId, stageScopeId, adapterName));
+            return;
         }
+        runDispatchStage(scope, normalized, actorId, stageScopeId, adapterName);
+    }
+
+    /**
+     * The step-6 stage: dispatch a normalized inbound and deliver any
+     * {@link DispatchResult.Reply} body. A
+     * {@link DispatchResult.AlreadyDelivered} means a self-delivering
+     * handler already shipped its reply through the ProgressNotifier —
+     * the router performs NO send for that invocation (no double-send),
+     * and the chat path has already run its delivery-gated post-delivery
+     * commit inside {@link #dispatchChatSelfDelivering} (M1-607). No
+     * Reply path produces a pending chat commit. Runs inline on the
+     * transport thread for non-interruptible bodies and on an
+     * {@link InterruptibleDispatcher} worker for the D35 interruptible
+     * class (M1-634).
+     */
+    private void runDispatchStage(ScopeRef scope, String normalized, UUID actorId,
+                                  UUID dispatchScopeId, String adapterName) {
+        DispatchResult dispatchResult =
+                dispatchSlashOrChat(scope, normalized, actorId, dispatchScopeId);
+        if (dispatchResult instanceof DispatchResult.Reply reply) {
+            sendReply(scope, reply.body(), adapterName);
+        }
+    }
+
+    /**
+     * Is {@code normalized} in the D35 interruptible dispatch class —
+     * chat-mode (non-slash), user-issued {@code /summary}, or
+     * user-issued {@code /retry} WITHOUT {@code --digest}? Only these
+     * are offloaded to the worker seam; a misclassification here is an
+     * ordering bug (an offloaded mutating command would lose the
+     * transport thread's arrival order), so the predicate must stay
+     * exact. The {@code --digest} test deliberately mirrors
+     * {@code RetryCommandHandler.hasFlag}'s whitespace-token equality —
+     * {@code /retry --digest} is D35 non-interruptible and must keep
+     * its inline ordering, so the two classifications may not drift.
+     */
+    private static boolean isInterruptible(String normalized) {
+        if (!normalized.startsWith("/")) {
+            return true;
+        }
+        String commandName = commandNameOf(normalized);
+        if ("summary".equals(commandName)) {
+            return true;
+        }
+        if (!"retry".equals(commandName)) {
+            return false;
+        }
+        for (String part : normalized.split("\\s+")) {
+            if (part.equals("--digest")) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

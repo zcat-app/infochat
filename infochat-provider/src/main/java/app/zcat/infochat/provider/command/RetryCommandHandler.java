@@ -260,6 +260,9 @@ public class RetryCommandHandler implements CommandHandler {
             return reply(scope, out.toString().stripTrailing());
         } finally {
             inFlightTracker.release(userId.get(), scopeKind, scopeId, slot);
+            // Gate close + interrupt-status clear, LAST in the section —
+            // see CancellationHandle.releaseWorker (M1-634).
+            slot.releaseWorker();
         }
     }
 

@@ -1,7 +1,9 @@
 package app.zcat.infochat.provider.translation;
 
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
+import app.zcat.infochat.provider.messaging.InterruptibleDispatcher;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
+import app.zcat.infochat.provider.testsupport.DispatchAwaits;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -60,6 +62,8 @@ class TranslationPipelineIT {
     @Inject @SeedDataSource DataSource dataSource;
 
     @Inject TestLlmProvider mockLlm;
+
+    @Inject InterruptibleDispatcher interruptibleDispatcher;
 
     @BeforeEach
     void cleanup() throws Exception {
@@ -121,6 +125,11 @@ class TranslationPipelineIT {
 
         adapter.deliverDm(USER_CONTACT_ID, "/summary -w 24h");
 
+        // /summary runs on an M1-634 worker — drain the pool so the
+        // exactly-one bounds below are race-free.
+        DispatchAwaits.await(() -> interruptibleDispatcher.inFlightTaskCount() == 0,
+                "interruptible dispatch pool quiescent");
+
         assertEquals(1, adapter.sentMessages().size(), "exactly one placeholder send");
         List<String> finalized = adapter.finalizedBodies();
         assertEquals(1, finalized.size(), "exactly one finalized summary message");
@@ -167,6 +176,11 @@ class TranslationPipelineIT {
         mockLlm.setResponseText("<en-summary>");
 
         adapter.deliverDm(USER_CONTACT_ID, "/summary -w 24h");
+
+        // /summary runs on an M1-634 worker — drain the pool so the
+        // exactly-one bounds below are race-free.
+        DispatchAwaits.await(() -> interruptibleDispatcher.inFlightTaskCount() == 0,
+                "interruptible dispatch pool quiescent");
 
         assertEquals(1, adapter.sentMessages().size(), "exactly one placeholder send");
         List<String> finalized = adapter.finalizedBodies();

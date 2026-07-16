@@ -4,7 +4,9 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.messaging.InterruptibleDispatcher;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
+import app.zcat.infochat.provider.testsupport.DispatchAwaits;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -67,6 +69,8 @@ class RetryCommandHandlerGroupScopeIT {
 
     @Inject BundleLoader bundleLoader;
 
+    @Inject InterruptibleDispatcher interruptibleDispatcher;
+
     @BeforeEach
     void cleanup() throws Exception {
         adapter.reset();
@@ -114,12 +118,17 @@ class RetryCommandHandlerGroupScopeIT {
 
         // First /summary writes the group anchor (scope_kind='group').
         adapter.deliverGroupMention(group, member, "/summary");
+        // The /summary turn runs on an M1-634 worker — it must fully
+        // finish (anchor written, handles finalized) BEFORE the reset
+        // below, which would otherwise kill its in-flight handles.
+        awaitDispatchIdle();
         // Drop the /summary placeholder + finalize bookkeeping so the
         // post-retry sentMessages() snapshot holds only the /retry reply.
         // The anchor row itself lives in the DB and survives the reset.
         adapter.reset();
 
         adapter.deliverGroupMention(group, member, "/retry");
+        awaitDispatchIdle();
 
         List<OutboundMessage> sent = adapter.sentMessages();
         assertEquals(1, sent.size(),
@@ -146,9 +155,13 @@ class RetryCommandHandlerGroupScopeIT {
         mockLlm.setResponseText("DM retry prose.");
 
         adapter.deliverDm(user, "/summary");
+        // Same M1-634 ordering as the group case: /summary must finish
+        // before the reset can safely drop its bookkeeping.
+        awaitDispatchIdle();
         adapter.reset();
 
         adapter.deliverDm(user, "/retry");
+        awaitDispatchIdle();
 
         List<OutboundMessage> sent = adapter.sentMessages();
         assertEquals(1, sent.size(),
@@ -162,6 +175,12 @@ class RetryCommandHandlerGroupScopeIT {
     }
 
     // ----- helpers ------------------------------------------------------
+
+    /** Await M1-634 worker-pool quiescence so negative asserts are race-free. */
+    private void awaitDispatchIdle() {
+        DispatchAwaits.await(() -> interruptibleDispatcher.inFlightTaskCount() == 0,
+                "interruptible dispatch pool quiescent");
+    }
 
     private String noAnchorText() {
         return bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ANCHOR, "en");

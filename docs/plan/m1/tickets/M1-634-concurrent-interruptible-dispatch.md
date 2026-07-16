@@ -1,11 +1,11 @@
 ---
 id: M1-634
 title: "Concurrent interruptible dispatch so the in-flight guard and /stop are reachable over live transports"
-status: pending
+status: done
 created: 2026-07-15
-last_updated: 2026-07-15
+last_updated: 2026-07-16
 blocked_by: []
-files_budget: 21
+files_budget: 28
 complexity: high
 risk: high
 round_cap: 3
@@ -82,6 +82,29 @@ acceptance:
     workers so the one-in-flight guard and /stop are reachable, while
     non-interruptible work stays on the existing path.
   - >-
+    Stale-interrupt confinement (2026-07-16 redteam remediation, the accepted
+    low DOS finding). Cancellation side effects are gated on the targeted
+    worker still executing its in-flight section:
+    InFlightTracker.CancellationHandle gains a monitor-guarded gate —
+    interruptWorker() issues the interrupt only while the gate is open and
+    reports whether it did; releaseWorker(), called on the worker thread as
+    the last statement of each in-flight finally (ChatAgent handleTurn,
+    SummaryCommandHandler, RetryCommandHandler), closes the gate and clears
+    the thread's interrupt status in the same atomic step — so a /stop
+    interrupt can never land on a pool thread after it finished the targeted
+    turn, and thus never on a recycled thread running a different
+    (user, scope)'s turn. CancellationService.cancel interrupts via the gate
+    (the workerThread() accessor it replaces is removed) and suppresses
+    pg_cancel_backend when the gate reports the worker already finished (the
+    same stale-cancel hazard, DB flavor). The now-superseded
+    Thread.interrupted() clear in InterruptibleDispatcher.runStage's finally
+    — whose comment claimed a confinement it did not provide — is removed;
+    the gate is the single owner of the invariant. Unit tests pin:
+    interrupt-before-release interrupts the captured thread;
+    interrupt-after-release is a no-op leaving the thread's status clear;
+    releaseWorker clears an already-landed stale interrupt; cancel() after
+    worker release issues neither an interrupt nor pg_cancel_backend.
+  - >-
     The full pre-existing suite is green (mvn verify), including the router /
     chat-dispatch tests updated per test_plan to await the async completion.
 test_plan:
@@ -123,6 +146,13 @@ test_plan:
     - "journey/GoldenPathJourneyIT.java — /summary at 237, chat at 252"
     - "translation/TranslationPipelineIT.java — /summary at 122, 169"
     - >-
+      Redteam-remediation additions (2026-07-16, stale-interrupt confinement
+      acceptance): chat/InFlightTrackerTest.java — new CancellationHandle
+      gate unit tests; chat/CancellationServiceTest.java — the
+      workerThread().isInterrupted() assert re-anchored to the current
+      thread (the accessor is removed) plus a new cancel-after-worker-release
+      suppression test.
+    - >-
       Explicitly NOT modified (verified non-interruptible or non-router — do
       not touch): digest/DigestRoundtripIT.java (drives only /retry --digest,
       D35 non-interruptible); chat/StopToolQueryCancellationIT.java (drives
@@ -131,7 +161,33 @@ test_plan:
       pre-offload at the step-3.5 SilentDrop).
   preserves:
     - all tests currently green on main
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-15
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 20
+      added: 1069
+      removed: 48
+  - round: 2
+    date: 2026-07-16
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 28
+      added: 1441
+      removed: 59
 overrides:
   - date: 2026-07-15
     kind: start-precondition
@@ -156,7 +212,43 @@ escalations:
       files_budget to ~21; the enumerated set becomes the authorized
       test_plan.modifies list. Full block with the per-file census: ticket
       body §OUTLINE FAILED (2026-07-15).
+  - date: 2026-07-16
+    reason: redteam-finding
+    reviewer_verdict_excerpt: |
+      RED-TEAM VERDICT: FINDINGS (1 low, 0 medium+). CATEGORY: DOS,
+      SEVERITY: low, SUGGESTED-FIX-CLASS: trust-boundary-tightening.
+      GAP: The interruptible offload runs turns on a FIXED, reused pool of
+      threads. Cancellation targets a captured Thread, not the still-held
+      slot: CancellationService.cancel calls handle.markCancelled() then
+      handle.workerThread().interrupt() with NO re-check that the slot is
+      still held by that handle at interrupt time. The Thread.interrupted()
+      clear in InterruptibleDispatcher.runStage's finally covers only the
+      interleaving where the stale interrupt lands BEFORE the next task's
+      first blocking call; it does NOT cover cancel()'s own interrupt being
+      DELAYED (the /stop thread descheduled between handle read and
+      interrupt) until after the pool thread finished turn A, ran the
+      finally, and recycled to a DIFFERENT (user, scope)'s turn B — the
+      interrupt then lands mid-turn-B. Full finding + repro:
+      docs/plan/m1/redteam/M1-634-2026-07-16.md and redteam_findings[0].
 revisions:
+  - date: 2026-07-16
+    reason: redteam-finding rework (stale-interrupt confinement remediation)
+    snapshot:
+      status: escalated
+      files_budget: 21
+      escalation_reason: redteam-finding
+      acceptance_criteria_count: 6
+      note: >-
+        Remediation adds 7 files to the working-tree diff (InFlightTracker,
+        CancellationService, ChatAgent, SummaryCommandHandler,
+        RetryCommandHandler, InFlightTrackerTest, CancellationServiceTest;
+        InterruptibleDispatcher already in-diff), 20 -> 27, plus the redteam
+        verdict file docs/plan/m1/redteam/M1-634-2026-07-16.md riding the
+        branch (workflow artifact, M1-621 precedent) -> 28. Budget corrected
+        27 -> 28 within this same refine (2026-07-16 amendment) — the first
+        draft counted implementation surface only. Growth vs review round 1
+        is the user-accepted in-branch redteam remediation (must-shrink
+        citable mandate).
   - date: 2026-07-15
     reason: outline-fail rework
     snapshot:
@@ -170,8 +262,77 @@ revisions:
           - "FILES-BUDGET-PLAUSIBLE: files_budget 14 plausible-but-tight (~13-16 files); test_plan.modifies explicitly incomplete pending the plan-writer's enumeration."
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-07-16
+    category: DOS
+    severity: low
+    promise: |
+      "Per-(user, scope) isolation for state, memory, saves. Never leak across
+      users or between DM and group." (CLAUDE.md §Key conventions, the isolation
+      invariant security.md constrains) — combined with the D35 cancellation
+      model: a /stop cancels only the issuing (user, scope)'s own in-flight turn.
+    gap: |
+      The interruptible offload runs turns on a FIXED, reused pool of threads.
+      Cancellation targets a captured Thread, not the still-held slot:
+      CancellationService.cancel calls handle.markCancelled() then
+      handle.workerThread().interrupt() with NO re-check that the slot is still
+      held by that handle at interrupt time. The Thread.interrupted() clear in
+      InterruptibleDispatcher.runStage's finally covers only the interleaving
+      where the stale interrupt lands BEFORE the next task's first blocking
+      call; it does NOT cover cancel()'s own interrupt being DELAYED (the /stop
+      thread descheduled between handle read and interrupt) until after the
+      pool thread finished turn A, ran the finally, and recycled to a DIFFERENT
+      (user, scope)'s turn B — the interrupt then lands mid-turn-B.
+    repro: |
+      User X has chat turn A in flight (pool thread T holds the slot). X sends
+      /stop; cancel reads handle H while the slot is held, then is descheduled
+      just before H.workerThread().interrupt(). Turn A completes, releases,
+      T recycles to user Y's turn B and enters Y's generate() HTTP call.
+      cancel() resumes and interrupts T — Y's LLM call breaks; B's own handle
+      is not cancelled so Y degrades to the failure terminal instead of an
+      answer. X caused a different user's turn to fail. Window is very tight
+      and not reliably attacker-triggerable → low.
+    suggested_fix_class: trust-boundary-tightening
+    disposition: >-
+      Remediated in-branch (2026-07-16 refine): monitor-guarded cancellation
+      gate on CancellationHandle; confirmed by the CLEAN re-audit
+      (redteam_audits 2026-07-16 r2).
+outline_file: target/m1-tick-outline-M1-634.md
+redteam_audits:
+  - date: 2026-07-16
+    verdict: FINDINGS
+    base: bb7ac434 (branch fork point on main)
+    head: working tree of m1/M1-634-concurrent-interruptible-dispa (uncommitted impl; working-tree-vs-fork diff per the refine-commit diff-range correction)
+    verdict_file: docs/plan/m1/redteam/M1-634-2026-07-16.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      Pre-commit audit (--in-progress, between review APPROVE r1 and commit).
+      One low DOS finding: stale-interrupt window — cancel()'s interrupt can
+      land on a recycled pool thread running a different user's turn when the
+      /stop thread is descheduled between handle read and interrupt; the
+      runStage finally-clear covers only the interrupt-landed-early
+      interleaving. One out-of-model advisory: D35 /stop immediacy degrades to
+      pre-M1-634 queuing during CallerRuns saturation fallback — documented
+      intentional degradation (06-messaging.md §6.3.7), threat model commits
+      to the memory bound, not /stop reachability under all load.
+  - date: 2026-07-16
+    verdict: CLEAN
+    base: bb7ac434 (branch fork point on main)
+    head: working tree of m1/M1-634-concurrent-interruptible-dispa (post-remediation; lifecycle/design paths excluded from the audited diff)
+    verdict_file: docs/plan/m1/redteam/M1-634-2026-07-16-r2.md
+    out_of_model_count: 1
+    note: |
+      Post-remediation re-audit (fresh threat-actor context, code diff
+      only), after the monitor-guarded cancellation gate landed for the
+      first audit's low DOS finding. CLEAN — 0 findings; the one
+      out-of-model advisory is recorded in the verdict file. Cleared the
+      ticket for commit + merge.
+clarity_check:
+  date: 2026-07-15
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-634: Concurrent interruptible dispatch so the in-flight guard and /stop are reachable over live transports
@@ -271,6 +432,29 @@ or bounded queue, not multi-in-flight outbound, not changing the LLM cap values.
   `budget-breach` at start rather than trimming scope.
 - **Decision family:** D35 (cancellation), D31 (progress notifier), D46
   (per-process LLM concurrency cap / multi-adapter topology).
+- **Implementation notes (2026-07-15, for review traceability).** Final honest
+  file count is **18 of 21** — under budget, no `budget-breach` needed.
+  - Of the 16 census test files in `test_plan.modifies`, the first four
+    (`InboundRouterChatProgressTest`, `RouterNoDoubleSendTest`,
+    `InboundRouterAcquisitionCountTest`, `InboundRouterChatPersistFailureTest`)
+    were **intentionally NOT modified**: they are plain-JUnit tests that
+    hand-construct `InboundRouter`, so the field-initialised
+    `InterruptibleDispatcher.direct()` default keeps their dispatch synchronous
+    and their existing assertions valid unchanged (verified: all four pass as-is
+    — the `direct()` design's whole point). The remaining 12 census files (the
+    `@QuarkusTest` ITs that exercise the real async pool) were reworked to await.
+  - One affected file the start-time census **missed** surfaced at full `mvn
+    verify`: `dev/DevTerminalHarnessRoundtripIT` drives `/summary` through the
+    dev file-transport harness and asserts on the OUTPUT FILE. The census grep
+    (drive + synchronous assert, both in the test file) structurally could not
+    catch it — the drive lives in PRODUCTION code (`DevTerminalHarness
+    .injectAndCapture`) and the assert is on file content. The offload made the
+    harness silently drop every interruptible directive's reply (it captured
+    replies synchronously right after `deliverDm` returned). Fixed at the source
+    in `dev/DevTerminalHarness.java` (await interruptible-pool quiescence before
+    capturing) — an orphan this ticket's async change created, so in-scope per
+    the surgical-changes rule; the IT itself needed no edit. This is the 18th
+    file.
 
 ## OUTLINE FAILED (2026-07-15)
 

@@ -8,7 +8,9 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.digest.DigestSlot;
 import app.zcat.infochat.provider.digest.DigestWorker;
+import app.zcat.infochat.provider.messaging.InterruptibleDispatcher;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
+import app.zcat.infochat.provider.testsupport.DispatchAwaits;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -96,6 +98,7 @@ class GoldenPathJourneyIT {
     @Inject CommandPermissions commandPermissions;
     @Inject TestLlmProvider testLlmProvider;
     @Inject DigestWorker digestWorker;
+    @Inject InterruptibleDispatcher interruptibleDispatcher;
 
     @BeforeEach
     void cleanup() throws Exception {
@@ -235,6 +238,10 @@ class GoldenPathJourneyIT {
         // rendered summary lands on the finalized body.
         testLlmProvider.setResponseText("Cluster prose for the journey summary.");
         adapter.deliverDm(user, "/summary");
+        // /summary runs on an M1-634 worker — drain before asserting and
+        // before the reset below (a mid-worker reset would kill handles),
+        // keeping the journey's step ordering deterministic.
+        awaitDispatchIdle();
         assertEquals(1, adapter.finalizedBodies().size(),
                 "hop 6: /summary must deliver exactly one finalized summary body");
         assertTrue(adapter.finalizedBodies().get(0).contains(postTitle),
@@ -250,6 +257,9 @@ class GoldenPathJourneyIT {
         testLlmProvider.reset();
         testLlmProvider.setResponseText(chatMarker);
         adapter.deliverDm(user, "tell me about the news");
+        // Chat turn on the M1-634 worker — same drain-before-assert-and-
+        // reset ordering as hop 6.
+        awaitDispatchIdle();
         assertEquals(1, adapter.finalizedBodies().size(),
                 "hop 7: the chat turn must deliver exactly one finalized reply body");
         assertTrue(adapter.finalizedBodies().get(0).contains(chatMarker),
@@ -350,6 +360,12 @@ class GoldenPathJourneyIT {
     }
 
     // ----- helpers ---------------------------------------------------------
+
+    /** Await M1-634 worker-pool quiescence so hop asserts and resets are race-free. */
+    private void awaitDispatchIdle() {
+        DispatchAwaits.await(() -> interruptibleDispatcher.inFlightTaskCount() == 0,
+                "interruptible dispatch pool quiescent");
+    }
 
     private UUID insertSource(String identifier) throws Exception {
         try (Connection conn = dataSource.getConnection();

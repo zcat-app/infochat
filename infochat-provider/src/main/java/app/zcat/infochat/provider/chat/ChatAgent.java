@@ -281,6 +281,9 @@ public class ChatAgent {
                     bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE, scopeLanguage), null, null);
         } finally {
             inFlightTracker.release(userId, scopeKind, scopeId, slot);
+            // Gate close + interrupt-status clear, LAST in the section —
+            // see CancellationHandle.releaseWorker (M1-634).
+            slot.releaseWorker();
         }
     }
 
