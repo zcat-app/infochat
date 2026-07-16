@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 652 |
+| done | 653 |
 | deferred | 1 |
 | abandoned | 13 |
 | **total** | **670** |
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-627 — /approve-group and /reject-group: clarify which group id token to pass (complexity: low, risk: low)
 - M1-628 — Asset commands (/zcash, /monero): inconsistent leading indentation on some reply lines (complexity: low, risk: low)
-- M1-635 — Queued interruptible request gives the sender no feedback until a worker frees (complexity: high, risk: medium)
 - M1-636 — Per-user cap on concurrent interruptible requests across scopes (complexity: medium, risk: medium)
 
 ---
@@ -64,6 +63,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-635 | Queued interruptible request gives the sender no feedback until a worker frees | 2026-07-16 | round 1 APPROVE |
 | M1-634 | Concurrent interruptible dispatch so the in-flight guard and /stop are reachable over live transports | 2026-07-16 | round 2 APPROVE |
 | M1-633 | In-band contactId sourcing for --contact invites (D60) | 2026-07-16 | round 1 APPROVE |
 | M1-632 | Default bare /invite create to --open (D60) | 2026-07-15 | round 2 APPROVE |
@@ -73,7 +73,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-624 | Bootstrap-admin token claim shows a probation welcome instead of an admin welcome (en+cs) | 2026-07-15 | round 1 APPROVE |
 | M1-623 | /summary degrades ungracefully on a large post window (cap before the summarizer LLM call) | 2026-07-15 | round 1 APPROVE |
 | M1-622 | Subscription guidance copy: welcome + /follow-tag hints + empty-digest nudge (en+cs) | 2026-07-14 | round 1 APPROVE |
-| M1-621 | Subscription model: implicit-bootstrap corpus, private custom sources, command surface + spec amendment | 2026-07-14 | round 2 APPROVE |
 
 ---
 
@@ -856,6 +855,6 @@ M1-631 (abandoned)
 M1-632 (done)
   └── M1-633 (done)
 M1-634 (done)
-M1-635 (pending) ← runnable
+M1-635 (done)
 M1-636 (pending) ← runnable
 ```

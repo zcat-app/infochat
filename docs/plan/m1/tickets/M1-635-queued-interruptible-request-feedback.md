@@ -1,7 +1,7 @@
 ---
 id: M1-635
 title: "Queued interruptible request gives the sender no feedback until a worker frees"
-status: pending
+status: done
 created: 2026-07-16
 last_updated: 2026-07-16
 blocked_by: []
@@ -57,6 +57,53 @@ decision_refs:
   - D31
   - D35
   - D43
+clarity_check:
+  date: 2026-07-16
+  verdict: WARN
+  warnings:
+    - >-
+      risk: medium is calibrated on the low side given the ticket's own
+      admission that this touches the isolation surface M1-634's red-team audit
+      scrutinised, and its recommendation of a follow-up /redteam pass; consider
+      risk: high.
+    - >-
+      The commented-out test_plan.modifies entry naming
+      InboundRouterConcurrentDispatchIT.java is ambiguous scaffolding — if the
+      chosen design changes an EXISTING test method's assertions in that file
+      (rather than only adding new methods that reuse its fixtures), that
+      modification is not yet explicitly authorized with a stated new expected
+      behavior. Clarify add-only vs modify-existing before touching that file.
+  blockers: []
+outline_file: target/m1-tick-outline-M1-635.md
+reviews:
+  - round: 1
+    date: 2026-07-16
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 560
+      removed: 10
+redteam_findings: []
+redteam_audits:
+  - date: 2026-07-16
+    verdict: CLEAN
+    base: main (eb5e2358)
+    head: working-tree@m1/M1-635-queued-interruptible-request-feedback (uncommitted impl; branch tip == main)
+    verdict_file: docs/plan/m1/redteam/M1-635-2026-07-16.md
+    out_of_model_count: 3
+    note: >-
+      Pre-commit --in-progress audit of the working-tree diff vs the fork
+      point (branch-form range would have been empty — uncommitted impl).
+      CLEAN across all severities; the hop-isolation surface (purpose-minted
+      operationId seeded across the dispatch hop) held under adversarial
+      review. Three out-of-model advisories recorded in the verdict file
+      for follow-up consideration; none block commit.
 ---
 
 # M1-635: Queued interruptible request gives the sender no feedback until a worker frees

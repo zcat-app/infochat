@@ -55,8 +55,10 @@ public class InboundContext {
     // never finalize each other's message (M1-611). Distinct from
     // senderContactId because the same user can drive two concurrent
     // operations in one scope, which must still be told apart. Request-scoped,
-    // so each dispatch gets a fresh value at construction.
-    private final String operationId = UUID.randomUUID().toString();
+    // so each dispatch gets a fresh value at construction; the queued
+    // interruptible path re-seeds it across the dispatch hop — see
+    // setOperationId (M1-635).
+    private String operationId = UUID.randomUUID().toString();
     // Eagerly defaulted (not router-set) because some reply paths
     // legitimately fire before any language is resolvable — see
     // effectiveLanguage().
@@ -120,6 +122,22 @@ public class InboundContext {
      */
     public String operationId() {
         return operationId;
+    }
+
+    /**
+     * Re-seed this dispatch's operation identity with a purpose-minted id
+     * (M1-635). Called only by the queued interruptible stage
+     * ({@link InboundRouter}'s queued dispatch variant), on the worker,
+     * before any progress publish: the transport thread already opened the
+     * turn's acknowledgement placeholder under this id at submit time, so
+     * seeding it here makes the worker's own publishes and terminal key to
+     * that placeholder instead of the constructor default minting a second,
+     * unrelated one. The M1-611 distinctness invariant is preserved — the
+     * seeded value is itself a UUID freshly minted for this one turn, never
+     * another dispatch's id.
+     */
+    public void setOperationId(String operationId) {
+        this.operationId = operationId;
     }
 
     /**

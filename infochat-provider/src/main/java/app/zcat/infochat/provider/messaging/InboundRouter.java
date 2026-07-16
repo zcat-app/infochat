@@ -840,6 +840,28 @@ public class InboundRouter {
         ScopeRef scope = msg.scope();
         UUID stageScopeId = dispatchScopeId;
         if (isInterruptible(normalized)) {
+            // M1-635: when every worker is occupied the submit below will
+            // queue, and nothing would reach the sender until a worker frees
+            // — a silence that can span several 90s LLM turns and reads as a
+            // broken bot. Publish the STARTED placeholder HERE, on the
+            // transport thread, under a PURPOSE-MINTED operationId — never
+            // this context's own id, so the M1-634 hop contract stands: the
+            // worker reads nothing of the submitting context — and carry the
+            // id across the hop as one more plain captured String. The worker
+            // seeds it into its fresh context before any dispatch work, so
+            // its own stage publishes and terminal land on this placeholder:
+            // one lifecycle, never a second bubble.
+            if (interruptibleDispatcher.wouldQueue()) {
+                String queuedOperationId = UUID.randomUUID().toString();
+                progressNotifier.publishQueuedPlaceholder(queuedOperationId, scope);
+                interruptibleDispatcher.dispatch(
+                        adapterName,
+                        inboundContext.senderContactId(),
+                        inboundContext.effectiveLanguage(),
+                        () -> runQueuedDispatchStage(
+                                queuedOperationId, scope, normalized, actorId, stageScopeId));
+                return;
+            }
             interruptibleDispatcher.dispatch(
                     adapterName,
                     inboundContext.senderContactId(),
@@ -869,6 +891,32 @@ public class InboundRouter {
                 dispatchSlashOrChat(scope, normalized, actorId, dispatchScopeId);
         if (dispatchResult instanceof DispatchResult.Reply reply) {
             sendReply(scope, reply.body(), adapterName);
+        }
+    }
+
+    /**
+     * Queued-variant step-6 stage (M1-635): the transport thread already
+     * opened this turn's acknowledgement placeholder under
+     * {@code operationId} at submit time, so the worker must (a) seed that
+     * id into its fresh context BEFORE any dispatch work —
+     * {@link StageProgressNotifier} keys per-operation state by it (M1-611),
+     * which is what makes the self-delivering handlers' own publishes and
+     * terminals land on the acknowledgement instead of minting a second
+     * placeholder — and (b) deliver a plain {@link DispatchResult.Reply}
+     * body (the in-flight reject, the rate-cap replies, {@code /retry}
+     * guidance, the internal-error reply) as a notifier terminal REPLACING
+     * that placeholder, where the non-queued variant would send a separate
+     * message: a separate send here would strand "working on it" forever
+     * alongside a second bubble, breaking the one-lifecycle contract
+     * (M1-607).
+     */
+    private void runQueuedDispatchStage(String operationId, ScopeRef scope, String normalized,
+                                        UUID actorId, UUID dispatchScopeId) {
+        inboundContext.setOperationId(operationId);
+        DispatchResult dispatchResult =
+                dispatchSlashOrChat(scope, normalized, actorId, dispatchScopeId);
+        if (dispatchResult instanceof DispatchResult.Reply reply) {
+            progressNotifier.complete(scope, reply.body());
         }
     }
 

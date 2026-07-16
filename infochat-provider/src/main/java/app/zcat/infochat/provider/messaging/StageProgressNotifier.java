@@ -197,6 +197,54 @@ public class StageProgressNotifier implements ProgressNotifier {
         }
     }
 
+    /**
+     * Queued-dispatch acknowledgement (M1-635): open an operation's
+     * placeholder on the TRANSPORT thread, at submit time, under the
+     * caller-supplied purpose-minted {@code operationId} — never this
+     * request's own id, which dies with the submitting context the moment
+     * {@code onMessage} returns. Same first-publish semantics as
+     * {@link #publish}'s STARTED branch — placeholder send via the outbound
+     * chokepoint, handle captured, typing on, D31 collapse no-op for
+     * adapters without message edit — with ONE deliberate difference: NO
+     * request-end cleanup is registered. The submitted task may still sit
+     * in the dispatch queue when the transport context is destroyed; a
+     * cleanup registered here would fire {@link #terminateAbandoned}
+     * against a merely-queued operation, finalizing the placeholder with
+     * FAILED text before the worker ever ran. Lifecycle ownership transfers
+     * to the worker instead: its own publishes register the M1-334 drain
+     * under the seeded id, and its terminal (or the router's queued-Reply
+     * reconciliation) removes the state. A chokepoint-aborted send leaves
+     * the handle null exactly like {@link #publish}'s first branch — the
+     * worker's next publish retries the send and the terminal degrades to
+     * a fresh send, so nothing dangles.
+     */
+    void publishQueuedPlaceholder(String operationId, ScopeRef scope) {
+        MessagingAdapter adapter = resolveAdapter();
+        if (!adapter.capabilities().supportsMessageEdit()) {
+            return;
+        }
+        String text = bundleLoader.get(
+                BundleKeys.PROGRESS_STARTED, inboundContext.effectiveLanguage());
+        ScopeState state = states.computeIfAbsent(operationId, id -> new ScopeState());
+        // The monitor pairs with the worker-side publish/terminate blocks so
+        // the handle written here is visible to the worker thread that later
+        // updates or finalizes this placeholder. Instant.now() (not an
+        // injected Clock) deliberately: the coalescing window's read side and
+        // every other lastEditAt write in this component use ambient time —
+        // a lone injected-clock write would split one component across two
+        // clocks (engineering-rules §9 forbids exactly that split; the
+        // whole-component migration is M1-447).
+        synchronized (state) {
+            MessageHandle handle = outboundDelivery.deliver(adapter, outbound(scope, text));
+            if (handle == null) {
+                return;
+            }
+            state.handle = handle;
+            state.lastEditAt = Instant.now();
+            adapter.setTyping(scope, true);
+        }
+    }
+
     @Override
     public void complete(ScopeRef scope, String finalText) {
         completeDelivered(scope, finalText);

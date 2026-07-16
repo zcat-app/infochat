@@ -55,7 +55,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  * seeds the new {@link InboundContext} with the three scalars captured
  * on the transport thread. Nothing else crosses the hop: the worker
  * context self-mints its own {@code operationId} (which is what keys
- * M1-611 per-operation progress state — deliberately NOT copied), and
+ * M1-611 per-operation progress state — deliberately NOT copied; the
+ * M1-635 queued path instead seeds a PURPOSE-MINTED per-turn id,
+ * captured in the stage closure as a plain String, never the
+ * submitting context's own id — so the contract that nothing on the
+ * worker reads the submitting context holds there verbatim), and
  * {@code pendingChatCommit} / {@code requestEndCleanups} live out
  * their whole lifecycle inside the worker context, whose destroy runs
  * the M1-334 abandoned-progress drain.
@@ -221,6 +225,30 @@ public class InterruptibleDispatcher {
         // interrupt status atomically at the end of the in-flight section —
         // so no cancellation interrupt can exist here, after the stage, to
         // poison the pool thread's next task (M1-634 redteam remediation).
+    }
+
+    /**
+     * Would a stage submitted right now sit in the pool queue rather
+     * than start immediately? Exact-counter comparison: at least
+     * {@code maxConcurrency} stages are submitted-but-unfinished, so
+     * every worker is occupied and the next submission queues (or, past
+     * queue capacity, degrades to a CallerRuns inline run — an
+     * acknowledgement preceding that stays honest, since work then
+     * starts immediately on the caller thread). Racy by nature at the
+     * call site (M1-635): a worker freeing between this check and
+     * {@link #dispatch} costs one acknowledgement for a turn that runs
+     * immediately; the inverse window restores the pre-M1-635 silence
+     * for that one turn. Both degrade to prior behaviour — never to a
+     * double placeholder, because the acknowledgement and the worker's
+     * own publishes share one seeded operationId. Always {@code false}
+     * in {@code directMode}: a {@link #direct()} instance runs the
+     * stage synchronously on the caller thread (nothing ever queues),
+     * and its uninjected {@code maxConcurrency} of 0 would otherwise
+     * make the comparison vacuously true for every hand-constructed
+     * router test.
+     */
+    public boolean wouldQueue() {
+        return !directMode && inFlightTasks.get() >= maxConcurrency;
     }
 
     /**
