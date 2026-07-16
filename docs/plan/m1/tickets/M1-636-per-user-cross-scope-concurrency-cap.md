@@ -1,0 +1,188 @@
+---
+id: M1-636
+title: "Per-user cap on concurrent interruptible requests across scopes"
+status: pending
+created: 2026-07-16
+last_updated: 2026-07-16
+blocked_by: []
+files_budget: 14
+complexity: medium
+risk: medium
+round_cap: 3
+security_relevant: true
+migration_touch: false
+out_of_scope:
+  - >-
+    A per-user FAIR SCHEDULER. Design 06-messaging.md §6.3 defers one to a later
+    revision and that deferral STANDS: this ticket adds a BOUND (a ceiling on a
+    sender's concurrent share), never an ordering policy. Queue order remains
+    arrival order with no fairness ordering of its own.
+  - >-
+    The per-(user, scope) in-flight guard itself (M1-634). Its one-request-per-
+    scope semantics and its /stop cancellation-handle role are unchanged; this
+    ticket adds a second, coarser bound alongside it.
+  - >-
+    Changing infochat.chat.dispatch.max-concurrency's VALUE (stays 4, per the
+    2026-07-16 operator decision), the CallerRunsPolicy saturation path, and
+    LlmRateCap / RateCapBucket values or windows.
+  - >-
+    Feedback for a QUEUED request (M1-635). This ticket's new reject path is a
+    terminal reply, not a progress placeholder.
+acceptance:
+  - >-
+    A test drives one user's interruptible requests across MORE THAN ONE distinct
+    scope (e.g. a DM plus a group) concurrently, and asserts that requests beyond
+    the configured per-user cap are rejected with fixed guidance rather than
+    admitted — while a DIFFERENT user's request in its own scope is still
+    admitted concurrently (the cap binds per sender, never globally).
+  - >-
+    A test asserts a cap rejection consumes NO LlmRateCap token and NO in-flight
+    slot, so the sender's next permitted request still succeeds — matching the
+    existing check-order discipline documented at SummaryCommandHandler.java:271.
+  - >-
+    A test asserts the per-user count is released when a request completes, when
+    it fails, and when it is cancelled by /stop, so a user cannot leak its own
+    budget to zero across repeated turns.
+  - >-
+    docs/design/06-messaging.md §6.3's sentence "one sender's share is bounded by
+    its per-minute rate-cap budget rather than by a fair scheduler" is amended to
+    state the concurrency dimension this ticket adds, and still records the
+    fair-scheduler deferral as standing.
+  - >-
+    infochat.chat.dispatch.max-concurrency is documented in the Provider's
+    application.properties with its default (4), its >= 2 boot validation, and
+    the caller-runs ceiling (pool + equal-depth queue, then inline on the
+    transport thread), so an operator can discover and tune it without reading
+    InterruptibleDispatcher's source.
+  - mvn -pl infochat-provider -am verify is green
+test_plan:
+  adds:
+    # - infochat-provider/src/test/java/.../chat/InFlightTrackerCrossScopeTest.java
+  modifies:
+    # - infochat-provider/src/test/java/.../chat/InFlightTrackerTest.java
+  preserves:
+    - all tests currently green on main
+spec_refs:
+  - docs/spec/security.md §Rate limiting
+  - docs/spec/commands.md §Surface conventions
+decision_refs:
+  - D35
+  - D43
+  - D46
+---
+
+# M1-636: Per-user cap on concurrent interruptible requests across scopes
+
+## Context
+
+`InFlightTracker` keys its slot on `(userId, scopeKind, scopeId)`
+(`InFlightTracker.java:17`), which bounds a sender to one in-flight
+interruptible request **per scope** — not per sender. A user who is a member of
+several groups holds one slot in each, plus one in their DM. With
+`InterruptibleDispatcher`'s pool at its default of 4, a single user present in
+three groups plus a DM can occupy every worker on their own, and the next
+sender's turn waits behind them.
+
+Nothing collapses when that happens — request 9 degrades to caller-runs, the
+transport's bounded inbound queue back-pressures exactly as M1-634 documented,
+and `LlmRateCap` still bounds the sender to 10/min (20 under `%remote-llm`). The
+cost is latency borne by other users, and the ceiling is low enough (4 workers)
+that ordinary group membership reaches it without any hostile intent.
+
+This is a known boundary, not a discovered bug: M1-634's `out_of_scope` states
+"a sender's share stays bounded by `LlmRateCap`", and `06-messaging.md` §6.3
+defers a fair scheduler. The 2026-07-16 concurrency review re-opened it because
+`LlmRateCap` bounds **rate**, not **concurrency**, and the pool made concurrency
+a scarce shared resource for the first time. A per-minute budget does not stop
+one sender from holding every worker at one instant.
+
+The distinction this ticket rests on: a **cap** is not a **scheduler**. Adding a
+ceiling on a sender's concurrent share leaves arrival order untouched and does
+not implement fairness — so §6.3's deferral of a per-user-fair scheduler stands,
+while its claim about what bounds a sender's share needs the concurrency
+dimension added.
+
+This ticket also carries the operator-facing documentation of the concurrency
+bounds (see §Acceptance): `infochat.chat.dispatch.max-concurrency` currently
+exists **only** as a `@ConfigProperty` default at
+`InterruptibleDispatcher.java:75` — it appears in neither the Provider's
+`application.properties` nor `prod/runtime/application.properties`, so an
+operator cannot discover it without reading the source. Per the 2026-07-16
+operator decision the value stays 4; it must become tunable-by-discovery.
+
+## Acceptance
+
+See the YAML `acceptance:` list. In prose: requests beyond a per-user cap across
+scopes are rejected with fixed guidance while other senders stay admitted; a
+rejection consumes neither an LLM token nor a slot; the count is released on
+completion, failure and `/stop`; §6.3 is amended; the concurrency knob is
+documented with its default, its boot validation and the caller-runs ceiling;
+and `mvn -pl infochat-provider -am verify` is green.
+
+## Out-of-scope
+
+Covered in the YAML `out_of_scope:`. Most importantly this is **not** the fair
+scheduler §6.3 defers, and it does not touch the per-scope guard's semantics or
+its `/stop` cancellation-handle role. The `max-concurrency` VALUE stays 4 — this
+ticket documents that knob, it does not retune it.
+
+## Notes
+
+**Open-decision (resolve with the operator at `/m1-tick start`): the cap's value
+and its overflow behaviour.**
+
+- *Reject with guidance* (Lean) — consistent with the per-scope guard's existing
+  "request already in progress" reply, cheap, and it tells the user something
+  true. Needs a new bundle key plus its cs twin (D43 bilateral keyset — a missing
+  cs key fails `BundleLoaderTest`).
+- *Queue instead* — invisible to the sender, but it re-creates the silent wait
+  M1-635 exists to remove, and it needs a fairness policy to decide who goes
+  first, which is exactly what §6.3 defers. Not recommended.
+
+**Lean: reject, default cap 2, configurable.** A cap of 2 lets a user hold a DM
+turn and one group turn concurrently while leaving half the default pool for
+other senders. The value should be a config knob documented alongside
+`max-concurrency`, not a constant.
+
+**Check-order discipline is load-bearing.** `SummaryCommandHandler.java:271`
+documents why the in-flight slot is checked *before* the LLM bucket: "neither
+check consumes anything on a rejection — an already-in-flight rejection takes no
+bucket token, and a rate-cap rejection records no timestamp, so the next
+permitted request still succeeds." A cross-scope cap is a third check and must
+join that order without consuming anything on its own rejection. The second
+acceptance item pins this.
+
+**Release discipline is where this will break if it breaks.** `InFlightTracker`
+already solves the equivalent problem with identity-compared two-arg
+`ConcurrentHashMap.remove(key, value)` so a stale release is a harmless no-op
+(`InFlightTracker.java:117`). A naive counter has no such identity check, and a
+double-decrement or a missed decrement on the `/stop` path silently corrupts the
+budget in the sender's favour (or locks them out permanently). Whatever
+represents the per-user count needs the same stale-safety reasoning; the third
+acceptance item pins the three release paths.
+
+**The check must run on the worker.** `tryAcquire` captures
+`Thread.currentThread()` as the cancellation target, so admission cannot move to
+the transport thread. A rejected request therefore still consumes a pool slot to
+discover its own rejection — acceptable (the reject is microseconds and takes no
+LLM call), but it means the cap bounds concurrent *LLM work*, not concurrent
+*task submissions*.
+
+**Alternative considered: do nothing.** `LlmRateCap` at 10–20/min already bounds
+a sender's total cost, and with the current 4-user population the ceiling is
+unreachable in practice. The case for acting now is that the exposure scales with
+group membership rather than with malice, and this is the control that has to
+exist before the bot is opened to senders who are not known personally.
+
+- Adjacent code: `InFlightTracker.java:103` (`tryAcquire`) / `:117` (`release`) —
+  the pattern to match.
+- Adjacent code: `LlmRateCap.java:14` — the javadoc explaining why chat,
+  `/summary` and `/retry` deliberately share ONE bucket ("a caller cannot bypass
+  the cap by switching surfaces"). Any new cap must not reopen that bypass by
+  binding to only one surface.
+- Design note to amend: `docs/design/06-messaging.md` §6.3, the "Per-user
+  fairness is **not** implemented in v1" paragraph.
+- Whether `docs/spec/security.md` §Rate limiting must also enumerate the new
+  control is for the clarity gate / start prompt to settle; the design-note
+  amendment is required either way because the ticket makes its current sentence
+  false.
