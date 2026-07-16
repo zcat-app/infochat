@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 653 |
 | deferred | 1 |
 | abandoned | 13 |
-| **total** | **670** |
+| **total** | **671** |
 
 ---
 
@@ -28,6 +28,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-627 — /approve-group and /reject-group: clarify which group id token to pass (complexity: low, risk: low)
 - M1-628 — Asset commands (/zcash, /monero): inconsistent leading indentation on some reply lines (complexity: low, risk: low)
 - M1-636 — Per-user cap on concurrent interruptible requests across scopes (complexity: medium, risk: medium)
+- M1-637 — Queued interruptible turn is not cancellable by /stop (complexity: high, risk: medium)
 
 ---
 
@@ -856,5 +857,6 @@ M1-632 (done)
   └── M1-633 (done)
 M1-634 (done)
 M1-635 (done)
+  └── M1-637 (pending) ← runnable
 M1-636 (pending) ← runnable
 ```
