@@ -4,7 +4,7 @@ title: "Per-user cap on concurrent interruptible requests across scopes"
 status: pending
 created: 2026-07-16
 last_updated: 2026-07-16
-blocked_by: []
+blocked_by: [M1-638]
 files_budget: 14
 complexity: medium
 risk: medium
@@ -19,8 +19,10 @@ out_of_scope:
     arrival order with no fairness ordering of its own.
   - >-
     The per-(user, scope) in-flight guard itself (M1-634). Its one-request-per-
-    scope semantics and its /stop cancellation-handle role are unchanged; this
-    ticket adds a second, coarser bound alongside it.
+    scope semantics, its reject text and its /stop cancellation-handle role are
+    unchanged. This ticket adds a coarser, per-user bound DERIVED from the M1-638
+    turn-lifecycle registry — a count of the sender's non-terminal turns across
+    scopes — never a second structure carrying its own state to keep in sync.
   - >-
     Changing infochat.chat.dispatch.max-concurrency's VALUE (stays 4, per the
     2026-07-16 operator decision), the CallerRunsPolicy saturation path, and
@@ -89,6 +91,15 @@ and `LlmRateCap` still bounds the sender to 10/min (20 under `%remote-llm`). The
 cost is latency borne by other users, and the ceiling is low enough (4 workers)
 that ordinary group membership reaches it without any hostile intent.
 
+**Blocked on M1-638.** M1-638 replaces the thread-keyed slot with a turn
+lifecycle that exists from submit, keyed by turn identity and indexed by scope.
+This ticket's cap becomes a *query* over that registry — count a sender's
+non-terminal turns across scopes — rather than a third structure standing beside
+`InFlightTracker`. Filing order is the only reason this ticket predates that
+model; the 2026-07-16 design review that produced M1-638 established it, and two
+of the notes below were written against the pre-M1-638 constraints and are
+revised accordingly.
+
 This is a known boundary, not a discovered bug: M1-634's `out_of_scope` states
 "a sender's share stays bounded by `LlmRateCap`", and `06-messaging.md` §6.3
 defers a fair scheduler. The 2026-07-16 concurrency review re-opened it because
@@ -152,21 +163,28 @@ permitted request still succeeds." A cross-scope cap is a third check and must
 join that order without consuming anything on its own rejection. The second
 acceptance item pins this.
 
-**Release discipline is where this will break if it breaks.** `InFlightTracker`
-already solves the equivalent problem with identity-compared two-arg
-`ConcurrentHashMap.remove(key, value)` so a stale release is a harmless no-op
-(`InFlightTracker.java:117`). A naive counter has no such identity check, and a
-double-decrement or a missed decrement on the `/stop` path silently corrupts the
-budget in the sender's favour (or locks them out permanently). Whatever
-represents the per-user count needs the same stale-safety reasoning; the third
-acceptance item pins the three release paths.
+**Release discipline is where this will break if it breaks.** A standalone
+counter has no identity check, so a double-decrement or a missed decrement on the
+`/stop` path silently corrupts the budget in the sender's favour — or locks the
+sender out permanently. Deriving the count from M1-638's registry removes that
+hazard by construction: the turn reaching a terminal state IS the release, so
+there is no second number that can drift from the first. The third acceptance
+item still pins all three release paths (complete, fail, `/stop`), because
+"derived" is a design intention until a test proves it. The stale-safety pattern
+to match wherever state is freed remains `InFlightTracker.java:117`'s
+identity-compared two-arg `ConcurrentHashMap.remove(key, value)`.
 
-**The check must run on the worker.** `tryAcquire` captures
-`Thread.currentThread()` as the cancellation target, so admission cannot move to
-the transport thread. A rejected request therefore still consumes a pool slot to
-discover its own rejection — acceptable (the reject is microseconds and takes no
-LLM call), but it means the cap bounds concurrent *LLM work*, not concurrent
-*task submissions*.
+**Where the check runs is now OPEN — M1-638 removed the constraint.** This note
+previously read that admission "must run on the worker", because `tryAcquire`
+captures `Thread.currentThread()` as the cancellation target; the consequence was
+that a rejected request still spent a pool slot to discover its own rejection,
+and the cap bounded concurrent *LLM work* rather than concurrent *submissions*.
+M1-638 gives a turn an identity at submit that does not depend on a thread, so
+the count is readable on the transport thread and this cap MAY reject before a
+slot is spent. Resolve at `/m1-tick start`: rejecting at submit is the lean (it
+spends nothing and bounds submissions), but it must not drag the per-SCOPE
+guard's reject off the worker with it — M1-638's `out_of_scope` pins that reject
+to its current timing and text.
 
 **Alternative considered: do nothing.** `LlmRateCap` at 10–20/min already bounds
 a sender's total cost, and with the current 4-user population the ceiling is
@@ -174,8 +192,9 @@ unreachable in practice. The case for acting now is that the exposure scales wit
 group membership rather than with malice, and this is the control that has to
 exist before the bot is opened to senders who are not known personally.
 
-- Adjacent code: `InFlightTracker.java:103` (`tryAcquire`) / `:117` (`release`) —
-  the pattern to match.
+- Adjacent code: the M1-638 turn-lifecycle registry (its post-merge shape) —
+  this ticket's per-user count is a query over it, so read it before designing
+  the cap rather than reaching for a counter of your own.
 - Adjacent code: `LlmRateCap.java:14` — the javadoc explaining why chat,
   `/summary` and `/retry` deliberately share ONE bucket ("a caller cannot bypass
   the cap by switching surfaces"). Any new cap must not reopen that bypass by

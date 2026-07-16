@@ -1,9 +1,13 @@
 ---
 id: M1-637
 title: "Queued interruptible turn is not cancellable by /stop"
-status: pending
+status: abandoned
 created: 2026-07-16
 last_updated: 2026-07-16
+replaced_by:
+  - M1-638
+abandoned_reason: superseded
+deferred_on: M1-638
 blocked_by: [M1-635]
 files_budget: 12
 complexity: high
@@ -66,9 +70,36 @@ spec_refs:
 decision_refs:
   - D31
   - D35
+clarity_check:
+  date: 2026-07-16
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-637: Queued interruptible turn is not cancellable by /stop
+
+## Superseded by M1-638 (2026-07-16)
+
+**This ticket was abandoned before implementation, not because the bug is not
+real — it is — but because its framing pre-committed the fix's shape.** The
+§Notes below offer a two-option design fork (a pre-worker registry beside
+`InFlightTracker`, or splitting `tryAcquire`), and both answers bolt state
+alongside a model that cannot express a pre-worker phase. M1-636 was
+independently about to add a third structure ("a second, coarser bound
+alongside it", its `out_of_scope`), while designing *around* the very
+thread-capture limitation this ticket exists to remove.
+
+The clarity pre-flight passed this ticket (recorded in `clarity_check:`); the
+design review that followed at `/m1-tick start` is what surfaced the trajectory.
+M1-638 fixes the lifecycle model instead and carries this ticket's three
+acceptance items **verbatim**, so nothing promised here is lost. Nothing merged
+is discarded: M1-634's pool and M1-635's acknowledgement both stand unchanged —
+only this unstarted plan is replaced.
+
+The design content below is retained deliberately: M1-638's §Notes cites the
+rejected pre-worker-registry shape, and this is where that shape is argued in
+full.
 
 ## Context
 

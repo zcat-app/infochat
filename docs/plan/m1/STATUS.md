@@ -16,8 +16,8 @@
 | escalated | 0 |
 | done | 653 |
 | deferred | 1 |
-| abandoned | 13 |
-| **total** | **671** |
+| abandoned | 14 |
+| **total** | **672** |
 
 ---
 
@@ -27,8 +27,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-627 — /approve-group and /reject-group: clarify which group id token to pass (complexity: low, risk: low)
 - M1-628 — Asset commands (/zcash, /monero): inconsistent leading indentation on some reply lines (complexity: low, risk: low)
-- M1-636 — Per-user cap on concurrent interruptible requests across scopes (complexity: medium, risk: medium)
-- M1-637 — Queued interruptible turn is not cancellable by /stop (complexity: high, risk: medium)
+- M1-638 — Model the interruptible turn lifecycle in one registry (complexity: high, risk: high)
 
 ---
 
@@ -45,7 +44,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-636 — blocked_by: M1-638 (pending)
 
 ---
 
@@ -103,10 +102,11 @@ Tickets decided against — not implemented as this ticket. Terminal: not reopen
 ### other (1)
 - M1-591 — /summary cluster block prints classification: and tags: as two identical lines — collapse the redundancy
 
-### superseded (3)
+### superseded (4)
 - M1-372 — messaging: align the SimpleX auth-failure design note with the loopback-trusted v1 transport and drop the dead auth.fail meter
 - M1-505 — SimpleX: map inbound admin DM to the configured admin address
 - M1-574 — /audit renders the usable target contact id, not the internal user UUID
+- M1-637 — Queued interruptible turn is not cancellable by /stop
 
 ### wont-do-infeasible (1)
 - M1-258 — ThrottledAdminNotifier: fold suppressed_count bump into the UPSERT
@@ -857,6 +857,8 @@ M1-632 (done)
   └── M1-633 (done)
 M1-634 (done)
 M1-635 (done)
-  └── M1-637 (pending) ← runnable
-M1-636 (pending) ← runnable
+  └── M1-637 (abandoned)
+M1-638 (pending) ← runnable
+  ├── M1-636 (pending)
+  └── M1-637 (abandoned) [see above]
 ```
