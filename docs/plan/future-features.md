@@ -230,6 +230,36 @@ confidentiality control). If a future ticket makes `source_subscription_version`
 load-bearing for cache invalidation, the exclusion paths must bump it too.
 **Verdict: `parked`** (correctness quirk, no current effect).
 
+### E7. Cost-weighted LLM rate cap (calls vs. actual cost)
+`LlmRateCap` charges **one token per turn**, but a turn's cost is not fixed: a
+chat turn runs a multi-turn tool loop of up to `ChatAgent.MAX_TOOL_ITERATIONS`
+(10) LLM round-trips, while an on-demand `/summary` is a single summarizer call.
+Both draw the same single token, so a sender asking loop-heavy questions can cost
+roughly an order of magnitude more than another sender on an identical budget.
+Surfaced by the 2026-07-16 concurrency review (which also produced M1-635/M1-636).
+
+Harmless today: the cap (10/min; 20 under `%remote-llm`) still bounds worst-case
+*absolute* spend per sender, and the population is a handful of known users. The
+mismatch only becomes interesting when the bot is opened to senders who are not
+known personally, or if LLM spend becomes material.
+
+Two tensions any redesign must respect. First, **input size is the wrong proxy**:
+a short question can trigger a 10-iteration loop and a long one can be answered
+in a single call, so counting characters or input tokens mispredicts cost in both
+directions. Second, **the single-bucket property is load-bearing** —
+`LlmRateCap`'s javadoc records that chat, `/summary` and `/retry` deliberately
+share ONE bucket so "a caller cannot bypass the cap by switching surfaces";
+splitting the bucket per surface to price them differently would reopen that
+bypass.
+
+The model that would work is **post-hoc cost debt**: charge the bucket by what a
+turn actually consumed (tool-loop iterations, or provider-reported usage), so an
+expensive turn shrinks the *next* turn's budget. This necessarily permits one
+over-budget turn before it bites — cost is unknown until the call returns — and
+it requires the LLM client to report usage back to the cap plus a debt/decay
+policy. **Verdict: `parked`** (real mismatch, no current effect; revisit on open
+enrolment or material spend).
+
 ---
 
 ## F. Parked
