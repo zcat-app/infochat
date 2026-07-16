@@ -41,13 +41,14 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Implements {@code /invite create / list / revoke / bot-contact} per
- * {@code docs/spec/security.md} §Invite-code registration and
- * {@code docs/spec/commands.md} §Admin (bot admin).
+ * Implements {@code /invite create / list / revoke / bot-contact /
+ * pending-contacts} per {@code docs/spec/security.md} §Invite-code
+ * registration and {@code docs/spec/commands.md} §Admin (bot admin).
  *
  * <p>The handler dispatches on the first whitespace-delimited
  * subcommand token to a {@code "create"} / {@code "list"} /
- * {@code "revoke"} / {@code "bot-contact"} branch; any other token →
+ * {@code "revoke"} / {@code "bot-contact"} / {@code "pending-contacts"}
+ * branch; any other token →
  * {@code error.invite.unknown_subcommand} (acceptance item 16). The
  * mutating branches execute
  * the audit-before-effect transaction shape that
@@ -125,6 +126,25 @@ public class InviteCommandHandler implements CommandHandler {
                     + "WHERE status = 'PENDING' "
                     + "  AND (expires_at IS NULL OR expires_at > NOW()) "
                     + "ORDER BY created_at DESC "
+                    + "LIMIT ? OFFSET ?";
+
+    // The pending-contacts roster (M1-633, D60): distinct connected-but-
+    // unregistered contacts on ONE adapter. invite_code_attempt is
+    // append-per-rejected-attempt (V12: no PK, one row per bounce), so
+    // GROUP BY collapses repeat knockers to one line with their most
+    // recent attempt. "Unregistered" = no users row for the
+    // (adapter, contact_id) key — a contact who registered (or was
+    // pre-banned, which also creates a row) is no longer an onboarding
+    // candidate. Most-recent first so the person the admin was just
+    // pinged about heads the list; LIMIT/OFFSET pages like /invite list.
+    private static final String SELECT_PENDING_CONTACTS_SQL =
+            "SELECT contact_id, max(attempted_at) AS last_attempted_at "
+                    + "FROM invite_code_attempt ica "
+                    + "WHERE ica.adapter = ? "
+                    + "  AND NOT EXISTS (SELECT 1 FROM users u "
+                    + "      WHERE u.adapter = ica.adapter AND u.contact_id = ica.contact_id) "
+                    + "GROUP BY contact_id "
+                    + "ORDER BY last_attempted_at DESC "
                     + "LIMIT ? OFFSET ?";
 
     // FOR UPDATE locks the row so the audit INSERT below cannot
@@ -217,8 +237,106 @@ public class InviteCommandHandler implements CommandHandler {
             case "list" -> handleList(scope, remainder);
             case "revoke" -> handleRevoke(scope, actor, inboundAdapter, remainder);
             case "bot-contact" -> handleBotContact(scope, inboundAdapter, remainder);
+            case "pending-contacts" -> handlePendingContacts(scope, actor, inboundAdapter, remainder);
             default -> reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_UNKNOWN_SUBCOMMAND, inboundContext.effectiveLanguage()));
         };
+    }
+
+    // ------------------------------------------------------------------
+    // /invite pending-contacts [--page N]
+    // ------------------------------------------------------------------
+
+    /**
+     * Lists connected-but-unregistered contacts on the inbound adapter
+     * with their FULL contact ids (M1-633, D60): the in-band sourcing
+     * surface that makes {@code /invite create --contact} usable — the
+     * id only exists after the person connects, and the intake bounce
+     * that wrote their {@code invite_code_attempt} row is the one
+     * signal the deployment has. Read-only, DM-only, bot-admin-only
+     * (both gates ran in {@link #handle} before dispatch), scoped to
+     * the inbound adapter so every listed id resolves against the same
+     * {@code (adapter, contact_id)} key create matches on (the D55
+     * {@code /pending} posture).
+     *
+     * <p>The contact ids are deliberately NOT {@link ContactIds#redact}'d
+     * — the whole point is a copy-pasteable id. The disclosure and its
+     * bounds are recorded in {@code docs/spec/security.md} §Invite-code
+     * registration; the audit-before-effect row below is its trail.</p>
+     */
+    private OutboundMessage handlePendingContacts(ScopeRef scope,
+                                                  UserRow actor,
+                                                  String inboundAdapter,
+                                                  String remainder) {
+        int page = ListArgs.parse(remainder).page;
+        int offset = Math.max(0, (page - 1) * PAGE_SIZE);
+
+        // Audit-before-effect for a privileged PII read (the
+        // PENDING_LIST posture, D55): the disclosure row commits BEFORE
+        // any contact id is read, so the admin's intent is recorded even
+        // when the roster turns out empty. Builder inlined rather than
+        // insertAudit because the target is the unregistered-contact
+        // roster (target_kind USER, target_id "all", like PENDING_LIST),
+        // not one invite row (target_kind INVITE).
+        String requestId = UUID.randomUUID().toString();
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                auditLogWriter.write(conn, RedactionHook.AuditRow.builder()
+                        .actorUserId(actor.id)
+                        .actorContactId(actor.contactId)
+                        .actorAdapter(inboundAdapter)
+                        .action(AuditAction.INVITE_PENDING_CONTACTS_LIST)
+                        .targetKind(TargetKind.USER)
+                        .targetId("all")
+                        .requestId(requestId)
+                        .detailsJson("{\"page\":" + page + "}")
+                        .build());
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw new IllegalStateException(
+                        "InviteCommandHandler.handlePendingContacts audit write failed", e);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "InviteCommandHandler.handlePendingContacts connection failed", e);
+        }
+
+        List<PendingContactRow> rows = new ArrayList<>();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_PENDING_CONTACTS_SQL)) {
+            ps.setString(1, inboundAdapter);
+            ps.setInt(2, PAGE_SIZE);
+            ps.setInt(3, offset);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    rows.add(new PendingContactRow(
+                            rs.getString("contact_id"),
+                            rs.getTimestamp("last_attempted_at").toInstant()));
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "InviteCommandHandler.handlePendingContacts failed for adapter="
+                            + inboundAdapter, e);
+        }
+
+        if (rows.isEmpty()) {
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_INVITE_PENDING_CONTACTS_EMPTY,
+                    inboundContext.effectiveLanguage()));
+        }
+        StringBuilder body = new StringBuilder(MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_INVITE_PENDING_CONTACTS_HEADER,
+                        inboundContext.effectiveLanguage()),
+                inboundAdapter));
+        for (PendingContactRow row : rows) {
+            body.append('\n');
+            body.append(MessageFormat.format(
+                    bundleLoader.get(BundleKeys.REPLY_INVITE_PENDING_CONTACTS_ENTRY,
+                            inboundContext.effectiveLanguage()),
+                    row.contactId, row.lastAttemptedAt.toString()));
+        }
+        return reply(scope, body.toString());
     }
 
     // ------------------------------------------------------------------
@@ -822,6 +940,9 @@ public class InviteCommandHandler implements CommandHandler {
     private record PendingInviteRow(UUID code, String inviteType, String adapter,
                                     @Nullable String expectedContactId, @Nullable Instant expiresAt) {}
 
+    /** One row of a {@code /invite pending-contacts} result page. */
+    private record PendingContactRow(String contactId, Instant lastAttemptedAt) {}
+
     /**
      * Parsed form of {@code /invite create --adapter <name>
      * {--contact <id> | --open}}. The required-vs-optional shape and
@@ -829,7 +950,9 @@ public class InviteCommandHandler implements CommandHandler {
      * parser extracts the supplied flag values and records whether any
      * token went unconsumed ({@link #malformed}) so {@code handleCreate}
      * can fail safe on a typo'd flag or a value-less {@code --contact}
-     * instead of mistaking it for a bare create (D60; redteam M1-632).
+     * — either the space form ({@code --contact} at end of input) or
+     * the equals form ({@code --contact=} with an empty value, M1-633)
+     * — instead of mistaking it for a bare create (D60; redteam M1-632).
      * {@code /invite bot-contact} reuses this parser for its optional
      * {@code --adapter} flag (same tokenizer, same flag grammar) and
      * reads only {@link #adapter}.
@@ -850,13 +973,33 @@ public class InviteCommandHandler implements CommandHandler {
                     adapter = tokens.get(i + 1);
                     i += 2;
                 } else if (tok.startsWith("--adapter=")) {
-                    adapter = tok.substring("--adapter=".length());
+                    // A bare "--adapter=" (empty value after the equals) is
+                    // a value-less flag in equals form: mark malformed like
+                    // the space form instead of carrying "" downstream, so
+                    // the malformed gate fires and nothing is minted or
+                    // armed (M1-632 redteam out-of-model item; M1-633).
+                    String value = tok.substring("--adapter=".length());
+                    if (value.isEmpty()) {
+                        malformed = true;
+                    } else {
+                        adapter = value;
+                    }
                     i++;
                 } else if (tok.equals("--contact") && i + 1 < tokens.size()) {
                     contact = tokens.get(i + 1);
                     i += 2;
                 } else if (tok.startsWith("--contact=")) {
-                    contact = tok.substring("--contact=".length());
+                    // Same empty-value rule as --adapter= above: without it,
+                    // "--contact=" parsed to contact="" (non-null), slipped
+                    // past both the malformed gate and the bare→open
+                    // normalization, and minted a CONTACT_BOUND invite
+                    // bound to "" that no redeemer could ever match.
+                    String value = tok.substring("--contact=".length());
+                    if (value.isEmpty()) {
+                        malformed = true;
+                    } else {
+                        contact = value;
+                    }
                     i++;
                 } else if (tok.equals("--open")) {
                     open = true;

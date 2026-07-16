@@ -848,6 +848,20 @@ DM access, applied uniformly across all adapters:
   higher-blast-radius primitive and should not blend into a long
   contact-bound list; an admin auditing exposure must be able to spot
   them at a glance.
+- **`/invite pending-contacts` disclosure.** The sourcing surface for
+  `--contact` invites (D60) deliberately shows the **full, un-redacted**
+  `contact_id` of connected-but-unregistered contacts — a value that is
+  otherwise redacted wherever it appears (logs, exceptions, the
+  `/invite list` target column). The disclosure is what makes the
+  theft-resistant `--contact` binding usable at the only moment it can
+  bind (after the contact connects, before they register), and it is
+  weighed against that anti-theft benefit and bounded: bot-admin-only,
+  DM-only, scoped to the inbound adapter, paged, and sourced only from
+  `invite_code_attempt` rows — contacts that already knocked on the
+  bot themselves; the surface can name no one who has not. The read is
+  audit-logged before the ids are returned (audit-before-effect, the
+  same posture as `/pending`), so every disclosure leaves an
+  operator-visible trail.
 - **Pre-banned contact + invite.** `/invite create --contact <id>`
   against a contact whose `users` row already has `is_banned=true`
   returns a friendly error pointing the admin at `/unban`; **no

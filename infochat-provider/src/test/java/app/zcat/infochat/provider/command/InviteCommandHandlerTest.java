@@ -28,6 +28,7 @@ import java.sql.ResultSet;
 import java.text.MessageFormat;
 import java.time.Clock;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -87,6 +88,9 @@ class InviteCommandHandlerTest {
                     "DELETE FROM invite_code WHERE expected_contact_id LIKE ? "
                             + "OR created_by IN (SELECT id FROM users WHERE contact_id LIKE ?)",
                     PREFIX + "%", PREFIX + "%");
+            exec(conn,
+                    "DELETE FROM invite_code_attempt WHERE contact_id LIKE ?",
+                    PREFIX + "%");
             exec(conn, "ALTER TABLE audit_log DISABLE TRIGGER trg_audit_log_no_update");
             exec(conn, "ALTER TABLE audit_log DISABLE TRIGGER trg_audit_log_no_delete");
             try {
@@ -214,6 +218,44 @@ class InviteCommandHandlerTest {
                 confirmStateService.peek(actorId, new ScopeRef.Dm(actor));
         assertFalse(peeked.isPresent(),
                 "malformed create must not arm a pending confirm");
+    }
+
+    // ----- (M1-633) empty-equals flag value fails safe ---------------------
+    // M1-632's parser caught the SPACE form of a value-less --contact (falls
+    // to the unconsumed-token branch) but the EQUALS form (--contact=) set
+    // contact="" and slipped past the malformed gate into createContactBound,
+    // minting a CONTACT_BOUND invite bound to "" that no redeemer could ever
+    // match. The parse-boundary fix makes the equals form malformed too;
+    // this pins the M1-632-shipped security.md promise that a value-less
+    // --contact is rejected. --adapter= is hardened for consistency.
+
+    @Test
+    void inviteCreateEmptyEqualsValueFailsSafeAndMintsNothing() throws Exception {
+        String actor = PREFIX + "eqEmpty-actor";
+        UUID actorId = seedUser(actor, true);
+        long intentBefore = countAuditByActorAndAction(actorId, "INVITE_CREATE_INTENT");
+
+        OutboundMessage contactForm = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/invite create --adapter " + ADAPTER + " --contact=");
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_INVITE_CREATE_MALFORMED), contactForm.text(),
+                "--contact= (equals form, empty value) must fail safe like the space form");
+
+        OutboundMessage adapterForm = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/invite create --adapter= --contact " + PREFIX + "eqEmpty-target");
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_INVITE_CREATE_MALFORMED), adapterForm.text(),
+                "--adapter= (equals form, empty value) must fail safe like the space form");
+
+        assertEquals(0L, countInvitesByCreator(actorId),
+                "empty-equals create must not mint any invite row "
+                        + "(no CONTACT_BOUND invite bound to \"\")");
+        assertEquals(intentBefore, countAuditByActorAndAction(actorId, "INVITE_CREATE_INTENT"),
+                "empty-equals create must not write an INVITE_CREATE_INTENT audit row");
+        Optional<ConfirmStateService.PendingConfirm> peeked =
+                confirmStateService.peek(actorId, new ScopeRef.Dm(actor));
+        assertFalse(peeked.isPresent(),
+                "empty-equals create must not arm a pending confirm");
     }
 
     // ----- (23) /invite create with both flags → mutually_exclusive -------
@@ -890,6 +932,91 @@ class InviteCommandHandlerTest {
                 reply.text());
     }
 
+    // ----- /invite pending-contacts (M1-633, D60) --------------------------
+    // The roster tests run on a DEDICATED adapter name (the
+    // PendingCommandHandlerIT precedent): invite_code_attempt is
+    // append-only across the shared DevServices DB, so leftover rows
+    // from other classes on `inmemory` would make a whole-body reply
+    // assertion order-dependent. On a private adapter the roster is
+    // exactly what the test seeds.
+
+    @Test
+    void pendingContactsDisclosesFullIdsForUnregisteredContactsOnInboundAdapterOnly()
+            throws Exception {
+        String pcAdapter = "m1-633-pc";
+        inboundContext.setAdapterName(pcAdapter);
+        String actor = PREFIX + "pc-actor";
+        UUID actorId = seedUserOnAdapter(pcAdapter, actor, true);
+        String candidate = PREFIX + "pc-candidate";
+        String alreadyUser = PREFIX + "pc-alreadyuser";
+        String otherAdapterContact = PREFIX + "pc-otheradapter";
+        seedUserOnAdapter(pcAdapter, alreadyUser, false);
+        // Seconds precision so the seeded instant round-trips the DB's
+        // microsecond timestamptz losslessly into the rendered ISO string.
+        OffsetDateTime older = OffsetDateTime.now().minusHours(2).truncatedTo(ChronoUnit.SECONDS);
+        OffsetDateTime newer = OffsetDateTime.now().minusHours(1).truncatedTo(ChronoUnit.SECONDS);
+        seedAttempt(pcAdapter, candidate, older);
+        seedAttempt(pcAdapter, candidate, newer);
+        seedAttempt(pcAdapter, alreadyUser, newer);
+        seedAttempt("m1-633-pc-other", otherAdapterContact, newer);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor), "/invite pending-contacts");
+
+        // Whole-body pin: exactly one line for the twice-knocking candidate
+        // (dedup to the most recent attempt), the FULL copy-pasteable id
+        // (not ContactIds.redact'd), and neither the registered contact nor
+        // the other-adapter contact anywhere in the reply.
+        String expected = MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_INVITE_PENDING_CONTACTS_HEADER), pcAdapter)
+                + "\n"
+                + MessageFormat.format(
+                        bundleLoader.get(BundleKeys.REPLY_INVITE_PENDING_CONTACTS_ENTRY),
+                        candidate, newer.toInstant().toString());
+        assertEquals(expected, reply.text(),
+                "roster must be exactly the header plus ONE full-id line for the "
+                        + "unregistered inbound-adapter contact — got: " + reply.text());
+        assertEquals(1L, countAuditByActorAndAction(actorId, "INVITE_PENDING_CONTACTS_LIST"),
+                "the privileged read must write exactly one INVITE_PENDING_CONTACTS_LIST "
+                        + "audit row (audit-before-effect, the PENDING_LIST posture)");
+    }
+
+    @Test
+    void pendingContactsEmptyRosterStillWritesAuditRowAndSaysEmpty() throws Exception {
+        String pcAdapter = "m1-633-pc-empty";
+        inboundContext.setAdapterName(pcAdapter);
+        String actor = PREFIX + "pc-audit-actor";
+        UUID actorId = seedUserOnAdapter(pcAdapter, actor, true);
+        long before = countAuditByActorAndAction(actorId, "INVITE_PENDING_CONTACTS_LIST");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor), "/invite pending-contacts");
+
+        assertEquals(bundleLoader.get(BundleKeys.REPLY_INVITE_PENDING_CONTACTS_EMPTY),
+                reply.text(),
+                "an empty roster must return the guidance reply, not a bare header");
+        assertEquals(before + 1, countAuditByActorAndAction(actorId, "INVITE_PENDING_CONTACTS_LIST"),
+                "audit-before-effect: the disclosure-intent row must be written "
+                        + "even when the roster turns out empty");
+    }
+
+    @Test
+    void pendingContactsFromNonAdminReturnsAdminOnly() throws Exception {
+        String actor = PREFIX + "pc-nonadmin";
+        seedUser(actor, /* isAdmin */ false);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor), "/invite pending-contacts");
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY), reply.text(),
+                "/invite pending-contacts must be rejected for a non-admin caller");
+    }
+
+    @Test
+    void pendingContactsInGroupScopeReturnsCommandDmOnly() {
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Group(PREFIX + "grp-pc"), "/invite pending-contacts");
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY), reply.text(),
+                "/invite pending-contacts in group scope must return error.command_dm_only");
+    }
+
     /**
      * Hand-wired handler with a substitute {@link AdapterRegistry}.
      * {@code QuarkusMock.installMockForType} would install the substitute
@@ -1000,6 +1127,33 @@ class InviteCommandHandlerTest {
                 rs.next();
                 return (UUID) rs.getObject("id");
             }
+        }
+    }
+
+    /** Like {@link #seedUser} but on an explicit adapter (the pending-contacts roster is adapter-scoped). */
+    private UUID seedUserOnAdapter(String adapter, String contactId, boolean isAdmin)
+            throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO users (adapter, contact_id, is_admin, registration_state) "
+                             + "VALUES (?, ?, ?, 'vouched') RETURNING id")) {
+            ps.setString(1, adapter);
+            ps.setString(2, contactId);
+            ps.setBoolean(3, isAdmin);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return (UUID) rs.getObject("id");
+            }
+        }
+    }
+
+    private void seedAttempt(String adapter, String contactId, OffsetDateTime attemptedAt)
+            throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            exec(conn,
+                    "INSERT INTO invite_code_attempt (adapter, contact_id, attempted_at) "
+                            + "VALUES (?, ?, ?)",
+                    adapter, contactId, attemptedAt);
         }
     }
 

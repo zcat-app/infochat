@@ -111,6 +111,11 @@ class LlmOutputSanitizerTest {
     }
 
     @Test
+    void invitePendingContactsTokenIsStripped() {
+        assertStripped("/invite pending-contacts");
+    }
+
+    @Test
     void quarantineListTokenIsStripped() {
         assertStripped("/quarantine list");
     }

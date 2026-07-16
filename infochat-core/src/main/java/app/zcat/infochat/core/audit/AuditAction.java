@@ -197,6 +197,18 @@ public enum AuditAction implements AuditVerb {
     // Written audit-before-effect so the intent is recorded even when the list
     // is empty. Like /list-groups it has no unprivileged form, so no _ALL suffix.
     PENDING_LIST,
+    // INVITE_PENDING_CONTACTS_LIST records the bot-admin-only
+    // /invite pending-contacts read (M1-633, D60) — the sourcing surface
+    // that discloses the FULL contact ids of connected-but-unregistered
+    // contacts (distinct invite_code_attempt keys with no users row) so
+    // an admin can mint theft-resistant /invite create --contact codes
+    // in-band. Same posture as PENDING_LIST: a privileged roster read,
+    // audit-before-effect, written even when the roster is empty;
+    // target_kind='user', target_id='all'. The id disclosed here is
+    // ContactIds.redact'd everywhere else — this row is the trail the
+    // deliberate disclosure leaves (security.md §Invite-code
+    // registration).
+    INVITE_PENDING_CONTACTS_LIST,
     // QUARANTINE_REJECT_INTENT is the audit-on-intent row written on the
     // first-call (un-confirmed) leg of the forensic /quarantine reject
     // path — overriding the system's own BENIGN_CLOSED all-clear to

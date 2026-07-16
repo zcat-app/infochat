@@ -745,6 +745,29 @@ public final class BundleKeys {
     public static final String ERROR_INVITE_BOT_CONTACT_UNKNOWN_ADAPTER =
             "error.invite.bot_contact_unknown_adapter";
 
+    /**
+     * {@code /invite pending-contacts} header (M1-633, D60): the roster of
+     * connected-but-unregistered contacts on the inbound adapter, sourced
+     * from {@code invite_code_attempt}. Token {@code {0}} = adapter name.
+     */
+    public static final String REPLY_INVITE_PENDING_CONTACTS_HEADER =
+            "reply.invite.pending_contacts_header";
+
+    /**
+     * Per-row template for {@code /invite pending-contacts}. The contact id
+     * is deliberately FULL (not {@code ContactIds.redact}'d) so the admin
+     * can paste it into {@code /invite create --contact}; the disclosure
+     * and its bounds are recorded in {@code docs/spec/security.md}
+     * §Invite-code registration. Tokens: {@code {0}} = full contact id,
+     * {@code {1}} = last attempt timestamp (ISO-8601 UTC).
+     */
+    public static final String REPLY_INVITE_PENDING_CONTACTS_ENTRY =
+            "reply.invite.pending_contacts_entry";
+
+    /** {@code /invite pending-contacts} with an empty roster. */
+    public static final String REPLY_INVITE_PENDING_CONTACTS_EMPTY =
+            "reply.invite.pending_contacts_empty";
+
     // ----- Pre-dispatch confirm gate (M1-051) -----------------------------
     // Per docs/spec/commands.md §Surface conventions ("Confirmation for
     // destructive commands") + docs/spec/security.md §What's intentionally

@@ -1,9 +1,9 @@
 ---
 id: M1-633
 title: "In-band contactId sourcing for --contact invites (D60)"
-status: pending
+status: done
 created: 2026-07-15
-last_updated: 2026-07-15
+last_updated: 2026-07-16
 blocked_by: [M1-632]
 files_budget: 10
 files_scope:
@@ -15,6 +15,8 @@ files_scope:
   - infochat-provider/src/main/resources/bundles/cs.properties
   - docs/spec/commands.md
   - docs/spec/security.md
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/llm/LlmOutputSanitizer.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/llm/LlmOutputSanitizerTest.java
 complexity: medium
 risk: medium
 round_cap: 2
@@ -84,20 +86,117 @@ acceptance:
     key (error.invite.create_malformed already exists from M1-632).
     InviteCommandHandlerTest pins the `--contact=` shape: no invite_code row, no
     INVITE_CREATE_INTENT audit row, no pending confirm.
+  - >-
+    Closed-list coupling (confirmed during the pre-implementation survey; the
+    original Note's "CLOSED_LIST should be unaffected" assumption was false —
+    the list is subcommand-granular for /invite): the new subcommand joins the
+    Bot-admin-only tier of docs/spec/commands.md §Closed list of
+    privileged-tier commands, LlmOutputSanitizer.CLOSED_LIST gains the
+    matching entry alongside the four existing /invite entries, and
+    LlmOutputSanitizerTest gains the per-entry strip test — all in lockstep so
+    matchSetEqualsSpecClosedList (spec↔code set equality) stays green. The
+    probation classifier (CommandPermissions) needs NO change: it is a
+    top-level-name allowlist, so /invite is already blocked during probation
+    for every subcommand.
 test_plan:
   adds:
     - >-
       InviteCommandHandlerTest empty-`--contact=` scenario — the equals-empty form
       is rejected with error.invite.create_malformed and mints/arms nothing (folds
       in the M1-632 redteam out-of-model item).
+    - >-
+      InviteCommandHandlerTest pending-contacts scenarios — full-id disclosure for
+      connected-but-unregistered contacts on the inbound adapter (registered,
+      other-adapter, and duplicate-attempt rows excluded/deduped), audit row
+      written, non-admin and group-scope rejection.
+    - >-
+      LlmOutputSanitizerTest per-entry strip test for the new /invite subcommand
+      token (matchSetEqualsSpecClosedList covers the spec↔CLOSED_LIST set equality
+      mechanically).
   preserves:
     - all tests currently green on main
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-16
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 12
+      added: 486
+      removed: 28
 overrides: []
+revisions:
+  - date: 2026-07-16
+    reason: >-
+      budget-breach refine (escalation menu option 1, user-approved). The
+      pre-implementation survey falsified the Note's assumption that
+      LlmOutputSanitizer.CLOSED_LIST holds top-level command names only: the
+      list is subcommand-granular for /invite ("/invite create", "/invite
+      list", "/invite revoke", "/invite bot-contact" are each entries), the
+      spec closed set (commands.md §Closed list of privileged-tier commands)
+      is a load-bearing spec-level enumeration whose tier changes are spec
+      amendments, and LlmOutputSanitizerTest.matchSetEqualsSpecClosedList
+      asserts set equality between the spec enumeration and CLOSED_LIST. A
+      new bot-admin-only /invite subcommand therefore forces the spec
+      closed-list entry, the CLOSED_LIST entry, and the per-entry strip test
+      in lockstep — two files outside the original files_scope. Fixed by
+      adding LlmOutputSanitizer.java and LlmOutputSanitizerTest.java to
+      files_scope (8 → 10 paths; files_budget 10 unchanged), adding an
+      acceptance item for the closed-list coupling, extending test_plan.adds,
+      and correcting the Notes bullet. Verified non-couplings recorded: the
+      probation classifier (CommandPermissions) is a top-level-name allowlist
+      — no change needed. Alternative considered and rejected: hanging the
+      surface off /invite list as a flag (already closed-listed via prefix
+      match) — contradicts the acceptance's explicit new-subcommand
+      requirement and conflates issued-code listing with unregistered-contact
+      listing.
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-07-16
+    verdict: CLEAN
+    base: f7c598b62c4cde88e9734fd5dae987c126e3a4ad
+    head: m1/M1-633-invite-contact-id-sourcing-surface@working-tree
+    verdict_file: docs/plan/m1/redteam/M1-633-2026-07-16.md
+    out_of_model_count: 3
+    note: |
+      Pre-commit --in-progress audit of the working-tree diff vs the fork
+      point (implementation uncommitted at audit time; the branch tip
+      carried only the budget-breach refine commit). CLEAN — zero findings
+      at every severity. Three out-of-model observations (Sybil knock
+      racing the roster's most-recent-first ordering; invite_code_attempt
+      growth now carrying an admin-facing read cost; lenient trailing-token
+      parsing on the read-only subcommand) reported to the user with
+      follow-up recommendations; none warranted blocking commit.
+escalations:
+  - date: 2026-07-16
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — pre-implementation scope discovery. Completing the ticket as
+      specified requires touching LlmOutputSanitizer.java and
+      LlmOutputSanitizerTest.java, both outside files_scope. The ticket
+      Note's assumption ("CLOSED_LIST (top-level command names) should be
+      unaffected") is falsified on inspection: CLOSED_LIST is
+      subcommand-granular for /invite ("/invite create", "/invite list",
+      "/invite revoke", "/invite bot-contact" are each entries), the spec
+      closed set (commands.md §Closed list of privileged-tier commands) is
+      declared load-bearing with subcommand granularity, and
+      LlmOutputSanitizerTest.matchSetEqualsSpecClosedList asserts set
+      equality between the spec enumeration and CLOSED_LIST — so adding a
+      new bot-admin-only /invite subcommand forces the spec closed-list
+      entry, the CLOSED_LIST entry, and the per-entry strip test in
+      lockstep.
+clarity_check:
+  date: 2026-07-16
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-633: In-band contactId sourcing for --contact invites (D60)
@@ -180,10 +279,13 @@ invite row, no intent audit row, no pending confirm. `mvn verify` is green.
   (D55). `security_relevant: true`; the redteam gate audits before commit.
 - A new bot-admin PII-read command historically trips a small set of couplings
   (see the project note on new-admin-command couplings): the audit-before-effect
-  `AuditAction` for the privileged read (covered above). Because this adds a
-  SUBcommand to the existing `/invite` command — not a new top-level command —
-  `LlmOutputSanitizer.CLOSED_LIST` (top-level command names) should be
-  unaffected; confirm during implementation rather than assuming.
+  `AuditAction` for the privileged read (covered above), and — confirmed during
+  the 2026-07-16 pre-implementation survey, contra this Note's original
+  assumption — `LlmOutputSanitizer.CLOSED_LIST`, which is subcommand-granular
+  for `/invite`. The new subcommand joins the spec §Closed list Bot-admin-only
+  tier, `CLOSED_LIST`, and the per-entry strip test in lockstep (acceptance
+  item 6). The probation classifier (`CommandPermissions`) is a
+  top-level-name allowlist and needs no change.
 - Adjacent code: `PendingCommandHandler` (the D55 precedent — bounded admin
   roster with full ids, audit-before-effect via `AuditAction.PENDING_LIST`);
   `InviteCodeConsumer` (writes `invite_code_attempt`); `InviteCommandHandler`

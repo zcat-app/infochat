@@ -1095,7 +1095,11 @@ contacts and contradict the registration-state model
   UUID invite code bound to the given (contact\_id, adapter) pair (decision
   D44). The code is displayed once in the reply and stored as PENDING. No
   confirmation required (risk is bounded to one specific identity).
-  Audit-logged before effect.
+  Audit-logged before effect. This is the advanced, theft-resistant path:
+  `<id>` does not exist before the person connects (it is assigned when the
+  connection forms), so it is obtained in-band via
+  `/invite pending-contacts` once the contact has connected and knocked
+  (D60) — which is also why the bare create defaults to `--open` below.
 - `/invite create --adapter <name> --open` — generate a single-use UUID invite
   code bound to the adapter only; the first unknown contact on that adapter to
   present the code is registered. Requires confirm (broader blast radius than
@@ -1136,6 +1140,21 @@ contacts and contradict the registration-state model
   only, displayed once in the reply and **never logged or persisted** (D37).
   Not audit-logged: this is a read of the bot's own non-secret address, the
   same posture as the un-audited `/invite list` read.
+- `/invite pending-contacts [--page N]` — list connected-but-unregistered
+  contacts on the **inbound adapter**: the distinct `(adapter, contact_id)`
+  keys from failed invite-code attempts (`invite_code_attempt`) that have
+  no `users` row yet, most recent attempt first, 20 per page. Each row
+  shows the **full** contact id — exactly what `/invite create --adapter
+  <name> --contact <id>` accepts — so the theft-resistant `--contact`
+  binding is usable in-band (D60): the person connects and knocks first,
+  then the admin binds a code to the id this surface discloses. Read-only,
+  DM-only, bot-admin-only, and scoped to the inbound adapter (the D55
+  `/pending` posture), so every listed id resolves against the same
+  `(adapter, contact_id)` key that create and consume match on. The
+  privileged read is audit-logged **before** the ids are returned
+  (audit-before-effect, the `/pending` posture); the deliberate full-id
+  disclosure and its bounds are recorded in `security.md` §Invite-code
+  registration.
 - `/vouch <contact>` — immediately graduate a user from the slow-start
   probation tier to full access (decision D45). Sets
   `probation_until = NULL`. No-op with a friendly reply if the user
@@ -1284,7 +1303,8 @@ cannot silently shrink across versions.
 
 - **Bot-admin only:** `/grant-admin`, `/revoke-admin`, `/ban`,
   `/unban`, `/promote`, `/demote`, `/vouch`, `/invite create`,
-  `/invite list`, `/invite revoke`, `/invite bot-contact`, `/quarantine list`,
+  `/invite list`, `/invite revoke`, `/invite bot-contact`,
+  `/invite pending-contacts`, `/quarantine list`,
   `/quarantine approve`, `/quarantine reject`, `/audit`, `/pending`,
   `/remove-source`, `/source-enable`, `/source-disable`,
   `/list-sources --all`, `/list-sources --include-deleted`,
