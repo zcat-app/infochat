@@ -1006,8 +1006,15 @@ public class InboundRouter {
      * {@code RetryCommandHandler.hasFlag}'s whitespace-token equality —
      * {@code /retry --digest} is D35 non-interruptible and must keep
      * its inline ordering, so the two classifications may not drift.
+     *
+     * <p>Package-private (not {@code private}) so
+     * {@code InboundRouterInterruptibleClassificationTest} pins this
+     * D35/D61 boundary directly as a table (M1-640): the inline
+     * self-serialization the D61 per-user-cap exclusion rests on is a
+     * property of this predicate's answer, so a refactor that moved
+     * {@code /retry --digest} onto the offloaded path fails that test.
      */
-    private static boolean isInterruptible(String normalized) {
+    static boolean isInterruptible(String normalized) {
         if (!normalized.startsWith("/")) {
             return true;
         }

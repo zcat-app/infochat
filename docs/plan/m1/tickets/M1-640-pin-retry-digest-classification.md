@@ -1,9 +1,41 @@
 ---
 id: M1-640
 title: "Pin the /retry --digest non-interruptible classification with a test"
-status: pending
+status: done
 created: 2026-07-17
 last_updated: 2026-07-17
+clarity_check:
+  date: 2026-07-17
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-17
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 108
+      removed: 8
+redteam_findings: []
+redteam_audits:
+  - date: 2026-07-17
+    verdict: CLEAN
+    base: 7b9c92d35172c6b87dd9a6d61ee56bb2a8cd1b22
+    head: working-tree (uncommitted, branch m1/M1-640-pin-retry-digest-classification)
+    verdict_file: docs/plan/m1/redteam/M1-640-2026-07-17.md
+    out_of_model_count: 0
+    note: |
+      Pre-commit --in-progress audit of the visibility-widen + new
+      classification test. CLEAN: the diff adds no attack surface and
+      hardens the D35/D61 concurrency boundary it audits. Nothing feeds a
+      follow-up ticket.
 blocked_by: []
 files_budget: 3
 files_scope:
