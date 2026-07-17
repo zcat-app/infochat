@@ -1,7 +1,8 @@
 ---
 id: M1-643
 title: "Group /summary output under topic headers (shared categorizer)"
-status: pending
+status: abandoned
+abandoned_reason: wont-do-infeasible
 created: 2026-07-17
 last_updated: 2026-07-17
 blocked_by:
@@ -78,6 +79,15 @@ decision_refs:
 ---
 
 # M1-643: Group /summary output under topic headers
+
+> **ABANDONED 2026-07-17 — product decision, NOT infeasibility.** After comparing
+> the live `/summary` output against the digest, we chose to keep `/summary`
+> as-is: it is an interactive DM surface whose rich per-cluster envelope (`uid`
+> for `/save`, `classification:`, `tags:`) is the feature, and users can already
+> slice it with `--tag` / `--since`. Topic headers pay off on the broadcast
+> digest (M1-641), not on this pull surface. The shared-categorizer plan is
+> reverted — M1-641 keeps a digest-local `DigestCategorizer`. Kept as a tombstone
+> so the idea is not silently re-proposed.
 
 ## Context
 

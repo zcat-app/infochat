@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 659 |
 | deferred | 0 |
-| abandoned | 16 |
+| abandoned | 17 |
 | **total** | **678** |
 
 ---
@@ -43,7 +43,6 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-642 — blocked_by: M1-641 (pending)
-- M1-643 — blocked_by: M1-641 (pending)
 
 ---
 
@@ -108,8 +107,9 @@ Tickets decided against — not implemented as this ticket. Terminal: not reopen
 - M1-574 — /audit renders the usable target contact id, not the internal user UUID
 - M1-637 — Queued interruptible turn is not cancellable by /stop
 
-### wont-do-infeasible (1)
+### wont-do-infeasible (2)
 - M1-258 — ThrottledAdminNotifier: fold suppressed_count bump into the UPSERT
+- M1-643 — Group /summary output under topic headers (shared categorizer)
 
 ---
 
@@ -865,5 +865,5 @@ M1-639 (done)
 M1-640 (done)
 M1-641 (pending) ← runnable
   ├── M1-642 (pending)
-  └── M1-643 (pending)
+  └── M1-643 (abandoned)
 ```
