@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 658 |
+| done | 659 |
 | deferred | 1 |
 | abandoned | 14 |
 | **total** | **674** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-627 — /approve-group and /reject-group: clarify which group id token to pass (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -66,11 +66,11 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-638 | Model the interruptible turn lifecycle in one registry | 2026-07-17 | round 1 APPROVE |
 | M1-636 | Per-user cap on concurrent interruptible requests across scopes | 2026-07-17 | round 2 APPROVE |
 | M1-628 | Asset commands (/zcash, /monero): inconsistent leading indentation on some reply lines | 2026-07-17 | round 1 APPROVE |
+| M1-627 | /approve-group and /reject-group: clarify which group id token to pass | 2026-07-17 | round 1 APPROVE |
 | M1-635 | Queued interruptible request gives the sender no feedback until a worker frees | 2026-07-16 | round 1 APPROVE |
 | M1-634 | Concurrent interruptible dispatch so the in-flight guard and /stop are reachable over live transports | 2026-07-16 | round 2 APPROVE |
 | M1-633 | In-band contactId sourcing for --contact invites (D60) | 2026-07-16 | round 1 APPROVE |
 | M1-632 | Default bare /invite create to --open (D60) | 2026-07-15 | round 2 APPROVE |
-| M1-630 | /list-sources & /get-sources: inline next-page hint on multi-page lists | 2026-07-15 | round 1 APPROVE |
 
 ---
 
@@ -846,7 +846,7 @@ M1-623 (done)
 M1-624 (done)
 M1-625 (done)
 M1-626 (done)
-M1-627 (pending) ← runnable
+M1-627 (done)
 M1-628 (done)
 M1-629 (abandoned)
 M1-630 (done)
