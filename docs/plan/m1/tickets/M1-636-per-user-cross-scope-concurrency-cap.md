@@ -78,7 +78,7 @@ decision_refs:
 ## Context
 
 `InFlightTracker` keys its slot on `(userId, scopeKind, scopeId)`
-(`InFlightTracker.java:17`), which bounds a sender to one in-flight
+(the `ScopeKey` record), which bounds a sender to one in-flight
 interruptible request **per scope** — not per sender. A user who is a member of
 several groups holds one slot in each, plus one in their DM. With
 `InterruptibleDispatcher`'s pool at its default of 4, a single user present in
@@ -171,8 +171,13 @@ hazard by construction: the turn reaching a terminal state IS the release, so
 there is no second number that can drift from the first. The third acceptance
 item still pins all three release paths (complete, fail, `/stop`), because
 "derived" is a design intention until a test proves it. The stale-safety pattern
-to match wherever state is freed remains `InFlightTracker.java:117`'s
-identity-compared two-arg `ConcurrentHashMap.remove(key, value)`.
+to match wherever state is freed remains `InFlightTracker.release`'s identity
+comparison — post-M1-638 it reads the held handle back inside a `computeIfPresent`
+and clears it only when it is the same object (`entry.running == handle`), so a
+late release by a superseded worker cannot evict a newer holder. (M1-638 replaced
+the former two-arg `ConcurrentHashMap.remove(key, value)` idiom: the map's value
+is now the per-scope entry rather than the handle itself, so identity is compared
+inside the lambda instead of by the map.)
 
 **Where the check runs is now OPEN — M1-638 removed the constraint.** This note
 previously read that admission "must run on the worker", because `tryAcquire`
