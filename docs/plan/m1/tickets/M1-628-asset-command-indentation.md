@@ -1,7 +1,7 @@
 ---
 id: M1-628
 title: "Asset commands (/zcash, /monero): inconsistent leading indentation on some reply lines"
-status: pending
+status: done
 created: 2026-07-15
 last_updated: 2026-07-17
 blocked_by: []
@@ -79,6 +79,25 @@ spec_refs:
 decision_refs:
   - D30
   - D43
+clarity_check:
+  date: 2026-07-17
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-17
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 49
+      removed: 16
 ---
 
 Found in the 2026-07-14/15 isolated live test (and previously noted 2026-07-08,

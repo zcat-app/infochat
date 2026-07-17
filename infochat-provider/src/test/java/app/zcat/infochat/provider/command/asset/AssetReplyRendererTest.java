@@ -56,6 +56,11 @@ class AssetReplyRendererTest {
 
         String rendered = renderer.render(result, "Zcash", "coingecko.com/en/coins/zcash", "en");
 
+        // M1-628: every non-header line shares the uniform 2-space indent (raw-byte
+        // check on the emitted String — the price, 1h, and capture lines used to
+        // render flush because their bundle values had unescaped leading spaces).
+        assertEveryNonHeaderLineIndented(rendered);
+
         assertTrue(rendered.contains("Zcash (coingecko)"), "header: display name + source");
         assertTrue(rendered.contains("$42.18"), "price line");
         assertTrue(rendered.contains("1h:"), "1h delta present for coingecko");
@@ -100,6 +105,10 @@ class AssetReplyRendererTest {
                 new AssetSnapshotReader.SnapshotResult(snap, false, interval);
 
         String rendered = renderer.render(result, "Zcash", "kraken.com/prices/zec-usd-zcash-price-chart", "en");
+
+        // M1-628: the exchange layout (price, spread, capture, source — no delta
+        // lines) also carries the uniform 2-space indent on every non-header line.
+        assertEveryNonHeaderLineIndented(rendered);
 
         assertTrue(rendered.contains("Zcash (kraken)"), "header");
         assertTrue(rendered.contains("$42.15"), "price line");
@@ -222,5 +231,23 @@ class AssetReplyRendererTest {
 
         assertTrue(rendered.contains("0.000651 BTC"), "BTC price format");
         assertFalse(rendered.contains("$0.000651"), "BTC price should not have $ prefix");
+    }
+
+    /**
+     * Raw-byte check (M1-628): the header sits at column 0 and every other reply
+     * line carries the uniform 2-space leading indent §10.5 specifies. Guards the
+     * {@code java.util.Properties.load()} trap — an unescaped {@code key=  value}
+     * silently drops its leading indent, which is what left the price / 1h /
+     * capture lines flush while the escaped 24h / spread / source lines were not.
+     */
+    private static void assertEveryNonHeaderLineIndented(String rendered) {
+        String[] lines = rendered.split("\n", -1);
+        assertFalse(lines[0].startsWith(" "),
+                "header line must be flush at column 0; got: " + rendered);
+        for (int i = 1; i < lines.length; i++) {
+            assertTrue(lines[i].startsWith("  "),
+                    "non-header line " + i + " must carry the uniform 2-space indent; got <"
+                            + lines[i] + "> in:\n" + rendered);
+        }
     }
 }
