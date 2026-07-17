@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 659 |
 | deferred | 0 |
 | abandoned | 16 |
-| **total** | **677** |
+| **total** | **678** |
 
 ---
 
@@ -43,6 +43,7 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-642 — blocked_by: M1-641 (pending)
+- M1-643 — blocked_by: M1-641 (pending)
 
 ---
 
@@ -863,5 +864,6 @@ M1-638 (done)
 M1-639 (done)
 M1-640 (done)
 M1-641 (pending) ← runnable
-  └── M1-642 (pending)
+  ├── M1-642 (pending)
+  └── M1-643 (pending)
 ```

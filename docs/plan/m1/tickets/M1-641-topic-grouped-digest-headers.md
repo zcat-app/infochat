@@ -8,11 +8,11 @@ blocked_by: []
 files_budget: 12
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRenderer.java
-  - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestCategorizer.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/summary/TopicCategorizer.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/bundles/cs.properties
-  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestCategorizerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/TopicCategorizerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererTest.java
   - docs/spec/commands.md
   - docs/spec/decisions.md
@@ -23,10 +23,12 @@ security_relevant: false
 migration_touch: false
 out_of_scope:
   - >-
-    /summary and its ClusterBlockRenderer — the categorization + header
-    assembly lives only in the digest path (DigestRenderer). /summary keeps
-    its current flat format; do not touch SummaryCommandHandler or
-    ClusterBlockRenderer.
+    Wiring the categorizer into /summary — that is M1-643. The categorizer
+    itself is built as a SHARED, scope-agnostic component (TopicCategorizer in
+    the summary package) so /summary can adopt it without a refactor, but
+    Phase 1 wires it ONLY into the digest (DigestRenderer). Do not touch
+    SummaryCommandHandler or ClusterBlockRenderer here; /summary keeps its
+    current format until M1-643.
   - >-
     Per-category MESSAGE delivery and per-category roll-up summaries — those
     are M1-642 (Phase 2). Phase 1 stays a single rendered string; SimpleX may
@@ -41,10 +43,10 @@ out_of_scope:
     it stays as-is: no category headers, no affordance. Only the non-degraded
     prose render gains structure.
 acceptance:
-  - DigestCategorizerTest.assignsClusterToHighestCountQualifyingTag passes
-  - DigestCategorizerTest.tieBreaksAlphabetically passes
-  - DigestCategorizerTest.foldsPostAssignmentUnderThresholdIntoOther passes
-  - DigestCategorizerTest.untaggedAndBelowThresholdGoToOther passes
+  - TopicCategorizerTest.assignsClusterToHighestCountQualifyingTag passes
+  - TopicCategorizerTest.tieBreaksAlphabetically passes
+  - TopicCategorizerTest.foldsPostAssignmentUnderThresholdIntoOther passes
+  - TopicCategorizerTest.untaggedAndBelowThresholdGoToOther passes
   - DigestRendererTest.rendersUppercaseHeadersOrderedBySizeThenAlphaOtherLast passes
   - DigestRendererTest.capsItemsPerSectionWithLocalizedMoreHint passes
   - DigestRendererTest.appendsClosingAffordanceOncePerDigest passes
@@ -61,7 +63,7 @@ acceptance:
   - mvn -pl infochat-provider verify is green
 test_plan:
   adds:
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestCategorizerTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/TopicCategorizerTest.java
   modifies:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererTest.java
   preserves:
@@ -125,10 +127,14 @@ its `cs.properties` twin fails `BundleLoaderTest`.
 **Where it slots in.** `DigestRenderer.render` today does
 `clusterTraversal.cluster(posts)` → `summaryProseGenerator.generate(...)` →
 concatenate. Insert a categorization step between clustering and assembly: a
-new `DigestCategorizer` takes the clusters, returns an ordered list of
-(categoryLabel, clusters). `DigestRenderer` then renders header + the
-existing per-cluster prose per group. `/summary` is untouched because it uses
-`ClusterBlockRenderer`, not `DigestRenderer`.
+new SHARED `TopicCategorizer` (summary package, alongside `ClusterTraversal`)
+takes `List<Cluster>` and returns an ordered list of (categoryLabel, clusters)
+— scope-agnostic, no digest/summary coupling, so `/summary` can adopt it in
+M1-643 without a refactor. `DigestRenderer` then renders header + the existing
+per-cluster prose per group. Phase 1 wires the categorizer into
+`DigestRenderer` ONLY; `/summary`'s `ClusterBlockRenderer` is untouched here.
+Both `/summary` and the digest share `ClusterTraversal` + `SummaryProseGenerator`
+already, so the categorizer belongs beside them, not in the digest package.
 
 **Cluster-level tags.** A cluster's tag-set is the union of its member posts'
 tags (`EligiblePostQuery.Post.tags`, already projected by
