@@ -1,9 +1,9 @@
 ---
 id: M1-638
 title: "Model the interruptible turn lifecycle in one registry"
-status: pending
+status: done
 created: 2026-07-16
-last_updated: 2026-07-16
+last_updated: 2026-07-17
 blocked_by: []
 files_budget: 18
 complexity: high
@@ -85,9 +85,10 @@ acceptance:
   - mvn -pl infochat-provider -am verify is green
 test_plan:
   adds:
-    # - infochat-provider/src/test/java/.../messaging/QueuedTurnCancellationIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/QueuedTurnCancellationIT.java
   modifies:
-    # - infochat-provider/src/test/java/.../chat/InFlightTrackerTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/InFlightTrackerTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/CancellationServiceTest.java
   preserves:
     - all tests currently green on main
     - >-
@@ -98,6 +99,53 @@ spec_refs:
 decision_refs:
   - D31
   - D35
+outline_file: target/m1-tick-outline-M1-638.md
+redteam_findings: []
+redteam_audits:
+  - date: 2026-07-17
+    verdict: CLEAN
+    base: "7765d023 (fork point; implementation uncommitted in working tree at audit time)"
+    head: "working tree of m1/M1-638-model-the-interruptible-turn-l"
+    verdict_file: docs/plan/m1/redteam/M1-638-2026-07-17.md
+    out_of_model_count: 0
+    note: >-
+      Pre-commit audit (--in-progress form) after round-1 APPROVE, zero
+      findings and zero out-of-model items. Cross-user cancellation isolation
+      (the sweep is keyed per-(user, scope) at every lifecycle state) and the
+      M1-634 monitor-gate remediation (handle stays thread-bound, unreachable
+      before worker attach) both survive the registry remodel.
+reviews:
+  - round: 1
+    date: 2026-07-17
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 12
+      added: 914
+      removed: 76
+clarity_check:
+  date: 2026-07-16
+  verdict: PASS
+  warnings:
+    - >-
+      TEST-CHANGES-AUTHORIZED nuance: CancellationServiceTest is named only in
+      the §Notes files_budget justification, without InFlightTrackerTest's
+      explicit "expected to change / additions-only" authorization sentence.
+      The blanket "never redefine, additions only" policy covers it; populate
+      test_plan.modifies for real once the §Notes open decision is resolved to
+      remove ambiguity for the code reviewer.
+    - >-
+      Two design decisions are intentionally left open for /m1-tick start (the
+      handlers' tryAcquire contract; who publishes the stopped terminal for a
+      cancelled queued turn). Not a clarity defect given complexity:high, but
+      the outline must resolve both before implementation — acceptance items
+      1, 4 and 6 depend on which fork is taken.
+  blockers: []
 ---
 
 # M1-638: Model the interruptible turn lifecycle in one registry
@@ -280,5 +328,3 @@ shape and should escalate rather than spend the budget.
   `/stop`. Reuse `DispatchAwaits` + `inFlightTaskCount()` as await points, and
   note both classes seed users via `RegisteredContactSet.markRegistered` so the
   shared stranger rate bucket cannot silently drop test traffic.
-</content>
-</invoke>

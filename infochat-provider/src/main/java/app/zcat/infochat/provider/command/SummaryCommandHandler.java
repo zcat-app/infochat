@@ -280,6 +280,15 @@ public class SummaryCommandHandler implements CommandHandler {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_IN_FLIGHT, inboundContext.effectiveLanguage()));
         }
         try {
+            // Adopted a turn /stop had already cancelled — marked while
+            // QUEUED, between the stage preamble and this acquire (M1-638):
+            // render the D35 stopped terminal onto the acknowledgement
+            // placeholder BEFORE the LLM bucket draw below, so a cancelled
+            // turn burns no token (the check-order doctrine above).
+            if (slot.isCancelled()) {
+                progressNotifier.complete(scope, stoppedTerminal());
+                return null;
+            }
             // security.md §Rate limiting: on-demand /summary draws from
             // the same per-user LLM bucket as chat replies and /retry
             // re-rolls.

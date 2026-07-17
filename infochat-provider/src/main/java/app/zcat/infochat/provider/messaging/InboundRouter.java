@@ -15,6 +15,7 @@ import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.ChatAgent;
+import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
@@ -48,6 +49,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 /**
  * Provider-side inbound dispatch. {@link AdapterRegistry} wraps the
@@ -366,6 +368,17 @@ public class InboundRouter {
      */
     @Inject
     InterruptibleDispatcher interruptibleDispatcher = InterruptibleDispatcher.direct();
+
+    /**
+     * The interruptible-turn lifecycle registry (M1-638): the router
+     * registers every interruptible dispatch here at submit time, before
+     * the hop, so {@code /stop} can reach a turn no worker has picked up
+     * yet. The throwaway-instance initializer keeps the hand-constructed
+     * router tests working unmodified; CDI replaces it with the singleton
+     * the handlers and CancellationService share.
+     */
+    @Inject
+    InFlightTracker inFlightTracker = new InFlightTracker();
 
     @ConfigProperty(name = "infochat.chat.body-cap", defaultValue = "2048")
     int chatBodyCap;
@@ -840,33 +853,47 @@ public class InboundRouter {
         ScopeRef scope = msg.scope();
         UUID stageScopeId = dispatchScopeId;
         if (isInterruptible(normalized)) {
+            // M1-638: one lifecycle object per interruptible dispatch, born
+            // at submit. The PURPOSE-MINTED id below is the turn's identity
+            // in InFlightTracker for its whole life — registered before the
+            // hop so /stop can cancel a turn no worker has picked up yet,
+            // adopted by the handler's tryAcquire on the worker (the
+            // QUEUED→RUNNING transition), and reused as the operationId that
+            // keys the turn's progress lifecycle. It is never this context's
+            // own id, so the M1-634 hop contract stands: the worker reads
+            // nothing of the submitting context — the id crosses the hop as
+            // one more plain captured String.
+            String turnId = UUID.randomUUID().toString();
+            String turnScopeKind = chatModeScopeKindOf(scope);
+            inFlightTracker.registerQueued(actorId, turnScopeKind, stageScopeId, turnId);
             // M1-635: when every worker is occupied the submit below will
             // queue, and nothing would reach the sender until a worker frees
             // — a silence that can span several 90s LLM turns and reads as a
             // broken bot. Publish the STARTED placeholder HERE, on the
-            // transport thread, under a PURPOSE-MINTED operationId — never
-            // this context's own id, so the M1-634 hop contract stands: the
-            // worker reads nothing of the submitting context — and carry the
-            // id across the hop as one more plain captured String. The worker
-            // seeds it into its fresh context before any dispatch work, so
-            // its own stage publishes and terminal land on this placeholder:
-            // one lifecycle, never a second bubble.
+            // transport thread, under the turn's id; the worker seeds it
+            // into its fresh context before any dispatch work, so its own
+            // stage publishes and terminal land on this placeholder: one
+            // lifecycle, never a second bubble. A non-queued turn gets no
+            // acknowledgement (work starts immediately) — its Reply bodies
+            // stay plain router sends, exactly as before the offload.
             if (interruptibleDispatcher.wouldQueue()) {
-                String queuedOperationId = UUID.randomUUID().toString();
-                progressNotifier.publishQueuedPlaceholder(queuedOperationId, scope);
+                progressNotifier.publishQueuedPlaceholder(turnId, scope);
                 interruptibleDispatcher.dispatch(
                         adapterName,
                         inboundContext.senderContactId(),
                         inboundContext.effectiveLanguage(),
-                        () -> runQueuedDispatchStage(
-                                queuedOperationId, scope, normalized, actorId, stageScopeId));
+                        () -> runSeededDispatchStage(
+                                turnId, scope, normalized, actorId, stageScopeId,
+                                body -> progressNotifier.complete(scope, body)));
                 return;
             }
             interruptibleDispatcher.dispatch(
                     adapterName,
                     inboundContext.senderContactId(),
                     inboundContext.effectiveLanguage(),
-                    () -> runDispatchStage(scope, normalized, actorId, stageScopeId, adapterName));
+                    () -> runSeededDispatchStage(
+                            turnId, scope, normalized, actorId, stageScopeId,
+                            body -> sendReply(scope, body, adapterName)));
             return;
         }
         runDispatchStage(scope, normalized, actorId, stageScopeId, adapterName);
@@ -895,28 +922,53 @@ public class InboundRouter {
     }
 
     /**
-     * Queued-variant step-6 stage (M1-635): the transport thread already
-     * opened this turn's acknowledgement placeholder under
-     * {@code operationId} at submit time, so the worker must (a) seed that
-     * id into its fresh context BEFORE any dispatch work —
-     * {@link StageProgressNotifier} keys per-operation state by it (M1-611),
-     * which is what makes the self-delivering handlers' own publishes and
-     * terminals land on the acknowledgement instead of minting a second
-     * placeholder — and (b) deliver a plain {@link DispatchResult.Reply}
-     * body (the in-flight reject, the rate-cap replies, {@code /retry}
-     * guidance, the internal-error reply) as a notifier terminal REPLACING
-     * that placeholder, where the non-queued variant would send a separate
-     * message: a separate send here would strand "working on it" forever
-     * alongside a second bubble, breaking the one-lifecycle contract
-     * (M1-607).
+     * Interruptible step-6 stage (M1-635/M1-638): every interruptible
+     * dispatch runs through here, seeded with the turn id minted at submit.
+     * The worker (a) seeds that id into its fresh context BEFORE any
+     * dispatch work — {@link StageProgressNotifier} keys per-operation
+     * state by it (M1-611), which is what makes the self-delivering
+     * handlers' own publishes and terminals land on the M1-635
+     * acknowledgement instead of minting a second placeholder, and
+     * {@link InFlightTracker#tryAcquire} adopts the submit-registered turn
+     * by it — and (b) delivers a plain {@link DispatchResult.Reply} body
+     * (the in-flight reject, the rate-cap replies, {@code /retry} guidance,
+     * the internal-error reply) through {@code replySink}: the queued
+     * variant reconciles it as a notifier terminal REPLACING the
+     * acknowledgement placeholder (a separate send would strand "working on
+     * it" forever alongside a second bubble, M1-607), while the non-queued
+     * variant — no placeholder exists — keeps the plain router send.
+     *
+     * <p>The preamble skips a turn {@code /stop} cancelled while it sat in
+     * the pool queue: no LLM work, no rate-cap draw, and the D35 stopped
+     * terminal lands on the same shape as {@code dispatchChatSelfDelivering}'s
+     * null-reply arm. {@code consumeIfCancelled} is exactly-once, so no
+     * other path can also terminate this turn (the single-publisher
+     * invariant acceptance-pinned by M1-638).</p>
      */
-    private void runQueuedDispatchStage(String operationId, ScopeRef scope, String normalized,
-                                        UUID actorId, UUID dispatchScopeId) {
+    private void runSeededDispatchStage(String operationId, ScopeRef scope, String normalized,
+                                        UUID actorId, UUID dispatchScopeId,
+                                        Consumer<String> replySink) {
         inboundContext.setOperationId(operationId);
-        DispatchResult dispatchResult =
-                dispatchSlashOrChat(scope, normalized, actorId, dispatchScopeId);
-        if (dispatchResult instanceof DispatchResult.Reply reply) {
-            progressNotifier.complete(scope, reply.body());
+        String scopeKind = chatModeScopeKindOf(scope);
+        try {
+            if (inFlightTracker.consumeIfCancelled(actorId, scopeKind, dispatchScopeId,
+                    operationId)) {
+                progressNotifier.complete(scope,
+                        bundleLoader.get(BundleKeys.PROGRESS_STOPPED,
+                                inboundContext.effectiveLanguage()));
+                return;
+            }
+            DispatchResult dispatchResult =
+                    dispatchSlashOrChat(scope, normalized, actorId, dispatchScopeId);
+            if (dispatchResult instanceof DispatchResult.Reply reply) {
+                replySink.accept(reply.body());
+            }
+        } finally {
+            // Leak guard: a turn that terminated without being adopted — a
+            // pre-handler Reply arm, an in-flight reject, an escaped
+            // exception — must not leave a QUEUED registry entry behind
+            // (M1-636's permanent-lockout hazard). No-op for adopted turns.
+            inFlightTracker.discard(actorId, scopeKind, dispatchScopeId, operationId);
         }
     }
 

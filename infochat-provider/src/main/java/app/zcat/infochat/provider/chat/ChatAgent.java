@@ -229,6 +229,14 @@ public class ChatAgent {
                     bundleLoader.get(BundleKeys.ERROR_CHAT_IN_FLIGHT, scopeLanguage), null, null);
         }
         try {
+            // Adopted a turn /stop had already cancelled — marked while
+            // QUEUED, between the stage preamble and this acquire (M1-638):
+            // skip the compute entirely, before any LLM work. The router's
+            // null-reply arm renders the D35 stopped terminal, the same
+            // single-publisher path as a cancelled-while-running turn.
+            if (slot.isCancelled()) {
+                return new ChatTurnResult(null, null, null);
+            }
             ChatTurnResult result = doHandle(userId, scopeKind, scopeId, userMessage, scopeLanguage);
             // Delivery boundary: /stop may have marked this request cancelled
             // even though the work completed — the interrupt landed after the

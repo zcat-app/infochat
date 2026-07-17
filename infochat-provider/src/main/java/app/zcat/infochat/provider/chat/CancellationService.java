@@ -40,15 +40,23 @@ public class CancellationService {
     Duration statementTimeout;
 
     /**
-     * Cancel the in-flight interruptible request for the given (user, scope).
-     * Returns true if an in-flight slot existed and cancellation was attempted;
-     * false if nothing was in flight.
+     * Cancel every non-terminal interruptible turn for the given
+     * (user, scope) — the QUEUED turns still sitting in the dispatcher pool
+     * queue and the RUNNING turn a worker holds. Returns true if anything
+     * was cancelled; false if nothing was in flight or queued.
      */
     public boolean cancel(UUID userId, String scopeKind, UUID scopeId) {
+        // Sweep the queued phase FIRST (M1-638): marked turns are skipped in
+        // place by their stage preamble, never reaching the LLM. Sweeping
+        // after the running arm would leave a window where a queued same-key
+        // turn slips into RUNNING behind a running-only cancel and survives
+        // the /stop that should have caught it.
+        boolean queuedCancelled = inFlightTracker.cancelQueuedTurns(userId, scopeKind, scopeId);
+
         Optional<InFlightTracker.CancellationHandle> handleOpt =
                 inFlightTracker.getCancellationHandle(userId, scopeKind, scopeId);
         if (handleOpt.isEmpty()) {
-            return false;
+            return queuedCancelled;
         }
 
         InFlightTracker.CancellationHandle handle = handleOpt.get();

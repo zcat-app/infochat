@@ -192,6 +192,16 @@ public class RetryCommandHandler implements CommandHandler {
         }
 
         try {
+            // Adopted a turn /stop had already cancelled — marked while
+            // QUEUED, between the stage preamble and this acquire (M1-638):
+            // skip before the cap peek and the LLM bucket, so a cancelled
+            // re-roll burns neither a retry slot nor a token. The seeded
+            // stage reconciles this Reply into the acknowledgement
+            // placeholder as the D35 stopped terminal.
+            if (slot.isCancelled()) {
+                return reply(scope, bundleLoader.get(BundleKeys.PROGRESS_STOPPED,
+                        inboundContext.effectiveLanguage()));
+            }
             // Read-then-check the retry cap BEFORE acquiring an LLM token or
             // incrementing the counter: an at-cap /retry must consume neither
             // a rate-cap token nor further counter growth. The in-memory

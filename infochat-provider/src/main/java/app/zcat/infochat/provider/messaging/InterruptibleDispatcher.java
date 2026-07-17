@@ -53,13 +53,13 @@ import java.util.concurrent.atomic.AtomicInteger;
  * context ({@link #runStage} is invoked through the bean's own client
  * proxy so the {@code @ActivateRequestContext} interceptor fires) and
  * seeds the new {@link InboundContext} with the three scalars captured
- * on the transport thread. Nothing else crosses the hop: the worker
- * context self-mints its own {@code operationId} (which is what keys
- * M1-611 per-operation progress state — deliberately NOT copied; the
- * M1-635 queued path instead seeds a PURPOSE-MINTED per-turn id,
- * captured in the stage closure as a plain String, never the
- * submitting context's own id — so the contract that nothing on the
- * worker reads the submitting context holds there verbatim), and
+ * on the transport thread. Nothing else crosses the hop: every
+ * interruptible stage additionally seeds a PURPOSE-MINTED per-turn id
+ * as its {@code operationId} (M1-635/M1-638) — the turn's identity in
+ * {@code InFlightTracker} and the key for M1-611 per-operation
+ * progress state — captured in the stage closure as a plain String,
+ * never the submitting context's own id, so the contract that nothing
+ * on the worker reads the submitting context holds verbatim. The
  * {@code pendingChatCommit} / {@code requestEndCleanups} live out
  * their whole lifecycle inside the worker context, whose destroy runs
  * the M1-334 abandoned-progress drain.

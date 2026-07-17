@@ -102,6 +102,54 @@ class CancellationServiceTest {
     }
 
     /**
+     * M1-638: /stop reaches a turn that no worker has picked up yet. A
+     * QUEUED turn has no thread and no pg backend, so cancelling it is a
+     * pure registry sweep — no interrupt is issued (there is no thread to
+     * interrupt) and no pg_cancel_backend fires.
+     */
+    @Test
+    void cancelWithOnlyQueuedTurnSweepsWithoutInterruptOrPgCancel() {
+        tracker.registerQueued(USER_A, "dm", SCOPE_A, "turn-q");
+
+        boolean cancelled = service.cancel(USER_A, "dm", SCOPE_A);
+
+        assertTrue(cancelled, "a queued turn is cancellable — /stop must not report a no-op");
+        assertFalse(Thread.currentThread().isInterrupted(),
+                "no worker is attached to a queued turn, so nothing may be interrupted");
+        assertTrue(recordingDataSource.executedSql.isEmpty(),
+                "no pg_cancel_backend may fire for a turn that never touched a connection");
+        assertTrue(tracker.consumeIfCancelled(USER_A, "dm", SCOPE_A, "turn-q"),
+                "the sweep must have marked the queued turn for its stage to skip");
+    }
+
+    /**
+     * M1-638: one /stop covers every lifecycle state of the caller's
+     * (user, scope) — the queued turn is swept AND the running turn gets
+     * the full existing arm (mark, gated interrupt, slot release).
+     */
+    @Test
+    void cancelSweepsQueuedAndRunningTogether() {
+        tracker.tryAcquire(USER_A, "dm", SCOPE_A);
+        InFlightTracker.CancellationHandle runningHandle =
+                tracker.getCancellationHandle(USER_A, "dm", SCOPE_A).orElseThrow();
+        tracker.registerQueued(USER_A, "dm", SCOPE_A, "turn-q");
+
+        boolean cancelled = service.cancel(USER_A, "dm", SCOPE_A);
+
+        assertTrue(cancelled);
+        assertTrue(runningHandle.isCancelled(),
+                "the running turn must get the existing cancel arm");
+        assertTrue(Thread.currentThread().isInterrupted(),
+                "the running turn's worker must still be interrupted");
+        assertTrue(tracker.consumeIfCancelled(USER_A, "dm", SCOPE_A, "turn-q"),
+                "the queued turn must be swept in the same /stop");
+        assertFalse(tracker.isInFlight(USER_A, "dm", SCOPE_A),
+                "the running slot must be released");
+
+        Thread.interrupted();
+    }
+
+    /**
      * M1-634 redteam remediation pin (stale-interrupt window): once the
      * worker has closed its cancellation gate (end of the in-flight
      * section), a cancel that already looked up the handle must issue
