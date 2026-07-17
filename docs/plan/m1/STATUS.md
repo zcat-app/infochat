@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 655 |
 | deferred | 1 |
 | abandoned | 14 |
-| **total** | **672** |
+| **total** | **673** |
 
 ---
 
@@ -27,6 +27,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-627 — /approve-group and /reject-group: clarify which group id token to pass (complexity: low, risk: low)
 - M1-628 — Asset commands (/zcash, /monero): inconsistent leading indentation on some reply lines (complexity: low, risk: low)
+- M1-639 — Settle the inline-dispatch cap exclusion and couple the dispatch knobs at boot (complexity: low, risk: low)
 
 ---
 
@@ -860,4 +861,5 @@ M1-635 (done)
 M1-638 (done)
   ├── M1-636 (done)
   └── M1-637 (abandoned) [see above]
+M1-639 (pending) ← runnable
 ```
