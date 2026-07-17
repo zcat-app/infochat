@@ -58,10 +58,8 @@ acceptance:
     InterruptibleDispatcher's source.
   - mvn -pl infochat-provider -am verify is green
 test_plan:
-  adds:
-    # - infochat-provider/src/test/java/.../chat/InFlightTrackerCrossScopeTest.java
   modifies:
-    # - infochat-provider/src/test/java/.../chat/InFlightTrackerTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/InFlightTrackerTest.java
   preserves:
     - all tests currently green on main
 spec_refs:
@@ -71,6 +69,17 @@ decision_refs:
   - D35
   - D43
   - D46
+clarity_check:
+  date: 2026-07-17
+  verdict: PASS
+  warnings:
+    - >-
+      Two design decisions are explicitly left open for /m1-tick start (§Notes:
+      the cap's value/overflow shape, and whether admission is checked at submit
+      time vs on the worker). Not a clarity defect — same pattern M1-638 shipped
+      with — but the outline/start step must actually resolve both before
+      implementation, since acceptance items 1-3 depend on which fork is taken.
+  blockers: []
 ---
 
 # M1-636: Per-user cap on concurrent interruptible requests across scopes
@@ -116,7 +125,7 @@ dimension added.
 This ticket also carries the operator-facing documentation of the concurrency
 bounds (see §Acceptance): `infochat.chat.dispatch.max-concurrency` currently
 exists **only** as a `@ConfigProperty` default at
-`InterruptibleDispatcher.java:75` — it appears in neither the Provider's
+`InterruptibleDispatcher.java:79` — it appears in neither the Provider's
 `application.properties` nor `prod/runtime/application.properties`, so an
 operator cannot discover it without reading the source. Per the 2026-07-16
 operator decision the value stays 4; it must become tunable-by-discovery.
@@ -190,6 +199,15 @@ slot is spent. Resolve at `/m1-tick start`: rejecting at submit is the lean (it
 spends nothing and bounds submissions), but it must not drag the per-SCOPE
 guard's reject off the worker with it — M1-638's `out_of_scope` pins that reject
 to its current timing and text.
+
+**Test-plan shape.** `InFlightTrackerTest` is modified ADD-ONLY: new methods
+pinning the per-user cross-scope count query and its release on completion,
+failure and `/stop`. No existing assertion changes — `out_of_scope` entry 2 pins
+the per-(user, scope) guard's observable semantics, so nothing already asserted
+there may move. `test_plan.adds` is deliberately empty: the file carrying
+acceptance items 1-2's two-sender admission test depends on the submit-vs-worker
+fork above, so it is named at `/m1-tick start` once that fork is resolved rather
+than guessed at filing time.
 
 **Alternative considered: do nothing.** `LlmRateCap` at 10–20/min already bounds
 a sender's total cost, and with the current 4-user population the ceiling is
