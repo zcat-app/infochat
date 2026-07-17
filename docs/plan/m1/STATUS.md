@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 659 |
 | deferred | 0 |
 | abandoned | 16 |
-| **total** | **675** |
+| **total** | **677** |
 
 ---
 
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-641 — Topic-grouped periodic digest: category headers + affordance (complexity: medium, risk: low)
 
 ---
 
@@ -42,7 +42,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-642 — blocked_by: M1-641 (pending)
 
 ---
 
@@ -862,4 +862,6 @@ M1-638 (done)
   └── M1-637 (abandoned) [see above]
 M1-639 (done)
 M1-640 (done)
+M1-641 (pending) ← runnable
+  └── M1-642 (pending)
 ```
