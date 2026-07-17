@@ -72,7 +72,7 @@ import java.util.function.Consumer;
  *   <li>2 DM unknown contact → first the SimpleX bootstrap-admin
  *       claim-token (D50): {@link SimpleXAdminClaim#claim} on the
  *       normalized body; a {@link SimpleXAdminClaim.Claimed} outcome
- *       sends the {@code reply.welcome.dm_fresh} entry and stops, and
+ *       sends the {@code reply.welcome.admin_claim} entry and stops, and
  *       {@link SimpleXAdminClaim.NotClaimed} (wrong/used token, no token
  *       configured, or non-SimpleX adapter) falls through to the invite
  *       path so a bad token gets the SAME fixed reply an invalid invite
