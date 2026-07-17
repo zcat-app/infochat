@@ -260,6 +260,21 @@ it requires the LLM client to report usage back to the cap plus a debt/decay
 policy. **Verdict: `parked`** (real mismatch, no current effect; revisit on open
 enrolment or material spend).
 
+### E8. Embedding-space equivalence guard (backend-swap determinism)
+`EmbeddingMetadataStartupGuard` pins the embedding model **name + dimension**,
+not vector-space equivalence, and the `allow-model-change=true` override only
+WARNs ("run the re-embed procedure") rather than enforcing it. Two backends both
+reporting `nomic-embed-text`/768 but producing differently-normalized vectors
+would pass silently, writing pgvector rows incomparable with existing ones —
+degrading deterministic retrieval (D6/D19) with no error. Fenced today: D54 pins
+embeddings to ONE local Ollama nomic-768 backend for the deployment's life,
+`allow-model-change=false` by default, and the M1-428 re-embed procedure is
+documented — so the exposure requires a deliberate same-name backend swap the
+design already steers against. A true numeric-equivalence check needs a reference
+corpus at startup (non-trivial). Origin: M1-513 relevance analysis (2026-07-17;
+ticket abandoned as superseded). **Verdict: `parked`** (real latent gap, no
+current effect).
+
 ---
 
 ## F. Parked
