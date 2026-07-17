@@ -133,6 +133,15 @@ header + the existing per-cluster prose per group. `/summary` is untouched — i
 uses `ClusterBlockRenderer`, not `DigestRenderer`, and deliberately keeps its
 rich flat format (M1-643 considered and abandoned 2026-07-17).
 
+**Test-fixture wiring (authorized).** `DigestRendererTest.setUp()` wires
+`DigestRenderer`'s collaborators by hand (no CDI). Adding the new
+`DigestCategorizer` field to `DigestRenderer` requires updating the shared
+`setUp()` to construct and wire that collaborator, or the pre-existing
+`render_producesLocalizedProse` test NPEs. This mechanical fixture change to
+`setUp()` is authorized and expected — it does not touch any pre-existing
+assertion (`test_plan.preserves` still pins their behavior). Call it out so the
+reviewer has an explicit line to check the fixture edit against.
+
 **Cluster-level tags.** A cluster's tag-set is the union of its member posts'
 tags (`EligiblePostQuery.Post.tags`, already projected by
 `DigestPostCollector`). Count categories at the cluster level (the render
