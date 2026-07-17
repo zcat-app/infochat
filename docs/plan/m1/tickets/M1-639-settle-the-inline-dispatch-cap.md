@@ -1,9 +1,49 @@
 ---
 id: M1-639
 title: "Settle the inline-dispatch cap exclusion and couple the dispatch knobs at boot"
-status: pending
+status: done
 created: 2026-07-17
 last_updated: 2026-07-17
+reviews:
+  - round: 1
+    date: 2026-07-17
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 98
+      removed: 12
+redteam_findings: []
+redteam_audits:
+  - date: 2026-07-17
+    verdict: CLEAN
+    base: 3b87558e
+    head: working-tree (uncommitted impl on branch m1/M1-639-settle-the-inline-dispatch-cap)
+    verdict_file: docs/plan/m1/redteam/M1-639-2026-07-17.md
+    out_of_model_count: 1
+    note: >-
+      Pre-commit audit of the full working-tree diff: CLEAN, no findings. One
+      out-of-model note: D61's structural preconditions (inline-on-transport
+      classification of /retry --digest; per-minute-bucket metering) are
+      process-enforced only — no test pins isInterruptible("/retry --digest")
+      == false, so a future dispatch refactor could silently void the
+      self-serialization bound. Candidate follow-up: a small classification
+      pin test on InboundRouter.
+clarity_check:
+  date: 2026-07-17
+  verdict: WARN
+  warnings:
+    - >-
+      ACCEPTANCE-RUNNABLE item 3 hard-codes REFUSE-BOOT while §Notes decision
+      (2) frames REFUSE-BOOT-vs-WARN as an open pick-at-start; resolve before
+      implementation and edit item 3 if WARN is chosen. (Resolved at start
+      2026-07-17: operator picked REFUSE BOOT — item 3 stands as written.
+      Operator also confirmed decision (1): keep the exclusion, record D61.)
 blocked_by: []
 files_budget: 8
 complexity: low

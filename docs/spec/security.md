@@ -1222,7 +1222,7 @@ share a cost profile share a bucket:
   running) across all scopes, so group membership cannot let a
   single sender occupy every dispatch worker at one instant — the
   per-minute bucket bounds rate, this bounds share. `/retry
-  --digest` is deliberately outside the cap: D35 non-interruptible,
+  --digest` is deliberately outside the cap (D61): D35 non-interruptible,
   dispatched inline on the transport thread, it can never take a
   pool worker, self-serializes to at most one concurrent call, and
   stays metered by the per-minute bucket — so a sender at cap can

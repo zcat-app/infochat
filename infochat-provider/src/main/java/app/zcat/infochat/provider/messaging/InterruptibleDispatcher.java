@@ -88,7 +88,10 @@ public class InterruptibleDispatcher {
      * ordering policy — per-user fairness stays deferred
      * (06-messaging.md §6.3.7). Validated >= 1 at init: 0 would reject
      * every interruptible request at intake, a total chat lockout no
-     * operator can intend. Field-initialised so {@link #direct()}
+     * operator can intend. Also validated below {@link #maxConcurrency}
+     * at init: cap >= pool silently voids the
+     * single-sender-cannot-fill-the-pool property this cap exists for
+     * (M1-636 re-audit; M1-639). Field-initialised so {@link #direct()}
      * instances (hand-constructed router tests) carry the same default
      * without CDI.
      */
@@ -157,6 +160,16 @@ public class InterruptibleDispatcher {
             throw new IllegalStateException(
                     "infochat.chat.dispatch.per-user-cap must be >= 1 (was "
                             + perUserCap + ")");
+        }
+        if (perUserCap >= maxConcurrency) {
+            // Config-boundary validation: see the field javadoc — cap
+            // >= pool silently voids the single-sender share bound, so
+            // refuse boot rather than run without the property (M1-639;
+            // M1-610 coupling-enforcement precedent).
+            throw new IllegalStateException(
+                    "infochat.chat.dispatch.per-user-cap (" + perUserCap
+                            + ") must be below infochat.chat.dispatch.max-concurrency ("
+                            + maxConcurrency + ")");
         }
         // Pin each pool thread's TCCL to the application classloader at
         // creation. Pool threads are minted lazily on first use, which
