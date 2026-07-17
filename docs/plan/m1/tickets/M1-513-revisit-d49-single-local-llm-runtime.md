@@ -1,10 +1,11 @@
 ---
 id: M1-513
 title: "Revisit D49: single local LLM runtime in prod (retire Ollama-embeddings shape b)"
-status: draft
+status: abandoned
 created: 2026-06-29
-last_updated: 2026-06-29
+last_updated: 2026-07-17
 blocked_by: []
+abandoned_reason: superseded
 files_budget: 5
 files_scope:
   - docs/spec/decisions.md
@@ -136,3 +137,34 @@ remote provider"** and **retire D49 shape (b)**. Keep shape (a) (pure llama.cpp)
 local+remote. Record a superseding decision; the dev inner-loop Ollama is untouched.
 
 Decision ratification is required at start (this amends D49). See acceptance.
+
+## Abandoned (2026-07-17)
+
+Superseded — the ticket's premise and remedy are overtaken by decisions
+ratified after it was drafted, verified against `main` in the 2026-07-17
+session:
+
+- **Premise stale.** It assumes prod runs D49 shape (a) (pure llama.cpp).
+  Prod pivoted to the `remote-llm` profile — remote DeepSeek generation +
+  LOCAL Ollama embeddings — via **M1-529/D54** (2026-07-01) and
+  **M1-603/604/D57** (2026-07-11). Committed `prod/runtime/application.properties`:
+  generation → `api.deepseek.com`, embeddings → `http://ollama:11434/v1`.
+- **Remedy collides with D54 (done).** D54 mandates embeddings ALWAYS local,
+  NEVER remote, and explicitly REUSES the D49 Ollama-embeddings shape for the
+  remote-llm embedder. So acceptance item 3 (strip the prod `ollama` profile)
+  would STRAND live prod's embedder, and the proposed replacement rule
+  ("generative local + remote provider for the other role") would permit
+  remote embeddings — which D54 forbids — and omits the topology prod
+  actually runs.
+- **Operational driver already handled.** The two-local-runtimes → RAM
+  concern was addressed independently by **M1-512** (per-container caps,
+  done).
+- **Determinism concern is real but mis-homed.** `EmbeddingMetadataStartupGuard`
+  pins model name + dimension, not vector-space equivalence — a genuine
+  latent gap, but a CODE/guard matter, not this docs edit. It is largely
+  fenced by D54 (one local embedder, `allow-model-change=false`) plus the
+  M1-428 re-embed procedure; any further hardening is a fresh, low-priority
+  code ticket.
+
+Integrating as-written would break live prod and contradict D54, so this is
+closed rather than started.

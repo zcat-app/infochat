@@ -1,11 +1,12 @@
 ---
 id: M1-031
 title: Provider catch-up hardening followup (3 M1-030 OUT-OF-MODEL advisories)
-status: deferred
+status: abandoned
 created: 2026-05-16
-last_updated: 2026-05-16
+last_updated: 2026-07-17
 deferred_reason: post-mvp-hardening
 deferred_on: []
+abandoned_reason: superseded
 blocked_by: []
 files_budget: 7
 files_scope:
@@ -291,3 +292,32 @@ The three advisories, in order of acceptance items:
   CLEAN audit, with no in-model finding driving urgency, so the
   honest default is `deferred` from the start. `/m1-tick reopen
   M1-031` is the explicit "we have slack, pick this up" signal.
+
+## Abandoned (2026-07-17)
+
+Superseded — the 3-advisory bundle is overtaken by later work, verified
+against `main` in the 2026-07-17 session:
+
+- **Advisory #2** (catch-up after listener reconnect) SHIPPED via **M1-142**
+  (`NewPostListener` reconcile-after-reconnect) and was refactored into the
+  shared `AbstractPgListener` by **M1-309**; proven by
+  `NewPostListenerReconcileOnReconnectIT`. Done, not open.
+- **Advisory #3** (broad test-helper `DELETE ... WHERE uid LIKE '%-it/%'`)
+  was relocated into shared `OutboxItFixtures.clearAllItPosts` by **M1-499**
+  and is now invoked by ITs (incl. `QuarantineReviewReconcileOnReconnectIT`)
+  that this ticket's `out_of_scope` explicitly forbade touching. The original
+  acceptance greps now **false-green** (they pass while the broad pattern
+  still runs from the shared helper), so the ticket cannot be satisfied as
+  written.
+- **Advisory #1** (existence-check ↔ cursor-advance atomicity) is the only
+  genuinely-open item, but it is **out-of-model** defense-in-depth: the
+  Collector is the sole writer to `post` and never deletes a READY row out
+  from under the cursor, and the worst case (advancing past a
+  concurrently-deleted post) correctly skips a now-gone post. Accepted as
+  residual risk per this ticket's own "Accept advisory #1 as residual risk"
+  alternative. The combined-statement change is a fresh one-file
+  *simplification* if ever wanted, not a security fix.
+
+Reopening would require re-authoring (stale `io.infochat` → `app.zcat`
+paths, deleting the done advisory-#2 block, rewriting the false-green
+advisory-#1/#3 greps), so the bundle is closed rather than reopened.

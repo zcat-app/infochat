@@ -36,6 +36,12 @@ than writing a new `.scratch` snapshot. When a tag changes, say why.
 - **Board: 642 done, 0 pending / in-progress / in-review / escalated.** Only
   non-terminal: **M1-031** (deferred) and **M1-513** (draft, revisit D49). No
   "v1-done" marker exists. ✅ VERIFIED (git board, 2026-07-13).
+  - **Update 2026-07-17:** both **M1-031** and **M1-513** were **abandoned**
+    (`abandoned_reason: superseded`) — M1-031's advisory #2 shipped via
+    M1-142/M1-309, #3 relocated into shared test fixtures (M1-499), #1 is
+    accepted out-of-model residual; M1-513's premise/remedy are overtaken by
+    D54 + the remote-DeepSeek prod pivot. **Zero non-terminal tickets now
+    remain.**
 - **main = `a19db4c9`** on top of `f9292433` (M1-619 merged). ✅ VERIFIED (git).
 - **Pushed to origin @ `a19db4c9`.** ✅ CONFIRMED (operator, 2026-07-13).
 

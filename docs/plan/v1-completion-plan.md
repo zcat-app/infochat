@@ -163,6 +163,14 @@ Alternative: **Phase 2 → Phase 3 → Phase 4 → Phase 5** follows dependency 
 > numbering and the `/m1-tick` workflow. The "M2–M5" labels below are
 > thematic phases, not ticket-ID prefixes. Deferred M1 tickets (M1-079,
 > M1-031, M1-042) are reopened via `/m1-tick reopen`, not re-created.
+>
+> **Correction (2026-07-17) — do NOT reopen the deferred tickets named in
+> this doc.** This is a superseded 2026-05-26 snapshot (its counts are
+> historical). Current disposition: **M1-079** and **M1-042** are DONE;
+> **M1-031** is ABANDONED (`superseded` — advisory #2 shipped via
+> M1-142/M1-309, #3 relocated by M1-499, #1 accepted out-of-model
+> residual). The Phase-2 rows below listing M1-079/M1-031/M1-042 as
+> "(reopen)" are stale.
 
 ### Phase 2 — Eval pipeline completion + hardening
 

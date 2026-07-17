@@ -15,9 +15,9 @@
 | in-review | 0 |
 | escalated | 0 |
 | done | 659 |
-| deferred | 1 |
-| abandoned | 14 |
-| **total** | **674** |
+| deferred | 0 |
+| abandoned | 16 |
+| **total** | **675** |
 
 ---
 
@@ -76,8 +76,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 ## Deferred
 
-### post-mvp-hardening (1)
-- M1-031 → unspecified
+_(none)_
 
 ---
 
@@ -100,9 +99,11 @@ Tickets decided against — not implemented as this ticket. Terminal: not reopen
 ### other (1)
 - M1-591 — /summary cluster block prints classification: and tags: as two identical lines — collapse the redundancy
 
-### superseded (4)
+### superseded (6)
+- M1-031 — Provider catch-up hardening followup (3 M1-030 OUT-OF-MODEL advisories)
 - M1-372 — messaging: align the SimpleX auth-failure design note with the loopback-trusted v1 transport and drop the dead auth.fail meter
 - M1-505 — SimpleX: map inbound admin DM to the configured admin address
+- M1-513 — Revisit D49: single local LLM runtime in prod (retire Ollama-embeddings shape b)
 - M1-574 — /audit renders the usable target contact id, not the internal user UUID
 - M1-637 — Queued interruptible turn is not cancellable by /stop
 
@@ -190,7 +191,7 @@ M1-019 (done)
   └── M1-020 (done)
 M1-029 (done)
 M1-030 (done)
-M1-031 (deferred)
+M1-031 (abandoned)
 M1-035d (done)
 M1-038 (done)
   └── M1-039 (done)
@@ -729,7 +730,7 @@ M1-509 (done)
 M1-510 (done)
   └── M1-511 (abandoned)
 M1-512 (done)
-M1-513 (draft)
+M1-513 (abandoned)
 M1-514 (done)
   └── M1-515 (done)
         └── M1-519 (done)
