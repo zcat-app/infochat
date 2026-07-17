@@ -853,6 +853,29 @@ public class InboundRouter {
         ScopeRef scope = msg.scope();
         UUID stageScopeId = dispatchScopeId;
         if (isInterruptible(normalized)) {
+            // M1-636: per-user cross-scope concurrency cap, checked FIRST —
+            // before the turn is registered, before the M1-635 placeholder,
+            // before any pool slot is spent — so a rejection consumes
+            // nothing: no registry entry, no LlmRateCap token (drawn only in
+            // the handlers, downstream), no in-flight slot, no outbound
+            // placeholder that would then have to be walked back. Same
+            // check-order doctrine as the slot-before-bucket order at
+            // SummaryCommandHandler.tryAcquire. The count-then-register pair
+            // is race-free per sender: a user's identity is adapter-scoped,
+            // so all their submits arrive on that adapter's single dispatch
+            // thread; a concurrent worker-side release only makes the count
+            // conservatively high for this one check. The per-SCOPE guard's
+            // reject keeps its worker-side timing and text untouched — this
+            // coarser bound rejects only a sender already at their
+            // cross-scope ceiling.
+            if (inFlightTracker.countNonTerminalTurns(actorId)
+                    >= interruptibleDispatcher.perUserCap()) {
+                sendReply(scope,
+                        bundleLoader.get(BundleKeys.ERROR_CHAT_PER_USER_CAP,
+                                inboundContext.effectiveLanguage()),
+                        adapterName);
+                return;
+            }
             // M1-638: one lifecycle object per interruptible dispatch, born
             // at submit. The PURPOSE-MINTED id below is the turn's identity
             // in InFlightTracker for its whole life — registered before the

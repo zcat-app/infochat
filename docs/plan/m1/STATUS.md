@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 654 |
+| done | 655 |
 | deferred | 1 |
 | abandoned | 14 |
 | **total** | **672** |
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-627 — /approve-group and /reject-group: clarify which group id token to pass (complexity: low, risk: low)
 - M1-628 — Asset commands (/zcash, /monero): inconsistent leading indentation on some reply lines (complexity: low, risk: low)
-- M1-636 — Per-user cap on concurrent interruptible requests across scopes (complexity: medium, risk: medium)
 
 ---
 
@@ -64,6 +63,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-638 | Model the interruptible turn lifecycle in one registry | 2026-07-17 | round 1 APPROVE |
+| M1-636 | Per-user cap on concurrent interruptible requests across scopes | 2026-07-17 | round 2 APPROVE |
 | M1-635 | Queued interruptible request gives the sender no feedback until a worker frees | 2026-07-16 | round 1 APPROVE |
 | M1-634 | Concurrent interruptible dispatch so the in-flight guard and /stop are reachable over live transports | 2026-07-16 | round 2 APPROVE |
 | M1-633 | In-band contactId sourcing for --contact invites (D60) | 2026-07-16 | round 1 APPROVE |
@@ -72,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-626 | /invite create --open: default to the sole enabled adapter; replace confusing empty-adapter error | 2026-07-15 | round 1 APPROVE |
 | M1-625 | /list-sources (and /get-sources) silently truncates at ~20 of N sources with no pagination hint | 2026-07-15 | round 1 APPROVE |
 | M1-624 | Bootstrap-admin token claim shows a probation welcome instead of an admin welcome (en+cs) | 2026-07-15 | round 1 APPROVE |
-| M1-623 | /summary degrades ungracefully on a large post window (cap before the summarizer LLM call) | 2026-07-15 | round 1 APPROVE |
 
 ---
 
@@ -859,6 +858,6 @@ M1-634 (done)
 M1-635 (done)
   └── M1-637 (abandoned)
 M1-638 (done)
-  ├── M1-636 (pending) ← runnable
+  ├── M1-636 (done)
   └── M1-637 (abandoned) [see above]
 ```

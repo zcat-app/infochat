@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -305,5 +306,91 @@ class InFlightTrackerTest {
 
         assertFalse(tracker.cancelQueuedTurns(USER_A, "dm", SCOPE_A),
                 "a discarded turn must leave nothing for the sweep to mark");
+    }
+
+    // ----- M1-636 per-user cross-scope count (additions only) ---------------
+
+    @Test
+    void countIsZeroForUserWithNoTurns() {
+        assertEquals(0, tracker.countNonTerminalTurns(USER_A));
+    }
+
+    /**
+     * The count the per-user cap queries: QUEUED and RUNNING turns both
+     * count, the sum spans scopes, and it binds per sender — another user's
+     * turns never inflate it.
+     */
+    @Test
+    void countSpansScopesCountsQueuedAndRunningAndBindsPerSender() {
+        tracker.registerQueued(USER_A, "dm", SCOPE_A, "turn-1");
+        assertNotNull(tracker.tryAcquire(USER_A, "group", SCOPE_B));
+        assertNotNull(tracker.tryAcquire(USER_B, "dm", SCOPE_B));
+
+        assertEquals(2, tracker.countNonTerminalTurns(USER_A),
+                "one QUEUED dm turn plus one RUNNING group turn");
+        assertEquals(1, tracker.countNonTerminalTurns(USER_B),
+                "the count binds per sender, never globally");
+    }
+
+    /** Release path 1 (completion/failure finally): release frees the count. */
+    @Test
+    void countReleasesWhenRunningTurnReleases() {
+        CancellationHandle held = tracker.tryAcquire(USER_A, "dm", SCOPE_A);
+        assertNotNull(held);
+        assertEquals(1, tracker.countNonTerminalTurns(USER_A));
+
+        tracker.release(USER_A, "dm", SCOPE_A, held);
+
+        assertEquals(0, tracker.countNonTerminalTurns(USER_A),
+                "a released turn must free the sender's budget");
+    }
+
+    /** Release path 2 (stage-final leak guard): discard frees the count. */
+    @Test
+    void countReleasesWhenQueuedTurnIsDiscarded() {
+        tracker.registerQueued(USER_A, "dm", SCOPE_A, "turn-1");
+        assertEquals(1, tracker.countNonTerminalTurns(USER_A));
+
+        tracker.discard(USER_A, "dm", SCOPE_A, "turn-1");
+
+        assertEquals(0, tracker.countNonTerminalTurns(USER_A),
+                "a discarded never-adopted turn must free the sender's budget");
+    }
+
+    /** Release path 3 (/stop in the queued phase): consume frees the count. */
+    @Test
+    void countReleasesWhenCancelledQueuedTurnIsConsumed() {
+        tracker.registerQueued(USER_A, "dm", SCOPE_A, "turn-1");
+        tracker.cancelQueuedTurns(USER_A, "dm", SCOPE_A);
+        assertEquals(1, tracker.countNonTerminalTurns(USER_A),
+                "a cancelled-but-unconsumed turn still counts — it is not terminal yet");
+
+        assertTrue(tracker.consumeIfCancelled(USER_A, "dm", SCOPE_A, "turn-1"));
+
+        assertEquals(0, tracker.countNonTerminalTurns(USER_A),
+                "consuming the cancelled turn is its terminal — the budget frees");
+    }
+
+    /**
+     * Adoption is a state transition of ONE turn, never a second turn: the
+     * QUEUED→RUNNING acquire must hold the count at 1, or every admitted
+     * request would double-count against its own sender mid-turn.
+     */
+    @Test
+    void countStaysStableAcrossAdoption() {
+        InboundContext context = new InboundContext();
+        context.setOperationId("turn-1");
+        tracker.inboundContext = context;
+
+        tracker.registerQueued(USER_A, "dm", SCOPE_A, "turn-1");
+        assertEquals(1, tracker.countNonTerminalTurns(USER_A));
+
+        CancellationHandle adopted = tracker.tryAcquire(USER_A, "dm", SCOPE_A);
+        assertNotNull(adopted);
+        assertEquals(1, tracker.countNonTerminalTurns(USER_A),
+                "adoption must not double-count the turn");
+
+        tracker.release(USER_A, "dm", SCOPE_A, adopted);
+        assertEquals(0, tracker.countNonTerminalTurns(USER_A));
     }
 }

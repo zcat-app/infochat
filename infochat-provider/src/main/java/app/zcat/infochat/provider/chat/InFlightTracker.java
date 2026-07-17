@@ -324,6 +324,35 @@ public class InFlightTracker {
     }
 
     /**
+     * A sender's non-terminal (QUEUED + RUNNING) turn count across ALL
+     * scopes — the M1-636 per-user cross-scope concurrency cap is a query
+     * over this registry, never a second counter that could drift: a turn
+     * reaching a terminal state IS the release, so no decrement can be
+     * missed or doubled. Each entry is read back through computeIfPresent
+     * because {@code queued} is mutated only inside compute-family lambdas
+     * on the owning key — a bare get() would read the LinkedHashMap with no
+     * happens-before edge to those writes. Cross-key the sum is a
+     * moment-in-time snapshot, which is sufficient for admission: same-user
+     * increments are serialized on the sender's single transport dispatch
+     * thread (the admission check's caller — a user's identity is
+     * adapter-scoped, so all their submits arrive on one thread), and a
+     * concurrent worker-side decrement can only make the sum conservatively
+     * high for one check, self-correcting on the next message.
+     */
+    public int countNonTerminalTurns(UUID userId) {
+        int[] count = new int[1];
+        for (ScopeKey key : turns.keySet()) {
+            if (key.userId().equals(userId)) {
+                turns.computeIfPresent(key, (scopeKey, entry) -> {
+                    count[0] += entry.queued.size() + (entry.running != null ? 1 : 0);
+                    return entry;
+                });
+            }
+        }
+        return count[0];
+    }
+
+    /**
      * Retrieve the cancellation handle for the RUNNING turn, if one exists.
      * Used by CancellationService to interrupt the worker and issue
      * pg_cancel_backend. A QUEUED turn has no reachable handle — the handle

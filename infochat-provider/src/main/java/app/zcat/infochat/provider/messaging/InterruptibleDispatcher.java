@@ -79,6 +79,22 @@ public class InterruptibleDispatcher {
     @ConfigProperty(name = "infochat.chat.dispatch.max-concurrency", defaultValue = "4")
     int maxConcurrency;
 
+    /**
+     * Per-user cross-scope bound on concurrent interruptible turns
+     * (M1-636): one sender may hold at most this many non-terminal
+     * (queued + running) turns across ALL scopes at once, so ordinary
+     * group membership cannot let a single sender occupy every pool
+     * worker at one instant. A bound on the sender's share, never an
+     * ordering policy — per-user fairness stays deferred
+     * (06-messaging.md §6.3.7). Validated >= 1 at init: 0 would reject
+     * every interruptible request at intake, a total chat lockout no
+     * operator can intend. Field-initialised so {@link #direct()}
+     * instances (hand-constructed router tests) carry the same default
+     * without CDI.
+     */
+    @ConfigProperty(name = "infochat.chat.dispatch.per-user-cap", defaultValue = "2")
+    int perUserCap = 2;
+
     @Inject
     InboundContext inboundContext;
 
@@ -135,6 +151,13 @@ public class InterruptibleDispatcher {
                     "infochat.chat.dispatch.max-concurrency must be >= 2 (was "
                             + maxConcurrency + ")");
         }
+        if (perUserCap < 1) {
+            // Config-boundary validation: see the field javadoc — 0
+            // would lock every sender out of interruptible dispatch.
+            throw new IllegalStateException(
+                    "infochat.chat.dispatch.per-user-cap must be >= 1 (was "
+                            + perUserCap + ")");
+        }
         // Pin each pool thread's TCCL to the application classloader at
         // creation. Pool threads are minted lazily on first use, which
         // can be triggered from an adapter-owned transport thread whose
@@ -165,6 +188,11 @@ public class InterruptibleDispatcher {
                 new ArrayBlockingQueue<>(maxConcurrency),
                 factory,
                 new ThreadPoolExecutor.CallerRunsPolicy());
+    }
+
+    /** The per-user cross-scope concurrency bound (see {@link #perUserCap}). */
+    public int perUserCap() {
+        return perUserCap;
     }
 
     /**

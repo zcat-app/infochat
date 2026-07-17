@@ -1215,6 +1215,27 @@ share a cost profile share a bucket:
   profile-driven. Transport rate is intentionally higher than this
   cap so a flooding user gets quick reject replies without burning
   the only LLM slot.
+- **Per-user interruptible concurrency (M1-636)** — not a rate
+  bucket: a ceiling on one sender's CONCURRENT interruptible
+  requests (the D35 interruptible class: chat replies, on-demand
+  `/summary`, `/retry` re-rolls except `--digest`; queued +
+  running) across all scopes, so group membership cannot let a
+  single sender occupy every dispatch worker at one instant — the
+  per-minute bucket bounds rate, this bounds share. `/retry
+  --digest` is deliberately outside the cap: D35 non-interruptible,
+  dispatched inline on the transport thread, it can never take a
+  pool worker, self-serializes to at most one concurrent call, and
+  stays metered by the per-minute bucket — so a sender at cap can
+  still hold one inline digest re-roll (accepted, 2026-07-17
+  redteam). Checked at intake before any token draw or slot
+  acquisition; a rejection is a fixed reply and consumes nothing.
+  The reply lands in the scope the over-cap request arrived in, so
+  in a group it necessarily reveals that the sender has concurrent
+  bot activity in other scopes (accepted: metadata-only,
+  self-triggered — no third party can probe another user's count —
+  same class as the per-user rate-cap reply). Bounds share, never
+  order — the per-user fair scheduler stays deferred
+  (`docs/design/06-messaging.md` §6.3.7).
 - **Tool calls per chat turn** — fixed cap. Tool results are cached
   within a single turn so identical calls don't re-query.
 - **`/quarantine approve`** — per-admin bucket.

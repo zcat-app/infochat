@@ -1,9 +1,9 @@
 ---
 id: M1-636
 title: "Per-user cap on concurrent interruptible requests across scopes"
-status: pending
+status: done
 created: 2026-07-16
-last_updated: 2026-07-16
+last_updated: 2026-07-17
 blocked_by: [M1-638]
 files_budget: 14
 complexity: medium
@@ -58,6 +58,8 @@ acceptance:
     InterruptibleDispatcher's source.
   - mvn -pl infochat-provider -am verify is green
 test_plan:
+  adds:
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterPerUserCapIT.java
   modifies:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/InFlightTrackerTest.java
   preserves:
@@ -74,12 +76,160 @@ clarity_check:
   verdict: PASS
   warnings:
     - >-
-      Two design decisions are explicitly left open for /m1-tick start (§Notes:
-      the cap's value/overflow shape, and whether admission is checked at submit
-      time vs on the worker). Not a clarity defect — same pattern M1-638 shipped
-      with — but the outline/start step must actually resolve both before
-      implementation, since acceptance items 1-3 depend on which fork is taken.
+      Three open design decisions are deferred to /m1-tick start: (1) the cap's
+      exact value and overflow shape (Notes lean: reject, default cap 2,
+      configurable), (2) submit-time vs on-worker admission check (Notes lean:
+      submit), (3) whether docs/spec/security.md §Rate limiting must also be
+      amended to enumerate the new control. None block implementability — each
+      carries a stated recommendation — but acceptance items 1-3's exact
+      assertions and items 4/5's completeness depend on how they resolve, so
+      the start step must settle all three before naming the new test file in
+      test_plan.adds (currently empty by design).
+    - >-
+      blocked_by: [M1-638] is still set but M1-638 is done and merged on main
+      (80d2778d, resynced by e3c268bd) — dependency satisfied, informational
+      only.
   blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-17
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 13
+      added: 627
+      removed: 14
+  - round: 2
+    date: 2026-07-17
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 13
+      added: 762
+      removed: 14
+redteam_findings:
+  - date: 2026-07-17
+    category: DOS
+    severity: low
+    promise: |
+      "Per-user interruptible concurrency (M1-636) — not a rate bucket: a
+      ceiling on one sender's CONCURRENT interruptible requests (the same
+      three surfaces as the LLM bucket above, queued + running) across all
+      scopes ... Checked at intake before any token draw or slot
+      acquisition" (docs/spec/security.md §Rate limiting, the bullet this
+      diff adds). The referenced LLM bucket's surface list is "chat replies
+      + on-demand /summary + /retry re-rolls".
+    gap: |
+      The cap check runs only inside the isInterruptible branch, and
+      isInterruptible deliberately classifies /retry --digest as
+      non-interruptible (D35), so that LLM-triggering re-roll is dispatched
+      inline with no admission check and is never counted against the
+      sender's ceiling. Delivery covers two-and-a-half of the "same three
+      surfaces" the new bullet claims: a sender at cap can still originate
+      one additional concurrent LLM-triggering request. Bounded in practice
+      (inline dispatch serializes on the adapter's single transport thread,
+      can never take a pool worker — the "cannot occupy every dispatch
+      worker" clause holds — and LlmRateCap still meters it), hence low:
+      the amended spec text promises more than the code enforces.
+    repro: |
+      1) Registered user sends a DM chat message and a group @mention;
+      both admitted, cap 2 reached, both RUNNING. 2) With a frozen digest
+      anchor in a third scope, send /retry --digest there. 3)
+      isInterruptible returns false, the M1-636 check never executes, the
+      summarizer call runs inline — cap+1 concurrent LLM-triggering
+      requests.
+    suggested_fix_class: rate-limit
+redteam_audits:
+  - date: 2026-07-17
+    verdict: FINDINGS
+    base: 9e0b7304156ee5bf5b6012a0c1099e872174d8cf
+    head: working-tree@m1/M1-636-per-user-cap-on-concurrent-int
+    verdict_file: docs/plan/m1/redteam/M1-636-2026-07-17.md
+    findings_count: 1
+    out_of_model_count: 2
+    note: |
+      One low (spec-text overpromise: the new security.md bullet claims
+      three-surface parity with the LLM bucket, but /retry --digest is D35
+      non-interruptible, takes no pool worker and is not cap-checked;
+      enforcement matches the ticket's pool-share design). Two out-of-model:
+      cross-scope activity disclosure in the group-delivered reject reply
+      (same class as the accepted rate-cap reply, undocumented), and no
+      boot coupling between per-user-cap and max-concurrency (an operator
+      setting cap >= pool voids the single-sender property; config is
+      trusted per the threat model). RESOLVED via escalate → refine: the
+      spec bullet's surface claim narrowed in-branch to the D35
+      interruptible class (--digest exclusion stated) and the disclosure
+      accepted-and-documented in the same bullet; out-of-model item 2 and
+      coherent inline-LLM bounding routed to a post-merge follow-up
+      ticket.
+  - date: 2026-07-17
+    verdict: CLEAN
+    base: 9e0b7304156ee5bf5b6012a0c1099e872174d8cf
+    head: working-tree@m1/M1-636-per-user-cap-on-concurrent-int (refine 9623381e + remediation)
+    verdict_file: docs/plan/m1/redteam/M1-636-2026-07-17.md
+    out_of_model_count: 2
+    note: |
+      Re-audit after the in-branch remediation: CLEAN. The prior low DOS
+      finding verified remediated — the amended security.md bullet scopes
+      the claim to the D35 interruptible class with the --digest exclusion
+      stated and matches the enforcement predicate exactly. Two
+      out-of-model notes: the cap-vs-pool boot-coupling question
+      re-flagged (already routed to the post-merge follow-up ticket so it
+      is not silently dropped), and colluding-identity pool saturation
+      (two identities can jointly hold all four workers) — a documented
+      residual: the promise is per-sender share, per-user fairness is an
+      explicit v1 non-commitment and extra identities cost admin-issued
+      invites (Sybil non-commitment).
+escalations:
+  - date: 2026-07-17
+    reason: redteam-finding
+    reviewer_verdict_excerpt: |
+      Review round 1 was APPROVE (all checks PASS). The escalation trigger
+      is the /redteam M1-636 --in-progress audit (verdict FINDINGS: 1 low,
+      2 out-of-model — docs/plan/m1/redteam/M1-636-2026-07-17.md): the new
+      security.md §Rate limiting bullet claims the cap covers "the same
+      three surfaces as the LLM bucket", but /retry --digest is D35
+      non-interruptible (inline, no pool worker) and is not cap-checked —
+      the spec text overpromises; the enforcement matches the ticket's
+      pool-share design.
+revisions:
+  - date: 2026-07-17
+    reason: >-
+      redteam-finding refine (post-APPROVE r1, pre-commit). Narrow the NEW
+      docs/spec/security.md §Rate limiting bullet this diff adds so its
+      surface claim matches the shipped control (low finding): the cap
+      covers the D35 interruptible class — chat replies, on-demand
+      /summary, /retry re-rolls EXCEPT --digest, which is D35
+      non-interruptible, runs inline on the transport thread, takes no
+      pool worker, self-serializes to at most one, and stays metered by
+      the per-minute LLM bucket. Same edit documents the reject-reply
+      cross-scope disclosure as accepted (out-of-model item 1, same class
+      as the per-user rate-cap reply). Out-of-model item 2 (cap >= pool
+      coupling) and the coherent bounding of inline LLM-triggering work
+      (counting /retry --digest) go to a follow-up ticket filed after
+      merge — NOT bolted on here. Code is unchanged by this refine: the
+      enforcement already matches the ticket's pool-share design.
+      Pre-refine frontmatter snapshot below; the full verbatim pre-refine
+      ticket is the parent of the refine commit on the branch.
+    snapshot:
+      files_budget: 14
+      files_scope: []
+      acceptance_count: 6
+      out_of_scope_count: 4
+      note: >-
+        Round-1 review APPROVEd the pre-refine diff (13 files, +627/-14)
+        before the redteam gate surfaced the 1 low DOS finding (spec-text
+        overpromise) + 2 out-of-model items.
 ---
 
 # M1-636: Per-user cap on concurrent interruptible requests across scopes
@@ -147,6 +297,32 @@ its `/stop` cancellation-handle role. The `max-concurrency` VALUE stays 4 — th
 ticket documents that knob, it does not retune it.
 
 ## Notes
+
+**Resolved at `/m1-tick start` (2026-07-17, operator):** all three open
+decisions taken on their recommended leans — (1) overflow REJECTS with fixed
+guidance (new bundle key `error.chat.per_user_cap` + cs twin), (2) default cap
+**2**, shipped as config knob `infochat.chat.dispatch.per-user-cap`, (3) the
+check runs **at submit** on the transport thread, before `registerQueued`, so a
+rejection spends no pool slot and leaves no registry entry; the per-SCOPE
+guard's reject stays on the worker untouched. Additionally the operator chose
+to amend `docs/spec/security.md` §Rate limiting with the new control (the
+closing-bullet question below). `test_plan.adds` names the two-sender admission
+test accordingly.
+
+**Redteam remediation (refine, 2026-07-17, operator-accepted):** the audit
+(`docs/plan/m1/redteam/M1-636-2026-07-17.md`, 1 low DOS) found the NEW
+security.md §Rate limiting bullet claims "the same three surfaces as the LLM
+bucket", but `/retry --digest` is D35 non-interruptible — dispatched inline,
+never takes a pool worker, self-serializes to one, still metered by the
+per-minute bucket — and is deliberately NOT cap-checked. The remediation is
+doc-only, in-branch: scope the bullet's surface claim to the D35 interruptible
+class with the `--digest` exclusion stated, and document the reject-reply
+cross-scope disclosure as accepted (out-of-model item 1). The follow-up work —
+whether inline LLM-triggering dispatch should be counted/bounded coherently,
+plus the cap-vs-pool boot-coupling question (out-of-model item 2) — is filed as
+a separate ticket after merge, per the operator's option-1 decision. The
+06-messaging.md §6.3.7 amendment already says "interruptible turns" and needs
+no change.
 
 **Open-decision (resolve with the operator at `/m1-tick start`): the cap's value
 and its overflow behaviour.**

@@ -1306,6 +1306,9 @@ public final class BundleKeys {
     /** Per-user LLM-triggering rate cap exceeded (infochat.chat.llm-rate-cap-per-minute). */
     public static final String ERROR_CHAT_LLM_RATE_CAP = "error.chat.llm_rate_cap";
 
+    /** Per-user cross-scope concurrent-request cap exceeded (infochat.chat.dispatch.per-user-cap, M1-636). */
+    public static final String ERROR_CHAT_PER_USER_CAP = "error.chat.per_user_cap";
+
     /** Chat LLM emitted the D21 structured refusal marker; this deterministic notice replaces it — the marker is protocol surface and is never delivered (security.md §Prompt-injection defenses). */
     public static final String ERROR_CHAT_REFUSED = "error.chat.refused";
 
