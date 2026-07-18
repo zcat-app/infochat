@@ -102,10 +102,12 @@ acceptance:
     /unfollow-source with its real usage and examples. An end-to-end test covers
     at least three phrasings that share no prefix with their target command.
   - >-
-    Decision D64 in docs/spec/decisions.md records the second embedded corpus,
+    Decision D66 in docs/spec/decisions.md records the second embedded corpus,
     the match-not-assert invariant, and the tier-filter-before-return rule.
     docs/spec/commands.md §Chat mode and docs/spec/llm.md §Embedding pipeline
-    document the new tool and corpus.
+    document the new tool and corpus. (Renumbered from D64 on 2026-07-18 —
+    D64 was LANDED by M1-653 for an unrelated decision before this ticket
+    reached it. See §Decision renumber in the body.)
   - mvn verify from the repo root is green
 test_plan:
   adds:
@@ -217,3 +219,26 @@ that ticket is a prerequisite and not superseded.
 The migration, the startup build path, and the tool wiring are three separable
 pieces; the sidecar should sequence them so the table and index land before the
 tool is registered.
+
+## Decision renumber — D64 → D66 (2026-07-18)
+
+**Acceptance item 8 asked for `D64`; that number is gone.** This ticket was
+filed at `db200608` when `decisions.md` maxed at D61, and the M1-645..649
+batch forward-allocated D62→M1-641, D63→M1-642, **D64→M1-648**. A later
+session re-derived the allocation from `decisions.md`'s max row alone,
+without checking pending tickets, assigned D64 to M1-653, and **M1-653
+landed it** in `832b4ff6` as an unrelated decision (outbound delivery is
+at-least-once). Append-only forbids renumbering a landed row, so the landed
+row keeps D64 and this unlanded claim moves.
+
+**D66 is the next genuinely free number:** D63 is held by M1-642 and D65 by
+M1-652 — both in *acceptance prose*, both invisible to `decisions.md`.
+M1-649's `decision_refs` was updated to D66 in the same commit, since it
+cites the row this ticket creates.
+
+**Re-verify D66 is still free immediately before writing the row.** A
+D-number claim lives in acceptance prose and is validated by **nothing** —
+not `scripts/lint-ticket.py`, and not the clarity gate, whose
+SPEC-REFS-VALID check covers `spec_refs` headings only. Checking
+`decisions.md` is NOT sufficient; grep the claimants:
+`grep -rn 'D6[0-9]' docs/plan/m1/tickets/*.md`.

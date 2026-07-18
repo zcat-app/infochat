@@ -107,7 +107,7 @@ spec_refs:
   - docs/spec/commands.md §Chat mode
   - docs/spec/commands.md §Onboarding
 decision_refs:
-  - D64
+  - D66
 ---
 
 # M1-649: Conceptual help topics: answer the questions no command's usage string can
