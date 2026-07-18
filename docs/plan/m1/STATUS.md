@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 665 |
 | deferred | 0 |
 | abandoned | 17 |
-| **total** | **688** |
+| **total** | **689** |
 
 ---
 
@@ -28,6 +28,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-642 — Per-category digest delivery + optional roll-up summaries (complexity: high, risk: medium)
 - M1-647 — Intent-aware command suggestions: synonyms + non-prefix matching on the /help path (complexity: medium, risk: medium)
 - M1-653 — Correct the outbound delivery contracts: correlationId javadoc and §6.3.5 (complexity: low, risk: low)
+- M1-655 — Fix MultiAdapterProductionIT flake: stand-in daemon must not die and trigger reconnect churn (complexity: low, risk: low)
 
 ---
 
@@ -883,4 +884,5 @@ M1-646 (done)
 M1-650 (done)
 M1-651 (done)
 M1-653 (pending) ← runnable
+M1-655 (pending) ← runnable
 ```
