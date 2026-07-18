@@ -1,9 +1,9 @@
 ---
 id: M1-641
 title: "Topic-grouped periodic digest: category headers + affordance"
-status: pending
+status: done
 created: 2026-07-17
-last_updated: 2026-07-17
+last_updated: 2026-07-18
 blocked_by: []
 files_budget: 12
 files_scope:
@@ -73,6 +73,25 @@ spec_refs:
 decision_refs:
   - D17
   - D59
+clarity_check:
+  date: 2026-07-17
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-18
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 534
+      removed: 22
 ---
 
 # M1-641: Topic-grouped periodic digest — category headers + affordance

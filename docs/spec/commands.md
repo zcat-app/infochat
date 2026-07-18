@@ -1465,6 +1465,38 @@ pool is saturated" recovery path. Results are cached briefly so a
 follow-up `/summary` from the same group during the cache TTL is
 served from cache (no second LLM call).
 
+**Categorized digest format (D62).** The non-degraded digest
+renders its story clusters grouped under **topic category
+headers** rather than as one flat list. Categorization is
+**deterministic tag arithmetic — no LLM call**: a cluster's
+tag-set is the union of its member posts' tags; a tag
+**qualifies** as a category when at least a threshold number of
+clusters in the digest carry it (operator-configurable, default
+3); each cluster is assigned to exactly **one** category — the
+qualifying tag with the highest digest-wide cluster count, ties
+broken alphabetically — and a cluster with no qualifying tag
+lands in the **Other** bucket. A deterministic second pass folds
+any category left with fewer than the threshold of *assigned*
+clusters into Other (a category can lose its clusters to a
+larger co-tag). Sections render with an UPPERCASE header
+(bundle-localized per D43; caps because v1 output is plain text,
+D30), ordered by assigned-cluster count descending, ties
+alphabetical, Other always last; under each header the existing
+per-cluster prose + links render unchanged. Each section
+(including Other) shows at most a per-section **item cap** of
+clusters (operator-configurable, default 12); a capped section
+appends a localized "+N more" line, and per-cluster LLM prose is
+generated only for the clusters actually shown. Every digest
+ends with **one** localized closing affordance line steering
+readers to `@mention` the bot. Given the same clusters and tags,
+the assignment and section order are byte-identical — the LLM
+touches only the per-cluster prose, extending the D19
+determinism boundary to the digest's structure. The degraded
+(headlines-only) digest (D17) is unchanged: no category headers,
+no affordance. `/summary` deliberately keeps its flat
+per-cluster format — it is an interactive, filterable DM
+surface, unlike the broadcast digest.
+
 **Zero-eligible-posts digest.** When a digest slot fires and there
 are no eligible posts for the group (an empty world, or nothing
 arrived in the window), the digest sends a

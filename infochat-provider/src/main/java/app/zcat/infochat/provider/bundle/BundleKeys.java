@@ -1809,6 +1809,27 @@ public final class BundleKeys {
     /** One-line note appended to the English text on any translation fallback. No tokens; resolved via the 2-arg accessor in the scope language. */
     public static final String REPLY_TRANSLATION_UNAVAILABLE = "reply.translation.unavailable";
 
+    // ----- Topic-grouped periodic digest (M1-641, D62) ------------------------
+    // Per docs/spec/commands.md §Periodic group digests. The non-degraded
+    // digest renders its clusters under deterministic category headers —
+    // pure tag arithmetic, no LLM (D62) — with a per-section item cap and
+    // one closing affordance line. Headers resolve in the group's scope
+    // language and are uppercased in code (v1 output is plain text per D30,
+    // so caps are the strongest header anchor); as deterministic bundle
+    // strings they never pass through the translation pipeline.
+
+    /** Category section header template. Token {@code {0}} = the category tag (e.g. {@code ai}); the formatted line is uppercased in code. */
+    public static final String REPLY_DIGEST_CATEGORY_HEADER = "reply.digest.category.header";
+
+    /** Header for the Other bucket (clusters with no qualifying category tag); uppercased in code. No tokens; resolved via the 2-arg accessor. */
+    public static final String REPLY_DIGEST_CATEGORY_OTHER = "reply.digest.category.other";
+
+    /** Capped-section overflow line. Token {@code {0}} = the count of clusters not shown; the cs value carries a {@code {0,choice,...}} plural shape. */
+    public static final String REPLY_DIGEST_CATEGORY_MORE = "reply.digest.category.more";
+
+    /** One closing affordance line ending every non-degraded digest (group scope, so it steers to @mention). No tokens; resolved via the 2-arg accessor. */
+    public static final String REPLY_DIGEST_CLOSING_AFFORDANCE = "reply.digest.closing_affordance";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }

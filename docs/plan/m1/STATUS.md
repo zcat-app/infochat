@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 660 |
+| done | 661 |
 | deferred | 0 |
 | abandoned | 17 |
-| **total** | **679** |
+| **total** | **685** |
 
 ---
 
@@ -25,7 +25,10 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-641 — Topic-grouped periodic digest: category headers + affordance (complexity: medium, risk: low)
+- M1-642 — Per-category digest delivery + optional roll-up summaries (complexity: high, risk: medium)
+- M1-645 — Correct three help/welcome strings that misstate the real command surface (complexity: low, risk: low)
+- M1-646 — Add /pending + /recover-pool to the help catalogue and guard catalogue coverage (complexity: medium, risk: low)
+- M1-650 — Sentinel-lint test endpoints (complexity: low, risk: medium)
 
 ---
 
@@ -42,7 +45,9 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-642 — blocked_by: M1-641 (pending)
+- M1-647 — blocked_by: M1-645 (pending), M1-646 (pending)
+- M1-648 — blocked_by: M1-645 (pending), M1-646 (pending), M1-647 (pending)
+- M1-649 — blocked_by: M1-648 (pending)
 
 ---
 
@@ -62,6 +67,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-644 | Stub the provider-module EmbeddingProvider so the suite stops calling a real ollama | 2026-07-18 | round 1 APPROVE |
+| M1-641 | Topic-grouped periodic digest: category headers + affordance | 2026-07-18 | round 1 APPROVE |
 | M1-640 | Pin the /retry --digest non-interruptible classification with a test | 2026-07-17 | round 1 APPROVE |
 | M1-639 | Settle the inline-dispatch cap exclusion and couple the dispatch knobs at boot | 2026-07-17 | round 1 APPROVE |
 | M1-638 | Model the interruptible turn lifecycle in one registry | 2026-07-17 | round 1 APPROVE |
@@ -70,7 +76,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-627 | /approve-group and /reject-group: clarify which group id token to pass | 2026-07-17 | round 1 APPROVE |
 | M1-635 | Queued interruptible request gives the sender no feedback until a worker frees | 2026-07-16 | round 1 APPROVE |
 | M1-634 | Concurrent interruptible dispatch so the in-flight guard and /stop are reachable over live transports | 2026-07-16 | round 2 APPROVE |
-| M1-633 | In-band contactId sourcing for --contact invites (D60) | 2026-07-16 | round 1 APPROVE |
 
 ---
 
@@ -863,8 +868,17 @@ M1-638 (done)
   └── M1-637 (abandoned) [see above]
 M1-639 (done)
 M1-640 (done)
-M1-641 (pending) ← runnable
-  ├── M1-642 (pending)
+M1-641 (done)
+  ├── M1-642 (pending) ← runnable
   └── M1-643 (abandoned)
 M1-644 (done)
+M1-645 (pending) ← runnable
+  ├── M1-647 (pending)
+  │     └── M1-648 (pending)
+  │           └── M1-649 (pending)
+  └── M1-648 (pending) [see above]
+M1-646 (pending) ← runnable
+  ├── M1-647 (pending) [see above]
+  └── M1-648 (pending) [see above]
+M1-650 (pending) ← runnable
 ```

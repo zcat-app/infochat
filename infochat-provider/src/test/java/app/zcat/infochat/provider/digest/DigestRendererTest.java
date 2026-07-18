@@ -25,7 +25,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Verifies that {@link DigestRenderer} wires the LLM summarizer pipeline
- * correctly: cluster → generate → sanitize → translate.
+ * correctly — cluster → categorize → generate → sanitize → translate — and
+ * renders the D62 category structure (uppercase headers, per-section item
+ * cap, closing affordance) deterministically.
  */
 class DigestRendererTest {
 
@@ -41,6 +43,9 @@ class DigestRendererTest {
         renderer.summaryProseGenerator = proseGenerator;
         renderer.llmOutputSanitizer = SanitizerTestDoubles.noAuditSanitizer();
         renderer.translationPipeline = newEnShortCircuitPipeline(bundleLoader);
+        renderer.digestCategorizer = newCategorizer(3);
+        renderer.bundleLoader = bundleLoader;
+        renderer.categoryItemCap = 12;
     }
 
     @Test
@@ -61,13 +66,112 @@ class DigestRendererTest {
                 "prose generator was invoked");
     }
 
+    @Test
+    void rendersUppercaseHeadersOrderedBySizeThenAlphaOtherLast() {
+        proseGenerator.setResponseText("story prose");
+        // EmptyEdgeSource → one singleton cluster per post, so tag counts
+        // are: security=4, ai=3, crypto=3 (all qualify at threshold 3) and
+        // one untagged cluster lands in Other.
+        List<Post> posts = List.of(
+                post("s1", "Sec 1", List.of("security")),
+                post("s2", "Sec 2", List.of("security")),
+                post("s3", "Sec 3", List.of("security")),
+                post("s4", "Sec 4", List.of("security")),
+                post("a1", "AI 1", List.of("ai")),
+                post("a2", "AI 2", List.of("ai")),
+                post("a3", "AI 3", List.of("ai")),
+                post("c1", "Crypto 1", List.of("crypto")),
+                post("c2", "Crypto 2", List.of("crypto")),
+                post("c3", "Crypto 3", List.of("crypto")),
+                post("u1", "Untagged", List.of()));
+
+        String result = renderer.render(posts, "en");
+
+        int security = result.indexOf("SECURITY NEWS");
+        int ai = result.indexOf("AI NEWS");
+        int crypto = result.indexOf("CRYPTO NEWS");
+        int other = result.indexOf("OTHER NEWS");
+        assertTrue(security >= 0 && ai >= 0 && crypto >= 0 && other >= 0,
+                "all four uppercase headers render: " + result);
+        assertTrue(security < ai, "largest category (security, 4 clusters) leads");
+        assertTrue(ai < crypto, "equal-size categories tie-break alphabetically (ai before crypto)");
+        assertTrue(crypto < other, "Other renders last");
+    }
+
+    @Test
+    void capsItemsPerSectionWithLocalizedMoreHint() {
+        renderer.categoryItemCap = 2;
+        proseGenerator.setResponseText("capped story prose");
+        List<Post> posts = List.of(
+                post("a1", "AI 1", List.of("ai")),
+                post("a2", "AI 2", List.of("ai")),
+                post("a3", "AI 3", List.of("ai")),
+                post("a4", "AI 4", List.of("ai")));
+
+        String result = renderer.render(posts, "en");
+
+        assertTrue(result.contains("+2 more — @mention me to see them"),
+                "capped section appends the localized overflow line: " + result);
+        assertEquals(2, proseGenerator.callCount(),
+                "prose is generated only for the clusters actually shown");
+    }
+
+    @Test
+    void appendsClosingAffordanceOncePerDigest() {
+        proseGenerator.setResponseText("affordance test prose");
+        List<Post> posts = List.of(
+                post("uid-1", "One", List.of("ai")),
+                post("uid-2", "Two", List.of("ai")),
+                post("uid-3", "Three", List.of("ai")));
+
+        String result = renderer.render(posts, "en");
+
+        String affordance =
+                "@mention me to go deeper on any story, or ask about a topic you don't see here.";
+        int first = result.indexOf(affordance);
+        assertTrue(first >= 0, "closing affordance present: " + result);
+        assertEquals(first, result.lastIndexOf(affordance), "affordance appears exactly once");
+        assertTrue(result.endsWith(affordance), "affordance is the digest's final line");
+    }
+
+    @Test
+    void renderTwiceProducesByteIdenticalSectionLayout() {
+        proseGenerator.setResponseText("deterministic prose");
+        // Exercises the full arithmetic (tie-break + fold-back + Other):
+        // ai and security both count 3; the dual-tagged post tie-breaks to
+        // ai, security folds (2 assigned < 3) into Other with the untagged.
+        List<Post> posts = List.of(
+                post("s1", "Sec 1", List.of("security", "ai")),
+                post("s2", "Sec 2", List.of("security")),
+                post("s3", "Sec 3", List.of("security")),
+                post("a1", "AI 1", List.of("ai")),
+                post("a2", "AI 2", List.of("ai")),
+                post("u1", "Untagged", List.of()));
+
+        String first = renderer.render(posts, "en");
+        String second = renderer.render(posts, "en");
+
+        assertEquals(first, second,
+                "same clusters + tags produce a byte-identical section layout");
+    }
+
     // ----- helpers ----------------------------------------------------------
 
+    private static DigestCategorizer newCategorizer(int minClusters) {
+        DigestCategorizer categorizer = new DigestCategorizer();
+        categorizer.categoryMinClusters = minClusters;
+        return categorizer;
+    }
+
     private static Post post(String uid, String title) {
+        return post(uid, title, List.of("crypto"));
+    }
+
+    private static Post post(String uid, String title, List<String> tags) {
         return new Post(
                 UUID.randomUUID(), uid, UUID.randomUUID(), "TestSrc",
                 title, "https://example.com/" + uid, "body",
-                Instant.now(), List.of("crypto"), List.of("unknown"));
+                Instant.now(), tags, List.of("unknown"));
     }
 
     /**
