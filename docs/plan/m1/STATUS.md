@@ -10,10 +10,10 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
-| escalated | 1 |
+| escalated | 0 |
 | done | 668 |
 | deferred | 0 |
 | abandoned | 17 |
@@ -44,7 +44,8 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-649 — blocked_by: M1-648 (escalated)
+- M1-648 — blocked_by: M1-645 (done), M1-646 (done), M1-647 (done), M1-654 (pending)
+- M1-649 — blocked_by: M1-648 (pending)
 - M1-652 — blocked_by: M1-642 (pending)
 
 ---
@@ -53,7 +54,8 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 | ID | Title | Trigger | Date |
 |---|---|---|---|
-| M1-648 | Semantic command-intent index with deterministic answer composition | ? | 2026-07-18 |
+
+_(none)_
 
 ---
 
@@ -872,17 +874,17 @@ M1-641 (done)
 M1-644 (done)
 M1-645 (done)
   ├── M1-647 (done)
-  │     └── M1-648 (escalated)
+  │     └── M1-648 (pending)
   │           └── M1-649 (pending)
-  └── M1-648 (escalated) [see above]
+  └── M1-648 (pending) [see above]
 M1-646 (done)
   ├── M1-647 (done) [see above]
-  └── M1-648 (escalated) [see above]
+  └── M1-648 (pending) [see above]
 M1-650 (done)
 M1-651 (done)
 M1-653 (done)
 M1-654 (pending) ← runnable
-  └── M1-648 (escalated) [see above]
+  └── M1-648 (pending) [see above]
 M1-655 (done)
 M1-656 (pending) ← runnable
 ```

@@ -1,7 +1,7 @@
 ---
 id: M1-648
 title: "Semantic command-intent index with deterministic answer composition"
-status: escalated
+status: pending
 created: 2026-07-18
 last_updated: 2026-07-18
 blocked_by:
@@ -9,7 +9,7 @@ blocked_by:
   - M1-646
   - M1-647
   - M1-654
-files_budget: 16
+files_budget: 21
 files_scope:
   - infochat-core/src/main/resources/db/migration/V60__doc_embedding.sql
   - infochat-provider/src/main/java/app/zcat/infochat/provider/help/CommandIntentIndex.java
@@ -19,14 +19,18 @@ files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatToolRegistry.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatToolDispatcher.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/CommandIntentSynonyms.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/bundles/cs.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/HelpLookupToolTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatToolRegistryTest.java
   - docs/spec/commands.md
   - docs/spec/llm.md
   - docs/spec/decisions.md
+  - docs/spec/security.md
+  - docs/design/05-llm-and-embeddings.md
 complexity: high
 risk: high
 round_cap: 3
@@ -59,6 +63,15 @@ out_of_scope:
   - >-
     Deprecating M1-647's synonym map. It remains the probation-reachable path
     and the seed corpus; this ticket adds a second, chat-only tier.
+  - >-
+    docs/spec/verification.md. M1-654 removes its duplicated tool-name
+    enumeration and repoints it at security.md's table as the single source of
+    truth; this ticket must not re-add an enumeration there. The only spec list
+    this ticket edits is security.md's table.
+  - >-
+    The closed-allowlist mechanism itself, and M1-654's parity guard. This
+    ticket adds one ROW to the spec table and one NAME to the registry; the
+    guard then proves the two agree. Do not modify, relax, or work around it.
 acceptance:
   - >-
     Migration V60 creates doc_embedding (doc_id TEXT PK, doc_kind TEXT,
@@ -109,79 +122,79 @@ acceptance:
     document the new tool and corpus. (Renumbered from D64 on 2026-07-18 —
     D64 was LANDED by M1-653 for an unrelated decision before this ticket
     reached it. See §Decision renumber in the body.)
+  - >-
+    docs/spec/security.md §Prompt-injection defenses gains a table row for the
+    new tool — name `helpLookup`, its free-text input, its output shape, and a
+    Notes entry recording the tier filter — placed INSIDE the
+    `<!-- tool-allowlist:begin -->` / `<!-- tool-allowlist:end -->` markers
+    M1-654 adds, so M1-654's
+    ChatToolAllowlistSpecParityTest.registryMatchesMarkedSpecTable stays green.
+    The registry key and the spec row's name must match byte-for-byte.
+  - >-
+    AUTHORIZED PRE-EXISTING TEST CHANGE —
+    ChatToolRegistryTest.registryContainsExactlySpecTools pins a six-name
+    Set.of and fails once ChatToolRegistry gains a 7th entry. Its expected set
+    becomes the SEVEN names (the existing six plus `helpLookup`). Nothing else
+    in that file changes, and the assertion stays an exact set equality — never
+    a containment check, a size check, or a removal.
+  - >-
+    CommandIntentSynonyms is reachable from the index builder. It is currently
+    `final class` (package-private) in provider.messaging with a private
+    INTENT_TO_COMMAND map, while files_scope places CommandIntentIndexBuilder in
+    provider.help — so seeding per acceptance item 2 requires widening the class
+    and exposing a read-only accessor. Widen no further than the builder needs;
+    the map stays immutable and is never mutated by the index.
   - mvn verify from the repo root is green
 test_plan:
   adds:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/HelpLookupToolTest.java
+  modifies:
+    - path: infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatToolRegistryTest.java
+      change: >-
+        registryContainsExactlySpecTools — the expected Set.of grows from six
+        names to seven (adds `helpLookup`). Exact-equality assertion retained.
   preserves:
     - all tests currently green on main
+    - >-
+      M1-654's ChatToolAllowlistSpecParityTest — it stays green only if the
+      security.md row and the registry key match exactly, which is the point.
 spec_refs:
   - docs/spec/commands.md §Chat mode
   - docs/spec/llm.md §Embedding pipeline
   - docs/spec/llm.md §Determinism boundary
 decision_refs:
   - D19
+  - D21
   - D54
   - D58
-clarity_check:
-  date: 2026-07-18
-  verdict: FAIL
-  warnings:
-    - >-
-      decision_refs (D19, D54, D58) does not list D64, the decision acceptance
-      item 8 asks this ticket to mint. Conventional (decision_refs lists
-      decisions relied on, not minted), but D64 may need to record the
-      tool-allowlist widening too.
-    - >-
-      Acceptance item 7 (three-phrasing end-to-end intent test) does not name an
-      exact test method, unlike items 2-6. Minor; still testable as written.
-  blockers:
-    - >-
-      files_scope (16 entries, exactly matching files_budget: 16 — zero slack)
-      omits docs/spec/security.md and docs/spec/verification.md.
-      ChatToolRegistry.java is in scope and carries the header comment "Holds the
-      closed six-tool allowlist for the chat agent. Additions or removals are
-      spec amendments (security.md §Prompt-injection defenses)"; security.md:278
-      confirms "The v1 list is closed at spec level (additions or removals are
-      spec amendments, not design tweaks)" and its per-tool table is the
-      byte-for-byte CI-parity source. Registering a 7th tool (HelpLookupTool,
-      acceptance items 4-6) therefore REQUIRES amending both spec files, and the
-      budget has no room for them. Fix: add both files to files_scope, raise
-      files_budget to at least 18, and add an acceptance item naming the new
-      security.md table row and the verification.md prose update.
-    - >-
-      No acceptance item, test_plan.modifies entry, or Notes/Out-of-scope text
-      authorizes updating the pre-existing test
-      ChatToolRegistryTest.registryContainsExactlySpecTools, which hard-asserts a
-      six-name Set.of and will fail once ChatToolRegistry gains a 7th entry.
-      Leaves the implementer choosing between an unauthorized test edit and a red
-      mvn verify (contradicting acceptance item 9). Fix: add an acceptance item /
-      test_plan.modifies entry naming the test and its new seven-name expected
-      set, including the exact registry key the new tool registers under.
-    - >-
-      (Found during post-verdict verification, NOT by the clarity subagent.)
-      CommandIntentSynonyms.java is declared `final class` — package-private, in
-      app.zcat.infochat.provider.messaging, with INTENT_TO_COMMAND `private
-      static final` and no public member anywhere in the file. Acceptance item 2
-      requires seeding intent documents "from CommandIntentSynonyms", but
-      files_scope places CommandIntentIndexBuilder in
-      app.zcat.infochat.provider.help — a different package, from which the class
-      is unreachable. Implementing item 2 therefore REQUIRES editing
-      CommandIntentSynonyms.java (widen the class and expose an accessor), and
-      that file is not in files_scope — only a prose mention in acceptance item
-      2. Fix: add
-      infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/CommandIntentSynonyms.java
-      to files_scope. Same class of coupling, already in scope and so NOT a
-      blocker: HelpTier, CommandHelp and the 41-entry CATALOGUE are
-      package-private members of HelpCommandHandler.java, which the tool must
-      also reach across the package boundary.
-    - >-
-      (Found during post-verdict verification.) files_scope omits
-      infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatToolRegistryTest.java,
-      the file blocker 2 requires modifying. Authorizing the edit in an
-      acceptance item is necessary but not sufficient — the changed file must
-      also be in files_scope and counted against files_budget.
+revisions:
+  - date: 2026-07-18
+    reason: >-
+      clarity-fail rework. The user chose `refine` from the escalation menu;
+      this was NOT a bounded self-refine, because the fix widens files_budget
+      and files_scope, which run.md excludes from self-refine. Four blockers,
+      all scope-AUTHORIZATION defects rather than design defects: the ticket
+      registers a 7th chat tool into a spec-closed allowlist without the files
+      or the acceptance language that requires. Every blocker was verified
+      against the cited file:line before refining, and one route around the
+      first was tested and rejected — a deterministic-only tool cannot bypass
+      the registry, since ChatToolDispatcher:140 rejects unregistered names and
+      :116 advertises to the model from that same set. docs/spec/verification.md
+      is deliberately NOT added to scope: the newly-filed M1-654 (now a blocker)
+      deletes its duplicated enumeration and repoints it at security.md, so this
+      ticket touches only security.md's table. Two blockers were found during
+      post-verdict verification, not by the clarity subagent.
+    prior_values: |
+      status: escalated. files_budget: 16, with files_scope holding exactly 16
+      entries — no docs/spec/security.md, no docs/design/05-llm-and-embeddings.md,
+      no CommandIntentSynonyms.java, no ChatToolRegistryTest.java.
+      acceptance had 9 items: the security.md table-row item, the AUTHORIZED
+      PRE-EXISTING TEST CHANGE item and the CommandIntentSynonyms-reachability
+      item did not exist. test_plan had no `modifies:` block and did not name
+      M1-654's parity test under `preserves`. decision_refs was [D19, D54, D58].
+      out_of_scope had 6 entries; the verification.md and closed-allowlist
+      boundaries did not exist. blocked_by gained M1-654 earlier, in 91bc5cd8.
 escalations:
   - date: 2026-07-18
     reason: clarity-fail
@@ -289,6 +302,22 @@ that ticket is a prerequisite and not superseded.
 The migration, the startup build path, and the tool wiring are three separable
 pieces; the sidecar should sequence them so the table and index land before the
 tool is registered.
+
+**The closed tool allowlist is a spec gate, not a code detail.** `ChatToolRegistry`'s
+header comment and `security.md` §Prompt-injection defenses both state the v1
+tool list is closed and that additions are spec amendments. Registering
+`helpLookup` therefore requires the security.md table row, and there is no way
+around it in code: `ChatToolDispatcher:140` rejects any name absent from
+`toolNames()`, and `:116` advertises tools to the model from that same set, so a
+"deterministic-only" tool is not a loophole. M1-654, now a blocker, turns that
+requirement into a build failure instead of something a reviewer must notice.
+
+**Package boundaries the acceptance items imply.** `CommandIntentSynonyms` is
+package-private in `provider.messaging` with a private map, and `HelpTier`,
+`CommandHelp` and the 41-entry `CATALOGUE` are package-private members of
+`HelpCommandHandler`. The new `provider.help` and `provider.chat.tool` classes
+sit outside that package, so both need a visibility widening. Widen the minimum
+the callers need — this is not licence to make the catalogue a public API.
 
 ## Decision renumber — D64 → D66 (2026-07-18)
 
