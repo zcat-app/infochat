@@ -121,6 +121,29 @@ class ApproveGroupCommandHandlerTest {
                 "non-admin /approve-group must write no APPROVE_GROUP audit row");
     }
 
+    // ----- (a') Non-admin + malformed id → admin_only, no token echo -------
+    // M1-657: the admin gate must precede parseGroupId. A non-admin caller
+    // supplying a non-UUID argument (here the copy-pasteable "/grant-admin")
+    // must be stopped by error.admin_only and must NOT receive the
+    // error.group_not_found reply, which interpolates the raw argument —
+    // the r2 redteam finding on M1-656.
+
+    @Test
+    void approveByNonAdminMalformedIdReturnsAdminOnlyWithoutEcho() throws Exception {
+        String actor = PREFIX + "nonAdmin-reflect";
+        seedUser( ADAPTER, actor, false, false);
+        inboundContext.setSenderContactId(actor);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/approve-group /grant-admin");
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY), reply.text(),
+                "non-admin /approve-group must surface error.admin_only before parsing");
+        assertFalse(reply.text().contains("grant-admin"),
+                "the admin-gated reply must not reflect the attacker-supplied token");
+    }
+
     // ----- (b) Unknown group_id → error.group_not_found --------------------
 
     @Test

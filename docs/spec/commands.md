@@ -265,16 +265,16 @@ them to the marked region — doing so would red the build.
 
   Second, a number of **bot-admin-only** errors still interpolate a
   raw token (`error.audit.unknown_action`,
-  `error.quarantine.invalid_id`, `error.invite.unknown_adapter` and
-  others). This list is deliberately
+  `error.quarantine.invalid_id`, `error.invite.unknown_adapter`,
+  `error.group_not_found` and others). This list is deliberately
   **not** exhaustive and must not be read as one: the binding rule is
   the tier, not the enumeration. Reaching these requires bot admin, so
   the reader of any reflected text is already an admin and the
-  social-engineering value is near zero. (Known violation:
-  `error.group_not_found` is currently reachable below bot admin,
-  because `/approve-group` reflects its unparsed argument before its
-  admin gate — an authorization-ordering defect tracked as M1-657 and
-  excluded from the bot-admin-only claim until that fix lands.) **Any friendly error
+  social-engineering value is near zero. Every such reply is gated by
+  an `is_admin` check that PRECEDES the reflecting parse — the gate's
+  position in control flow, not the command's catalogue tier, is what
+  makes the property hold (M1-657 fixed `/approve-group`, whose gate
+  had sat after the parse). **Any friendly error
   reachable below bot admin must not reflect inbound text** — that is
   the property to check when adding a command, and enumerating today's
   exceptions would only rot. Reflection, not slash-synthesis, is the property

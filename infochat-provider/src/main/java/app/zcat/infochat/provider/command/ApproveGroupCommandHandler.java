@@ -112,8 +112,18 @@ public class ApproveGroupCommandHandler implements CommandHandler {
         // Step 1+2 — actor resolution + admin gate. Fail fast before
         // parsing or opening any transaction. Group scope reaches here
         // identically to DM scope because senderContactId() carries the
-        // sender id regardless of scope shape.
+        // sender id regardless of scope shape. The gate MUST precede the
+        // parse: error.group_not_found interpolates the raw argument, so
+        // gating after it would reflect an attacker's token to any
+        // non-admin caller (M1-657; sibling RejectGroupCommandHandler
+        // orders it the same way, "Admin gate has precedence"). The in-tx
+        // SELECT FOR UPDATE re-check in executeApprove still closes the
+        // TOCTOU window (M1-046-redteam); this pre-gate stops the reflect.
         if (adapter == null || callerContactId == null) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
+        }
+        Optional<UserRow> actorOpt = lookupActor(adapter, callerContactId);
+        if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
 
@@ -212,6 +222,11 @@ public class ApproveGroupCommandHandler implements CommandHandler {
         return reply(scope, MessageFormat.format(
                 bundleLoader.get(BundleKeys.REPLY_APPROVE_GROUP_SUCCESS, inboundContext.effectiveLanguage()),
                 groupId));
+    }
+
+    private Optional<UserRow> lookupActor(String adapter, String contactId) {
+        return userRepository.findByAdapterAndContactId(adapter, contactId)
+                .map(u -> new UserRow(u.id(), u.contactId(), u.isAdmin(), u.isBanned()));
     }
 
     private Optional<UserRow> lookupActorForUpdate(Connection conn,

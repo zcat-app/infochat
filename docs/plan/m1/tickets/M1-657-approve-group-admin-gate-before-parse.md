@@ -1,7 +1,7 @@
 ---
 id: M1-657
 title: "Gate /approve-group: admin check before group-id parse"
-status: pending
+status: done
 created: 2026-07-18
 last_updated: 2026-07-18
 blocked_by:
@@ -12,7 +12,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/ApproveGroupCommandHandlerTest.java
   - docs/spec/commands.md
 complexity: low
-risk: low
+risk: medium
 round_cap: 2
 security_relevant: true
 migration_touch: false
@@ -89,12 +89,45 @@ spec_refs:
   - docs/spec/commands.md §Discovery
 decision_refs:
   - D47
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-18
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 63
+      removed: 18
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-07-18
+    verdict: CLEAN
+    base: d07b2a95
+    head: working tree on m1/M1-657 (r1)
+    verdict_file: docs/plan/m1/redteam/M1-657-2026-07-18.md
+    out_of_model_count: 0
+    note: |
+      Pre-commit audit of the gate-ordering fix. Confirms the is_admin
+      gate precedes parseGroupId, closing the M1-656 r2 finding; the in-tx
+      FOR UPDATE re-check is retained. No findings, no out-of-model items.
+clarity_check:
+  date: 2026-07-18
+  verdict: WARN
+  warnings:
+    - >-
+      COMPLEXITY-RISK-CALIBRATED: risk: low claimed on a ticket whose
+      subject is a bot-admin authorization-ordering defect
+      (security_relevant: true, from a redteam FINDINGS verdict).
+      Accepted: risk raised to medium before start.
+  blockers: []
 ---
 
 # M1-657: Gate /approve-group: admin check before group-id parse
