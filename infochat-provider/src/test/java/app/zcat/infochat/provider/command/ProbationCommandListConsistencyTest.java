@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -135,6 +136,51 @@ class ProbationCommandListConsistencyTest {
         Set<String> canonicalNames = new HashSet<>(commandPermissions.probationAllowedCommandNames());
         assertEquals(canonicalNames, helpProbationVisibleSet(),
                 "/help probation-visible command set must equal the canonical probation set");
+    }
+
+    /**
+     * The M1-645 D3 invariant, the mirror image of the three tests above: it is
+     * not enough that the welcome LISTS the right commands — it must also not
+     * turn around and deny one. The welcome rendered {@code /summary} into the
+     * canonical list and then said it "unlocks when probation ends," so the
+     * same message both offered and withheld it. Red before this ticket's
+     * bundle-value fix, green after.
+     */
+    @Test
+    void welcomeReplyDoesNotContradictProbationAllowList() {
+        String canonicalList = commandPermissions.renderProbationCommandList();
+        for (String lang : List.of("en", "cs")) {
+            String unlockClause = unlockClauseOf(renderWelcome(lang), canonicalList, lang);
+            // The superset of ALLOWED (it adds the enabled asset family), so a
+            // clause naming any probation-available command is caught.
+            for (String command : commandPermissions.probationAllowedCommandNames()) {
+                assertFalse(unlockClause.contains("/" + command),
+                        lang + " welcome must not say /" + command + " unlocks when probation ends —"
+                                + " it is available DURING probation; got clause: " + unlockClause);
+            }
+        }
+    }
+
+    /**
+     * The welcome's "unlocks when probation ends" clause: the line immediately
+     * after the one rendering the canonical command list. Located structurally
+     * rather than by keyword so one lookup serves both locales — the values
+     * differ in wording but share the line order (greeting / probation intro /
+     * {@code {0}} list / unlock clause / setup hint).
+     */
+    private String unlockClauseOf(String welcome, String canonicalList, String lang) {
+        List<String> lines = List.of(welcome.split("\n"));
+        int listLineIndex = -1;
+        for (int i = 0; i < lines.size(); i++) {
+            if (lines.get(i).contains(canonicalList)) {
+                listLineIndex = i;
+                break;
+            }
+        }
+        assertTrue(listLineIndex >= 0 && listLineIndex + 1 < lines.size(),
+                lang + " welcome must render the canonical list on a line followed by the unlock clause;"
+                        + " got: " + welcome);
+        return lines.get(listLineIndex + 1);
     }
 
     private String renderWelcome(String lang) {

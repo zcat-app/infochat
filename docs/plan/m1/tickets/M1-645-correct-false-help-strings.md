@@ -1,9 +1,38 @@
 ---
 id: M1-645
 title: "Correct three help/welcome strings that misstate the real command surface"
-status: pending
+status: done
 created: 2026-07-18
 last_updated: 2026-07-18
+clarity_check:
+  date: 2026-07-18
+  verdict: WARN
+  warnings:
+    - >-
+      docs/design/03-commands.md is in files_scope and the Notes section directs
+      updating it "in the same diff," but no acceptance item verifies it, and the
+      design note's §3.11 Mode 1 text is already substantially stale (pre-D59
+      wording, and no mention of /summary in its probation-unlock line at all).
+    - >-
+      The Notes section's list of pre-existing tests that may need fixture updates
+      ends in an open-ended "and others." 11 files reference the affected
+      BundleKeys constants (4 more than the 7 named), though none currently
+      hardcode the false substrings this ticket corrects.
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-18
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 189
+      removed: 17
 files_budget: 8
 files_scope:
   - infochat-provider/src/main/resources/bundles/en.properties
