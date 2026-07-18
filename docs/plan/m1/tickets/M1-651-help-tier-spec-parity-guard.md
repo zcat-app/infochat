@@ -1,28 +1,139 @@
 ---
 id: M1-651
 title: "Guard HelpTier against the spec's closed bot-admin list"
-status: pending
+status: done
 created: 2026-07-18
 last_updated: 2026-07-18
+revisions:
+  - date: 2026-07-18
+    reason: refine ticket spec (round 2 rework) — redteam re-audit, spec designation
+    prior_values: |
+      round_cap was 2 (now 3), files_budget was 3 (now 4), and files_scope held
+      only the two provider test files (docs/spec/commands.md added). The
+      round-2 re-audit found the remediation's group-admin tier derivation
+      rests on a prose qualifier the spec never designates as tier-bearing;
+      closing that honestly requires amending the spec, which is a third file
+      and a third review round. Two acceptance items added (spec designation;
+      structural anchoring + honest javadoc + non-misdirecting failure
+      messages). out_of_scope is UNCHANGED and still forbids any file under
+      src/main/ — a docs/spec/ edit is not production code, and this ticket
+      still changes no HelpTier value and no permission gate.
+  - date: 2026-07-18
+    reason: refine ticket spec (round 1 rework) — redteam-finding scope widening
+    prior_values: |
+      out_of_scope carried a first bullet excluding "the group-admin bullet of
+      the spec's closed privileged-tier list", on the stated grounds that its
+      entries map to TWO HelpTier values depending on an "in groups" qualifier
+      and "a correct mapping needs a design decision this ticket does not
+      make". Redteam finding 2 showed that exclusion leaves the group-admin
+      half of the same closed list unguarded against exactly the mis-tier slip
+      the bot-admin half exists to catch. The deferred design decision was
+      then verified DETERMINATE — the spec's own "in groups" qualifier is the
+      discriminator and matches CATALOGUE for all 8 entries — so the bullet was
+      dropped and a corresponding acceptance item added. A second acceptance
+      item was added for redteam finding 1 (parser subset-truncation).
+      files_budget unchanged at 3: the estimate is still 2 implementation
+      files, both already in files_scope. No other frontmatter changed.
+redteam_findings:
+  - date: 2026-07-18
+    category: INFO-LEAK
+    severity: low
+    promise: |
+      security.md §LLM output sanitizer, "Match-set derivation": the sanitizer's
+      match set is derived from the closed privileged-tier list at spec level,
+      making "admin commands never leak through LLM output" a structural
+      property rather than a discipline. commands.md:1295-1302 commits that the
+      closed set "cannot silently shrink across versions". The diff makes
+      HelpTier a second consumer of that same closed list, but derives it in a
+      way that CAN silently shrink.
+    gap: |
+      parseBotAdminBaseCommands' only completeness check is a non-emptiness
+      assertion, which prevents TOTAL disablement but not PARTIAL truncation.
+      The bullet-end detection breaks on the first line whose strip() is empty,
+      starts with "- ", or starts with "#", so any of those appearing
+      mid-bullet after a future spec reformat silently reduces the guarded set
+      to a non-empty subset and the test still passes. The sibling parser in
+      LlmOutputSanitizerTest is immune because its consumer asserts
+      BIDIRECTIONAL equality against the hardcoded runtime CLOSED_LIST; the new
+      guard has no reverse-direction check and deliberately declines to pin a
+      count, so subset-truncation is indistinguishable from a correct parse.
+  - date: 2026-07-18
+    category: INFO-LEAK
+    severity: low
+    promise: |
+      security.md §Authorization model (D9) treats both admin tiers as
+      load-bearing, and §LLM output sanitizer states every command in the
+      bot-admin AND group-admin tiers of the closed list is in the sanitizer
+      set. The threat model treats both tiers of the closed privileged-tier
+      list as equally load-bearing; the diff derives a guard from one tier only.
+    gap: |
+      The parse anchors solely on "**Bot-admin only:**" and breaks at the next
+      "- " line, which is exactly the group-admin bullet. That bullet's eight
+      entries are never compared against HelpTier.GROUP_ADMIN /
+      USER_OR_GROUP_ADMIN. A spec amendment adding a new group-admin command
+      whose CATALOGUE entry is typed HelpTier.USER passes every existing guard,
+      and any plain member of an approved group can then read its short line and
+      full usage block via /help — the identical mistake the bot-admin half of
+      this diff exists to catch.
+escalations:
+  - date: 2026-07-18
+    reason: redteam-finding
+    reviewer_verdict_excerpt: |
+      RED-TEAM VERDICT: FINDINGS — critical=0 high=0 medium=0 low=2,
+      out-of-model=3. Both findings are INFO-LEAK/low. Full verdict:
+      docs/plan/m1/redteam/M1-651-2026-07-18.md
+      (Round-1 code review was APPROVE, 0 rework items, all six checks PASS.)
+  - date: 2026-07-18
+    reason: redteam-finding
+    reviewer_verdict_excerpt: |
+      RE-AUDIT after the round-1 remediation. RED-TEAM VERDICT: FINDINGS —
+      critical=0 high=0 medium=0 low=2, out-of-model=4. Both ORIGINAL findings
+      are confirmed CLOSED by this audit. The two new findings concern the
+      remediation's own soundness: (A) the "in groups" prose qualifier is used
+      as a tier discriminator although the spec designates the closed list as
+      membership-bearing only and relegates per-actor splits to design tier —
+      so a NEW group-only command authored in the bullet's dominant house style
+      would be derived as USER_OR_GROUP_ADMIN and blessed by the guard, and the
+      failure message misdirects remediation at the enum rather than the prose;
+      (B) a residual narrow truncation window — a line inside the bot-admin
+      bullet that merely MENTIONS the bolded string "**Group-admin" ends the
+      region early — plus a javadoc that overstates the guarantee as "it can
+      never degrade quietly". Full verdict:
+      docs/plan/m1/redteam/M1-651-2026-07-18-r2.md
+      (Round-2 code review was APPROVE, 0 rework items, all six checks PASS,
+      must-shrink mandate verified against commit 4119d0ed.)
+clarity_check:
+  date: 2026-07-18
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 3
+    date: 2026-07-18
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 981
+      removed: 17
 blocked_by: []
 remediates: M1-646
-files_budget: 3
+files_budget: 4
 files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/CommandCatalogueParityTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/HelpCommandHandlerTest.java
+  - docs/spec/commands.md
 complexity: medium
 risk: low
-round_cap: 2
+round_cap: 3
 security_relevant: true
 migration_touch: false
 out_of_scope:
-  - >-
-    The group-admin bullet of the spec's closed privileged-tier list. Its
-    entries map to TWO different HelpTier values depending on an "in groups"
-    qualifier (/group-timezone and /digest are GROUP_ADMIN; "/add-source in
-    groups" is USER_OR_GROUP_ADMIN), so a correct mapping needs a design
-    decision this ticket does not make. Bot-admin is the security-relevant
-    axis and maps one-to-one.
   - >-
     Changing any HelpTier value in CATALOGUE, or any handler's permission
     gate. If the new guard reveals an existing mis-tier, ESCALATE — do not
@@ -77,6 +188,47 @@ acceptance:
     strength of the pre-existing
     HelpCommandHandlerTest.helpDetailOfCommandHiddenFromCallerIsUnknownCommandError,
     which already asserts the /ban signature does not leak.
+  - >-
+    parseBotAdminBaseCommands bounds its scan region by the group-admin
+    bullet label rather than by "first line starting with '- '", and asserts
+    that terminator was found. A blank line or nested sub-bullet appearing
+    mid-bullet after a spec reformat must NOT silently truncate the guarded
+    set; a missing terminator must fail loudly. Closes redteam finding 1
+    (reproduced: a mid-bullet blank line truncated the guarded set 19 -> 8
+    and a nested "- " sub-bullet truncated it to 9, both passing the
+    non-emptiness vacuity guard).
+  - >-
+    CommandCatalogueParityTest.groupAdminSpecCommandsCarryGroupTier passes —
+    for every base command in the "Group-admin (or bot admin acting in the
+    group):" bullet of the same closed list, the CATALOGUE entry carries
+    HelpTier.USER_OR_GROUP_ADMIN when the spec token is qualified "in groups"
+    and HelpTier.GROUP_ADMIN when it is bare. This is the design decision the
+    original out_of_scope bullet 1 deferred; it is determinate — 6 qualified
+    (add-source, unfollow-source, follow-all-sources, lang, follow-tag,
+    unfollow-tag) and 2 bare (group-timezone, digest), matching CATALOGUE
+    exactly today. Closes redteam finding 2.
+  - >-
+    docs/spec/commands.md §Permission model DESIGNATES the "in groups"
+    qualifier as tier-bearing, so the guard's derivation rests on a spec
+    commitment rather than on incidental house style. The amendment states
+    that a qualified entry means "any user in DM, group admin in a group"
+    and a bare entry means group-only, and that adding or removing the
+    qualifier is therefore a tier change — a spec amendment, like adding or
+    removing a command. Placed AFTER the closing "The full per-actor-tier"
+    paragraph so it falls outside both closed-list parse regions (this
+    guard's and LlmOutputSanitizerTest.parseSpecClosedList's) and cannot
+    perturb either token set. Closes redteam round-2 finding A.
+  - >-
+    closedListRegion anchors STRUCTURALLY: each label must match at the START
+    of a stripped line, and the region must contain no other list item, so a
+    prose mention of "**Group-admin" inside the bot-admin bullet can no
+    longer terminate the region early. A structural intrusion fails LOUDLY
+    with a message naming the offending line rather than silently yielding a
+    subset. The javadoc states the guarantee precisely instead of the
+    absolute "it can never degrade quietly". The mis-tier failure messages
+    name BOTH sides (spec prose and CATALOGUE enum) as candidate causes
+    rather than directing remediation at the enum. Closes redteam round-2
+    finding B and its misdirection sub-point.
   - mvn -pl infochat-provider -am verify is green
 test_plan:
   modifies:

@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -377,12 +378,22 @@ class HelpCommandHandlerTest {
         String deniedReply = productionBundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY);
         HelpCommandHandler nonAdmin = handlerFor(dm(false, false, false), productionBundleLoader);
 
-        for (String hidden : List.of("pending", "recover-pool")) {
+        for (Map.Entry<String, String> hiddenCommand : List.of(
+                Map.entry("pending", BundleKeys.HELP_CMD_PENDING_USAGE),
+                Map.entry("recover-pool", BundleKeys.HELP_CMD_RECOVER_POOL_USAGE))) {
+            String hidden = hiddenCommand.getKey();
             String body = nonAdmin.handle(new ScopeRef.Dm("alice"), "/help " + hidden).text();
             assertTrue(body.contains("Unknown command `/" + hidden + "`"),
                     "hidden /" + hidden + " must resolve to the unknown-command reply; got: " + body);
             assertFalse(body.contains(deniedReply),
                     "hidden /" + hidden + " must not return a permission-denied reply; got: " + body);
+            // The reply shape matching is necessary but not sufficient: the
+            // usage block carries the command's full argument syntax, which is
+            // the recon payload a hidden command must never hand a non-admin.
+            // Same strength as helpDetailOfCommandHiddenFromCallerIsUnknownCommandError
+            // already asserts for /ban's signature.
+            assertFalse(body.contains(productionBundleLoader.get(hiddenCommand.getValue())),
+                    "hidden /" + hidden + " must not leak its usage block; got: " + body);
         }
 
         // The nonexistent-name control: a name no handler serves produces the

@@ -1322,6 +1322,20 @@ are allowed to non-privileged users, plus the per-flag splits like
 **closed set above** is the spec-level commitment that the
 sanitizer and probation classifier read from.
 
+**The "in groups" qualifier in the group-admin bullet is
+tier-bearing, not prose.** An entry written *with* the qualifier is
+a **dual** command: any user may invoke it in a DM, and only a group
+admin (or bot admin) may invoke it inside a group. An entry written
+*without* it is **group-only**: it is never offered in DM at all.
+The two are not interchangeable — they differ in who may see the
+command exists, so the qualifier is part of the closed list's
+authorization content. Adding or removing it on an existing entry is
+therefore a **tier change**, and like adding or removing a command it
+is a spec amendment, not a copy-edit. Discovery surfaces this
+distinction directly: `/help` filters the catalogue by tier, so
+mislabelling a group-only command as dual advertises it — name and
+full argument syntax — to every non-probation user in DM.
+
 ## Chat mode
 
 Anything not starting with `/` is routed to the chat agent. The agent has a
