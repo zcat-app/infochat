@@ -33,6 +33,7 @@ import java.io.IOException;
 import java.net.http.HttpClient;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -74,11 +75,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * SimpleXAdapter} and {@link SignalAdapter} beans dial the fakes when
  * {@link MessagingStartup} reflectively calls each adapter's
  * {@code start()} at {@code @PostConstruct}. The subprocess binary is
- * {@code /bin/sleep} — it doesn't accept the adapter-defined arg list
- * and exits immediately, but {@code adapter.start()} returns success
- * because the WS / TCP probe to the fake's bound port succeeds; the
- * subprocess supervisors' WARN spam is suppressed via
- * {@code src/test/resources/application.properties}.
+ * {@link #standInDaemonBinary}, a generated script that ignores the
+ * adapter-defined arg list and STAYS ALIVE for the whole class;
+ * {@code adapter.start()} succeeds because the WS / TCP probe hits the
+ * fake's bound port. The stand-in MUST NOT exit: a dying child (the
+ * retired {@code /bin/sleep} pattern, which choked on the arg list and
+ * exited code 1 at launch) switches the supervisors' crash recovery ON
+ * during the test body — each supervised respawn fires the adapters'
+ * reconnect path, which disconnects the LIVE JSON-RPC / WebSocket
+ * connection mid-test, and a liveness-probe frame written into that
+ * severed window is absorbed without retry and never reaches the fake.
+ * That churn is the root cause of the recurring
+ * "received no outbound JSON-RPC within 2000 ms" flake (M1-655; prior
+ * barrier-only fixes M1-540 / M1-541 could not cover it because the
+ * churn severs the connection AFTER any readiness barrier passes).
  *
  * <p><b>Crash-test independence.</b> The {@code simpleXCrashDoesNotAffectSignal}
  * and {@code signalCrashDoesNotAffectSimpleX} tests construct FRESH
@@ -159,6 +169,16 @@ class MultiAdapterProductionIT {
     // static-init block as the fakes because Profile.getConfigOverrides()
     // runs after class load.
     static final Path sharedSignalStoreDir;
+    // Stand-in daemon binary for BOTH adapters (CDI Profile wiring and the
+    // per-test factories): a generated script that ignores the
+    // adapter-supplied signal-cli / simplex-chat argument list and blocks.
+    // It must stay alive — see the class javadoc §Profile wiring for the
+    // reconnect-churn flake a dying stand-in causes (M1-655). The sleep is
+    // BOUNDED (1 h, far past any class runtime) rather than infinite
+    // because MessagingStartup never stops the CDI-wired adapters, so the
+    // Profile-path children are never SIGTERMed and must self-reap; the
+    // factory-path children are reaped by close() in each test's finally.
+    static final Path standInDaemonBinary;
     // SimpleXAdapter.start() no longer derives a bot queue address (the
     // /show_address derivation was removed in M1-518; group @-mention
     // recognition reads the per-group memberId per-frame, D51), so the shared
@@ -172,6 +192,15 @@ class MultiAdapterProductionIT {
             sharedSignalStoreDir = Files.createTempDirectory("m1-109-signal-store-");
             SignalAccountStoreFixture.writeStore(sharedSignalStoreDir,
                     "m1-109-test-account", "00000000-0000-0000-0000-000000000002");
+            standInDaemonBinary = Files.createTempFile("m1-109-daemon-standin-", ".sh");
+            Files.writeString(standInDaemonBinary,
+                    "#!/bin/sh\n"
+                            + "# m1-109 stand-in for signal-cli / simplex-chat: ignore the\n"
+                            + "# adapter's args and stay alive so the subprocess supervisors\n"
+                            + "# never fire restart->reconnect churn mid-test (M1-655).\n"
+                            + "exec sleep 3600\n");
+            Files.setPosixFilePermissions(standInDaemonBinary,
+                    PosixFilePermissions.fromString("rwx------"));
         } catch (IOException e) {
             throw new ExceptionInInitializerError(e);
         }
@@ -503,15 +532,17 @@ class MultiAdapterProductionIT {
     // ----- per-test adapter factories ----------------------------------------
 
     private static SimpleXAdapter newSimpleXAdapter(FakeSimpleXProcess fake) {
-        // /bin/sleep stands in for the simplex-chat binary: it ignores
-        // the adapter's argument list and exits non-zero on launch.
-        // SimpleXSubprocess restarts it asynchronously up to its crash
-        // cap; the supervisor noise is suppressed via
-        // src/test/resources/application.properties. The adapter's
-        // start() waits on the WS port reaching ready and connects to
-        // the fake (which IS bound and listening), so start() returns
-        // success and the fake observes the WS handshake.
-        SimpleXConfig cfg = new SimpleXConfig("/bin/sleep", "/tmp", fake.port());
+        // standInDaemonBinary stands in for the simplex-chat binary: it
+        // ignores the adapter's argument list and STAYS ALIVE, so
+        // SimpleXSubprocess sees a healthy child and never fires the
+        // restart->reconnect churn that severed the live WebSocket
+        // mid-test (M1-655 — see the class javadoc §Profile wiring).
+        // The adapter's start() waits on the WS port reaching ready and
+        // connects to the fake (which IS bound and listening), so
+        // start() returns success and the fake observes the WS
+        // handshake.
+        SimpleXConfig cfg = new SimpleXConfig(
+                standInDaemonBinary.toString(), "/tmp", fake.port());
         return new SimpleXAdapter(
                 cfg,
                 HttpClient.newHttpClient(),
@@ -526,14 +557,14 @@ class MultiAdapterProductionIT {
     }
 
     private static SignalAdapter newSignalAdapter(FakeSignalCli fake) {
-        // Same /bin/sleep stand-in pattern as SimpleX. SignalAdapter.start()
-        // derives the bot ACI from the shared account-store fixture, then
-        // awaits the daemon endpoint via TCP connect probe; the fake
-        // accepts on its bound port so the probe succeeds and the
-        // SignalJsonRpcClient connects.
+        // Same stay-alive stand-in pattern as SimpleX (M1-655).
+        // SignalAdapter.start() derives the bot ACI from the shared
+        // account-store fixture, then awaits the daemon endpoint via TCP
+        // connect probe; the fake accepts on its bound port so the probe
+        // succeeds and the SignalJsonRpcClient connects.
         return new SignalAdapter(
-                "/bin/sleep", sharedSignalStoreDir.toString(), "m1-109-test-account",
-                fake.endpoint());
+                standInDaemonBinary.toString(), sharedSignalStoreDir.toString(),
+                "m1-109-test-account", fake.endpoint());
     }
 
     // ----- helpers (mirrored from M1-105's MultiAdapterIsolationIT) ---------
@@ -657,12 +688,14 @@ class MultiAdapterProductionIT {
             // .endpoint entries point at the shared in-process fakes so
             // adapter.start() (called reflectively by MessagingStartup at
             // @PostConstruct) connects to the fakes' bound ephemeral
-            // ports; /bin/sleep is the binary placeholder and the
-            // supervisor's launch-failure WARNs are suppressed via
-            // src/test/resources/application.properties.
+            // ports; the stay-alive standInDaemonBinary is the binary
+            // placeholder (a dying one would put the supervisors'
+            // restart->reconnect churn mid-test, M1-655 — see the class
+            // javadoc §Profile wiring).
             return Map.ofEntries(
                     Map.entry("infochat.adapters", "simplex,signal"),
-                    Map.entry("infochat.adapters.simplex.binary", "/bin/sleep"),
+                    Map.entry("infochat.adapters.simplex.binary",
+                            standInDaemonBinary.toString()),
                     Map.entry("infochat.adapters.simplex.data-dir", "/tmp"),
                     Map.entry("infochat.adapters.simplex.ws-port",
                             String.valueOf(sharedFakeSimplex.port())),
@@ -672,7 +705,8 @@ class MultiAdapterProductionIT {
                     // SimpleXIdentity.isWellFormed (M1-208).
                     Map.entry("infochat.adapters.simplex.admin",
                             "M1109SimplexBootstrapAdminQueueAddr000000000A"),
-                    Map.entry("infochat.adapters.signal.binary", "/bin/sleep"),
+                    Map.entry("infochat.adapters.signal.binary",
+                            standInDaemonBinary.toString()),
                     Map.entry("infochat.adapters.signal.data-dir",
                             sharedSignalStoreDir.toString()),
                     Map.entry("infochat.adapters.signal.account", "m1-109-test-account"),

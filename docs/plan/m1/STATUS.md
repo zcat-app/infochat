@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 665 |
+| done | 666 |
 | deferred | 0 |
 | abandoned | 17 |
 | **total** | **689** |
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-642 — Per-category digest delivery + optional roll-up summaries (complexity: high, risk: medium)
 - M1-647 — Intent-aware command suggestions: synonyms + non-prefix matching on the /help path (complexity: medium, risk: medium)
 - M1-653 — Correct the outbound delivery contracts: correlationId javadoc and §6.3.5 (complexity: low, risk: low)
-- M1-655 — Fix MultiAdapterProductionIT flake: stand-in daemon must not die and trigger reconnect churn (complexity: low, risk: low)
 
 ---
 
@@ -66,6 +65,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-655 | Fix MultiAdapterProductionIT flake: stand-in daemon must not die and trigger reconnect churn | 2026-07-18 | round 1 APPROVE |
 | M1-651 | Guard HelpTier against the spec's closed bot-admin list | 2026-07-18 | round 3 APPROVE |
 | M1-650 | Sentinel-lint test endpoints | 2026-07-18 | round 1 APPROVE |
 | M1-646 | Add /pending + /recover-pool to the help catalogue and guard catalogue coverage | 2026-07-18 | round 1 APPROVE |
@@ -75,7 +75,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-640 | Pin the /retry --digest non-interruptible classification with a test | 2026-07-17 | round 1 APPROVE |
 | M1-639 | Settle the inline-dispatch cap exclusion and couple the dispatch knobs at boot | 2026-07-17 | round 1 APPROVE |
 | M1-638 | Model the interruptible turn lifecycle in one registry | 2026-07-17 | round 1 APPROVE |
-| M1-636 | Per-user cap on concurrent interruptible requests across scopes | 2026-07-17 | round 2 APPROVE |
 
 ---
 
@@ -884,5 +883,5 @@ M1-646 (done)
 M1-650 (done)
 M1-651 (done)
 M1-653 (pending) ← runnable
-M1-655 (pending) ← runnable
+M1-655 (done)
 ```
