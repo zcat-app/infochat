@@ -185,7 +185,13 @@ public final class BundleKeys {
     /** Shared "Examples" section header for every {@code /help <command>} detail block. */
     public static final String HELP_DETAIL_EXAMPLES_HEADER = "help.detail.examples.header";
 
-    /** Unknown {@code /help <command>} argument — friendly error with fuzzy suggestions drawn only from the caller-visible command set. */
+    /**
+     * Unknown command (either {@code /help <command>} or a bare unrecognized slash) that HAS a
+     * close match — suggestions drawn only from the caller-visible command set. Interpolates the
+     * suggestions only, never the requested name: this template used to render the name as
+     * <code>`/{0}`</code>, which supplied the slash and turned an inbound word into a
+     * copy-pasteable command in bot output (M1-647).
+     */
     public static final String ERROR_HELP_UNKNOWN_COMMAND = "error.help.unknown_command";
 
     /** {@code /help} usage detail. */

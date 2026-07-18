@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -308,12 +309,149 @@ class HelpCommandHandlerTest {
         String body = handlerFor(dm(false, false, false), productionBundleLoader)
                 .handle(new ScopeRef.Dm("alice"), "/help summry").text();
 
-        assertTrue(body.contains("Unknown command `/summry`"),
-                "unknown reply must echo the requested name; got: " + body);
-        assertTrue(body.contains("/summary"),
-                "fuzzy suggestions must offer the close match /summary; got: " + body);
+        // M1-647 strengthened this from "contains the echoed name" to full
+        // equality: the reply must be EXACTLY the suggestion template, which
+        // simultaneously pins the suggestion and proves nothing else (notably
+        // the requested name) leaked into it.
+        assertEquals(MessageFormat.format(
+                        productionBundleLoader.get(BundleKeys.ERROR_HELP_UNKNOWN_COMMAND),
+                        "/summary"),
+                body,
+                "unknown reply must be the suggestion template naming /summary; got: " + body);
+        assertFalse(body.contains("summry"),
+                "the requested name must not appear in the reply; got: " + body);
         assertTrue(body.contains("/help"),
                 "unknown reply must point back at /help; got: " + body);
+    }
+
+    @Test
+    void suggestsUnfollowSourceForMute() {
+        // M1-647: "mute" shares no prefix with any command, so the
+        // shared-prefix predecessor scored it 0 across the board and offered
+        // the alphabetically-first names instead.
+        String body = handlerFor(dm(false, false, false), productionBundleLoader)
+                .handle(new ScopeRef.Dm("alice"), "/help mute").text();
+
+        assertEquals(MessageFormat.format(
+                        productionBundleLoader.get(BundleKeys.ERROR_HELP_UNKNOWN_COMMAND),
+                        "/unfollow-source"),
+                body,
+                "'mute' must resolve to /unfollow-source alone — not to the "
+                        + "alphabetically-first names the prefix-only ranking returned");
+    }
+
+    @Test
+    void noCloseMatchOffersNoCommandList() {
+        // M1-647: the failure being fixed is confident misdirection, not
+        // silence — a query matching nothing must be told so, not handed
+        // irrelevant names it might mistake for an answer.
+        String body = handlerFor(dm(false, false, false), productionBundleLoader)
+                .handle(new ScopeRef.Dm("alice"), "/help xyzzy").text();
+
+        assertEquals(productionBundleLoader.get(BundleKeys.ERROR_UNKNOWN_COMMAND), body,
+                "a query with no close match must get the flat reply, which interpolates "
+                        + "nothing at all");
+        assertFalse(body.contains("xyzzy"),
+                "the requested name must not appear in the reply; got: " + body);
+
+        for (HelpCommandHandler.CommandHelp entry : HelpCommandHandler.CATALOGUE) {
+            // /help itself is exempt: the reply's whole point is to redirect
+            // there. Every other catalogue name is a suggestion this reply
+            // must not make.
+            if (entry.command().equals("help")) {
+                continue;
+            }
+            assertFalse(body.contains("/" + entry.command()),
+                    "no-close-match reply must name no commands, found /" + entry.command()
+                            + "; got: " + body);
+        }
+    }
+
+    @Test
+    void synonymForAdminCommandLeaksNothingToNonAdmin() {
+        // The security crux (docs/spec/commands.md §Permission model): an
+        // intent word that resolves to a bot-admin command must produce the
+        // same no-close-match reply an unmatched query does. Suggesting
+        // /grant-admin here would turn the synonym map into the very
+        // existence oracle visible() exists to prevent.
+        String nonAdmin = handlerFor(dm(false, false, false), productionBundleLoader)
+                .handle(new ScopeRef.Dm("alice"), "/help makeadmin").text();
+
+        assertFalse(nonAdmin.contains("grant-admin"),
+                "a non-admin's synonym must not name the bot-admin command; got: " + nonAdmin);
+        assertEquals(productionBundleLoader.get(BundleKeys.ERROR_UNKNOWN_COMMAND), nonAdmin,
+                "the tier-filtered synonym must fall back to the flat reply");
+
+        // Control: the mapping genuinely exists, so the assertion above is
+        // about the tier filter rather than a synonym that never resolved.
+        String botAdmin = handlerFor(dm(true, false, false), productionBundleLoader)
+                .handle(new ScopeRef.Dm("admin"), "/help makeadmin").text();
+        assertTrue(botAdmin.contains("/grant-admin"),
+                "a bot admin must get the mapped command; got: " + botAdmin);
+    }
+
+    @Test
+    void commandUnknownReplyNeverReflectsInboundText() {
+        // Redteam remediation, second audit (2026-07-18). The first attempt was
+        // an [a-z0-9-] echo filter; the audit broke it immediately, because
+        // `grant-admin` is itself inside that alphabet. The fix is structural:
+        // the requested name selects suggestions and never reaches output, so
+        // there is no filter left to bypass. This surface mattered more than
+        // the app's other friendly errors because its template alone rendered
+        // `/{0}`, supplying the slash that turns an inbound word into a
+        // copy-pasteable command.
+        HelpCommandHandler handler = handlerFor(dm(false, false, false), productionBundleLoader);
+        String flatReply = productionBundleLoader.get(BundleKeys.ERROR_UNKNOWN_COMMAND);
+
+        // Bare privileged names — the case that defeated the echo filter.
+        for (String privileged : List.of("grant-admin", "ban", "promote", "remove-source")) {
+            String body = handler.handle(new ScopeRef.Dm("alice"), "/help " + privileged).text();
+            assertEquals(flatReply, body,
+                    "/help " + privileged + " must return the flat reply; got: " + body);
+            assertFalse(body.contains(privileged),
+                    "bot output must not carry the privileged name " + privileged
+                            + "; got: " + body);
+        }
+
+        // Tokens that DO produce a suggestion still leak nothing: ban-source
+        // scores 0.7 against add-source via plain edit distance, so it reaches
+        // the suggestion branch — which must name only the bot-authored match.
+        String withSuggestion = handler.handle(new ScopeRef.Dm("alice"), "/help ban-source").text();
+        assertEquals(MessageFormat.format(
+                        productionBundleLoader.get(BundleKeys.ERROR_HELP_UNKNOWN_COMMAND),
+                        "/add-source, /get-sources"),
+                withSuggestion,
+                "a matching hostile token must yield only bot-authored names; got: " + withSuggestion);
+        assertFalse(withSuggestion.contains("ban-source"),
+                "the requested name must not appear; got: " + withSuggestion);
+
+        // Arbitrary punctuation and length are moot once nothing is echoed.
+        for (String hostile : List.of("summary/grant-admin", "clear-/ban", "a".repeat(9000))) {
+            String body = handler.handle(new ScopeRef.Dm("alice"), "/help " + hostile).text();
+            assertFalse(body.contains(hostile),
+                    "no inbound text may be reflected; got: " + body);
+        }
+    }
+
+    @Test
+    void probationCallerReceivesIntentSuggestionsWithinTheAllowedSubset() {
+        // /help is in CommandPermissions.ALLOWED, so the users least likely to
+        // know the vocabulary reach this path before probation ends — the
+        // reason this ticket is not made redundant by chat-mode discovery,
+        // which fails closed during probation.
+        HelpCommandHandler handler = handlerFor(dm(false, false, true), productionBundleLoader);
+
+        String allowed = handler.handle(new ScopeRef.Dm("rookie"), "/help news").text();
+        assertTrue(allowed.contains("/summary"),
+                "a probation caller's intent word must resolve within the allowed subset; got: "
+                        + allowed);
+
+        // The same filter still applies: /save is outside the slow-start subset,
+        // so its synonym resolves to nothing rather than naming a command the
+        // caller cannot invoke yet.
+        String blocked = handler.handle(new ScopeRef.Dm("rookie"), "/help bookmark").text();
+        assertFalse(blocked.contains("/save"),
+                "a probation-hidden command must not be named by its synonym; got: " + blocked);
     }
 
     @Test
@@ -322,19 +460,27 @@ class HelpCommandHandlerTest {
         // nonexistent name — the detail view must not confirm existence.
         String nonAdmin = handlerFor(dm(false, false, false), productionBundleLoader)
                 .handle(new ScopeRef.Dm("alice"), "/help ban").text();
-        assertTrue(nonAdmin.contains("Unknown command `/ban`"),
-                "hidden command must resolve to the unknown error; got: " + nonAdmin);
-        assertFalse(nonAdmin.contains("/ban <contact>"),
-                "hidden command detail must not leak the signature; got: " + nonAdmin);
-        assertFalse(nonAdmin.contains("/ban,") || nonAdmin.contains(": /ban"),
-                "suggestions must not include the hidden name itself; got: " + nonAdmin);
+        // M1-647 strengthened this from "contains the echoed name" to full
+        // equality with the flat reply. Byte equality is strictly stronger:
+        // it subsumes the old substring checks (no signature, no suggestion
+        // naming /ban) AND proves the reply carries no trace of the request.
+        assertEquals(productionBundleLoader.get(BundleKeys.ERROR_UNKNOWN_COMMAND), nonAdmin,
+                "hidden command must resolve to the flat unknown reply; got: " + nonAdmin);
+        assertFalse(nonAdmin.contains("ban"),
+                "the reply must carry no trace of the hidden name; got: " + nonAdmin);
 
         // A probation caller asking for a command outside the slow-start
         // allowed subset (e.g. /save, hidden in the probation list).
         String probation = handlerFor(dm(false, false, true), productionBundleLoader)
                 .handle(new ScopeRef.Dm("rookie"), "/help save").text();
-        assertTrue(probation.contains("Unknown command `/save`"),
-                "probation-hidden command must resolve to the unknown error; got: " + probation);
+        // /save is outside the slow-start subset, but /saved is inside it, so
+        // this query legitimately matches — the assertion is that the reply is
+        // the suggestion template and nothing more, never the requested name.
+        assertEquals(MessageFormat.format(
+                        productionBundleLoader.get(BundleKeys.ERROR_HELP_UNKNOWN_COMMAND),
+                        "/saved"),
+                probation,
+                "probation-hidden command must resolve to the suggestion reply; got: " + probation);
         assertFalse(probation.contains(productionBundleLoader.get(BundleKeys.HELP_CMD_SAVE_USAGE)),
                 "probation caller must not see the /save detail; got: " + probation);
 
@@ -383,8 +529,8 @@ class HelpCommandHandlerTest {
                 Map.entry("recover-pool", BundleKeys.HELP_CMD_RECOVER_POOL_USAGE))) {
             String hidden = hiddenCommand.getKey();
             String body = nonAdmin.handle(new ScopeRef.Dm("alice"), "/help " + hidden).text();
-            assertTrue(body.contains("Unknown command `/" + hidden + "`"),
-                    "hidden /" + hidden + " must resolve to the unknown-command reply; got: " + body);
+            assertEquals(productionBundleLoader.get(BundleKeys.ERROR_UNKNOWN_COMMAND), body,
+                    "hidden /" + hidden + " must resolve to the flat unknown reply; got: " + body);
             assertFalse(body.contains(deniedReply),
                     "hidden /" + hidden + " must not return a permission-denied reply; got: " + body);
             // The reply shape matching is necessary but not sufficient: the
@@ -399,8 +545,15 @@ class HelpCommandHandlerTest {
         // The nonexistent-name control: a name no handler serves produces the
         // same reply shape, so the two cases are indistinguishable.
         String nonexistent = nonAdmin.handle(new ScopeRef.Dm("alice"), "/help pendinx").text();
-        assertTrue(nonexistent.contains("Unknown command `/pendinx`"),
-                "control: a nonexistent name must produce the unknown-command reply; got: " + nonexistent);
+        assertEquals(productionBundleLoader.get(BundleKeys.ERROR_UNKNOWN_COMMAND), nonexistent,
+                "control: a nonexistent name must produce the flat unknown reply; got: " + nonexistent);
+
+        // The property this test exists for, now stated exactly: M1-647 removed
+        // the echo, so a hidden-but-real command and a nonexistent one are not
+        // merely similar in shape — they are byte-identical.
+        assertEquals(nonAdmin.handle(new ScopeRef.Dm("alice"), "/help pending").text(),
+                nonexistent,
+                "a hidden real command and a nonexistent name must be byte-identical");
 
         // Suggestions are drawn only from caller-visible names, so neither
         // hidden name may appear in the nonexistent name's near-miss list.
@@ -457,7 +610,7 @@ class HelpCommandHandlerTest {
         // Without the asset enabled, the same name is unknown.
         String disabled = handlerFor(dm(false, false, false), productionBundleLoader)
                 .handle(new ScopeRef.Dm("alice"), "/help zcash").text();
-        assertTrue(disabled.contains("Unknown command `/zcash`"),
+        assertEquals(productionBundleLoader.get(BundleKeys.ERROR_UNKNOWN_COMMAND), disabled,
                 "a non-enabled asset name must resolve to the unknown error; got: " + disabled);
     }
 

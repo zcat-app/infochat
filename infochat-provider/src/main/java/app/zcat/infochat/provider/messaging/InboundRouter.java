@@ -168,7 +168,16 @@ import java.util.function.Consumer;
  * only remaining step-5 write is the lazy graduation
  * {@link ProbationCheck#clearIfPromoted} UPDATE, now issued solely on the
  * first post-graduation inbound (non-null past {@code probation_until}),
- * never on the NULL steady state.</p>
+ * never on the NULL steady state.
+ *
+ * <p>One dispatch path exceeds that count: an unrecognized slash command
+ * consults {@code HelpCommandHandler.slashMissSuggestion} for intent-aware
+ * guidance (M1-647), and the handler resolves the caller's tier through its
+ * own reads — a second users-row SELECT plus a probation check, plus the
+ * group-approval and group-admin lookups in group scope. The path is
+ * reached only by a name no handler and no asset family serves, and it is
+ * bounded by the step-1.5 per-(adapter, contact_id) transport cap, so the
+ * extra reads cannot be driven faster than that cap allows.</p>
  *
  * <p><b>Dispatch connection (pre-LLM phase).</b> Every router-owned DB
  * step of one inbound — the users-row snapshot, the groups-row
@@ -1420,6 +1429,28 @@ public class InboundRouter {
         if (assetCommandFamilyOracle.isAssetCommand(commandName)) {
             return assetHandler.handle(commandName, scope, normalized).text();
         }
+        // Intent-aware miss guidance (M1-647): route through the SAME resolver
+        // /help <unknown> uses, so /mute and /help mute answer identically. The
+        // help handler owns both the catalogue and the caller-tier filter, so
+        // the suggestion is tier-safe by construction — this path cannot name a
+        // command the caller may not see. Located among the handlers the router
+        // already dispatches to rather than injected on its own: that keeps the
+        // dependency where one already exists, and a router assembled without a
+        // help handler then has no suggestion surface at all and simply keeps
+        // the flat reply below. The method is public because this call crosses
+        // the CDI client proxy, which delegates public methods only.
+        for (CommandHandler handler : commandHandlers) {
+            if (handler instanceof HelpCommandHandler helpCommandHandler) {
+                @Nullable String suggestion = helpCommandHandler.slashMissSuggestion(
+                        scope, commandName, inboundContext.effectiveLanguage());
+                if (suggestion != null) {
+                    return suggestion;
+                }
+                break;
+            }
+        }
+        // Genuine no-match: the flat reply already names no commands and points
+        // at /help, which is exactly the honest answer here.
         return bundleLoader.get(BundleKeys.ERROR_UNKNOWN_COMMAND, inboundContext.effectiveLanguage());
     }
 

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 667 |
+| done | 668 |
 | deferred | 0 |
 | abandoned | 17 |
 | **total** | **689** |
@@ -26,7 +26,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-642 — Per-category digest delivery + optional roll-up summaries (complexity: high, risk: medium)
-- M1-647 — Intent-aware command suggestions: synonyms + non-prefix matching on the /help path (complexity: medium, risk: medium)
+- M1-648 — Semantic command-intent index with deterministic answer composition (complexity: high, risk: high)
 
 ---
 
@@ -43,7 +43,6 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-648 — blocked_by: M1-645 (done), M1-646 (done), M1-647 (pending)
 - M1-649 — blocked_by: M1-648 (pending)
 - M1-652 — blocked_by: M1-642 (pending)
 
@@ -68,12 +67,12 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-653 | Correct the outbound delivery contracts: correlationId javadoc and §6.3.5 | 2026-07-18 | round 1 APPROVE |
 | M1-651 | Guard HelpTier against the spec's closed bot-admin list | 2026-07-18 | round 3 APPROVE |
 | M1-650 | Sentinel-lint test endpoints | 2026-07-18 | round 1 APPROVE |
+| M1-647 | Intent-aware command suggestions: synonyms + non-prefix matching on the /help path | 2026-07-18 | round 3 APPROVE |
 | M1-646 | Add /pending + /recover-pool to the help catalogue and guard catalogue coverage | 2026-07-18 | round 1 APPROVE |
 | M1-645 | Correct three help/welcome strings that misstate the real command surface | 2026-07-18 | round 1 APPROVE |
 | M1-644 | Stub the provider-module EmbeddingProvider so the suite stops calling a real ollama | 2026-07-18 | round 1 APPROVE |
 | M1-641 | Topic-grouped periodic digest: category headers + affordance | 2026-07-18 | round 1 APPROVE |
 | M1-640 | Pin the /retry --digest non-interruptible classification with a test | 2026-07-17 | round 1 APPROVE |
-| M1-639 | Settle the inline-dispatch cap exclusion and couple the dispatch knobs at boot | 2026-07-17 | round 1 APPROVE |
 
 ---
 
@@ -872,12 +871,12 @@ M1-641 (done)
   └── M1-643 (abandoned)
 M1-644 (done)
 M1-645 (done)
-  ├── M1-647 (pending) ← runnable
-  │     └── M1-648 (pending)
+  ├── M1-647 (done)
+  │     └── M1-648 (pending) ← runnable
   │           └── M1-649 (pending)
   └── M1-648 (pending) [see above]
 M1-646 (done)
-  ├── M1-647 (pending) [see above]
+  ├── M1-647 (done) [see above]
   └── M1-648 (pending) [see above]
 M1-650 (done)
 M1-651 (done)

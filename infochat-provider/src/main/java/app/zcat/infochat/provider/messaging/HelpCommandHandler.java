@@ -10,6 +10,7 @@ import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.group.GroupRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -259,13 +260,52 @@ public class HelpCommandHandler implements CommandHandler {
     }
 
     /**
-     * Unknown-command friendly error mirroring the unknown-tag shape.
-     * The fuzzy-suggestion vocabulary is restricted to the names the
-     * caller can see in bare {@code /help} (visible catalogue entries
-     * plus enabled assets), so the suggestions cannot leak the
-     * existence of admin-only or otherwise hidden commands.
+     * Unknown-command friendly error. The suggestion vocabulary is
+     * restricted to the names the caller can see in bare {@code /help}
+     * (visible catalogue entries plus enabled assets), so the
+     * suggestions cannot leak the existence of admin-only or otherwise
+     * hidden commands. When nothing clears the match threshold the
+     * reply names no commands at all and points at {@code /help}
+     * (M1-647) — the predecessor always filled the list, so a query
+     * matching nothing was confidently offered the
+     * alphabetically-first few names.
+     *
+     * <p><b>{@code requested} is never echoed.</b> It selects the
+     * suggestions and then stops; every byte of the reply is fixed
+     * bundle text or a caller-visible catalogue name. Unlike this
+     * app's other friendly errors ({@code error.summary.unknown_tag}
+     * and friends, which render a bare <code>{0}</code>), the command
+     * template used to render <code>`/{0}`</code> — supplying the
+     * slash itself, so an inbound word like {@code grant-admin} came
+     * back out as the copy-pasteable {@code /grant-admin} to everyone
+     * in a group. {@code security.md} §LLM output sanitizer exempts
+     * deterministic command output from the admin-command strip on the
+     * premise that such output is bot-authored; not interpolating is
+     * what makes that premise true here, rather than a filter on which
+     * inbound bytes look safe (an earlier attempt at one let every
+     * bare privileged name through).
+     *
+     * <p>It also makes the §Permission model no-existence-leak
+     * property exact: with nothing echoed, a hidden-but-real command
+     * and a nonexistent one produce byte-identical replies, not merely
+     * similarly-shaped ones.
      */
     private String unknownCommandReply(String requested, CallerTier caller, String language) {
+        String suggestions = suggestionList(requested, caller);
+        if (suggestions.isEmpty()) {
+            return bundleLoader.get(BundleKeys.ERROR_UNKNOWN_COMMAND, language);
+        }
+        return MessageFormat.format(
+                bundleLoader.get(BundleKeys.ERROR_HELP_UNKNOWN_COMMAND, language), suggestions);
+    }
+
+    /**
+     * Rendered {@code "/name, /name"} suggestion list for
+     * {@code requested}, or the empty string when nothing is close
+     * enough. The vocabulary handed to the resolver is already
+     * tier-filtered, so no branch below it can name a hidden command.
+     */
+    private String suggestionList(String requested, CallerTier caller) {
         List<String> visibleNames = new ArrayList<>();
         for (CommandHelp entry : CATALOGUE) {
             if (visible(entry, caller)) {
@@ -275,7 +315,8 @@ public class HelpCommandHandler implements CommandHandler {
         for (AssetRegistry.AssetEntry asset : assetRegistry.getEnabledAssets()) {
             visibleNames.add(asset.name());
         }
-        List<String> suggestions = fuzzySuggest(requested, visibleNames, FUZZY_SUGGESTION_MAX);
+        List<String> suggestions =
+                CommandIntentSynonyms.suggest(requested, visibleNames, FUZZY_SUGGESTION_MAX);
         StringBuilder joined = new StringBuilder();
         for (String suggestion : suggestions) {
             if (joined.length() > 0) {
@@ -283,47 +324,38 @@ public class HelpCommandHandler implements CommandHandler {
             }
             joined.append('/').append(suggestion);
         }
+        return joined.toString();
+    }
+
+    /**
+     * Suggestion reply for the router's unknown-slash path, or null
+     * when no command is close enough to name (M1-647). Public because
+     * {@code InboundRouter} reaches it through the CDI client proxy,
+     * which only delegates public methods — a package-private call
+     * would run against the proxy's own uninitialized fields.
+     *
+     * <p>Returning null rather than a reply of its own keeps the
+     * genuine-no-match answer on the router's existing flat
+     * {@code error.unknown_command}, which names no commands and
+     * points at {@code /help}. Since neither path interpolates the
+     * requested name, the two render byte-identical strings — so
+     * {@code /mute} and {@code /help mute} give the same guidance by
+     * construction rather than by keeping two templates in step.
+     */
+    public @Nullable String slashMissSuggestion(ScopeRef scope, String commandName, String language) {
+        String suggestions =
+                suggestionList(normalizeCommandName(commandName), resolveTier(scope));
+        if (suggestions.isEmpty()) {
+            return null;
+        }
         return MessageFormat.format(
-                bundleLoader.get(BundleKeys.ERROR_HELP_UNKNOWN_COMMAND, language),
-                requested, joined.toString());
+                bundleLoader.get(BundleKeys.ERROR_HELP_UNKNOWN_COMMAND, language), suggestions);
     }
 
     /** First-token normalization: an optional leading {@code /} is stripped so {@code /help /summary} and {@code /help summary} are equivalent. */
     private static String normalizeCommandName(String requested) {
         String name = requested.startsWith("/") ? requested.substring(1) : requested;
         return name.toLowerCase(Locale.ROOT);
-    }
-
-    /**
-     * Fuzzy-suggestion list ordered by shared-prefix length DESC then
-     * name ASC — the same naive convention the tag friendly errors use
-     * (M1-037 shape); kept local because the tag handlers' copies are
-     * private to their classes.
-     */
-    private static List<String> fuzzySuggest(String supplied, List<String> vocabulary, int max) {
-        record Scored(String name, int shared) {}
-        List<Scored> scored = new ArrayList<>(vocabulary.size());
-        for (String v : vocabulary) {
-            scored.add(new Scored(v, sharedPrefixLength(supplied, v)));
-        }
-        scored.sort((a, b) -> {
-            int cmp = Integer.compare(b.shared, a.shared);
-            return cmp != 0 ? cmp : a.name.compareTo(b.name);
-        });
-        List<String> out = new ArrayList<>();
-        for (int i = 0; i < Math.min(max, scored.size()); i++) {
-            out.add(scored.get(i).name);
-        }
-        return out;
-    }
-
-    private static int sharedPrefixLength(String a, String b) {
-        int n = Math.min(a.length(), b.length());
-        int i = 0;
-        while (i < n && a.charAt(i) == b.charAt(i)) {
-            i++;
-        }
-        return i;
     }
 
     private static String headerKey(CallerTier caller) {

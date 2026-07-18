@@ -225,6 +225,45 @@ them to the marked region — doing so would red the build.
   friendly-error shape: fuzzy suggestions drawn **only from the
   caller-visible command set** (no admin-command existence leak),
   pointing the user back at bare `/help`.
+
+  **Intent-aware guidance.** Unknown-command suggestions are
+  matched by intent, not by shared prefix alone: a deterministic
+  synonym map resolves natural words onto existing command names
+  (`mute` → `/unfollow-source`), so a command whose name the user
+  cannot guess is still reachable. Matching is deterministic — a
+  static map plus a similarity measure, no model call — and adds
+  no alias: the map points at existing names only. Suggestion
+  ranking is **tier-filtered after resolution, never before**: a
+  query resolving to a command the caller may not see yields no
+  suggestion at all, so the map cannot become an existence oracle
+  for the admin surface (§Permission model). This is a security
+  property, not a UX detail. When no candidate clears the match
+  threshold the reply **names no commands** and points at `/help`
+  instead of offering the closest entries regardless of relevance.
+  The same resolver serves the bare unknown-slash reply, so
+  `/mute` and `/help mute` give consistent guidance **for a
+  non-probation caller**; during probation a bare `/mute` is stopped
+  by the authorization step before dispatch is reached (§Slow-start
+  tier fails closed on any name outside the allowed subset) and
+  receives the probation reply, while `/help mute` — `/help` being
+  in the allowed subset — still returns the suggestion.
+
+  The unknown-command reply **never reflects the requested name
+  back**. The name selects the suggestions and then stops; every byte
+  delivered is fixed bundle text or a caller-visible command name.
+  This differs deliberately from the app's other friendly errors
+  (unknown tag, unknown timezone), which do echo what the user typed:
+  those render the value bare, whereas the command template rendered
+  it as `` `/<name>` `` — supplying the slash itself, so an inbound
+  word such as `grant-admin` came back out as the copy-pasteable
+  `/grant-admin` to everyone in a group. `security.md` §LLM output
+  sanitizer exempts deterministic command output from the
+  admin-command strip on the premise that such output is
+  bot-authored; **not interpolating is what makes that premise true**,
+  rather than a filter deciding which inbound bytes look safe. It
+  also makes the §Permission model no-existence-leak property exact:
+  a hidden-but-real command and a nonexistent one produce
+  byte-identical replies, not merely similar-looking ones.
 - `/status` — runtime status (active profile and uptime; admin sees
   more). DM and group; any non-banned user. Bot
   admin view includes a count of pending groups
