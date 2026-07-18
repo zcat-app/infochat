@@ -115,7 +115,7 @@ public class AssetHandler {
                 String bestMatch = suggestions.isEmpty() ? "" : suggestions.getFirst();
                 return reply(scope, MessageFormat.format(
                         bundleLoader.get(BundleKeys.ERROR_ASSET_UNKNOWN_SUB_VERB, language),
-                        args.subVerb, bestMatch, assetName, String.join(", ", allSubVerbs)));
+                        bestMatch, assetName, String.join(", ", allSubVerbs)));
             }
             if (!svEntry.enabled()) {
                 return reply(scope, MessageFormat.format(
@@ -137,7 +137,7 @@ public class AssetHandler {
                 String bestMatch = suggestions.isEmpty() ? "" : suggestions.getFirst();
                 return reply(scope, MessageFormat.format(
                         bundleLoader.get(BundleKeys.ERROR_ASSET_UNSUPPORTED_QUOTE_CURRENCY, language),
-                        vsCurrency, bestMatch, assetName, String.join(", ", supported)));
+                        bestMatch, assetName, String.join(", ", supported)));
             }
         }
 

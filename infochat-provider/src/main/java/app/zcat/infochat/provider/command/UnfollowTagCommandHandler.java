@@ -237,7 +237,7 @@ public class UnfollowTagCommandHandler implements CommandHandler {
             List<String> suggestions = fuzzySuggest(normalizedTag, vocab, FUZZY_SUGGESTION_MAX);
             String body = MessageFormat.format(
                     bundleLoader.get(BundleKeys.ERROR_UNFOLLOW_TAG_UNKNOWN_TAG, inboundContext.effectiveLanguage()),
-                    parsed.positionalTag, String.join(", ", suggestions));
+                    String.join(", ", suggestions));
             return reply(scope, body);
         }
 

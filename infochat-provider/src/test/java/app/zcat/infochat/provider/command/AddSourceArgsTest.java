@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -136,14 +137,18 @@ class AddSourceArgsTest {
                 "/add-source https://example.com/feed.xml --tags news --type=mastodon");
         Failure failure = assertInstanceOf(Failure.class, result);
         assertEquals("error.add_source.unknown_kind", failure.bundleKey());
-        assertEquals(2, failure.interpolationArgs().size(),
-                "unknown_kind failure carries (suppliedValue, validKindsCommaList)");
-        assertEquals("mastodon", failure.interpolationArgs().get(0));
+        // M1-656: the supplied token is no longer carried into the reply. It
+        // came straight off the inbound split with no charset filter, so
+        // `--type /grant-admin` put that string into bot output.
+        assertEquals(1, failure.interpolationArgs().size(),
+                "unknown_kind failure carries only (validKindsCommaList)");
+        assertFalse(failure.interpolationArgs().contains("mastodon"),
+                "the supplied token must not reach the reply: " + failure.interpolationArgs());
         // The closed enum list is the fuzzy-suggestion footer per spec
         // §Source management's unknown-type friendly error.
-        assertTrue(failure.interpolationArgs().get(1).contains("rss"),
+        assertTrue(failure.interpolationArgs().get(0).contains("rss"),
                 "valid-kinds list must include rss");
-        assertTrue(failure.interpolationArgs().get(1).contains("bluesky"),
+        assertTrue(failure.interpolationArgs().get(0).contains("bluesky"),
                 "valid-kinds list must include bluesky");
     }
 
@@ -154,8 +159,11 @@ class AddSourceArgsTest {
                 "/add-source https://example.com/feed.xml --tags news --category=podcast");
         Failure failure = assertInstanceOf(Failure.class, result);
         assertEquals("error.add_source.unknown_category", failure.bundleKey());
-        assertEquals("news, blog, social", failure.interpolationArgs().get(1),
+        // M1-656: same as the unknown-kind case — supplied token dropped.
+        assertEquals("news, blog, social", failure.interpolationArgs().get(0),
                 "category enumeration must be the spec-closed news|blog|social trio");
+        assertFalse(failure.interpolationArgs().contains("podcast"),
+                "the supplied token must not reach the reply: " + failure.interpolationArgs());
     }
 
     // (e) malformed URL

@@ -103,34 +103,34 @@ public record AddSourceArgs(
             } else if (token.startsWith("--type=")) {
                 Optional<SourceKind> resolved = SourceKind.fromString(token.substring("--type=".length()));
                 if (resolved.isEmpty()) {
-                    return unknownKind(token.substring("--type=".length()));
+                    return unknownKind();
                 }
                 typeOverride = resolved;
                 i++;
             } else if (token.equals("--type")) {
                 if (i + 1 >= tokens.size()) {
-                    return unknownKind("");
+                    return unknownKind();
                 }
                 Optional<SourceKind> resolved = SourceKind.fromString(tokens.get(i + 1));
                 if (resolved.isEmpty()) {
-                    return unknownKind(tokens.get(i + 1));
+                    return unknownKind();
                 }
                 typeOverride = resolved;
                 i += 2;
             } else if (token.startsWith("--category=")) {
                 String value = token.substring("--category=".length());
                 if (!ALLOWED_CATEGORIES.contains(value)) {
-                    return unknownCategory(value);
+                    return unknownCategory();
                 }
                 category = value;
                 i++;
             } else if (token.equals("--category")) {
                 if (i + 1 >= tokens.size()) {
-                    return unknownCategory("");
+                    return unknownCategory();
                 }
                 String value = tokens.get(i + 1);
                 if (!ALLOWED_CATEGORIES.contains(value)) {
-                    return unknownCategory(value);
+                    return unknownCategory();
                 }
                 category = value;
                 i += 2;
@@ -225,13 +225,22 @@ public record AddSourceArgs(
         }
     }
 
-    private static Failure unknownKind(String supplied) {
+    /**
+     * The supplied token is deliberately NOT carried into the reply (M1-656).
+     * It comes straight off the inbound token split with no charset filter and
+     * no length bound, so reflecting it let any registered user put arbitrary
+     * text — including a copy-pasteable admin command — into bot output, on the
+     * one channel security.md §LLM output sanitizer leaves unfiltered. The
+     * valid-value list is bot-authored and carries the message on its own.
+     */
+    private static Failure unknownKind() {
         return new Failure("error.add_source.unknown_kind",
-                List.of(supplied, SourceKind.commaList()));
+                List.of(SourceKind.commaList()));
     }
 
-    private static Failure unknownCategory(String supplied) {
+    /** See {@link #unknownKind()} — same reasoning for the category token. */
+    private static Failure unknownCategory() {
         return new Failure("error.add_source.unknown_category",
-                List.of(supplied, String.join(", ", ALLOWED_CATEGORIES)));
+                List.of(String.join(", ", ALLOWED_CATEGORIES)));
     }
 }

@@ -237,8 +237,9 @@ class UnfollowTagCommandHandlerTest {
                 new ScopeRef.Dm(actor),
                 "/unfollow-tag " + PREFIX + "notavocab");
 
-        assertTrue(reply.text().contains(PREFIX + "notavocab"),
-                "unknown-tag reply must echo the supplied tag — got: " + reply.text());
+        // M1-656: see FollowTagCommandHandlerTest — the echo was the leak.
+        assertFalse(reply.text().contains(PREFIX + "notavocab"),
+                "unknown-tag reply must NOT echo the supplied tag — got: " + reply.text());
         assertTrue(reply.text().contains("Did you mean"),
                 "unknown-tag reply must carry the fuzzy-suggestion footer — got: "
                         + reply.text());
@@ -246,6 +247,23 @@ class UnfollowTagCommandHandlerTest {
                 "unknown-tag reject must not flip tag_mode");
         assertEquals(0L, countScopeTag(actorId),
                 "unknown-tag reject must not touch scope_tag");
+    }
+
+    @Test
+    void unfollowTagUnknownTagReplyDoesNotReflectInboundText() throws Exception {
+        // M1-656: see FollowTagCommandHandlerTest — the handler validated a
+        // separate normalizedTag while echoing the raw positional token.
+        String actor = PREFIX + "reflect-actor";
+        UUID actorId = seedUser(actor);
+        seedTag(PREFIX + "a");
+        seedScopePreferences(actorId, "EXPLICIT");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/unfollow-tag /grant-admin");
+
+        assertFalse(reply.text().contains("grant-admin"),
+                "unknown-tag reply must not reflect inbound text — got: " + reply.text());
     }
 
     // ----- (e) Group scope short-circuits ---------------------------------

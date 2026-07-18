@@ -251,12 +251,36 @@ them to the marked region — doing so would red the build.
   The unknown-command reply **never reflects the requested name
   back**. The name selects the suggestions and then stops; every byte
   delivered is fixed bundle text or a caller-visible command name.
-  This differs deliberately from the app's other friendly errors
-  (unknown tag, unknown timezone), which do echo what the user typed:
-  those render the value bare, whereas the command template rendered
-  it as `` `/<name>` `` — supplying the slash itself, so an inbound
-  word such as `grant-admin` came back out as the copy-pasteable
-  `/grant-admin` to everyone in a group. `security.md` §LLM output
+  The same rule now holds for the unknown-tag, unknown-timezone,
+  unknown-asset-sub-verb and unknown-`--type`/`--category` replies
+  (M1-656): none of them reflects the user's token either. The
+  rule is scoped by **who can reach the reply**, and two categories
+  are deliberately left echoing.
+
+  First, an echo whose value is *provably constrained* is fine —
+  `/summary` validates its tag argument at parse time, so the echoed
+  value can only ever be `[a-z0-9][a-z0-9-]{0,47}` and cannot carry a
+  slash or whitespace. Validation at the parse boundary, not filtering
+  at the output boundary, is what makes an echo safe.
+
+  Second, a number of **bot-admin-only** errors still interpolate a
+  raw token (`error.audit.unknown_action`,
+  `error.quarantine.invalid_id`, `error.invite.unknown_adapter` and
+  others). This list is deliberately
+  **not** exhaustive and must not be read as one: the binding rule is
+  the tier, not the enumeration. Reaching these requires bot admin, so
+  the reader of any reflected text is already an admin and the
+  social-engineering value is near zero. (Known violation:
+  `error.group_not_found` is currently reachable below bot admin,
+  because `/approve-group` reflects its unparsed argument before its
+  admin gate — an authorization-ordering defect tracked as M1-657 and
+  excluded from the bot-admin-only claim until that fix lands.) **Any friendly error
+  reachable below bot admin must not reflect inbound text** — that is
+  the property to check when adding a command, and enumerating today's
+  exceptions would only rot. Reflection, not slash-synthesis, is the property
+  that matters: a template rendering the value bare cannot fabricate
+  a command from a bare word, but an attacker can supply the slash
+  themselves, so bare rendering is not on its own a defence. `security.md` §LLM output
   sanitizer exempts deterministic command output from the
   admin-command strip on the premise that such output is
   bot-authored; **not interpolating is what makes that premise true**,
@@ -528,7 +552,9 @@ over the whole world (§Per-scope tag preferences).
      friendly-error path with fuzzy suggestions over the enum, the
      same path as an unknown tag argument. The value never reaches
      a SQL query as free-form text — the enum check is the validation
-     boundary. **One exception qualifies "explicit `--type` wins":** a
+     boundary — and since M1-656 it does not reach the reply text
+     either: the friendly error names the valid types without echoing
+     what was typed, exactly as the unknown-tag path does. **One exception qualifies "explicit `--type` wins":** a
      URL whose host is a configured Nitter instance (the operator
      allowlist in the table's row below) may only be added as
      `--type nitter`. A non-nitter `--type` on such a host is rejected

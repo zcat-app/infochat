@@ -1,22 +1,24 @@
 ---
 id: M1-656
 title: "Stop friendly errors reflecting unvalidated inbound text"
-status: pending
+status: done
 created: 2026-07-18
 last_updated: 2026-07-18
 blocked_by: []
-files_budget: 14
+files_budget: 16
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/FollowTagCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/UnfollowTagCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/GroupTimezoneCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/asset/AssetHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/command/AddSourceArgs.java
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/bundles/cs.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/FollowTagCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/UnfollowTagCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/GroupTimezoneCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetHandlerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceArgsTest.java
   - docs/spec/commands.md
 complexity: medium
 risk: medium
@@ -117,6 +119,36 @@ acceptance:
   - >-
     No behaviour change to any successful command path; only the failure
     replies lose an interpolated token.
+  - >-
+    ADD-SOURCE (scope widened at round 1 by user-accepted redteam remediation).
+    error.add_source.unknown_kind and error.add_source.unknown_category lose
+    their {0} raw-token placeholder in en and cs, and AddSourceArgs.unknownKind
+    / unknownCategory stop passing the supplied value into interpolationArgs
+    (dropping the now-unused parameter rather than leaving it dead). Verified
+    reachable: AddSourceArgs:106/117 and :123/133 pass the raw --type /
+    --category token straight from the inbound token split with no charset
+    filter and no length bound, and /add-source is open to any registered
+    non-banned user in DM (commands.md §Sources).
+  - >-
+    AUTHORIZED PRE-EXISTING TEST CHANGES (add-source). AddSourceArgsTest
+    line 138-140 asserts the unknown_kind failure carries
+    "(suppliedValue, validKindsCommaList)" and line 156 the category
+    equivalent. Both MUST be rewritten to assert the single remaining
+    bot-authored argument, and to assert the supplied token is ABSENT from
+    interpolationArgs. The bundleKey assertions on both lines are RETAINED
+    unchanged. No other assertion in the file may be relaxed.
+  - >-
+    The REMAINING raw-echo surfaces are named explicitly in the spec as
+    known-unfixed rather than left implied (error.recover_pool.not_found,
+    error.quarantine.invalid_id, error.audit.unknown_action,
+    error.invite.unknown_adapter and siblings), scoped by the bot-admin
+    tier property rather than an exhaustive enumeration (round-2 rework).
+    error.group_not_found is named as a KNOWN VIOLATION of that tier
+    property — reachable below bot admin via /approve-group's
+    parse-before-gate ordering defect (r2 audit) — tracked as M1-657 and
+    excluded from the bot-admin-only claim until that fix lands. This
+    ticket does NOT change the surfaces; it stops the spec claiming they
+    do not exist.
   - mvn verify is green
 test_plan:
   adds: []
@@ -132,7 +164,129 @@ spec_refs:
   - docs/spec/commands.md §Discovery
 decision_refs:
   - D43
+clarity_check:
+  date: 2026-07-18
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-18
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 13
+      added: 123
+      removed: 35
+    note: >-
+      Reviewer independently verified the four authorized pre-existing
+      assertion rewrites (inverted, not weakened; retained assertions intact)
+      and confirmed the four new absence-asserting tests are non-vacuous
+      against pre-diff behaviour.
+  - round: 2
+    date: 2026-07-18
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 16
+      added: 409
+      removed: 57
+    note: >-
+      Two rework items, both accepted and fixed in round 3. (1) The spec's
+      "five bot-admin-only errors" list claimed exhaustiveness and was short by
+      at least one (error.invite.bot_contact_unknown_adapter). A full sweep of
+      all 110 MessageFormat sites then found SEVEN such keys, confirming that
+      enumerating them is a trap; the paragraph was rewritten to state the
+      tier-scoped PROPERTY and explicitly disclaim exhaustiveness. (2) Three
+      "# Token ..." comments in en.properties documented the pre-diff argument
+      order and were falsified by this diff's renumbering — orphans the change
+      itself created, and precisely the stale-index footgun the audit had to
+      spend a pass ruling out. Corrected in en; cs verified to carry no
+      equivalent per-template comments.
+  - round: 3
+    date: 2026-07-18
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 16
+      added: 466
+      removed: 60
+    note: >-
+      Addresses only the two round-2 items. Must-shrink: files held equal at
+      16, so growth is not along all three dimensions — convergent.
+escalations:
+  - date: 2026-07-18
+    reason: redteam-finding
+    reviewer_verdict_excerpt: |
+      Review was APPROVE (round 1, all five checks PASS). The /redteam audit
+      returned FINDINGS (medium=1). The audit verified the CODE fix is sound —
+      placeholder renumbering correct per-template against every call site in
+      both languages, and both deliberately-unchanged claims (SummaryArgs,
+      error.asset.sub_verb_not_enabled) hold. The finding is against the SPEC
+      TEXT this diff adds: "The one deliberate exception is /summary" is false.
+      AddSourceArgs.unknownKind:228-231 and unknownCategory:233-236 still
+      interpolate a raw inbound token, reachable by any registered user in DM,
+      plus five bot-admin-only twins. Aggravating: commands.md:530-532 already
+      documents /add-source's unknown values as taking "the same path as an
+      unknown tag argument", a cross-reference this diff made stale in the
+      unsafe direction. User resolved the escalation as `refine` and directed
+      that /add-source be fixed in this ticket rather than deferred.
+  - date: 2026-07-18
+    reason: redteam-finding
+    reviewer_verdict_excerpt: |
+      Review was APPROVE (round 3, all five checks PASS). The r2 /redteam
+      audit returned FINDINGS (medium=1): error.group_not_found, which the
+      diff's rewritten spec paragraph names as bot-admin-only, is reachable
+      WITHOUT bot admin — ApproveGroupCommandHandler interpolates
+      parseGroupIdRaw(rawText) at :124-128 and RETURNS before the admin
+      gate at :146-151 (inside executeApprove, reached only when the UUID
+      parse succeeds). An authorization-ORDERING defect in a handler this
+      ticket never touched; the sibling RejectGroupCommandHandler orders it
+      correctly (:129-132 gate before :149 parse). Full record:
+      docs/plan/m1/redteam/M1-656-2026-07-18-r2.md.
+      User-directed resolution (HANDOFF-output-reflection-20260718.md,
+      acted on 2026-07-18): do NOT fold the code fix into this ticket — the
+      round cap (3/3) is spent and the defect deserves its own review. The
+      ordering fix is filed as M1-657 and the recurrence guard as M1-658;
+      this ticket's spec text drops the false tier claim and names the
+      tracked violation. Docs-only correction; the reviewed code is
+      byte-identical to the round-3 APPROVE diff.
 revisions:
+  - date: 2026-07-18
+    reason: >-
+      redteam-finding rework (user-directed scope widening). files_budget
+      14 -> 16 and files_scope +2 (AddSourceArgs.java, AddSourceArgsTest.java)
+      to fold in the user-reachable /add-source reflection the audit found.
+      Three acceptance items added: the add-source fix, authorization for the
+      two pre-existing AddSourceArgsTest assertions it breaks, and a
+      requirement that the five remaining bot-admin-only raw-echo surfaces be
+      NAMED in the spec as known-unfixed instead of the false
+      "one deliberate exception" claim. Root cause of the false claim: a scope
+      boundary was asserted without first enumerating every interpolating
+      call site; that enumeration has now been done across all three
+      interpolation forms (inline MessageFormat, the Failure/interpolationArgs
+      pattern, and the format(KEY, ...) helper).
+    prior_values: |
+      files_budget: 14
+      files_scope: 11 entries (no AddSourceArgs.java, no AddSourceArgsTest.java)
+      acceptance: 11 items; the three add-source / remaining-surfaces items
+      did not exist. spec text claimed /summary was "the one deliberate
+      exception".
   - date: 2026-07-18
     reason: >-
       clarity-fail rework (bounded self-refine, 1 of 1 permitted). The clarity
@@ -148,11 +302,42 @@ revisions:
     prior_values: |
       acceptance had 9 items; the two AUTHORIZED PRE-EXISTING TEST CHANGES
       items (tags, asset) did not exist. No other field changed.
+  - date: 2026-07-18
+    reason: >-
+      r2 redteam-finding rework (user-directed via the 2026-07-18 handoff,
+      docs-only). The spec paragraph and the matching acceptance item
+      claimed error.group_not_found is bot-admin-only; the r2 audit
+      disproved this (reachable below admin via /approve-group's
+      parse-before-gate ordering). The spec text now names it a known
+      violation tracked as M1-657, and the acceptance parenthetical is
+      corrected the same way. No code, test, bundle, files_scope or
+      files_budget change; the round cap is untouched because no reviewed
+      code changed.
+    prior_values: |
+      acceptance item "The five REMAINING raw-echo surfaces..." claimed
+      "All five are bot-admin-only commands"; the spec text listed
+      error.group_not_found among the bot-admin-only examples with no
+      violation note.
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-escalations: []
+redteam_audits:
+  - date: 2026-07-18
+    verdict: CLEAN
+    base: d07b2a95
+    head: working tree on m1/M1-656 (r3 re-audit)
+    verdict_file: docs/plan/m1/redteam/M1-656-2026-07-18-r3.md
+    out_of_model_count: 1
+    note: |
+      r3 re-audit after r2's FINDINGS (r1 and r2 records:
+      docs/plan/m1/redteam/M1-656-2026-07-18.md and -r2.md; those runs
+      predate the redteam_audits index). Confirms the corrected spec text
+      states only true properties and that M1-657/M1-658 faithfully carry
+      the r2 finding; reviewed code byte-identical to the round-3 APPROVE
+      diff. One out-of-model advisory: the nitter_host_type_conflict
+      URI-host echo is provably constrained and becomes an M1-658
+      baseline entry, not a fix.
 ---
 
 # M1-656: Stop friendly errors reflecting unvalidated inbound text
@@ -231,3 +416,31 @@ is urgent.
 severity argument, noting the slash-synthesis distinction is "an argument
 about copy-pasteability, not about reflection — those surfaces do still
 reflect inbound bytes."
+
+## Round 2 rework
+
+1. **Spec list claimed exhaustiveness and was wrong.** `docs/spec/commands.md`
+   named "five bot-admin-only errors" as the remaining raw-echo set. A sweep of
+   all 110 `MessageFormat.format` sites in the provider found seven
+   (`error.group_not_found` via both approve and reject, `error.audit.unknown_action`,
+   `error.quarantine.invalid_id`, `error.invite.unknown_adapter`, and the two
+   `error.invite.bot_contact_*` keys). Rewritten to state the tier-scoped
+   property — "any friendly error reachable below bot admin must not reflect
+   inbound text" — and to disclaim exhaustiveness explicitly.
+
+2. **Three stale `# Token ...` comments.** `en.properties` :538, :542 and :650
+   documented the pre-diff argument order for templates this diff renumbered.
+   Corrected, with a line recording that the supplied value is deliberately not
+   interpolated. `cs.properties` verified to carry no per-template equivalents.
+
+## Redteam r2 resolution
+
+The r2 audit's finding (error.group_not_found reachable below bot admin via
+/approve-group's parse-before-gate ordering) is resolved OUTSIDE this
+ticket, per the user-endorsed 2026-07-18 handoff: the round cap is spent
+and the defect lives in a handler this diff never touched. M1-657 carries
+the ordering fix (and restores the key to the spec's bot-admin-only
+examples); M1-658 carries the enforcement guard the handoff recommends.
+After the finding, this ticket's diff changed only in docs/spec/commands.md
+— the false tier claim became a named, tracked violation — so the reviewed
+code is byte-identical to the round-3 APPROVE.

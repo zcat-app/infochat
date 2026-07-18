@@ -113,7 +113,7 @@ public class GroupTimezoneCommandHandler implements CommandHandler {
                     String suggestions = fuzzySuggestions(tzArg);
                     String replyText = MessageFormat.format(
                             bundleLoader.get(BundleKeys.ERROR_GROUP_TIMEZONE_INVALID_ZONE, inboundContext.effectiveLanguage()),
-                            tzArg, suggestions);
+                            suggestions);
                     return reply(scope, replyText);
                 }
 

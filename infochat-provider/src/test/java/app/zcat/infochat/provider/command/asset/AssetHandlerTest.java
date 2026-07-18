@@ -113,12 +113,29 @@ class AssetHandlerTest {
     @Test
     void unknownSubVerbFuzzy() {
         OutboundMessage reply = handler.handle("zcash", SCOPE, "/zcash krakn");
-        assertTrue(reply.text().contains("Unknown sub-verb krakn"),
-                "unknown sub-verb error");
+        // M1-656: the raw sub-verb is no longer echoed; the bot-authored
+        // suggestion and available-list carry the message instead.
+        assertFalse(reply.text().contains("krakn"),
+                "unknown sub-verb reply must NOT echo the raw token — got: " + reply.text());
         assertTrue(reply.text().contains("Did you mean: kraken"),
                 "fuzzy suggestion for closest match");
         assertTrue(reply.text().contains("Available:"),
                 "available sub-verbs listed");
+    }
+
+    @Test
+    void assetErrorRepliesDoNotReflectInboundText() {
+        // M1-656: /zcash and friends are admitted during slow-start probation
+        // (CommandPermissions:80), making this the widest-reachable of the
+        // reflecting surfaces. Neither the sub-verb nor the --vs value is
+        // charset-validated at parse (AssetHandler.parseArgs only lowercases).
+        OutboundMessage subVerb = handler.handle("zcash", SCOPE, "/zcash /grant-admin");
+        assertFalse(subVerb.text().contains("grant-admin"),
+                "unknown sub-verb reply must not reflect inbound text — got: " + subVerb.text());
+
+        OutboundMessage currency = handler.handle("zcash", SCOPE, "/zcash --vs /grant-admin");
+        assertFalse(currency.text().contains("grant-admin"),
+                "unsupported-currency reply must not reflect inbound text — got: " + currency.text());
     }
 
     @Test
@@ -145,7 +162,11 @@ class AssetHandlerTest {
     void unsupportedQuoteCurrency() {
         snapshotReader.setResult(coingeckoSnapshot("zcash"));
         OutboundMessage reply = handler.handle("zcash", SCOPE, "/zcash --vs jpy");
-        assertTrue(reply.text().contains("jpy") && reply.text().contains("not enabled"),
+        // M1-656: the raw currency token is no longer echoed; the "not enabled"
+        // framing and the bot-authored available-list are retained.
+        assertFalse(reply.text().contains("jpy"),
+                "unsupported-currency reply must NOT echo the raw token — got: " + reply.text());
+        assertTrue(reply.text().contains("not enabled"),
                 "unsupported quote currency error");
         assertTrue(reply.text().contains("Did you mean: "),
                 "fuzzy suggestion for quote currency");

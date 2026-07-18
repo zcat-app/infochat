@@ -184,7 +184,7 @@ public class FollowTagCommandHandler implements CommandHandler {
             List<String> suggestions = fuzzySuggest(normalizedTag, vocab, FUZZY_SUGGESTION_MAX);
             String body = MessageFormat.format(
                     bundleLoader.get(BundleKeys.ERROR_FOLLOW_TAG_UNKNOWN_TAG, inboundContext.effectiveLanguage()),
-                    suppliedTag, String.join(", ", suggestions));
+                    String.join(", ", suggestions));
             return reply(scope, body);
         }
 

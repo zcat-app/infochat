@@ -19,6 +19,7 @@ import java.sql.ResultSet;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
@@ -103,6 +104,23 @@ class GroupTimezoneCommandHandlerTest {
         OutboundMessage result = handler.handle(scope, "/group-timezone NotAReal/Zone");
 
         assertTrue(result.text().contains("Unknown timezone"));
+    }
+
+    @Test
+    void groupTimezone_invalidZoneReplyDoesNotReflectInboundText() {
+        // M1-656: the reply used to echo tzArg raw. Unlike the tag surfaces,
+        // no charset predicate could have fixed this — IANA zone names
+        // legitimately contain "/" (Europe/Prague), so a filter permitting a
+        // real zone necessarily permits /grant-admin too. Hence removal.
+        inboundContext.setSenderContactId(botAdminContactId);
+        ScopeRef scope = new ScopeRef.Group(UPSTREAM_GROUP_ID);
+
+        OutboundMessage result = handler.handle(scope, "/group-timezone /grant-admin");
+
+        assertFalse(result.text().contains("grant-admin"),
+                "invalid-zone reply must not reflect inbound text — got: " + result.text());
+        assertTrue(result.text().contains("Unknown timezone"),
+                "the bot-authored framing is retained — got: " + result.text());
     }
 
     @Test

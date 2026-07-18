@@ -19,6 +19,7 @@ import java.text.MessageFormat;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -182,8 +183,11 @@ class FollowTagCommandHandlerTest {
                 new ScopeRef.Dm(actor),
                 "/follow-tag " + PREFIX + "notavocab");
 
-        assertTrue(reply.text().contains(PREFIX + "notavocab"),
-                "unknown-tag reply must echo the supplied tag — got: " + reply.text());
+        // M1-656: the reply no longer echoes the supplied tag. The echo was the
+        // vulnerability — parsePositionalTag returns the raw first token, so
+        // /follow-tag /grant-admin put that literal string into bot output.
+        assertFalse(reply.text().contains(PREFIX + "notavocab"),
+                "unknown-tag reply must NOT echo the supplied tag — got: " + reply.text());
         assertTrue(reply.text().contains("Did you mean"),
                 "unknown-tag reply must carry the fuzzy-suggestion footer — got: "
                         + reply.text());
@@ -191,6 +195,27 @@ class FollowTagCommandHandlerTest {
                 "unknown-tag reject must not flip tag_mode");
         assertEquals(0L, countScopeTag(actorId),
                 "unknown-tag reject must not seed any scope_tag row");
+    }
+
+    @Test
+    void followTagUnknownTagReplyDoesNotReflectInboundText() throws Exception {
+        // M1-656: parsePositionalTag returns the raw first token with no
+        // charset filter and no length bound, and the handler echoed it while
+        // validating a separate normalizedTag — the same
+        // check-one-string-echo-another shape M1-647 fixed on the command
+        // surface. TagNormalizer.normalize does NOT strip "/", so echoing the
+        // normalized value would not have been enough either.
+        String actor = PREFIX + "reflect-actor";
+        UUID actorId = seedUser(actor);
+        seedTag(PREFIX + "ai");
+        seedScopePreferences(actorId, "ALL");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/follow-tag /grant-admin");
+
+        assertFalse(reply.text().contains("grant-admin"),
+                "unknown-tag reply must not reflect inbound text — got: " + reply.text());
     }
 
     // ----- (e) Group scope short-circuits ---------------------------------

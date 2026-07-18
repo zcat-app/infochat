@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 668 |
+| done | 669 |
 | deferred | 0 |
 | abandoned | 17 |
-| **total** | **691** |
+| **total** | **693** |
 
 ---
 
@@ -27,7 +27,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-642 — Per-category digest delivery + optional roll-up summaries (complexity: high, risk: medium)
 - M1-654 — Guard the closed LLM tool allowlist against spec drift (complexity: low, risk: low)
-- M1-656 — Stop friendly errors reflecting unvalidated inbound text (complexity: medium, risk: medium)
+- M1-657 — Gate /approve-group: admin check before group-id parse (complexity: low, risk: low)
 
 ---
 
@@ -47,6 +47,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-648 — blocked_by: M1-645 (done), M1-646 (done), M1-647 (done), M1-654 (pending)
 - M1-649 — blocked_by: M1-648 (pending)
 - M1-652 — blocked_by: M1-642 (pending)
+- M1-658 — blocked_by: M1-656 (done), M1-657 (pending)
 
 ---
 
@@ -65,6 +66,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-656 | Stop friendly errors reflecting unvalidated inbound text | 2026-07-18 | round 3 APPROVE |
 | M1-655 | Fix MultiAdapterProductionIT flake: stand-in daemon must not die and trigger reconnect churn | 2026-07-18 | round 1 APPROVE |
 | M1-653 | Correct the outbound delivery contracts: correlationId javadoc and §6.3.5 | 2026-07-18 | round 1 APPROVE |
 | M1-651 | Guard HelpTier against the spec's closed bot-admin list | 2026-07-18 | round 3 APPROVE |
@@ -74,7 +76,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-645 | Correct three help/welcome strings that misstate the real command surface | 2026-07-18 | round 1 APPROVE |
 | M1-644 | Stub the provider-module EmbeddingProvider so the suite stops calling a real ollama | 2026-07-18 | round 1 APPROVE |
 | M1-641 | Topic-grouped periodic digest: category headers + affordance | 2026-07-18 | round 1 APPROVE |
-| M1-640 | Pin the /retry --digest non-interruptible classification with a test | 2026-07-17 | round 1 APPROVE |
 
 ---
 
@@ -886,5 +887,8 @@ M1-653 (done)
 M1-654 (pending) ← runnable
   └── M1-648 (pending) [see above]
 M1-655 (done)
-M1-656 (pending) ← runnable
+M1-656 (done)
+  ├── M1-657 (pending) ← runnable
+  │     └── M1-658 (pending)
+  └── M1-658 (pending) [see above]
 ```
