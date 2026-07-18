@@ -102,8 +102,12 @@ decision_refs:
 
 `/help <cmd>` returns good per-command usage and examples (M1-573), but reaching
 it requires already knowing the command's name. A 2026-07-18 audit measured the
-gap: of 39 catalogue commands, roughly 12 are guessable from the first word a
-user would naturally reach for. The rest require the product's vocabulary.
+gap: of 41 catalogue commands (verified 2026-07-18 — `HelpCommandHandler` holds
+41 `new CommandHelp(` entries: 18 BOT_ADMIN, 15 USER, 6 USER_OR_GROUP_ADMIN, 2
+GROUP_ADMIN), roughly 12 are guessable from the first word a user would
+naturally reach for. The rest require the product's vocabulary. The "roughly 12"
+is a subjective audit judgement, not a measured count, and nothing depends on
+its exact value.
 
 The failure is not silence — it is confident misdirection. `fuzzySuggest` scores
 candidates by `sharedPrefixLength` alone and breaks ties with

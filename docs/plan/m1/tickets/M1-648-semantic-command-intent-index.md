@@ -63,10 +63,10 @@ acceptance:
     Migration V60 creates doc_embedding (doc_id TEXT PK, doc_kind TEXT,
     target_ref TEXT, content_hash TEXT, embedding vector(N), embedding_model
     TEXT) with an HNSW cosine index, NOT partitioned, and grants the provider
-    role SELECT + INSERT + DELETE. The dimension N matches the profile dimension
-    already recorded in the embedding_metadata singleton, so
-    EmbeddingMetadataStartupGuard's model/dimension identity assumption still
-    holds for both corpora.
+    role SELECT + INSERT + DELETE. N is 768 — the single app-wide dimension
+    already recorded in the embedding_metadata singleton (v1 ships 768 on every
+    profile; see Notes) — so EmbeddingMetadataStartupGuard's model/dimension
+    identity assumption still holds for both corpora.
   - >-
     On startup the provider embeds one short intent document per catalogue
     command (seeded from CommandIntentSynonyms plus the command's own name and
@@ -169,9 +169,18 @@ D19 are untouched.
 
 **Why a separate table, same database.** One Postgres, one pgvector, one
 embedding model. `embedding_metadata` is a singleton pinning model identifier
-and dimension app-wide, and dimension is profile-dependent (768 laptop/vps, 384
-pi, 1536 remote-llm) — two corpora cannot use different models without breaking
-`EmbeddingMetadataStartupGuard`'s identity assumption. What the docs corpus must
+and dimension app-wide — two corpora cannot use different models without
+breaking `EmbeddingMetadataStartupGuard`'s identity assumption. The dimension
+is **768 on every profile in v1**, not profile-dependent: there is exactly one
+`infochat.embeddings.dimension` key in the tree
+(`infochat-collector/src/main/resources/application.properties:548`, value
+`768`) with no per-profile override, and `V11__post_embedding.sql:65` hardcodes
+`vector(768)`. The per-profile table in
+`docs/design/05-llm-and-embeddings.md:705-716` (pi 384, remote-llm 1536) is
+labelled in that same file as "the *intended* design, NOT the v1 shipped
+reality", and D54 permanently supersedes the 1536 row (embeddings always run on
+a local nomic-768 backend). So `vector(N)` in the acceptance above is
+`vector(768)` concretely. What the docs corpus must
 NOT share is `post_embedding`'s shape: that table is partitioned by `fetched_at`
 for TTL-by-partition-drop (Invariant 6), and a docs corpus has no TTL.
 
