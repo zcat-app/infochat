@@ -1,13 +1,14 @@
 ---
 id: M1-648
 title: "Semantic command-intent index with deterministic answer composition"
-status: pending
+status: escalated
 created: 2026-07-18
 last_updated: 2026-07-18
 blocked_by:
   - M1-645
   - M1-646
   - M1-647
+  - M1-654
 files_budget: 16
 files_scope:
   - infochat-core/src/main/resources/db/migration/V60__doc_embedding.sql
@@ -123,6 +124,75 @@ decision_refs:
   - D19
   - D54
   - D58
+clarity_check:
+  date: 2026-07-18
+  verdict: FAIL
+  warnings:
+    - >-
+      decision_refs (D19, D54, D58) does not list D64, the decision acceptance
+      item 8 asks this ticket to mint. Conventional (decision_refs lists
+      decisions relied on, not minted), but D64 may need to record the
+      tool-allowlist widening too.
+    - >-
+      Acceptance item 7 (three-phrasing end-to-end intent test) does not name an
+      exact test method, unlike items 2-6. Minor; still testable as written.
+  blockers:
+    - >-
+      files_scope (16 entries, exactly matching files_budget: 16 — zero slack)
+      omits docs/spec/security.md and docs/spec/verification.md.
+      ChatToolRegistry.java is in scope and carries the header comment "Holds the
+      closed six-tool allowlist for the chat agent. Additions or removals are
+      spec amendments (security.md §Prompt-injection defenses)"; security.md:278
+      confirms "The v1 list is closed at spec level (additions or removals are
+      spec amendments, not design tweaks)" and its per-tool table is the
+      byte-for-byte CI-parity source. Registering a 7th tool (HelpLookupTool,
+      acceptance items 4-6) therefore REQUIRES amending both spec files, and the
+      budget has no room for them. Fix: add both files to files_scope, raise
+      files_budget to at least 18, and add an acceptance item naming the new
+      security.md table row and the verification.md prose update.
+    - >-
+      No acceptance item, test_plan.modifies entry, or Notes/Out-of-scope text
+      authorizes updating the pre-existing test
+      ChatToolRegistryTest.registryContainsExactlySpecTools, which hard-asserts a
+      six-name Set.of and will fail once ChatToolRegistry gains a 7th entry.
+      Leaves the implementer choosing between an unauthorized test edit and a red
+      mvn verify (contradicting acceptance item 9). Fix: add an acceptance item /
+      test_plan.modifies entry naming the test and its new seven-name expected
+      set, including the exact registry key the new tool registers under.
+    - >-
+      (Found during post-verdict verification, NOT by the clarity subagent.)
+      CommandIntentSynonyms.java is declared `final class` — package-private, in
+      app.zcat.infochat.provider.messaging, with INTENT_TO_COMMAND `private
+      static final` and no public member anywhere in the file. Acceptance item 2
+      requires seeding intent documents "from CommandIntentSynonyms", but
+      files_scope places CommandIntentIndexBuilder in
+      app.zcat.infochat.provider.help — a different package, from which the class
+      is unreachable. Implementing item 2 therefore REQUIRES editing
+      CommandIntentSynonyms.java (widen the class and expose an accessor), and
+      that file is not in files_scope — only a prose mention in acceptance item
+      2. Fix: add
+      infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/CommandIntentSynonyms.java
+      to files_scope. Same class of coupling, already in scope and so NOT a
+      blocker: HelpTier, CommandHelp and the 41-entry CATALOGUE are
+      package-private members of HelpCommandHandler.java, which the tool must
+      also reach across the package boundary.
+    - >-
+      (Found during post-verdict verification.) files_scope omits
+      infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatToolRegistryTest.java,
+      the file blocker 2 requires modifying. Authorizing the edit in an
+      acceptance item is necessary but not sufficient — the changed file must
+      also be in files_scope and counted against files_budget.
+escalations:
+  - date: 2026-07-18
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      CLARITY VERDICT: FAIL
+      FILES-BUDGET-PLAUSIBLE: FAIL — files_scope omits docs/spec/security.md and
+      docs/spec/verification.md, which the closed-tool-allowlist amendment
+      requires; files_budget 16 is fully consumed by the existing 16 entries.
+      TEST-CHANGES-AUTHORIZED: FAIL — ChatToolRegistryTest
+      .registryContainsExactlySpecTools asserts exactly six tool names and will
+      break when a 7th is registered; no ticket text authorizes the update.
 ---
 
 # M1-648: Semantic command-intent index with deterministic answer composition
