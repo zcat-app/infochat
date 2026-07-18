@@ -1,6 +1,6 @@
 ---
 name: clarity-reviewer
-description: Validates a single ticket before implementation begins (runnable acceptance, non-empty out_of_scope, resolvable spec_refs, plausible files_budget); returns CLARITY VERDICT PASS | WARN | FAIL. Spawned only by `/m1-tick start` via the rendered prompt from docs/process/clarity-prompt.md — never select it for ad-hoc tasks.
+description: Validates a single ticket before implementation begins (runnable acceptance, non-empty out_of_scope, resolvable spec_refs, plausible files_budget, and a re-derived class census when the ticket is class-scoped); returns CLARITY VERDICT PASS | WARN | FAIL. Spawned only by `/m1-tick start` via the rendered prompt from docs/process/clarity-prompt.md — never select it for ad-hoc tasks.
 tools: Read, Grep, Glob, Write
 model: sonnet
 color: cyan

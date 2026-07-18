@@ -19,6 +19,14 @@ You are NOT looking for things the ticket should do differently. You
 are looking for things the ticket cannot be implemented from in its
 current form.
 
+One deliberate exception: check 10 (CLASS-COMPLETENESS). When a ticket
+fixes or guards a CLASS of defect rather than one named instance, an
+under-scoped class IS an implementability defect — the ticket cannot
+deliver what its own Context claims, and every gate after you measures
+the diff against the ticket, so nothing downstream will catch it.
+Judging that is squarely in your mandate. Judging design choices
+WITHIN a correctly-scoped class still is not.
+
 The ticket is: {{TICKET_ID}}
 Ticket file (Read this with the Read tool): {{TICKET_FILE_PATH}}
 Verdict file (Write the full structured verdict here using the Write
@@ -164,6 +172,56 @@ The overall FORWARD-REFERENCE-CHECK verdict:
 - `WARN` — at least one UNRESOLVED-PROSE and no UNRESOLVED-LOAD-BEARING.
 - `FAIL` — at least one UNRESOLVED-LOAD-BEARING.
 
+### 10. CLASS-COMPLETENESS — a class-scoped ticket enumerates its class
+
+Most tickets fix one named thing, and this check does NOT apply to
+them. It applies when the ticket's own Context or acceptance quantifies
+over INSTANCES — a defect with more than one site, or a guard that
+exists to cover a set. Trigger on either signal:
+
+  - **Plural or quantified framing** — "the four surfaces", "every
+    tool", "each handler", "the closed list", "duplicated between X and
+    Y", "drift", "parity", "recurrence", "the same pattern elsewhere".
+  - **The ticket adds a guard, parity test, lint or census.** A guard
+    exists to cover a set, so it is class-scoped by construction.
+
+If neither fires, report NOT-APPLICABLE and move on. Do NOT invent a
+class for a single-instance ticket — a false demand here costs a refine
+round for nothing and teaches authors to route around this check.
+
+When it does fire, the ticket must carry a **census**: a `## Census`
+body section holding (a) a re-runnable enumeration — a grep or glob
+pattern that mechanically lists every site of the class — and (b) a
+disposition for EVERY site that enumeration returns, each one of:
+`fix` (this ticket changes it), `guard` (this ticket makes it
+build-checked), `defer: <ticket-id or reason>`, or `out-of-scope:
+<reason>`.
+
+Then VERIFY it. Do not take the census on faith — re-deriving it is the
+entire value of this check:
+
+  1. Re-run the ticket's stated enumeration yourself with Grep/Glob.
+  2. Diff the sites it returns against the sites the census disposes.
+  3. Any returned site with no disposition is an UNACCOUNTED SITE.
+
+Verdict:
+  - Class-scoped ticket with no `## Census` section → **FAIL**.
+  - Census present, but re-running its enumeration returns one or more
+    UNACCOUNTED SITES → **FAIL**, listing each unaccounted path in the
+    blocker. This is the case the check exists for: it is what catches
+    a guard that covers one pair while a third copy of the same
+    invariant sits unguarded, or a fix that repairs four surfaces while
+    a fifth of the same shape goes unmentioned.
+  - Census present, enumeration re-runs clean, every returned site
+    disposed → **PASS**.
+  - An enumeration you cannot re-run with the Read/Grep/Glob tools you
+    have → **WARN**, saying so plainly. Never silently score it PASS.
+
+A disposition may be terse, and `defer:` / `out-of-scope:` do NOT
+require your agreement — a deliberately deferred site is a disposed
+site. You are checking that every site was SEEN and consciously
+decided, not that you would have decided the same way.
+
 ---
 
 ## Short chat reply (the only thing you return inline)
@@ -220,6 +278,13 @@ FORWARD-REFERENCE-CHECK: <PASS | WARN | FAIL>
    RESOLVED (path: <glob result>) | SELF-REF | PLACEHOLDER |
    UNRESOLVED-LOAD-BEARING (field: <field-name>) |
    UNRESOLVED-PROSE (location: <section or field>).>
+
+CLASS-COMPLETENESS: <PASS | WARN | FAIL | NOT-APPLICABLE>
+  <On NOT-APPLICABLE: one line naming why the ticket is single-instance.
+   Otherwise: the enumeration you re-ran, the number of sites it
+   returned, then one bullet per returned site with its disposition —
+   fix | guard | defer: <reason> | out-of-scope: <reason> |
+   UNACCOUNTED. Every UNACCOUNTED site must be listed by path.>
 
 BLOCKERS: (omit on PASS; required on FAIL)
   1. <specific, addressable, points at the line in the ticket that needs change>

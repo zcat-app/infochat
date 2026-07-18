@@ -123,6 +123,35 @@ unlock? Cite the parent milestone goal in `docs/plan/<milestone>/README.md`
 (e.g. `docs/plan/m1/README.md` §M1 milestone goal) if applicable. Cite the
 relevant `spec_refs:` entry as the contract.
 
+## Census
+
+**Required when this ticket fixes or guards a CLASS of defect** — more
+than one site of the same shape, or a guard that exists to cover a set.
+Omit the section entirely for a single-instance ticket; the clarity gate
+reports NOT-APPLICABLE and moves on.
+
+Enumerate the class MECHANICALLY, then dispose of every site it returns.
+Do not hand-list from memory: the point is to surface the sites you did
+not already know about, which is exactly where under-scoped tickets come
+from. State the enumeration so it can be re-run with Grep/Glob — the
+clarity gate repeats it and compares.
+
+    grep -rln "<the invariant's distinguishing token>" --include=<globs>
+
+| Site | Disposition |
+|---|---|
+| `path/to/a.java` | fix |
+| `path/to/b.md` | guard |
+| `path/to/c.java` | defer: M<N>-XXX |
+| `path/to/d.md` | out-of-scope: <reason> |
+
+Every path the enumeration returns needs a row. The clarity gate re-runs
+it and FAILs the ticket on any returned path with no row
+(CLASS-COMPLETENESS in `docs/process/clarity-prompt.md`). A deferred or
+out-of-scope site still counts as disposed — this is about having SEEN
+every site and decided consciously, not about fixing them all in one
+ticket.
+
 ## Acceptance
 
 The behavioral contract this ticket commits to. Each item is either a
