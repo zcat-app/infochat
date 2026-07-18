@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 662 |
+| done | 663 |
 | deferred | 0 |
 | abandoned | 17 |
 | **total** | **685** |
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-642 — Per-category digest delivery + optional roll-up summaries (complexity: high, risk: medium)
 - M1-646 — Add /pending + /recover-pool to the help catalogue and guard catalogue coverage (complexity: medium, risk: low)
-- M1-650 — Sentinel-lint test endpoints (complexity: low, risk: medium)
 
 ---
 
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-650 | Sentinel-lint test endpoints | 2026-07-18 | round 1 APPROVE |
 | M1-645 | Correct three help/welcome strings that misstate the real command surface | 2026-07-18 | round 1 APPROVE |
 | M1-644 | Stub the provider-module EmbeddingProvider so the suite stops calling a real ollama | 2026-07-18 | round 1 APPROVE |
 | M1-641 | Topic-grouped periodic digest: category headers + affordance | 2026-07-18 | round 1 APPROVE |
@@ -74,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-636 | Per-user cap on concurrent interruptible requests across scopes | 2026-07-17 | round 2 APPROVE |
 | M1-628 | Asset commands (/zcash, /monero): inconsistent leading indentation on some reply lines | 2026-07-17 | round 1 APPROVE |
 | M1-627 | /approve-group and /reject-group: clarify which group id token to pass | 2026-07-17 | round 1 APPROVE |
-| M1-635 | Queued interruptible request gives the sender no feedback until a worker frees | 2026-07-16 | round 1 APPROVE |
 
 ---
 
@@ -879,5 +878,5 @@ M1-645 (done)
 M1-646 (pending) ← runnable
   ├── M1-647 (pending) [see above]
   └── M1-648 (pending) [see above]
-M1-650 (pending) ← runnable
+M1-650 (done)
 ```

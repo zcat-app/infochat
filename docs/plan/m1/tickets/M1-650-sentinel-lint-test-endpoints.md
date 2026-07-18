@@ -1,7 +1,7 @@
 ---
 id: M1-650
 title: "Sentinel-lint test endpoints"
-status: pending
+status: done
 created: 2026-07-18
 last_updated: 2026-07-18
 blocked_by: []
@@ -99,6 +99,25 @@ test_plan:
 spec_refs:
   - docs/spec/verification.md §Test layers
 decision_refs: []
+clarity_check:
+  date: 2026-07-18
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-18
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 230
+      removed: 14
 ---
 
 # M1-650: Sentinel-lint test endpoints
