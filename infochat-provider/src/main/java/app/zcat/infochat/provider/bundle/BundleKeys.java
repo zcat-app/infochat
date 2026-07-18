@@ -153,6 +153,12 @@ public final class BundleKeys {
     /** Short-help line for {@code /list-groups} (bot-admin tier). */
     public static final String HELP_CMD_LIST_GROUPS_SHORT = "help.cmd.list-groups.short";
 
+    /** Short-help line for {@code /pending} (bot-admin tier). */
+    public static final String HELP_CMD_PENDING_SHORT = "help.cmd.pending.short";
+
+    /** Short-help line for {@code /recover-pool} (bot-admin tier). */
+    public static final String HELP_CMD_RECOVER_POOL_SHORT = "help.cmd.recover-pool.short";
+
     /**
      * Per-asset {@code /help} line template (M1-303). One key for the whole
      * dynamic asset list (unlike the per-command {@code help.cmd.*.short}
@@ -418,6 +424,18 @@ public final class BundleKeys {
 
     /** {@code /list-groups} examples. */
     public static final String HELP_CMD_LIST_GROUPS_EXAMPLES = "help.cmd.list-groups.examples";
+
+    /** {@code /pending} usage detail. */
+    public static final String HELP_CMD_PENDING_USAGE = "help.cmd.pending.usage";
+
+    /** {@code /pending} examples. */
+    public static final String HELP_CMD_PENDING_EXAMPLES = "help.cmd.pending.examples";
+
+    /** {@code /recover-pool} usage detail. */
+    public static final String HELP_CMD_RECOVER_POOL_USAGE = "help.cmd.recover-pool.usage";
+
+    /** {@code /recover-pool} examples. */
+    public static final String HELP_CMD_RECOVER_POOL_EXAMPLES = "help.cmd.recover-pool.examples";
 
     /** Deterministic reply for an unknown slash command, looked up by InboundRouter's slash dispatch in the requester's effective scope language. */
     public static final String ERROR_UNKNOWN_COMMAND = "error.unknown_command";

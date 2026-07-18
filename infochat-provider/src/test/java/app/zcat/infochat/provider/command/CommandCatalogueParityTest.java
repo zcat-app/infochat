@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.CodeSource;
@@ -20,9 +22,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Build-time guard against command-catalogue name drift (M1-527): the
- * PRODUCTION set of {@link CommandHandler} beans must exactly match the
- * marker-delimited canonical command index in {@code docs/spec/commands.md}.
+ * Build-time guard against command-catalogue name drift: the PRODUCTION set of
+ * {@link CommandHandler} beans must exactly match BOTH the marker-delimited
+ * canonical command index in {@code docs/spec/commands.md} (M1-527) and the
+ * {@code /help} catalogue the bot renders (M1-646). The two axes are
+ * independent — a command can be indexed in the spec and dispatchable yet
+ * undocumented by {@code /help}, which is exactly how {@code /pending} and
+ * {@code /recover-pool} drifted out.
  *
  * <p>The runtime side is enumerated from the real CDI bean graph
  * ({@link BeanManager#getBeans}) — authoritative, no fragile source regex —
@@ -66,18 +72,72 @@ class CommandCatalogueParityTest {
 
     @Test
     void productionCommandSetMatchesMarkedIndex() {
-        Set<String> inCode = new TreeSet<>();
+        Set<String> inCode = productionCommandNames();
+        Set<String> inDoc = parseMarkedIndex(COMMANDS_MD);
+
+        assertEquals(inDoc, inCode, () -> diffMessage(inCode, inDoc));
+    }
+
+    /**
+     * The SECOND parity axis (M1-646): every dispatchable production
+     * {@link CommandHandler} must also carry a {@code /help} catalogue entry,
+     * so no command is reachable at runtime yet undocumented by the bot itself.
+     *
+     * <p>{@link #productionCommandSetMatchesMarkedIndex} compares a different
+     * pair — handlers against the SPEC index — which is why it stayed green
+     * while {@code /pending} and {@code /recover-pool} were indexed and
+     * dispatchable but absent from {@code HelpCommandHandler.CATALOGUE}.
+     *
+     * <p>Asset commands need no exclusion filter on either side: they are
+     * dispatched via {@code AssetHandler}/{@code AssetRegistry} rather than as
+     * {@link CommandHandler} beans, and are deliberately outside the catalogue
+     * because the enabled-asset set is operator-driven, not static
+     * (docs/spec/commands.md §Command catalogue, "Asset commands ... are
+     * deliberately not in the index"). {@code HelpCommandHandler} appends them
+     * to the help listing dynamically at render time.
+     */
+    @Test
+    void everyCommandHandlerHasAHelpCatalogueEntry() throws Exception {
+        Set<String> inCode = productionCommandNames();
+        Set<String> inCatalogue = helpCatalogueCommandNames();
+
+        assertEquals(inCatalogue, inCode, () -> catalogueDiffMessage(inCode, inCatalogue));
+    }
+
+    /**
+     * The command names {@code HelpCommandHandler.CATALOGUE} documents. The
+     * catalogue is a package-private static in the messaging package, so it is
+     * read reflectively — the same access this module's
+     * {@code ProbationCommandListConsistencyTest} uses, rather than widening
+     * the production surface for a test.
+     */
+    private static Set<String> helpCatalogueCommandNames() throws Exception {
+        Class<?> helpClass = Class.forName("app.zcat.infochat.provider.messaging.HelpCommandHandler");
+        Field catalogueField = helpClass.getDeclaredField("CATALOGUE");
+        catalogueField.setAccessible(true);
+        List<?> catalogue = (List<?>) catalogueField.get(null);
+
+        Set<String> names = new TreeSet<>();
+        for (Object entry : catalogue) {
+            Method commandAccessor = entry.getClass().getDeclaredMethod("command");
+            commandAccessor.setAccessible(true);
+            names.add((String) commandAccessor.invoke(entry));
+        }
+        return names;
+    }
+
+    /** Command names of the production (non-test) {@link CommandHandler} beans, from the real CDI bean graph. */
+    private Set<String> productionCommandNames() {
+        Set<String> names = new TreeSet<>();
         for (Bean<?> bean : beanManager.getBeans(CommandHandler.class)) {
             if (!isProductionClass(bean.getBeanClass())) {
                 continue;
             }
             CommandHandler handler = (CommandHandler) beanManager.getReference(
                     bean, CommandHandler.class, beanManager.createCreationalContext(bean));
-            inCode.add(handler.name());
+            names.add(handler.name());
         }
-        Set<String> inDoc = parseMarkedIndex(COMMANDS_MD);
-
-        assertEquals(inDoc, inCode, () -> diffMessage(inCode, inDoc));
+        return names;
     }
 
     /**
@@ -152,5 +212,19 @@ class CommandCatalogueParityTest {
                + codeOnly + "\n"
                + "  indexed but NOT in code (the catalogue lists a ghost command): "
                + docOnly;
+    }
+
+    private static String catalogueDiffMessage(Set<String> inCode, Set<String> inCatalogue) {
+        Set<String> codeOnly = new TreeSet<>(inCode);
+        codeOnly.removeAll(inCatalogue);
+        Set<String> catalogueOnly = new TreeSet<>(inCatalogue);
+        catalogueOnly.removeAll(inCode);
+        return "Help-catalogue coverage mismatch between the production CommandHandler "
+               + "set and HelpCommandHandler.CATALOGUE:\n"
+               + "  dispatchable but NOT in the help catalogue (the bot answers a command "
+               + "it never documents — add a CATALOGUE entry plus its short/usage/examples "
+               + "bundle keys in en and cs): " + codeOnly + "\n"
+               + "  in the help catalogue but NOT dispatchable (help advertises a command "
+               + "that no handler serves): " + catalogueOnly;
     }
 }

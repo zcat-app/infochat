@@ -1,9 +1,93 @@
 ---
 id: M1-646
 title: "Add /pending + /recover-pool to the help catalogue and guard catalogue coverage"
-status: pending
+status: done
 created: 2026-07-18
 last_updated: 2026-07-18
+reviews:
+  - round: 1
+    date: 2026-07-18
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 196
+      removed: 18
+redteam_findings:
+  - date: 2026-07-18
+    category: INFO-LEAK
+    severity: low
+    promise: |
+      docs/spec/commands.md §Discovery commits to fuzzy suggestions drawn "only
+      from the caller-visible command set (no admin-command existence leak)",
+      and docs/spec/security.md §Prompt-injection defenses states the posture
+      for the closed privileged-tier list is structural CI-enforced parity,
+      "not hand-maintained" discipline.
+    gap: |
+      The new everyCommandHandlerHasAHelpCatalogueEntry guard reads only the
+      command() accessor of each CommandHelp record, so it constrains the NAME
+      axis only. The HelpTier of each entry — the sole input to visible()'s
+      non-admin gate — stays hand-picked with no machine-check against the
+      spec's closed privileged-tier list (docs/spec/commands.md:1295). No test
+      in the repo reads the tier field at all. Net-effect direction: before
+      this diff, forgetting an admin command in the catalogue failed SAFE
+      (undocumented); after it, CI fails until an entry exists, so every future
+      handler is force-added to the discovery surface with a hand-picked enum
+      as the only thing separating "documented" from "advertised to every
+      non-admin".
+    repro: |
+      A future ticket adds a bot-admin handler; the new guard fails with a
+      message telling the developer to add a CATALOGUE entry but saying nothing
+      about which HelpTier to pick; the developer writes HelpTier.USER; the
+      full suite goes green (name parity passes, spec-index parity passes, the
+      sanitizer closed-list guard reads its own list, no spot check names the
+      new command); any registered non-admin then reads the short line via
+      /help and the full usage block via /help <cmd>. Execution still requires
+      is_admin=true, so this is disclosure and recon, not privilege escalation.
+    suggested_fix_class: other
+redteam_audits:
+  - date: 2026-07-18
+    verdict: FINDINGS
+    base: 15537d74ce4ca73a4b11e29e321d22a3f7eacb00
+    head: working tree (uncommitted, branch m1/M1-646-help-catalogue-coverage-guard)
+    verdict_file: docs/plan/m1/redteam/M1-646-2026-07-18.md
+    findings_count: 1
+    out_of_model_count: 3
+    note: |
+      One low finding, no critical/high/medium. It is forward-looking — a
+      coupling the diff introduces, not a defect in the shipped behaviour. The
+      candidate fix has an in-repo precedent
+      (LlmOutputSanitizerTest.matchSetEqualsSpecClosedList reads the spec's
+      closed privileged-tier list and asserts equality against a code list), so
+      a tier-parity guard is buildable either in-branch via refine or as a
+      follow-up ticket. All three out-of-model items (group-scope
+      advertisement of DM-only admin commands, direct-invocation existence
+      oracle, unbounded echo of the requested token) are pre-existing and
+      untouched by this diff.
+clarity_check:
+  date: 2026-07-18
+  verdict: WARN
+  warnings:
+    - >-
+      Acceptance item 6 requires no diff: docs/spec/commands.md's marked
+      command-index already lists both /pending (line 153) and /recover-pool
+      (line 156) on main, and the pre-existing parity test already passes with
+      them present.
+    - >-
+      /recover-pool has no prose documentation anywhere in commands.md (only the
+      bare index entry and the closed bot-admin-tier list mention), unlike
+      /pending's full descriptive bullet. The ticket doesn't say whether closing
+      this gap is in or out of scope.
+    - >-
+      risk: low is likely undercalibrated for a security_relevant: true ticket
+      that adds admin-tier catalogue entries and pins an admin-command-existence-leak
+      property; consider risk: medium.
+  blockers: []
 files_budget: 8
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java

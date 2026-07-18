@@ -345,6 +345,61 @@ class HelpCommandHandlerTest {
     }
 
     @Test
+    void botAdminSeesPendingAndRecoverPoolInListAndDetail() {
+        // M1-646: both commands are dispatchable bot-admin handlers, so the
+        // help surface must document them — the flat list carries their short
+        // lines and /help <cmd> returns usage plus examples.
+        HelpCommandHandler handler = handlerFor(dm(true, false, false), productionBundleLoader);
+        String list = handler.handle(new ScopeRef.Dm("admin"), "/help").text();
+        assertContainsLine(list, BundleKeys.HELP_CMD_PENDING_SHORT);
+        assertContainsLine(list, BundleKeys.HELP_CMD_RECOVER_POOL_SHORT);
+
+        String pending = handler.handle(new ScopeRef.Dm("admin"), "/help pending").text();
+        assertTrue(pending.contains(productionBundleLoader.get(BundleKeys.HELP_CMD_PENDING_USAGE)),
+                "/help pending must carry its usage block; got: " + pending);
+        assertTrue(pending.contains(productionBundleLoader.get(BundleKeys.HELP_CMD_PENDING_EXAMPLES)),
+                "/help pending must carry its examples block; got: " + pending);
+
+        String recoverPool = handler.handle(new ScopeRef.Dm("admin"), "/help recover-pool").text();
+        assertTrue(recoverPool.contains(productionBundleLoader.get(BundleKeys.HELP_CMD_RECOVER_POOL_USAGE)),
+                "/help recover-pool must carry its usage block; got: " + recoverPool);
+        assertTrue(recoverPool.contains(productionBundleLoader.get(BundleKeys.HELP_CMD_RECOVER_POOL_EXAMPLES)),
+                "/help recover-pool must carry its examples block; got: " + recoverPool);
+    }
+
+    @Test
+    void hiddenTierCommandIsIndistinguishableFromUnknown() {
+        // Documenting an admin command must not turn /help into an existence
+        // oracle (docs/spec/commands.md §Permission model, "no admin-command
+        // existence leak"): to a non-admin, a real-but-hidden name must produce
+        // the SAME unknown-command reply a nonexistent name does — never a
+        // permission-denied reply, which would confirm the command exists.
+        String deniedReply = productionBundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY);
+        HelpCommandHandler nonAdmin = handlerFor(dm(false, false, false), productionBundleLoader);
+
+        for (String hidden : List.of("pending", "recover-pool")) {
+            String body = nonAdmin.handle(new ScopeRef.Dm("alice"), "/help " + hidden).text();
+            assertTrue(body.contains("Unknown command `/" + hidden + "`"),
+                    "hidden /" + hidden + " must resolve to the unknown-command reply; got: " + body);
+            assertFalse(body.contains(deniedReply),
+                    "hidden /" + hidden + " must not return a permission-denied reply; got: " + body);
+        }
+
+        // The nonexistent-name control: a name no handler serves produces the
+        // same reply shape, so the two cases are indistinguishable.
+        String nonexistent = nonAdmin.handle(new ScopeRef.Dm("alice"), "/help pendinx").text();
+        assertTrue(nonexistent.contains("Unknown command `/pendinx`"),
+                "control: a nonexistent name must produce the unknown-command reply; got: " + nonexistent);
+
+        // Suggestions are drawn only from caller-visible names, so neither
+        // hidden name may appear in the nonexistent name's near-miss list.
+        assertFalse(nonexistent.contains("/pending"),
+                "suggestions must not leak the hidden /pending; got: " + nonexistent);
+        assertFalse(nonexistent.contains("/recover-pool"),
+                "suggestions must not leak the hidden /recover-pool; got: " + nonexistent);
+    }
+
+    @Test
     void helpListSourcesDetailShowsAdminFlagsOnlyToBotAdmin() {
         String nonAdmin = handlerFor(dm(false, false, false), productionBundleLoader)
                 .handle(new ScopeRef.Dm("alice"), "/help list-sources").text();
