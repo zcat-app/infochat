@@ -6,7 +6,6 @@ created: 2026-07-17
 last_updated: 2026-07-18
 blocked_by:
   - M1-641
-  - M1-652
 files_budget: 16
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java
@@ -43,12 +42,13 @@ out_of_scope:
     it does not add per-category cache rows or change the /retry --digest cache
     contract (D17).
   - >-
-    BUILDING the delivery-idempotency mechanism. That is M1-652's job — it adds
-    correlationId-keyed dedup at the outbound chokepoint for every message type,
-    persisted so it survives a Provider restart. This ticket CONSUMES it by
-    minting one correlationId per (slot, category); it adds no dedup logic of
-    its own and no digest-local acked state. If M1-652 has not landed, this
-    ticket is not startable — that is what blocked_by encodes.
+    Gap-filling redelivery — tracking which categories landed so a later
+    /retry --digest sends only the missing ones. That needs persisted
+    per-(slot, category) delivery state and is M1-652's job, which is
+    blocked_by THIS ticket (the per-category structure must exist before there
+    are gaps to fill). This ticket adds no delivery-state persistence and no
+    dedup logic. Until M1-652 lands, a /retry --digest re-posts every category,
+    including ones already delivered — see the acceptance item on redelivery.
   - >-
     Adapter-side chunking. SimpleXOutboundChunker still applies its 4 000-byte
     line-based chunking to each category message independently; this ticket does
@@ -70,13 +70,16 @@ acceptance:
     a PERMANENT failure on one category still delivers the others.
     DigestDeliveryTest.retriesFailedCategoryMessageIndependently passes.
   - >-
-    Redelivery does not double-post: because each category's correlationId is
-    stable across regenerations of the same (slot, category), M1-652's
-    chokepoint dedup suppresses an already-delivered category on a mid-sequence
-    Provider restart or a /retry --digest. This ticket's obligation is minting a
-    STABLE id — derived from (groupId, windowStart, categorySlug), never from a
-    counter, timestamp or random value — not implementing the suppression.
-    DigestDeliveryTest.redeliveryReusesTheSameCorrelationIdPerCategory passes.
+    Redelivery posts again and MAY duplicate: nothing in v1 records which
+    categories were delivered, so a /retry --digest re-runs the slot and
+    re-posts every category it produces, including any that already landed.
+    This is deliberate — docs/spec/commands.md §"Cached digest message handle"
+    commits that /retry --digest posts a new message, so suppressing it would
+    be a spec violation. Each category message carries its own correlationId,
+    but NO cross-regeneration stability is required or asserted: no consumer
+    dedups on it, and M1-652 (gap-filling) will key on the
+    (groupId, windowStart, categorySlug) tuple directly rather than on the id.
+    DigestDeliveryTest.retryRepostsEveryCategory passes.
   - DigestDeliveryTest.partialFailureDeliversRemainingCategories passes
   - >-
     DigestRenderer's public render(posts, langCode) contract is UNCHANGED and
@@ -132,6 +135,29 @@ decision_refs:
   - D17
   - D36
 revisions:
+  - date: 2026-07-18
+    reason: >-
+      Redelivery policy inverted after M1-652's clarity-fail investigation
+      found chokepoint dedup unworkable (40 of 43 OutboundMessage sites mint
+      UUID.randomUUID(); the ambiguous-ack duplicate writes no ack row and is
+      invisible to that seam). User decision 2026-07-18: /retry --digest posts
+      again, per docs/spec/commands.md §"Cached digest message handle".
+      Acceptance item flipped from "redelivery does not double-post" to
+      "redelivery posts again and MAY duplicate"; the cross-regeneration
+      correlationId-stability obligation dropped; M1-652 removed from
+      blocked_by and re-sequenced AFTER this ticket as gap-filling redelivery.
+      No sizing change — files_budget/files_scope/complexity/risk unchanged.
+    snapshot:
+      blocked_by: [M1-641, M1-652]
+      acceptance_item_4: >-
+        Redelivery does not double-post: because each category's correlationId
+        is stable across regenerations of the same (slot, category), M1-652's
+        chokepoint dedup suppresses an already-delivered category on a
+        mid-sequence Provider restart or a /retry --digest. This ticket's
+        obligation is minting a STABLE id — derived from (groupId, windowStart,
+        categorySlug), never from a counter, timestamp or random value — not
+        implementing the suppression.
+        DigestDeliveryTest.redeliveryReusesTheSameCorrelationIdPerCategory passes.
   - date: 2026-07-18
     reason: clarity-fail rework
     snapshot:
@@ -251,24 +277,36 @@ call, as before.
 **Partial-failure policy (the crux).** Each category message retries
 independently through the chokepoint's existing TRANSIENT-retry /
 PERMANENT-abort ladder and per-group permanent-failure counter; the digest is
-"delivered" if ≥1 category lands. Redelivery does not double-post, because
-M1-652 puts correlationId-keyed dedup at that chokepoint.
+"delivered" if ≥1 category lands. Redelivery re-posts everything and may
+duplicate — see below.
 
 This ticket originally asserted the chokepoint "already does its
-idempotency/dedup work per message" — that was false when filed.
-`OutboundDelivery` had no correlationId dedup, and the
-`docs/design/06-messaging.md` §6.3.5 adapter-side SHOULD is unimplemented in
-all three v1 adapters (verified 2026-07-18). Rather than degrade this ticket
-to match, the missing capability was filed as its own prerequisite, M1-652,
-which builds it once at the seam every outbound message crosses. So the
-original design holds — it was simply resting on something that had to be
-built first.
+idempotency/dedup work per message" — false when filed, and the prerequisite
+raised to fix it (M1-652, correlationId-keyed dedup at the chokepoint) was
+then found not to work either. Verified 2026-07-18: 40 of 43
+`OutboundMessage` construction sites mint `UUID.randomUUID()`, so a
+chokepoint dedup keyed on correlationId is inert almost everywhere; and the
+one duplicate mode that reaches a user — adapter transmits, ack times out,
+ladder re-sends — writes no ack row and so is not suppressed by it. The
+chokepoint cannot observe whether an ambiguous transmit landed; only the
+adapter can. That guarantee was therefore dropped rather than moved, and
+M1-652 was repurposed (see below). D63 records the v1 position.
 
-**All this ticket owes is a stable id.** The suppression lives in M1-652; the
-obligation here is that the same (slot, category) always mints the same
-correlationId, so a regenerated digest collides with its own earlier delivery
-instead of minting a fresh id and duplicating. Derive it from
-(groupId, windowStart, categorySlug) only.
+**What actually goes wrong, and who owns it.** On a mid-sequence Provider
+death the scheduler does NOT re-run the slot — a `summary_cache` row exists,
+so it is not "missed" (`DigestScheduler` is skip-not-catch-up). The
+undelivered categories are simply lost, with no alarm. The real risk here is
+silent under-delivery, not duplication. The remedy is gap-filling redelivery
+— on `/retry --digest`, send only the categories that never landed — which
+needs persisted per-(slot, category) delivery state and is **M1-652**, now
+sequenced AFTER this ticket because the per-category structure has to exist
+before there are gaps to fill.
+
+**This ticket owes no id stability.** Cross-regeneration correlationId
+stability was the previous design's requirement and is now explicitly NOT
+required: nothing dedups on the id, `/retry --digest` must post again per
+`docs/spec/commands.md`, and M1-652 will key its delivery state on the
+(groupId, windowStart, categorySlug) tuple rather than on the correlationId.
 
 **Cluster splitting is reduced, not eliminated.** `SimpleXOutboundChunker`
 chunks at 4 000 UTF-8 bytes on greedy line boundaries and is not caller-
