@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 664 |
 | deferred | 0 |
 | abandoned | 17 |
-| **total** | **686** |
+| **total** | **687** |
 
 ---
 
@@ -25,9 +25,9 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-642 — Per-category digest delivery + optional roll-up summaries (complexity: high, risk: medium)
 - M1-647 — Intent-aware command suggestions: synonyms + non-prefix matching on the /help path (complexity: medium, risk: medium)
 - M1-651 — Guard HelpTier against the spec's closed bot-admin list (complexity: medium, risk: low)
+- M1-652 — Delivery idempotency at the outbound chokepoint (complexity: high, risk: high)
 
 ---
 
@@ -44,6 +44,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
+- M1-642 — blocked_by: M1-641 (done), M1-652 (pending)
 - M1-648 — blocked_by: M1-645 (done), M1-646 (done), M1-647 (pending)
 - M1-649 — blocked_by: M1-648 (pending)
 
@@ -867,7 +868,7 @@ M1-638 (done)
 M1-639 (done)
 M1-640 (done)
 M1-641 (done)
-  ├── M1-642 (pending) ← runnable
+  ├── M1-642 (pending)
   └── M1-643 (abandoned)
 M1-644 (done)
 M1-645 (done)
@@ -880,4 +881,6 @@ M1-646 (done)
   └── M1-648 (pending) [see above]
 M1-650 (done)
 M1-651 (pending) ← runnable
+M1-652 (pending) ← runnable
+  └── M1-642 (pending) [see above]
 ```
