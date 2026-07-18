@@ -9,7 +9,7 @@ blocked_by:
   - M1-646
   - M1-647
   - M1-654
-files_budget: 21
+files_budget: 25
 files_scope:
   - infochat-core/src/main/resources/db/migration/V60__doc_embedding.sql
   - infochat-provider/src/main/java/app/zcat/infochat/provider/help/CommandIntentIndex.java
@@ -18,6 +18,7 @@ files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/tool/HelpLookupTool.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatToolRegistry.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatToolDispatcher.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/CommandIntentSynonyms.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
@@ -26,11 +27,14 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/HelpLookupToolTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatToolRegistryTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java
   - docs/spec/commands.md
   - docs/spec/llm.md
   - docs/spec/decisions.md
   - docs/spec/security.md
   - docs/design/05-llm-and-embeddings.md
+  - docs/design/04-security.md
+  - docs/design/03-commands.md
 complexity: high
 risk: high
 round_cap: 3
@@ -131,6 +135,47 @@ acceptance:
     ChatToolAllowlistSpecParityTest.registryMatchesMarkedSpecTable stays green.
     The registry key and the spec row's name must match byte-for-byte.
   - >-
+    ChatAgent.TOOL_INSTRUCTIONS advertises `helpLookup` to the model, in the
+    same one-line-per-tool shape the other entries use, naming its free-text
+    input. This is not cosmetic. TOOL_INSTRUCTIONS (ChatAgent.java:65-82) is a
+    hardcoded THIRD copy of the tool-name list and is the ONLY thing that tells
+    the model a tool exists — it is appended to the system prompt at
+    ChatAgent.java:395 and nothing derives it from the registry. A tool absent
+    from it is registered, dispatchable, spec'd and parity-guarded yet never
+    offered to the model, so it is never called and this ticket's entire
+    chat-facing feature is inert while every gate stays green.
+  - >-
+    ChatAgentTest gains everyRegisteredToolIsAdvertised, which DERIVES its
+    expectation from ChatToolRegistry.toolNames() and asserts every name appears
+    in TOOL_INSTRUCTIONS. It must be derived rather than a hand-listed set: the
+    four existing toolInstructions*Params tests are hand-written per tool and
+    already cover only 4 of the 6 shipped tools (no getPost, no getReferences),
+    which is exactly the drift this item closes for every future tool. Those
+    four tests are NOT modified or removed — this is an addition.
+    ChatAgentTest.everyRegisteredToolIsAdvertised passes.
+  - >-
+    docs/spec/commands.md's `/stop` cancellation paragraph (commands.md:980-989)
+    is corrected. It asserts "every tool in the closed allowlist ... is a
+    read-only DB query" and then enumerates FIVE names — already stale since
+    M1-589, omitting `semanticSearch`. Replace that enumeration with a pointer
+    to security.md's marked table (the single source of truth M1-654
+    established; do not re-add a list that can drift), and record `helpLookup`'s
+    cancellation story as the same read-only `pg_cancel_backend` primitive.
+    That paragraph requires a tool added by spec amendment to "define their own
+    cancellation primitive before being added to the registry", so this is a
+    precondition of registering the 7th tool, not an optional tidy-up.
+  - >-
+    The three design-tier mirrors of the closed list stop contradicting
+    security.md's table, since registering the 7th tool is what makes them
+    wrong: docs/design/04-security.md:189-199 (heading "closed at exactly five"
+    plus a five-row table — already stale, missing `semanticSearch` since
+    M1-589), docs/design/03-commands.md:1056-1058 (a near-verbatim mirror of the
+    `/stop` cancellation enumeration corrected in the item above), and
+    docs/design/05-llm-and-embeddings.md:473 (prose list). Each gains
+    `helpLookup` and stops asserting a fixed count. Design notes are
+    non-normative, so the bar is "does not contradict security.md's marked
+    table" — do NOT turn them into a second source of truth.
+  - >-
     AUTHORIZED PRE-EXISTING TEST CHANGE —
     ChatToolRegistryTest.registryContainsExactlySpecTools pins a six-name
     Set.of and fails once ChatToolRegistry gains a 7th entry. Its expected set
@@ -154,6 +199,11 @@ test_plan:
       change: >-
         registryContainsExactlySpecTools — the expected Set.of grows from six
         names to seven (adds `helpLookup`). Exact-equality assertion retained.
+    - path: infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java
+      change: >-
+        ADDS everyRegisteredToolIsAdvertised, derived from toolNames(). The four
+        existing toolInstructions*Params tests are left byte-for-byte unchanged —
+        this is an addition, never a replacement, a merge, or a weakening.
   preserves:
     - all tests currently green on main
     - >-
@@ -195,6 +245,46 @@ revisions:
       M1-654's parity test under `preserves`. decision_refs was [D19, D54, D58].
       out_of_scope had 6 entries; the verification.md and closed-allowlist
       boundaries did not exist. blocked_by gained M1-654 earlier, in 91bc5cd8.
+  - date: 2026-07-18
+    reason: >-
+      advertising-gap rework, user-directed after M1-654 merged. The ticket
+      registered a 7th tool into the closed allowlist but never advertised it:
+      ChatAgent.TOOL_INSTRUCTIONS is the ONLY path that tells the model a tool
+      exists, and neither it nor ChatAgentTest was in files_scope. Nothing in
+      the build ties TOOL_INSTRUCTIONS to the registry (the toolNames() loops in
+      ChatAgentTest are fixture builders, not assertions), so this ticket would
+      have landed green with helpLookup registered, dispatchable, spec'd and
+      parity-guarded yet never offered to the model — the chat-facing feature
+      inert. Root cause: the prior revision's claim that ChatToolDispatcher:116
+      "advertises tools to the model" is FALSE (it is a constructor-time
+      handler-completeness check), and that false mechanism is why ChatAgent.java
+      was judged out of scope. The §Notes correction supersedes it; the earlier
+      revisions entry is left intact as the audit record of what was believed.
+      Also adds the ## Census this ticket now requires as a class-scoped ticket,
+      which is what surfaced two further undisposed sites: commands.md's /stop
+      cancellation enumeration (five names, stale since M1-589, and the
+      paragraph mandating a cancellation primitive for any newly registered
+      tool) and design/05-llm-and-embeddings.md:473's prose list.
+    census_round_2: >-
+      The first draft of this refine was itself run through the new
+      CLASS-COMPLETENESS gate and FAILED with 3 blockers — the census
+      dispositioned 9 sites while its own stated grep returned 24. The gate
+      found two further genuine enumeration sites the author missed
+      (docs/design/04-security.md:189-199, whose heading still reads "closed at
+      exactly five", and docs/design/03-commands.md:1056-1058, a mirror of the
+      /stop cancellation paragraph) and required an explicit blanket
+      disposition for the incidental single-name hits. Both were added as `fix`
+      with files_scope and files_budget widened to match (23 -> 25). Recorded
+      because it is the evidence the gate does real work on a ticket its own
+      author believed complete.
+    prior_values: |
+      files_budget: 21, with files_scope holding 20 entries — no
+      ChatAgent.java, no ChatAgentTest.java. acceptance had 12 items: the
+      TOOL_INSTRUCTIONS advertising item, the derived
+      everyRegisteredToolIsAdvertised item and the commands.md /stop
+      cancellation item did not exist. test_plan.modifies named only
+      ChatToolRegistryTest.java. The body had no ## Census section, and §Notes
+      asserted ChatToolDispatcher:116 advertises tools to the model.
 escalations:
   - date: 2026-07-18
     reason: clarity-fail
@@ -237,6 +327,52 @@ wrong answers confident and hard to trace.
 So: retrieval finds a POINTER; the runtime composes the ANSWER. The embedded
 intent document is a matching surface only. Its worst failure mode is a missed
 match — never a wrong instruction.
+
+## Census
+
+This ticket adds a name to a CLOSED LIST that is duplicated across several
+sites, so it is class-scoped per `docs/process/clarity-prompt.md` check 10. The
+class is "places that enumerate the chat tool-name set". Enumerated
+mechanically — every file carrying the current six tool-name literals:
+
+    grep -rln -E "searchPosts|semanticSearch|getPost|getReferences|recallMemory|listSaves" \
+      infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ \
+      infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ \
+      docs/spec/ docs/design/
+
+| Site | Disposition |
+|---|---|
+| `docs/spec/security.md` (marked table) | fix — new `helpLookup` row inside the M1-654 markers |
+| `.../chat/ChatToolRegistry.java` (`TOOL_NAMES`) | fix — the registry entry |
+| `.../chat/ChatToolDispatcher.java` (handler map) | fix — the handler wiring |
+| `.../chat/ChatAgent.java:65-82` (`TOOL_INSTRUCTIONS`) | fix — the advertising item; the site this census surfaced |
+| `.../chat/ChatAgentTest.java` | fix — derived `everyRegisteredToolIsAdvertised` guard |
+| `.../chat/ChatToolRegistryTest.java` (six-name pin) | fix — authorized pre-existing test change |
+| `docs/spec/commands.md:980-989` (`/stop` cancellation) | fix — stale five-name list → pointer; `helpLookup` cancellation primitive |
+| `docs/design/05-llm-and-embeddings.md:473` (prose list) | fix — add `helpLookup` |
+| `docs/design/04-security.md:189-199` ("closed at exactly five" + 5-row table) | fix — stale since M1-589; add `semanticSearch` and `helpLookup`, drop the fixed count |
+| `docs/design/03-commands.md:1056-1058` (`/stop` cancellation mirror) | fix — same correction as the spec copy above |
+| `docs/spec/verification.md` | out-of-scope — M1-654 removed its enumeration and repointed it at security.md; this ticket must not re-add one |
+| every remaining hit of the grep above — per-tool unit tests, retrieval/DataSource tests, `docs/spec/schema.md`, and prose cross-references | out-of-scope — these name tools as their own subject under test or as cross-references. Some name several (e.g. `RetrievalWorldPredicateIT`, `CountingRecordingDataSource`, and M1-654's own `ChatToolAllowlistSpecParityTest`), so the test is NOT "how many names appear" but whether the site asserts the closed SET: none does, so none can go stale as a list when a 7th tool lands. This blanket row is the disposition for every such hit. |
+
+The grep above is deliberately broad (any one of the six names), so it returns
+both genuine enumeration sites and incidental single-name mentions; the last row
+disposes the latter as a class rather than listing them individually.
+
+**Four documents currently contradict the registry, not one.** `docs/spec/commands.md`,
+`docs/design/04-security.md` and `docs/design/03-commands.md` all still enumerate
+FIVE tools — M1-589 added `semanticSearch` to the registry and to security.md's
+table and updated none of them. M1-654 repaired only `docs/spec/verification.md`.
+That is why this census exists and why those three rows are `fix` here rather
+than deferred: this ticket takes the list from six to seven, which makes every
+one of them wrong by two.
+
+Note what this table buys. M1-654's parity guard covers exactly ONE pair —
+security.md's table against the registry. Every other `fix` row above is a copy
+of the same closed list that the guard does not see, and each would otherwise
+have gone stale silently the moment the 7th tool landed. `ChatAgent.java` is the
+one that matters most: it is the only advertising path, so missing it ships a
+tool the model is never told about.
 
 ## Acceptance
 
@@ -308,9 +444,24 @@ header comment and `security.md` §Prompt-injection defenses both state the v1
 tool list is closed and that additions are spec amendments. Registering
 `helpLookup` therefore requires the security.md table row, and there is no way
 around it in code: `ChatToolDispatcher:140` rejects any name absent from
-`toolNames()`, and `:116` advertises tools to the model from that same set, so a
-"deterministic-only" tool is not a loophole. M1-654, now a blocker, turns that
-requirement into a build failure instead of something a reviewer must notice.
+`toolNames()`, so a "deterministic-only" tool is not a loophole. M1-654, now a
+blocker, turns that requirement into a build failure instead of something a
+reviewer must notice.
+
+**Correction (2026-07-18) — `ChatToolDispatcher:116` does NOT advertise
+tools.** An earlier revision of this ticket (see `revisions:`) claimed `:116`
+"advertises tools to the model from that same set". It does not.
+`ChatToolDispatcher:114-121` is `requireHandlerForEveryAdvertisedTool`, a
+constructor-time check that every registry name has a registered handler; its
+own comment describes the prompt's tool instructions as a *mirror* of the
+registry — a separate copy, not something derived from it. The sole advertising
+path is `ChatAgent.TOOL_INSTRUCTIONS` (`ChatAgent.java:65-82`), a hardcoded
+literal concatenated onto the system prompt at `ChatAgent.java:395`. The
+conclusion still holds through `:140`, so the earlier refine decision was
+right — but the mechanism was wrong, and believing advertising was derived from
+the registry is precisely what left `ChatAgent.java` out of `files_scope`. That
+omission would have shipped a registered, spec'd, parity-guarded tool that the
+model is never told about.
 
 **Package boundaries the acceptance items imply.** `CommandIntentSynonyms` is
 package-private in `provider.messaging` with a private map, and `HelpTier`,
