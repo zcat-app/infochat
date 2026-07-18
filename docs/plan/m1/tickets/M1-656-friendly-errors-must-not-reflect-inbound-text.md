@@ -71,6 +71,20 @@ acceptance:
     reply containing neither the raw token nor the substring "grant-admin",
     while a legitimate unknown tag still receives its suggestion list.
   - >-
+    AUTHORIZED PRE-EXISTING TEST CHANGES (tags). Two assertions pin the echo
+    this ticket removes and MUST be rewritten:
+    FollowTagCommandHandlerTest.followTagDmUnknownTagReturnsFuzzySuggestionError
+    (line 185-186) and
+    UnfollowTagCommandHandlerTest.unfollowTagDmUnknownTagReturnsFuzzySuggestionError
+    (line 240-241), both currently
+    `assertTrue(reply.text().contains(PREFIX + "notavocab"), "unknown-tag reply
+    must echo the supplied tag")`. Each becomes the negation —
+    `assertFalse(reply.text().contains("notavocab"), "unknown-tag reply must not
+    echo the supplied tag")` — with the adjacent `contains("Did you mean")`
+    assertion RETAINED unchanged. Net coverage is equal-or-stronger: a
+    positive echo check is replaced by a negative one plus the untouched
+    suggestion check. No other assertion in either test may be relaxed.
+  - >-
     GroupTimezoneCommandHandlerTest gains the equivalent test. NOTE the
     validity-gated-echo approach used elsewhere is NOT available here: IANA
     zone names legitimately contain "/" (Europe/Prague), so no charset
@@ -82,6 +96,18 @@ acceptance:
     reachability of the four: CommandPermissions:80 admits any asset command
     during slow-start probation, so a probation user reaches it wherever the
     operator has enabled an asset.
+  - >-
+    AUTHORIZED PRE-EXISTING TEST CHANGES (asset). Two assertions pin the echoed
+    token and MUST be rewritten: AssetHandlerTest.unknownSubVerbFuzzy (line 116)
+    `assertTrue(reply.text().contains("Unknown sub-verb krakn"))` becomes an
+    assertion that the reply does NOT contain the raw sub-verb "krakn" while
+    still containing the bot-authored `Did you mean: kraken` (line 118,
+    RETAINED); and AssetHandlerTest.unsupportedQuoteCurrency (line 148)
+    `assertTrue(reply.text().contains("jpy") && reply.text().contains("not
+    enabled"))` becomes `assertFalse(contains("jpy"))` with the
+    `contains("not enabled")` half RETAINED. The available-values list and the
+    `Did you mean: ` assertions stay — those interpolate the enabled asset
+    registry, which is bot-authored. No other assertion may be relaxed.
   - >-
     docs/spec/commands.md is updated so the §Discovery paragraph M1-647 added
     stays true. It currently says the command surface "differs deliberately
@@ -106,7 +132,22 @@ spec_refs:
   - docs/spec/commands.md §Discovery
 decision_refs:
   - D43
-revisions: []
+revisions:
+  - date: 2026-07-18
+    reason: >-
+      clarity-fail rework (bounded self-refine, 1 of 1 permitted). The clarity
+      pre-flight returned FAIL with 4 blockers, all one class: four
+      PRE-EXISTING test assertions pin the echo this ticket removes, and the
+      ticket listed the files under test_plan.modifies without authorizing the
+      specific assertion changes. All four were verified to exist at the cited
+      lines before refining. Prose-only fix: two acceptance items added naming
+      each assertion, its current text, its replacement, and which adjacent
+      assertions must be RETAINED. files_budget, files_scope and out_of_scope
+      are UNCHANGED — every affected test file was already in scope; only the
+      authorization language was missing.
+    prior_values: |
+      acceptance had 9 items; the two AUTHORIZED PRE-EXISTING TEST CHANGES
+      items (tags, asset) did not exist. No other field changed.
 overrides: []
 aborted_attempts: []
 reopens: []
