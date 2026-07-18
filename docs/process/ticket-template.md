@@ -152,6 +152,31 @@ acceptance — it is context for the implementer, not commitment. Keep it
 brief; if a sentence here describes behavior the diff must implement,
 move it to §Acceptance.
 
+**The non-binding exemption covers judgement, not fact.** Rationale,
+alternatives and design opinion are yours to assert freely. A claim that
+existing code *already does* something is different: it is checkable, the
+implementer builds on it, and no gate downstream falsifies it — §Acceptance
+is checked against the diff and `mvn verify` proves test behavior (doctrine
+rule 4), but nothing anywhere checks a ticket's assertions about code that
+already exists. So when you assert current behavior, cite what proves it —
+a `path:line`, or the grep that returns the hit — or don't assert it at all
+and point at the code instead (doctrine rule 3: don't re-state spec content
+in tickets).
+
+Rank sources the way `docs/plan/v1-verification-truth.md` does: **code,
+config and `git` outrank committed docs.** A design note under `docs/design/`
+describes what we decided to build; it is the goal, not evidence that the
+goal shipped. Those files mix normative requirements with as-built
+description in the same voice — `docs/design/06-messaging.md` §6.3.5 says
+adapters SHOULD deduplicate by correlationId and no adapter does;
+`docs/design/05-llm-and-embeddings.md` §711 tabulates per-profile embedding
+dimensions and labels them "the *intended* design, NOT the v1 shipped
+reality." M1-642 and M1-648 were both filed asserting those as current
+behavior. A resolving spec anchor proves the section exists, never that the
+code matches it. Finished tickets are a usable second source but a noisy
+index — a term like "dedup" matches ~130 done tickets across five unrelated
+meanings — so reach for the grep first.
+
 - Relevant design note: `docs/design/<NN>-<name>.md` §<section>
 - Adjacent code: `<path>` (the existing pattern this should match)
 - Alternatives considered, future-shape concerns, anything subtle

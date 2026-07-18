@@ -84,9 +84,13 @@ acceptance:
     KrakenSnapshotSource.SUPPORTED_VS is Set.of("usd", "eur", "btc"); czk is
     Coingecko-only. The guide must state the per-source difference.
   - >-
-    USER_GUIDE.md defect 2 corrected — /follow-all-sources and /list-sources are
-    absent from the cheat sheet despite being non-admin commands, and the
-    pagination list omits /export --page.
+    USER_GUIDE.md defect 2 corrected — the reference section (§Advanced
+    (reference), USER_GUIDE.md:295; there is no section titled "cheat sheet")
+    never documents /follow-all-sources, a non-admin command (zero occurrences
+    in the file). /list-sources IS present but only incidentally, inside the
+    pagination bullet at USER_GUIDE.md:319, never as a command entry of its own.
+    That same bullet lists /saved, /get-sources and /list-sources but omits
+    /export, which does accept --page N (ExportCommandHandler.java:29,36).
   - >-
     docs/spec/commands.md §Chat mode records that conceptual topics are served
     from a curated corpus with a derivation-hash guard, and names ADMIN_GUIDE.md
