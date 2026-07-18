@@ -8,11 +8,16 @@ import java.time.Instant;
  * delivery. Per {@code docs/design/06-messaging.md} §6.2.
  *
  * <p>{@code correlationId} ties an outbound reply back to its inbound
- * trigger so adapters that deduplicate on retry
- * ({@code docs/design/06-messaging.md} §6.3.5) can do so deterministically.
- * When the outbound is not a reply (e.g., a scheduled digest) the
- * correlation id is adapter-defined; the SPI commitment is that the id
- * is non-null and stable across retries of the same logical outbound.</p>
+ * trigger for logging and handle bookkeeping. The only SPI commitment is
+ * that the id is <strong>non-null</strong>.
+ *
+ * <p><strong>It is not stable across retries.</strong> Whether two
+ * constructions of the same logical outbound share an id is a property of
+ * the individual call site, not of this SPI: all but three call sites mint
+ * a fresh {@code UUID.randomUUID()} per construction. A consumer therefore
+ * MUST NOT use this id as a deduplication or idempotency key — v1 outbound
+ * delivery is at-least-once and no component suppresses duplicates
+ * ({@code docs/design/06-messaging.md} §6.3.5, decision D64).</p>
  */
 public record OutboundMessage(
         ScopeRef scope,

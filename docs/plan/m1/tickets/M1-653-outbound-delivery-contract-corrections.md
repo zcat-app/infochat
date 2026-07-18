@@ -1,9 +1,28 @@
 ---
 id: M1-653
 title: "Correct the outbound delivery contracts: correlationId javadoc and §6.3.5"
-status: pending
+status: done
 created: 2026-07-18
 last_updated: 2026-07-18
+clarity_check:
+  date: 2026-07-18
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-18
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 70
+      removed: 21
 blocked_by: []
 files_budget: 5
 files_scope:
@@ -37,17 +56,23 @@ acceptance:
   - >-
     OutboundMessage's class javadoc no longer claims the correlation id is
     "stable across retries of the same logical outbound". Verified 2026-07-18
-    that this claim is false: 40 of the 43 `new OutboundMessage(...)` sites in
-    infochat-provider/src/main pass UUID.randomUUID().toString(), so a fresh
-    id is minted on every construction. The replacement text states what is
-    actually guaranteed (non-null) and that stability is per-site and NOT
-    something a consumer may rely on.
+    that this claim is false: ALL BUT THREE `new OutboundMessage(...)` sites
+    in infochat-provider/src/main pass UUID.randomUUID().toString(), so a
+    fresh id is minted on every construction. (Re-measured 2026-07-18 at
+    implementation time: 47 sites, 44 random, 3 stable. The structural claim
+    — exactly three stable-id sites — is the load-bearing one and is what the
+    replacement text must state; the absolute counts drift as handlers are
+    added and MUST NOT be written into the javadoc or the spec.) The
+    replacement text states what is actually guaranteed (non-null) and that
+    stability is per-site and NOT something a consumer may rely on.
   - >-
     docs/design/06-messaging.md §6.3.5 no longer states adapters SHOULD
     deduplicate by correlationId over a 60-second window. Verified 2026-07-18
     that no adapter does: grep correlationId across
-    infochat-messaging-adapter/src/main/java returns 8 hits, all javadoc or
-    record-field plumbing, zero lookups; SimpleXAdapter.java:562 stores the id
+    infochat-messaging-adapter/src/main/java returns 10 hits (re-measured
+    2026-07-18 at implementation time; the ticket as filed said 8), all
+    javadoc or record-field plumbing, ZERO lookups — the zero is the
+    load-bearing figure; SimpleXAdapter.java:562 stores the id
     into the returned handle and never reads it back, and
     SignalJsonRpcClient.java:430 and InMemoryAdapter.java:129 send
     unconditionally. §6.3.5 instead states v1's actual position.
@@ -158,3 +183,22 @@ for a guarantee — that mistake is what this ticket exists to prevent.
 **Relationship to M1-652.** M1-652 (gap-filling redelivery for per-category
 digests) is the behavioral follow-on and is blocked on M1-642. This ticket is
 independent of both: it can ship immediately and gates nothing.
+
+**Count correction applied at implementation time (2026-07-18).** Two figures
+in the acceptance items were stale when re-measured against the tree at
+`edecc9b6`, and were corrected in place: call sites `43`→`47` and random-id
+sites `40`→`44` (item 1), and messaging-adapter `correlationId` grep hits
+`8`→`10` (item 2). **No requirement changed** — this is a factual correction
+to the justification prose, not a scope, budget or acceptance change, so it
+did not route through `escalate → refine`. Every structural claim survived
+re-measurement unchanged: exactly three stable-id sites (`DigestWorker:212`
+verbatim, `ApproveGroupCommandHandler:260`, `RejectGroupCommandHandler:304`)
+and zero adapter-side correlationId lookups. `SimpleXAdapter.java:562`,
+`SignalJsonRpcClient.java:430` and `InMemoryAdapter.java:129` were each
+re-read and are exact.
+
+The correction is itself an instance of what this ticket documents: a count
+baked into prose rots, and the two figures had already drifted between filing
+and implementation on the same day. That is why the shipped javadoc, §6.3.5
+and D64 state "all but three call sites" rather than any absolute number —
+the invariant is stable, the count is not.

@@ -338,6 +338,19 @@ Provider produces plain text per decision D30. The adapter:
 - An adapter cannot silently drop messages. Either delivery succeeds,
   the caller learns it didn't (after the bounded retry budget), or
   the failure is permanent and surfaced immediately.
+- **Outbound delivery is at-least-once.** A retry after an *ambiguous*
+  send failure — the transport accepted the frame but the ack timed
+  out — MAY deliver the message twice, and **no component suppresses
+  that duplicate**: no adapter deduplicates, and the Provider-side
+  delivery chokepoint keeps no ledger. The recipient may occasionally
+  see a repeated message; bot output is not safety-critical, and v1
+  accepts this rather than claiming a guarantee it does not provide.
+  The reason it is not fixed at the chokepoint is structural: only the
+  adapter or the transport can observe whether an ambiguous transmit
+  actually landed, and the chokepoint learns of success only *after*
+  the adapter reports it — so it is blind to precisely the case that
+  produces the duplicate. At-most-once would require adapter- or
+  transport-level support and is out of scope for v1 (**D64**).
 - Adapter-internal back-pressure (e.g. rate limits enforced by the
   transport) surfaces as transient failures so the Provider's
   per-user rate limiter is the single source of truth for "slow
