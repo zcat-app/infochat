@@ -1,10 +1,38 @@
 ---
 id: M1-644
 title: "Stub the provider-module EmbeddingProvider so the suite stops calling a real ollama"
-status: pending
+status: done
 created: 2026-07-18
 last_updated: 2026-07-18
 blocked_by: []
+reviews:
+  - round: 1
+    date: 2026-07-18
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 140
+      removed: 6
+clarity_check:
+  date: 2026-07-18
+  verdict: WARN
+  warnings:
+    - >-
+      FILES-BUDGET-PLAUSIBLE: the ticket's own Notes section names a real,
+      acknowledged risk (provider chat IT retrieval-provenance assertions "may
+      shift") but does not name which test(s) or budget a file for fixing them
+      if the risk materializes. Recommend either naming the specific IT(s)
+      checked and stating "none affected" explicitly, or adding one line
+      authorizing in-scope fixes to named provider chat IT assertion files with
+      the new expected behavior, so the round_cap: 2 budget isn't consumed by
+      an unbudgeted-but-anticipated fix.
+  blockers: []
 files_budget: 3
 files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/testing/StubEmbeddingProvider.java
