@@ -14,10 +14,10 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 671 |
+| done | 672 |
 | deferred | 0 |
 | abandoned | 17 |
-| **total** | **693** |
+| **total** | **694** |
 
 ---
 
@@ -27,7 +27,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-642 — Per-category digest delivery + optional roll-up summaries (complexity: high, risk: medium)
 - M1-648 — Semantic command-intent index with deterministic answer composition (complexity: high, risk: high)
-- M1-658 — Guard: no inbound-text reflection in outbound templates (complexity: high, risk: low)
+- M1-659 — Stop /add-source success reply reflecting raw --name (complexity: medium, risk: medium)
 
 ---
 
@@ -64,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-658 | Guard: no inbound-text reflection in outbound templates | 2026-07-18 | round 3 APPROVE |
 | M1-657 | Gate /approve-group: admin check before group-id parse | 2026-07-18 | round 1 APPROVE |
 | M1-656 | Stop friendly errors reflecting unvalidated inbound text | 2026-07-18 | round 3 APPROVE |
 | M1-655 | Fix MultiAdapterProductionIT flake: stand-in daemon must not die and trigger reconnect churn | 2026-07-18 | round 1 APPROVE |
@@ -73,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-650 | Sentinel-lint test endpoints | 2026-07-18 | round 1 APPROVE |
 | M1-647 | Intent-aware command suggestions: synonyms + non-prefix matching on the /help path | 2026-07-18 | round 3 APPROVE |
 | M1-646 | Add /pending + /recover-pool to the help catalogue and guard catalogue coverage | 2026-07-18 | round 1 APPROVE |
-| M1-645 | Correct three help/welcome strings that misstate the real command surface | 2026-07-18 | round 1 APPROVE |
 
 ---
 
@@ -887,6 +887,7 @@ M1-654 (done)
 M1-655 (done)
 M1-656 (done)
   ├── M1-657 (done)
-  │     └── M1-658 (pending) ← runnable
-  └── M1-658 (pending) [see above]
+  │     └── M1-658 (done)
+  └── M1-658 (done) [see above]
+M1-659 (pending) ← runnable
 ```

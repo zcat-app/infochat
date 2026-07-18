@@ -288,6 +288,19 @@ them to the marked region — doing so would red the build.
   also makes the §Permission model no-existence-leak property exact:
   a hidden-but-real command and a nonexistent one produce
   byte-identical replies, not merely similar-looking ones.
+  This property is mechanically guarded (M1-658): `InboundReflectionGuardTest`
+  censuses every `error.*` template interpolation and fails the build on a
+  new one that is neither trivially bot-authored nor recorded, with its
+  provenance, in the error-reflection baseline. The guard's scope is its
+  limit: it covers **friendly-error templates only** — success, confirmation
+  and other `reply.*` templates are outside its view, and the complete fix
+  (a taint-carrying type for inbound strings) remains future work — so a
+  green guard means "no unrecorded error reflection", not "reflection is
+  impossible". The reply surface is not merely a theoretical gap: one live
+  instance — the `/add-source` success reply echoing an unconstrained
+  `--name` — was found in it and is tracked as M1-659. The rule above
+  therefore binds success/reply templates too; only the *mechanical* guard
+  is error-scoped.
 - `/status` — runtime status (active profile and uptime; admin sees
   more). DM and group; any non-banned user. Bot
   admin view includes a count of pending groups

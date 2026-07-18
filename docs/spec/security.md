@@ -322,7 +322,20 @@ sanitizer applies to the **full set of LLM-authored output surfaces**:
 chat-mode replies, on-the-fly `/summary` prose, periodic group
 digests, `/retry` re-rolls, and any future LLM-emitted text. It does
 **not** apply to deterministic command output (`/help`, `/status`,
-`/list-sources`, etc.) because that text never passes through an LLM.
+`/list-sources`, etc.). "Never passes through an LLM" is true of this
+surface but is **not** what makes it safe: a deterministic reply that
+echoes an attacker's raw token is exactly as dangerous as an LLM
+emitting one. The exemption is safe only to the extent deterministic
+output is **bot-authored** — interpolates no inbound-derived text
+(parse-validated echoes, per `commands.md` §Discovery, count as
+bot-authored). That is a property the handlers must **maintain**, not
+one the exemption may assume: M1-647/M1-656 removed the reflecting
+echoes from the friendly-**error** surface and M1-658
+(`InboundReflectionGuardTest`) guards that surface against their
+return. The **reply/success** surface is not yet fully guaranteed — a
+known live instance, the `/add-source` `--name` display-name echo, is
+tracked as M1-659 — so for now this exemption carries a **residual
+risk** on non-error deterministic output, not a proven-safe blanket.
 Admin commands are dispatched only by the deterministic command path,
 so a copy-pasted reply still requires `is_admin=true` to do anything;
 the sanitizer closes the social-engineering surface where a small LLM

@@ -1,0 +1,77 @@
+# M1-658 friendly-error inbound-reflection baseline.
+#
+# Every ERROR-keyed template-interpolation site in infochat-provider that the
+# InboundReflectionGuardTest census cannot auto-classify as trivially
+# bot-authored must appear here, with a provenance justification of exactly one
+# of three kinds:
+#   - bot-admin-only reachable  (a raw echo whose reader is already a bot
+#     admin; the gate that enforces it is cited by file:line)
+#   - provably-constrained-at-parse  (the echoed value is validated at the
+#     parse boundary, e.g. SummaryArgs)
+#   - bot-authored  (a controlled-vocabulary / registry / typed / DB value,
+#     not inbound-arbitrary text)
+#
+# Format (5 pipe-separated fields):
+#   file | resolved.error.key | argIndex | normalizedArgumentExpression | justification
+#
+# The guard keys on the FIRST FOUR fields; changing what is interpolated at a
+# site changes the fingerprint and invalidates its entry (forcing a conscious
+# re-record). A line matching no current site fails noDeadBaselineEntries.
+# The auto-classifier only clears shapes that are safe REGARDLESS of argument
+# content or type (string/int literals, .size(), local static-final-String
+# constants); content-dependent shapes such as String.join(...) and
+# String.valueOf(...) are NOT auto-cleared (they can carry inbound text) and
+# appear here with an explicit judgment.
+# This baseline covers ERROR templates only; see the class Javadoc for the
+# boundary and why success/reply paths are out of scope.
+#
+AddSourceArgs.java | error.add_source.unknown_category | 0 | String.join(", ", ALLOWED_CATEGORIES) | bot-authored: the fixed ALLOWED_CATEGORIES source-category vocabulary
+AddSourceArgs.java | error.add_source.unknown_kind | 0 | SourceKind.commaList() | bot-authored: the SourceKind enum's comma-joined value list
+AddSourceCommandHandler.java | error.add_source.nitter_host_type_conflict | 0 | resolution.nitterHostConflict().orElseThrow() | provably-constrained: a URI host of a configured Nitter instance (url.getHost() over the operator allowlist); no slash/whitespace/backtick can survive (M1-656 r3 out-of-model)
+ApproveGroupCommandHandler.java | error.group_not_found | 0 | groupId | bot-admin-only: is_admin gate precedes parseGroupId in ApproveGroupCommandHandler.handle (M1-657); reader is already an admin
+ApproveGroupCommandHandler.java | error.group_not_found | 0 | parseGroupIdRaw(rawText) | bot-admin-only: is_admin gate precedes parseGroupId in ApproveGroupCommandHandler.handle (M1-657); reader is already an admin
+AssetHandler.java | error.asset.default_disabled | 0 | assetName | bot-authored: the asset command's own registry name (e.g. zcash), not inbound-arbitrary text
+AssetHandler.java | error.asset.default_disabled | 1 | String.join(", ", enabledSubVerbs) | bot-authored: the enabled/registered asset sub-verb or quote-currency list from the asset registry
+AssetHandler.java | error.asset.no_data | 0 | assetName | bot-authored: the asset command's own registry name (e.g. zcash), not inbound-arbitrary text
+AssetHandler.java | error.asset.no_data | 1 | subVerb | bot-authored: the resolved registry sub-verb (svEntry.subVerb()), post-lookup
+AssetHandler.java | error.asset.not_configured | 0 | assetName | bot-authored: the asset command's own registry name (e.g. zcash), not inbound-arbitrary text
+AssetHandler.java | error.asset.not_configured | 1 | String.join(", ", enabledSubVerbs) | bot-authored: the enabled/registered asset sub-verb or quote-currency list from the asset registry
+AssetHandler.java | error.asset.sub_verb_not_enabled | 0 | args.subVerb | provably-constrained: reached only when asset.findSubVerb(args.subVerb) matched a registered sub-verb (AssetHandler:108-125), so the value is a registry vocabulary member
+AssetHandler.java | error.asset.sub_verb_not_enabled | 1 | assetName | bot-authored: the asset command's own registry name (e.g. zcash), not inbound-arbitrary text
+AssetHandler.java | error.asset.sub_verb_not_enabled | 2 | String.join(", ", enabledSubVerbs) | bot-authored: the enabled/registered asset sub-verb or quote-currency list from the asset registry
+AssetHandler.java | error.asset.unknown_sub_verb | 0 | bestMatch | bot-authored: a fuzzy suggestion drawn from the enabled asset registry (AssetHandler), not the raw token
+AssetHandler.java | error.asset.unknown_sub_verb | 1 | assetName | bot-authored: the asset command's own registry name (e.g. zcash), not inbound-arbitrary text
+AssetHandler.java | error.asset.unknown_sub_verb | 2 | String.join(", ", allSubVerbs) | bot-authored: the enabled/registered asset sub-verb or quote-currency list from the asset registry
+AssetHandler.java | error.asset.unsupported_quote_currency | 0 | bestMatch | bot-authored: a fuzzy suggestion drawn from the enabled asset registry (AssetHandler), not the raw token
+AssetHandler.java | error.asset.unsupported_quote_currency | 1 | assetName | bot-authored: the asset command's own registry name (e.g. zcash), not inbound-arbitrary text
+AssetHandler.java | error.asset.unsupported_quote_currency | 2 | String.join(", ", supported) | bot-authored: the enabled/registered asset sub-verb or quote-currency list from the asset registry
+AssetHandler.java | error.usage.missing_argument | 0 | "/" + assetName + " [sub-verb] [--vs <currency>]" | bot-authored: the asset command's own registry name (e.g. zcash), not inbound-arbitrary text
+AuditCommandHandler.java | error.audit.unknown_action | 0 | args.action | bot-admin-only: admin gate at AuditCommandHandler:99 precedes the reflect (r2 audit)
+AuditCommandHandler.java | error.audit.unknown_action | 1 | ACCEPTED_ACTIONS | bot-authored: the accepted-action vocabulary constant
+ExportCommandHandler.java | error.export.page_out_of_range_one | 0 | String.valueOf(requestedPage) | bot-authored: a parsed integer page index (int, digits only; cannot carry non-numeric inbound text)
+ExportCommandHandler.java | error.export.page_out_of_range_one | 1 | String.valueOf(pages.size()) | bot-authored: a typed int page count
+FollowTagCommandHandler.java | error.follow_tag.unknown_tag | 0 | String.join(", ", suggestions) | bot-authored: fuzzy suggestions drawn from the controlled vocabulary (M1-647/M1-656), not the raw token
+GroupTimezoneCommandHandler.java | error.group_timezone.invalid_zone | 0 | suggestions | bot-authored: a suggestion list drawn from the controlled vocabulary / catalogue (M1-647/M1-656)
+HelpCommandHandler.java | error.help.unknown_command | 0 | suggestions | bot-authored: a suggestion list drawn from the controlled vocabulary / catalogue (M1-647/M1-656)
+InboundRouter.java | error.probation.blocked | 0 | formatTimeUntilUnlock(probationNow, probationActor.probationUntil()) | bot-authored: a formatted typed Duration (time-until-unlock), not inbound text
+InboundRouter.java | error.probation.blocked | 1 | commandPermissions.renderProbationCommandList() | bot-authored: the canonical probation command listing (CommandPermissions)
+InviteCommandHandler.java | error.invite.adapter_required | 0 | String.join(", ", enabled) | bot-authored: the enabled-adapter name list
+InviteCommandHandler.java | error.invite.bot_contact_unavailable | 0 | targetName | bot-admin-only: admin gate at InviteCommandHandler:225 precedes every reflect (r2 audit)
+InviteCommandHandler.java | error.invite.bot_contact_unknown_adapter | 0 | targetName | bot-admin-only: admin gate at InviteCommandHandler:225 precedes every reflect (r2 audit)
+InviteCommandHandler.java | error.invite.bot_contact_unknown_adapter | 1 | String.join(", ", enabledAdapterNames()) | bot-authored: the enabled-adapter name list
+InviteCommandHandler.java | error.invite.bot_contact_unsupported | 0 | targetName | bot-admin-only: admin gate at InviteCommandHandler:225 precedes every reflect (r2 audit)
+InviteCommandHandler.java | error.invite.unknown_adapter | 0 | targetAdapter == null ? "" : targetAdapter | bot-admin-only: admin gate at InviteCommandHandler:225 precedes the reflect (r2 audit)
+LangCommandHandler.java | error.lang.unsupported_code | 0 | sortedJoin(supported) | bot-authored: the sorted supported-language code list
+QuarantineCommandHandler.java | error.quarantine.invalid_id | 0 | idStr | bot-admin-only: admin gate at QuarantineCommandHandler:127 precedes the reflect (r2 audit)
+QuarantineCommandHandler.java | error.quarantine.invalid_state | 0 | quarantineId.toString() | bot-admin-only: admin gate at QuarantineCommandHandler:127 precedes the reflect (r2 audit)
+QuarantineCommandHandler.java | error.quarantine.not_found | 0 | quarantineId.toString() | bot-admin-only: admin gate at QuarantineCommandHandler:127 precedes the reflect (r2 audit)
+RecoverPoolCommandHandler.java | error.recover_pool.not_found | 0 | targetAdapter | bot-admin-only: admin gate at RecoverPoolCommandHandler:104 precedes the reflect (r2 audit)
+RecoverPoolCommandHandler.java | error.recover_pool.not_found | 1 | upstreamGroupId | bot-admin-only: admin gate at RecoverPoolCommandHandler:104 precedes the reflect (r2 audit)
+RejectGroupCommandHandler.java | error.group_not_found | 0 | groupId | bot-admin-only: lookupActor+isAdmin gate at RejectGroupCommandHandler:130 precedes the parseGroupId reflect
+RejectGroupCommandHandler.java | error.group_not_found | 0 | parseGroupIdRaw(rawText) | bot-admin-only: lookupActor+isAdmin gate at RejectGroupCommandHandler:130 precedes the parseGroupId reflect
+RetryCommandHandler.java | error.retry.cap_exhausted | 0 | String.valueOf(retryCap) | bot-authored: a typed int configuration limit (retry cap)
+SaveCommandHandler.java | error.save.tag_too_long | 0 | personalTagMaxLength | bot-authored: a typed int configuration limit
+SaveCommandHandler.java | error.save.too_many_tags | 0 | personalTagMaxCount | bot-authored: a typed int configuration limit
+SummaryArgs.java | error.summary.unknown_tag | 0 | suppliedTag | provably-constrained-at-parse: value is args.tag().get(), TagNormalizer-validated to ^[a-z0-9][a-z0-9-]{0,47}$ at SummaryArgs:96-100 (the ticket precedent)
+SummaryArgs.java | error.summary.unknown_tag | 1 | String.join(", ", suggestions) | bot-authored: fuzzy suggestions drawn from the controlled vocabulary (M1-647/M1-656), not the raw token
+UnfollowTagCommandHandler.java | error.unfollow_tag.unknown_tag | 0 | String.join(", ", suggestions) | bot-authored: fuzzy suggestions drawn from the controlled vocabulary (M1-647/M1-656), not the raw token
