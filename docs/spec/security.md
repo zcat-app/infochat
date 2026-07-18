@@ -284,6 +284,8 @@ considered untrusted (decision D21):
   reply. Per-tool overrides (cap differences, additional rules)
   are noted in the Notes column.
 
+  <!-- tool-allowlist:begin -->
+
   | Name | Inputs | Output | Notes |
   |---|---|---|---|
   | `searchPosts` | `tags: list<Tier-1 tag>` (each value validated against the controlled vocabulary), `window: duration`, `limit: int ≤ profile-driven cap` | list of `{uid, title, url, ready_at, tags}` | Returns `READY` posts visible in the calling `(user, scope)`'s world only (D59: live, non-excluded bootstrap sources OR the scope's subscriptions). The requested tag filter applies as-is (validated against the controlled vocabulary); the scope's `tag_mode`/`scope_tag` preferences intentionally do NOT apply — tag preferences narrow the digests only (commands.md §Per-scope tag preferences, D59). The `window` filter and result ordering both bind to `published_at` (the source's claimed publication time): the result is the posts whose `published_at` falls within the window, ordered `published_at` descending. `ready_at` (the pipeline's READY-transition time) is a display field in the result shape only — it drives neither the window nor the ordering, so a post with an old `published_at` but a recent `ready_at` does not surface in a short window. |
@@ -292,6 +294,8 @@ considered untrusted (decision D21):
   | `getReferences` | `uid: string`, `limit: int ≤ profile-driven cap` | list of `{uid, title, url, link_type, score}` | Edges from the `post_reference` graph. Scope-filtered the same way as `searchPosts`. |
   | `recallMemory` | `keywords: list<string>` (each ≤ a profile-driven length cap) | list of `{compressed_at, summary, references}` | Reads `chat_memory` for the calling `(user, scope)` only — D28. **Not** the user-facing `/recall <keyword>` command, which is v2-deferred per SPEC.md §"Deferred to v2". |
   | `listSaves` | `tags: list<personal tag>` (free-form, but length-capped), `window: duration` | list of `{uid, saved_at, personal_tags, snapshot_title, snapshot_url}` | Reads the caller's `saved_post` rows globally (D13: per-user across scopes); never returns another user's saves. |
+
+  <!-- tool-allowlist:end -->
 
   Every argument is type-checked and bound to enums, validated
   ranges, or length caps before the underlying SQL runs. Every output

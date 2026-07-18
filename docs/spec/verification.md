@@ -394,12 +394,16 @@ or `deployment.md`. Each one corresponds to at least one named test.
   `/grant-admin abc`; sanitizer strips it and writes an audit row;                                                                                                                                                                                    
   multi-match replies are refused entirely.
 - Tool surface: the agent's tool registry contains exactly the closed
-  set named in `security.md` §Prompt-injection defenses (`searchPosts`,
-  `getPost`, `getReferences`, `recallMemory`, `listSaves`) and nothing
-  else; CI fails on a mismatch in either direction (a name added to the
-  registry without a matching spec row, or a spec row with no matching
-  registry entry). Attempts to call any other name from the agent loop
-  are rejected at the SPI boundary.
+  set named by the marker-delimited per-tool table in `security.md`
+  §Prompt-injection defenses and nothing else. That table is the single
+  source of truth for the tool names; this document deliberately does
+  not restate them, so there is no second enumeration that can drift
+  out of date. CI parses the table between its
+  `<!-- tool-allowlist:begin -->` / `<!-- tool-allowlist:end -->`
+  markers and fails on a mismatch in either direction (a name added to
+  the registry without a matching spec row, or a spec row with no
+  matching registry entry). Attempts to call any other name from the
+  agent loop are rejected at the SPI boundary.
 - Rate limits: per-user LLM-trigger cap rejects the call that exceeds
   the profile-configured cap; per-turn tool-call cap stops the agent
   loop. (Specific numeric caps are profile-driven; the test asserts

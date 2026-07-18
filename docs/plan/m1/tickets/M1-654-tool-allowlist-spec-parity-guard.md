@@ -1,10 +1,50 @@
 ---
 id: M1-654
 title: "Guard the closed LLM tool allowlist against spec drift"
-status: pending
+status: done
 created: 2026-07-18
 last_updated: 2026-07-18
 blocked_by: []
+clarity_check:
+  date: 2026-07-18
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-18
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 230
+      removed: 14
+redteam_findings: []
+redteam_audits:
+  - date: 2026-07-18
+    verdict: CLEAN
+    base: aeacd5099127f6f6e0e2d572709cc480f30f21b3
+    head: working tree (branch m1/M1-654-tool-allowlist-spec-parity-guard, no commits yet)
+    verdict_file: docs/plan/m1/redteam/M1-654-2026-07-18.md
+    out_of_model_count: 3
+    note: |
+      CLEAN. Audited the working-tree-vs-fork-point diff rather than the
+      skill's `main...<branch>` form, which resolves to an EMPTY diff at this
+      gate because the branch carries no commits until /m1-tick commit runs.
+      Three out-of-model items, none a gap in this diff and none auto-filed:
+      (1) ChatAgent.TOOL_INSTRUCTIONS hardcodes a THIRD copy of the six tool
+      names that this guard does not cover — verified present and fail-closed
+      (ChatToolDispatcher rejects "Unknown tool"), so it cannot widen
+      capability; the strongest follow-up candidate. (2) The guard covers tool
+      NAMES only, not the Notes column's per-tool behavioural commitments,
+      which is exactly the promise security.md makes. (3) The parser binds the
+      first marker pair, so a hypothetical second block would go unparsed —
+      only able to hide a spec-only row, never an extra registry name.
 files_budget: 5
 files_scope:
   - docs/spec/security.md
