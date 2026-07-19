@@ -335,7 +335,7 @@ class AddSourceCommandHandlerTest {
     void commandTokenAfterALeadingWordIsStillRejected() {
         // A leading-slash-only check would be bypassed by prefixing one
         // word: the rendered reply would still carry a fully pasteable
-        // /grant-admin line. The check is at a token boundary, so it is not.
+        // /grant-admin line. The rule rejects a slash anywhere, so it is not.
         dataSource.seedUser("m1-659-prefixed", /* isAdmin */ false, /* isBanned */ false);
         urlProbe.setProbe("https://example.com/m1-659-prefixed.xml",
                 ProbeResult.success(200, Optional.of("application/rss+xml")));
@@ -355,13 +355,15 @@ class AddSourceCommandHandlerTest {
 
     @Test
     void blankRenderingNonSeparatorCodepointBeforeACommandTokenIsRejected() {
-        // The M1-659 round-1 redteam bypass. U+2800 BRAILLE PATTERN BLANK
-        // renders as a blank word gap but is category OTHER_SYMBOL, so it
-        // satisfies neither isWhitespace nor isSpaceChar, and it survives
-        // both stripMetadataField and trim(). A boundary rule that
-        // enumerates blanks accepts this; the fail-closed rule (a slash may
-        // only follow a letter or digit) rejects it. Written below as a
-        // unicode escape so the source carries no invisible character.
+        // The M1-659 round-1 redteam bypass, kept as a regression guard.
+        // U+2800 BRAILLE PATTERN BLANK renders as a blank word gap but is
+        // category OTHER_SYMBOL, so it satisfies neither isWhitespace nor
+        // isSpaceChar, and it survives both stripMetadataField and trim().
+        // Any rule that decides "does this slash open a word" by inspecting
+        // the preceding character accepts this; the absolute rule never
+        // looks at the preceding character, so the codepoint's category is
+        // irrelevant. Written below as a unicode escape so the source
+        // carries no invisible character.
         dataSource.seedUser("m1-659-braille", /* isAdmin */ false, /* isBanned */ false);
         urlProbe.setProbe("https://example.com/m1-659-braille.xml",
                 ProbeResult.success(200, Optional.of("application/rss+xml")));
@@ -383,8 +385,8 @@ class AddSourceCommandHandlerTest {
 
     @Test
     void slashAfterPunctuationIsRejected() {
-        // Punctuation is not a letter or digit, so ":/grant-admin" does not
-        // read as a mid-word slash and is rejected under the same rule.
+        // ":/grant-admin" reads as a pasteable command despite the slash
+        // sitting mid-string, and is rejected like every other slash.
         dataSource.seedUser("m1-659-punct", /* isAdmin */ false, /* isBanned */ false);
         urlProbe.setProbe("https://example.com/m1-659-punct.xml",
                 ProbeResult.success(200, Optional.of("application/rss+xml")));
