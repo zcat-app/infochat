@@ -7,7 +7,7 @@ last_updated: 2026-07-19
 blocked_by:
   - M1-663
   - M1-664
-files_budget: 12
+files_budget: 11
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/tool/HelpLookupTool.java
@@ -17,7 +17,6 @@ files_scope:
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/bundles/cs.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java
-  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/HelpLookupToolTest.java
   - docs/spec/commands.md
   - docs/spec/decisions.md
   - docs/design/03-commands.md
