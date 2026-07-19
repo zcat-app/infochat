@@ -1,7 +1,8 @@
 ---
 id: M1-662
 title: "Reconcile the ticket-frontmatter and verdict-check record registries"
-status: pending
+status: abandoned
+abandoned_reason: superseded
 created: 2026-07-19
 last_updated: 2026-07-19
 blocked_by: []
@@ -87,6 +88,27 @@ clarity_check: {}
 ---
 
 # M1-662: Reconcile the ticket-frontmatter and verdict-check record registries
+
+> **ABANDONED — superseded by the m1-tick cutover (2026-07-19).** Both
+> defects this ticket was filed to fix are resolved by the cutover, which
+> reshapes the surrounding surface more deeply than a registry-only patch
+> could:
+>
+> - **(1) The `escalations:`/`revisions:` frontmatter contradiction** is
+>   resolved by cutover 2/3: `escalations:`/`revisions:` are definitively
+>   NOT frontmatter (git log is the refine/escalation history), and the two
+>   functional readers in `escalate.md` (override-eligibility gate,
+>   refine-arm dispatch) now read the durable `escalation_reason:` scalar,
+>   which survives a cold session resume. `regen-status.py`,
+>   `ticket-template.md`, `abort.md`, `reviewer-prompt.md`, and
+>   `workflow.md` were all made consistent with this in the same commit.
+> - **(2) The unregistered `SPEC-CONFORMANCE-CHECK`** in `review.md` is
+>   handled by cutover 3/3, which reshapes the reviewer's check registry.
+>
+> Retained as history (not reopenable). Its Notes' recommended resolution
+> ("make the fields schema") was NOT taken: the durable-scalar resolution
+> is smaller AND honors the "git is the audit trail" doctrine (workflow.md
+> §Process doctrine point 5) that the schema route would have bent.
 
 ## Context
 

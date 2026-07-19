@@ -119,8 +119,8 @@ and therefore are EXEMPT from both the numeric-budget check and the
   - The operand ticket file at `docs/plan/m1/tickets/{{TICKET_ID}}-*.md`
     — frontmatter is mutated by `/m1-tick start` (sets `status`,
     populates `clarity_check`), `/m1-tick review` (appends to
-    `reviews:`), `/m1-tick escalate` (appends to `escalations:`,
-    `overrides:`, `revisions:`), and `/m1-tick commit` (sets
+    `reviews:`), `/m1-tick escalate` (sets `escalation_reason:`, may
+    append to `overrides:`), and `/m1-tick commit` (sets
     `status: done`).
   - The per-audit verdict file at
     `docs/plan/m1/redteam/{{TICKET_ID}}-*.md` — written by `/redteam

@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 674 |
 | deferred | 0 |
-| abandoned | 17 |
+| abandoned | 18 |
 | **total** | **696** |
 
 ---
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-642 — Per-category digest delivery + optional roll-up summaries (complexity: high, risk: medium)
 - M1-648 — Semantic command-intent index with deterministic answer composition (complexity: high, risk: high)
-- M1-662 — Reconcile the ticket-frontmatter and verdict-check record registries (complexity: low, risk: medium)
 
 ---
 
@@ -102,13 +101,14 @@ Tickets decided against — not implemented as this ticket. Terminal: not reopen
 ### other (1)
 - M1-591 — /summary cluster block prints classification: and tags: as two identical lines — collapse the redundancy
 
-### superseded (6)
+### superseded (7)
 - M1-031 — Provider catch-up hardening followup (3 M1-030 OUT-OF-MODEL advisories)
 - M1-372 — messaging: align the SimpleX auth-failure design note with the loopback-trusted v1 transport and drop the dead auth.fail meter
 - M1-505 — SimpleX: map inbound admin DM to the configured admin address
 - M1-513 — Revisit D49: single local LLM runtime in prod (retire Ollama-embeddings shape b)
 - M1-574 — /audit renders the usable target contact id, not the internal user UUID
 - M1-637 — Queued interruptible turn is not cancellable by /stop
+- M1-662 — Reconcile the ticket-frontmatter and verdict-check record registries
 
 ### wont-do-infeasible (2)
 - M1-258 — ThrottledAdminNotifier: fold suppressed_count bump into the UPSERT
@@ -891,5 +891,5 @@ M1-656 (done)
   └── M1-658 (done) [see above]
 M1-659 (done)
 M1-661 (done)
-M1-662 (pending) ← runnable
+M1-662 (abandoned)
 ```

@@ -104,7 +104,10 @@ remediates: M<N>-XXX           # set on a remediation ticket created from a /red
 # `reviews` and `clarity_check` carry the LATEST entry only — git log is
 # the audit trail for prior rounds. `escalations` and `revisions` are NOT
 # in the schema; refine/escalation history lives in git commit messages
-# (`M<N>-NNN: refine ticket spec (<reason>-rework)`).
+# (`M<N>-NNN: refine ticket spec (<reason>-rework)`). The CURRENT open
+# escalation's reason is the `escalation_reason` scalar below — a state
+# field the escalate-path readers consult, cleared when the escalation
+# resolves (M1-662 resolution).
 
 reviews: {}                    # latest review only: {round, date, verdict, checks, diff_stats}
 overrides: []                  # populated on `override` escalations
@@ -113,6 +116,10 @@ reopens: []                    # populated by `reopen`; one entry per reopen
 redteam_findings: []           # populated by /redteam; one entry per finding
 clarity_check: {}              # ticket-readiness pre-flight result populated by `start`
                                # (lint verdict + developer self-check; LATEST only)
+escalation_reason:             # scalar; set by `escalate` while status: escalated
+                               # (round-cap | manual-verdict | outline-fail |
+                               #  budget-breach | premise-fail | loop |
+                               #  redteam-finding); cleared on resolution
 ---
 
 # M<N>-NNN: <title>

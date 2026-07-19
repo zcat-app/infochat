@@ -23,16 +23,16 @@ Steps:
 
    Note on refine commits: any `M1-NNN: refine ticket spec ...` commits that
    landed on the branch (from /m1-tick escalate → 1 refine after the branch
-   existed) are captured in the archive's `revisions_at_abort:` field for
-   audit, but their spec-level edits do NOT propagate to main. If the
-   refined acceptance criteria should land, do NOT abort — let the rework
-   round complete. Abort is "throw away the attempt"; refine survives only
-   inside the per-attempt history.
+   existed) are discarded with the branch — their spec-level edits do NOT
+   propagate to main. Their history remains in git reflog/log until GC, but
+   the aborted archive does not snapshot them. If the refined acceptance
+   criteria should land, do NOT abort — let the rework round complete.
+   Abort is "throw away the attempt."
 
    Confirm with: yes
    ```
 2. Wait for the user's literal `yes`. Any other reply aborts the abort.
-3. **Snapshot from the branch** (we are currently on the branch). Read the ticket file's current frontmatter into memory: capture `status`, `reviews:`, `clarity_check:`, `revisions:`, anything else in dynamic fields. The `revisions:` capture preserves any refine snapshots that landed on the branch via `escalate → 1 refine` after `start` had created the branch. This is the data that will become the `aborted_attempts:` archive entry.
+3. **Snapshot from the branch** (we are currently on the branch). Read the ticket file's current frontmatter into memory: capture `status`, `reviews:`, `clarity_check:`, `escalation_reason:`, anything else in dynamic fields. (There is no `revisions:` field — refines that landed on the branch via `escalate → 1 refine` are durable as their own commits in git log, which survives the abort; the branch-tip commits are what the aborted archive references, not a frontmatter snapshot.) This is the data that will become the `aborted_attempts:` archive entry.
 4. **Switch to main** with `git checkout main`. This discards any uncommitted working-tree changes on the branch (including the ticket file's in-progress modifications) — which is the intended destructive behavior of abort.
 5. **Read the ticket file on main.** This is the older state (typically with `status: pending` from before `start` ran, or `status: in-progress` if a prior abort committed an in-progress reset — either way, the persistent main-branch state).
 6. **Build the new frontmatter on main:**
@@ -43,14 +43,13 @@ Steps:
          prior_status: <captured status from step 3>
          reviews_at_abort: <captured reviews from step 3>
          clarity_check_at_abort: <captured clarity_check from step 3>
-         revisions_at_abort: <captured revisions from step 3>
          reason: <user's optional reason from the abort args>
      ```
-   - Set `status: pending`.
+   - Set `status: pending`. Clear `escalation_reason:` if set (the attempt, including any open escalation, is being thrown away).
    - Clear `reviews:`, `clarity_check:` (these belonged to the aborted attempt; they're now archived under `aborted_attempts:`).
    - Update `last_updated` to today.
    - Keep `created`, `blocked_by`, `files_budget`, `files_scope`, `complexity`, `risk`, `round_cap`, `security_relevant`, `migration_touch`, `out_of_scope`, `acceptance`, `test_plan`, `spec_refs`, `decision_refs`, lineage fields untouched.
-   - Keep `revisions:` on main exactly as it already is (pre-start refines that landed on main directly are unaffected by this abort). The branch's `revisions:` (which may include during-attempt refines committed on the branch) is captured under `aborted_attempts[].revisions_at_abort:` and does NOT propagate to main — abort is "throw away the attempt", so during-attempt spec edits live only inside the archive.
+   - During-attempt refines that landed as commits on the branch are discarded with the branch (`git checkout main` at step 4 leaves them unreferenced); their history remains in git reflog/log until GC, but they do NOT propagate to main — abort is "throw away the attempt." Pre-start refines that landed on `main` directly are already part of main's ticket file and are unaffected.
 7. **Commit the archive on main:**
    - Stage only the ticket file: `git add docs/plan/m1/tickets/M1-NNN-<slug>.md`.
    - Commit subject: `M1-NNN: aborted attempt #<N> (reason: <reason-or-no-reason-given>)` where `<N>` is the new length of `aborted_attempts:` after appending. This makes aborts visible in `git log --oneline` and `git bisect`.

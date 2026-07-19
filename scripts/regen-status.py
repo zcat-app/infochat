@@ -6,13 +6,13 @@ Usage: regen-status.py <tickets-glob> <status-file-path>
 The script reads every ticket file matching the glob, extracts the
 specific frontmatter fields STATUS.md needs (id, title, status,
 blocked_by, deferred_on, deferred_reason, abandoned_reason,
-complexity, risk, last_updated, reviews, escalations), classifies each
-ticket, renders the canonical template, writes the destination file,
-and prints a four-line summary on stdout matching the contract the
-m1-tick skill consumes.
+complexity, risk, last_updated, reviews, escalation_reason), classifies
+each ticket, renders the canonical template, writes the destination
+file, and prints a four-line summary on stdout matching the contract
+the m1-tick skill consumes.
 
 The parser is targeted extraction — not a general YAML parser. It
-reads only the eleven fields above; everything else in the
+reads only the fields above; everything else in the
 frontmatter (acceptance, files_scope, out_of_scope, test_plan, etc.)
 is ignored by construction. This is deliberate: those fields contain
 backticks and other characters that break strict YAML in our tickets
@@ -25,9 +25,9 @@ Supported value shapes:
   - Scalar: `key: value` or `key: "value with colons"`
   - Inline list: `key: [A, B, C]` or `key: []`
   - Block list of IDs: `key:` followed by `  - M1-001` lines
-  - Block list of small mappings (reviews, escalations): we read only
-    the round/date/verdict (or trigger/date) sub-keys; nested
-    structures inside an entry (e.g. `checks:`) are skipped.
+  - Block list of small mappings (reviews): we read only the
+    round/date/verdict sub-keys; nested structures inside an entry
+    (e.g. `checks:`) are skipped.
 
 Exits 0 on success, 2 on usage error.
 """
@@ -40,16 +40,19 @@ from pathlib import Path
 
 SCALAR_FIELDS = {
     "id", "title", "status", "complexity", "risk",
-    "last_updated", "deferred_reason", "abandoned_reason",
+    "last_updated", "deferred_reason", "abandoned_reason", "escalation_reason",
 }
 ID_LIST_FIELDS = {"blocked_by", "deferred_on"}
-MAPPING_LIST_FIELDS = {"reviews", "escalations"}
+MAPPING_LIST_FIELDS = {"reviews"}
 KEEP_FIELDS = SCALAR_FIELDS | ID_LIST_FIELDS | MAPPING_LIST_FIELDS
 
 # Sub-keys we extract from each mapping in a MAPPING_LIST_FIELDS entry.
 # Other sub-keys (e.g. `checks:` under a review) are skipped — they may
-# contain nested structures we don't need.
-MAPPING_ENTRY_KEYS = {"round", "date", "verdict", "trigger"}
+# contain nested structures we don't need. `escalations` is no longer a
+# field (the open-escalation reason is the `escalation_reason` scalar; the
+# history lives in git log); a stray `escalations:` in an old done ticket is
+# skipped as an unknown top-level key.
+MAPPING_ENTRY_KEYS = {"round", "date", "verdict"}
 
 _TOP_KEY_RE = re.compile(r"^([a-z_]+):\s*(.*?)\s*$")
 _NESTED_KEY_RE = re.compile(r"^    ([a-z_]+):\s*(.*?)\s*$")
@@ -374,9 +377,8 @@ def main(argv: list[str]) -> int:
     if escalated_ids:
         for tid in escalated_ids:
             t = tickets_by_id[tid]
-            esc = (t.get("escalations") or [{}])[-1]
             L.append(f"| {tid} | {t.get('title', '')} | "
-                     f"{esc.get('trigger', '?')} | {esc.get('date', '?')} |")
+                     f"{t.get('escalation_reason', '?')} | {t.get('last_updated', '?')} |")
     L.append("")
     if not escalated_ids:
         L.append("_(none)_")

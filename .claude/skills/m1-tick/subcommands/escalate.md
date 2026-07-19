@@ -14,15 +14,11 @@ Reasons (auto-set by `review`/`start` or passed explicitly):
 
 Steps:
 
-1. Set ticket frontmatter `status: escalated`. Update `last_updated`. Append:
+1. Set ticket frontmatter `status: escalated`. Update `last_updated`. Set the **`escalation_reason:` scalar** — the single durable field the two functional readers below consult (the override-eligibility gate in step 5 arm 2, and the refine-arm dispatch in step 5 arm 1):
    ```yaml
-   escalations:
-     - date: <YYYY-MM-DD>
-       reason: <one of the above>
-       reviewer_verdict_excerpt: |
-         <the relevant verbatim block from the most recent review,
-          or "N/A" if escalation is from budget-breach/loop/premise-fail>
+   escalation_reason: <one of the reasons above>   # round-cap | manual-verdict | outline-fail | budget-breach | premise-fail | loop | redteam-finding
    ```
+   `escalation_reason` is a **scalar state field**, not a history log — it holds the reason of the *currently open* escalation and is cleared when the escalation resolves (step 5). This is the M1-662 resolution: `escalations:` and `revisions:` are **not** frontmatter (the escalation/refine *history* lives in git commit messages — `M1-NNN: refine ticket spec (<reason>-rework)` — per `docs/process/workflow.md` §"Process doctrine" point 5), but the readers need the *current* reason at escalate time, before any refine commit exists, so it is stored as one scalar rather than reconstructed from git. The relevant reviewer verdict, when one exists, is already the most-recent `reviews:` entry — do not duplicate it here.
 2. Regenerate `STATUS.md`.
 3. Print the six-way menu (in chat — the user picks). The "trigger context" block adapts based on reason:
    - `round-cap` / `manual-verdict` → the verbatim verdict from the most recent `reviews:` entry.
@@ -57,7 +53,7 @@ Reply with: <number> [optional notes]
 
 5. On user reply, dispatch:
 
-   - **`1` (refine).** Snapshot current frontmatter under `revisions:` with date + reason. Print the path of the ticket file and the relevant trigger context (the `## OUTLINE FAILED` block, reviewer's last verdict, etc.); ask the user to edit the file directly and reply `done` when finished. The skill does NOT accept inline chat-format edits — file-edit + `done` is the single supported input mode (avoids the ambiguity of parsing free-form chat replies into YAML frontmatter and body sections). When the user replies `done`, re-read the file, verify the snapshot under `revisions:` is still present, and dispatch on the *prior* escalation reason (read from the most recent `escalations:` entry):
+   - **`1` (refine).** Print the path of the ticket file and the relevant trigger context (the `## OUTLINE FAILED` block, reviewer's last verdict, etc.); ask the user to edit the file directly and reply `done` when finished. The skill does NOT accept inline chat-format edits — file-edit + `done` is the single supported input mode (avoids the ambiguity of parsing free-form chat replies into YAML frontmatter and body sections). The refine is captured by the refine *commit* the arms below make (`M1-NNN: refine ticket spec (<reason>-rework)`) — git log is the audit trail, so there is no `revisions:` frontmatter snapshot. When the user replies `done`, re-read the file and dispatch on the **`escalation_reason:` scalar** (set in step 1; it survives a session resume because it is committed on disk with the escalated ticket):
 
      - **Refine after `outline-fail`** (branch was created at `start` step 4, but the plan-writer subagent returned `OUTLINE FAILED` before any implementation, so the branch is *expected* to have no commits beyond `main`): set `status: pending`. Clear `clarity_check:` (the readiness pre-flight passed for the old ticket; the rewritten ticket needs a fresh evaluation). **Verify-then-clean-up the empty branch.** Resolve the branch name per the branch resolution procedure in [`workflow.md`](../../../../docs/process/workflow.md). Run `git rev-list --count main..m1/M1-NNN-<slug>` to count commits on the branch beyond `main`:
        - If `0` (the canonical path): `git checkout main`, then `git branch -D m1/M1-NNN-<slug>` is safe.
@@ -79,13 +75,13 @@ Reply with: <number> [optional notes]
        **A re-run of Plan against the refined ticket is mandatory before implementation.** The path to that re-run is `/m1-tick start M1-NNN`, which re-spawns Plan in fresh context and produces a new OUTLINE block (or a new OUTLINE FAILED). Plan's prior `OUTLINE FAILED` is **not exhaustive** — its `### Audit coverage` enumeration names which dimensions it audited; dimensions marked `not audited` (or any dimension whose evidence depended on the now-changed acceptance text) may still hide blockers. The refinement only fixed what round-1 Plan named; it cannot prove the refined ticket implementable. Print a one-line reminder: `Re-run Plan via /m1-tick start M1-NNN — refining only fixes named blockers; a fresh Plan pass may surface new ones the prior pass did not audit.` Do NOT instruct the user to manually flip `status` to `in-progress` — that path skips Plan and is forbidden by the [`SKILL.md`](../SKILL.md) cross-cutting rules.
      - **Refine after `round-cap`, `manual-verdict`, `budget-breach`, `premise-fail`, `loop`, or `redteam-finding`** (branch exists, implementation is in progress or complete): set `status: in-progress`. **Commit the refine on the per-ticket branch immediately.** Stage the ticket file (and only the ticket file): `git add docs/plan/m1/tickets/M1-NNN-<slug>.md`. Commit subject: `M1-NNN: refine ticket spec (round <r> rework)` where `<r>` is the round number that just escalated. This makes the refine durable mid-attempt — a subsequent `git checkout` (e.g. via `abort`) will not silently lose the refined acceptance criteria. Remind the developer to re-implement against the new criteria on the existing branch. The ticket-readiness pre-flight does NOT re-run on refine in this arm (the criteria are new but the implementation context — branch, prior diff, prior `mvn verify` — is preserved); WARN if the refined ticket would trip a lint BLOCKER.
 
-     Both arms preserve the snapshot under `revisions:` for the audit trail.
+     Both refine arms clear the `escalation_reason:` scalar as part of the edit (the escalation is resolved). The refine *commit* each arm makes is the audit trail — there is no `revisions:` frontmatter snapshot.
 
      **Cross-worktree variant for the refine-to-`main` arm (outline-fail).** When the session runs inside a per-ticket worktree, the `git checkout main` this arm assumes is impossible — `main` is checked out in the primary and git refuses. Instead: commit the refined ticket file on the current (empty) per-ticket branch, fast-forward the primary's `main` — `git -C <main-host> merge --ff-only m1/M1-NNN-<slug>` (resolve `<main-host>` via `git worktree list` as in [`merge.md`](merge.md) step 2; the branch carries exactly the one refine commit beyond `main`, so `--ff-only` succeeds) — then `git checkout --detach` to free the branch ref while keeping the refined ticket on disk in this worktree, and finally `git branch -D m1/M1-NNN-<slug>`. If `main` has moved since the fork, `--ff-only` refuses — fall back to `git -C <main-host> checkout m1/M1-NNN-<slug> -- docs/plan/m1/tickets/M1-NNN-<slug>.md` and commit on the host (the defer-landing pattern, M1-224). (Observed: M1-125, 2026-06-02.)
 
      **Cross-worktree variant for the mid-implementation arms (`round-cap`, `manual-verdict`, `budget-breach`, `premise-fail`, `loop`, `redteam-finding`).** The line-79 `git add` + commit assumes the controlling session sits *inside* the per-ticket worktree, so the stage+commit lands on the branch. When instead the session runs in the primary (`main` checked out here) while the implementation lives in a separate per-ticket worktree (the `--parallel` topology, [`merge.md`](merge.md) step 2), do **NOT** edit `main`'s checkout of the ticket file or regenerate `STATUS.md` against `main` — those edits cannot ride the branch and they leave `main`'s working tree dirty, tripping every other session's `merge` clean-tree precondition ([`merge.md`](merge.md) step 8). Instead resolve the worktree via `git worktree list`, apply the refine to the worktree's ticket copy, and commit it there: `git -C <worktree> add docs/plan/m1/tickets/M1-NNN-<slug>.md && git -C <worktree> commit -m 'M1-NNN: refine ticket spec (round <r> rework)'`. Regenerate `STATUS.md` in the worktree, never against `main` — `commit`/`merge` regenerate it on `main` at land time, so a mid-flight regen against `main` is both unnecessary and dirties the shared checkout. (Observed: M1-284, 2026-06-12.)
 
-   - **`2` (override).** **Eligibility gate (run first).** Read the most recent entry in `escalations:` and inspect its `reason`. Override is reviewer-judgment-correction only — it applies iff `reason ∈ {round-cap, manual-verdict}`. For any other reason, refuse:
+   - **`2` (override).** **Eligibility gate (run first).** Read the **`escalation_reason:` scalar** (set in step 1). Override is reviewer-judgment-correction only — it applies iff `escalation_reason ∈ {round-cap, manual-verdict}`. For any other reason, refuse:
 
      ```
      Override is only applicable when a reviewer returned REWORK or MANUAL.
@@ -123,7 +119,7 @@ Reply with: <number> [optional notes]
            # carries the override.
          override_ref: <index of the corresponding overrides[] entry>
      ```
-     Set `status: in-review`. The commit precondition accepts `verdict: OVERRIDE-APPROVE` exactly as it accepts `APPROVE`. Proceed to `commit`.
+     Set `status: in-review` and clear the `escalation_reason:` scalar (the escalation is resolved). The commit precondition accepts `verdict: OVERRIDE-APPROVE` exactly as it accepts `APPROVE`. Proceed to `commit`.
 
      Override is NOT permitted for `TEST-INTEGRITY-CHECK: FAIL` flowing through `MANUAL` — the user must explicitly acknowledge that they are overriding test integrity, and the override entry must include the literal text `"acknowledging-test-integrity-override"` in `user_justification`.
 
@@ -137,7 +133,7 @@ Reply with: <number> [optional notes]
      - `decomposed_from: M1-NNN` (the operand)
      - **Sizing fields (`files_budget`, `files_scope`, `complexity`, `risk`, `round_cap`, `security_relevant`, `migration_touch`) are NOT inherited from the parent.** They are left at the template defaults (`files_budget: 8`, `files_scope: []`, `complexity: low`, `risk: low`, `round_cap: 2`, the rest `false`). The skeleton is a *placeholder*; the user must edit each new ticket to set sizing accurately for the smaller scope. The reasoning: a parent decomposed because it was too big; inheriting its sizing onto each child re-creates the original sizing problem distributed.
      - `out_of_scope: []`, `acceptance: []`, `test_plan: { adds: [], preserves: [...] }`, `spec_refs: []`, `decision_refs: []` — the user must fill these in. The ticket-readiness pre-flight blocks `start` until they do: the linter's OUT-OF-SCOPE-PRESENT BLOCKER fires on the empty `out_of_scope`, and the developer self-check catches empty `acceptance`. This is the intended forcing function.
-     - All dynamic fields (`reviews`, `escalations`, `revisions`, `overrides`, `aborted_attempts`, `reopens`, `redteam_findings`, `clarity_check`) start empty.
+     - All dynamic fields (`reviews`, `overrides`, `aborted_attempts`, `reopens`, `redteam_findings`, `clarity_check`) start empty; `escalation_reason` is unset (no open escalation on a fresh skeleton).
 
      Print the new ticket paths so the user can flesh them out, plus a one-line reminder: "Each skeleton needs acceptance criteria, sizing, and `out_of_scope` filled in before `/m1-tick start <id>` will pass the readiness pre-flight."
 
@@ -155,13 +151,14 @@ Reply with: <number> [optional notes]
      - `blocked_by: []` — the parent's `blocked_by` is NOT auto-inherited; an amendment ticket gates only on what it itself needs.
      - **All sizing and policy fields take template defaults** (`files_budget: 8`, `files_scope: []`, `complexity: low`, `risk: low`, `round_cap: 2`, `security_relevant: false`, `migration_touch: false`). Spec amendments are typically small documentation-only changes; if the amendment turns out larger, the user edits these before `start`.
      - `out_of_scope: []`, `test_plan: { adds: [], preserves: [...] }`, `decision_refs: []` — the user fills these in. The empty `out_of_scope` is intentional: the linter's OUT-OF-SCOPE-PRESENT BLOCKER is the forcing function for the user to think about boundaries before `start`.
-     - All dynamic fields (`reviews`, `escalations`, `revisions`, `overrides`, `aborted_attempts`, `reopens`, `redteam_findings`, `clarity_check`) start empty. Lineage fields other than `spec_amend_for` and `spec_amend_parent` are unset.
+     - All dynamic fields (`reviews`, `overrides`, `aborted_attempts`, `reopens`, `redteam_findings`, `clarity_check`) start empty; `escalation_reason` is unset. Lineage fields other than `spec_amend_for` and `spec_amend_parent` are unset.
 
      Set the operand's terminal state per whether the amendment obsoletes it: ask the user "after this amendment lands, is the operand reopened to do the (now-corrected) work, or does the amendment drop the operand's requirement entirely?" — **reopened after** → `status: deferred`, `deferred_on: M1-AAA`, `deferred_reason: spec-amend`; **obsoleted** → `status: abandoned`, `abandoned_reason: obsoleted-by-spec-amend` (record the obsoleting ticket in `deferred_on: M1-AAA` for lineage; terminal). Print the new ticket path and a one-line reminder: "The amendment ticket needs `acceptance` and `out_of_scope` filled in before `/m1-tick start M1-AAA` will pass the readiness pre-flight." Add, for the deferred case only: "The amendment ticket must be `done` before the operand can be reopened."
 
    - **`6` (abandon).** The ticket is decided against outright — the work will not be built and no split (`decompose`) or amendment (`spec-amend`) carries it. Ask the user for the reason category — `superseded` (the work is absorbed by an existing/other named ticket) or `wont-do-infeasible` (evaluated and judged not worth building / not achievable as framed) — plus a one-line free-text justification and, for `superseded`, the ID(s) that absorb it. Set the operand ticket: `status: abandoned`, `abandoned_reason: <superseded | wont-do-infeasible>`, and (for `superseded`, if IDs were named) record them in `deferred_on:` for lineage. Do NOT delete the branch here — if a per-ticket branch exists (the escalation came mid-implementation), remind the user that `/m1-tick abort M1-NNN` is the destructive path to discard it; `abandon` only records the decision on the ticket. Abandoned is terminal — the driver's `reopen` refuses it; reviving requires a fresh, deliberate decision. Print the abandoned state and the recorded reason.
 
-6. Regenerate `STATUS.md` after the resolution applies.
+6. Clear the `escalation_reason:` scalar on the operand whenever the resolution moves it out of `escalated` (every arm except a re-print-and-STOP refusal does). The refine and override arms above already state this explicitly; for `decompose`/`defer`/`spec-amend`/`abandon` the operand moves to `deferred`/`abandoned`, so clear it there too — a resolved escalation must leave no open-reason marker behind.
+7. Regenerate `STATUS.md` after the resolution applies.
 
 ### ID allocation algorithm
 
