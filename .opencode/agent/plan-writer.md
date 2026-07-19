@@ -6,9 +6,17 @@ tools:
   grep: true
   glob: true
   write: true
-  edit: false
+  # edit MUST stay true: opencode gates the `write` tool under the edit
+  # permission, so `edit: false` silently disables verdict-file writing
+  # (verified against opencode 1.18.3). The Claude allowlist is Write-only;
+  # this is the weaker guarantee documented in harness-mapping.md §6, which is
+  # why the post-gate `git status --porcelain` check is mandatory here.
+  edit: true
   bash: false
   webfetch: false
+  websearch: false
+  task: false
+  skill: false
 ---
 Source of truth: .claude/agents/plan-writer.md — this file is a thin pointer.
 

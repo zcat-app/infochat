@@ -8,9 +8,12 @@ the Generic column is the contract any capable agent can satisfy by hand.
 Nothing in this file changes the workflow itself — if a binding here seems to
 require a different procedure, this file is wrong and the procedure wins.
 
-Tool flags and discovery paths below were verified against the tools' public
-docs on 2026-07-19. Versions move: verify flags against your installed version
-on first use, and treat §7 as the acceptance test.
+The **opencode** column was verified empirically against **opencode 1.18.3** on
+2026-07-19 (discovery, agent resolution, and the two gotchas in §6.1 were
+measured, not read from docs — the docs were wrong on one of them). The
+**Codex CLI** column is from its published docs only; no Codex binary was
+available to test against, so treat every Codex row as unverified until §7
+passes. Versions move: re-check flags on first use.
 
 ## 1. The five primitives
 
@@ -91,6 +94,39 @@ in another working directory, `--parallel` works as written (workflow.md
 nothing else changes. `scripts/verify-serialized.sh` works on any Linux/macOS
 with flock and must stay in the loop wherever parallel verifies are possible.
 
+## 6.1 opencode: two verified gotchas that silently break the gates
+
+Both were measured against opencode 1.18.3. Both fail *silently* — the flow
+appears to work and produces nothing usable.
+
+**(a) `edit: false` disables the `write` tool.** opencode gates writing under
+the edit permission, so an agent declaring `write: true, edit: false` resolves
+to `write=false` and cannot produce its verdict file. The Claude allowlist is
+Write-without-Edit, so the natural translation is exactly wrong. The agent
+definitions in `.opencode/agent/` therefore set `edit: true` with a comment
+saying why — meaning **on opencode a gate agent can also edit files**, which is
+what makes the `git status --porcelain` check below load-bearing rather than
+advisory. Verify with `opencode debug agent <name>`; the resolved map, not the
+frontmatter, is the truth.
+
+**(b) Same-named skills in `.claude/skills/` and `.agents/skills/` resolve
+NONDETERMINISTICALLY.** opencode scans both trees; when a name exists in each,
+which copy wins is a race — measured flipping run to run across five runs. If
+the `.claude/` copy wins, opencode executes the raw Claude procedure with no
+harness translation and will try to spawn Claude subagents. opencode's own docs
+say only "ensure skill names are unique across all locations" and document no
+way to disable a source. The binary does carry an undocumented
+`OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` env var, and it works — with it set, all
+three skills resolved to the `.agents/` wrappers 5/5 runs:
+
+    OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1 opencode …
+
+Set it in the shell profile or task runner you launch opencode from. Confirm
+with `opencode debug skill` that every workflow skill's `location` is under
+`.agents/skills/`. Being undocumented it may change; the check is the
+safeguard, not the variable. (Codex is unaffected — it reads `.agents/skills/`
+only and never `.claude/skills/`, so no collision exists there.)
+
 ## 6. Weaker guarantees on non-Claude harnesses (honest notes)
 
 - **No per-path Write restriction.** On Claude Code the gate agents' `tools:`
@@ -116,17 +152,18 @@ No non-Claude CLI is installed on the reference machine, so these are the
 acceptance checks a fork runs once per tool (record the results in your
 fork):
 
-opencode:
-1. Skill discovery: `m1-tick` / `redteam` / `deep-code-review` are listed
-   (source: the `.agents/skills/` wrappers; opencode also reads
-   `.claude/skills/` natively — note whether both register and whether
-   routing dedups; if double registration breaks routing, disable one source
-   via opencode's config rather than touching either skill tree).
-2. `opencode run --agent code-reviewer` — verify current flags (stdin/file
-   input was undocumented at mapping time; shell-substitute the prompt text
-   if needed).
-3. One end-to-end review gate on a toy diff: rendered prompt → verdict file
-   lands → §6 contamination check passes.
+opencode (steps 1–2 VERIFIED on 1.18.3, 2026-07-19 — re-run after an upgrade):
+1. ✅ Skill discovery — `opencode debug skill` lists `m1-tick`, `redteam`,
+   `deep-code-review`. Confirm each `location` is under `.agents/skills/`; if
+   any resolves to `.claude/skills/`, apply §6.1(b).
+2. ✅ Agent discovery — `opencode agent list` shows all five gate agents as
+   `(subagent)`, and `opencode debug agent <name>` resolves `write=true`.
+   A `write=false` here means §6.1(a) has regressed.
+3. ⬜ One end-to-end review gate on a toy diff: rendered prompt → verdict file
+   lands → §6 contamination check passes. (Not yet run — it costs a real model
+   call. `opencode run --agent code-reviewer "<stub>"` takes the prompt as a
+   positional argument; there is no stdin flag, and `-f/--file` attaches files
+   rather than supplying the prompt.)
 
 Codex CLI:
 4. Skill discovery from `.agents/skills/` (Codex does NOT read
