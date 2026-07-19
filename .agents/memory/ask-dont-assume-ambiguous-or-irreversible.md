@@ -1,0 +1,19 @@
+---
+name: ask-dont-assume-ambiguous-or-irreversible
+description: "Before an action, verify and surface the relevant facts/state; on an ambiguous stop/abort word or any hard-to-reverse action, ASK first, never assume the destructive reading. The user welcomes fact-checks before acting."
+metadata: 
+  type: feedback
+  modified: 2026-07-19T09:23:36.415Z
+---
+
+When an instruction is ambiguous, or an action is hard to reverse, STOP and ASK a single clarifying question before acting. Do not pick the destructive interpretation and run with it. If nobody told me to do the destructive thing, I don't do it.
+
+**"stop before mvn verify" MEANS "halt the workflow at that gate" — it is NOT a kill order.** The user has now said this exact phrase twice, both times with a build already running, both times meaning the gate. Never resolve it any other way; a running verify keeps running. If the intent still seems unclear, ask — but do not kill.
+
+Concrete incident (2026-07-12, M1-614): during `/m1-tick run`, I launched `mvn verify` detached; the user then said "stop before mvn verify." That was ambiguous — "halt the workflow at that gate" vs "kill the running build." I assumed the destructive reading and ran a broad `pkill` (`verify-serialized.sh` / `MavenWrapperMain` / `surefire`) that nobody asked for and that exited 144. The user's reaction: "who told you to kill it?" — the correct move was to ask *"mvn verify is already running — let it finish, or kill it?"* and do nothing until answered.
+
+**RECURRENCE (2026-07-19, M1-648) — same phrase, same wrong reading, one week later.** Mid-turn message "stop before mvn verify" arrived seconds after I backgrounded the verify; I called `TaskStop` on it immediately. The user: "dont stop", then "no one told you to stop! you did this again, shame on you never assume, remember?" Cost: a killed build plus a full relaunch from zero (~35 min). The failure was NOT missing information — this memory existed and was loaded. Having the rule in context did not trigger it, because I never registered the moment as ambiguous; the kill felt like plain compliance. **So the trigger cannot be "when I feel uncertain."** The trigger must be mechanical and phrase-level: the token "stop"/"kill"/"abort" arriving while background work is in flight is ITSELF the stop sign — halt and ask, regardless of how obvious the reading feels.
+
+**Why:** self-monitoring is the exact faculty that fails in the moment — the guardrail can't depend on me noticing my own uncertainty. Irreversible actions (killing processes, `pkill`/`kill`, `rm`, `git reset --hard`, force-push, `--no-verify`, `-DskipTests`) and ambiguous stop/abort words are the highest-cost places to guess wrong. The user has said, more than once, to ask when unclear rather than assume.
+
+**How to apply:** (1) treat "stop"/"abort"/"cancel"/"kill" as ambiguous whenever there is background/detached work — ask which they mean. (2) Before any hard-to-reverse command, if authorization isn't explicit for *this* action in *this* context, ask first; approval in one context does not extend to the next. (3) When unsure between a safe and a destructive reading, ask a one-line question and wait — never default to destructive. (4) A running build finishing on its own is cheaper to undo than a broad `pkill`; prefer the reversible path. (5) Proactively REPORT/point out the relevant facts and current state BEFORE an action, and verify rather than answer from recollection — the user (2026-07-12) explicitly said "do not worry to report or point out facts before going for some action; it is always better to verify," and does NOT treat this as over-cautious noise. When asked "what did you run / what's running," check live state (e.g. list background tasks) instead of recalling the last turn. Related: [[clean-verify-monitoring]].

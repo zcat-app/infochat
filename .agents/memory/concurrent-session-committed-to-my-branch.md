@@ -1,0 +1,12 @@
+---
+name: concurrent-session-committed-to-my-branch
+description: A concurrent session in this shared single-worktree checkout can commit onto YOUR active ticket branch; re-check the branch tip right before merge and never whole-branch-squash-and-delete blindly.
+metadata: 
+  type: feedback
+---
+
+During M1-619 (2026-07-13), while I was on branch `m1/M1-619-...`, a CONCURRENT session (same git identity `ubuntu5`, the same primary checkout — a SINGLE shared worktree, NOT a separate git worktree) committed an unrelated `process:` doc (`docs/plan/future-features.md`, `b041a566`) directly ON TOP of my ticket commit (`fec9a7b7`), because the shared HEAD was on my branch. `git merge --squash <branch>` then folded BOTH commits; committing that squash would have (a) put the stray file into main under my ticket's message and (b) on branch-delete DESTROYED the concurrent session's commit.
+
+**Why:** this repo is regularly worked by concurrent sessions (see [[m1-batch-run-launched]], [[m1-tick-workflow-cannot-nest-gates]]), and a `process:` commit lands on whatever HEAD points at — if that's your ticket branch, it silently contaminates your branch. `git worktree list` shows only ONE worktree, so the usual "check worktrees" heuristic misses it; the tell is the branch TIP moving (`git rev-parse <branch>` / reflog) even though your own git ops succeeded uninterrupted.
+
+**How to apply:** (1) Right before `/m1-tick merge`, re-read the branch tip and `git log <forkpoint>..<branch>` — confirm it's still exactly YOUR ticket commit(s), not a surprise extra. An unrelated untracked file appearing mid-session (tripping the clean-tree precondition) is the early warning. (2) If the branch is contaminated: DO NOT whole-branch `git merge --squash <branch>` and DO NOT `git branch -D` it. Squash ONLY your ticket commit — `git merge --squash <your-sha>` (squashes forkpoint..your-sha, excluding the interloper) — `git commit -C <your-sha>`, and LEAVE the branch in place so the concurrent commit survives for its owner to rebase/land. (3) `git reset --hard HEAD` cleanly backs out a mis-staged squash (all content is safe in the commits); but it also removes the interloper's file from the shared working tree — flag that to the user so the concurrent session knows to `git checkout <sha> -- <file>`. Recovery on M1-619 worked: main = `f9292433` (M1-619 only, audited byte-identical), branch kept at `b041a566`. Aligns with [[ask-dont-assume-ambiguous-or-irreversible]] — I surfaced + re-confirmed with the user rather than proceeding on the stale approval.

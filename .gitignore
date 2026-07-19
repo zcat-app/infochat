@@ -41,3 +41,4 @@ credentials.json
 # negation must come after it for gitignore last-match-wins).
 prod/runtime/
 !prod/config/secrets.env.example
+.agents/memory-local/
