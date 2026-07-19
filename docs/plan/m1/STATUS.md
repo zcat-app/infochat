@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 674 |
 | deferred | 0 |
 | abandoned | 17 |
-| **total** | **695** |
+| **total** | **696** |
 
 ---
 
@@ -27,6 +27,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-642 — Per-category digest delivery + optional roll-up summaries (complexity: high, risk: medium)
 - M1-648 — Semantic command-intent index with deterministic answer composition (complexity: high, risk: high)
+- M1-662 — Reconcile the ticket-frontmatter and verdict-check record registries (complexity: low, risk: medium)
 
 ---
 
@@ -890,4 +891,5 @@ M1-656 (done)
   └── M1-658 (done) [see above]
 M1-659 (done)
 M1-661 (done)
+M1-662 (pending) ← runnable
 ```
