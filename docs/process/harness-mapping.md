@@ -8,12 +8,12 @@ the Generic column is the contract any capable agent can satisfy by hand.
 Nothing in this file changes the workflow itself — if a binding here seems to
 require a different procedure, this file is wrong and the procedure wins.
 
-The **opencode** column was verified empirically against **opencode 1.18.3** on
-2026-07-19 (discovery, agent resolution, and the two gotchas in §6.1 were
-measured, not read from docs — the docs were wrong on one of them). The
-**Codex CLI** column is from its published docs only; no Codex binary was
-available to test against, so treat every Codex row as unverified until §7
-passes. Versions move: re-check flags on first use.
+Both tool columns were verified empirically on 2026-07-19 against **opencode
+1.18.3** and **codex-cli 0.144.6** — discovery, agent resolution, config
+loading, and the gotchas in §6.1/§6.2 were measured, not read from docs. Two
+published claims turned out false against the real binaries (noted in place).
+The only step not yet run is a live end-to-end gate (§7), which costs a real
+model call. Versions move: re-check on first use.
 
 ## 1. The five primitives
 
@@ -43,8 +43,16 @@ five:
 |---|---|---|
 | Claude Code (native) | `.claude/agents/<name>.md` | the skill spawns the agent with the stub prompt below — status quo |
 | opencode | `.opencode/agent/<name>.md` (`mode: subagent`) | Task-tool routing or `@<name>` mention with the stub prompt, or headless (§3) |
-| Codex CLI | `.codex/agents/<name>.toml` | `spawn_agent` + `wait` with the stub prompt, or headless (§3) |
+| Codex CLI | **none — no repo-shippable agent definition exists** (§6.2) | `spawn_agent` with the stub prompt, or headless `codex exec` (§3) |
 | Generic (any agent) | none needed | any FRESH session/process of a capable model, given the stub prompt |
+
+Codex has no per-agent definition because its spawned agents are deliberately
+generic — the prompt states all agents "are equally intelligent and capable,
+and have access to the same set of tools". That costs nothing here: this
+architecture already carries the persona in the rendered prompt plus
+`.claude/agents/<name>.md`, which the stub prompt tells the agent to read, so a
+generic spawn arrives at the same behavior. What is lost is per-agent
+capability scoping — see §6.2.
 
 The stub prompt is the same everywhere:
 
@@ -58,11 +66,12 @@ When a tool's in-session subagent mechanism is unavailable (or you want a
 process boundary for CI), run the gate as a separate headless invocation.
 Render first (primitive 2), then:
 
-Codex CLI (the `-o` file captures the chat reply; the real artifact is the
-verdict file the rendered prompt names; `workspace-write` because gate agents
-must Write their artifact):
+Codex CLI (`-o/--output-last-message` captures the final chat reply; the real
+artifact is the verdict file the rendered prompt names; `workspace-write`
+because gate agents must Write that artifact). The prompt may be passed
+positionally or on stdin via `-`:
 
-    echo 'Read <rendered-prompt-path> and follow it exactly. It names every input file and the output path. Write the required artifact to that path and reply only in the format the prompt specifies.' \
+    printf 'Read <rendered-prompt-path> and follow it exactly. It names every input file and the output path. Write the required artifact to that path and reply only in the format the prompt specifies.' \
       | codex exec - --sandbox workspace-write -o target/<gate>-reply.txt
 
 opencode:
@@ -127,17 +136,52 @@ with `opencode debug skill` that every workflow skill's `location` is under
 safeguard, not the variable. (Codex is unaffected — it reads `.agents/skills/`
 only and never `.claude/skills/`, so no collision exists there.)
 
+## 6.2 Codex: verified discovery facts
+
+Measured against codex-cli 0.144.6 with `codex debug prompt-input`, which
+renders the model-visible prompt locally (no auth, no token spend) and is the
+cheapest way to confirm any of this.
+
+- ✅ **`AGENTS.md` is loaded** — it appears verbatim in the prompt as
+  "AGENTS.md instructions for `<repo>`".
+- ✅ **`.agents/skills/` is the working skills path** — all three workflow
+  skills register with their file locators alongside Codex's built-ins. Codex
+  reads neither `.claude/skills/` nor `.codex/skills/`, so the opencode
+  collision of §6.1(b) cannot occur here.
+- ❌ **`.codex/agents/*.toml` is NOT read.** A deliberately malformed file
+  there produces no error even with the project trusted, and the path does not
+  appear in the binary. Repo-shipped per-agent definitions for Codex were
+  written and then **deleted** rather than left as decoration — an inert config
+  file is worse than none, because it implies capability scoping that is not
+  in force. Custom-agent support does exist (the binary validates
+  `developer_instructions`), but only via config, i.e. not repo-shippable
+  per-project.
+- ⚠ **A project `.codex/config.toml` is read ONLY if the project is trusted.**
+  Untrusted, it is silently ignored — no warning. Trust is declared in the
+  USER's `~/.codex/config.toml`, so it is a per-machine setup step a fork must
+  perform, not something the repo can ship:
+
+      [projects."/absolute/path/to/repo"]
+      trust_level = "trusted"
+
+  Trusting also flips the sandbox to `workspace-write`. Verify with
+  `codex debug prompt-input t` — the permissions block names the mode and the
+  writable roots.
+- Concurrency: 4 slots by default (the prompt states it), so a fan-out wider
+  than 4 queues rather than failing.
+
 ## 6. Weaker guarantees on non-Claude harnesses (honest notes)
 
-- **No per-path Write restriction.** On Claude Code the gate agents' `tools:`
-  allowlist plus prompt constrain them to Write only their artifact.
-  opencode's permissions are per-tool (write on/off) and Codex's sandbox is
-  per-mode (`workspace-write`) — neither restricts WHICH path, so there the
-  constraint is prompt discipline. Mitigation, MANDATORY on non-Claude
-  harnesses: after a gate agent returns, run `git status --porcelain` and
-  compare against the expected artifact path. ANY other new or changed path
-  means a contaminated gate — discard the artifact, revert the contamination,
-  re-run the gate.
+- **No per-path Write restriction, and on Codex no per-agent scoping at all.**
+  On Claude Code the gate agents' `tools:` allowlist plus prompt constrain them
+  to Write only their artifact. opencode's permissions are per-tool (and
+  `write` drags `edit` in with it, §6.1(a)); Codex's spawned agents are generic
+  and share the session's `workspace-write` sandbox (§6.2). Neither restricts
+  WHICH path, so there the constraint is prompt discipline alone. Mitigation,
+  MANDATORY on non-Claude harnesses: after a gate agent returns, run
+  `git status --porcelain` and compare against the expected artifact path. ANY
+  other new or changed path means a contaminated gate — discard the artifact,
+  revert the contamination, re-run the gate.
 - **Fresh context is a process property.** In-session subagents on
   opencode/Codex are fresh by construction, like Claude's. Hand-running a
   gate inside your MAIN session forfeits the independence guarantee; treat
@@ -165,14 +209,16 @@ opencode (steps 1–2 VERIFIED on 1.18.3, 2026-07-19 — re-run after an upgrade
    positional argument; there is no stdin flag, and `-f/--file` attaches files
    rather than supplying the prompt.)
 
-Codex CLI:
-4. Skill discovery from `.agents/skills/` (Codex does NOT read
-   `.claude/skills/`).
-5. Whether `.codex/agents/*.toml` is auto-discovered in a trusted project or
-   requires a project `.codex/config.toml` — add the minimal config only if
-   required.
-6. One gate via `spawn_agent` AND one via `codex exec` (§3): the verdict
-   lands, and only the verdict path changed.
+Codex CLI (steps 4–5 VERIFIED on 0.144.6, 2026-07-19):
+4. ✅ Skill discovery from `.agents/skills/` and `AGENTS.md` loading — confirm
+   with `codex debug prompt-input t` (local, no auth, no token spend).
+5. ✅ Agent definitions: none needed — `.codex/agents/` is not read (§6.2).
+   If you want a project `.codex/config.toml` honored, mark the project
+   trusted in `~/.codex/config.toml` first, then confirm by breaking the file
+   deliberately and seeing a parse error.
+6. ⬜ One gate via `spawn_agent` AND one via `codex exec` (§3): the verdict
+   lands, and only the verdict path changed. (Not yet run — this host has no
+   Codex credentials; `codex doctor` reports the auth state.)
 
 Any tool:
 7. Drive `/m1-tick start` (via the `.agents/skills/m1-tick` wrapper) on a
