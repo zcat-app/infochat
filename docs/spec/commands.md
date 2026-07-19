@@ -298,9 +298,32 @@ them to the marked region — doing so would red the build.
   green guard means "no unrecorded error reflection", not "reflection is
   impossible". The reply surface is not merely a theoretical gap: one live
   instance — the `/add-source` success reply echoing an unconstrained
-  `--name` — was found in it and is tracked as M1-659. The rule above
-  therefore binds success/reply templates too; only the *mechanical* guard
-  is error-scoped.
+  `--name` — was found in it. That instance is **closed** (M1-659): a
+  caller-supplied `--name` is constrained where the value is produced.
+  Control characters are stripped from the name and the remainder is
+  kept; a name containing **any** slash, or over-long input — or one
+  left empty by the strip — is discarded whole in favour of the
+  host-derived default. Only an ordinary slash-free name is stored and
+  echoed. The slash rule is deliberately absolute rather than a
+  judgement about whether the slash begins a command: two M1-659 audits
+  defeated the boundary form on each side in turn (U+2800, category
+  `OTHER_SYMBOL`, then the Hangul fillers, category `OTHER_LETTER` —
+  both render as a blank gap), which establishes that no
+  character-category test can decide the question. Since slash-prefix
+  is the only command surface (D12), a slash-free name cannot carry a
+  command token at all. The name is NFKC-normalized at that check
+  rather than relying on the router's normalization, because the
+  router's pass exempts fenced code blocks while command-vs-chat
+  routing is decided on the body's first line — so a value can reach
+  a handler unfolded, and a fullwidth solidus that survived an
+  ASCII-only test would become a real slash when the reply was pasted
+  back. The cost is that a legitimate `AC/DC News` falls back to the
+  host name too. Constraining the *stored* value rather than
+  one reply's bytes closes the `/list-sources` and `/unfollow-source`
+  echoes of the same field at the same time. The rule above binds
+  success/reply templates too; only the *mechanical* guard is
+  error-scoped, so the reply surface stays guarded by review rather than
+  by the build.
 - `/status` — runtime status (active profile and uptime; admin sees
   more). DM and group; any non-banned user. Bot
   admin view includes a count of pending groups

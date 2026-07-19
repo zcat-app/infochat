@@ -4,12 +4,14 @@ import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.ingest.IngestTextNormalizer;
 import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.provider.source.KindResolver.SourceKind;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import javax.sql.DataSource;
+import java.text.Normalizer;
 import java.sql.Array;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -74,6 +76,15 @@ import java.util.UUID;
  */
 @ApplicationScoped
 public class SourceUpsertService {
+
+    // A display name is a single-line label rendered inline in a reply
+    // sentence; 80 characters is a full terminal line, past which the value
+    // is padding rather than a name. Bounds how much attacker-chosen text a
+    // group admin can push into a broadcast reply (M1-659). Distinct from
+    // the 200-char --name parse guardrail in docs/design/03-commands.md
+    // §3.1: that one caps argument length at the parser, this one bounds
+    // what an outbound reply will echo, and only the latter is implemented.
+    private static final int MAX_DISPLAY_NAME_LENGTH = 80;
 
     private static final String UPSERT_TAG_SQL =
             "INSERT INTO tag (name, display, source_origin) "
@@ -272,9 +283,14 @@ public class SourceUpsertService {
     /** Internal row-level result of the {@code source} UPSERT. */
     private record SourceUpsertResultRow(UUID id, String displayName, boolean wasInserted) {}
 
-    /** Optional convenience: derive a default display name from the URL host. */
+    /**
+     * Optional convenience: derive a default display name from the URL host.
+     * A caller-supplied {@code --name} override is accepted only if it
+     * survives {@link #acceptableOverride}; otherwise the host-derived
+     * fallback is used as though no override had been supplied.
+     */
     public static String defaultDisplayName(String identifier, Optional<String> override) {
-        return override.orElseGet(() -> {
+        return override.flatMap(SourceUpsertService::acceptableOverride).orElseGet(() -> {
             try {
                 String host = java.net.URI.create(identifier).getHost();
                 return host == null ? identifier : host;
@@ -282,5 +298,97 @@ public class SourceUpsertService {
                 return identifier;
             }
         });
+    }
+
+    /**
+     * The {@code --name} override, or empty if it is not safe to echo.
+     *
+     * <p>The stored display name is reflected verbatim into deterministic
+     * outbound replies — the {@code /add-source} success reply, the
+     * {@code /list-sources} listing, the {@code /unfollow-source}
+     * confirmation — and in an approved group those replies are broadcast
+     * to every member. A group admin (below bot admin) may add a source,
+     * so an unconstrained override lets a lower-tier user put attacker-
+     * chosen text in front of a bot admin. Text shaped like a bot command
+     * is the payload that matters: a bot admin who copy-pastes a
+     * plausible {@code /grant-admin <uuid> approved} line executes it.
+     * That is the deterministic-reply social-engineering surface
+     * {@code docs/spec/security.md} §LLM output sanitizer leaves
+     * unfiltered by design (it filters LLM prose, not deterministic
+     * templates).
+     *
+     * <p><b>Reject rather than rewrite.</b> Neutralizing the value in
+     * place does not work: stripping the leading slash from
+     * {@code /grant-admin …} leaves the command words intact, and a
+     * charset filter cannot help because {@code grant-admin} is already
+     * plain lowercase ASCII — the output-side filtering M1-647 tried and
+     * abandoned. Discarding the whole override and falling back to the
+     * host is what actually removes the text from the reply. Constraining
+     * here, where the value is produced, also covers the other two
+     * surfaces at once, because it is the *stored* value that is
+     * constrained rather than one reply's bytes (M1-659).
+     */
+    private static Optional<String> acceptableOverride(String override) {
+        // NFKC first, so the slash test below sees the same representation the
+        // command parser would. The router normalizes inbound text, but NOT
+        // inside fenced code blocks (InboundRouter.normalize works per line and
+        // appends fence content verbatim) while routing is decided on the whole
+        // body's first character — so a /add-source on line 1 can carry an
+        // un-normalized fenced payload on line 3, in which U+FF0F FULLWIDTH
+        // SOLIDUS survives an ASCII-only test and then folds to '/' when the
+        // reply is pasted back unfenced. Normalizing here makes this check
+        // self-sufficient rather than dependent on how the value arrived.
+        // Then strip: control characters, bidi overrides and the Unicode
+        // line/paragraph separators would let the name forge extra apparent
+        // lines in the rendered reply; stripMetadataField is the project's
+        // single declaration of that strip for single-line metadata fields.
+        String normalized = Normalizer.normalize(override, Normalizer.Form.NFKC);
+        String stripped = IngestTextNormalizer.stripMetadataField(normalized).trim();
+        if (stripped.isEmpty()
+                || containsSlash(stripped)
+                || stripped.length() > MAX_DISPLAY_NAME_LENGTH) {
+            return Optional.empty();
+        }
+        return Optional.of(stripped);
+    }
+
+    /**
+     * Does the name contain a slash?
+     *
+     * <p>A slash anywhere disqualifies the whole override — this is
+     * deliberately absolute rather than a judgement about whether the
+     * slash "opens a word", and the absoluteness is the security
+     * property. Two successive M1-659 audits defeated the boundary form,
+     * once on each side of the predicate: rejecting when the preceding
+     * character is {@code isWhitespace}/{@code isSpaceChar} fell to U+2800
+     * BRAILLE PATTERN BLANK (category {@code OTHER_SYMBOL}), and accepting
+     * only when it is {@code isLetterOrDigit} fell to the Hangul fillers
+     * U+115F/U+1160/U+3164 (category {@code OTHER_LETTER}). Both render as
+     * a blank gap; neither is removed by {@code stripMetadataField} or
+     * {@code String.trim()}. The lesson is structural, not a matter of
+     * picking better predicates: every partition of Unicode has
+     * blank-rendering members on both sides, so a character-category test
+     * can only move the hole. Since D12 makes slash-prefix the only
+     * command surface, a name containing no slash cannot carry a command
+     * token regardless of what surrounds it.
+     *
+     * <p>Testing the ASCII slash alone is sufficient only because
+     * {@link #acceptableOverride} NFKC-normalizes the value first, which
+     * folds U+FF0F FULLWIDTH SOLIDUS to {@code '/'}. That normalization is
+     * done HERE rather than relied upon from the router: the router's own
+     * pass exempts fenced code blocks, and a command line can open a fence
+     * on a later line, so an inbound value can reach this method unfolded.
+     * The homoglyphs that do NOT fold (U+2215, U+2044, U+29F8) equally do
+     * not parse as a command when pasted back, so they yield nothing
+     * executable.
+     *
+     * <p>The cost is that an ordinary name carrying a slash
+     * ({@code "AC/DC News"}) is also discarded and falls back to the
+     * host-derived default. That is accepted: the display name is
+     * cosmetic, no spec commits to a character set for it, and the
+     * fallback is a sane host string.
+     */
+    private static boolean containsSlash(String name) {
+        return name.indexOf('/') >= 0;
     }
 }

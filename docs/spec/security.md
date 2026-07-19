@@ -332,10 +332,14 @@ bot-authored). That is a property the handlers must **maintain**, not
 one the exemption may assume: M1-647/M1-656 removed the reflecting
 echoes from the friendly-**error** surface and M1-658
 (`InboundReflectionGuardTest`) guards that surface against their
-return. The **reply/success** surface is not yet fully guaranteed — a
-known live instance, the `/add-source` `--name` display-name echo, is
-tracked as M1-659 — so for now this exemption carries a **residual
-risk** on non-error deterministic output, not a proven-safe blanket.
+return. The **reply/success** surface is not yet fully guaranteed: its
+one known live instance — the `/add-source` `--name` display-name echo
+— was closed by M1-659, which constrains the name where the value is
+produced rather than filtering the reply, but that surface has **no
+mechanical guard** (M1-658's census is error-scoped) and other
+`reply.*` echoes remain unreviewed. So for now this exemption carries a
+**residual risk** on non-error deterministic output, not a proven-safe
+blanket.
 Admin commands are dispatched only by the deterministic command path,
 so a copy-pasted reply still requires `is_admin=true` to do anything;
 the sanitizer closes the social-engineering surface where a small LLM

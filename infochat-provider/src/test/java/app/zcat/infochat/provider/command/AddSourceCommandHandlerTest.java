@@ -45,6 +45,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       by {@code text/html} → AMBIGUOUS reply.</li>
  *   <li>URL-visibility disclosure: present on Branch A reply,
  *       absent on Branch B / Branch C replies.</li>
+ *   <li>Display-name constraint: control characters are stripped from a
+ *       {@code --name}, and a name carrying ANY slash or over-long input
+ *       is discarded in favour of the host-derived default, while an
+ *       ordinary slash-free name is reflected verbatim.</li>
  * </ul>
  */
 class AddSourceCommandHandlerTest {
@@ -254,6 +258,255 @@ class AddSourceCommandHandlerTest {
                 "nitter takes the existing HTTP probe exactly once, not the Nostr relay probe");
         assertFalse(reply.text().isEmpty(),
                 "a successful nitter add must produce a non-empty reply");
+    }
+
+    @Test
+    void slashPrefixedDisplayNameIsNotReflectedIntoFreshInsertReply() {
+        // The M1-658 r2 audit's live payload: a group admin supplies a
+        // --name shaped like a fully parameterized bot command, and the
+        // deterministic success reply broadcasts it to the group, where a
+        // bot admin might copy-paste it. The override must be discarded
+        // whole — neutralizing the leading slash would leave the command
+        // words in the reply.
+        dataSource.seedUser("m1-659-inject", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-659-inject.xml",
+                ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.FRESH_INSERT);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-659-inject"),
+                "/add-source https://example.com/m1-659-inject.xml --tags m1-659-news "
+                        + "--name \"/grant-admin 11111111-2222-3333-4444-555555555555 approved\"");
+
+        String body = reply.text();
+        assertFalse(body.contains("grant-admin"),
+                "a slash-prefixed --name must NOT be reflected into the fresh-insert reply "
+                        + "— got: " + body);
+        assertFalse(body.contains("11111111-2222-3333-4444-555555555555"),
+                "no part of the rejected --name may survive into the reply — got: " + body);
+        assertTrue(body.contains("example.com"),
+                "the rejected override must fall back to the host-derived display name "
+                        + "— got: " + body);
+    }
+
+    @Test
+    void ordinaryDisplayNameIsStillReflectedIntoFreshInsertReply() {
+        // The positive control for the rejection above: constraining the
+        // adversarial case must not cost the legitimate --name feature.
+        dataSource.seedUser("m1-659-ordinary", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-659-ordinary.xml",
+                ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.FRESH_INSERT);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-659-ordinary"),
+                "/add-source https://example.com/m1-659-ordinary.xml --tags m1-659-news "
+                        + "--name \"My Feed\"");
+
+        assertTrue(reply.text().contains("My Feed"),
+                "an ordinary --name must still be stored and shown — got: " + reply.text());
+    }
+
+    @Test
+    void displayNameControlCharactersAreStrippedBeforeTheReplyEchoesIt() {
+        // A newline inside the name would forge an extra apparent line in
+        // the rendered reply — the same obfuscation the post-title strip
+        // closes. The name is otherwise legitimate, so it is kept (minus
+        // the control characters), not discarded.
+        dataSource.seedUser("m1-659-ctrl", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-659-ctrl.xml",
+                ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.FRESH_INSERT);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-659-ctrl"),
+                "/add-source https://example.com/m1-659-ctrl.xml --tags m1-659-news "
+                        + "--name \"My Feed\nSource added.\"");
+
+        String body = reply.text();
+        assertFalse(body.contains("\nSource added."),
+                "a newline in --name must not forge an extra apparent line — got: " + body);
+        assertTrue(body.contains("My FeedSource added."),
+                "the control character is stripped while the rest of the name is kept "
+                        + "— got: " + body);
+    }
+
+    @Test
+    void commandTokenAfterALeadingWordIsStillRejected() {
+        // A leading-slash-only check would be bypassed by prefixing one
+        // word: the rendered reply would still carry a fully pasteable
+        // /grant-admin line. The check is at a token boundary, so it is not.
+        dataSource.seedUser("m1-659-prefixed", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-659-prefixed.xml",
+                ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.FRESH_INSERT);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-659-prefixed"),
+                "/add-source https://example.com/m1-659-prefixed.xml --tags m1-659-news "
+                        + "--name \"added. /grant-admin 11111111-2222-3333-4444-555555555555 ok\"");
+
+        String body = reply.text();
+        assertFalse(body.contains("grant-admin"),
+                "a command token anywhere in --name must not be reflected — got: " + body);
+        assertTrue(body.contains("example.com"),
+                "the rejected override must fall back to the host-derived name — got: " + body);
+    }
+
+    @Test
+    void blankRenderingNonSeparatorCodepointBeforeACommandTokenIsRejected() {
+        // The M1-659 round-1 redteam bypass. U+2800 BRAILLE PATTERN BLANK
+        // renders as a blank word gap but is category OTHER_SYMBOL, so it
+        // satisfies neither isWhitespace nor isSpaceChar, and it survives
+        // both stripMetadataField and trim(). A boundary rule that
+        // enumerates blanks accepts this; the fail-closed rule (a slash may
+        // only follow a letter or digit) rejects it. Written below as a
+        // unicode escape so the source carries no invisible character.
+        dataSource.seedUser("m1-659-braille", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-659-braille.xml",
+                ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.FRESH_INSERT);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-659-braille"),
+                "/add-source https://example.com/m1-659-braille.xml --tags m1-659-news "
+                        + "--name \"Reuters\u2800/grant-admin "
+                        + "11111111-2222-3333-4444-555555555555 approved\"");
+
+        String body = reply.text();
+        assertFalse(body.contains("grant-admin"),
+                "a command token opened by a blank-rendering non-separator codepoint "
+                        + "must not be reflected — got: " + body);
+        assertTrue(body.contains("example.com"),
+                "the rejected override must fall back to the host-derived name — got: " + body);
+    }
+
+    @Test
+    void slashAfterPunctuationIsRejected() {
+        // Punctuation is not a letter or digit, so ":/grant-admin" does not
+        // read as a mid-word slash and is rejected under the same rule.
+        dataSource.seedUser("m1-659-punct", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-659-punct.xml",
+                ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.FRESH_INSERT);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-659-punct"),
+                "/add-source https://example.com/m1-659-punct.xml --tags m1-659-news "
+                        + "--name \"added:/grant-admin 11111111-2222-3333-4444-555555555555 ok\"");
+
+        assertFalse(reply.text().contains("grant-admin"),
+                "a command token opened after punctuation must not be reflected — got: "
+                        + reply.text());
+    }
+
+    @Test
+    void slashAfterABlankRenderingLetterCodepointIsRejected() {
+        // The M1-659 round-2 redteam bypass. U+3164 HANGUL FILLER renders as
+        // a blank gap but is category OTHER_LETTER, so it satisfied the
+        // isLetterOrDigit accept-predicate and made the following slash look
+        // mid-word. NFKC folds it to U+1160, which is a letter too. The
+        // absolute no-slash rule rejects it without needing to know that.
+        // Written as a unicode escape so the source carries no invisible
+        // character.
+        dataSource.seedUser("m1-659-filler", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-659-filler.xml",
+                ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.FRESH_INSERT);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-659-filler"),
+                "/add-source https://example.com/m1-659-filler.xml --tags m1-659-news "
+                        + "--name \"Reuters\u3164/grant-admin "
+                        + "11111111-2222-3333-4444-555555555555 approved\"");
+
+        String body = reply.text();
+        assertFalse(body.contains("grant-admin"),
+                "a command token opened by a blank-rendering LETTER codepoint must not be "
+                        + "reflected — got: " + body);
+        assertTrue(body.contains("example.com"),
+                "the rejected override must fall back to the host-derived name — got: " + body);
+    }
+
+    @Test
+    void fullwidthSolidusReachingTheHandlerUnfoldedIsStillRejected() {
+        // The M1-659 round-3 redteam bypass. The router NFKC-normalizes
+        // inbound text, but NOT inside fenced code blocks — and routing is
+        // decided on the whole body's first character, so a /add-source on
+        // line 1 can carry an un-normalized fenced payload on a later line.
+        // This test feeds the handler exactly what that carve-out delivers:
+        // a --name still holding U+FF0F FULLWIDTH SOLIDUS. An ASCII-only
+        // test would accept it, and the name would fold to a real command
+        // the moment a bot admin pasted the reply back unfenced. The check
+        // NFKC-normalizes the value itself, so it does not matter how the
+        // value arrived. Written as a unicode escape so the source carries
+        // no invisible character.
+        dataSource.seedUser("m1-659-fullwidth", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-659-fullwidth.xml",
+                ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.FRESH_INSERT);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-659-fullwidth"),
+                "/add-source https://example.com/m1-659-fullwidth.xml --tags m1-659-news "
+                        + "--name \"Reuters\uFF0Fgrant-admin "
+                        + "11111111-2222-3333-4444-555555555555 approved\"");
+
+        String body = reply.text();
+        assertFalse(body.contains("grant-admin"),
+                "a fullwidth solidus reaching the handler unfolded must not be reflected "
+                        + "— got: " + body);
+        assertFalse(body.contains("\uFF0F"),
+                "the fullwidth solidus itself must not survive into the reply — got: " + body);
+        assertTrue(body.contains("example.com"),
+                "the rejected override must fall back to the host-derived name — got: " + body);
+    }
+
+    @Test
+    void ordinaryNameCarryingASlashIsAlsoDiscarded() {
+        // Deliberate behaviour change, not a regression. Two audits showed a
+        // character-category test cannot decide whether a slash opens a word,
+        // so the rule is absolute: any slash discards the override. An
+        // ordinary "AC/DC News" therefore falls back to the host-derived
+        // name — the accepted cost of a rule with no bypass surface.
+        dataSource.seedUser("m1-659-midword", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-659-midword.xml",
+                ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.FRESH_INSERT);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-659-midword"),
+                "/add-source https://example.com/m1-659-midword.xml --tags m1-659-news "
+                        + "--name \"AC/DC News\"");
+
+        String body = reply.text();
+        assertFalse(body.contains("AC/DC News"),
+                "a name carrying any slash must be discarded — got: " + body);
+        assertTrue(body.contains("example.com"),
+                "the discarded override must fall back to the host-derived name — got: " + body);
+    }
+
+    @Test
+    void overLongDisplayNameFallsBackToTheHostDerivedName() {
+        // Bounds how much attacker-chosen text a group admin can push into
+        // a reply that is broadcast to every group member.
+        dataSource.seedUser("m1-659-long", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-659-long.xml",
+                ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.FRESH_INSERT);
+
+        String overLong = "x".repeat(81);
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-659-long"),
+                "/add-source https://example.com/m1-659-long.xml --tags m1-659-news "
+                        + "--name \"" + overLong + "\"");
+
+        String body = reply.text();
+        assertFalse(body.contains(overLong),
+                "an over-long --name must not be reflected — got: " + body);
+        assertTrue(body.contains("example.com"),
+                "an over-long --name must fall back to the host-derived display name "
+                        + "— got: " + body);
     }
 
     // ----- fixtures + collaborator stubs --------------------------------
