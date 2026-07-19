@@ -20,8 +20,8 @@ Everything else is "stop typing the subcommand names." `run` introduces exactly 
 | Ticket `status` | Enter at |
 |---|---|
 | `pending` | step 1 (select) / step 2 (start) |
-| `in-progress`, branch exists | step 3 (implement) or step 4 (review), per whether the last review round is open |
-| `in-review` (APPROVE / OVERRIDE-APPROVE) | step 5 (redteam gate) → step 6 (commit) |
+| `in-progress`, branch exists | step 3 (implement), step 4 (redteam gate) or step 5 (review), per how far the last round got |
+| `in-review` (APPROVE / OVERRIDE-APPROVE) | step 6 (commit) — the redteam gate runs at step 4, ahead of review. **Transitional check:** a ticket that reached `in-review` before this ordering landed never faced step 4. If `security_relevant: true` and `redteam_audits:` holds no entry covering the current diff, run step 4 before committing |
 | `done` | step 7 (merge) |
 | `escalated` | **refuse** — an escalation is open; the user resolves it via the escalation menu before `run` can resume |
 | `deferred` | **refuse** — `run` does not reopen; point the user at `/m1-tick reopen <id>` |
@@ -45,17 +45,17 @@ Everything else is "stop typing the subcommand names." `run` introduces exactly 
 3. **Implement.** The orchestrator writes the diff in normal Edit/Write/Bash calls. For `complexity:high`, read the plan-writer sidecar (`outline_file:`) before touching code. Run `mvn verify` capturing to the fixed log path per the SKILL.md "Capture `mvn verify` output" rule before moving to review.
    - **Halt to an option menu** on any documented immediate-escalation trigger — `files_budget` about to be exceeded, a path outside `files_scope`/`out_of_scope`, a test failure suggesting the ticket's *premise* is wrong, two consecutive failures with the same root cause — or on a genuine design decision only the user can make. Each halt presents a brief summary and verified options, the recommended one first with its reasoning. **Every recommended option is verified before it is offered** (CLAUDE.md verify-before-recommending). A red `mvn verify` from the orchestrator's own diff is fixed in-band, not escalated, unless it reveals a premise-fail.
 
-4. **Review loop** — invoke [`review.md`](review.md) for each round.
-   - **APPROVE** → proceed to step 5.
-   - **REWORK, round 1** → address only the named items, re-run `mvn verify`, re-invoke `review`. (Round-1 REWORK is notify-and-continue.)
-   - **Round-cap reached, must-shrink violation, or MANUAL** → `review.md` already sets `escalated` and fires `escalate`; `run` **halts** to that escalation menu. It does not loop past the round cap.
-
-5. **Redteam gate (conditional on `security_relevant`).**
-   - If `security_relevant: false` → skip directly to step 6.
-   - If `security_relevant: true` → invoke `/redteam <id> --in-progress` (audits the branch tip before commit; the `--in-progress` form is the redteam skill's documented opt-in for a not-yet-merged ticket).
-     - **`CLEAN`** → proceed to step 6. (The redteam audit file lands in the working tree and folds into the upcoming commit — the redteam skill's lifecycle-path exemption already anticipates this.)
-     - **`FINDINGS`** → **halt.** Surface the per-severity summary and recommend `/m1-tick escalate <id> redteam-finding`. Do not commit.
+4. **Redteam gate (conditional on `security_relevant`).** This runs **before** review, not after. A finding forces a code change, and a code change invalidates a review that already passed — so auditing second guarantees the ticket pays for a second review round whenever the adversary finds anything. Auditing first means review sees the remediated diff. The M1 corpus bears the asymmetry out: the redteam gate returns FINDINGS on ~30% of audits (102 of 335) while review returns REWORK or MANUAL on ~12% of tickets (80 of 670), and 13 tickets recorded an `APPROVE, APPROVE` pair whose second round existed *only* because a post-review audit found something (M1-045, 051, 302, 506, 515, 528, 542, 561, 563, 597, 632, 636, 658). Running the more selective gate first is strictly cheaper.
+   - If `security_relevant: false` → skip directly to step 5.
+   - If `security_relevant: true` → invoke `/redteam <id> --in-progress` (audits the uncommitted branch tip; the redteam skill's step-1 algorithm resolves the working-tree diff for a zero-commit branch and refuses outright on an empty one).
+     - **`CLEAN`** → proceed to step 5. (The audit file lands in the working tree and folds into the eventual commit. It does not count against `files_budget` or `files_scope` — `reviewer-prompt.md` §"Lifecycle-path exemption" already exempts `docs/plan/m1/redteam/<id>-*.md`, so it is safe for review to see it.)
+     - **`FINDINGS`** → **halt.** Surface the per-severity summary and recommend `/m1-tick escalate <id> redteam-finding`. Do not review, do not commit.
      - **Out-of-model items** (either verdict) → report each with a one-line recommendation on whether it warrants a follow-up ticket *and why*, but never auto-file one (the redteam skill is advisory-only on these).
+
+5. **Review loop** — invoke [`review.md`](review.md) for each round.
+   - **APPROVE** → proceed to step 6.
+   - **REWORK, round 1** → address only the named items, re-run `mvn verify`, re-invoke `review`. (Round-1 REWORK is notify-and-continue.) **If the rework changed any file under a module's `src/`, re-run step 4 before proceeding** — the ordering above buys nothing if a post-audit code change ships unaudited, and the invalidation runs in both directions. A rework that only touches the ticket file, `files_scope`/`files_budget` declarations, or docs does not re-trigger the gate.
+   - **Round-cap reached, must-shrink violation, or MANUAL** → `review.md` already sets `escalated` and fires `escalate`; `run` **halts** to that escalation menu. It does not loop past the round cap.
 
 6. **Commit** — invoke [`commit.md`](commit.md). Its user-gated test-freshness menu and (for `complexity:high`/`risk:high`) full-suite safety re-run fire as written. `run` goes *through* `commit.md`; it never hand-rolls a commit.
 

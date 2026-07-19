@@ -23,7 +23,7 @@ Dispatch table:
 
 | User invocation | Procedure file |
 |---|---|
-| `/m1-tick run [id]` | [`.claude/skills/m1-tick/subcommands/run.md`](subcommands/run.md) — drive one ticket through the full cycle (start → implement → review → redteam → commit → merge), stopping only at human-owned gates; orchestrates the other subcommands |
+| `/m1-tick run [id]` | [`.claude/skills/m1-tick/subcommands/run.md`](subcommands/run.md) — drive one ticket through the full cycle (start → implement → redteam → review → commit → merge), stopping only at human-owned gates; orchestrates the other subcommands |
 | `/m1-tick next` (or empty) | [`.claude/skills/m1-tick/subcommands/next.md`](subcommands/next.md) — list runnable tickets |
 | `/m1-tick start <id>` | [`.claude/skills/m1-tick/subcommands/start.md`](subcommands/start.md) — begin work on a ticket |
 | `/m1-tick start <id> --parallel` | [`.claude/skills/m1-tick/subcommands/start.md`](subcommands/start.md) — start in a worktree |

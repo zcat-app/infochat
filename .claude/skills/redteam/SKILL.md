@@ -24,7 +24,7 @@ If the args don't match, print the table above and stop.
 
 - `docs/spec/security.md` exists. Refuse if not (the adversary needs the threat model to compare against).
 - `docs/process/redteam-prompt.md` exists. Refuse if not.
-- For `<ticket-id>` form: the ticket exists and `status: done`, OR the user explicitly opts in to running the audit on an in-progress ticket via `/redteam <id> --in-progress` (rare; surfaces findings before APPROVE).
+- For `<ticket-id>` form: the ticket exists and `status: done`, OR the audit runs against an in-progress ticket via `/redteam <id> --in-progress`. That form is not exotic: it is the standing gate `/m1-tick run` fires for every `security_relevant: true` ticket, ahead of review, so findings surface before the reviewer ever sees the diff.
 - For `milestone <name>` form: the milestone directory `docs/plan/<name>/` exists and contains tickets.
 - For `id-range <a..b>` form: every ticket in the range exists; all share a milestone prefix (refuse cross-milestone ranges with a clear error).
 - For `release <tag>` form: `<tag>` matches the repo's tag pattern AND a previous release tag exists.
@@ -184,7 +184,7 @@ The verdict file's frontmatter carries `target`, `date`, `base`, `head`, `verdic
 
 **Why both pointers and a separate file:** `redteam_findings:` is structured data the milestone-driver and future remediation tickets can query mechanically (e.g. "list all critical findings across the milestone"). `redteam_audits:` is the audit index — one entry per audit run, regardless of finding count, so a CLEAN audit is still discoverable from the ticket. The separate markdown file is the verbatim record (full PROMISE / GAP / REPRO text, OUT-OF-MODEL observations) that survives `mvn clean` and ages well alongside the ticket.
 
-**Lifecycle-path exemption alignment.** The verdict file at `docs/plan/<active-milestone>/redteam/<slug>-<date>.md` is a workflow-byproduct of `/redteam`, NOT a developer choice — analogous to STATUS.md and the ticket file being byproducts of `/m1-tick`. When a single-ticket audit runs between `/m1-tick review APPROVE` and `/m1-tick commit`, the new audit file appears in the working tree and gets folded into the eventual ticket commit. The reviewer's lifecycle-path exemption (see `docs/process/reviewer-prompt.md` §"Lifecycle-path exemption") MUST include this directory; the reviewer prompt template lists the exempt paths and is updated in lockstep with this rule.
+**Lifecycle-path exemption alignment.** The verdict file at `docs/plan/<active-milestone>/redteam/<slug>-<date>.md` is a workflow-byproduct of `/redteam`, NOT a developer choice — analogous to STATUS.md and the ticket file being byproducts of `/m1-tick`. When a single-ticket audit runs at the `/m1-tick run` gate — after implementation, ahead of `/m1-tick review` — the new audit file appears in the working tree, is visible to the reviewer in the diff it then evaluates, and gets folded into the eventual ticket commit. The exemption is what makes that ordering safe: without it the reviewer would read its own gate's byproduct as an out-of-scope file. The reviewer's lifecycle-path exemption (see `docs/process/reviewer-prompt.md` §"Lifecycle-path exemption") MUST include this directory; the reviewer prompt template lists the exempt paths and is updated in lockstep with this rule.
 
 ### 8. Escalate findings to the lifecycle workflow
 
