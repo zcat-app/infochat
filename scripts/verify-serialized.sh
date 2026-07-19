@@ -18,6 +18,18 @@
 # the verify gate runs the pinned toolchain rather than whatever ambient
 # `mvn` the host happens to have. Resolved against this script's own
 # directory so the gate works regardless of the caller's CWD.
+#
+# Optional progress tick (process/verify-tick): emits a 30s stderr
+# progress line while mvn runs. Format:
+#   [verify-tick] 57% (4/7 modules) · in infochat-llm-adapter · 89 test classes · elapsed 2:15
+# Default ON (a long verify with no progress signal is the failure mode this
+# was added for). Set VERIFY_TICK=0 to opt out — e.g. for a CI-shaped caller
+# that pipes stdout through a parser and cannot tolerate extra lines.
+# Writes to stderr so the caller's `> log 2>&1` captures it alongside
+# mvn output; `tail -f log` then shows live ticks. The sampler reads a
+# mkstemp'd tee of mvn's output — no shared state with mvn itself, killed
+# via trap on script exit (normal or killed), so a SIGKILL'd verify
+# cannot leak the sampler.
 set -eu
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -54,4 +66,69 @@ if command -v docker >/dev/null 2>&1; then
     fi
 fi
 
+# Optional progress tick. Default ON; opt out with VERIFY_TICK=0. The
+# sampler is a background subshell reading the tmpfile mvn is being
+# teed into; it exits when the trap fires on script exit. The tick is
+# informational — it must never change the script's exit status or
+# block mvn, so every command in the sampler is best-effort.
+if [ "${VERIFY_TICK:-1}" != "0" ]; then
+    tick_log="$(mktemp -t verify-tick-XXXXXX.log)"
+    tick_start=$(date +%s)
+
+    # Subshell, not a function, so it can be backgrounded cleanly and
+    # killed by PID. Reads tick_log every 30s; writes one progress line
+    # to stderr. The line shape (module % + test-class count + elapsed)
+    # is what an 11-minute verify actually surfaces — Maven emits
+    # `[INFO] Building <module> <version> [N/M]` per reactor module (7
+    # buckets, coarse) and `[INFO] Running <class>` per test class
+    # (hundreds of buckets, fine). Two granularities because either
+    # alone misleads: module-only hides test progress inside a long
+    # module (infochat-provider's 8 min has no module boundary);
+    # test-class-only hides whether mvn has even reached the test phase.
+    (
+        while true; do
+            sleep 30
+            now=$(date +%s); elapsed=$((now - tick_start))
+            mins=$((elapsed / 60)); secs=$((elapsed % 60))
+            latest="$(grep -E 'Building .*\[[0-9]+/[0-9]+\]' "$tick_log" 2>/dev/null | tail -1 || true)"
+            if [ -n "$latest" ]; then
+                cur="$(printf '%s' "$latest" | sed -E 's/.*\[([0-9]+)\/([0-9]+)\].*/\1/')"
+                total="$(printf '%s' "$latest" | sed -E 's/.*\[([0-9]+)\/([0-9]+)\].*/\2/')"
+                mod="$(printf '%s' "$latest" | awk '{print $3}')"
+                pct=$((cur * 100 / total))
+            else
+                pct=0; cur="-"; total="-"; mod="(waiting or starting)"
+            fi
+            tcount="$(grep -cE '^\[INFO\] Running ' "$tick_log" 2>/dev/null || printf 0)"
+            printf '[verify-tick] %d%% (%s/%s modules) · in %s · %s test classes · elapsed %d:%02d\n' \
+                "$pct" "$cur" "$total" "$mod" "$tcount" "$mins" "$secs" >&2
+        done
+    ) &
+    tick_pid=$!
+
+    cleanup_tick() {
+        # Kill the sampler first so it cannot read a half-deleted file,
+        # then wait so the kill is settled, then remove the tmpfile. The
+        # `|| true` and `2>/dev/null` keep cleanup silent under `set -e`
+        # even if the sampler already exited (e.g. very fast mvn failure).
+        kill "$tick_pid" 2>/dev/null || true
+        wait "$tick_pid" 2>/dev/null || true
+        rm -f "$tick_log"
+    }
+    trap cleanup_tick EXIT
+
+    # `tee` streams mvn's output to BOTH the caller's stdout (live —
+    # existing `> log` redirect still works) AND tick_log (sampler
+    # reads). PIPESTATUS[0] captures mvn's exit, since the pipeline's
+    # own exit is tee's (always 0 under no pipefail). The explicit
+    # `ec=` capture + `exit "$ec"` keeps the script's exit contract
+    # (exit status is mvn's) intact under `set -e`.
+    "$repo_root/mvnw" -B clean verify "$@" 2>&1 | tee "$tick_log"
+    ec=${PIPESTATUS[0]}
+    cleanup_tick
+    trap - EXIT
+    exit "$ec"
+fi
+
 "$repo_root/mvnw" -B clean verify "$@"
+
