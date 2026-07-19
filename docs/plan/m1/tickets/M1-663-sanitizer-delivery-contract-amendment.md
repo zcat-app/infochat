@@ -1,7 +1,7 @@
 ---
 id: M1-663
 title: "Spec: deterministic-delivery contract for chat help text"
-status: pending
+status: done
 created: 2026-07-19
 last_updated: 2026-07-19
 blocked_by: []
@@ -67,12 +67,44 @@ decision_refs: []
 decomposed_from: M1-648
 spec_amend_for: docs/spec/security.md §LLM output sanitizer
 spec_amend_parent: M1-665
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-19
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 127
+      removed: 9
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-07-19
+    verdict: CLEAN
+    base: 7724fdbc580de83b1a07b5d7f1ccddf07c25319d
+    head: working tree (uncommitted on m1/M1-663-spec-deterministic-delivery-co)
+    verdict_file: docs/plan/m1/redteam/M1-663-2026-07-19.md
+    out_of_model_count: 0
+    note: |
+      Pre-review gate fired by /m1-tick run step 4 (security_relevant: true).
+      Audited the working-tree-vs-fork-point diff (the §LLM output sanitizer
+      amendment plus start's STATUS / ticket-file byproducts). CLEAN — 0
+      findings, 0 out-of-model. The amendment tightens the exemption and
+      names the non-qualifying shape; it removes no commitment. Audit file
+      lands in the working tree and folds into the eventual commit per the
+      reviewer-prompt.md §Lifecycle-path exemption.
+clarity_check:
+  date: 2026-07-19
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 

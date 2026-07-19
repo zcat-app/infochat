@@ -340,6 +340,32 @@ mechanical guard** (M1-658's census is error-scoped) and other
 `reply.*` echoes remain unreviewed. So for now this exemption carries a
 **residual risk** on non-error deterministic output, not a proven-safe
 blanket.
+
+**Delivery-ordering contract.** Command-usage or help text delivered
+into a chat-mode reply must satisfy **one of two** paths: either
+(a) it is **deterministic end-to-end** — deterministic code decides
+both **whether** it is delivered and **what** it contains, driven by
+the parsed user request, never by a model-elected tool call — or
+(b) it is passed through the sanitizer like any other LLM-authored
+output. The exemption for deterministic command output therefore
+requires more than deterministic bytes: it requires a deterministic
+**emission decision** to match. Output whose content is bot-authored
+and deterministic while the decision to emit it is the model's does
+**not** qualify — that shape is inside the sanitizer's mandate, not
+the exemption, and passes through the outbound regex pass like any
+other LLM-authored output (motivating finding:
+`docs/plan/m1/redteam/M1-648-2026-07-19-r2.md` — a post-sanitize,
+model-elected append of privileged command usage into a chat reply,
+byte-true against the old exemption's prose and contract-false under
+this one). The "driven by the parsed user request" qualifier is
+load-bearing: the caller's own inbound text is the same trust grade
+`/help` itself runs on, whereas the model's context is
+attacker-influenced by this threat model's own admission
+(§Prompt-injection defenses, `semanticSearch` row, on the D28
+pre-fetch that re-injects feed-derived text every turn), so a
+delivery decision keyed off model-elected tool output is exactly the
+shape the sanitizer exists to catch.
+
 Admin commands are dispatched only by the deterministic command path,
 so a copy-pasted reply still requires `is_admin=true` to do anything;
 the sanitizer closes the social-engineering surface where a small LLM

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 674 |
+| done | 675 |
 | deferred | 0 |
 | abandoned | 19 |
 | **total** | **699** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-642 — Per-category digest delivery + optional roll-up summaries (complexity: high, risk: medium)
-- M1-663 — Spec: deterministic-delivery contract for chat help text (complexity: low, risk: medium)
 - M1-664 — Semantic command-intent index: retrieval + registration (complexity: high, risk: high)
 
 ---
@@ -46,7 +45,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-649 — blocked_by: M1-664 (pending), M1-665 (pending)
 - M1-652 — blocked_by: M1-642 (pending)
-- M1-665 — blocked_by: M1-663 (pending), M1-664 (pending)
+- M1-665 — blocked_by: M1-663 (done), M1-664 (pending)
 
 ---
 
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-663 | Spec: deterministic-delivery contract for chat help text | 2026-07-19 | round 1 APPROVE |
 | M1-661 | Add an ASSERTION-ADEQUACY check to the reviewer gate | 2026-07-19 | round 1 APPROVE |
 | M1-659 | Stop /add-source success reply reflecting raw --name | 2026-07-19 | round 5 APPROVE |
 | M1-658 | Guard: no inbound-text reflection in outbound templates | 2026-07-18 | round 3 APPROVE |
@@ -74,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-654 | Guard the closed LLM tool allowlist against spec drift | 2026-07-18 | round 1 APPROVE |
 | M1-653 | Correct the outbound delivery contracts: correlationId javadoc and §6.3.5 | 2026-07-18 | round 1 APPROVE |
 | M1-651 | Guard HelpTier against the spec's closed bot-admin list | 2026-07-18 | round 3 APPROVE |
-| M1-650 | Sentinel-lint test endpoints | 2026-07-18 | round 1 APPROVE |
 
 ---
 
@@ -894,7 +893,7 @@ M1-656 (done)
 M1-659 (done)
 M1-661 (done)
 M1-662 (abandoned)
-M1-663 (pending) ← runnable
+M1-663 (done)
   ├── M1-648 (abandoned) [see above]
   └── M1-665 (pending)
         ├── M1-648 (abandoned) [see above]
