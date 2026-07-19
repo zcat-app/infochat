@@ -101,7 +101,8 @@ acceptance:
     window_start TIMESTAMPTZ, category_slug TEXT, delivered_at TIMESTAMPTZ NOT
     NULL, PRIMARY KEY (group_id, window_start, category_slug)) and grants the
     provider role SELECT + INSERT + DELETE. V59 is the highest migration on
-    disk (verified 2026-07-18) and V60 is reserved by M1-648, so V61 is next.
+    disk (verified 2026-07-18) and V60 is reserved by M1-664 (the M1-648
+    decomposition), so V61 is next.
   - >-
     A category message that the adapter accepts records a
     digest_category_delivery row. A failed send records nothing, so the

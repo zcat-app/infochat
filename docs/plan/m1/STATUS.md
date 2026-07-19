@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 674 |
 | deferred | 0 |
-| abandoned | 18 |
-| **total** | **696** |
+| abandoned | 19 |
+| **total** | **699** |
 
 ---
 
@@ -26,7 +26,8 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-642 — Per-category digest delivery + optional roll-up summaries (complexity: high, risk: medium)
-- M1-648 — Semantic command-intent index with deterministic answer composition (complexity: high, risk: high)
+- M1-663 — Spec: deterministic-delivery contract for chat help text (complexity: low, risk: medium)
+- M1-664 — Semantic command-intent index: retrieval + registration (complexity: high, risk: high)
 
 ---
 
@@ -43,8 +44,9 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-649 — blocked_by: M1-648 (pending)
+- M1-649 — blocked_by: M1-664 (pending), M1-665 (pending)
 - M1-652 — blocked_by: M1-642 (pending)
+- M1-665 — blocked_by: M1-663 (pending), M1-664 (pending)
 
 ---
 
@@ -86,7 +88,7 @@ _(none)_
 
 Tickets decided against — not implemented as this ticket. Terminal: not reopenable via the driver's `reopen`. `abandoned_reason` records why (`decomposed` = split into shipped children; `superseded` = absorbed by another ticket; `obsoleted-by-spec-amend` = a spec change dropped the requirement; `wont-do-infeasible` = evaluated and judged not worth building). See `docs/process/workflow.md` §Status values.
 
-### decomposed (7)
+### decomposed (8)
 - M1-034 — Tagger + Embedding pipeline + status→READY + new_post NOTIFY
 - M1-318 — Derive per-adapter bot contact id from adapter identity material (SimpleX queue address, Signal ACI)
 - M1-493 — Schema hardening: NOT NULL upstream_identifier + approve_quarantine phantom NOTIFY
@@ -94,6 +96,7 @@ Tickets decided against — not implemented as this ticket. Terminal: not reopen
 - M1-522 — Free auto_joined_group slots when the bot leaves a group
 - M1-629 — Investigate the one-in-flight-per-(user, scope) guard under a chat/summary burst (multi-minute-late replies)
 - M1-631 — Default /invite create to --open; fix/retire --contact
+- M1-648 — Semantic command-intent index with deterministic answer composition
 
 ### obsoleted-by-spec-amend (1)
 - M1-314 — Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed
@@ -873,17 +876,16 @@ M1-641 (done)
 M1-644 (done)
 M1-645 (done)
   ├── M1-647 (done)
-  │     └── M1-648 (pending) ← runnable
-  │           └── M1-649 (pending)
-  └── M1-648 (pending) [see above]
+  │     └── M1-648 (abandoned)
+  └── M1-648 (abandoned) [see above]
 M1-646 (done)
   ├── M1-647 (done) [see above]
-  └── M1-648 (pending) [see above]
+  └── M1-648 (abandoned) [see above]
 M1-650 (done)
 M1-651 (done)
 M1-653 (done)
 M1-654 (done)
-  └── M1-648 (pending) [see above]
+  └── M1-648 (abandoned) [see above]
 M1-655 (done)
 M1-656 (done)
   ├── M1-657 (done)
@@ -892,4 +894,13 @@ M1-656 (done)
 M1-659 (done)
 M1-661 (done)
 M1-662 (abandoned)
+M1-663 (pending) ← runnable
+  ├── M1-648 (abandoned) [see above]
+  └── M1-665 (pending)
+        ├── M1-648 (abandoned) [see above]
+        └── M1-649 (pending)
+M1-664 (pending) ← runnable
+  ├── M1-648 (abandoned) [see above]
+  ├── M1-649 (pending) [see above]
+  └── M1-665 (pending) [see above]
 ```

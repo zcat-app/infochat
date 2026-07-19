@@ -1,9 +1,14 @@
 ---
 id: M1-648
 title: "Semantic command-intent index with deterministic answer composition"
-status: pending
+status: abandoned
 created: 2026-07-18
-last_updated: 2026-07-18
+last_updated: 2026-07-19
+abandoned_reason: decomposed
+deferred_on:
+  - M1-663
+  - M1-664
+  - M1-665
 blocked_by:
   - M1-645
   - M1-646

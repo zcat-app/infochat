@@ -3,9 +3,10 @@ id: M1-649
 title: "Conceptual help topics: answer the questions no command's usage string can"
 status: pending
 created: 2026-07-18
-last_updated: 2026-07-18
+last_updated: 2026-07-19
 blocked_by:
-  - M1-648
+  - M1-664
+  - M1-665
 files_budget: 12
 files_scope:
   - USER_GUIDE.md
@@ -37,7 +38,8 @@ out_of_scope:
     the reasoning at :1243-1246 that reading defeats).
   - >-
     The command-intent index itself, the doc_embedding table, grants, or the
-    match-not-assert composition path for COMMAND answers — all M1-648.
+    match-not-assert composition path for COMMAND answers — all M1-664 and
+    M1-665 (the M1-648 decomposition).
   - >-
     Rewriting USER_GUIDE.md. Only the two confirmed factual defects below are
     corrected; this is not a documentation-quality pass.
