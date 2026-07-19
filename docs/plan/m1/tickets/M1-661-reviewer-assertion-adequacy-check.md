@@ -79,6 +79,14 @@ acceptance:
     .claude/skills/m1-tick/subcommands/review.md step 4's per-check extraction
     list names ASSERTION-ADEQUACY-CHECK. Without this the skill parses five
     check names out of the verdict file and the sixth is silently dropped.
+  - >-
+    docs/process/reviewer-prompt.md §"Skill responsibilities" describes the
+    diff capture as `git diff $(git merge-base main HEAD)` in BOTH step 2
+    (full diff) and step 3 (`--shortstat`), matching what review.md step 1
+    actually does. No `git diff main` wording survives in that section. The
+    adjacent rationale sentence ("a commit-range diff against `main` would be
+    empty here because `commit` runs after `review`") stays as-is — it is
+    still true.
 test_plan:
   adds: []
   preserves:
@@ -142,6 +150,28 @@ that returns seven paths:
 | `docs/process/ticket-template.md` | out-of-scope: one SCOPE-DRIFT-CHECK mention in a `files_budget` comment |
 | `docs/process/workflow.md` | out-of-scope: its table maps FRONTMATTER FIELDS to enforcing checks. The new check derives from the diff, not from a frontmatter field, so it has no row to add |
 
+## Second deliverable: a stale diff-capture description in the same file
+
+`reviewer-prompt.md` §"Skill responsibilities" steps 2 and 3 say the skill
+captures `git diff main`. It does not: `review.md` step 1 uses `git diff
+$(git merge-base main HEAD)` and explicitly warns *against* diffing on
+`main`, because in a worktree pinned behind a moved `main` that drags every
+since-landed ticket into the review as phantom changes (observed M1-096,
+2026-05-30). The skill file is operative, so live behavior is correct and
+this is a documentation defect — but it is the kind that reintroduces the bug
+the moment anyone re-derives the procedure from the description.
+
+It is bundled here rather than filed separately for two reasons. It lives in
+a file this ticket already opens and already lists in `files_scope`, so it
+adds no file and no budget. And it is now the odd one out of three: as of
+`82268df5` the `/redteam` skill captures its diff by the same merge-base
+rule, citing `review.md` as the pattern, which leaves this section the only
+description of the procedure that is wrong.
+
+Bundling is explicit, not incidental — it carries its own acceptance item, so
+every changed line traces to the contract rather than reading as
+"while we were in there".
+
 ## Acceptance
 
 Mirrors the YAML list above. In prose: `reviewer-prompt.md` gains
@@ -151,8 +181,10 @@ surviving mutation or unasserted boundary with a file:line, so the check
 cannot block on impression; a diff adding no new test reports
 NOT-APPLICABLE; the definition disclaims §8 Semantic and clarity check 10 by
 name; §Verdict rules pins WARN as non-blocking and FAIL as at-least-REWORK;
-`engineering-rules-verbatim.md` §8 carries the canonical text; and
-`review.md` step 4 registers the name so the skill extracts it.
+`engineering-rules-verbatim.md` §8 carries the canonical text;
+`review.md` step 4 registers the name so the skill extracts it; and
+§"Skill responsibilities" steps 2 and 3 describe the merge-base diff capture
+with no `git diff main` wording left in that section.
 
 ## Out-of-scope
 
