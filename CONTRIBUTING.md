@@ -25,6 +25,8 @@ automated. Before changing anything, read:
   — the canonical engineering rules.
 - **[CLAUDE.md](CLAUDE.md)** — the always-loaded summary of those rules plus the
   coding style.
+- **[AGENTS.md](AGENTS.md)** — the entry point for non-Claude coding agents
+  (opencode, Codex CLI, others); routes to the same canonical sources.
 
 ## Conventions that bind every change
 
@@ -40,12 +42,15 @@ These hold whatever editor you use:
   `docs/process/`, `docs/plan/`, or `CLAUDE.md`.
 
 > **About `/m1-tick`.** This is **how implementation is actually done in this
-> repo** — a **Claude Code** skill that drives the lifecycle above and runs the
-> clarity, code-review, and red-team subagents that are the whole point of the
-> flow (the next section walks through it). It needs Claude Code with the repo's
-> bundled skills. If you work with other tooling you can still follow the same
-> conventions by hand (branch → surgical change → `mvn verify` → commit with the
-> right prefix), but then the review and red-team gates are yours to reproduce —
+> repo** — a coding-agent skill that drives the lifecycle above and runs the
+> code-review and red-team gate agents that are the whole point of the flow
+> (the next section walks through it). It runs natively under Claude Code with
+> the repo's bundled skills; under opencode and Codex CLI via the
+> `.agents/skills/` wrappers plus
+> [docs/process/harness-mapping.md](docs/process/harness-mapping.md). If you
+> work with other tooling you can still follow the same conventions by hand
+> (branch → surgical change → `mvn verify` → commit with the right prefix),
+> but then the review and red-team gates are yours to reproduce —
 > self-review against the engineering rules and the threat model rather than
 > getting them for free.
 
@@ -61,8 +66,10 @@ Those gates are the point of the flow.
 We'll add a trivial read-only command, `/now`, that replies with the current
 date and time, and take it all the way from idea to merged.
 
-> Everything below is run **inside Claude Code**, where `/m1-tick` and `/redteam`
-> live. You'll need a working dev environment first — see
+> Everything below is run **inside your coding agent** — Claude Code natively,
+> opencode/Codex CLI via the wrappers (see
+> [docs/process/harness-mapping.md](docs/process/harness-mapping.md)) — where
+> `/m1-tick` and `/redteam` live. You'll need a working dev environment first — see
 > [DEVELOPER.md](DEVELOPER.md). The illustrative ticket number `M1-900` is a
 > stand-in; use the next unused number (check `docs/plan/m1/tickets/` and
 > `docs/plan/m1/STATUS.md`).
@@ -120,7 +127,7 @@ start again.
 ### Step 4 — Implement (within the ticket's scope)
 
 There is deliberately no `/m1-tick` command for this step — implementation is the
-work you (or Claude) do in the conversation between `start` and `review`, on the
+work you (or your coding agent) do in the conversation between `start` and `review`, on the
 branch `start` created. This is the interactive part of the flow: you discuss the
 approach, watch the diff take shape, and **steer it** — ask for changes, point
 out a missed case, course-correct — before the formal review gate runs. This is
