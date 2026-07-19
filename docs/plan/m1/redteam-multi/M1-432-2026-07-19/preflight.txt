@@ -1,0 +1,8 @@
+redteam-multi preflight (repo: /home/infochat/infochat-redteam-multi)
+
+AUDITOR      STATUS       DETAIL
+claude       AVAILABLE    2.1.215 (Claude Code)
+opencode     AVAILABLE    opencode 1.18.3
+codex        AVAILABLE    codex-cli 0.144.6 (sandbox write unproven until first run)
+
+3 of 3 auditor(s) available.

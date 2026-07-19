@@ -1,0 +1,28 @@
+[0m
+> threat-actor · glm-5.2
+[0m
+[0m→ [0mRead .claude/agents/threat-actor.md
+[0m→ [0mRead docs/plan/m1/redteam-multi/M1-432-2026-07-19/prompt-opencode.txt
+[0m→ [0mRead docs/spec/security.md
+[0m→ [0mRead docs/plan/m1/redteam-multi/M1-432-2026-07-19/diff.patch
+[0m→ [0mRead docs/spec/security.md[90m [offset=720][0m
+Let me check the actual source file to understand the helper functions used by the new code:
+[0m→ [0mRead infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing/LlmRouterStartupGuard.java
+I have read the threat model in full, the diff under audit, and the production source file (`LlmRouterStartupGuard.java`) whose helper functions (`REMOTE_PROVIDER_NAMES`, `languagesKeyFor`, `nonEnglishLanguages`, `perTaskRoutes`) the new code branch consumes. Let me record my analysis.
+
+The diff:
+- Touches only the startup-time disclosure guard `LlmRouterStartupGuard`, adding a WARN line that mirrors the languages axis the existing FATAL (local-only) branch already checks.
+- Runs in `@PostConstruct` before any inbound message; no auth/authz/ban/audit/input surface touched (matches the mechanically-extracted inventory).
+- Emits only operator-set config values (provider name from a compile-time constant set `{anthropic, deepseek}`; non-English language codes parsed from `infochat.llm.<provider>.languages`). The threat model classifies operator config as trusted (§Threat model: "Operator-set config (properties files, bootstrap JSON) is trusted"). No user prose, contact IDs, secrets, or base-URLs flow into the new line.
+- Format string is a literal; interpolated values are not re-interpreted as format specifiers, so no log/format injection.
+- No TOCTOU (snapshot captured once at startup), no DoS (bounded iteration over a fixed set), no INFO-LEAK surface (operator logs only, no user-visible path).
+
+No threat-model commitment is left undelivered. Writing the verdict:
+[0m
+[0m← [0mWrite docs/plan/m1/redteam-multi/M1-432-2026-07-19/verdict-opencode.txt
+Wrote file successfully.
+[0m
+RED-TEAM VERDICT: CLEAN
+Verdict file: /home/infochat/infochat-redteam-multi/docs/plan/m1/redteam-multi/M1-432-2026-07-19/verdict-opencode.txt
+Findings: critical=0 high=0 medium=0 low=0
+Out-of-model: 0

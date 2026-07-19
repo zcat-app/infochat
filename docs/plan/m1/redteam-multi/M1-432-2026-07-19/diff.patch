@@ -1,0 +1,335 @@
+diff --git a/docs/plan/m1/STATUS.md b/docs/plan/m1/STATUS.md
+index 90f98a4c..67ef3167 100644
+--- a/docs/plan/m1/STATUS.md
++++ b/docs/plan/m1/STATUS.md
+@@ -10,11 +10,11 @@
+ 
+ | Status | Count |
+ |---|---|
+-| pending | 3 |
++| pending | 2 |
+ | in-progress | 0 |
+ | in-review | 0 |
+ | escalated | 0 |
+-| done | 461 |
++| done | 462 |
+ | deferred | 6 |
+ | **total** | **470** |
+ 
+@@ -24,7 +24,6 @@
+ 
+ Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
+ 
+-- M1-432 — LlmRouterStartupGuard remote-disclosure WARN must cover the language-capability route (complexity: low, risk: low)
+ - M1-433 — Strip bidi/zero-width/control characters from post title and url at the ingest convergence point (complexity: medium, risk: medium)
+ - M1-434 — cleanup: deep-review low-severity sweep — cache-token metric, embedding providerName, connected() gauge, SQL seam (complexity: low, risk: low)
+ 
+@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
+ 
+ | ID | Title | Done date | Verdict |
+ |---|---|---|---|
++| M1-432 | LlmRouterStartupGuard remote-disclosure WARN must cover the language-capability route | 2026-06-23 | round 1 APPROVE |
+ | M1-431 | Wizard auto-provisions the SimpleX bot identity (profile + address + auto-accept) | 2026-06-23 | round 1 APPROVE |
+ | M1-430 | Fail-fast if simplex-chat ws-port binds non-loopback | 2026-06-22 | round 1 APPROVE |
+ | M1-429 | Fix SimpleX subprocess launch: -p port + in-dir db prefix | 2026-06-22 | round 2 APPROVE |
+@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
+ | M1-425 | collector: drop over-matching bare function in Stage 1 tool-call regex | 2026-06-22 | round 1 APPROVE |
+ | M1-424 | provider: honor profile-driven chat-memory retention (pi=30d) | 2026-06-21 | round 1 APPROVE |
+ | M1-423 | llm: redact userinfo in LlmRouterStartupGuard base-url logs | 2026-06-21 | round 1 APPROVE |
+-| M1-422 | Show the source UUID in /list-sources output | 2026-06-21 | round 1 APPROVE |
+ 
+ ---
+ 
+@@ -632,7 +631,7 @@ M1-428 (done)
+ M1-429 (done)
+ M1-430 (done)
+ M1-431 (done)
+-M1-432 (pending) ← runnable
++M1-432 (done)
+ M1-433 (pending) ← runnable
+ M1-434 (pending) ← runnable
+ ```
+diff --git a/docs/plan/m1/redteam/M1-432-2026-06-23.md b/docs/plan/m1/redteam/M1-432-2026-06-23.md
+new file mode 100644
+index 00000000..7e54e464
+--- /dev/null
++++ b/docs/plan/m1/redteam/M1-432-2026-06-23.md
+@@ -0,0 +1,53 @@
++---
++target: M1-432
++date: 2026-06-23
++base: main
++head: working-tree (m1/M1-432 branch, uncommitted, pre-commit)
++verdict: CLEAN
++findings_count:
++  critical: 0
++  high: 0
++  medium: 0
++  low: 0
++out_of_model_count: 0
++disposition: |
++  Pre-commit redteam (between review APPROVE and commit) on this
++  security_relevant ticket. CLEAN — the diff adds a startup disclosure WARN
++  for the language-capability route (privacy-disclosure audit line), reusing
++  the nonEnglishLanguages primitive the local-only fatal branch already
++  computes. No data-flow change, no auth/authz/ban/audit/input surface
++  touched. No remediation needed.
++---
++
++RED-TEAM VERDICT: CLEAN
++
++FINDINGS: (none)
++
++OUT-OF-MODEL: (none)
++
++Audit notes (informational, not findings):
++- The diff adds a single startup-time disclosure WARN in
++  LlmRouterStartupGuard.warnRemoteLlmTaskRoutes (infochat-llm-adapter
++  .../routing/LlmRouterStartupGuard.java:320-334) plus a plain-JUnit test.
++  It mirrors the already-shipped local-only FATAL-branch check
++  (validateLocalOnlyConfiguration:236-249) so the WARN posture and the FATAL
++  posture agree on what counts as off-host across the same three axes
++  (base-url, effective provider, languages key).
++- The new log line emits only the provider name (REMOTE_PROVIDER_NAMES =
++  {anthropic}) and non-English language codes parsed from
++  infochat.llm.<provider>.languages. Both are operator-set config, which the
++  threat model classifies as trusted (§Threat model bullet: "Operator-set
++  config (properties files, bootstrap JSON) is trusted"). No base-url, no
++  secret, no user-authored prose flows into this line; the base-url branch
++  elsewhere already redacts userinfo via LlmHttpSupport.redactUserInfo
++  (M1-401/M1-423 sibling) and the new languages branch contains no URL at all.
++  §Secrets handling stdout API-key catalogue redactor remains the backstop.
++- The change is not user-reachable: it runs once in @PostConstruct at startup,
++  before any inbound message, and touches no message intake, authorization,
++  ban handling, audit-log write, LLM tool surface, or DB-role path. The
++  mechanically-extracted sensitive-surface inventory correctly reports "(none
++  touched)" for every category, which the source review confirms.
++- No threat-model commitment is left undelivered by this diff; it strengthens
++  operator visibility of the remote-disclosure posture the spec already
++  acknowledges (trust boundary 8; §Secrets handling per-task remote
++  disclosure).
+diff --git a/docs/plan/m1/tickets/M1-432-router-guard-language-route-disclosure.md b/docs/plan/m1/tickets/M1-432-router-guard-language-route-disclosure.md
+index 90ab56ac..515b9628 100644
+--- a/docs/plan/m1/tickets/M1-432-router-guard-language-route-disclosure.md
++++ b/docs/plan/m1/tickets/M1-432-router-guard-language-route-disclosure.md
+@@ -1,7 +1,7 @@
+ ---
+ id: M1-432
+ title: "LlmRouterStartupGuard remote-disclosure WARN must cover the language-capability route"
+-status: pending
++status: done
+ created: 2026-06-23
+ last_updated: 2026-06-23
+ blocked_by: []
+@@ -34,12 +34,43 @@ test_plan:
+ spec_refs:
+   - docs/spec/llm.md §Per-task routing rules
+ decision_refs: []
+-reviews: {}
++reviews:
++  - round: 1
++    date: 2026-06-23
++    verdict: APPROVE
++    checks:
++      scope_drift: PASS
++      test_integrity: PASS
++      out_of_scope: PASS
++      negative_space: PASS
++      acceptance: PASS
++    diff_stats:
++      files: 4
++      added: 150
++      removed: 10
+ overrides: []
+ aborted_attempts: []
+ reopens: []
+ redteam_findings: []
+-clarity_check: {}
++redteam_audits:
++  - date: 2026-06-23
++    verdict: CLEAN
++    base: main
++    head: working-tree (m1/M1-432 branch, uncommitted, pre-commit)
++    verdict_file: docs/plan/m1/redteam/M1-432-2026-06-23.md
++    out_of_model_count: 0
++    note: |
++      Pre-commit redteam (between review APPROVE and commit) on this
++      security_relevant ticket. CLEAN — the diff adds a startup disclosure
++      WARN for the language-capability privacy route, reusing the
++      nonEnglishLanguages primitive the local-only fatal branch already
++      computes. No data-flow change; no auth/authz/ban/audit/input surface
++      touched. No remediation needed.
++clarity_check:
++  date: 2026-06-23
++  verdict: PASS
++  warnings: []
++  blockers: []
+ ---
+ 
+ # M1-432: LlmRouterStartupGuard remote-disclosure WARN must cover the language-capability route
+diff --git a/infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing/LlmRouterStartupGuard.java b/infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing/LlmRouterStartupGuard.java
+index 3dac20c5..b1d56dca 100644
+--- a/infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing/LlmRouterStartupGuard.java
++++ b/infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing/LlmRouterStartupGuard.java
+@@ -285,8 +285,13 @@ public class LlmRouterStartupGuard {
+      * default) is a cloud-only provider; the off-host base-url and
+      * override-cloud detection is the same {@link #perTaskRoutes} the
+      * local-only fatal branch consumes, so the two postures cannot drift on
+-     * what "remote" means. The symmetric remote-embedding WARN is emitted by
+-     * the caller before this runs.
++     * what "remote" means. A cloud-only provider made reachable ONLY via its
++     * non-English {@code languages} capability key (the router's priority-2
++     * branch, with no override or default naming it) gets its own disclosure
++     * WARN here too, mirroring the languages axis the local-only fatal branch
++     * already checks — so both postures decide "off-host" on the same three
++     * axes (base-url, effective provider, languages key). The symmetric
++     * remote-embedding WARN is emitted by the caller before this runs.
+      */
+     private static void warnRemoteLlmTaskRoutes(Map<String, String> snapshot) {
+         String defaultProvider = stripOrEmpty(snapshot.get(LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER))
+@@ -312,6 +317,21 @@ public class LlmRouterStartupGuard {
+             line.append("; post bodies will leave the host.");
+             LOG.warn(line.toString());
+         }
++        // A cloud-only provider reachable ONLY via its non-English languages
++        // declaration leaves post-derived output on the wire even when no
++        // per-task override or default names it — the router's priority-2
++        // branch selects it. The local-only fatal branch already treats this
++        // exact route as an offender (see validateLocalOnlyConfiguration), so
++        // the disclosure WARN must cover the same languages axis or the two
++        // postures drift on what counts as off-host (M1-432).
++        for (String remoteProvider : REMOTE_PROVIDER_NAMES) {
++            String reachableLanguages = nonEnglishLanguages(snapshot.get(languagesKeyFor(remoteProvider)));
++            if (!reachableLanguages.isEmpty()) {
++                LOG.warnf("LlmRouterStartupGuard: remote LLM provider=%s reachable via languages=%s;"
++                        + " non-English summarizer/translator output will leave the host.",
++                    remoteProvider, reachableLanguages);
++            }
++        }
+     }
+ 
+     /**
+diff --git a/infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/routing/LlmRouterStartupGuardLanguageRouteDisclosureTest.java b/infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/routing/LlmRouterStartupGuardLanguageRouteDisclosureTest.java
+new file mode 100644
+index 00000000..795d187a
+--- /dev/null
++++ b/infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/routing/LlmRouterStartupGuardLanguageRouteDisclosureTest.java
+@@ -0,0 +1,118 @@
++package app.zcat.infochat.llm.routing;
++
++import org.junit.jupiter.api.AfterEach;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Map;
++import java.util.logging.Level;
++import java.util.logging.LogRecord;
++import java.util.logging.Logger;
++
++import app.zcat.infochat.llm.impl.AnthropicProvider;
++
++import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
++import static org.junit.jupiter.api.Assertions.assertFalse;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++/**
++ * M1-432: the non-local-only disclosure WARN must cover the language-capability
++ * route, not only per-task overrides and the default provider. A cloud-only
++ * provider made reachable ONLY via its non-English {@code languages} key (the
++ * router's priority-2 branch, with no override or default naming it) routes
++ * non-English summarizer/translator output off-host — the exact route the
++ * local-only FATAL branch already treats as an offender. Without this WARN the
++ * two postures drift on what counts as off-host.
++ *
++ * <p>Plain JUnit5 (no Quarkus boot), same direct
++ * {@link LlmRouterStartupGuard#validateLocalOnlyConfiguration(Map)} seam and
++ * {@link CapturingHandler} the sibling {@code LlmRouterStartupGuardRedactionTest}
++ * uses. {@code anthropic} is the only member of {@code REMOTE_PROVIDER_NAMES};
++ * its languages key is resolved through the guard's own
++ * {@link LlmRouterStartupGuard#languagesKeyFor(String)} seam so the test cannot
++ * drift from the key the production path reads.
++ */
++class LlmRouterStartupGuardLanguageRouteDisclosureTest {
++
++    private static final String LANGUAGES_KEY =
++        LlmRouterStartupGuard.languagesKeyFor(AnthropicProvider.PROVIDER_NAME);
++    private static final String LANGUAGE_ROUTE_MARKER = "reachable via languages";
++
++    private Logger jul;
++    private CapturingHandler capturer;
++
++    @BeforeEach
++    void attachLogHandler() {
++        jul = Logger.getLogger(LlmRouterStartupGuard.class.getName());
++        capturer = new CapturingHandler();
++        capturer.setLevel(Level.ALL);
++        jul.addHandler(capturer);
++        jul.setLevel(Level.ALL);
++    }
++
++    @AfterEach
++    void detachLogHandler() {
++        jul.removeHandler(capturer);
++    }
++
++    @Test
++    void nonEnglishLanguagesKeyAloneEmitsDisclosureWarn() {
++        // local-only unset, no per-task override, no default — the remote
++        // provider is reachable ONLY through its non-English languages key.
++        Map<String, String> snapshot = new LinkedHashMap<>();
++        snapshot.put(LlmRouterStartupGuard.CONFIG_KEY_LOCAL_ONLY, "false");
++        snapshot.put(LANGUAGES_KEY, "cs");
++
++        assertDoesNotThrow(
++            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(snapshot),
++            "a non-English languages key without local-only is allowed (but loud)");
++
++        List<LogRecord> warns = capturer.recordsAtLevel(Level.WARNING);
++        assertTrue(warns.stream().anyMatch(r -> {
++            String m = CapturingHandler.formatMessage(r);
++            return m.contains(LANGUAGE_ROUTE_MARKER)
++                && m.contains(AnthropicProvider.PROVIDER_NAME)
++                && m.contains("cs")
++                && m.contains("leave the host");
++        }), "the language-route disclosure WARN must name the provider and the reachable "
++            + "non-English language; captured: " + capturer.formattedAll());
++    }
++
++    @Test
++    void englishOnlyLanguagesKeyEmitsNoLanguageRouteWarn() {
++        Map<String, String> snapshot = new LinkedHashMap<>();
++        snapshot.put(LlmRouterStartupGuard.CONFIG_KEY_LOCAL_ONLY, "false");
++        snapshot.put(LANGUAGES_KEY, "en");
++
++        assertDoesNotThrow(() -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(snapshot));
++
++        assertNoLanguageRouteWarn();
++    }
++
++    @Test
++    void absentLanguagesKeyEmitsNoLanguageRouteWarn() {
++        Map<String, String> snapshot = new LinkedHashMap<>();
++        snapshot.put(LlmRouterStartupGuard.CONFIG_KEY_LOCAL_ONLY, "false");
++
++        assertDoesNotThrow(() -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(snapshot));
++
++        assertNoLanguageRouteWarn();
++    }
++
++    private void assertNoLanguageRouteWarn() {
++        for (LogRecord record : capturer.records) {
++            String m = CapturingHandler.formatMessage(record);
++            assertFalse(m.contains(LANGUAGE_ROUTE_MARKER),
++                "no language-route disclosure WARN must be emitted; leaking record: " + m);
++        }
++    }
++
++    static {
++        // Mirror the sibling test's bootstrap pin: Quarkus can leave
++        // WARNING-and-above on the class logger suppressed depending on the
++        // LogManager bootstrap order, so pin ALL before the @BeforeEach attach.
++        Logger.getLogger(LlmRouterStartupGuard.class.getName()).setLevel(Level.ALL);
++    }
++}

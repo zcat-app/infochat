@@ -1,0 +1,69 @@
+RED-TEAM VERDICT: CLEAN
+
+FINDINGS: (none)
+
+OUT-OF-MODEL: (none)
+
+Audit notes (informational, not findings):
+- The diff is a single-startup-time disclosure WARN addition in
+  LlmRouterStartupGuard.warnRemoteLlmTaskRoutes
+  (infochat-llm-adapter .../routing/LlmRouterStartupGuard.java:405-419)
+  plus a plain-JUnit5 test
+  (LlmRouterStartupGuardLanguageRouteDisclosureTest). It mirrors the
+  languages axis the local-only FATAL branch already checks
+  (validateLocalOnlyConfiguration:321-334), so the WARN posture and
+  the FATAL posture now decide "off-host" on the same three axes
+  (base-url, effective provider, languages key). No data-flow change;
+  no auth/authz/ban/audit/LLM-tool/input surface touched.
+- The new loop emits only (a) provider names from the compile-time
+  constant set REMOTE_PROVIDER_NAMES = {anthropic, deepseek} and (b)
+  non-English language codes parsed from the operator-set
+  infochat.llm.<provider>.languages property via the existing
+  nonEnglishLanguages() helper (lowercased, trimmed, "en"-filtered,
+  comma-joined). Both values are operator-set config, which the
+  threat model explicitly classifies as trusted (§Threat model:
+  "Operator-set config (properties files, bootstrap JSON) is
+  trusted"). No user-authored prose, contact id, secret, or base-url
+  flows into this line; the base-url sibling branch already redacts
+  userinfo via LlmHttpSupport.redactUserInfo (M1-401/M1-423), and the
+  new languages branch contains no URL at all. §Secrets handling
+  stdout API-key catalogue redactor remains the backstop.
+- Not user-reachable: warnRemoteLlmTaskRoutes is called only from
+  validateLocalOnlyConfiguration:290 inside the !localOnly branch,
+  which itself runs only from the @PostConstruct onStartup hook
+  (line 234) before any inbound message is processed. The new code
+  adds no intake, parse, authorization, ban, audit, LLM-tool, or
+  DB-role path. The mechanically-extracted sensitive-surface
+  inventory correctly reports "(none touched)" for every category
+  except Input validation — and those LlmRouterStartupGuard hits are
+  @PostConstruct / docstring references, not message-intake code.
+- Format-string safety: LOG.warnf consumes a literal format with two
+  %s placeholders; the two args (provider name, language list) are
+  interpolated as values, not re-interpreted as format specifiers, so
+  an operator-supplied value containing %s or newlines cannot inject
+  log lines or break formatting. Even if it could, operator config is
+  a trusted source per the threat model, so log-injection from that
+  source is out of model.
+- Symmetry preserved, not weakened: the new WARN loop iterates the
+  SAME REMOTE_PROVIDER_NAMES set and uses the SAME nonEnglishLanguages
+  primitive as the FATAL branch (lines 321-334). A future cloud-only
+  provider added to REMOTE_PROVIDER_NAMES automatically appears in
+  both postures — no separate edit required — so the diff cannot
+  introduce drift between them. The known "set is hand-maintained"
+  limitation (a new cloud provider added without updating the set
+  would miss both branches) predates this diff and is the source's
+  own documented property (comment on REMOTE_PROVIDER_NAMES, lines
+  160-174); not created or worsened here.
+- No duplicate-WARN hazard that weakens defense: if a cloud-only
+  provider is reachable via BOTH a per-task override/default AND its
+  languages key, two WARNs fire for that provider — slightly noisier
+  logs, but the disclosure is additive, not conflicting, and operator
+  logs are not a parsing target.
+- The diff also flips ticket status to done and adds a prior
+  pre-commit redteam disposition (docs/plan/m1/redteam/M1-432-2026-06-23.md)
+  plus a reviews/redteam_audits/clarity_check block to the ticket.
+  These are bookkeeping; no security surface.
+- No threat-model commitment is left undelivered by this diff; it
+  strengthens operator visibility of the remote-disclosure posture
+  the spec already acknowledges (§Secrets handling per-task remote
+  disclosure; §Trust boundaries bullet 8).

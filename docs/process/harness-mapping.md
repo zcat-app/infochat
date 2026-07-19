@@ -12,12 +12,12 @@ Both tool columns were verified empirically on 2026-07-19 against **opencode
 1.18.3** and **codex-cli 0.144.6** — discovery, agent resolution, config
 loading, and the gotchas in §6.1/§6.2 were measured, not read from docs. Two
 published claims turned out false against the real binaries (noted in place).
-The only step not yet run is a live end-to-end gate (§7), which costs a real
+The only step not yet run is a live end-to-end gate (§8), which costs a real
 model call. Versions move: re-check on first use.
 
-## 1. The five primitives
+## 1. The six primitives
 
-The workflow needs exactly five harness-provided capabilities. Everything else
+The workflow needs exactly six harness-provided capabilities. Everything else
 — ticket linting, STATUS regen, prompt rendering, verdict files, flock
 serialization, git mechanics — is plain bash/python/git and runs identically
 everywhere.
@@ -29,6 +29,7 @@ everywhere.
 | 3 | Verdict-file readback | The orchestrating session treats the ON-DISK artifact as the result; the gate agent's chat reply is a 3–4 line summary parsed literally. Never accept a chat-only verdict. |
 | 4 | Blocking user menu | Present fixed options, stop, wait for the human's typed choice. |
 | 5 | Worktree parallelism | Optional. `--parallel` tickets run in git worktrees; `scripts/verify-serialized.sh` (flock) serializes full-suite verifies across them. |
+| 6 | Cross-harness gate | Optional. Fan the SAME rendered prompt through several coding-agent CLIs headlessly, then cross-examine their verdicts. Single-sourced in §7; the wrapper script is `scripts/redteam-multi.sh`. |
 
 ## 2. Gate-agent bindings
 
@@ -200,7 +201,128 @@ cheapest way to confirm any of this.
   omit `model`, so each tool uses its configured default. Use a strong model
   for gates — a weak reviewer is worse than none, because it APPROVEs.
 
-## 7. Fork-side smoke checklist
+## 7. Cross-harness gate (multi-auditor red-team)
+
+This section single-sources primitive #6. The wrapper script is
+`scripts/redteam-multi.sh`; the cross-examination parser is
+`scripts/redteam-multi-cross.py`. The skill wrapper that exposes it as a
+command is `.agents/skills/redteam-multi/SKILL.md` (and, on Claude Code,
+`.claude/skills/redteam-multi/SKILL.md` — not yet authored; see the
+opencode-boundary note at the end of this section).
+
+### What it is
+
+`/redteam-multi <target>` runs the SAME rendered red-team prompt through
+several independent coding-agent CLIs (claude, opencode, codex) and
+cross-examines their verdicts. The point of fanning out is that a single
+auditor's blind spots are systematic: a finding only one model reports is
+either a real gap the others missed or a false positive exposing that
+model's bias, and only a falsification pass tells those apart. The
+cross-examination stage makes the difference legible to the user.
+
+### Contract — what every harness MUST do identically
+
+1. **Headless invocation, uniformly.** Every auditor — including the
+   harness you invoked `/redteam-multi` from — is spawned as a separate
+   headless process via the §3 recipes. An in-session subagent and a
+   headless process differ in context assembly, system prompt and tool
+   wrappers, so a difference in findings could not be attributed to the
+   model. Uniform invocation is a correctness requirement of the
+   comparison, not a convenience. (A subprocess also cannot call back into
+   its parent agent session — bash has no channel to drive the
+   orchestrating LLM.)
+2. **One verdict file per auditor.** Each auditor Writes its verdict to
+   `verdict-<auditor>.txt` under the run directory, in the exact format
+   `docs/process/redteam-prompt.md` specifies. The auditor's chat reply is
+   discarded; only the on-disk verdict is read back (primitive #3).
+3. **No skill recursion.** The wrapper invokes the GATE AGENT (`threat-
+   actor`), never the `/redteam` or `/redteam-multi` skill. The Claude and
+   opencode `threat-actor` agent definitions declare no Task/skill tool,
+   so recursion is structurally impossible there. Codex's spawned agents
+   are generic and CAN read `.agents/skills/`, so on Codex the
+   `REDTEAM_MULTI_DEPTH` env var is the primary guard: the wrapper sets it
+   to 1 on every spawn and refuses to start when it is already non-zero.
+4. **The diff-range algorithm is consumed, not reimplemented.** The
+   wrapper accepts a resolved range (`--base`/`--head`, `--diff`, or
+   `--ticket` for the MERGED form) and does NOT reimplement the four-form
+   algorithm from `.claude/skills/redteam/SKILL.md` §1 — duplicating it in
+   bash is a drift risk. The in-progress branch forms of `/redteam` are
+   deliberately unreachable here.
+
+### What the wrapper handles (failure modes)
+
+- **Empty diff.** Refuses to render or spawn. An audit of nothing returns
+  CLEAN, and that verdict is indistinguishable in the record from a real
+  one (the same fail-closed rule single-auditor `/redteam` applies).
+- **Unavailable auditor.** A binary missing, auth invalid, agent
+  definition unresolvable, or run failing to produce a verdict file → a
+  stub verdict reading `RED-TEAM VERDICT: UNAVAILABLE`. Never CLEAN.
+- **Single available auditor.** The run proceeds (one audit is still an
+  audit) but cross-examination is SKIPPED — without an independent
+  refuter the comparison is meaningless. A degenerate
+  `cross-examination.md` is still written for layout symmetry.
+- **Contamination.** After each auditor the wrapper captures
+  `git status --porcelain`, filters out paths under the run directory
+  (which is under `docs/plan/` and therefore tracked), and compares. Any
+  residual delta is contamination — the auditor wrote outside its
+  verdict path. This is the same load-bearing check §6 mandates for any
+  non-Claude gate; it is mandatory here because the verdict paths
+  themselves live in tracked space.
+- **Reaudits.** Same target, same day → `-r2`, `-r3`, ... suffix on the
+  run directory, mirroring the `docs/plan/m1/redteam/<id>-<date>-rN.md`
+  convention.
+- **Persistent storage.** Evidence lives under
+  `docs/plan/m1/redteam-multi/<slug>-<date>[-rN]/`, NOT under `target/`
+  (gitignored, wiped by `mvn clean`). The directory contains: `preflight.txt`,
+  `diff.patch`, `inv-{auth,authz,input,ban,audit}.txt`, `prompt-<id>.txt`,
+  `reply-<id.txt>`, `verdict-<id>.txt`, `porcelain-<id>.txt`, and
+  `cross-examination.md`. Commit the whole directory alongside
+  `docs/plan/m1/redteam/` as the audit record.
+
+### Cross-examination — v1 (shipped) vs v2 (not yet wired)
+
+- **v1** is `scripts/redteam-multi-cross.py`: a deterministic parser that
+  extracts findings from each `verdict-<id>.txt`, clusters them across
+  auditors by `(CATEGORY, primary file:line cited in GAP)`, and emits
+  `cross-examination.md` with a summary, a side-by-side table, per-cluster
+  detail, and a single-auditor-findings callout. Clustering is fuzzy on
+  purpose — two auditors citing the same code site under slightly
+  different `file:line` forms (e.g. `Foo.java:472` vs `Foo.java:472-474`)
+  produce two clusters; the per-cluster detail section makes the match
+  legible to a human.
+- **v2** is a fresh-context synthesizer subagent that Reads every
+  `verdict-<id>.txt` and falsifies each single-auditor finding by
+  re-auditing it against the threat model. v1 surfaces the candidates; v2
+  adjudicates them. Not yet wired — the v1 output is enough to land the
+  primitive.
+
+### Invocation
+
+`scripts/redteam-multi.sh preflight` — probe each auditor (binary, auth,
+agent definition, opencode `write=true` per §6.1(a)). Costs no model
+tokens; prints an availability table.
+
+`scripts/redteam-multi.sh run --ticket M1-NNN [--auditors <id,...>]`
+`[--prepare-only]` — render the prompt, dispatch each available auditor
+headlessly, write per-auditor verdicts, run cross-examination.
+`--prepare-only` renders prompts without spawning auditors (free pipeline
+verification).
+
+`/redteam-multi <target>` — the skill-wrapper form (`.agents/skills/
+redteam-multi/SKILL.md`); resolves the diff range per
+`.claude/skills/redteam/SKILL.md` §1 and dispatches `scripts/redteam-multi.sh`.
+
+### opencode-boundary note (authoring deferred)
+
+This section was added by an opencode session. opencode cannot edit
+`.claude/**` per `AGENTS.md`, so the parallel `.claude/skills/redteam-
+multi/SKILL.md` wrapper is NOT yet authored — when Claude Code next
+resumes, it should add that file mirroring the `.agents/skills/redteam-
+multi/SKILL.md` wrapper that points back here. Until then, `/redteam-
+multi` is invocable only on non-Claude harnesses (and directly via
+`scripts/redteam-multi.sh` on any host).
+
+## 8. Fork-side smoke checklist
 
 No non-Claude CLI is installed on the reference machine, so these are the
 acceptance checks a fork runs once per tool (record the results in your

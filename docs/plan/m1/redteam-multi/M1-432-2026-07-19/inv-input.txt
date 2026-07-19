@@ -1,0 +1,5 @@
+infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing/LlmRouterStartupGuard.java:108: * @PostConstruct path delegates to the same validator after reading
+infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing/LlmRouterStartupGuard.java:233:    @PostConstruct
+infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing/LlmRouterStartupGuard.java:270:     * @PostConstruct above; no other consumer should call it
+infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing/LlmRouterStartupGuard.java:939:     * @Startup bean's @PostConstruct re-throws this, which Quarkus
+infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing/LlmRouterStartupGuard.java:952:     * @PostConstruct re-throws this, which Quarkus treats as a fatal startup
