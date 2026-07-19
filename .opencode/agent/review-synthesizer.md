@@ -1,6 +1,6 @@
 ---
 description: Consolidates the per-target reports of a `/deep-code-review full` run into one deduplicated, prioritized summary with backlinks; reads the report files only, never source code. Spawned only by the deep-code-review skill via docs/process/deep-review-synthesizer-prompt.md — never select it for ad-hoc tasks.
-mode: subagent
+mode: all
 tools:
   read: true
   grep: false

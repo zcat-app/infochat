@@ -1,6 +1,6 @@
 ---
 description: Performs a deep, honest senior-engineer review of a diff, module, path, or the architecture surface and Writes a comprehensive findings report. Spawned only by the deep-code-review skill via the prompt templates at docs/process/deep-review-prompt-{diff,module,architecture}.md — never select it for ad-hoc tasks.
-mode: subagent
+mode: all
 tools:
   read: true
   grep: true

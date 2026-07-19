@@ -42,7 +42,7 @@ five:
 | Harness | Definition read | Invocation |
 |---|---|---|
 | Claude Code (native) | `.claude/agents/<name>.md` | the skill spawns the agent with the stub prompt below — status quo |
-| opencode | `.opencode/agent/<name>.md` (`mode: subagent`) | Task-tool routing or `@<name>` mention with the stub prompt, or headless (§3) |
+| opencode | `.opencode/agent/<name>.md` (**`mode: all`** — see §6.1(c)) | Task-tool routing or `@<name>` mention with the stub prompt, or headless (§3) |
 | Codex CLI | **none — no repo-shippable agent definition exists** (§6.2) | `spawn_agent` with the stub prompt, or headless `codex exec` (§3) |
 | Generic (any agent) | none needed | any FRESH session/process of a capable model, given the stub prompt |
 
@@ -117,6 +117,16 @@ saying why — meaning **on opencode a gate agent can also edit files**, which i
 what makes the `git status --porcelain` check below load-bearing rather than
 advisory. Verify with `opencode debug agent <name>`; the resolved map, not the
 frontmatter, is the truth.
+
+**(c) `opencode run --agent <name>` REFUSES a `mode: subagent` agent** and
+falls back to the default primary agent — which has write, edit AND bash
+allowed. It prints a warning and then proceeds, so a headless gate silently
+runs unconstrained and without its persona. Verified: with `mode: subagent` the
+run reported `> build · glm-4.7`; with `mode: all` it reported
+`> code-reviewer · glm-4.7`. All five agent definitions therefore use
+`mode: all`, which keeps them available BOTH for in-session subagent routing
+and for headless `run --agent`. If a gate's output looks generic, check the
+banner line for which agent actually ran.
 
 **(b) Same-named skills in `.claude/skills/` and `.agents/skills/` resolve
 NONDETERMINISTICALLY.** opencode scans both trees; when a name exists in each,
@@ -203,11 +213,15 @@ opencode (steps 1–2 VERIFIED on 1.18.3, 2026-07-19 — re-run after an upgrade
 2. ✅ Agent discovery — `opencode agent list` shows all five gate agents as
    `(subagent)`, and `opencode debug agent <name>` resolves `write=true`.
    A `write=false` here means §6.1(a) has regressed.
-3. ⬜ One end-to-end review gate on a toy diff: rendered prompt → verdict file
-   lands → §6 contamination check passes. (Not yet run — it costs a real model
-   call. `opencode run --agent code-reviewer "<stub>"` takes the prompt as a
-   positional argument; there is no stdin flag, and `-f/--file` attaches files
-   rather than supplying the prompt.)
+3. ✅ End-to-end gate RUN and passed (2026-07-19, glm-4.7 via the Z.AI plan) on
+   a toy diff carrying a gutted assertion and a commented-out authorization
+   check. The agent read the prompt file, read the diff and
+   `engineering-rules-verbatim.md`, wrote the verdict to the exact path, and
+   replied in the exact three-line format; `git status --porcelain` showed no
+   contamination. It cited the right rules (§8 test integrity, §2 no
+   workarounds) — the gate is substantively working, not just wired up.
+   The prompt is a positional argument: there is no stdin flag, and `-f/--file`
+   attaches files rather than supplying the prompt.
 
 Codex CLI (steps 4–5 VERIFIED on 0.144.6, 2026-07-19):
 4. ✅ Skill discovery from `.agents/skills/` and `AGENTS.md` loading — confirm

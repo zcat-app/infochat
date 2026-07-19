@@ -1,6 +1,6 @@
 ---
 description: Adversarial security review of a diff against the documented threat model (docs/spec/security.md); Writes a bucketed verdict file and returns a four-line summary. Spawned only by the /redteam skill via the rendered prompt from docs/process/redteam-prompt.md — never select it for ad-hoc tasks.
-mode: subagent
+mode: all
 tools:
   read: true
   grep: true
