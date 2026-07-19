@@ -160,7 +160,7 @@ The skill reads `docs/plan/<milestone>/tickets/`, finds tickets where `status: p
 - Skill spawns `Agent(subagent_type: "code-reviewer")` with the prompt from [`reviewer-prompt.md`](reviewer-prompt.md).
 - Reviewer receives:
   - The ticket file.
-  - The diff (`git diff main`, working-tree-vs-main; the implementation lives in the working tree at review time because `commit` runs *after* `review`, so a commit-range diff against `main` would be empty. The driver runs `git add -N` on any untracked files first so newly created files appear in the diff).
+  - The diff (`git diff $(git merge-base main HEAD)`, working-tree-vs-fork-point; the implementation lives in the working tree at review time because `commit` runs *after* `review`, so a commit-range diff against `main` would be empty. The driver runs `git add -N` on any untracked files first so newly created files appear in the diff. The fork point, never `main` itself: in a worktree pinned behind a moved `main`, diffing against the `main` ref drags every since-landed ticket into the review as phantom changes; the merge-base is the branch's fork point and is identical to `main` whenever `main` has not moved. Observed: M1-096, 2026-05-30).
   - The list of files in `files_scope` that were NOT touched (the "negative space"), so the reviewer can judge whether the un-touched files were a deliberate skip or a forgotten part of the scope. When `files_scope` is empty, the negative-space report is empty and `NEGATIVE-SPACE-CHECK` reports PASS by definition.
   - The test output.
   - On rounds ≥ 2: the previous-round diff stats (files touched, lines added, lines removed) for the must-shrink check.

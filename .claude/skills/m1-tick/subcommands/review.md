@@ -52,7 +52,7 @@ Steps:
    ```
 
    Foreground (the verdict gates the next step). The `code-reviewer` agent is defined at `.claude/agents/code-reviewer.md` (Read/Grep/Glob/Write tool allowlist; model inherited from the main conversation). The render-script approach replaces the previous "Read template → inline substitute → pass as Agent prompt" pattern; the PROMPT-SIZE-ALARM check is no longer needed (the main session no longer holds the template).
-4. Parse the three-line short chat reply for the verdict line + integer rework-item count. Read `target/m1-tick-review-{{ID}}-r{{CURRENT_ROUND}}.txt` (the same `{{VERDICT_FILE_PATH}}` substituted above) from disk to extract per-check results (SCOPE-DRIFT-CHECK / TEST-INTEGRITY-CHECK / OUT-OF-SCOPE-CHECK / NEGATIVE-SPACE-CHECK / ACCEPTANCE-CHECK) and the REWORK ITEMS / UNCERTAINTY strings the subagent wrote there.
+4. Parse the three-line short chat reply for the verdict line + integer rework-item count. Read `target/m1-tick-review-{{ID}}-r{{CURRENT_ROUND}}.txt` (the same `{{VERDICT_FILE_PATH}}` substituted above) from disk to extract per-check results (SCOPE-DRIFT-CHECK / TEST-INTEGRITY-CHECK / OUT-OF-SCOPE-CHECK / NEGATIVE-SPACE-CHECK / ACCEPTANCE-CHECK / ASSERTION-ADEQUACY-CHECK) and the REWORK ITEMS / UNCERTAINTY strings the subagent wrote there.
 5. Append to ticket frontmatter under `reviews:`:
    ```yaml
    reviews:

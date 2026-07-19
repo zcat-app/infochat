@@ -1,7 +1,7 @@
 ---
 id: M1-661
 title: "Add an ASSERTION-ADEQUACY check to the reviewer gate"
-status: pending
+status: done
 created: 2026-07-19
 last_updated: 2026-07-19
 blocked_by: []
@@ -105,12 +105,41 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-19
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 90
+      removed: 12
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-19
+  verdict: WARN
+  warnings:
+    - >-
+      COMPLEXITY-RISK-CALIBRATED: complexity: low may undersell a ticket
+      bundling two independently-verified defect classes across 4 files with a
+      10-item acceptance list and its own two-section enumeration structure;
+      consider medium. Non-blocking — the diff mechanics themselves (prose
+      edits, no code) are genuinely simple.
+    - >-
+      CLASS-COMPLETENESS: the second bundled defect class's enumeration and
+      dispositions live under "## Second deliverable" rather than under the
+      "## Census" heading itself. Both were independently re-derived and
+      verified accurate with no unaccounted sites, so this is a
+      structural/labeling observation only, not a coverage gap.
+  blockers: []
 ---
 
 # M1-661: Add an ASSERTION-ADEQUACY check to the reviewer gate

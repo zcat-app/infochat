@@ -209,6 +209,37 @@ A diff that does the spec thing AND an adjacent thing the spec doesn't
 mention is SCOPE-DRIFT-CHECK territory (the existing check covers it),
 not SPEC-CONFORMANCE.
 
+### Assertion adequacy (engineering-rules-verbatim.md §8 Assertion adequacy)
+
+The canonical rule text is §8 "Assertion adequacy" in the engineering
+rules embedded above — read it there; it is not restated here. What it
+requires of you operationally:
+
+Ask exactly two questions, and no others:
+
+  (a) BOUNDARY SITING — for a value the diff introduces that reaches a
+      user or an external surface, does at least one assertion live at
+      the END of that path, rather than only at the point of production?
+  (b) NON-VACUITY — for each NEW test the diff adds, can you name a
+      concrete mutation of the diff's own production code that the test
+      would catch?
+
+Report `NOT-APPLICABLE` with a one-line reason when the diff adds no new
+test — documentation-only and process-only diffs pass through here
+without noise.
+
+`FAIL` requires you to NAME the specific surviving mutation or the
+specific unasserted boundary, with a `file:line`. A FAIL you cannot name
+an artifact for is not a valid FAIL — downgrade it to WARN or PASS. Do
+not fail this check on an impression that the tests feel thin.
+
+This check owns ONLY tests the diff adds. Modifications to pre-existing
+tests are TEST-INTEGRITY-CHECK's territory (§8 Semantic and §8
+Test-modification authorization); do not double-report them here.
+Whether a class-scoped ticket enumerated its class belongs to the
+clarity gate's CLASS-COMPLETENESS check, which runs before
+implementation and is not yours.
+
 ### Parameter contracts (engineering-rules-verbatim.md §7a)
 
 §7a nullability contracts are enforced by the build, not by the reviewer
@@ -295,6 +326,20 @@ SPEC-CONFORMANCE-CHECK: <PASS | WARN | FAIL>
    spec_refs entry by anchor range in your fresh context; on
    ANCHOR-NOT-FOUND or AMBIGUOUS, raise to WARN with a note.>
 
+ASSERTION-ADEQUACY-CHECK: <PASS | WARN | FAIL | NOT-APPLICABLE>
+  <one paragraph answering the two questions from the Assertion-adequacy
+   section above: (a) BOUNDARY SITING — for a value the diff introduces
+   that reaches a user or an external surface, does at least one
+   assertion live at the END of that path rather than only at the point
+   of production; (b) NON-VACUITY — for each NEW test the diff adds, name
+   a concrete mutation of the diff's own production code that the test
+   would catch. NOT-APPLICABLE (with a one-line reason) when the diff
+   adds no new test. On FAIL you MUST name the specific surviving
+   mutation or the specific unasserted boundary with a file:line — a FAIL
+   without a named artifact is not valid; downgrade it to WARN or PASS.
+   Newly-added tests only: modifications to pre-existing tests belong to
+   TEST-INTEGRITY-CHECK.>
+
 REWORK ITEMS: (omit on APPROVE; required on REWORK)
   1. <specific, addressable, scoped to the existing diff>
   2. <as many as needed; each must be actionable without re-architecting>
@@ -311,6 +356,12 @@ UNCERTAINTY: (required on MANUAL; omit otherwise)
   APPROVE requires every check to be PASS (NEGATIVE-SPACE-CHECK: WARN
   is permitted under APPROVE — it surfaces to the user as informational
   and does not block the commit).
+- ASSERTION-ADEQUACY-CHECK: WARN does not block APPROVE — it surfaces
+  to the user as informational, exactly as NEGATIVE-SPACE-CHECK: WARN
+  does. NOT-APPLICABLE likewise does not block (it means the diff added
+  no new test). FAIL forces VERDICT to be at least REWORK, and is only
+  valid when it names the surviving mutation or unasserted boundary
+  with a file:line.
 - ACCEPTANCE-CHECK: PARTIAL is REWORK unless the **ticket body itself**
   explicitly names a deferred dependency for the missing item (e.g. a
   bullet under "Definition of Done" that reads "deferred to M<N>-XXX"
@@ -339,8 +390,8 @@ both literally.
 ## Skill responsibilities (what `/m1-tick review` does around the prompt)
 
 1. Resolves the ticket file path, the branch, and the slug.
-2. Captures the working-tree-vs-main diff on the branch: `git add -N` on any untracked-but-present files first (intent-to-add, so file paths show up in the diff), then `git diff main` for the full diff. Writes the diff to `target/m1-tick-review-{{ID}}-r{{CURRENT_ROUND}}.diff` and substitutes that path as `{{DIFF_FILE_PATH}}`. The `-N` entries are absorbed by the explicit `git add` at commit time and need no separate cleanup. A commit-range diff against `main` would be empty here because `commit` runs after `review`.
-3. Computes diff stats: files touched count, net lines added, net lines removed (`git diff main --shortstat`). Stores under `reviews[].diff_stats` in frontmatter for cross-round comparison; substitutes the numbers into the `{{CURRENT_FILES}}` / `{{CURRENT_ADDED}}` / `{{CURRENT_REMOVED}}` placeholders (and the previous-round counterparts on rounds ≥ 2).
+2. Captures the working-tree-vs-fork-point diff on the branch: `git add -N` on any untracked-but-present files first (intent-to-add, so file paths show up in the diff), then `git diff $(git merge-base main HEAD)` for the full diff. Writes the diff to `target/m1-tick-review-{{ID}}-r{{CURRENT_ROUND}}.diff` and substitutes that path as `{{DIFF_FILE_PATH}}`. The `-N` entries are absorbed by the explicit `git add` at commit time and need no separate cleanup. A commit-range diff against `main` would be empty here because `commit` runs after `review`. (The fork point, never `main` itself: in a worktree pinned behind a moved `main`, diffing against the `main` ref drags every since-landed ticket into the review as phantom changes; the merge-base is the branch's fork point and is identical to `main` whenever `main` has not moved. Observed: M1-096, 2026-05-30.)
+3. Computes diff stats: files touched count, net lines added, net lines removed (`git diff $(git merge-base main HEAD) --shortstat`). Stores under `reviews[].diff_stats` in frontmatter for cross-round comparison; substitutes the numbers into the `{{CURRENT_FILES}}` / `{{CURRENT_ADDED}}` / `{{CURRENT_REMOVED}}` placeholders (and the previous-round counterparts on rounds ≥ 2).
 4. Builds the **negative-space list**: if the ticket has a non-empty `files_scope`, computes the set of files matching any glob in `files_scope` that are NOT in the diff and substitutes them as `{{NEGATIVE_SPACE_LIST}}`. If `files_scope` is empty or absent, the substitution is the literal sentinel string `(no path-level scope declared — files_budget is purely numeric, no negative-space evaluation applicable)` and the reviewer must report PASS on `NEGATIVE-SPACE-CHECK`.
 5. Locates the most recent `mvn verify` log at `target/m1-tick-test-{{ID}}-r{{CURRENT_ROUND}}.log` and substitutes its path as `{{TEST_LOG_PATH}}`.
 6. Pre-allocates a verdict file path under `target/m1-tick-review-{{ID}}-r{{CURRENT_ROUND}}.txt` and substitutes it as `{{VERDICT_FILE_PATH}}`.
