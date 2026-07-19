@@ -106,7 +106,7 @@ If this section disagrees with `ticket-template.md`, the template wins; sync thi
 | `id` | Stable ticket identifier (`M<N>-NNN`). Never reused. | every step |
 | `status` | Lifecycle state (`pending` → `in-progress` → `in-review` → `done` / `escalated` / `deferred` / `abandoned`). | every step |
 | `blocked_by` | List of ticket IDs that must be `done` before this can start. | `next`, `start` preconditions |
-| `files_budget` | Numeric upper bound on file count touched by the diff (always enforced). | reviewer SCOPE-DRIFT-CHECK |
+| `files_budget` | Numeric file-count hint. **Advisory** as of 2026-07-19 — a count overage is informational, not a SCOPE-DRIFT FAIL; the real scope gates are untraceable-lines, `files_scope` membership, and `out_of_scope`. | reviewer SCOPE-DRIFT-CHECK (advisory note) |
 | `files_scope` | Optional path/glob list. Enables negative-space check + parallelism eligibility. | reviewer NEGATIVE-SPACE-CHECK, `start --parallel` |
 | `out_of_scope` | Path/feature exclusions the diff MUST NOT touch. | reviewer OUT-OF-SCOPE-CHECK |
 | `acceptance` | Runnable / testable criteria, ideally one assertion per item. | reviewer ACCEPTANCE-CHECK, lint PROSE-VERB-IN-VERIFY |
@@ -143,7 +143,7 @@ The skill reads `docs/plan/<milestone>/tickets/`, finds tickets where `status: p
 
 ### 2. Implement
 
-- Touch at most `files_budget` files; if `files_scope` is set, every touched file must also match a glob in that list. Stay outside `out_of_scope`. Approaching the numeric budget → escalate before exceeding it.
+- If `files_scope` is set, every touched file must match a glob in that list; stay outside `out_of_scope`. A path departure from either is a genuine scope drift → escalate before making it. `files_budget` is an advisory file-count hint (2026-07-19 cutover) — exceeding it is not a hard failure, so it does not by itself require pre-escalation; keep the diff surgical regardless.
 - Match existing style. No adjacent improvements (CLAUDE.md §Surgical changes).
 - If a better alternative surfaces → record under `Alternatives considered:` in the eventual commit message; complete the ticket as written.
 
@@ -174,11 +174,11 @@ The skill reads `docs/plan/<milestone>/tickets/`, finds tickets where `status: p
 |---|---|
 | `APPROVE` | Proceed to commit (step 6). |
 | `REWORK` (round 1) | Address only the named items. Do not re-architect. Re-run `mvn verify`. Re-invoke reviewer. |
-| `REWORK` (round 2) | If the ticket has `round_cap: 2` (default): escalate (no round 3). If the ticket has `round_cap: 3`: address only the named items, re-run `mvn verify`, re-invoke reviewer for round 3. (Round 2's own must-shrink check has already run by the time this verdict applies; a must-shrink failure in this round is a `SCOPE-DRIFT-CHECK: FAIL` that escalates immediately regardless of `round_cap`.) |
-| `REWORK` (round 3) | Only reachable when `round_cap: 3`. Escalate; no round 4 exists. (Round 3's own must-shrink check vs round 2 has already run by the time this verdict applies.) |
+| `REWORK` (round 2) | If the ticket has `round_cap: 2` (default): escalate (no round 3). If the ticket has `round_cap: 3`: address only the named items, re-run `mvn verify`, re-invoke reviewer for round 3. (Must-shrink is advisory as of 2026-07-19 — a non-convergent round surfaces as a reviewer WARN, not a FAIL that escalates.) |
+| `REWORK` (round 3) | Only reachable when `round_cap: 3`. Escalate; no round 4 exists. |
 | `MANUAL` | Escalate immediately. The reviewer's uncertainty is not for the developer to resolve. |
 
-**Round-N must-shrink (N ≥ 2).** Every rework round is a fix-only round. The reviewer compares round-N diff stats to round-(N−1) along files-touched, net lines added, and net lines removed. Growth along **all three** dimensions simultaneously fails `SCOPE-DRIFT-CHECK` (holding equal or shrinking along any dimension is convergent) — unless the growth is required by a citable mandate (a round-(N−1) REWORK item or an in-branch redteam-finding remediation the user accepted) and the developer cited it in the round-N commit message. Applies to round 2 (default `round_cap: 2`) AND to round 3 (only reachable when `round_cap: 3`). The canonical rule is in [`engineering-rules-verbatim.md`](engineering-rules-verbatim.md) §8 "Round-N must-shrink".
+**Round-N must-shrink (N ≥ 2) — advisory (2026-07-19 cutover).** Every rework round is a fix-only round. The reviewer compares round-N diff stats to round-(N−1) along files-touched, net lines added, and net lines removed. Growth along **all three** dimensions simultaneously with no citable mandate surfaces as a reviewer **WARN** on SCOPE-DRIFT-CHECK — it does NOT force REWORK or escalate, because the round cap already bounds non-convergent rework and a second hard gate here was redundant friction. Holding equal or shrinking along any dimension is convergent and silent. The canonical rule is in [`engineering-rules-verbatim.md`](engineering-rules-verbatim.md) §8 "Round-N must-shrink".
 
 ### 6. Commit — `/<driver> commit M<N>-NNN`
 

@@ -1,6 +1,6 @@
 # /m1-tick review
 
-Spawn the code-reviewer subagent and record its verdict on the current implementation round, with must-shrink enforcement on rework rounds.
+Spawn the code-reviewer subagent and record its verdict on the current implementation round. Must-shrink on rework rounds is advisory as of the 2026-07-19 cutover — the reviewer WARNs on a non-convergent round, it does not force escalation.
 
 Preconditions:
 
@@ -80,9 +80,8 @@ Steps:
 
    - **REWORK, round 1.** Set `status: in-progress`. Append the rework items to the ticket body under a new `## Round 1 rework` section. Print the rework items in chat. Remind the developer to address only the named items, then re-run `mvn verify`, then `/m1-tick review M1-NNN`.
 
-   - **REWORK, round N (N≥2).**
-     - If the verdict's `SCOPE-DRIFT-CHECK: FAIL` reason includes a must-shrink violation (round-N diff grew along all three dimensions vs round-(N−1) without an authorized refactor citation), set `status: escalated` and fire `escalate` with `reason: round-cap`. Must-shrink failures do NOT consume a round-cap allowance — they exit immediately because the rework is no longer convergent. This applies even when `round_cap: 3`.
-     - Otherwise, if `round_cap: 3` AND this is round 2: set `status: in-progress` and append a `## Round 2 rework` section. The next review will be round 3 and will be compared to round 2 for must-shrink.
+   - **REWORK, round N (N≥2).** (Must-shrink is advisory as of the 2026-07-19 cutover — a non-convergent round surfaces as a WARN in the reviewer's SCOPE-DRIFT-CHECK paragraph, NOT a FAIL that force-escalates; the round cap below is the bound on non-convergent rework. If the reviewer noted a must-shrink WARN, print it to chat as informational.)
+     - If `round_cap: 3` AND this is round 2: set `status: in-progress` and append a `## Round 2 rework` section. The next review is round 3.
      - Otherwise (round 2 with default `round_cap: 2`, or round 3 with any `round_cap`): set `status: escalated` and fire `escalate` with `reason: round-cap`.
 
    - **MANUAL.** Set `status: escalated`. Fire `escalate` with `reason: manual-verdict`.

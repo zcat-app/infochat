@@ -68,7 +68,7 @@ Everything else is "stop typing the subcommand names." `run` introduces exactly 
 
 ## Stop taxonomy
 
-- **Hard stop (end this run, hand to the user):** grounding confirm in the auto-picked case; a non-mechanical or cap-exceeded lint blocker, or a `complexity:high` outline FAIL; a self-check `AskUserQuestion` (genuine ambiguity / wrong-premise the developer found); any immediate-escalation trigger; round-cap / must-shrink / MANUAL from review; redteam FINDINGS; substantive merge conflict.
+- **Hard stop (end this run, hand to the user):** grounding confirm in the auto-picked case; a non-mechanical or cap-exceeded lint blocker, or a `complexity:high` outline FAIL; a self-check `AskUserQuestion` (genuine ambiguity / wrong-premise the developer found); any immediate-escalation trigger; round-cap or MANUAL from review; redteam FINDINGS; substantive merge conflict. (Must-shrink is advisory now — a reviewer WARN, not a stop.)
 - **Notify-and-continue (log it, keep going):** a lint WARN; negative-space WARN; an applied bounded self-refine of a mechanical lint blocker; round-1 REWORK; redteam out-of-model items; an incidental finding surfaced at discovery per step 3.
 
 ## Cross-cutting rules this skill must obey

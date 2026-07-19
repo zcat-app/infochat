@@ -96,16 +96,23 @@ above); read them too before evaluating.
 
 ### Files budget and scope (the ticket's frontmatter)
 
-The ticket sets `files_budget: N` (numeric upper bound). The diff MUST
-touch at most N files (including new test files). If exceeded, automatic
-FAIL on SCOPE-DRIFT-CHECK regardless of how reasonable the extra files
-seem. The numeric budget is canonical and always enforced.
+The ticket MAY set `files_budget: N` (numeric bound). As of the 2026-07-19
+cutover this is **advisory, not a hard gate**: a diff that exceeds N does
+NOT automatically FAIL SCOPE-DRIFT-CHECK. The numeric count produced the
+large majority of the corpus's bookkeeping REWORKs (78 of 133 refines +
+34 budget-breach escalations traced to file-count arithmetic) while the
+real scope control is the line-level check below — *do the changed lines
+trace to acceptance?* Note a large overage (say >1.5×N) as informational
+in the SCOPE-DRIFT-CHECK paragraph, but drive the verdict off untraceable
+changed lines and `out_of_scope`/`files_scope` membership, not off the
+count.
 
 The ticket MAY also set `files_scope: [paths/globs]`. When non-empty,
-every file in the diff MUST also match an entry in `files_scope`. A
-diffed file outside `files_scope` is automatic FAIL on SCOPE-DRIFT-CHECK.
-When `files_scope` is empty or absent, only the numeric budget applies
-and any path is acceptable (subject to `out_of_scope` exclusions).
+every file in the diff MUST match an entry in `files_scope`; a diffed file
+outside `files_scope` is a genuine **FAIL** on SCOPE-DRIFT-CHECK (the
+author declared the path boundary — a departure from it is real scope
+drift, not a count). When `files_scope` is empty or absent, any path is
+acceptable subject to `out_of_scope` exclusions.
 
 **Lifecycle-path exemption.** Three paths are workflow byproducts produced
 by the `/m1-tick` and `/redteam` skills themselves, NOT developer choices,
@@ -285,14 +292,18 @@ strings — to {{VERDICT_FILE_PATH}}:
 VERDICT: <APPROVE | REWORK | MANUAL>
 
 SCOPE-DRIFT-CHECK: <PASS | FAIL>
-  <one paragraph: which changed lines do not trace to acceptance criteria
-   or files_budget, or PASS if all do. If FAIL, name specific files/lines.
-   On round N ≥ 2, also FAIL if the diff grew along ALL THREE of
-   files-touched, lines added, AND lines removed vs round-(N−1) and the
-   round-N commit message cites no authorizing mandate — a prior-round
-   REWORK item or a user-accepted redteam finding (must-shrink: growth
-   along all three is the only failure condition; holding equal or
-   shrinking along any dimension is convergent).>
+  <one paragraph. FAIL conditions (the real scope controls): a changed
+   line that traces to no acceptance criterion / user request / orphan the
+   diff itself created; OR a diffed file outside a non-empty `files_scope`;
+   OR a touched path listed in `out_of_scope`. PASS if none. If FAIL, name
+   specific files/lines. `files_budget` is ADVISORY (2026-07-19 cutover) —
+   a file-count overage is NOT a FAIL by itself; note a large overage
+   (>1.5× the budget) as informational only. Round-N must-shrink (N ≥ 2)
+   is likewise informational: if the diff grew along all three of
+   files-touched, added, removed vs round-(N−1) with no cited mandate,
+   note it as a WARN in this paragraph — it does NOT force REWORK (the
+   round cap already bounds non-convergent rework). The verdict is driven
+   by untraceable lines and path-boundary violations, never by counts.>
 
 TEST-INTEGRITY-CHECK: <PASS | FAIL>
   <one paragraph: any forbidden patterns introduced (see

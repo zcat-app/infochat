@@ -5,8 +5,11 @@ status: pending                # pending | in-progress | in-review | escalated |
 created: <YYYY-MM-DD>          # set on first save; never edited afterwards
 last_updated: <YYYY-MM-DD>     # auto-updated by the milestone-driver skill on every status transition
 blocked_by: []
-files_budget: 8                # numeric upper bound; max files this ticket may touch (incl. tests).
-                               # Reviewer FAILs SCOPE-DRIFT-CHECK if exceeded.
+files_budget: 8                # numeric file-count hint (incl. tests). ADVISORY as of the
+                               # 2026-07-19 cutover: an overage is a reviewer note, NOT a
+                               # SCOPE-DRIFT FAIL. The hard scope gates are untraceable changed
+                               # lines, files_scope membership, and out_of_scope. Optional; may
+                               # be omitted.
                                # Umbrella tickets (per docs/process/workflow.md §Ticket-ID placeholder
                                # convention — the umbrella + subticket idiom) typically declare a small
                                # budget (e.g. 2–3) covering only the whole-topic integration test files;

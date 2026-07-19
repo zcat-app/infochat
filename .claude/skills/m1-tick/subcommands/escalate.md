@@ -4,10 +4,10 @@ Set the ticket to `escalated`, append an escalation entry, and print the six-way
 
 Reasons (auto-set by `review`/`start` or passed explicitly):
 
-- `round-cap` — round-cap returned non-APPROVE, or a must-shrink violation forced an early exit from the rework loop.
+- `round-cap` — the reviewer returned non-APPROVE at the round cap (round 2 by default, round 3 for `round_cap: 3`). (Must-shrink no longer forces an early exit — it is advisory as of the 2026-07-19 cutover.)
 - `manual-verdict` — reviewer returned MANUAL.
 - `outline-fail` — plan-writer subagent returned `OUTLINE FAILED` during `/m1-tick start` (only reachable for `complexity: high` tickets). The plan-writer subagent is defined at `.claude/agents/plan-writer.md`. (There is no `clarity-fail` reason: the ticket-readiness lint is a `start` precondition, not an escalation — a lint BLOCKER refuses the start and the ticket stays `pending`; see [`start.md`](start.md) step 1.)
-- `budget-breach` — developer is about to exceed `files_budget`.
+- `budget-breach` — the ticket's declared scope is genuinely too narrow: the developer is about to touch a path outside `files_scope` (a hard SCOPE-DRIFT boundary) that the ticket really does need, so the scope must be widened via refine. (A mere `files_budget` file-count overage is advisory as of the 2026-07-19 cutover and does NOT warrant this trigger — only a genuine `files_scope`/`out_of_scope` boundary that needs to move does.)
 - `premise-fail` — tests fail in a way that suggests the ticket's premise is wrong.
 - `loop` — two consecutive failures with the same root cause.
 - `redteam-finding` — [`/redteam`](../../redteam/SKILL.md) returned non-CLEAN and the user opened the lifecycle escalation for the affected ticket. **REFUSED if the operand ticket has `status: done`** — done commits are immutable (per the §M1 workflow rules section in this skill's SKILL.md, "never amend a passed commit"). The redteam SKILL prints the alternative recommendation in this case: draft a new remediation ticket with `remediates: <done-id>` pointing back at the done ticket, then run `/m1-tick start <new-id>`. The done ticket's `redteam_findings:` is still populated for traceability.
