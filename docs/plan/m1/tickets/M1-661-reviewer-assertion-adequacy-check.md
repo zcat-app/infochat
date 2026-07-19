@@ -5,11 +5,12 @@ status: pending
 created: 2026-07-19
 last_updated: 2026-07-19
 blocked_by: []
-files_budget: 3
+files_budget: 4
 files_scope:
   - docs/process/reviewer-prompt.md
   - docs/process/engineering-rules-verbatim.md
   - .claude/skills/m1-tick/subcommands/review.md
+  - docs/process/workflow.md
 complexity: low
 risk: medium
 round_cap: 2
@@ -87,6 +88,17 @@ acceptance:
     adjacent rationale sentence ("a commit-range diff against `main` would be
     empty here because `commit` runs after `review`") stays as-is — it is
     still true.
+  - >-
+    docs/process/workflow.md §"4. Review" describes the diff the reviewer
+    receives as `git diff $(git merge-base main HEAD)` (working-tree-vs-fork-
+    point), not `git diff main` / "working-tree-vs-main". No `git diff main`
+    wording survives anywhere in workflow.md. The existing rationale clause
+    ("a commit-range diff against `main` would be empty" because `commit`
+    runs after `review`) and the adjacent `git add -N` sentence both stay —
+    they are still true. This is the same defect as the preceding item at the
+    second of its two live sites; workflow.md self-declares as "the single
+    source of truth for the procedure" (workflow.md:3), so leaving it stale
+    is the more load-bearing half of the pair.
 test_plan:
   adds: []
   preserves:
@@ -148,9 +160,9 @@ that returns seven paths:
 | `.claude/skills/m1-tick/SKILL.md` | out-of-scope: single SCOPE-DRIFT-CHECK reference inside the must-shrink rule, not a check registry |
 | `.claude/skills/m1-tick/subcommands/escalate.md` | out-of-scope: names TEST-INTEGRITY-CHECK only, for the override restriction. The new check carries no override restriction, so no row is owed |
 | `docs/process/ticket-template.md` | out-of-scope: one SCOPE-DRIFT-CHECK mention in a `files_budget` comment |
-| `docs/process/workflow.md` | out-of-scope: its table maps FRONTMATTER FIELDS to enforcing checks. The new check derives from the diff, not from a frontmatter field, so it has no row to add |
+| `docs/process/workflow.md` | out-of-scope **for this class**: its table maps FRONTMATTER FIELDS to enforcing checks. The new check derives from the diff, not from a frontmatter field, so it has no row to add. The file is nonetheless in `files_scope` — it enters via the *second* deliverable below, which is a different defect class (a stale diff-capture description, not a missing check registration) |
 
-## Second deliverable: a stale diff-capture description in the same file
+## Second deliverable: the two stale diff-capture descriptions
 
 `reviewer-prompt.md` §"Skill responsibilities" steps 2 and 3 say the skill
 captures `git diff main`. It does not: `review.md` step 1 uses `git diff
@@ -161,15 +173,32 @@ since-landed ticket into the review as phantom changes (observed M1-096,
 this is a documentation defect — but it is the kind that reintroduces the bug
 the moment anyone re-derives the procedure from the description.
 
-It is bundled here rather than filed separately for two reasons. It lives in
-a file this ticket already opens and already lists in `files_scope`, so it
-adds no file and no budget. And it is now the odd one out of three: as of
-`82268df5` the `/redteam` skill captures its diff by the same merge-base
-rule, citing `review.md` as the pattern, which leaves this section the only
-description of the procedure that is wrong.
+`reviewer-prompt.md` is not the only site. `workflow.md:163` §"4. Review"
+describes the same capture as "`git diff main`, working-tree-vs-main" with
+the same "would be empty" rationale, and `grep merge-base
+docs/process/workflow.md` returns zero hits — nothing elsewhere in that file
+corrects it. Both sites are fixed here.
 
-Bundling is explicit, not incidental — it carries its own acceptance item, so
-every changed line traces to the contract rather than reading as
+Enumerated, so the claim is checkable rather than impressionistic: `grep -rn
+'git diff main' --include=*.md .`, excluding `docs/plan/m1/tickets/` and
+`docs/plan/m1/redteam/` (the same historical-record exclusion §Census
+applies), returns four paths. Two are **correct** — `review.md:15` and
+`redteam/SKILL.md:56` carry the string only inside an explicit negative
+callout ("**Not** `git diff main`"). Two are **wrong** and are this
+deliverable's scope: `reviewer-prompt.md:342-343` and `workflow.md:163`.
+
+Fixing both rather than one is what the ticket's own rationale demands. The
+defect matters because a wrong description reintroduces the bug when someone
+re-derives the procedure from it — and `workflow.md:3` self-declares as "the
+single source of truth for the procedure", i.e. it is precisely the document
+one re-derives from. Repairing the subordinate description while leaving the
+authoritative one stale would fix the weaker half. (An earlier draft of this
+ticket asserted `reviewer-prompt.md` was "the odd one out of three" and the
+only wrong description; the clarity pre-flight falsified that, which is why
+`workflow.md` is now in `files_scope` at `files_budget: 4`.)
+
+Bundling is explicit, not incidental — each site carries its own acceptance
+item, so every changed line traces to the contract rather than reading as
 "while we were in there".
 
 ## Acceptance
@@ -182,9 +211,11 @@ cannot block on impression; a diff adding no new test reports
 NOT-APPLICABLE; the definition disclaims §8 Semantic and clarity check 10 by
 name; §Verdict rules pins WARN as non-blocking and FAIL as at-least-REWORK;
 `engineering-rules-verbatim.md` §8 carries the canonical text;
-`review.md` step 4 registers the name so the skill extracts it; and
+`review.md` step 4 registers the name so the skill extracts it;
 §"Skill responsibilities" steps 2 and 3 describe the merge-base diff capture
-with no `git diff main` wording left in that section.
+with no `git diff main` wording left in that section; and `workflow.md`
+§"4. Review" does the same, leaving no `git diff main` wording anywhere in
+that file.
 
 ## Out-of-scope
 
@@ -222,7 +253,7 @@ named-artifact demand rather than an invitation to look for problems. It
 raises detection probability; it does not guarantee it.
 
 `risk: medium` because this changes a gate contract that every subsequent
-ticket passes through, while `complexity: low` reflects the three-file
+ticket passes through, while `complexity: low` reflects the four-file
 documentation diff. The FAIL-must-name-an-artifact rule is the guard against
 the failure mode a new blocking check usually has — noise on the 88% of
 tickets that are fine, followed by the check being overridden into
