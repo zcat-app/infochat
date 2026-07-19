@@ -31,7 +31,7 @@ When a ticket failure surfaces, the default response is to evaluate whether an e
 3. **The contract lives in code + tests + spec, not in ticket prose.** Tickets are briefs that point at the spec; the reviewer compares the diff against the spec. Do not re-state spec content inside tickets; do not police ticket-internal consistency of paraphrased spec.
 4. **`mvn verify` is the green gate.** Author claims about test behavior (will-stay-green, won't-conflict, dependency-on-X) are unnecessary — the test suite proves or disproves them at runtime. Do not require authors to predict what the suite will do.
 5. **Git is the audit trail.** Escalation history, refine reasons, prior-round verdicts — git log preserves them. Do not accumulate the same data in YAML frontmatter; redundant copies drift.
-6. **Reviewer additions over clarity additions.** When a new failure mode genuinely requires a process change, prefer a reviewer-side check (reads code + tests, ground truth) over a clarity-side check (reads prose, paraphrase risk). Clarity checks are the last resort, not the default.
+6. **Ground-truth checks over prose checks.** When a new failure mode genuinely requires a process change, prefer a check that reads ground truth — the reviewer (code + tests + the diff) or the deterministic linter (`scripts/lint-ticket.py`, mechanical facts about the ticket file) — over one that reads and judges ticket prose. The clarity-reviewer subagent (a prose-judging gate) was deleted in the 2026-07-19 cutover for exactly this reason: it FAILed ~1 in 5 tickets at a rate that never improved, ~90% of its catches were mechanical (now the linter's job), and the residue was "the ticket is wrong about the code," which the developer catches for free at implementation. A prose-judging subagent is the last resort, not the default.
 
 Apply the doctrine on every proposed process change: is this addition addressing a class with evidence, or patching a one-off? Could a deletion solve it better?
 
@@ -42,11 +42,11 @@ Apply the doctrine on every proposed process change: is this addition addressing
 ```
    pending  ─────────────────────────────────────────────────────────┐
       │  ▲                                                           │
-      │  │ refine after clarity-fail / outline-fail                  │
-      │  │ (no branch ever existed; status returns to pending,       │
-      │  │  user re-runs /<driver> start to re-trigger clarity)      │
+      │  │ refine after outline-fail                                 │
+      │  │ (no implementation yet; status returns to pending,        │
+      │  │  user re-runs /<driver> start to re-run the pre-flight)   │
       │  │                                                           │
-      ▼  │   clarity-fail / outline-fail  (skips in-progress)        ▼
+      ▼  │   outline-fail  (skips in-progress)                       ▼
    in-progress  ──────────→  in-review  ─────────────────→  done  ──→  (squash-merged into main)
    (developer)               (reviewer)                     (commit on branch)   (post-done; via /<driver> merge)
        ▲                         │
@@ -65,14 +65,14 @@ Apply the doctrine on every proposed process change: is this addition addressing
 
 Edges:
 
-- `pending → in-progress` — normal `start` path (clarity PASS or WARN; for `complexity: high` tickets, also requires the plan-writer subagent to return an outline rather than `OUTLINE FAILED`).
-- `pending → escalated` — `start`-blocked-by-clarity-FAIL OR `outline-fail` for `complexity: high` tickets (plan-writer subagent returned `OUTLINE FAILED` after the branch was created). The status never passes through `in-progress` for the clarity-fail arm; for the outline-fail arm the branch exists but is rolled back if the user resolves with refine-to-pending or abort.
+- `pending → in-progress` — normal `start` path (ticket-readiness pre-flight passes: the linter reports no BLOCKER and the developer self-check raises no blocking question; for `complexity: high` tickets, also requires the plan-writer subagent to return an outline rather than `OUTLINE FAILED`).
+- `pending → escalated` — `outline-fail` for `complexity: high` tickets (plan-writer subagent returned `OUTLINE FAILED` after the branch was created); the branch exists but is rolled back if the user resolves with refine-to-pending or abort. (A ticket-readiness lint BLOCKER does NOT escalate — `start` refuses and the ticket stays `pending` until the user fixes the mechanical defect and re-runs `start`.)
 - `in-progress → in-review` — `review` step.
 - `in-review → in-progress` — REWORK (rounds 1..N).
 - `in-review → escalated` — round-cap or `MANUAL` verdict.
 - `in-review → done` — `APPROVE` (or `OVERRIDE-APPROVE`) followed by `commit` (which lands the commit on the per-ticket branch). Squash-merge into `main` is a separate post-`done` step (`/<driver> merge`); it does not change `status` because `done` is the only terminal status.
-- `escalated → pending` — `refine` resolution when the prior escalation reason was `clarity-fail` or `outline-fail` (no branch). The user re-runs `/<driver> start` to re-trigger clarity.
-- `escalated → in-progress` — `refine` resolution when the prior escalation reason was `round-cap`, `manual-verdict`, `budget-breach`, `premise-fail`, `loop`, or `redteam-finding` (branch exists; clarity does NOT re-run).
+- `escalated → pending` — `refine` resolution when the prior escalation reason was `outline-fail` (branch existed but held no implementation; it is deleted). The user re-runs `/<driver> start` to re-run the pre-flight and re-spawn the plan-writer.
+- `escalated → in-progress` — `refine` resolution when the prior escalation reason was `round-cap`, `manual-verdict`, `budget-breach`, `premise-fail`, `loop`, or `redteam-finding` (branch exists; the pre-flight does NOT re-run).
 - `escalated → in-review → done` — `override` resolution (APPROVE bypassed; `OVERRIDE-APPROVE` recorded in `reviews:`).
 - `escalated → deferred` — `defer`; `decompose` or `spec-amend` when the operand retains residual work and will be reopened after the new ticket(s) land.
 - `escalated → abandoned` — `abandon` (decided against outright); or `decompose`/`spec-amend` when the operand is fully replaced/obsoleted by the new ticket(s) and will NOT be reopened.
@@ -109,14 +109,14 @@ If this section disagrees with `ticket-template.md`, the template wins; sync thi
 | `files_budget` | Numeric upper bound on file count touched by the diff (always enforced). | reviewer SCOPE-DRIFT-CHECK |
 | `files_scope` | Optional path/glob list. Enables negative-space check + parallelism eligibility. | reviewer NEGATIVE-SPACE-CHECK, `start --parallel` |
 | `out_of_scope` | Path/feature exclusions the diff MUST NOT touch. | reviewer OUT-OF-SCOPE-CHECK |
-| `acceptance` | Runnable / testable criteria, ideally one assertion per item. | reviewer ACCEPTANCE-CHECK, clarity pre-flight |
+| `acceptance` | Runnable / testable criteria, ideally one assertion per item. | reviewer ACCEPTANCE-CHECK, lint PROSE-VERB-IN-VERIFY |
 | `complexity` | `low` / `medium` / `high`; `high` triggers the plan-writer subagent at `start`. | `start` |
 | `risk` | `low` / `medium` / `high`; `high` triggers the commit-time `mvn verify` re-run. | `commit` |
 | `round_cap` | Default 2; may be 3 for `complexity: high` OR `risk: high` tickets. | reviewer round bookkeeping |
 | `security_relevant` | When `true`, `/redteam` is recommended after APPROVE. | `commit` reminder |
 | `migration_touch` | When `true`, serializes parallel start globally. | `start --parallel` preconditions |
-| `spec_refs` / `decision_refs` | Anchors into `docs/spec/` and the decisions log. | clarity pre-flight |
-| `clarity_check`, `reviews`, `overrides`, `redteam_findings`, `aborted_attempts`, `reopens` | Dynamic — populated by the milestone-driver skill. Authors leave empty. `clarity_check` and `reviews` carry only the LATEST entry (no per-round accumulation); `escalations` and `revisions` are not in the schema — git log is the audit trail for refine/escalation history. | the driver skill |
+| `spec_refs` / `decision_refs` | Anchors into `docs/spec/` and the decisions log. | lint SPEC-REFS-RESOLVABLE |
+| `clarity_check`, `reviews`, `overrides`, `redteam_findings`, `aborted_attempts`, `reopens` | Dynamic — populated by the milestone-driver skill. Authors leave empty. `clarity_check` (now the ticket-readiness pre-flight result: lint verdict + developer self-check) and `reviews` carry only the LATEST entry (no per-round accumulation); `escalations` and `revisions` are not in the schema — git log is the audit trail for refine/escalation history. | the driver skill |
 | Lineage (`decomposed_from`, `replaces`, `replaced_by`, `deferred_on`, `deferred_reason`, `abandoned_reason`, `spec_amend_for`, `spec_amend_parent`, `remediates`) | Populated only when applicable (escalation paths, redteam remediation on done tickets). | the driver skill |
 
 For body section order (Context → Definition of Done → Implementation notes → Big-picture notes → Out-of-scope expansion → Authorized test changes → Alternatives considered) and field defaults / comments / example values, read [`ticket-template.md`](ticket-template.md) directly.
@@ -133,8 +133,7 @@ The skill reads `docs/plan/<milestone>/tickets/`, finds tickets where `status: p
 
 ### 1. Start — `/<driver> start M<N>-NNN`
 
-- **Ticket-clarity pre-flight.** Spawn a fresh-context subagent with the prompt at [`clarity-prompt.md`](clarity-prompt.md). It validates the ticket itself: are acceptance criteria runnable, is `out_of_scope` non-empty, do `spec_refs` resolve to real anchors in `docs/spec/`, is `files_budget` plausible given the acceptance criteria. Result is recorded under `clarity_check:` in frontmatter.
-- If clarity returns `FAIL`, the start is blocked and the user is prompted to refine the ticket before implementation begins. `WARN` is informational and does not block.
+- **Ticket-readiness pre-flight.** Two parts, both in the main session — no subagent. (a) The deterministic linter `scripts/lint-ticket.py` checks the mechanical facts: `spec_refs` resolve to real anchors, `out_of_scope` is non-empty and specific, ticket-ID references resolve to files, `files_scope` covers `test_plan` paths, a security surface in `files_scope` matches `security_relevant`, a class-scoped ticket carries a §Census, acceptance items avoid unrunnable prose verbs. A BLOCKER refuses the start (the user fixes the ticket and re-runs). (b) The developer self-check (the main session applies its own judgment against the ticket AND the code it names): every acceptance item implementable without guessing, no ticket claim about existing code is false, the census grep re-runs clean. A genuine ambiguity → one `AskUserQuestion` (a question, not an escalation). Result recorded under `clarity_check:` in frontmatter. Full procedure in [`start.md`](../../.claude/skills/m1-tick/subcommands/start.md) step 1.
 - Set frontmatter `status: in-progress`. Update `last_updated`.
 - Create branch `m<N>/M<N>-NNN-<slug>` off `main`.
 - If `complexity: high`, spawn `Agent(subagent_type: "plan-writer")` with the ticket body and require an implementation outline before any code is written. (`plan-writer` is defined at `.claude/agents/plan-writer.md`; the built-in `Plan` subagent type is read-only and cannot Write the outline sidecar, so the procedure uses the custom agent.)
@@ -299,8 +298,8 @@ The ticket flow exists for code, tests, migrations, and spec changes coordinated
 | Prefix | Scope | Skipped vs ticket flow |
 |---|---|---|
 | `M<N>-NNN:` | Implementation ticket: code, tests, migrations, or spec changes coordinated with code | (full flow) |
-| `spec:` | Pure spec/design edit under `docs/spec/` or `docs/design/`, no code change | clarity, reviewer, `mvn verify`, STATUS regen |
-| `process:` | Edit under `.claude/`, `docs/process/`, `docs/plan/`, or `CLAUDE.md`, no code change | clarity, reviewer, `mvn verify`, STATUS regen |
+| `spec:` | Pure spec/design edit under `docs/spec/` or `docs/design/`, no code change | ticket-readiness pre-flight, reviewer, `mvn verify`, STATUS regen |
+| `process:` | Edit under `.claude/`, `docs/process/`, `docs/plan/`, or `CLAUDE.md`, no code change | ticket-readiness pre-flight, reviewer, `mvn verify`, STATUS regen |
 
 ### Rules
 
@@ -314,7 +313,7 @@ The ticket flow exists for code, tests, migrations, and spec changes coordinated
 
 ### When in doubt
 
-Default to the ticket flow. The cost of an unnecessary ticket is lower than the cost of an unreviewed code change slipping through under a `process:` prefix. The `spec:` and `process:` prefixes are for changes that would feel silly going through clarity-check — a typo fix in a skill prompt; a sentence-level spec refinement; a rule-rewording in `engineering-rules-verbatim.md`; replacing an LLM subagent with a deterministic script.
+Default to the ticket flow. The cost of an unnecessary ticket is lower than the cost of an unreviewed code change slipping through under a `process:` prefix. The `spec:` and `process:` prefixes are for changes that would feel silly going through the ticket-readiness pre-flight and reviewer — a typo fix in a skill prompt; a sentence-level spec refinement; a rule-rewording in `engineering-rules-verbatim.md`; replacing an LLM subagent with a deterministic script.
 
 ---
 
@@ -378,6 +377,27 @@ The slug is computed from the title at `start`. Subsequent steps (`/<driver> rev
 The procedure is identical for every consumer; the consumer's name (e.g. `m1-tick review`, `redteam --in-progress`) appears in the refusal message but the algorithm is the same.
 
 The slug is NOT used as a stable identifier — `M<N>-NNN` is. The slug is only a human-readable affordance attached to branch and file names so `git branch -a` and directory listings are scannable.
+
+---
+
+## Spec-anchor resolution (canonical)
+
+A `spec_refs:` entry has the form `<file-path> §<section-title>`. Several consumers resolve the `§<section-title>` to a concrete heading in the file: `scripts/lint-ticket.py` (SPEC-REFS-RESOLVABLE, the authoritative implementation), the reviewer subagent (SPEC-CONFORMANCE-CHECK reads the cited section by anchor range), and the plan-writer subagent. Define the algorithm once here so every consumer produces the same resolution. (Before the 2026-07-19 cutover this text lived in `clarity-prompt.md`; that file is gone and this section is its canonical replacement.)
+
+For each entry:
+
+1. Read `<file-path>`.
+2. Walk the file line-by-line maintaining a `fence_open` flag (initially false). For each line, in order:
+   a. If the line is a CommonMark fenced code-block delimiter — 0–3 spaces of leading indent, then a run of three or more backtick (U+0060) or three or more tilde (U+007E) characters, optionally followed by an info string — toggle `fence_open` and continue to the next line. Fence delimiter lines are themselves never headings.
+   b. If `fence_open` is true after step (a), skip the line. Anything inside a fenced code block is content, not document structure.
+   c. If the line matches `^[ ]{0,3}#{1,6}[ \t]+\S` (a CommonMark ATX heading), record it as a candidate heading with its line number and the count of `#` markers as its depth. Otherwise skip.
+3. For each candidate, derive the heading text by stripping the leading whitespace, the `#`-marker run, the whitespace between the markers and the title, and any trailing whitespace or trailing `#`-run.
+4. Lowercase both the candidate heading text and the searched section-title; do a substring match.
+5. If exactly one heading matches → `FOUND (line N: "<heading>")`.
+6. If zero match → `ANCHOR-NOT-FOUND`.
+7. If multiple match → prefer the heading whose depth is closest to the most recently resolved anchor's depth; tie-break by line number ascending. If still tied → `AMBIGUOUS (lines: N, M, ...)`.
+
+The linter treats `ANCHOR-NOT-FOUND` as a BLOCKER and `AMBIGUOUS` as a WARN. The reviewer, when reading a cited section for SPEC-CONFORMANCE-CHECK, reads from the resolved line until the next heading at the same-or-higher depth; on `ANCHOR-NOT-FOUND` / `AMBIGUOUS` it falls back to a whole-file read and raises SPEC-CONFORMANCE-CHECK to WARN with a note.
 
 ---
 

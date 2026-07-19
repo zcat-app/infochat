@@ -92,7 +92,7 @@ The reviewer's `ASSERTION-ADEQUACY-CHECK` asks whether a diff's new tests actual
 
 `NOT-APPLICABLE` (with a one-line reason) is the verdict when the diff adds no new test, so documentation-only and process-only diffs pass through without noise.
 
-**Scope boundaries — this rule owns only newly-added tests.** Modifications to *pre-existing* tests remain the territory of §8 Semantic and §8 Test-modification authorization above; this rule never adjudicates them. Whether a class-scoped ticket enumerated its class is the clarity gate's CLASS-COMPLETENESS check, not this one — that check asks whether the ticket *enumerated* its class, this one asks whether the tests *constrain* what the diff claims. The two must not overlap.
+**Scope boundaries — this rule owns only newly-added tests.** Modifications to *pre-existing* tests remain the territory of §8 Semantic and §8 Test-modification authorization above; this rule never adjudicates them. Whether a class-scoped ticket enumerated its class is handled before review by `scripts/lint-ticket.py` (CENSUS-PRESENT-IF-CLASS-SCOPED) and the developer's live census re-run at `start`, not by this check — that gate asks whether the ticket *enumerated* its class, this one asks whether the tests *constrain* what the diff claims. The two must not overlap.
 
 ### Round-N must-shrink (applies to every rework round, N ≥ 2)
 

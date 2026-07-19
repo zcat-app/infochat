@@ -39,13 +39,13 @@ out_of_scope:
   # to provide.
   #
   # FORWARD-REFERENCE RULE: ticket-ID references here (and anywhere else
-  # in the ticket) are validated by the clarity pre-flight. A reference
-  # to a ticket that does not yet exist as a file under docs/plan/<milestone>/
-  # tickets/ produces a clarity WARN here in prose, or a clarity FAIL when
-  # the reference is in a load-bearing frontmatter field (blocked_by,
-  # deferred_on, decomposed_from, replaces, replaced_by, spec_amend_parent,
-  # remediates). File the follow-up ticket as a skeleton before deferring
-  # work to it.
+  # in the ticket) are validated by scripts/lint-ticket.py
+  # (FORWARD-REFERENCE-RESOLVABLE). A reference to a ticket that does not
+  # yet exist as a file under docs/plan/<milestone>/tickets/ produces a
+  # lint WARN in prose, or a lint BLOCKER when the reference is in a
+  # load-bearing frontmatter field (blocked_by, deferred_on,
+  # decomposed_from, replaces, replaced_by, spec_amend_parent, remediates).
+  # File the follow-up ticket as a skeleton before deferring work to it.
 acceptance:
   # Runnable or testable items. The two preferred shapes:
   #
@@ -111,7 +111,8 @@ overrides: []                  # populated on `override` escalations
 aborted_attempts: []           # populated by `abort`; one entry per aborted attempt
 reopens: []                    # populated by `reopen`; one entry per reopen
 redteam_findings: []           # populated by /redteam; one entry per finding
-clarity_check: {}              # populated by `start` when ticket-clarity pre-flight runs (LATEST only)
+clarity_check: {}              # ticket-readiness pre-flight result populated by `start`
+                               # (lint verdict + developer self-check; LATEST only)
 ---
 
 # M<N>-NNN: <title>
@@ -127,14 +128,14 @@ relevant `spec_refs:` entry as the contract.
 
 **Required when this ticket fixes or guards a CLASS of defect** — more
 than one site of the same shape, or a guard that exists to cover a set.
-Omit the section entirely for a single-instance ticket; the clarity gate
-reports NOT-APPLICABLE and moves on.
+Omit the section entirely for a single-instance ticket.
 
 Enumerate the class MECHANICALLY, then dispose of every site it returns.
 Do not hand-list from memory: the point is to surface the sites you did
 not already know about, which is exactly where under-scoped tickets come
 from. State the enumeration so it can be re-run with Grep/Glob — the
-clarity gate repeats it and compares.
+developer re-runs it live at `start` and the reviewer checks the disposed
+sites against the diff.
 
     grep -rln "<the invariant's distinguishing token>" --include=<globs>
 
@@ -145,9 +146,12 @@ clarity gate repeats it and compares.
 | `path/to/c.java` | defer: M<N>-XXX |
 | `path/to/d.md` | out-of-scope: <reason> |
 
-Every path the enumeration returns needs a row. The clarity gate re-runs
-it and FAILs the ticket on any returned path with no row
-(CLASS-COMPLETENESS in `docs/process/clarity-prompt.md`). A deferred or
+Every path the enumeration returns needs a row. Two gates cover this:
+`scripts/lint-ticket.py` (CENSUS-PRESENT-IF-CLASS-SCOPED) WARNs at author
+time if a class-scoped ticket has no §Census section at all; the developer
+re-runs the enumeration live at `start` (step 1b of
+[`start.md`](../../.claude/skills/m1-tick/subcommands/start.md)) and
+confirms every returned path has a row before implementing. A deferred or
 out-of-scope site still counts as disposed — this is about having SEEN
 every site and decided consciously, not about fixing them all in one
 ticket.
@@ -213,15 +217,22 @@ meanings — so reach for the grep first.
 ## Pre-flight self-check (author-side)
 
 Before committing a new or revised ticket — and BEFORE running
-`/m1-tick start <id>` — run `scripts/lint-ticket.py` against the
-ticket file. The linter catches a small set of mechanical authoring
-errors at author-time so they don't cost a clarity-subagent round.
+`/m1-tick start <id>` — run `scripts/lint-ticket.py` against the ticket
+file. The linter is the mechanical half of the ticket-readiness gate:
+`/m1-tick start` runs it and refuses to start on a BLOCKER (it replaced
+the clarity-reviewer subagent in the 2026-07-19 cutover). Running it at
+author time means you fix mechanical errors before `start` ever bounces.
 
 ```bash
 python3 scripts/lint-ticket.py docs/plan/<milestone>/tickets/M<N>-NNN-*.md
 ```
 
-| Check | Catches |
-|---|---|
-| **FILES-SCOPE-COVERAGE** | `test_plan.adds` / `test_plan.modifies` paths missing from `files_scope`. Either add to `files_scope` (with a `files_budget` bump if needed) or rely on `files_budget` alone (omit `files_scope`). |
-| **PROSE-VERB-IN-VERIFY** | Acceptance items using "by reading", "by inspection", "should be present", "loop exits" — not mechanically checkable. Rewrite as a named test or a runnable command. |
+| Check | Severity | Catches |
+|---|---|---|
+| **SPEC-REFS-RESOLVABLE** | BLOCKER / WARN | A `spec_refs` entry whose file or `§section` anchor does not resolve (see `docs/process/workflow.md` §"Spec-anchor resolution"). |
+| **OUT-OF-SCOPE-PRESENT** | BLOCKER / WARN | An empty `out_of_scope` (BLOCKER), or a circular entry like "things unrelated to this ticket" (WARN). |
+| **FORWARD-REFERENCE-RESOLVABLE** | BLOCKER / WARN | A ticket-ID reference with no file under `docs/plan/*/tickets/` — BLOCKER in a load-bearing frontmatter field, WARN in prose. |
+| **SECURITY-FLAG-INFERENCE** | WARN | `files_scope` touches a security surface but `security_relevant: false` (the `/redteam` gate keys off that flag). |
+| **CENSUS-PRESENT-IF-CLASS-SCOPED** | WARN | A class-scoped ticket (parity/reconcile/plural-site framing) with no §Census section. |
+| **FILES-SCOPE-COVERAGE** | WARN | `test_plan.adds` / `test_plan.modifies` paths missing from `files_scope`. Either add to `files_scope` or rely on the numeric budget alone (omit `files_scope`). |
+| **PROSE-VERB-IN-VERIFY** | WARN | Acceptance items using "by reading", "by inspection", "should be present", "loop exits" — not mechanically checkable. Rewrite as a named test or a runnable command. |

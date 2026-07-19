@@ -58,9 +58,10 @@ PROCEDURE — read fresh, follow verbatim, never from memory:
 1. Read ${REPO}/.claude/skills/m1-tick/SKILL.md ("M1 workflow rules" section) in full.
 2. Read .claude/skills/m1-tick/subcommands/run.md and follow its sequence, reading each
    subcommand file (start.md, review.md, commit.md, merge.md) fresh at the step that invokes it.
-   Spawn the gate subagents (clarity-reviewer, plan-writer if complexity:high, code-reviewer,
-   threat-actor via the /redteam skill when security_relevant: true) exactly as those files
-   prescribe, using their rendered prompt templates from docs/process/.
+   Run the ticket-readiness pre-flight (scripts/lint-ticket.py + developer self-check, in-session)
+   and spawn the gate subagents (plan-writer if complexity:high, code-reviewer, threat-actor via
+   the /redteam skill when security_relevant: true) exactly as those files prescribe, using their
+   rendered prompt templates from docs/process/.
 
 UNATTENDED-BATCH POLICIES (resolve the user-gated menus to their safe arms; they change no other rule):
 - START: invoke the start procedure WITH --parallel semantics (worktree branch), even if no
@@ -77,7 +78,8 @@ UNATTENDED-BATCH POLICIES (resolve the user-gated menus to their safe arms; they
   flock -w 1800 "$(git -C ${REPO} rev-parse --git-common-dir)/m1-batch-main.lock" <cmd>
   so the lines never interleave main mutations. Commits on your own ticket branch in your own
   worktree need no lock.
-- HARD STOPS: on any documented halt — clarity FAIL after the one self-refine, a structural
+- HARD STOPS: on any documented halt — a lint BLOCKER surviving the one self-refine or a
+  self-check ambiguity question, a structural
   blocker, an immediate-escalation trigger (files_budget breach, out-of-scope path, premise-fail
   test, two same-root-cause failures), review round-cap / must-shrink / MANUAL, redteam
   FINDINGS, substantive merge conflict, or a red verify you cannot fix in-band — STOP. Leave

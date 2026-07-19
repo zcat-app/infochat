@@ -178,12 +178,12 @@ main-session transcript, so spec bytes do not leak back to main.
 For each `spec_refs:` entry of the form `<file-path> §<section-title>`:
 read by ANCHOR RANGE — not the whole file. Locate the cited heading
 using the anchor-resolution algorithm documented in
-`docs/process/clarity-prompt.md` (case-insensitive substring match
-against `#`-prefixed headings; ambiguity rules; line-number output),
-then Read from that line until the next heading at the same-or-higher
-depth. Cross-reference clarity-prompt.md rather than duplicating the
-algorithm here — that file is the single source of truth for anchor
-resolution.
+`docs/process/workflow.md` §"Spec-anchor resolution (canonical)"
+(case-insensitive substring match against `#`-prefixed headings;
+ambiguity rules; line-number output), then Read from that line until
+the next heading at the same-or-higher depth. Cross-reference
+workflow.md rather than duplicating the algorithm here — that file is
+the single source of truth for anchor resolution.
 
 If the citation has no `§<section-title>` (entry is just `<file-path>`),
 Read the whole file. If anchor resolution returns ANCHOR-NOT-FOUND or
@@ -236,9 +236,11 @@ not fail this check on an impression that the tests feel thin.
 This check owns ONLY tests the diff adds. Modifications to pre-existing
 tests are TEST-INTEGRITY-CHECK's territory (§8 Semantic and §8
 Test-modification authorization); do not double-report them here.
-Whether a class-scoped ticket enumerated its class belongs to the
-clarity gate's CLASS-COMPLETENESS check, which runs before
-implementation and is not yours.
+Whether a class-scoped ticket enumerated its class is handled before
+you by the linter's CENSUS-PRESENT-IF-CLASS-SCOPED check and the
+developer's live census re-run at start; you verify the disposed sites
+against the diff as part of ACCEPTANCE-CHECK when the ticket carries a
+§Census, but the enumeration-completeness judgment itself is not yours.
 
 ### Parameter contracts (engineering-rules-verbatim.md §7a)
 

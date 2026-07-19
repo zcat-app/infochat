@@ -18,7 +18,7 @@ The point: surface the implementation shape, ordering pitfalls, and risks BEFORE
 
 ## Single source: the rendered prompt
 
-The skill spawns you with a stub pointing at a rendered prompt file (template: `docs/process/plan-prompt.md`). That file is the single source for: the inputs to load (the ticket via Read, with the id-mismatch abort rule; `spec_refs` anchors resolved by you via the algorithm in `docs/process/clarity-prompt.md`), the six sections the outline must cover, the sidecar format, the OUTLINE FAILED conditions and block format, and the three-line success reply. Apply it as written; this file deliberately does not duplicate any of it (single-source rule: when the template changes, there is no second copy here to drift). The two disciplines below are the agent-level rules the template assumes.
+The skill spawns you with a stub pointing at a rendered prompt file (template: `docs/process/plan-prompt.md`). That file is the single source for: the inputs to load (the ticket via Read, with the id-mismatch abort rule; `spec_refs` anchors resolved by you via the algorithm in `docs/process/workflow.md` §"Spec-anchor resolution (canonical)"), the six sections the outline must cover, the sidecar format, the OUTLINE FAILED conditions and block format, and the three-line success reply. Apply it as written; this file deliberately does not duplicate any of it (single-source rule: when the template changes, there is no second copy here to drift). The two disciplines below are the agent-level rules the template assumes.
 
 ## Ground-truth discipline (critical)
 

@@ -187,13 +187,13 @@ These are working-style heuristics for keeping the main conversation's context u
 
 ## M1 workflow (in force for the v1 build)
 
-M1 work is ticket-driven via the `/m1-tick` skill. The full rule set — lifecycle, round cap, must-shrink, clarity preflight, escalation, reviewer, parallelism, `mvn verify` log capture — lives in [`.claude/skills/m1-tick/SKILL.md`](.claude/skills/m1-tick/SKILL.md) §M1 workflow rules and loads when you invoke the skill. The universal workflow specification is [`docs/process/workflow.md`](docs/process/workflow.md); M1-specific framing is [`docs/plan/m1/README.md`](docs/plan/m1/README.md).
+M1 work is ticket-driven via the `/m1-tick` skill. The full rule set — lifecycle, round cap, must-shrink, ticket-readiness pre-flight (deterministic linter + developer self-check), escalation, reviewer, parallelism, `mvn verify` log capture — lives in [`.claude/skills/m1-tick/SKILL.md`](.claude/skills/m1-tick/SKILL.md) §M1 workflow rules and loads when you invoke the skill. The universal workflow specification is [`docs/process/workflow.md`](docs/process/workflow.md); M1-specific framing is [`docs/plan/m1/README.md`](docs/plan/m1/README.md).
 
 Tickets live in `docs/plan/m1/tickets/M1-NNN-<slug>.md`; status board at `docs/plan/m1/STATUS.md` (regenerated, never hand-edited). Invoke `/m1-tick next` to see the next runnable ticket; `/m1-tick start <id>` to begin work. Adversarial security review is a separate skill: `/redteam`.
 
 ### Commit prefixes (not every change is a ticket)
 
-The ticket flow exists for code, tests, migrations, and spec changes coordinated with code. Pure-doc edits (spec, design, process, skills, agents) bypass clarity-check, reviewer, `mvn verify`, and STATUS regen — commit them directly on `main` with a non-ticket prefix:
+The ticket flow exists for code, tests, migrations, and spec changes coordinated with code. Pure-doc edits (spec, design, process, skills, agents) bypass the ticket-readiness pre-flight, reviewer, `mvn verify`, and STATUS regen — commit them directly on `main` with a non-ticket prefix:
 
 | Prefix | When | Example |
 |---|---|---|

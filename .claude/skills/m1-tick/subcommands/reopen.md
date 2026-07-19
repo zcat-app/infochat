@@ -36,5 +36,5 @@ Steps:
 5. Print:
    ```
    M1-NNN reopened (status: pending).
-   Run `/m1-tick start M1-NNN` to begin (clarity pre-flight will run).
+   Run `/m1-tick start M1-NNN` to begin (ticket-readiness pre-flight will run).
    ```

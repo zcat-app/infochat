@@ -48,9 +48,9 @@ Write tools accept either form when the agent's CWD is the repo root.
    citing the mismatch as your chat reply, and do NOT Write the
    outline file.
 3. For each entry in the ticket's `spec_refs:` list (frontmatter),
-   resolve the anchor yourself using the same algorithm documented in
-   `docs/process/clarity-prompt.md` §"`spec_refs` anchor resolution
-   algorithm". Resolve every spec_ref before beginning the outline.
+   resolve the anchor yourself using the algorithm documented in
+   `docs/process/workflow.md` §"Spec-anchor resolution (canonical)".
+   Resolve every spec_ref before beginning the outline.
    On ANCHOR-NOT-FOUND or AMBIGUOUS for a load-bearing anchor —
    i.e. the implementer cannot proceed without re-reading the cited
    section — escalate via OUTLINE FAILED. Otherwise flag as a risk
@@ -182,7 +182,7 @@ escalation rather than letting the developer start.
 
 ## Skill responsibilities (what `/m1-tick start` does around the prompt)
 
-1. After the clarity pre-flight passes, check the ticket's `complexity` field. If `complexity: high`, continue; otherwise skip the Plan step.
+1. After the ticket-readiness pre-flight passes (linter + developer self-check), check the ticket's `complexity` field. If `complexity: high`, continue; otherwise skip the Plan step.
 2. Pre-allocate the outline sidecar path at `target/m1-tick-outline-{{ID}}.md`.
 3. Substitute three placeholders: `{{TICKET_ID}}`, `{{TICKET_FILE_PATH}}` (the ticket file under `docs/plan/<milestone>/tickets/`), and `{{OUTLINE_FILE_PATH}}`. No content placeholders — the subagent loads the ticket and each cited spec file via Read in its own fresh context.
 4. Spawn `Agent(subagent_type: "plan-writer", prompt: <substituted>, description: "Implementation outline M<N>-NNN")`. Foreground.
