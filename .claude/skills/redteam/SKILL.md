@@ -40,12 +40,22 @@ If the args don't match, print the table above and stop.
 | `id-range <a..b>` | commit before `a` landed | commit when `b` landed |
 | `release <tag>` | previous release tag | `<tag>` (or `main` if not yet tagged) |
 
-Capture via shell redirection so the diff bytes never enter the main-session transcript: `git diff <base>...<head> > target/redteam-diff-<target-slug>.diff` (`<target-slug>` per the slug rule in step 7).
+Capture via shell redirection so the diff bytes never enter the main-session transcript (`<target-slug>` per the slug rule in step 7). Which command depends on whether the target resolves to a commit range or to uncommitted working-tree state:
+
+- **Commit range** (every target form except the uncommitted branch form below): `git diff <base>...<head> > target/redteam-diff-<target-slug>.diff`
+- **Uncommitted branch form** (see the single-ticket algorithm, step 2): `git diff $(git merge-base main HEAD) > target/redteam-diff-<target-slug>.diff`
+
+**Refuse on an empty diff.** After capture, if the diff file is zero-length, do NOT render the prompt or spawn the adversary — an audit of an empty diff returns CLEAN, and that verdict is indistinguishable in the record from a real one. Print the resolved base/head and the form that produced them, and stop. Fail-closed is the whole point: a silent vacuous CLEAN is worse than no audit, because it is persisted to `redteam_audits:` as evidence the ticket was audited.
 
 **Single-ticket diff-range algorithm.** Run in order; stop at the first form that succeeds:
 
 1. **Try the merged form.** Run `git log --grep="^<ticket-id>: " --format=%H main` to find the squash-merge commit subject (commit messages start with `<ticket-id>: <imperative summary>` per the workflow's commit conventions). If exactly one commit hash returns, set `BASE = <hash>^` and `HEAD = <hash>`. Done.
-2. **Try the branch form** (only if `--in-progress` was passed; otherwise skip to step 3 and refuse). The expected branch name is `m<N>/<ticket-id>-<slug>` (e.g. `m1/M1-007-rss-fetcher`). Compute the slug from the ticket title per the canonical rule in [`docs/process/workflow.md`](../../../docs/process/workflow.md) §"Naming conventions (slug, branch, ticket file)". Check whether the branch exists with `git rev-parse --verify --quiet refs/heads/m<N>/<ticket-id>-<slug>`. If exact-match exists, set `BASE = main` and `HEAD = m<N>/<ticket-id>-<slug>` (use `main...m<N>/<ticket-id>-<slug>` so the diff shows what's on the branch but not main). If no exact match, fall back to globbing `m<N>/<ticket-id>-*` per the workflow's slug-drift fallback (refuse if zero or multiple matches). Done.
+2. **Try the branch form** (only if `--in-progress` was passed; otherwise skip to step 3 and refuse). The expected branch name is `m<N>/<ticket-id>-<slug>` (e.g. `m1/M1-007-rss-fetcher`). Compute the slug from the ticket title per the canonical rule in [`docs/process/workflow.md`](../../../docs/process/workflow.md) §"Naming conventions (slug, branch, ticket file)". Check whether the branch exists with `git rev-parse --verify --quiet refs/heads/m<N>/<ticket-id>-<slug>`; if no exact match, fall back to globbing `m<N>/<ticket-id>-*` per the workflow's slug-drift fallback (refuse if zero or multiple matches). Then pick the diff form by whether the branch carries any commit — `git rev-list --count main..<branch>`:
+
+   - **Count > 0 — committed branch work.** Set `BASE = main` and `HEAD = <branch>`, and capture the commit range `main...<branch>` so the diff shows what is on the branch but not main.
+   - **Count == 0 — the implementation is uncommitted working-tree state.** This is the normal state at the `/m1-tick run` redteam gate, because `run` invokes the audit *before* [`commit.md`](../m1-tick/subcommands/commit.md) lands anything on the branch. A commit-range diff is empty here, so the adversary would be handed nothing and would return a vacuous CLEAN. Capture working-tree-vs-fork-point instead, mirroring what [`review.md`](../m1-tick/subcommands/review.md) step 1 already does for the reviewer so both gates audit byte-identical input: run `git add -N <untracked-files-in-the-working-tree>` first so newly created files appear in the diff (intent-to-add; the `-N` entries are absorbed by the explicit `git add` at commit time and need no separate cleanup), then set `BASE = $(git merge-base main HEAD)` and `HEAD = <working tree>`. **Not** `git diff main`: in a worktree pinned behind a moved `main`, diffing against `main` drags every since-landed ticket into the audit as phantom changes (observed for the reviewer as M1-096, 2026-05-30; the same topology reaches this skill).
+
+   Done.
 3. **Otherwise refuse** with:
    ```
    /redteam <ticket-id>: cannot resolve diff range.
