@@ -1012,26 +1012,29 @@ and makes the digest query depend on row presence.
   etc.) are never interruptible because their side effects may
   already be partially committed. The in-flight LLM
   stream is closed and any in-flight read-only tool call is
-  abandoned: the worker discards the in-flight result, releases the
-  DB connection, and moves on. **In v1 every tool in the closed
-  allowlist (`security.md` §Prompt-injection defenses —
-  `searchPosts`, `getPost`, `getReferences`, `recallMemory`,
-  `listSaves`) is a read-only DB query**, so the cancellation
-  primitive is `pg_cancel_backend(pid)` at the released connection,
-  best-effort because Postgres may complete the query before the
-  cancel takes effect. Tools added in future spec amendments MUST
-  define their own cancellation primitive before being added to
-  the registry; `/stop` semantics are spec-load-bearing and a new
-  tool with no cancellation story would silently weaken the
-  guarantee. As an additional safety net, every interruptible
-  read-only query (chat-mode tool calls, on-demand `/summary`)
-  runs under a profile-driven `statement_timeout` that bounds the
-  worst case even when `pg_cancel_backend` fails. Once outbound
-  delivery has begun the message is not unsent. Idempotent (no-op
-  with a friendly reply when nothing is in flight).
-  Audit-before-effect still holds — any audit row written before
-  cancellation stays. The progress notifier (decision D31) renders
-  a final "stopped" state on the in-place message. See decision
+   abandoned: the worker discards the in-flight result, releases the
+   DB connection, and moves on. **In v1 every tool in the closed
+   allowlist (`security.md` §Prompt-injection defenses — see the marked
+   `<!-- tool-allowlist:begin -->` / `<!-- tool-allowlist:end -->` table
+   for the single source of truth) is a read-only DB query**, so the cancellation
+   primitive is `pg_cancel_backend(pid)` at the released connection,
+   best-effort because Postgres may complete the query before the
+   cancel takes effect. `helpLookup` (M1-664) follows the same
+   primitive: a single read-only pgvector cosine probe over
+   `doc_embedding`, armed via `CancellationService.armToolConnection`
+   like every other chat tool. Tools added in future spec amendments MUST
+   define their own cancellation primitive before being added to the
+   registry; `/stop` semantics are spec-load-bearing and a new
+   tool with no cancellation story would silently weaken the
+   guarantee. As an additional safety net, every interruptible
+   read-only query (chat-mode tool calls, on-demand `/summary`)
+   runs under a profile-driven `statement_timeout` that bounds the
+   worst case even when `pg_cancel_backend` fails. Once outbound
+   delivery has begun the message is not unsent. Idempotent (no-op
+   with a friendly reply when nothing is in flight).
+   Audit-before-effect still holds — any audit row written before
+   cancellation stays. The progress notifier (decision D31) renders
+   a final "stopped" state on the in-place message. See decision
   D35.
 - `/retry` [`--digest`] — regenerates the prose for the last
   summary-producing command. Re-runs the LLM stage only;
@@ -1474,6 +1477,26 @@ notice interpolates the count only — never post UIDs, titles, or other
 feed-derived text. Degrade and rejection replies (unavailable, in-flight,
 ceiling-gated, refusal, /stop) carry no provenance notice. Exact wording
 lives in design notes (05 §5.4.6).
+
+**Command-intent retrieval is match-not-assert** (decision D66, M1-664).
+The `helpLookup` tool resolves a free-text intent to a catalogue command
+name via one pgvector cosine probe against the `doc_embedding` corpus,
+built at Provider startup from the runtime `HelpCommandHandler.CATALOGUE`
+plus the `CommandIntentSynonyms` seed map. The tool returns the matched
+command NAME plus the catalogue's one-line short-help line, composed at
+call time from the runtime catalogue — embedded text is used only for
+MATCHING, never for ASSERTING, so a stale intent document can degrade a
+match but can never produce wrong syntax. The tier filter rides INSIDE
+the SQL WHERE clause (`target_ref = ANY(?)` bound to the caller's visible
+command-name set), so an invisible command's name never enters the model
+context — the existence-oracle defense M1-647 established, widened from
+the slash-command unknown-name path to free-text input. Below the
+calibrated similarity threshold the tool returns no command and the agent
+is directed to say it does not know and point at `/help <name>` rather
+than restating command syntax from memory. The chat delivery path — how
+a matched command's usage reaches the user — is governed by the M1-663
+spec amendment and implemented by M1-665; this section is deliberately
+silent on it.
 
 **Conversational refinement recovers a weak or ambiguous first answer.**
 In a plain-text messaging surface there are no buttons or facets, so a

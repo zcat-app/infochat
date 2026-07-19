@@ -1,0 +1,120 @@
+RED-TEAM VERDICT: CLEAN
+
+Audited M1-664 (helpLookup chat tool + doc_embedding corpus V60) against
+docs/spec/security.md in full. Every threat-model commitment the diff
+touches is delivered. Detail of what was checked and why each is clean:
+
+1. Tier-filter-before-return (existence-oracle defense, §Prompt-injection
+   defenses helpLookup row; D66; M1-647 widened to free-text).
+   PROMISE: "The tier filter runs INSIDE the query (target_ref = ANY(?)
+   bound to the caller's visible command set ...), so an invisible
+   command's name never enters the model context."
+   VERIFIED: HelpLookupTool.execute (diff lines 691-697, 742-749) computes
+   visibleTargets via helpHandler.resolveCallerTier(...) + helpHandler.visible(...)
+   BEFORE the SQL and binds them as target_ref = ANY(?) inside the WHERE.
+   The returned target_ref is always a member of visibleTargets. The
+   group-admin leg (HelpCommandHandler.resolveCallerTier, diff 496-504)
+   fails CLOSED: isGroupAdmin(scopeId,userId) returns false on any scopeId
+   that is not a groups.id where the user is admin, so a mismatch under-
+   reports privilege (fewer visible commands) — it can never over-report.
+   No AUTH-BYPASS / PERM-ESCAL / INFO-LEAK path. The user can already
+   enumerate their visible commands via /help, so helpLookup is not a new
+   oracle.
+
+2. Match-not-assert (§Prompt-injection defenses; D66 invariant 1).
+   PROMISE: "the returned description is composed at call time from the
+   runtime HelpCommandHandler.CATALOGUE's short-help bundle key, never
+   from the indexed text ... Full usage/examples bodies never enter the
+   model context."
+   VERIFIED: describe() (diff 776-783) resolves bundleLoader.get(entry.bundleKey())
+   from the in-memory CATALOGUE; the stored row text is never read at
+   lookup time (lookup() SELECTs only target_ref). usageKey/examplesKey
+   are never returned. matchJson JSON-escapes both fields (JsonEscaper).
+
+3. Input length cap before SQL (§Prompt-injection defenses: "All free-form
+   string ... inputs ... are length-bounded ... rejected by the tool
+   dispatcher before any SQL runs").
+   VERIFIED: ChatToolDispatcher.validateInputLengths/validateValue
+   (ChatToolDispatcher.java 207-255) recurses over every arg generically
+   (including helpLookup's "query") and returns a typed ValidationError
+   before tool.execute; the embed round-trip and pgvector probe therefore
+   only run on a query <= infochat.chat.tool.input-max-length.
+
+4. D19 determinism (§Prompt-injection defenses; D66 invariant 3).
+   VERIFIED: lookup() decides the match entirely in SQL (distance
+   threshold + ORDER BY distance ASC LIMIT 1); the LLM never chooses. The
+   only reproducibility caveat (HNSW approximate NN + no secondary tie-
+   break) is inherent to the spec-chosen index and applies equally to the
+   existing semanticSearch tool — noted OUT-OF-MODEL, not a delivery gap.
+
+5. SQL injection.
+   VERIFIED: all params are PreparedStatement-bound; the query vector is
+   bound as a text literal via ?::vector (setString), doc_kind is a
+   constant, and target_ref/doc_id arrays go through conn.createArrayOf.
+   No string concatenation of untrusted values. Vector floats come from
+   the local embedding backend, not the attacker.
+
+6. Least-privilege DB grants (§DB roles; D66; V60).
+   VERIFIED: V60 grants infochat_provider SELECT, INSERT, DELETE and
+   REVOKEs UPDATE (diff 461-463); the Collector is granted nothing. The
+   DELETE-then-INSERT upsert (DocEmbeddingDao.upsert) matches the narrow
+   grant. A Provider SQL-injection foothold still cannot UPDATE the corpus
+   in place.
+
+7. Closed tool allowlist, parity-guarded (§Prompt-injection defenses:
+   "The v1 list is closed at spec level").
+   VERIFIED: security.md marked table, ChatToolRegistry.TOOL_NAMES,
+   ChatToolDispatcher.tools map, ChatAgent.TOOL_INSTRUCTIONS, and the
+   design mirrors (04-security.md, 05-llm-and-embeddings.md) all move
+   6->7 consistently, and the CI parity tests
+   (ChatToolRegistryTest.registryContainsExactlySpecTools,
+   new ChatAgentTest.everyRegisteredToolIsAdvertised) enforce it.
+
+8. Availability / round-1 DOS remediation (§Failure handling: "A complete
+   LLM outage degrades quality, not safety").
+   VERIFIED: CommandIntentIndexBuilder.onStart (diff 1030-1049) catches
+   RuntimeException, logs ERROR, and continues Provider startup; an
+   embedding-backend failure at boot leaves the corpus empty/stale and
+   HelpLookupTool returns {"command":null}. The stale inner message
+   "refusing startup with a partial index" is thrown as IllegalStateException
+   which IS a RuntimeException caught by onStart, so the actual behavior is
+   degrade-not-abort (pinned by CommandIntentIndexIT.
+   embeddingBackendFailureAtStartupDoesNotAbort). At chat time the tool
+   likewise catches embed failure and degrades (HelpLookupToolIT.
+   embeddingBackendFailureDegradesToNoMatch). The chat-time cost is
+   bounded by the per-turn tool call cap (25), the identical-call cache,
+   and the per-user LLM rate bucket — no new unbounded surface beyond the
+   existing semanticSearch envelope.
+
+9. Sanitizer / no post-sanitize append (§LLM output sanitizer;
+   Delivery-ordering contract; M1-648 r2 regression).
+   VERIFIED: helpLookup output re-enters the model context and the final
+   reply passes through the outbound sanitizer unchanged; ChatAgentTest.
+   noToolDerivedTextIsAppendedAfterSanitize pins that tool-result bytes
+   are neither pre-pended pre-sanitize nor appended post-sanitize. Any
+   admin command name a legitimately-admin caller surfaces is still
+   stripped by the outbound admin-command sanitizer.
+
+10. Audit coverage: helpLookup is a read-only chat tool; like the other
+    six read tools it is not individually audit-logged, which is
+    consistent with the existing tool surface (audit-before-effect applies
+    to the deterministic command path, step 8, not to LLM-internal tool
+    calls). No AUDIT-EVASION gap introduced.
+
+FINDINGS: none.
+
+OUT-OF-MODEL:
+  - HNSW is an approximate-nearest-neighbor index and lookup() has no
+    secondary tie-break key after ORDER BY distance ASC LIMIT 1, so
+    "reproducible on unchanged DB state" (D19) is approximate. This is
+    inherent to the spec-chosen pgvector HNSW index and already applies to
+    semanticSearch; the security-relevant D19 property (the LLM never
+    chooses the match; invisible commands never surface) is unaffected.
+    Flagged only so the user can decide whether strict tie-break
+    determinism is worth a deterministic secondary sort.
+  - Whether the query text (LLM-supplied, attacker-influenced) stays on
+    the deployment depends on infochat.embeddings.* pointing at a local
+    backend (D54). Operator-set config is trusted per §Threat model, and
+    this is the identical posture as the existing semanticSearch tool, so
+    it is not a new gap; noted only because helpLookup adds one more embed
+    call site that inherits that operator-config dependency.

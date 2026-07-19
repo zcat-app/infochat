@@ -1,0 +1,7 @@
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/CommandIntentSynonyms.java:60:     * unrelated query — {@code ban} against {@code lang}, three edits
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:113:        /** Any non-banned user, both scopes. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:167:            new CommandHelp("ban", BundleKeys.HELP_CMD_BAN_SHORT, BundleKeys.HELP_CMD_BAN_USAGE, BundleKeys.HELP_CMD_BAN_EXAMPLES, HelpTier.BOT_ADMIN),
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:168:            new CommandHelp("unban", BundleKeys.HELP_CMD_UNBAN_SHORT, BundleKeys.HELP_CMD_UNBAN_USAGE, BundleKeys.HELP_CMD_UNBAN_EXAMPLES, HelpTier.BOT_ADMIN),
+infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java:179:        llmProvider.responses.add(new LlmResponse("Try /ban user123"));
+infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java:184:        assertEquals("Try /ban user123", sanitizerLastInput);
+infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java:567:        llmProvider.responses.add(new LlmResponse("Try /ban user123"));

@@ -251,6 +251,30 @@ Adding a fallback chain is a v2 candidate.
 - The pgvector index type is profile-driven (decision D27): HNSW for the                                                                                                                                                                              
   laptop / vps / remote profiles; IVFFlat for Pi (cheaper build,
   acceptable recall at the small live-set size).
+- **Second embedded corpus — command intents** (decision D66, M1-664).
+  The `doc_embedding` table ships a second embedded corpus alongside
+  `post_embedding`: one row per catalogue command, ~41 documents of a
+  sentence or two, written by the Provider-side `CommandIntentIndexBuilder`
+  at every startup. The table is the structural opposite of
+  `post_embedding` on every load-bearing axis: NOT partitioned (an intent
+  document has no TTL — it is correct until the command itself changes),
+  Provider-owned (the builder is the sole writer; the Collector holds
+  nothing on it), and grant-opened to provider INSERT + DELETE so the
+  DELETE-then-INSERT upsert can run. The `embedding_metadata` singleton
+  identity guard covers BOTH corpora — one model, one dimension
+  app-wide — so the model/dimension identity assumption holds uniformly.
+  The corpus is read by the chat-side `helpLookup` tool, which embeds
+  the model-supplied free-text query and probes for the nearest
+  command-intent document. The match is decided entirely by SQL (D19:
+  the LLM never picks the match), and the returned description is
+  composed at call time from the runtime catalogue (match-not-assert —
+  a stale intent document can degrade a match but can never produce
+  wrong syntax). A content-hash skip on warm restart means steady-state
+  startup cost is one SELECT (no embedding calls); a change to the
+  source text or to the active embedding model forces a re-embed of the
+  affected rows, so a stale vector can never outlive its source text.
+  The chat delivery path is governed by the M1-663 spec amendment and
+  implemented by M1-665; this section is deliberately silent on it.
 
 ## Translation flow
 

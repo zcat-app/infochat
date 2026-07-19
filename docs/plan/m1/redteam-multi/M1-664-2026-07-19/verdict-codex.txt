@@ -1,0 +1,6 @@
+RED-TEAM VERDICT: UNAVAILABLE
+
+AUDITOR: codex
+REASON: exit status 1
+
+This auditor produced no verdict. Treat as NO DATA, never as "no findings".

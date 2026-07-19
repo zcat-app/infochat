@@ -1,0 +1,182 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: DOS
+    SEVERITY: high
+    PROMISE: docs/spec/security.md §Failure handling: "A complete LLM outage
+             degrades quality, not safety." The same section binds every
+             LLM-tier failure to a *degrade* path, never a service-stop:
+             "**Chat-mode replies** with the chat-agent LLM unreachable →
+             return a localized 'chat assistant is unavailable, try again
+             later' friendly error from the bundle (D43)"; and for malformed
+             backend output, "**Schema-violating LLM output** (wrong JSON
+             shape, unexpected label value, missing required field) is
+             treated identically to an unparseable reply at every stage:
+             retry once, then apply the stage-specific failure path below."
+             The circuit-breaker bullet reinforces the invariant: "Fail-fast
+             changes WHEN a doomed call fails, never WHERE it goes or how the
+             task degrades."
+    GAP: CommandIntentIndexBuilder converts an LLM-tier (embedding backend)
+         dependency into a hard, boot-blocking dependency for the Provider —
+         the ONLY user-facing component (CLAUDE.md §Two services;
+         docs/spec/architecture.md). The builder is a plain
+         `@Observes StartupEvent` observer, so any throw from it aborts
+         Quarkus startup:
+           - diff.patch:998 / CommandIntentIndexBuilder.java:106 —
+             `void onStart(@Observes StartupEvent event)`, no failure
+             containment around the body.
+           - diff.patch:1060-1065 —
+             `catch (RuntimeException e) { throw new IllegalStateException(
+             "...embedding backend failed building ... — refusing startup
+             with a partial index", e); }`. An embedding backend that is
+             down, still loading a model, or merely slow past its timeout at
+             Provider boot takes the whole Provider down.
+           - diff.patch:1066-1071 — `if (embeddings.size() !=
+             textsToEmbed.size()) { throw new IllegalStateException(...); }`.
+             A degraded backend returning a short vector list also refuses
+             boot, with no retry-once step, directly contradicting the
+             spec's "retry once, then apply the stage-specific failure path"
+             rule for schema-violating backend output.
+           - diff.patch:1246-1249 and 1276-1278 (DocEmbeddingDao) — the DAO's
+             SQLException wrappers rethrow as IllegalStateException into the
+             same startup observer, so a transient DB hiccup during the
+             corpus write is likewise a boot abort.
+         The failure posture is stated as deliberate in the class javadoc
+         (diff.patch:956-964: "a loud startup failure ... not a silent
+         degradation to an empty index"), but the chosen blast radius is the
+         entire Provider, not the helpLookup feature. The tool's own
+         chat-time path already implements the correct degrade behavior
+         (diff.patch:699-706: embed failure → `noMatchJson()`), so an empty
+         or partial index at boot would degrade helpLookup to "no match" —
+         exactly the "quality, not safety" outcome the spec demands — with
+         every other Provider surface (ban enforcement, admin commands,
+         invite gate, digests, all deterministic commands) intact. The diff
+         chooses total unavailability over that.
+         Aggravating: the builder's own javadoc (diff.patch:993-996,
+         CommandIntentIndexBuilder.java:99-104) concedes it "carries no
+         explicit priority and relies on that default ordering" for running
+         after Flyway and EmbeddingMetadataStartupGuard — the ordering that
+         must hold for the boot to succeed at all is unpinned.
+    REPRO: 1. Operator runs the shipped `docker-compose.yml`, which starts
+              Postgres+pgvector, Ollama, and the Provider in parallel
+              (CLAUDE.md §Build / run quick reference). Ollama's first
+              `nomic-embed-text` model load takes tens of seconds to
+              minutes; the Provider's Flyway+ARC boot completes in seconds.
+           2. CommandIntentIndexBuilder.onStart fires, finds doc_embedding
+              empty (cold start), computes ~41 deltas, and calls
+              `embeddingProvider.embed(textsToEmbed)`.
+           3. The call fails — connection refused, or a connect/read timeout
+              per `infochat.embeddings.timeout-ms` — throwing a
+              RuntimeException. (Note the M1-606 circuit breaker makes this
+              FASTER to fail, not softer: once OPEN it short-circuits with
+              the typed provider-unreachable signal, which is still a
+              RuntimeException here.)
+           4. diff.patch:1060 catches it and rethrows IllegalStateException.
+              Quarkus startup aborts. The Provider exits.
+           5. Observed result: no messaging adapter connects. Every user of
+              every adapter is unserved. A bot admin cannot `/ban`, cannot
+              `/revoke-admin`, cannot reach `/quarantine`. Under a container
+              restart policy the Provider crash-loops for as long as the
+              embedding backend is unavailable.
+           6. Why the system shouldn't have allowed it: the failed subsystem
+              is a chat-tier *help-lookup convenience* whose own runtime path
+              already degrades gracefully to `{"command":null}`. The spec
+              commits that an LLM outage costs quality, not safety; here it
+              costs the availability of every security control the Provider
+              enforces, including ban intake and admin authorization.
+           Adversarial amplification (secondary, same defect): an attacker
+           with chat access can drive the local embedding endpoint with
+           model-elected `semanticSearch` + `helpLookup` calls (up to
+           ChatAgent.MAX_TOOL_ITERATIONS = 10 embeds per metered turn, each
+           an embed round-trip — diff.patch:697 and ChatAgent.java:63). If
+           that load pushes the backend past its timeout window, any
+           concurrent Provider restart converts a degraded-quality condition
+           into a total outage.
+    SUGGESTED-FIX-CLASS: other
+
+OUT-OF-MODEL:
+  - SIMILARITY_THRESHOLD calibration (diff.patch:644,
+    HelpLookupTool.java:SIMILARITY_THRESHOLD = 0.40). The spec commits that
+    "Below the calibrated similarity threshold the tool returns
+    `{command: null}` and the agent is directed ... to say it does not know
+    and point at `/help` rather than answering from general knowledge"
+    (security.md §Prompt-injection defenses, helpLookup row). 0.40 *cosine
+    similarity* = 0.60 cosine distance is a very loose cutoff for a
+    normalized 768-dim sentence-embedding model; unrelated short English
+    texts under nomic-embed-text routinely score above it. Note the contrast
+    with SemanticSearchTool, whose `infochat.chat.semantic-threshold`
+    defaultValue of 0.40 is a *distance* threshold — a 0.60-similarity
+    cutoff, i.e. materially stricter than what this tool applies. The only
+    test covering the boundary (`belowThresholdReturnsNoCommand`,
+    diff.patch:1874-1887) seeds a synthetic near-orthogonal vector at
+    similarity ≈0.20 and therefore never exercises a realistic unrelated
+    query, so the acceptance item passes without validating the production
+    behavior. Practical consequence: the "I don't know, see /help" path may
+    effectively never fire and every free-text query returns some command.
+    Flagged rather than filed as a FINDING because the resulting harm is a
+    confidently-wrong command suggestion, not a confidentiality, integrity,
+    or availability breach: the tier filter still bounds the answer to the
+    caller's own visible set, and authorization remains deterministic Java
+    downstream. Worth a user decision on whether the threshold should be
+    calibrated against real embeddings before ship.
+  - Startup-ordering assumption. CommandIntentIndexBuilder's javadoc
+    (diff.patch:993-996) states it must run after Flyway and after
+    EmbeddingMetadataStartupGuard, but "carries no explicit priority and
+    relies on that default ordering." If that ordering ever shifts, the
+    builder could embed under an unvalidated model/dimension identity. The
+    security consequence is bounded — a vector-space mismatch degrades match
+    quality and the guard refuses startup independently; the tier filter is
+    decided by `target_ref = ANY(?)` and is wholly independent of vector
+    values — so this is a robustness rather than a threat-model gap. Noted
+    because it shares a root with the DOS finding above.
+  - Sanitizer audit-noise interaction. For a bot-admin caller the tier
+    filter legitimately admits BOT_ADMIN command names into the model
+    context, and security.md §LLM output sanitizer requires that "Every
+    match is audit-logged (per-occurrence, not throttled)." An admin asking
+    "how do I ban someone" can therefore produce sanitizer-match audit rows
+    plus a stripped reply. This is spec-conformant behavior (path (b) of the
+    Delivery-ordering contract is satisfied — the model's reply passes
+    through the sanitizer, and diff.patch:1612-1654's
+    `noToolDerivedTextIsAppendedAfterSanitize` pins the absence of a
+    post-sanitize append), so it is not a finding. Flagged only so the user
+    can decide whether the resulting admin-UX degradation and audit volume
+    are intended.
+
+NOT-A-FINDING (verified delivered, recorded so the audit's negative space is explicit):
+  - Tier-filter-before-return is genuinely inside the WHERE clause, not a
+    post-filter (diff.patch:730-744): `target_ref = ANY(?)` is bound to the
+    caller's visible set computed by the SAME `HelpCommandHandler.visible`
+    predicate `/help` uses, and `doc_kind = ?` prevents cross-corpus
+    matching. `HelpLookupToolIT.adminOnlyCommandNeverSurfacesToNonAdmin`
+    seeds `grant-admin` strictly CLOSER to the query than the legitimate
+    match, so only the tier filter can exclude it — a genuine mutation test,
+    not a tautology. The M1-647 existence-oracle defense holds.
+  - `resolveCallerTier` (diff.patch:1539-1547) is semantically equivalent to
+    the listing-side `resolveTier`: verified `chatModeScopeKindOf` emits
+    lowercase "dm"/"group" (InboundRouter.java:1536-1541), so the
+    `"group".equals(scopeKind)` comparison cannot silently fall through to
+    the more-permissive DM branch of the USER_OR_GROUP_ADMIN tier; and
+    verified `dispatchScopeId` IS the `groups` approval-row id in group
+    scope (InboundRouter.java:735), matching what the listing side derives
+    via `findApprovalRow(...).map(row -> isGroupAdmin(row.id(), ...))`.
+  - The spec's per-tool length cap ("All free-form string and list inputs
+    across every tool below are length-bounded by a profile-driven cap; a
+    call exceeding the cap is rejected by the tool dispatcher before any SQL
+    runs") is delivered: ChatToolDispatcher.validateInputLengths /
+    validateValue (ChatToolDispatcher.java:207-255) applies
+    `infochat.chat.tool.input-max-length` generically to every String arg,
+    so `query` is capped at 500 before HelpLookupTool executes.
+  - Match-not-assert holds: `describe()` (diff.patch:764-771) resolves the
+    description from the in-memory `HelpCommandHandler.CATALOGUE` bundle key
+    at call time; no column of the indexed row other than `target_ref`
+    (itself constrained to the caller's visible catalogue set) reaches the
+    model. No SQL injection surface — every statement is parameterized, and
+    the vector literal is machine-generated from float[] and bound via
+    setString through a `?::vector` cast.
+  - V60 grants match the least-privilege posture: provider gets
+    SELECT/INSERT/DELETE only, UPDATE explicitly revoked from provider and
+    PUBLIC, Collector granted nothing (diff.patch:461-463).
+  - No AUDIT-EVASION: chat tool calls are not audit-logged for any tool in
+    the v1 allowlist, so helpLookup introduces no audit regression, and the
+    diff adds no privileged operation that the threat model requires a trail
+    for.

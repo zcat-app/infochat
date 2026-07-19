@@ -659,6 +659,86 @@ class ChatAgentTest {
         assertTrue(listSavesLine.contains("\"window\""), "listSaves must document window param");
     }
 
+    // --- M1-664: closed-allowlist advertising parity. The four
+    // toolInstructionsMatch*Params tests above are hand-written per
+    // tool and cover only 4 of the now-7 shipped tools — exactly the
+    // drift this DERIVED guard closes for every future tool. The test
+    // is derived from ChatToolRegistry.toolNames() so a registry
+    // addition without a TOOL_INSTRUCTIONS line fails here loudly,
+    // rather than shipping a tool the LLM is never told about (a tool
+    // absent from TOOL_INSTRUCTIONS is registered, dispatchable,
+    // spec'd and parity-guarded yet never called by the model). ---
+
+    @Test
+    void everyRegisteredToolIsAdvertised() {
+        Set<String> registryNames = new ChatToolRegistry().toolNames();
+        String instructions = ChatAgent.TOOL_INSTRUCTIONS;
+        for (String name : registryNames) {
+            assertTrue(instructions.contains(name),
+                    "ChatToolRegistry advertises '" + name
+                            + "' but ChatAgent.TOOL_INSTRUCTIONS does not mention it — "
+                            + "the LLM is never told this tool exists and will never call it");
+        }
+    }
+
+    // --- M1-664 / M1-665 boundary pin: no post-sanitize append of
+    // tool-derived text. The M1-648 r2 redteam regression (medium
+    // INJECTION: post-sanitize, model-elected append of privileged
+    // command usage) is what this guard structurally prevents. The
+    // sentinel below is a unique byte sequence the helpLookup tool
+    // emits into the model context; if it appears in the delivered
+    // reply, EITHER the model echoed it through the sanitizer (which
+    // the scripted reply does NOT), OR a post-sanitize append added it
+    // — the latter is the regression. Asserting the sanitizer's INPUT
+    // also excludes the sentinel pins the pre-sanitize direction too:
+    // tool-result bytes must not be pre-pended to the model's reply
+    // before sanitize either. ---
+
+    @Test
+    void noToolDerivedTextIsAppendedAfterSanitize() {
+        final String SENTINEL = "UNIQUE_INTENT_SENTINEL_FROM_HELPLOOKUP_TOOL";
+
+        // Real dispatcher so the model's TOOL_CALL reaches an actual
+        // tool handler; the counting stub bypasses dispatch and would
+        // hide the boundary under test.
+        Map<String, ChatToolRegistry.ChatTool> tools = new HashMap<>();
+        for (String name : new ChatToolRegistry().toolNames()) {
+            tools.put(name, (u, sk, si, a) -> "[]");
+        }
+        tools.put("helpLookup", (u, sk, si, a) ->
+                "{\"command\":\"unfollow-source\",\"description\":\"" + SENTINEL + "\"}");
+        ChatToolDispatcher realDispatcher = new ChatToolDispatcher(
+                new ChatToolRegistry(), tools, 500, 200, 20);
+        agent = buildAgent("en", realDispatcher);
+
+        // Identity sanitizer (sanitizerOutput null → the test's sanitize()
+        // override returns its input unchanged). That makes the delivered
+        // reply EQUAL the sanitizer's output, so any tool-derived append
+        // would be visible directly as bytes in the reply.
+        sanitizerOutput = null;
+
+        // First LLM call: model invokes helpLookup. Second: model's
+        // final reply names the command (which it learned from the tool
+        // result) but does NOT echo the sentinel description bytes.
+        llmProvider.responses.add(
+                new LlmResponse("TOOL_CALL: helpLookup {\"query\": \"mute this feed\"}"));
+        llmProvider.responses.add(new LlmResponse(
+                "To stop seeing posts from a source, type /help unfollow-source."));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "how do I mute this feed");
+
+        assertEquals(1, sanitizerCalls,
+                "the sanitizer runs exactly once on the model's final reply");
+        assertFalse(sanitizerLastInput.contains(SENTINEL),
+                "the sanitizer's input must be the LLM's raw reply only — tool-result "
+                        + "bytes must not be pre-pended pre-sanitize");
+        assertFalse(reply.contains(SENTINEL),
+                "no byte sequence sourced from the helpLookup tool result may appear "
+                        + "in the delivered reply unless the model echoed it through "
+                        + "the sanitizer — post-sanitize append is the M1-648 r2 "
+                        + "regression this ticket structurally refuses to rebuild");
+    }
+
     @Test
     void finalCallOmitsToolInstructions() {
         // Fill MAX_TOOL_ITERATIONS with tool calls to hit the cap

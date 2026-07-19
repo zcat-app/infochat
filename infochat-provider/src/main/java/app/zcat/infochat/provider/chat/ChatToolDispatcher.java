@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.chat;
 
 import app.zcat.infochat.provider.chat.tool.GetPostTool;
 import app.zcat.infochat.provider.chat.tool.GetReferencesTool;
+import app.zcat.infochat.provider.chat.tool.HelpLookupTool;
 import app.zcat.infochat.provider.chat.tool.ListSavesTool;
 import app.zcat.infochat.provider.chat.tool.RecallMemoryTool;
 import app.zcat.infochat.provider.chat.tool.SearchPostsTool;
@@ -73,6 +74,7 @@ public class ChatToolDispatcher {
                                GetReferencesTool getReferencesTool,
                                RecallMemoryTool recallMemoryTool,
                                ListSavesTool listSavesTool,
+                               HelpLookupTool helpLookupTool,
                                @ConfigProperty(name = "infochat.chat.tool.input-max-length",
                                        defaultValue = "500") int inputMaxLength,
                                @ConfigProperty(name = "infochat.chat.tool.limit-cap",
@@ -89,7 +91,8 @@ public class ChatToolDispatcher {
                 "getPost", getPostTool,
                 "getReferences", getReferencesTool,
                 "recallMemory", recallMemoryTool,
-                "listSaves", listSavesTool
+                "listSaves", listSavesTool,
+                "helpLookup", helpLookupTool
         );
         requireHandlerForEveryAdvertisedTool(registry, this.tools);
     }

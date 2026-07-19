@@ -84,6 +84,16 @@ public class HelpCommandHandler implements CommandHandler {
     private static final String SELECT_CALLER_SQL =
             "SELECT id, is_admin FROM users WHERE adapter = ? AND contact_id = ?";
 
+    /**
+     * M1-664: the chat-side tier resolver
+     * ({@link #resolveCallerTier}) reads {@code is_admin} by user id
+     * (the chat tool's dispatch identity is the {@code (userId, scope)}
+     * pair the {@code ChatToolRegistry.ChatTool} SPI carries — no
+     * adapter/contact_id, no {@code InboundContext}).
+     */
+    private static final String SELECT_CALLER_BY_ID_SQL =
+            "SELECT is_admin FROM users WHERE id = ?";
+
     /** Max fuzzy-suggestion entries surfaced in the unknown-command error. */
     private static final int FUZZY_SUGGESTION_MAX = 5;
 
@@ -93,8 +103,13 @@ public class HelpCommandHandler implements CommandHandler {
      * that any user may invoke in DM but only a group admin may invoke
      * in a group — spec §Permission model lists them under the
      * group-admin closed set "in groups" only.
+     *
+     * <p>M1-664 widens this from package-private to {@code public}: the
+     * chat-side {@code HelpLookupTool} (in {@code provider.chat.tool})
+     * applies the same tier predicate at lookup time. The enum's
+     * semantics are unchanged.
      */
-    enum HelpTier {
+    public enum HelpTier {
         /** Any non-banned user, both scopes. */
         USER,
         /** Any user in DM; group admin (or bot admin) in a group. */
@@ -106,17 +121,24 @@ public class HelpCommandHandler implements CommandHandler {
     }
 
     /** One catalogue entry: the command name (for the probation predicate), its short-help / usage-detail / examples bundle keys, and its visibility tier. */
-    record CommandHelp(String command, String bundleKey, String usageKey, String examplesKey, HelpTier tier) {}
+    public record CommandHelp(String command, String bundleKey, String usageKey, String examplesKey, HelpTier tier) {}
 
     /** Resolved tier facts about the caller in the current dispatch. */
-    record CallerTier(boolean botAdmin, boolean groupAdmin, boolean probation, boolean group) {}
+    public record CallerTier(boolean botAdmin, boolean groupAdmin, boolean probation, boolean group) {}
 
     /**
      * Closed {@code (command, bundleKey, tier)} catalogue, in display
      * order. The set mirrors the v1 dispatchable command handlers; the
      * tiers mirror spec §Permission model's closed privileged-tier list.
+     *
+     * <p>M1-664 widens this from package-private to {@code public}: the
+     * chat-side {@code HelpLookupTool} reads it to compose the matched
+     * command's one-line description at call time from the runtime
+     * catalogue (the match-not-assert invariant — embedded text is used
+     * only for MATCHING, never for ASSERTING). The list stays immutable
+     * ({@link List#of}) and is never mutated by the tool.
      */
-    static final List<CommandHelp> CATALOGUE = List.of(
+    public static final List<CommandHelp> CATALOGUE = List.of(
             new CommandHelp("help", BundleKeys.HELP_CMD_HELP_SHORT, BundleKeys.HELP_CMD_HELP_USAGE, BundleKeys.HELP_CMD_HELP_EXAMPLES, HelpTier.USER),
             new CommandHelp("status", BundleKeys.HELP_CMD_STATUS_SHORT, BundleKeys.HELP_CMD_STATUS_USAGE, BundleKeys.HELP_CMD_STATUS_EXAMPLES, HelpTier.USER),
             new CommandHelp("get-tags", BundleKeys.HELP_CMD_GET_TAGS_SHORT, BundleKeys.HELP_CMD_GET_TAGS_USAGE, BundleKeys.HELP_CMD_GET_TAGS_EXAMPLES, HelpTier.USER),
@@ -370,8 +392,18 @@ public class HelpCommandHandler implements CommandHandler {
      * tier decides: bot-admin commands need bot admin; group-admin
      * commands need group scope plus group-admin (or bot-admin); the
      * dual tier is open in DM and group-admin-gated in a group.
+     *
+     * <p>M1-664 widens this from {@code private} to {@code public}: the
+     * chat-side {@code HelpLookupTool} applies the SAME tier predicate
+     * at lookup time so a hidden command's name can never enter the
+     * LLM's context (tier-filter-before-return, docs/spec/security.md
+     * §Prompt-injection defenses). The semantics are unchanged; the
+     * method is and remains stateless w.r.t. the instance — every
+     * decision branch reads only the {@link CallerTier} argument (or
+     * delegates to the stateless {@link CommandPermissions}
+     * collaborator), so it is safe to call from any caller.
      */
-    private boolean visible(CommandHelp entry, CallerTier caller) {
+    public boolean visible(CommandHelp entry, CallerTier caller) {
         if (caller.probation()) {
             return commandPermissions.allowedDuringProbation(entry.command());
         }
@@ -433,6 +465,58 @@ public class HelpCommandHandler implements CommandHandler {
                     .orElse(false);
         }
         return new CallerTier(caller.isAdmin(), groupAdmin, probation, groupScope);
+    }
+
+    /**
+     * Resolve the caller's tier facts from the chat-tool dispatch
+     * identity ({@code userId, scopeKind, scopeId}), used by the
+     * chat-side {@code HelpLookupTool} to apply the same tier filter
+     * {@link #resolveTier(ScopeRef)} applies at listing time
+     * (M1-664 — tier-filter-before-return,
+     * docs/spec/security.md §Prompt-injection defenses).
+     *
+     * <p>The chat-tool dispatch identity is the {@code (userId, scope)}
+     * pair the {@code ChatToolRegistry.ChatTool} SPI carries; it has
+     * no {@link ScopeRef} and no {@link InboundContext} (the chat
+     * worker runs under a fresh, seeded context, NOT the intake one),
+     * so this method reads the {@code users} row by {@code id}
+     * directly and resolves group-admin via the {@code scopeId}
+     * (which IS the group UUID in group scope) — the
+     * {@link GroupMembershipRepository#isGroupAdmin(UUID, UUID)} path
+     * the listing-side {@code resolveTier} also bottoms-outs on after
+     * resolving the {@link ScopeRef.Group} → {@code approval row.id}.
+     *
+     * <p>Probation is consulted even though the chat path is
+     * dispatch-reachable from probation senders: a probation caller's
+     * visible set collapses to the probation-allowlist subset (the
+     * same {@link CommandPermissions#allowedDuringProbation}
+     * predicate the intake gate uses), so a probation caller's LLM
+     * can never learn an admin command's name from the index.
+     */
+    public CallerTier resolveCallerTier(UUID userId, String scopeKind, UUID scopeId) {
+        boolean botAdmin = lookupIsAdminById(userId);
+        boolean group = "group".equals(scopeKind);
+        boolean groupAdmin = group
+                && scopeId != null
+                && groupMembershipRepository.isGroupAdmin(scopeId, userId);
+        boolean probation = probationCheck.inProbation(userId);
+        return new CallerTier(botAdmin, groupAdmin, probation, group);
+    }
+
+    private boolean lookupIsAdminById(UUID userId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_CALLER_BY_ID_SQL)) {
+            ps.setObject(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    throw new IllegalStateException(
+                            "HelpCommandHandler: no users row for id=" + userId);
+                }
+                return rs.getBoolean("is_admin");
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("HelpCommandHandler.lookupIsAdminById failed", e);
+        }
     }
 
     private CallerRow lookupCaller(String adapter, String contactId) {

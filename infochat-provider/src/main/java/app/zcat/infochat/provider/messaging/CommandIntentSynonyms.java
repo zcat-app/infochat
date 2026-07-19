@@ -39,8 +39,18 @@ import java.util.Map;
  * <p>Kept a plain declarative structure rather than logic scattered
  * through the handler so M1-648 can reuse it as the hand-written seed
  * corpus for the semantic intent index.
+ *
+ * <p><b>M1-664 visibility widening.</b> This class is package-private
+ * and lives in {@code provider.messaging}; M1-664's
+ * {@code CommandIntentIndexBuilder} lives in {@code provider.help} and
+ * needs to read the seed map. The minimum widening is making the class
+ * {@code public} and exposing {@link #intentToCommand()} as a
+ * read-only accessor — the map literal stays the single source of truth
+ * and is never mutated by the index (acceptance: "the map stays
+ * immutable and is never mutated by the index"). The {@link #suggest}
+ * method stays package-private; the index builder does not call it.
  */
-final class CommandIntentSynonyms {
+public final class CommandIntentSynonyms {
 
     /**
      * Minimum similarity a typo candidate must reach to be offered.
@@ -69,6 +79,13 @@ final class CommandIntentSynonyms {
      * <p>{@link Map#ofEntries} rejects a duplicate key at class-init,
      * which is the build-time guard against two intents silently
      * claiming the same word.
+     *
+     * <p>M1-664 widens this map's accessor from private to
+     * package-private so {@code CommandIntentIndexBuilder} (in
+     * {@code provider.help}) can seed the chat-side semantic intent
+     * index from it. The map is exposed read-only via
+     * {@link #intentToCommand()}; the literal stays the single source
+     * of truth and is never mutated by the index.
      */
     private static final Map<String, String> INTENT_TO_COMMAND = Map.ofEntries(
             Map.entry("mute", "unfollow-source"),
@@ -124,6 +141,19 @@ final class CommandIntentSynonyms {
             Map.entry("makeadmin", "grant-admin"));
 
     private CommandIntentSynonyms() {
+    }
+
+    /**
+     * Read-only view of the {@code intent word → command name} seed
+     * map (M1-664). The map literal stays the single source of truth;
+     * callers (the {@code CommandIntentIndexBuilder}) consume it to
+     * seed the chat-side semantic intent index. Exposed as an
+     * unmodifiable {@link Map} so the build-time
+     * {@link Map#ofEntries} duplicate-key guard survives the widening
+     * unchanged — the caller cannot put into it.
+     */
+    public static Map<String, String> intentToCommand() {
+        return INTENT_TO_COMMAND;
     }
 
     /**

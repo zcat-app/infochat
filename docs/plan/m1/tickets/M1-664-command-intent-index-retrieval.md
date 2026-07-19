@@ -1,7 +1,7 @@
 ---
 id: M1-664
 title: "Semantic command-intent index: retrieval + registration"
-status: pending
+status: done
 created: 2026-07-19
 last_updated: 2026-07-19
 blocked_by: []
@@ -20,8 +20,8 @@ files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/bundles/cs.properties
-  - infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexTest.java
-  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/HelpLookupToolTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/HelpLookupToolIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatToolRegistryTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java
   - docs/spec/commands.md
@@ -109,33 +109,33 @@ acceptance:
     short description) and upserts it into doc_embedding. Re-embedding is
     skipped when content_hash and embedding_model both match, so a restart
     with unchanged input performs zero embedding calls.
-    CommandIntentIndexTest.restartWithUnchangedCorpusPerformsNoEmbeddingCall
+    CommandIntentIndexIT.restartWithUnchangedCorpusPerformsNoEmbeddingCall
     passes.
   - >-
     A change to the embedding model or to any intent document's text causes
     that row to be re-embedded on next startup — a stale vector can never
-    outlive its source text. CommandIntentIndexTest.changedIntentTextIsReEmbedded
+    outlive its source text. CommandIntentIndexIT.changedIntentTextIsReEmbedded
     passes.
   - >-
     A new read-only HelpLookupTool resolves a free-text intent to a command
     name via one fused pgvector query, filtered to the caller's visible tier
     BEFORE the result is returned, reusing the same HelpTier predicate
     HelpCommandHandler uses.
-    HelpLookupToolTest.adminOnlyCommandNeverSurfacesToNonAdmin passes.
+    HelpLookupToolIT.adminOnlyCommandNeverSurfacesToNonAdmin passes.
   - >-
     THE CORE INVARIANT — the tool returns a command NAME (plus the
     catalogue's one-line description composed at call time from the runtime
     catalogue), never a body derived from indexed text. Embedded text is used
     only for MATCHING, never for ASSERTING. A stale intent document can
     therefore degrade the match but can never produce wrong syntax.
-    HelpLookupToolTest.toolOutputComesFromRuntimeCatalogueNotFromIndexedText
+    HelpLookupToolIT.toolOutputComesFromRuntimeCatalogueNotFromIndexedText
     passes by mutating an indexed intent document's text and asserting the
     returned name and description are unchanged.
   - >-
     Below the similarity threshold the tool returns no command and the agent
     is directed to say it does not know and point at /help, rather than
     answering from general knowledge.
-    HelpLookupToolTest.belowThresholdReturnsNoCommand passes.
+    HelpLookupToolIT.belowThresholdReturnsNoCommand passes.
   - >-
     Free-text phrasings resolve to the right command at the TOOL level: "how
     do I stop seeing posts from this source" resolves to unfollow-source, and
@@ -225,8 +225,8 @@ acceptance:
   - mvn verify from the repo root is green
 test_plan:
   adds:
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexTest.java
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/HelpLookupToolTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/HelpLookupToolIT.java
   modifies:
     - path: infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatToolRegistryTest.java
       change: >-
@@ -253,12 +253,48 @@ decision_refs:
   - D54
   - D58
 decomposed_from: M1-648
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-19
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 23
+      added: 2006
+      removed: 58
+    note: |
+      Reviewer noted one non-blocking observation: CommandIntentIndex.LookupResult
+      (record + isPresent() + empty() factory, ~15 lines) is dead code — the
+      class-level javadoc claim that it is "the shape HelpLookupTool returns" is
+      inaccurate (HelpLookupTool composes JSON via private matchJson/noMatchJson).
+      Recommend follow-up to either route matchJson/noMatchJson through LookupResult
+      or delete LookupResult + empty() and fix the javadoc. Not blocking: every
+      behavioral invariant is pinned by tests on the actual JSON output.
+      Round-1 also ran the multi-auditor redteam gate (redteam-multi M1-664) per
+      the high/high security_relevant profile; round-1 audit FINDINGS (claude,
+      high DOS) remediated in-branch (builder now catches+logs+degrades instead of
+      aborting Provider startup; SIMILARITY_THRESHOLD 0.40→0.60 to align with
+      SemanticSearchTool's distance default; @Priority(150) pinned on observer).
+      Round-2 audit CLEAN across both available auditors (claude, opencode; codex
+      UNAVAILABLE both rounds — host sandbox-write issue, file separately).
+      Evidence: docs/plan/m1/redteam-multi/M1-664-2026-07-19/ (r1) and
+      M1-664-2026-07-19-r2/ (r2).
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+outline_file: target/m1-tick-outline-M1-664.md
+clarity_check:
+  date: 2026-07-19
+  verdict: WARN
+  warnings:
+    - "FILES-SCOPE-COVERAGE: §Notes cites infochat-collector/src/main/resources/application.properties:548 as proof that 768 is the app-wide dimension — it is a citation, not a file this ticket edits; advisory only."
+    - "Self-check: implementable-as-written. Verified D66 is free (decisions.md top row is D64; D65 claimed by M1-652, D66 by this ticket per M1-648 renumber history, D67 by M1-665). Six-row security.md marked table confirmed (lines 287-298). ChatToolRegistry/Dispatcher structure matches acceptance. V11 grants on post_embedding match the 'provider SELECT-only, separate-table-for-docs' rationale. /stop cancellation paragraph actually at commands.md:1016-1023 (cited 980-989 — expected line drift, ticket itself says re-grep at start); enumerates 5 names omitting semanticSearch, stale since M1-589, exactly as ticket describes. design mirror sites (04-security.md:189-199, 03-commands.md:1056-1058, 05-llm-and-embeddings.md:473) all located and match ticket descriptions. Census grep returns the listed enumeration sites."
 escalation_reason:
 ---
 

@@ -1055,9 +1055,13 @@ these returns a friendly no-op stating why):
 
 **Cancellation primitive.** In v1 every tool in the closed allowlist
 ([../spec/security.md](../spec/security.md) §Prompt-injection defenses —
-`searchPosts`, `getPost`, `getReferences`, `recallMemory`, `listSaves`)
+see the marker-delimited `<!-- tool-allowlist:begin -->` /
+`<!-- tool-allowlist:end -->` table for the single source of truth)
 is a read-only DB query, so the primitive is `pg_cancel_backend(pid)` at
-the released connection. **Best-effort** — Postgres may complete the
+the released connection. `helpLookup` (M1-664) follows the same primitive:
+a single read-only pgvector cosine probe over `doc_embedding`, armed via
+`CancellationService.armToolConnection` like every other chat tool.
+**Best-effort** — Postgres may complete the
 query before the cancel takes effect; the worker discards the in-flight
 result regardless. As an additional safety net, every interruptible
 read-only query runs under a profile-driven `statement_timeout` that

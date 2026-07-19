@@ -1,0 +1,31 @@
+infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java:18:import app.zcat.infochat.provider.messaging.InboundContext;
+infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java:149:    private final InboundContext inboundContext;
+infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java:164:                     InboundContext inboundContext,
+infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java:177:        this.inboundContext = inboundContext;
+infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java:227:        // (InboundRouter.onMessage, D43) so the contention notice and the
+infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java:230:        String scopeLanguage = inboundContext.effectiveLanguage();
+infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java:854:                    .actorContactId(inboundContext.senderContactId())
+infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java:855:                    .actorAdapter(inboundContext.adapterName())
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:92:     * adapter/contact_id, no {@code InboundContext}).
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:194:    InboundContext inboundContext;
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:224:        body.append(bundleLoader.get(headerKey(caller), inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:228:                body.append(bundleLoader.get(entry.bundleKey(), inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:234:            body.append(bundleLoader.get(BundleKeys.HELP_FOOTER_PROBATION, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:249:        String language = inboundContext.effectiveLanguage();
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:301:     * slash itself, so an inbound word like {@code grant-admin} came
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:307:     * inbound bytes look safe (an earlier attempt at one let every
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:355:     * {@code InboundRouter} reaches it through the CDI client proxy,
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:419:        String language = inboundContext.effectiveLanguage();
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:443:     * request-scoped {@link InboundContext}. Group-admin is resolved
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:451:     * {@code InboundRouter#lookupUser} test seam.</p>
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:454:        String adapter = inboundContext.adapterName();
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:456:                ? dm.contactId() : inboundContext.senderContactId();
+infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:480:     * no {@link ScopeRef} and no {@link InboundContext} (the chat
+infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java:13:import app.zcat.infochat.provider.messaging.InboundContext;
+infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java:931:    // Builds a test-scoped InboundContext carrying the scope language the
+infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java:933:    // InboundRouterChatPersistFailureTest uses, replacing the former
+infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java:935:    // from the request-scoped InboundContext (M1-333 / D43).
+infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java:936:    private static InboundContext inboundContextWith(String language) {
+infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java:937:        InboundContext context = new InboundContext();
+infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java:943:    // language is supplied via the test-scoped InboundContext above.
+infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java:954:                    inboundContextWith(language), breakerRegistry);
