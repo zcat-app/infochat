@@ -8,6 +8,8 @@ The skill-loaded summary lives in [`.claude/skills/m1-tick/SKILL.md`](../../.cla
 
 Precedence on conflict: the SKILL.md / CLAUDE.md summary content < this document < [`engineering-rules-verbatim.md`](engineering-rules-verbatim.md) (the rules themselves are canonical). If anything here contradicts the summary, sync the summary. If anything here contradicts `engineering-rules-verbatim.md`, this file is wrong.
 
+Harness bindings for the primitives this spec names (fresh-context subagent spawn, blocking user menu, worktree parallelism) live in [`harness-mapping.md`](harness-mapping.md) — Claude Code is the native harness; other coding agents apply that mapping.
+
 > **Milestone tokens used below.** Examples use `M<N>` (e.g. `M1`, `M2`) for ticket-ID prefixes and `m<N>` (e.g. `m1`, `m2`) for branch and directory tokens. The currently active milestone is M1, driven by the `/m1-tick` skill. Future milestones may instantiate their own driver skill or extend the existing one.
 
 > **Ticket-ID placeholder convention.** Where examples and skill text reference ticket IDs, they use these placeholders to avoid confusing the *operand* of an invocation with *other* tickets touched by it:
@@ -300,7 +302,7 @@ The ticket flow exists for code, tests, migrations, and spec changes coordinated
 |---|---|---|
 | `M<N>-NNN:` | Implementation ticket: code, tests, migrations, or spec changes coordinated with code | (full flow) |
 | `spec:` | Pure spec/design edit under `docs/spec/` or `docs/design/`, no code change | ticket-readiness pre-flight, reviewer, `mvn verify`, STATUS regen |
-| `process:` | Edit under `.claude/`, `docs/process/`, `docs/plan/`, or `CLAUDE.md`, no code change | ticket-readiness pre-flight, reviewer, `mvn verify`, STATUS regen |
+| `process:` | Edit under `.claude/`, `docs/process/`, `docs/plan/`, `CLAUDE.md`, or the agent-tooling surface (`AGENTS.md`, `.agents/`, `.opencode/`, `.codex/`, `CONTRIBUTING.md`), no code change | ticket-readiness pre-flight, reviewer, `mvn verify`, STATUS regen |
 
 ### Rules
 
