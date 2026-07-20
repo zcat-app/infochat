@@ -1697,6 +1697,76 @@ sustained-overload signal is the throttled admin notification
 already in `security.md` §Failure handling, not a per-group
 slot-skipping policy.
 
+**Per-category delivery (D63).** A non-degraded digest with at
+least one post is delivered as **one outbound message per
+category**, plus one "Other" message when the Other bucket is
+non-empty (bounded at categories+1). The delivery path never
+merges two categories into one message and never splits a
+category across two; the rendered sections (D62) ARE the delivery
+bytes — the closing affordance is folded into the LAST section's
+text inside the render pass, so it lands once per digest on the
+final category message only. Category messages are sent
+**sequentially in section order** (D62 order: assigned-cluster
+count descending, alphabetical ties, Other last), never fanned
+out in parallel; sequential order is what makes the
+affordance-on-last property deterministic and preserves the
+digest's narrative order. The zero-posts fixed reply and the
+degraded (D17) headlines-only digest stay single-message — they
+have no per-category structure. Cluster-split reduction is
+structural, not eliminated: SimpleX's outbound chunker still
+applies its 4 000-byte line-based chunking to each category
+message independently, so a category whose rendered text exceeds
+4 000 bytes can still break inside a cluster; this ticket reduces
+mid-cluster splits by moving the break to a meaningful boundary,
+it does not eliminate them.
+
+**Partial-failure policy (D63).** Each category message runs the
+existing per-message TRANSIENT-retry / PERMANENT-abort ladder
+independently: a TRANSIENT failure retries only that message, and
+a PERMANENT failure on one category still delivers the others
+(partial success is visible, not all-or-nothing). One digest slot
+contributes at most ONE outcome to the per-group consecutive
+permanent-failure counter — any success resets, all-permanent
+increments once, an interrupt that stops the sequence early
+attributes nothing — so a single transport blip during the
+sequential loop cannot soft-remove a healthy group (the counter's
+threshold of 3 was calibrated for one message per slot; naive
+per-message attribution would let one simplex-chat subprocess
+restart yield ≥3 instant PERMANENTs in milliseconds). See
+`messaging.md` §Failure handling for the chokepoint primitive.
+
+**Redelivery may duplicate (D63, D64).** Nothing in v1 records
+which categories were delivered, so a `/retry --digest` re-runs
+the slot and re-posts every category it produces, including any
+that already landed — consistent with §Conversation control,
+which commits that `/retry --digest` posts a new message. Each
+category message carries a per-(slot, category) correlationId
+`digest-<groupId>-<windowStart>-<categorySlug>` (the literal
+`other` for the Other bucket); the id is NOT stable across
+regenerations and nothing dedups on it (D64). Gap-filling
+redelivery — sending only the categories a prior attempt missed
+— needs persisted per-(slot, category) delivery state and is a
+follow-up ticket's job; until then, `/retry --digest` re-posts
+every category.
+
+**Optional per-category roll-up.** When
+`infochat.digest.category-summary-enabled` (default `false`) is
+on, each category message is prefixed with a 1–2 sentence LLM
+roll-up SYNTHESIS across that category's clusters — a headline-
+level summary naming the themes ("Three supply-chain attacks, an
+OpenSSL DoS, and a WordPress RCE"), NOT a restatement of the
+items. The roll-up is the only NEW LLM stage; one LLM request per
+category, alongside the existing one-request-per-cluster prose.
+Roll-up prose is sanitized and translated like cluster prose
+(`security.md` §LLM output sanitizer is unconditional), generated
+inside the slot-window render budget (the same `windowEnd`
+deadline that bounds cluster prose), and a roll-up failure yields
+that category's message WITHOUT a prefix (exactly the flag-off
+shape) — never a degraded or blocked digest. Category assignment
+stays deterministic (D62); the roll-up is prose only. The flag
+ships off so Phase 2 ships the delivery change first and enables
+roll-ups after evaluation.
+
 ## What lives in design notes
 
 - Exact argument grammar and accepted `-w` forms

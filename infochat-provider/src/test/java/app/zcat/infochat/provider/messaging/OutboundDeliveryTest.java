@@ -192,4 +192,102 @@ class OutboundDeliveryTest {
         assertTrue(repo.removed.isEmpty(),
                 "a successful delivery resets the consecutive-failure counter");
     }
+
+    @Test
+    void sequenceAttributesAtMostOneCounterOutcome() {
+        // A digest slot produces N category messages through
+        // deliverSequenceToGroup. The per-group permanent-failure counter
+        // receives at most ONE aggregate outcome per call, regardless of N —
+        // collapsing the slot into one increment when every message fails
+        // permanently, and resetting on any success. The threshold is 3; a
+        // single sequence of >= threshold all-permanent messages must NOT
+        // soft-remove the group (naive per-message attribution would soft-
+        // remove it on the third message of the same slot).
+        RecordingGroupRepository repo = new RecordingGroupRepository();
+        OutboundDelivery delivery = delivery(new RecordingAdminNotifier(), repo);
+        UUID groupId = UUID.randomUUID();
+
+        // One sequence of 5 all-permanent messages → exactly ONE counter
+        // increment. Threshold is 3, so the group is NOT removed.
+        delivery.deliverSequenceToGroup(
+                FailingMessagingAdapter.alwaysFailing("chanA", FailureCategory.PERMANENT),
+                List.of(groupMessage(), groupMessage(), groupMessage(),
+                        groupMessage(), groupMessage()),
+                groupId);
+        assertTrue(repo.removed.isEmpty(),
+                "one sequence of all-permanent messages increments the counter once — "
+                        + "threshold 3 not reached (naive per-message attribution would "
+                        + "soft-remove the group on the third message of the same slot)");
+
+        // A sequence with any success resets the counter to 0. failCount=0
+        // means the adapter never fails, so both messages succeed.
+        delivery.deliverSequenceToGroup(
+                new FailingMessagingAdapter("chanA", 0, FailureCategory.PERMANENT),
+                List.of(groupMessage(), groupMessage()),
+                groupId);
+        assertTrue(repo.removed.isEmpty(),
+                "a successful sequence resets the counter; threshold still not reached");
+
+        // Three subsequent all-permanent sequences bring the counter from 0
+        // to 3 via three one-increment aggregates — threshold reached, group
+        // removed. The slot-level attribution is the load-bearing invariant:
+        // each slot contributes exactly one outcome, never one per message.
+        for (int i = 0; i < 3; i++) {
+            delivery.deliverSequenceToGroup(
+                    FailingMessagingAdapter.alwaysFailing("chanA", FailureCategory.PERMANENT),
+                    List.of(groupMessage(), groupMessage()),
+                    groupId);
+        }
+        assertEquals(List.of(groupId), repo.removed,
+                "three one-increment aggregates reach threshold 3 — the slot-level "
+                        + "attribution is the load-bearing invariant");
+    }
+
+    @Test
+    void interruptedSequenceStopsWithoutCounterAttribution() throws InterruptedException {
+        // An InterruptedException during a back-off aborts the in-flight
+        // message and stops the sequence; remaining messages never reach the
+        // adapter, and NO aggregate counter outcome is applied. The
+        // invariant is provable deterministically by following with two
+        // all-permanent sequences and asserting the group is NOT yet removed
+        // at threshold 3 — the interrupt "consumed" the slot's would-be
+        // increment.
+        RecordingGroupRepository repo = new RecordingGroupRepository();
+        // First TRANSIENT failure triggers a back-off; the sleeper throws,
+        // backOff re-interrupts the thread and returns false, execute
+        // returns ABORTED with no onPermanentGroupFailure call (groupId is
+        // null in the sequence loop), and deliverSequenceToGroup observes
+        // the interrupt flag and returns without aggregating.
+        OutboundDelivery delivery = new OutboundDelivery(
+                new RecordingAdminNotifier(), repo,
+                3, 0L, 2.0, 3, millis -> { throw new InterruptedException("interrupted back-off"); });
+        UUID groupId = UUID.randomUUID();
+        FailingMessagingAdapter transientThenGiveUp =
+                FailingMessagingAdapter.alwaysFailing("chanA", FailureCategory.TRANSIENT);
+
+        delivery.deliverSequenceToGroup(transientThenGiveUp,
+                List.of(groupMessage(), groupMessage(), groupMessage()),
+                groupId);
+        // The test thread's interrupt flag is now set (backOff re-set it).
+        // Clear it so subsequent Thread.currentThread().isInterrupted() checks
+        // in the same thread do not see a stale flag.
+        assertTrue(Thread.interrupted(),
+                "backOff re-sets the interrupt flag after an InterruptedException");
+
+        assertTrue(repo.removed.isEmpty(),
+                "interrupted sequence attributes nothing to the counter");
+
+        // Two follow-up all-permanent sequences bring the counter to 2 —
+        // threshold 3 not reached, because the interrupted slot contributed
+        // no increment.
+        delivery = delivery(new RecordingAdminNotifier(), repo);
+        for (int i = 0; i < 2; i++) {
+            delivery.deliverSequenceToGroup(
+                    FailingMessagingAdapter.alwaysFailing("chanA", FailureCategory.PERMANENT),
+                    List.of(groupMessage(), groupMessage()),
+                    groupId);
+        }
+        assertTrue(repo.removed.isEmpty(),
+                "two post-interrupt permanent sequences leave the counter at 2 — not removed");
+    }
 }

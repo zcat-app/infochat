@@ -1,0 +1,9 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: INFO-LEAK
+    SEVERITY: medium
+    PROMISE: "Exception messages and stack traces emitted via the application logger MUST NOT contain user-authored prose (chat-mode message bodies, post bodies, saved-post annotations, command arguments). The application provides a SafeLog utility that drops the exception message body... The original Throwable is never passed to the underlying SLF4J logger."
+    GAP: CategoryRollupGenerator.java:118 passes the caught RuntimeException directly to JBoss Logger via LOG.warnf(e, ...), rather than SafeLog. The new call path supplies every category post's title, body, and URL to the LLM at CategoryRollupGenerator.java:151-165, so an exception from the LLM, sanitizer, or translation boundary can carry attacker-controlled post content into the application log and stack trace.
+    REPRO: An attacker publishes a feed post whose body contains a sensitive-looking payload, then causes the roll-up provider or downstream translation path to fail with an exception that includes its request/input text. With category summaries enabled, the digest invokes generateRollup; its catch logs that Throwable verbatim. Anyone with normal log access can then read the post body, despite the logging boundary requiring prose to be dropped.
+    SUGGESTED-FIX-CLASS: trust-boundary-tightening

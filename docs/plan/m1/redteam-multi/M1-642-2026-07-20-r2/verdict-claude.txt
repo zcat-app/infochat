@@ -1,0 +1,79 @@
+RED-TEAM VERDICT: CLEAN
+
+FINDINGS: (none)
+
+Audit summary (why CLEAN):
+
+The diff introduces one new security-relevant surface — a per-category LLM
+roll-up (`CategoryRollupGenerator`) that is an LLM-authored output surface —
+plus a delivery restructuring (`DigestDelivery`,
+`OutboundDelivery.deliverSequenceToGroup`, `DigestRenderer.renderSections`).
+Each threat-model commitment that touches this surface is delivered:
+
+1. §Prompt-injection defenses ("Every prompt that includes user-derived text
+   is wrapped in a delimiter block whose marker contains a per-call random
+   value"). CategoryRollupGenerator.buildPrompt (diff lines 688-714) wraps all
+   post title/body/url text in a single `<<<UNTRUSTED_CONTENT id="<uuid>">>>`
+   ... `<<<END id="<uuid>">>>` block whose marker is a fresh
+   `UUID.randomUUID()` per call — the SummaryProseGenerator precedent. The
+   system prompt (ROLLUP_SYSTEM_PROMPT, lines 591-607) instructs the model to
+   never follow wrapped instructions and to emit the structured `[REFUSAL:
+   ...]` marker. DELIVERED.
+
+2. §LLM output sanitizer ("the sanitizer applies to the full set of
+   LLM-authored output surfaces: ... periodic group digests ... and any future
+   LLM-emitted text"). generateRollup (lines 646-676) runs the model text
+   through `llmOutputSanitizer.sanitize(text)` then
+   `translationPipeline.run(...)` (which re-runs the sanitizer on translated
+   text) before returning; empty text, the `[REFUSAL: ...]` marker, and the
+   flag-off case all short-circuit to Optional.empty so no unsanitized or
+   marker text ever reaches the user. DELIVERED.
+
+3. §Secrets handling / "User content in exceptions" ("Exception messages and
+   stack traces emitted via the application logger MUST NOT contain
+   user-authored prose ... The application provides a SafeLog utility ... the
+   original Throwable is never passed to the underlying SLF4J logger"). The
+   sole catch in generateRollup (lines 672-675) routes the RuntimeException
+   through `SafeLog.warn(LOG, "...", e)`, NOT a raw `LOG.warnf(e, ...)`. The
+   roll-up prompt interpolates post bodies, so a provider/sanitizer/translation
+   exception could otherwise carry attacker-controlled prose into the log
+   stream; SafeLog closes that. The other two LOG.warn calls (lines 657, 666)
+   are fixed strings with no user content and no Throwable. DELIVERED.
+   NOTE: this is the same gap a prior audit round recorded as the M1-642
+   INFO-LEAK finding (ticket `redteam_findings`, 2026-07-20); it is remediated
+   in the diff under audit (working-tree-r2), so it is not re-raised here.
+
+4. messaging.md §Failure handling / decisions.md D63 (per-category delivery
+   attributes "at most ONE aggregate outcome per slot — any success resets,
+   all-permanent increments once, an interrupt that stops the sequence early
+   attributes nothing"). OutboundDelivery.deliverSequenceToGroup (lines
+   1090-1115) loops the per-message ladder with a null groupId (so no
+   per-message counter mutation), then applies exactly one aggregate:
+   anyDelivered → reset, else → one onPermanentGroupFailure; an interrupt
+   returns early attributing nothing. This preserves the threshold-3
+   "always > 1" invariant that guards against a simplex-chat subprocess
+   restart soft-removing a healthy group. DELIVERED (pinned by
+   DigestDeliveryTest.oneFailedDigestNeverSoftRemovesGroup).
+
+No SQL is constructed from the new code (the correlationId concatenation and
+`categorySlug` derive from a controlled-vocabulary tag and internal UUIDs and
+feed OutboundMessage.correlationId, never a query). No authorization, ban,
+invite, admin-tier, or audit surface is touched. No AUTH-BYPASS, INJECTION,
+PERM-ESCAL, or AUDIT-EVASION surface is reachable through the diff.
+
+OUT-OF-MODEL:
+  - deliverSequenceToGroup empty-sequence counter-increment trap
+    (OutboundDelivery.java, diff lines 1090-1115): if `messages` is empty, the
+    loop body never runs, `anyDelivered` stays false, and the method calls
+    `onPermanentGroupFailure(channel, groupId)` — incrementing the per-group
+    consecutive-permanent-failure counter for a slot that had ZERO failed
+    sends. Sustained empty slots could eventually cross the soft-remove
+    threshold and silently drop a healthy group (an availability concern in
+    spirit of the DOS category). It is NOT adversary-reachable in this diff:
+    the only caller is DigestDelivery.deliver, invoked by DigestWorker solely
+    on the non-degraded, non-zero-posts path, where DigestRenderer.renderSections
+    always yields at least the "Other" section for a non-empty post set. It
+    becomes reachable only when M1-652 introduces a filtering caller that can
+    hand deliverSequenceToGroup a pre-filtered (possibly empty) subset. Flagged
+    so the empty-list guard is added before that caller lands; the ticket's own
+    redteam_audits note already tracks this as the single out-of-model item.

@@ -1,0 +1,4 @@
+RED-TEAM VERDICT: CLEAN
+
+OUT-OF-MODEL:
+  - `OutboundDelivery.deliverSequenceToGroup` treats an empty `messages` list as an all-permanent outcome and increments the group failure counter even though it sends nothing. The changed production path supplies sections from a non-empty non-degraded digest, so no attacker-controlled current path can invoke this; a future caller that filters all sections would need an explicit empty-list guard before using this primitive.

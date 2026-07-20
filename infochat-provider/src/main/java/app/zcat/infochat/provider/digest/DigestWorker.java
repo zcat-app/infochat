@@ -7,6 +7,7 @@ import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -29,6 +30,7 @@ import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.digest.DigestPostCollector.CollectionResult;
+import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
 import app.zcat.infochat.provider.messaging.AdapterRegistry;
 import app.zcat.infochat.provider.messaging.OutboundDelivery;
 import jakarta.annotation.PreDestroy;
@@ -61,6 +63,9 @@ public class DigestWorker {
 
     @Inject
     DegradedDigestRenderer degradedRenderer;
+
+    @Inject
+    DigestDelivery digestDelivery;
 
     @Inject
     SummaryCacheRepository cacheRepository;
@@ -158,6 +163,17 @@ public class DigestWorker {
                 postCollector.collectForGroup(slot.groupId(), collectFrom);
         GroupMetadata meta = readGroupMetadata(slot.groupId());
 
+        // The non-degraded, non-zero-posts path renders to a per-category
+        // section list (the exact delivery bytes — M1-652 fork closed, arm
+        // (b)); the cache stores the "\n\n" join of that list (the same join
+        // DigestRenderer.render() performs). The single-message paths
+        // (zero-posts fixed reply, degraded headlines-only) keep a plain
+        // String — they have no per-category structure and deliver via
+        // deliverToGroup, not DigestDelivery. `content` is always definitely
+        // assigned in one of the branches below; `renderedSections` is non-
+        // null only on the multi-section render path and drives the
+        // per-category delivery branch at the bottom.
+        List<RenderedSection> renderedSections = null;
         String content;
         boolean isDegraded = false;
 
@@ -169,11 +185,18 @@ public class DigestWorker {
                 content = degradedRenderer.render(collection.posts());
                 isDegraded = true;
             } else {
-                CompletableFuture<String> renderFuture = CompletableFuture.supplyAsync(
-                        () -> digestRenderer.render(collection.posts(), meta.language()),
+                CompletableFuture<List<RenderedSection>> renderFuture = CompletableFuture.supplyAsync(
+                        () -> digestRenderer.renderSections(collection.posts(), meta.language()),
                         renderExecutor);
                 try {
-                    content = renderFuture.get(remaining.toMillis(), TimeUnit.MILLISECONDS);
+                    renderedSections = renderFuture.get(remaining.toMillis(), TimeUnit.MILLISECONDS);
+                    // NEVER call render() after renderSections() — that re-runs
+                    // the whole LLM pass and lets the cached prose silently
+                    // diverge from the delivered bytes (the hand-wired stubs
+                    // cannot catch it). The cache stores the join of the
+                    // section list already in hand.
+                    content = String.join("\n\n", renderedSections.stream()
+                            .map(RenderedSection::text).toList());
                 } catch (TimeoutException | ExecutionException | InterruptedException e) {
                     if (e instanceof InterruptedException) {
                         Thread.currentThread().interrupt();
@@ -209,19 +232,28 @@ public class DigestWorker {
             return;
         }
 
-        String correlationId = "digest-" + slot.groupId() + "-" + slot.windowStart();
-        OutboundMessage msg = new OutboundMessage(
-                new ScopeRef.Group(meta.upstreamGroupId()),
-                content,
-                Instant.now(),
-                correlationId);
-        // Route through the chokepoint: retry on TRANSIENT, abort on
-        // PERMANENT, and feed the per-group permanent-failure counter that
-        // drives bot-removed cleanup. A null return means the delivery was
-        // aborted — logged here; the next slot retries (spec §Failure handling).
-        if (outboundDelivery.deliverToGroup(adapter, msg, slot.groupId()) == null) {
-            LOG.warnf("Digest delivery aborted for group %s slot %s",
-                    slot.groupId(), slot.slotKind());
+        if (renderedSections != null) {
+            // Per-category delivery: one OutboundMessage per section,
+            // sequentially in section order, through deliverSequenceToGroup
+            // (one aggregate counter outcome per slot). The single-message
+            // paths below stay on deliverToGroup.
+            digestDelivery.deliver(adapter, meta.upstreamGroupId(), slot.groupId(),
+                    slot.windowStart(), renderedSections);
+        } else {
+            String correlationId = "digest-" + slot.groupId() + "-" + slot.windowStart();
+            OutboundMessage msg = new OutboundMessage(
+                    new ScopeRef.Group(meta.upstreamGroupId()),
+                    content,
+                    Instant.now(),
+                    correlationId);
+            // Route through the chokepoint: retry on TRANSIENT, abort on
+            // PERMANENT, and feed the per-group permanent-failure counter that
+            // drives bot-removed cleanup. A null return means the delivery was
+            // aborted — logged here; the next slot retries (spec §Failure handling).
+            if (outboundDelivery.deliverToGroup(adapter, msg, slot.groupId()) == null) {
+                LOG.warnf("Digest delivery aborted for group %s slot %s",
+                        slot.groupId(), slot.slotKind());
+            }
         }
     }
 

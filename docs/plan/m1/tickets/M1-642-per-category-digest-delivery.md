@@ -1,21 +1,24 @@
 ---
 id: M1-642
 title: "Per-category digest delivery + optional roll-up summaries"
-status: pending
+status: done
 created: 2026-07-17
 last_updated: 2026-07-20
+clarity_check:
+  date: 2026-07-20
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-642.md
 blocked_by:
   - M1-641
-files_budget: 18
+files_budget: 15
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestDelivery.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRenderer.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/CategoryRollupGenerator.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/OutboundDelivery.java
-  - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
-  - infochat-provider/src/main/resources/bundles/en.properties
-  - infochat-provider/src/main/resources/bundles/cs.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestDeliveryTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererSectionsTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/CategoryRollupGeneratorTest.java
@@ -123,10 +126,19 @@ acceptance:
     subprocess restart during the sequential loop yields >= 3 instant
     PERMANENTs and soft-removes a healthy group in milliseconds, with no
     admin notification.
+    The ladder's THIRD outcome is pinned too: an interrupted back-off
+    already aborts with NO counter attribution today (backOff re-interrupts
+    and returns false; execute returns ABORTED without
+    onPermanentGroupFailure), and the sequence mirrors it — an interrupt
+    mid-sequence stops the remaining sends and applies NO aggregate outcome
+    (neither reset nor increment), so a Provider shutdown mid-digest never
+    counts toward soft-removal.
     OutboundDeliveryTest.sequenceAttributesAtMostOneCounterOutcome passes
     (an all-permanent sequence of >= threshold messages increments the
     counter once and does NOT soft-remove the group; a sequence with one
-    success resets it), and
+    success resets it),
+    OutboundDeliveryTest.interruptedSequenceStopsWithoutCounterAttribution
+    passes (interrupt driven through the Sleeper seam), and
     DigestDeliveryTest.oneFailedDigestNeverSoftRemovesGroup passes.
   - >-
     Redelivery posts again and MAY duplicate: nothing in v1 records which
@@ -162,11 +174,17 @@ acceptance:
   - >-
     Optional per-category roll-up: when infochat.digest.category-summary-enabled
     (default false) is on, each category message is prefixed with a 1–2 sentence
-    LLM roll-up SYNTHESIS across that category's clusters (a headline-level
-    summary, not a restatement of the items) — ONE LLM request per category,
-    alongside the existing one-request-per-cluster prose; the roll-up step is
-    the only NEW LLM stage. When off, the category message is just header +
-    items (Phase 1 behavior per message).
+    LLM roll-up SYNTHESIS across ALL of that category's clusters — including
+    any past the per-section item cap; the roll-up is the one line that names
+    what the "+N more" line hides (a headline-level summary, not a restatement
+    of the items) — ONE LLM request per category, alongside the existing
+    one-request-per-cluster prose; the roll-up step is the only NEW LLM stage,
+    routed as ModelTask.SUMMARIZER with its own system-prompt constant (a new
+    ModelTask is out of reach for this ticket — closed enum in
+    infochat-llm-adapter whose widening requires an llm.md spec amendment plus
+    routing-config and SwitchLlmWiringTest changes, all outside files_scope;
+    see Notes). When off, the category message is just header + items
+    (Phase 1 behavior per message).
     CategoryRollupGeneratorTest.producesOneRollupPerCategory passes.
   - >-
     Roll-up prose is LLM output and receives the same outbound treatment as
@@ -196,6 +214,21 @@ acceptance:
     policy, state explicitly that redelivery may duplicate, and record the
     slot-level counter attribution (one aggregate outcome per digest slot);
     a new decision D63 records all of it.
+  - >-
+    SafeLog on the roll-up LLM-failure path: the catch in
+    CategoryRollupGenerator.generateRollup routes its RuntimeException
+    through app.zcat.infochat.core.log.SafeLog (the project's exception-safe
+    logger — drops the message body, keeps only the class name plus a
+    depth-capped cause chain of class names, and runs the caller msg through
+    the API-key redactor), NOT a raw LOG.warnf(e, ...) that passes the
+    Throwable to SLF4J. The roll-up prompt interpolates post titles, bodies,
+    and urls, so a provider / sanitizer / translation exception can carry
+    user-authored prose in its message or cause chain; SafeLog is what keeps
+    that prose out of the operator log stream per docs/spec/security.md
+    §Secrets handling "User content in exceptions" — the same convention
+    every other infochat-provider LLM-call catch already follows (ChatAgent,
+    CompressCommandHandler, SummaryCommandHandler). (Added 2026-07-20 from
+    the M1-642 redteam-multi INFO-LEAK finding.)
   - mvn -pl infochat-provider verify is green
 test_plan:
   adds:
@@ -219,13 +252,20 @@ test_plan:
       parks an execution mid-render via that latch (DigestWorkerTest:238),
       and once the worker calls renderSections() a latch left only on
       render() makes the overlap test hang on its entered-await instead of
-      exercising the guard.
+      exercising the guard. The calls counter must migrate the same way:
+      DigestWorkerClockTest:81 and DigestWorkerTest:160 assert
+      callCount()==1 against the entry point the worker invokes, and
+      DigestWorkerClockTest must pass UNMODIFIED — a renderSections()
+      override that returns a section without incrementing the counter
+      fails it with no permitted fix.
     - >-
       OutboundDeliveryTest.java — ADDS the sequence-attribution cases
       (all-permanent sequence of >= threshold messages increments the counter
       once and does not soft-remove the group; a partial success resets the
-      counter; per-message retry/abort behavior inside a sequence is
-      unchanged). Existing cases pass unmodified.
+      counter; an interrupted back-off mid-sequence stops the remaining sends
+      with NO attribution, interrupt driven through the Sleeper seam;
+      per-message retry/abort behavior inside a sequence is unchanged).
+      Existing cases pass unmodified.
     - >-
       DigestWorkerTest.java — ADDS one case proving a multi-section render
       produces N sends through the chokepoint. The existing single-section
@@ -244,6 +284,39 @@ decision_refs:
   - D17
   - D36
 revisions:
+  - date: 2026-07-20
+    reason: >-
+      Pre-implementation plan review (each finding falsified against code
+      before adoption). (1) Roll-up routing pinned to ModelTask.SUMMARIZER —
+      the choice was never actually open: ModelTask is a closed enum in
+      infochat-llm-adapter whose widening requires an llm.md spec amendment
+      (its own javadoc), per-profile routing config (D56: an unrouted task
+      refuses boot on remote-llm), and the SwitchLlmWiringTest update — all
+      outside files_scope and outside -pl infochat-provider verify.
+      (2) Bundle-key ambiguity resolved to NONE NEEDED (the prefix is LLM
+      prose on the translator path; the prompt is a Java constant per the
+      SummaryProseGenerator precedent) — BundleKeys.java + en/cs.properties
+      leave files_scope, files_budget 18 -> 15. (3) RecordingDigestRenderer's
+      calls counter must migrate to renderSections() alongside the latch
+      (DigestWorkerClockTest:81 asserts callCount()==1 and must pass
+      unmodified). (4) The ladder's third outcome pinned: an interrupted
+      back-off stops the sequence with NO aggregate attribution;
+      OutboundDeliveryTest.interruptedSequenceStopsWithoutCounterAttribution
+      named. (5) Roll-up input pinned to ALL of the category's clusters (it
+      names what "+N more" hides). Notes gained three implementer
+      constraints: no execute() refactor is needed (null-groupId execute
+      calls are already the unattributed ladder), the worker caches the join
+      of the section list it already holds (a second render() call would
+      re-run the LLM pass and let cached prose diverge from delivered
+      bytes), and DigestDelivery is dereferenced only after the findAdapter
+      null-check (DigestWorkerClockTest leaves the field unset and must pass
+      unmodified).
+    snapshot:
+      files_budget: 18
+      files_scope_extra:
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
+        - infochat-provider/src/main/resources/bundles/en.properties
+        - infochat-provider/src/main/resources/bundles/cs.properties
   - date: 2026-07-20
     reason: >-
       M1-652 fork closed — user chose arm (b) (replay persisted sections).
@@ -354,6 +427,136 @@ escalations:
       TEST-CHANGES-AUTHORIZED: FAIL
       COMPLEXITY-RISK-CALIBRATED: WARN
       (full verdict: target/m1-tick-clarity-M1-642.txt)
+redteam_findings:
+  - date: 2026-07-20
+    category: INFO-LEAK
+    severity: medium
+    promise: |
+      security.md §Secrets handling / D37 "User content in exceptions":
+      exception messages and stack traces emitted via the application
+      logger MUST NOT contain user-authored prose (post bodies, etc.). The
+      application provides a SafeLog utility that drops the exception
+      message body, retains only the exception class name, and truncates
+      the cause chain to class names; the original Throwable is never
+      passed to the underlying SLF4J logger.
+    gap: |
+      CategoryRollupGenerator.java:149-150 catches RuntimeException e and
+      passes the raw Throwable to the JBoss logger via
+      LOG.warnf(e, "category roll-up LLM call failed; ..."), bypassing
+      SafeLog. The guarded call (provider.generate(ModelTask.SUMMARIZER,
+      ROLLUP_SYSTEM_PROMPT, userPrompt)) builds userPrompt by interpolating
+      every category cluster's post title, body, and url, so an exception
+      from the LLM transport, sanitizer, or translation boundary can embed
+      attacker-controlled post content in the Throwable's message/cause
+      chain, which then lands verbatim in the operator log stream the
+      threat model commits is free of post bodies at every log level.
+      Corroboration: multi-auditor run, corroborated 2/3 (claude rated low,
+      codex rated medium); the cross-exam parser split them into two
+      single-auditor clusters only on a line-number difference (118 vs
+      149-152) — substantively the same gap. opencode returned CLEAN on the
+      incorrect rationale that "all new LOG lines are fixed strings,"
+      overlooking the warnf(e, ...) call that passes the Throwable. claude's
+      low rationale: feature is default-off, leak target is the operator
+      log stream (API-key shapes separately caught by the console redactor),
+      exploitation needs a provider client whose exceptions embed body
+      content, and the same pattern already exists outside the diff
+      (SummaryProseGenerator.java:105-106/136-138) — but this diff
+      introduces a NEW instance of the surface SafeLog exists to close.
+    repro: |
+      1. Operator enables infochat.digest.category-summary-enabled
+         (default false).
+      2. An attacker who controls or can inject into a subscribed feed
+         publishes a post whose body survives Stage 1/2 and is crafted to
+         make the roll-up LLM call fail with a content-bearing exception
+         (e.g. content that drives the model into schema-/format-violating
+         output the provider client rejects with the raw reply quoted, or
+         that inflates the request past a provider limit whose client
+         exception echoes request context).
+      3. On the next digest slot for a group whose world includes the
+         source, generateRollup catches the RuntimeException and logs the
+         original Throwable; attacker-derived post text lands verbatim in
+         the production log stream.
+    suggested_fix_class: trust-boundary-tightening
+redteam_audits:
+  - date: 2026-07-20
+    verdict: FINDINGS
+    base: 5449d777457b338ad85371fae1b71a81f3cea33d
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam-multi/M1-642-2026-07-20/cross-examination.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      Multi-auditor run (claude, opencode, codex) at the /m1-tick run
+      step-4 gate, ahead of review. One INFO-LEAK finding (SafeLog bypass
+      at CategoryRollupGenerator.java:149-150) corroborated by
+      claude + codex; opencode returned CLEAN on an oversight. Per-auditor
+      verdicts and the cross-examination report live alongside this pointer
+      under docs/plan/m1/redteam-multi/M1-642-2026-07-20/ (verdict-*.txt,
+      cross-examination.md, diff.patch). The single out-of-model item
+      (deliverSequenceToGroup empty-sequence counter-increment trap) is not
+      adversary-reachable today but becomes a risk when M1-652 adds a
+      filtering caller; see escalation trigger context.
+  - date: 2026-07-20
+    verdict: CLEAN
+    base: 5449d777457b338ad85371fae1b71a81f3cea33d
+    head: working-tree-r2
+    verdict_file: docs/plan/m1/redteam-multi/M1-642-2026-07-20-r2/cross-examination.md
+    out_of_model_count: 1
+    note: |
+      Multi-auditor re-audit (claude, opencode, codex) after the
+      redteam-finding refine remediated the r1 INFO-LEAK gap by routing the
+      CategoryRollupGenerator.generateRollup catch through SafeLog. 3/3 CLEAN;
+      claude explicitly confirmed the SafeLog.warn(LOG, ..., e) routing at the
+      catch site and noted the prior finding is closed. The same out-of-model
+      item (deliverSequenceToGroup empty-sequence counter trap) was flagged by
+      all three auditors this round (corroborated out-of-model) — already
+      dispositioned by an acceptance criterion added to M1-652 (commit
+      52939154). Evidence under docs/plan/m1/redteam-multi/M1-642-2026-07-20-r2/.
+reviews:
+  - round: 1
+    date: 2026-07-20
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      assertion_adequacy: FAIL
+      spec_conformance: PASS
+    diff_stats:
+      files: 56
+      added: 7098
+      removed: 58
+    note: |
+      Files/lines inflated by the two redteam-multi evidence dirs + STATUS +
+      ticket (all lifecycle-exempt); 14 implementation files, within
+      files_budget 15. REWORK is a single ASSERTION-ADEQUACY item: the roll-up
+      integration is asserted only at the producer; nothing pins the
+      renderSections consumer line `.ifPresent(rollup -> sb.append(...))` at
+      DigestRenderer.java:121-122 (removing that append survives every test).
+  - round: 2
+    date: 2026-07-20
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      assertion_adequacy: PASS
+      spec_conformance: PASS
+    diff_stats:
+      files: 56
+      added: 7172
+      removed: 58
+    note: |
+      Rework item 1 addressed (end-of-path rollup-prefix test in
+      DigestRendererSectionsTest wires a stub CategoryRollupGenerator and
+      asserts the prefix appears in the rendered section text, pinning
+      DigestRenderer.java:121-122). Must-shrink convergent — growth vs round 1
+      is the new test method + the r2 redteam-multi evidence dir, both citable.
+      Verdict file: target/m1-tick-review-M1-642-r2.txt.
 ---
 
 # M1-642: Per-category digest delivery + optional roll-up summaries
@@ -406,8 +609,10 @@ touches the outbound delivery/retry chokepoint. Contract:
   message only.
 - Optional roll-up (`infochat.digest.category-summary-enabled`, default
   false): a 1–2 sentence LLM synthesis prefixes each category message —
-  a headline-level roll-up across the category's clusters, not a restatement.
-  One LLM request per category, sanitized and translated like cluster prose;
+  a headline-level roll-up across ALL the category's clusters (including
+  past-cap ones — it names what "+N more" hides), not a restatement.
+  Routed as `ModelTask.SUMMARIZER` (see Notes). One LLM request per
+  category, sanitized and translated like cluster prose;
   a roll-up failure yields that category without a prefix, never a degraded
   or blocked digest. Config-toggleable so it can be A/B'd against plain
   headers.
@@ -426,8 +631,11 @@ optional roll-up prepend. Do not add per-category cache rows or alter the
 `/retry --digest` cache contract. Do not touch `/summary`. Do not add
 delivery de-duplication at any layer. Do not touch the adapter chunker. The
 retry ladder's mechanics are untouched — `deliverSequenceToGroup` changes
-only the counter attribution granularity (see Notes). New
-bundle keys need en+cs twins (D43).
+only the counter attribution granularity (see Notes). No new bundle keys:
+the roll-up adds no deterministic user-visible string (the prefix is LLM
+prose; the prompt template is a Java constant, the `SummaryProseGenerator`
+precedent), so `BundleKeys.java` and the bundle files left files_scope
+(revision 2026-07-20).
 
 ## Notes
 
@@ -443,8 +651,17 @@ aggregate counter outcome per call — see the crux below) with correlationId
 `digest-<groupId>-<windowStart>-<categorySlug>`; `categorySlug` is the
 category tag as-is, the literal `other` for the null bucket, and M1-652's
 delivery-state key inherits this mapping. One render pass and one
-`generate()` pass, as before. The single-message paths (degraded, zero
-posts) keep using `deliverToGroup` unchanged.
+`generate()` pass, as before: the worker caches the join of the section
+list it already holds (the same `"\n\n"` join `render()` performs) and
+NEVER calls `render()` after `renderSections()` — a second `render()`
+call would re-run the whole LLM pass, and the cached prose would silently
+diverge from the delivered bytes (the hand-wired renderer stubs cannot
+catch that). The worker also keeps the `findAdapter` lookup and
+dereferences `DigestDelivery` only after the adapter-null early return:
+`DigestWorkerClockTest` hand-wires the worker with the delivery
+collaborators unset and relies on the empty-registry return right after
+the cache upsert — and it must pass unmodified. The single-message paths
+(degraded, zero posts) keep using `deliverToGroup` unchanged.
 
 **Partial-failure policy (the crux).** Each category message retries
 independently through the chokepoint's existing per-message TRANSIENT-retry /
@@ -468,6 +685,18 @@ consecutive failed slots. Inside `deliverSequenceToGroup` the per-message
 sends run unattributed; after the loop one aggregate is applied: any success
 → counter reset, all-permanent → one increment. Per-message classification,
 backoff, and the threshold value are untouched.
+
+No modification of `execute(...)` is needed for any of this:
+`execute(channel, null, msg, op)` is already the unattributed ladder (it
+is what `deliver()` uses for DMs — every counter mutation is gated on
+`groupId != null`), so the sequence method is a loop of null-groupId
+`execute` calls plus one aggregate applied through the existing helpers
+(`consecutivePermanentByGroup.remove` / `onPermanentGroupFailure`). The
+ladder also has a THIRD outcome the binary aggregate must not swallow: an
+interrupted back-off aborts with NO counter attribution (`backOff`
+re-interrupts and returns false). The sequence mirrors it — an interrupt
+stops the remaining sends and applies no aggregate outcome, so a Provider
+shutdown mid-digest never counts toward soft-removal.
 
 Redelivery re-posts everything and may duplicate — see below.
 
@@ -509,11 +738,21 @@ rendered text exceeds 4 000 bytes — reachable at the default
 `infochat.digest.category-item-cap` of 12 clusters — can still break inside a
 cluster. Do not write an acceptance criterion promising otherwise.
 
-**Roll-up prompt shape.** `CategoryRollupGenerator` gets the category's
-clusters and emits ONE synthesis sentence naming the themes ("Three
-supply-chain attacks, an OpenSSL DoS, and a WordPress RCE"), NOT a re-list.
-Reuse the group language. Keep it behind the default-off flag so Phase 2 can
-ship the delivery change first and enable roll-ups after evaluation.
+**Roll-up prompt shape.** `CategoryRollupGenerator` gets ALL clusters
+assigned to the category — including those past the per-section item cap:
+the roll-up is the one line that names what the "+N more" line hides, and
+headline-level input keeps the prompt small even for a capped category —
+and emits ONE synthesis sentence naming the themes ("Three supply-chain
+attacks, an OpenSSL DoS, and a WordPress RCE"), NOT a re-list. Reuse the
+group language. Routing is `ModelTask.SUMMARIZER` with a distinct
+system-prompt constant (the `SummaryProseGenerator` precedent): a new
+`ModelTask` is unreachable in this ticket — the enum is a closed set in
+`infochat-llm-adapter` whose widening requires an `llm.md` spec amendment
+(per its own javadoc), per-profile routing config (D56: an unrouted task
+refuses boot on `remote-llm`), and the `SwitchLlmWiringTest` positional
+update, all outside files_scope and outside `mvn -pl infochat-provider
+verify`. Keep it behind the default-off flag so Phase 2 can ship the
+delivery change first and enable roll-ups after evaluation.
 
 **Roll-up safety and containment.** Roll-up prose is LLM output: sanitize
 with `LlmOutputSanitizer`, then `TranslationPipeline.run` — the same
@@ -538,3 +777,21 @@ categories.
 **Blocked on M1-641** (merged 2026-07-18, `52de43c3`) — consumes its
 (category, clusters) output. The M1-652 fork was closed 2026-07-20 (arm (b),
 first acceptance item); nothing else gates `/m1-tick start`.
+
+## Round 1 rework
+
+Reviewer round-1 REWORK (ASSERTION-ADEQUACY-CHECK FAIL; full verdict at
+`target/m1-tick-review-M1-642-r1.txt`). One item:
+
+1. **Add an end-of-path test for the roll-up integration.** The roll-up
+   prefix is asserted only at the producer (`CategoryRollupGeneratorTest`
+   checks `generateRollup`'s `Optional<String>` return); no test pins the
+   consumer line
+   `categoryRollupGenerator.generateRollup(...).ifPresent(rollup -> sb.append("\n\n").append(rollup))`
+   at `DigestRenderer.java:121-122`. Removing that append survives every
+   test — every `renderSections` test runs with `categorySummaryEnabled` at
+   its default `false`, so the `ifPresent` is a no-op they cannot constrain.
+   Fix: in `DigestRendererSectionsTest`, wire `renderer.categoryRollupGenerator`
+   to a stub whose `generateRollup` returns `Optional.of("TEST-ROLLUP-PREFIX")`,
+   render sections for a post set with at least one qualifying category, and
+   assert the prefix appears inside the rendered section text.

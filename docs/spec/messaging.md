@@ -365,6 +365,31 @@ Provider produces plain text per decision D30. The adapter:
   permanent failure on a group triggers the bot-removed-from-group
   handler below. The retry queue does not re-attempt permanent
   failures.
+- **Per-category digest delivery attribution (D63).** A
+  non-degraded periodic digest is delivered as a sequence of N
+  category messages through the chokepoint primitive
+  `OutboundDelivery.deliverSequenceToGroup(adapter, messages, groupId)`.
+  Each message runs the existing per-message TRANSIENT-retry /
+  PERMANENT-abort ladder unchanged; the per-group permanent-failure
+  counter that drives the bot-removed-from-group handler below
+  receives at most ONE aggregate outcome per slot — **any success
+  resets the counter, all-permanent increments once, an interrupt
+  that stops the sequence early attributes nothing.** This is not
+  optional hardening: the counter's documented "always > 1"
+  invariant (below) was calibrated for one message per slot, and
+  SimpleX classifies a send on a closed or not-yet-started
+  WebSocket as an IMMEDIATE PERMANENT (`SimpleXWebSocketClient.sendCommand`;
+  `onClose` fails every pending future the same way), so naive
+  per-category `deliverToGroup` calls would let one routine
+  simplex-chat subprocess restart during the sequential loop yield
+  ≥3 instant PERMANENTs in milliseconds — soft-removing a healthy
+  group with no admin notification, where the same blip today costs
+  a single increment. Per-message failure classification, backoff,
+  max-attempts, and the threshold value are untouched; single-
+  message callers (`deliverToGroup`) keep today's per-call
+  attribution. Redelivery may duplicate (D63, D64): nothing in v1
+  records which categories were delivered, so `/retry --digest`
+  re-posts every category, including any that already landed.
 - **Bot removed from group.** When the adapter detects the bot has
   been removed from a group (via an adapter-specific signal, or
   via repeated permanent send failures past a profile-driven

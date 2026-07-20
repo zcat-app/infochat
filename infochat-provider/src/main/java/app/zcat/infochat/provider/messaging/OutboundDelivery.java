@@ -16,6 +16,7 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
@@ -148,6 +149,60 @@ public class OutboundDelivery {
     public @Nullable MessageHandle deliverToGroup(
             MessagingAdapter adapter, OutboundMessage msg, UUID groupId) {
         return execute(adapter.name(), groupId, msg, () -> adapter.send(msg)).handle();
+    }
+
+    /**
+     * Deliver a sequence of group-scoped messages (a per-category digest),
+     * attributing at most ONE aggregate outcome to {@code groupId}'s
+     * permanent-failure counter regardless of how many messages the
+     * sequence contains. Each message runs the existing per-message
+     * TRANSIENT-retry / PERMANENT-abort ladder unattributed — the loop
+     * passes {@code null} for the per-call groupId, exactly as
+     * {@link #deliver} does for DMs — so per-message retry/back-off/classify
+     * behavior is unchanged; after the loop one aggregate is applied: any
+     * success resets the counter, all-aborted-permanent increments it
+     * once, an interrupt that stopped the sequence early attributes
+     * nothing.
+     *
+     * <p>The aggregate models THREE per-message outcomes, not two:
+     * delivered / aborted-permanent / aborted-interrupted. SimpleX
+     * classifies a send on a closed or not-yet-started WebSocket as an
+     * IMMEDIATE PERMANENT ({@code SimpleXWebSocketClient.sendCommand}),
+     * so a single simplex-chat subprocess restart during the sequential
+     * loop could otherwise yield ≥3 instant PERMANENTs in milliseconds
+     * and soft-remove a healthy group with no admin notification.
+     * Collapsing the whole slot into a single counter outcome preserves
+     * the "always &gt; 1" invariant the threshold (3 in every profile
+     * except {@code pi}) was calibrated for — a single transport blip
+     * during the sequence costs one increment, not N. Partial success is
+     * visible: ≥1 delivered still resets the counter; a PERMANENT on one
+     * message does not block the others.
+     */
+    public void deliverSequenceToGroup(
+            MessagingAdapter adapter, List<OutboundMessage> messages, UUID groupId) {
+        String channel = adapter.name();
+        boolean anyDelivered = false;
+        for (OutboundMessage msg : messages) {
+            Outcome outcome = execute(channel, null, msg, () -> adapter.send(msg));
+            if (outcome.delivered()) {
+                anyDelivered = true;
+            } else if (Thread.currentThread().isInterrupted()) {
+                // An interrupted back-off aborts the message with no
+                // counter attribution — backOff() re-sets the interrupt
+                // flag after its InterruptedException catch. Stop the
+                // sequence and attribute NOTHING, mirroring today's
+                // single-message interrupted abort, which also leaves the
+                // counter untouched (OutboundDelivery.execute returns
+                // ABORTED with no onPermanentGroupFailure call when
+                // backOff returns false).
+                return;
+            }
+        }
+        if (anyDelivered) {
+            consecutivePermanentByGroup.remove(groupId);
+        } else {
+            onPermanentGroupFailure(channel, groupId);
+        }
     }
 
     /**

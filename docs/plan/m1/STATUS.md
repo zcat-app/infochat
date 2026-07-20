@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 677 |
+| done | 678 |
 | deferred | 0 |
 | abandoned | 19 |
 | **total** | **701** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-642 — Per-category digest delivery + optional roll-up summaries (complexity: high, risk: medium)
+- M1-652 — Gap-filling redelivery for per-category digests (complexity: high, risk: medium)
 - M1-660 — doc_embedding read path: arm hnsw.iterative_scan under filter-inside-ANN, in a transaction (complexity: medium, risk: medium)
 
 ---
@@ -44,7 +44,6 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-649 — blocked_by: M1-660 (pending), M1-664 (done)
-- M1-652 — blocked_by: M1-642 (pending)
 - M1-666 — blocked_by: M1-649 (pending), M1-665 (done)
 
 ---
@@ -64,6 +63,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-642 | Per-category digest delivery + optional roll-up summaries | 2026-07-20 | round 2 APPROVE |
 | M1-665 | Deterministic delivery of matched command usage in chat | 2026-07-19 | round 2 APPROVE |
 | M1-664 | Semantic command-intent index: retrieval + registration | 2026-07-19 | round 1 APPROVE |
 | M1-663 | Spec: deterministic-delivery contract for chat help text | 2026-07-19 | round 1 APPROVE |
@@ -73,7 +73,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-657 | Gate /approve-group: admin check before group-id parse | 2026-07-18 | round 1 APPROVE |
 | M1-656 | Stop friendly errors reflecting unvalidated inbound text | 2026-07-18 | round 3 APPROVE |
 | M1-655 | Fix MultiAdapterProductionIT flake: stand-in daemon must not die and trigger reconnect churn | 2026-07-18 | round 1 APPROVE |
-| M1-654 | Guard the closed LLM tool allowlist against spec drift | 2026-07-18 | round 1 APPROVE |
 
 ---
 
@@ -869,8 +868,8 @@ M1-638 (done)
 M1-639 (done)
 M1-640 (done)
 M1-641 (done)
-  ├── M1-642 (pending) ← runnable
-  │     └── M1-652 (pending)
+  ├── M1-642 (done)
+  │     └── M1-652 (pending) ← runnable
   └── M1-643 (abandoned)
 M1-644 (done)
 M1-645 (done)

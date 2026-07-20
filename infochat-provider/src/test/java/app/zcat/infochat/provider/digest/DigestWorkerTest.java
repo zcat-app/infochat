@@ -12,6 +12,7 @@ import app.zcat.infochat.provider.group.GroupRepository;
 import app.zcat.infochat.provider.messaging.AdapterRegistry;
 import app.zcat.infochat.provider.messaging.OutboundDelivery;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
+import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -78,6 +79,9 @@ class DigestWorkerTest {
                 new ThrottledAdminNotifier(),
                 new GroupRepository(new StubGroupDataSource(ADAPTER_NAME, UPSTREAM_GROUP_ID, "en")),
                 3, 0L, 2.0, 3);
+        DigestDelivery digestDelivery = new DigestDelivery();
+        digestDelivery.outboundDelivery = worker.outboundDelivery;
+        worker.digestDelivery = digestDelivery;
     }
 
     @Test
@@ -228,6 +232,26 @@ class DigestWorkerTest {
 
         assertEquals(7L, cacheRepository.lastTagSubVer());
         assertEquals(12L, cacheRepository.lastSrcSubVer());
+    }
+
+    @Test
+    void execute_multiSectionRenderProducesOneSendPerSection() {
+        postCollector.seed(testPosts(), 1, 1);
+        digestRenderer.setMultiSections(List.of(
+                new RenderedSection("security", "section A prose"),
+                new RenderedSection("crypto", "section B prose"),
+                new RenderedSection(null, "section Other prose")));
+        DigestSlot slot = futureSlot();
+
+        worker.execute(slot);
+
+        assertEquals(3, recordingAdapter.sendCount(),
+                "an N-section render produces N sends through the chokepoint");
+        // Sequential section order: the adapter's recorded sends preserve the
+        // section order DigestDelivery received.
+        assertEquals("section A prose", recordingAdapter.sent.get(0).text());
+        assertEquals("section B prose", recordingAdapter.sent.get(1).text());
+        assertEquals("section Other prose", recordingAdapter.sent.get(2).text());
     }
 
     @Test

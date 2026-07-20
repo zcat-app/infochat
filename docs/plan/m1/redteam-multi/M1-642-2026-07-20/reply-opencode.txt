@@ -1,0 +1,45 @@
+[0m
+> threat-actor · glm-5.2
+[0m
+[0m→ [0mRead .claude/agents/threat-actor.md
+[0m→ [0mRead docs/plan/m1/redteam-multi/M1-642-2026-07-20/prompt-opencode.txt
+[0m→ [0mRead docs/spec/security.md
+[0m→ [0mRead docs/plan/m1/redteam-multi/M1-642-2026-07-20/diff.patch
+[0m→ [0mRead docs/spec/security.md[90m [offset=696][0m
+[0m→ [0mRead docs/plan/m1/redteam-multi/M1-642-2026-07-20/diff.patch[90m [offset=730][0m
+[0m→ [0mRead docs/spec/security.md[90m [offset=1566][0m
+[0m→ [0mRead docs/plan/m1/redteam-multi/M1-642-2026-07-20/diff.patch[90m [offset=1745][0m
+[0m→ [0mRead infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/OutboundDelivery.java
+Now I have a complete picture. Let me also verify the existing `SummaryProseGenerator` precedent that the diff claims to mirror, to confirm the prompt-injection defenses are correctly applied.
+[0m✱ [0mGrep "LlmOutputSanitizer|sanitize"[90m in infochat-provider/src/main/java/app/zcat/infochat/provider/summary · 2 matches[0m
+[0m✱ [0mGrep "SUMMARIZER_SYSTEM_PROMPT|UNTRUSTED_CONTENT|REFUSAL"[90m in infochat-provider/src/main/java/app/zcat/infochat/provider/summary · 13 matches[0m
+[0m→ [0mRead infochat-provider/src/main/java/app/zcat/infochat/provider/summary/SummaryProseGenerator.java[90m [offset=100, limit=90][0m
+[0m→ [0mRead infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRenderer.java
+I have full context now. The diff proposes per-category digest delivery plus an optional LLM roll-up. Let me audit each threat-model commitment against what the diff actually delivers.
+
+Key commitments to verify:
+1. **Prompt-injection defenses** (per-call random marker, system prompt, REFUSAL marker, treat-as-data) — for the new `CategoryRollupGenerator` LLM call.
+2. **LLM output sanitizer unconditional** — roll-up prose must be sanitized + translated before delivery.
+3. **Determinism boundary** — LLM touches prose only, never digest structure.
+4. **Bot-removed audit row** — soft-remove path must still write `BOT_REMOVED`.
+5. **D63 slot-level counter attribution** — at most one aggregate outcome per slot, including the interrupt-attributes-nothing case.
+
+Verifying each in the diff:
+
+- `CategoryRollupGenerator.buildPrompt` uses `UUID.randomUUID().toString()` as the wrapper marker (per-call random), mirroring `SummaryProseGenerator` exactly. The `ROLLUP_SYSTEM_PROMPT` contains the never-follow-instructions clause, the treat-as-data clause, the delimiter-mimicry warning, and the `[REFUSAL: <reason>]` refusal protocol. ✓
+- `generateRollup` calls `llmOutputSanitizer.sanitize(text)` then `translationPipeline.run(sanitized, langCode)` before returning — the output runs through both before reaching the renderer, and the refusal/empty/exception paths all yield `Optional.empty()` (the flag-off shape). ✓
+- The LLM only produces a prose prefix; category assignment, section ordering, and the closing-affordance folding are deterministic (the roll-up is routed via `categoryRollupGenerator.generateRollup(...).ifPresent(...)` — it cannot change structure, only add a prefix). ✓
+- `deliverSequenceToGroup` aggregates via `onPermanentGroupFailure(channel, groupId)` which calls the existing `groupRepository.markRemovedAudited(groupId, channel)` — the `BOT_REMOVED` audit row path is preserved. ✓
+- The interrupt branch (`Thread.currentThread().isInterrupted()` → `return` with no aggregation) and the `anyDelivered ? remove : onPermanentGroupFailure` aggregate match the D63 three-outcome model. ✓
+
+No new auth surface, no new mutation operations, no new tool-allowlist entries, no SQL, no log injection (all new logs are fixed strings), no INFO-LEAK path (roll-up input is the same group's own subscribed, Stage-1-redacted posts; output returns to the same group). The larger LLM input (past-cap clusters) is documented behavior and bounded by the existing defenses.
+
+Writing the verdict.
+[0m
+[0m← [0mWrite docs/plan/m1/redteam-multi/M1-642-2026-07-20/verdict-opencode.txt
+Wrote file successfully.
+[0m
+RED-TEAM VERDICT: CLEAN
+Verdict file: /home/infochat/infochat/docs/plan/m1/redteam-multi/M1-642-2026-07-20/verdict-opencode.txt
+Findings: critical=0 high=0 medium=0 low=0
+Out-of-model: 0
