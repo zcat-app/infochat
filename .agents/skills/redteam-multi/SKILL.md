@@ -101,11 +101,10 @@ Never modify anything under `.claude/`.
 
 ## opencode-boundary note
 
-This skill was authored by an opencode session. opencode cannot edit
-`.claude/**` per `AGENTS.md`, so the parallel
-`.claude/skills/redteam-multi/SKILL.md` wrapper is NOT yet authored. On
-Claude Code, `/redteam-multi` is therefore not yet invocable as a slash
-command — but `scripts/redteam-multi.sh` works on any host, and the
-procedure here is harness-agnostic. When Claude Code next resumes, it
-should add the parallel `.claude/skills/redteam-multi/SKILL.md` mirroring
-this file.
+This skill was authored by an opencode session (opencode cannot edit
+`.claude/**` per `AGENTS.md`). The parallel Claude Code wrapper
+`.claude/skills/redteam-multi/SKILL.md` was authored 2026-07-20, so
+`/redteam-multi` is now invocable as a slash command on Claude Code. Both
+skill files are thin harness wrappers; the procedure is single-sourced in
+`docs/process/harness-mapping.md` §7 — keep them pointers, not forks. The
+`scripts/redteam-multi.sh` wrapper works on any host regardless.
