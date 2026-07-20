@@ -15,7 +15,10 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -31,7 +34,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Covers M1-664 acceptance items 2 (warm-restart content-hash skip)
  * and 3 (changed intent text or embedding model forces a re-embed).
  * Together these pin the invariant that a stale vector can never
- * outlive its source text.
+ * outlive its source text. M1-660 adds the read-path hardening probes:
+ * command recall under foreign-doc_kind crowding, and the
+ * SET-LOCAL-without-transaction no-op trap.
  *
  * <p>Named {@code *IT} (failsafe phase) because it boots DevServices
  * Postgres — integration-shaped per design 08-verification §8.2,
@@ -65,6 +70,7 @@ class CommandIntentIndexIT {
     @BeforeEach
     void setUp() throws Exception {
         deleteAllIntentRows();
+        deleteForeignKindRows();
         stubEmbedder = new CountingEmbedder();
         builder = new CommandIntentIndexBuilder(dao, stubEmbedder, bundleLoader, EMBEDDING_MODEL);
     }
@@ -72,6 +78,7 @@ class CommandIntentIndexIT {
     @AfterEach
     void tearDown() throws Exception {
         deleteAllIntentRows();
+        deleteForeignKindRows();
     }
 
     /**
@@ -222,6 +229,260 @@ class CommandIntentIndexIT {
                         + "start) or at its prior state (warm restart) — NOT abort "
                         + "Provider startup. helpLookup degrades to no-match at chat "
                         + "time per docs/spec/security.md §Failure handling.");
+    }
+
+    // ---------- M1-660: filter-inside-ANN read-path hardening ----------
+
+    /** A second doc_kind sharing idx_doc_embedding_hnsw (the M1-649 shape). */
+    private static final String FOREIGN_KIND = "zz_m1660_foreign";
+    /** Synthetic command row the crowded probes must still recall. */
+    private static final String CROWDED_COMMAND = "zz-m1660-target-command";
+    /**
+     * Pinned to postgres' hnsw.ef_search default so the crowd size below
+     * always exceeds the non-iterative candidate window, regardless of
+     * server-config drift.
+     */
+    private static final int EF_SEARCH = 40;
+    private static final int FOREIGN_CROWD_SIZE = 200;
+    private static final double SIMILARITY_THRESHOLD = 0.60;
+
+    /**
+     * M1-660 acceptance item 4 — the retrieval proof, not a SQL-string
+     * assert. {@value #FOREIGN_CROWD_SIZE} rows of a second doc_kind are
+     * seeded strictly CLOSER to the query vector than the target command
+     * row, so a non-iterative HNSW probe's whole {@value #EF_SEARCH}-row
+     * candidate window fills with rows the {@code doc_kind} filter then
+     * discards — under-recall to empty, exactly what production hits the
+     * moment M1-649's topic corpus lands. With
+     * {@code hnsw.iterative_scan = strict_order} armed inside the probe's
+     * transaction the scan keeps walking until a filter-surviving row
+     * emerges, so the command is recalled. This test FAILS on main (no
+     * arming) and PASSES with the fix.
+     */
+    @Test
+    void commandRecallSurvivesForeignKindInterleaving() throws Exception {
+        seedDocRow(CROWDED_COMMAND, CommandIntentIndex.DOC_KIND, vectorAtAngle(0.30));
+        seedForeignCrowd();
+        reindexHnswGraph();
+
+        try (Connection conn = dataSource.getConnection()) {
+            try {
+                conn.setAutoCommit(false);
+                forcePlannerToHnswProbe(conn, true);
+                Optional<String> match = CommandIntentIndex.lookupCommand(
+                        conn,
+                        toVectorLiteral(vectorAtAngle(0)),
+                        List.of(CROWDED_COMMAND),
+                        SIMILARITY_THRESHOLD);
+                assertEquals(Optional.of(CROWDED_COMMAND), match,
+                        "a command probe must recall the nearest VISIBLE command-intent "
+                                + "row even when " + FOREIGN_CROWD_SIZE + " closer rows of "
+                                + "another doc_kind crowd the ef_search window — without "
+                                + "iterative_scan the probe stops at " + EF_SEARCH
+                                + " candidates and silently under-recalls");
+            } finally {
+                conn.rollback();
+                conn.setAutoCommit(true);
+            }
+        }
+    }
+
+    /**
+     * M1-660 acceptance item 5 — the no-op-trap pin. Probe A hand-rolls
+     * the naive pre-M1-660 read shape on an AUTOCOMMIT connection:
+     * {@code SET LOCAL hnsw.iterative_scan} is issued exactly as the
+     * fixed path issues it, but with no transaction open the GUC expires
+     * with its own implicit single-statement transaction before the
+     * query runs, so the probe under-recalls to empty. Probe B then
+     * calls the REAL read path on the SAME still-autocommit connection
+     * (ChatAgent.lookupIntentForDelivery's exact borrow shape) and
+     * recalls the command — the only variable separating under-recall
+     * from recall is {@code lookupCommand}'s own transaction + arming.
+     * A refactor that drops {@code setAutoCommit(false)} or the
+     * {@code SET LOCAL} from {@code lookupCommand} turns probe B into
+     * probe A and reds this test rather than silently regressing recall.
+     * Probe A doubles as the fixture's discrimination guard: if the
+     * crowd ever stops defeating a non-iterative window (pgvector
+     * default drift, fixture rot), its EMPTY assert fires and flags the
+     * companion test above as vacuous instead of green-washing it.
+     */
+    @Test
+    void armingOutsideTransactionIsSilentNoOpAndRealPathRecovers() throws Exception {
+        seedDocRow(CROWDED_COMMAND, CommandIntentIndex.DOC_KIND, vectorAtAngle(0.30));
+        seedForeignCrowd();
+        reindexHnswGraph();
+
+        try (Connection conn = dataSource.getConnection()) {
+            try {
+                // Session-scoped (plain SET) so the plan pinning survives
+                // autocommit's per-statement transaction boundaries for
+                // probe A, and stays in effect inside probe B's transaction.
+                forcePlannerToHnswProbe(conn, false);
+
+                // Probe A — the trap: arming without a transaction.
+                try (Statement stmt = conn.createStatement()) {
+                    stmt.execute("SET LOCAL hnsw.iterative_scan = strict_order");
+                }
+                assertTrue(naiveProbe(conn).isEmpty(),
+                        "SET LOCAL on an autocommit connection must be a silent no-op "
+                                + "— if this probe recalls the command, either the arming "
+                                + "unexpectedly took effect outside a transaction or the "
+                                + "crowd fixture no longer defeats a non-iterative "
+                                + "ef_search window, and the companion recall test is "
+                                + "vacuous");
+
+                // Probe B — the real read path on the same bare autocommit
+                // connection.
+                Optional<String> match = CommandIntentIndex.lookupCommand(
+                        conn,
+                        toVectorLiteral(vectorAtAngle(0)),
+                        List.of(CROWDED_COMMAND),
+                        SIMILARITY_THRESHOLD);
+                assertEquals(Optional.of(CROWDED_COMMAND), match,
+                        "lookupCommand must open the transaction its own SET LOCAL "
+                                + "arming needs — on a bare autocommit borrow (the "
+                                + "ChatAgent.lookupIntentForDelivery shape) the arming "
+                                + "must still be effective");
+            } finally {
+                if (!conn.getAutoCommit()) {
+                    conn.rollback();
+                    conn.setAutoCommit(true);
+                }
+                try (Statement stmt = conn.createStatement()) {
+                    stmt.execute("RESET enable_seqscan");
+                    stmt.execute("RESET enable_sort");
+                    stmt.execute("RESET hnsw.ef_search");
+                }
+            }
+        }
+    }
+
+    /**
+     * Rebuild the HNSW graph from the live heap before probing. Sibling
+     * tests in this class churn {@code doc_embedding} (insert + delete
+     * of ~41 IDENTICAL stub vectors per builder run); HNSW deletes leave
+     * dead graph nodes until VACUUM, and a fresh row inserted into that
+     * degenerate duplicate-vector region can become unreachable from
+     * the graph entry point — empirically, even an exhaustive iterative
+     * scan (ef_search=1000, max_scan_tuples=20000) then exhausts after
+     * the reachable component without ever surfacing the row (reproduced
+     * standalone on pgvector/pgvector:pg16, 2026-07-20). REINDEX pins
+     * the precondition these tests rely on — every LIVE row reachable —
+     * so the non-iterative ef_search window is the ONLY recall variable
+     * under test. Production sees no comparable state: the corpus is
+     * rebuilt at most once per boot with diverse real embeddings, not
+     * churned per-test with duplicates.
+     */
+    private void reindexHnswGraph() throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("REINDEX INDEX idx_doc_embedding_hnsw");
+        }
+    }
+
+    /**
+     * Pin the probe to the HNSW index path. On a ~{@value #FOREIGN_CROWD_SIZE}-row
+     * table the planner would otherwise seq-scan (exact — every row sees
+     * the filters) or walk the (doc_kind, target_ref) btree plus an
+     * explicit sort (also exact), and the ef_search window these tests
+     * probe would never come into play. Disabling seq scans and explicit
+     * sorts leaves the distance-ordered HNSW scan as the only plan — the
+     * same plan a production-sized corpus reaches on cost alone.
+     */
+    private static void forcePlannerToHnswProbe(Connection conn, boolean transactionScoped)
+            throws SQLException {
+        String scope = transactionScoped ? "SET LOCAL " : "SET ";
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute(scope + "enable_seqscan = off");
+            stmt.execute(scope + "enable_sort = off");
+            stmt.execute(scope + "hnsw.ef_search = " + EF_SEARCH);
+        }
+    }
+
+    /**
+     * The pre-M1-660 probe shape: {@code lookupCommand}'s exact SQL with
+     * no transaction and no arming beyond what the caller already issued.
+     */
+    private Optional<String> naiveProbe(Connection conn) throws SQLException {
+        String sql = "SELECT target_ref FROM doc_embedding "
+                + "WHERE doc_kind = ? AND target_ref = ANY(?) "
+                + "AND (embedding <=> ?::vector) < ? "
+                + "ORDER BY (embedding <=> ?::vector) ASC LIMIT 1";
+        String vectorLiteral = toVectorLiteral(vectorAtAngle(0));
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, CommandIntentIndex.DOC_KIND);
+            ps.setArray(2, conn.createArrayOf("text", new String[] {CROWDED_COMMAND}));
+            ps.setString(3, vectorLiteral);
+            ps.setDouble(4, 1.0 - SIMILARITY_THRESHOLD);
+            ps.setString(5, vectorLiteral);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? Optional.of(rs.getString("target_ref")) : Optional.empty();
+            }
+        }
+    }
+
+    /**
+     * {@value #FOREIGN_CROWD_SIZE} rows of a second doc_kind, every one
+     * strictly closer to the query vector (angle 0) than the command row
+     * at angle 0.30 — so a non-iterative probe's candidate window holds
+     * only rows the doc_kind filter discards.
+     */
+    private void seedForeignCrowd() throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO doc_embedding "
+                     + "(doc_id, doc_kind, target_ref, content_hash, embedding, embedding_model) "
+                     + "VALUES (?, ?, ?, ?, ?::vector, ?)")) {
+            for (int i = 0; i < FOREIGN_CROWD_SIZE; i++) {
+                String docId = "zz-m1660-foreign-" + i;
+                ps.setString(1, docId);
+                ps.setString(2, FOREIGN_KIND);
+                ps.setString(3, docId);
+                ps.setString(4, "crowd-hash");
+                ps.setString(5, toVectorLiteral(vectorAtAngle(0.001 + i * 0.0001)));
+                ps.setString(6, EMBEDDING_MODEL);
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        }
+    }
+
+    private void seedDocRow(String docId, String docKind, float[] embedding) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO doc_embedding "
+                     + "(doc_id, doc_kind, target_ref, content_hash, embedding, embedding_model) "
+                     + "VALUES (?, ?, ?, ?, ?::vector, ?)")) {
+            ps.setString(1, docId);
+            ps.setString(2, docKind);
+            ps.setString(3, docId);
+            ps.setString(4, "m1660-hash");
+            ps.setString(5, toVectorLiteral(embedding));
+            ps.setString(6, EMBEDDING_MODEL);
+            ps.executeUpdate();
+        }
+    }
+
+    private void deleteForeignKindRows() throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "DELETE FROM doc_embedding WHERE doc_kind = ?")) {
+            ps.setString(1, FOREIGN_KIND);
+            ps.executeUpdate();
+        }
+    }
+
+    /**
+     * Unit vector in the (dim0, dim1) plane at the given angle from the
+     * dim0 axis — cosine similarity to {@code vectorAtAngle(0)} is
+     * exactly {@code cos(radians)}. Same helper shape as
+     * {@code HelpLookupToolIT}.
+     */
+    private static float[] vectorAtAngle(double radians) {
+        float[] v = new float[DIMENSION];
+        v[0] = (float) Math.cos(radians);
+        v[1] = (float) Math.sin(radians);
+        return v;
     }
 
     // ---------- helpers ----------

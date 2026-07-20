@@ -174,6 +174,7 @@ public class ChatAgent {
     private final LlmCircuitBreakerRegistry breakerRegistry;
     private final EmbeddingProvider embeddingProvider;
     private final HelpCommandHandler helpHandler;
+    private final CancellationService cancellationService;
 
     @Inject
     public ChatAgent(InFlightTracker inFlightTracker,
@@ -190,7 +191,8 @@ public class ChatAgent {
                      InboundContext inboundContext,
                      LlmCircuitBreakerRegistry breakerRegistry,
                      EmbeddingProvider embeddingProvider,
-                     HelpCommandHandler helpHandler) {
+                     HelpCommandHandler helpHandler,
+                     CancellationService cancellationService) {
         this.inFlightTracker = inFlightTracker;
         this.promptBuilder = promptBuilder;
         this.toolDispatcher = toolDispatcher;
@@ -206,6 +208,7 @@ public class ChatAgent {
         this.breakerRegistry = breakerRegistry;
         this.embeddingProvider = embeddingProvider;
         this.helpHandler = helpHandler;
+        this.cancellationService = cancellationService;
     }
 
     /**
@@ -791,6 +794,15 @@ public class ChatAgent {
         CallerTier caller = helpHandler.resolveCallerTier(userId, scopeKind, scopeId);
         List<String> visibleTargets = helpHandler.visibleCommandNames(caller);
         try (Connection conn = dataSource.getConnection()) {
+            // This borrow has no armToolConnection (the trigger runs before
+            // the tool loop), so nothing else caps the probe — and the
+            // strict_order iterative scan lookupCommand arms can walk up to
+            // hnsw.max_scan_tuples when no row clears the threshold. The
+            // profile-driven statement_timeout bounds this path in time
+            // like the tool path's; it also flips autocommit off, so the
+            // SET LOCAL arming below joins a live transaction caller-side
+            // (redteam-multi 2026-07-20, M1-660).
+            cancellationService.applyStatementTimeout(conn);
             return CommandIntentIndex.lookupCommand(
                     conn, vectorLiteral, visibleTargets, INTENT_DELIVERY_SIMILARITY_THRESHOLD);
         } catch (SQLException e) {

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 678 |
+| done | 679 |
 | deferred | 0 |
 | abandoned | 19 |
 | **total** | **702** |
@@ -25,8 +25,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
+- M1-649 — Conceptual topic corpus: curated answers, intent-shaped matching, code-anchored guards (retrieval only) (complexity: high, risk: high)
 - M1-652 — Gap-filling redelivery for per-category digests (complexity: high, risk: medium)
-- M1-660 — doc_embedding read path: arm hnsw.iterative_scan under filter-inside-ANN, in a transaction (complexity: medium, risk: medium)
 - M1-667 — Route user-content exception catches through SafeLog (complexity: medium, risk: low)
 
 ---
@@ -44,7 +44,6 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-649 — blocked_by: M1-660 (pending), M1-664 (done)
 - M1-666 — blocked_by: M1-649 (pending), M1-665 (done)
 
 ---
@@ -64,6 +63,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-660 | doc_embedding read path: arm hnsw.iterative_scan under filter-inside-ANN, in a transaction | 2026-07-20 | round 1 APPROVE |
 | M1-642 | Per-category digest delivery + optional roll-up summaries | 2026-07-20 | round 2 APPROVE |
 | M1-665 | Deterministic delivery of matched command usage in chat | 2026-07-19 | round 2 APPROVE |
 | M1-664 | Semantic command-intent index: retrieval + registration | 2026-07-19 | round 1 APPROVE |
@@ -73,7 +73,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-658 | Guard: no inbound-text reflection in outbound templates | 2026-07-18 | round 3 APPROVE |
 | M1-657 | Gate /approve-group: admin check before group-id parse | 2026-07-18 | round 1 APPROVE |
 | M1-656 | Stop friendly errors reflecting unvalidated inbound text | 2026-07-18 | round 3 APPROVE |
-| M1-655 | Fix MultiAdapterProductionIT flake: stand-in daemon must not die and trigger reconnect churn | 2026-07-18 | round 1 APPROVE |
 
 ---
 
@@ -891,8 +890,8 @@ M1-656 (done)
   │     └── M1-658 (done)
   └── M1-658 (done) [see above]
 M1-659 (done)
-M1-660 (pending) ← runnable
-  └── M1-649 (pending)
+M1-660 (done)
+  └── M1-649 (pending) ← runnable
         └── M1-666 (pending)
 M1-661 (done)
 M1-662 (abandoned)

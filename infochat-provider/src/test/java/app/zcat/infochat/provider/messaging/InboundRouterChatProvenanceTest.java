@@ -82,7 +82,7 @@ class InboundRouterChatProvenanceTest {
 
         StubChatAgent(ChatTurnResult result) {
             super(null, null, null, null, null, null, null, null, null, null,
-                    null, null, null, null, null);
+                    null, null, null, null, null, null);
             this.result = result;
         }
 

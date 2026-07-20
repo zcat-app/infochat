@@ -1,0 +1,4 @@
+ M docs/plan/m1/STATUS.md
+ M docs/plan/m1/tickets/M1-660-doc-embedding-read-hardening.md
+ M infochat-provider/src/main/java/app/zcat/infochat/provider/help/CommandIntentIndex.java
+ M infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexIT.java

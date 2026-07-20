@@ -1,0 +1,505 @@
+diff --git a/docs/plan/m1/STATUS.md b/docs/plan/m1/STATUS.md
+index e2d963fb..ece22c0d 100644
+--- a/docs/plan/m1/STATUS.md
++++ b/docs/plan/m1/STATUS.md
+@@ -10,8 +10,8 @@
+ 
+ | Status | Count |
+ |---|---|
+-| pending | 5 |
+-| in-progress | 0 |
++| pending | 4 |
++| in-progress | 1 |
+ | in-review | 0 |
+ | escalated | 0 |
+ | done | 677 |
+@@ -26,7 +26,6 @@
+ Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
+ 
+ - M1-642 — Per-category digest delivery + optional roll-up summaries (complexity: high, risk: medium)
+-- M1-660 — doc_embedding read path: arm hnsw.iterative_scan under filter-inside-ANN, in a transaction (complexity: medium, risk: medium)
+ 
+ ---
+ 
+@@ -34,8 +33,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
+ 
+ | ID | Title | Status | Last review |
+ |---|---|---|---|
+-
+-_(none)_
++| M1-660 | doc_embedding read path: arm hnsw.iterative_scan under filter-inside-ANN, in a transaction | in-progress | (none) |
+ 
+ ---
+ 
+@@ -43,7 +41,7 @@ _(none)_
+ 
+ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
+ 
+-- M1-649 — blocked_by: M1-660 (pending), M1-664 (done)
++- M1-649 — blocked_by: M1-660 (in-progress), M1-664 (done)
+ - M1-652 — blocked_by: M1-642 (pending)
+ - M1-666 — blocked_by: M1-649 (pending), M1-665 (done)
+ 
+@@ -891,7 +889,7 @@ M1-656 (done)
+   │     └── M1-658 (done)
+   └── M1-658 (done) [see above]
+ M1-659 (done)
+-M1-660 (pending) ← runnable
++M1-660 (in-progress)
+   └── M1-649 (pending)
+         └── M1-666 (pending)
+ M1-661 (done)
+diff --git a/docs/plan/m1/tickets/M1-660-doc-embedding-read-hardening.md b/docs/plan/m1/tickets/M1-660-doc-embedding-read-hardening.md
+index 2b085af6..e8e6e38e 100644
+--- a/docs/plan/m1/tickets/M1-660-doc-embedding-read-hardening.md
++++ b/docs/plan/m1/tickets/M1-660-doc-embedding-read-hardening.md
+@@ -1,7 +1,7 @@
+ ---
+ id: M1-660
+ title: "doc_embedding read path: arm hnsw.iterative_scan under filter-inside-ANN, in a transaction"
+-status: pending
++status: in-progress
+ created: 2026-07-18
+ last_updated: 2026-07-20
+ blocked_by: []
+@@ -44,13 +44,15 @@ acceptance:
+     regardless of how many rows of OTHER doc_kinds share the HNSW index.
+   - >-
+     THE SILENT-NO-OP TRAP IS CLOSED — both existing callers run the lookup
+-    inside an explicit transaction (autocommit off): HelpLookupTool
+-    (HelpLookupTool.java:168) and ChatAgent.lookupIntentForDelivery
+-    (ChatAgent.java:793) today borrow an autocommit
+-    `dataSource.getConnection()`, on which `SET LOCAL` has no effect. The GUC
+-    is transaction-scoped, dies at pool release, and never leaks to another
+-    borrower. The fix's own failure mode — arming a GUC on an autocommit
+-    connection — is itself covered by the IT below.
++    inside an explicit transaction (autocommit off). Today only
++    ChatAgent.lookupIntentForDelivery (ChatAgent.java:793) borrows a bare
++    autocommit `dataSource.getConnection()`, on which `SET LOCAL` has no
++    effect; HelpLookupTool (HelpLookupTool.java:168) is already
++    autocommit-off via CancellationService.armToolConnection →
++    applyStatementTimeout (CancellationService.java:114) and must stay
++    that way. The GUC is transaction-scoped, dies at pool release, and
++    never leaks to another borrower. The fix's own failure mode — arming
++    a GUC on an autocommit connection — is itself covered by the IT below.
+   - >-
+     strict_order (not relaxed_order) is used, preserving D19's exact
+     distance-ascending order ("same DB state + same message -> same
+@@ -71,7 +73,8 @@ test_plan:
+   adds:
+     - >-
+       infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexIT.java
+-      — commandRecallSurvivesForeignKindInterleaving (+ the no-op-trap variant)
++      — new methods in the EXISTING IT class:
++      commandRecallSurvivesForeignKindInterleaving (+ the no-op-trap variant)
+   modifies:
+     - path: infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/HelpLookupToolIT.java
+       change: >-
+@@ -87,6 +90,18 @@ spec_refs: []
+ decision_refs:
+   - D19
+   - D54
++clarity_check:
++  date: 2026-07-20
++  verdict: PASS
++  warnings:
++    - >-
++      self-check: ticket claimed BOTH callers borrow autocommit connections;
++      in fact HelpLookupTool is already autocommit-off via
++      CancellationService.armToolConnection (setAutoCommit(false) inside
++      applyStatementTimeout, CancellationService.java:114). The no-op trap
++      is live only on ChatAgent.lookupIntentForDelivery's bare connection.
++      Acceptance item 2 + §The autocommit trap prose corrected inline;
++      required end state and the encapsulated fix are unchanged.
+ ---
+ 
+ # M1-660: doc_embedding read path — arm hnsw.iterative_scan under filter-inside-ANN
+@@ -126,8 +141,11 @@ body is reconstructed from the M1-648 handoff plus live-code verification.
+ Arming is not a one-line `stmt.execute("SET LOCAL …")`. `SET LOCAL` is
+ transaction-scoped; on an autocommit connection each statement is its own
+ transaction, so the GUC expires before the query runs — a silent no-op (and
+-Postgres may warn "SET LOCAL can only be used in transaction blocks"). Both
+-current callers borrow an autocommit `dataSource.getConnection()`. The fix
++Postgres may warn "SET LOCAL can only be used in transaction blocks").
++ChatAgent.lookupIntentForDelivery borrows a bare autocommit
++`dataSource.getConnection()`; HelpLookupTool's borrow is already flipped to
++autocommit-off by `CancellationService.armToolConnection`
++(`applyStatementTimeout`, CancellationService.java:114). The fix
+ must therefore open an explicit transaction around the probe (setAutoCommit
+ false → SET LOCAL → query → commit/rollback), mirroring how
+ `SemanticSearchTool.armToolConnection` opens one that its `SET LOCAL`
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/help/CommandIntentIndex.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/help/CommandIntentIndex.java
+index dc3b72bc..6f414a8e 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/help/CommandIntentIndex.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/help/CommandIntentIndex.java
+@@ -6,6 +6,7 @@ import java.sql.Connection;
+ import java.sql.PreparedStatement;
+ import java.sql.ResultSet;
+ import java.sql.SQLException;
++import java.sql.Statement;
+ import java.util.List;
+ import java.util.Optional;
+ 
+@@ -101,10 +102,15 @@ public final class CommandIntentIndex {
+      *
+      * <p><b>Connection ownership.</b> The caller manages the
+      * connection lifecycle (acquire, arm cancellation if applicable,
+-     * close). This method only prepares and executes the statement.
+-     * Mirrors the tool's previous private {@code lookup} shape so the
+-     * tool's cancellation arming is preserved when it migrates to this
+-     * shared entry point.
++     * close). This method flips the connection to autocommit-off (a
++     * no-op when the caller already opened a transaction, e.g. via
++     * {@code CancellationService.armToolConnection}) so its
++     * {@code SET LOCAL} arming below joins a transaction that is still
++     * open when the probe executes — on an autocommit connection the
++     * GUC would expire before the query runs, a silent no-op (M1-660).
++     * The probe is read-only, so the transaction is never committed
++     * here; it dies (with the GUC) at pool release, exactly like
++     * {@code SemanticSearchTool}'s reference shape.
+      *
+      * @param conn                 an open connection; not closed by this method
+      * @param vectorLiteral        the embedded query vector as a pgvector
+@@ -135,6 +141,14 @@ public final class CommandIntentIndex {
+                 + "  AND (embedding <=> ?::vector) < ? "
+                 + "ORDER BY (embedding <=> ?::vector) ASC "
+                 + "LIMIT 1";
++        // SET LOCAL is transaction-scoped: on an autocommit connection
++        // each statement is its own transaction, so the arming would
++        // expire before the probe runs — the silent no-op M1-660 exists
++        // to close. Autocommit-off here guarantees the GUC and the query
++        // share one transaction on every caller's connection, armed
++        // (HelpLookupTool) or bare (ChatAgent.lookupIntentForDelivery).
++        conn.setAutoCommit(false);
++        enableIterativeScan(conn);
+         double distanceThreshold = 1.0 - similarityThreshold;
+         try (PreparedStatement ps = conn.prepareStatement(sql)) {
+             ps.setString(1, DOC_KIND);
+@@ -148,6 +162,24 @@ public final class CommandIntentIndex {
+         }
+     }
+ 
++    // pgvector iterative index scan (>= 0.8): the HNSW scan keeps walking
++    // until LIMIT rows survive the query's OTHER predicates, so the
++    // doc_kind + tier filters can sit INSIDE the index-driven probe —
++    // recall is exact over the caller-visible command set regardless of
++    // how many rows of OTHER doc_kinds (M1-649 topics) crowd the
++    // ef_search window. Without it the probe stops after ef_search
++    // candidates and silently under-recalls the moment a second corpus
++    // shares idx_doc_embedding_hnsw — the failure arrives with the DATA,
++    // not a code change. strict_order (not relaxed_order) keeps the
++    // emitted order exactly distance-ascending, which D19's "same DB
++    // state + same message -> same set/order" needs. Mirror of
++    // SemanticSearchTool.enableIterativeScan (M1-589 lineage).
++    private static void enableIterativeScan(Connection conn) throws SQLException {
++        try (Statement stmt = conn.createStatement()) {
++            stmt.execute("SET LOCAL hnsw.iterative_scan = strict_order");
++        }
++    }
++
+     /**
+      * pgvector text literal {@code [f0,f1,...]}, bound via setString
+      * through a {@code ?::vector} cast. Mirrors the literal-building
+diff --git a/infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexIT.java b/infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexIT.java
+index 90a5f07e..18ad066b 100644
+--- a/infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexIT.java
++++ b/infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexIT.java
+@@ -15,7 +15,10 @@ import javax.sql.DataSource;
+ import java.sql.Connection;
+ import java.sql.PreparedStatement;
+ import java.sql.ResultSet;
++import java.sql.SQLException;
++import java.sql.Statement;
+ import java.util.List;
++import java.util.Optional;
+ 
+ import static org.junit.jupiter.api.Assertions.assertEquals;
+ import static org.junit.jupiter.api.Assertions.assertFalse;
+@@ -31,7 +34,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
+  * <p>Covers M1-664 acceptance items 2 (warm-restart content-hash skip)
+  * and 3 (changed intent text or embedding model forces a re-embed).
+  * Together these pin the invariant that a stale vector can never
+- * outlive its source text.
++ * outlive its source text. M1-660 adds the read-path hardening probes:
++ * command recall under foreign-doc_kind crowding, and the
++ * SET-LOCAL-without-transaction no-op trap.
+  *
+  * <p>Named {@code *IT} (failsafe phase) because it boots DevServices
+  * Postgres — integration-shaped per design 08-verification §8.2,
+@@ -65,6 +70,7 @@ class CommandIntentIndexIT {
+     @BeforeEach
+     void setUp() throws Exception {
+         deleteAllIntentRows();
++        deleteForeignKindRows();
+         stubEmbedder = new CountingEmbedder();
+         builder = new CommandIntentIndexBuilder(dao, stubEmbedder, bundleLoader, EMBEDDING_MODEL);
+     }
+@@ -72,6 +78,7 @@ class CommandIntentIndexIT {
+     @AfterEach
+     void tearDown() throws Exception {
+         deleteAllIntentRows();
++        deleteForeignKindRows();
+     }
+ 
+     /**
+@@ -224,6 +231,260 @@ class CommandIntentIndexIT {
+                         + "time per docs/spec/security.md §Failure handling.");
+     }
+ 
++    // ---------- M1-660: filter-inside-ANN read-path hardening ----------
++
++    /** A second doc_kind sharing idx_doc_embedding_hnsw (the M1-649 shape). */
++    private static final String FOREIGN_KIND = "zz_m1660_foreign";
++    /** Synthetic command row the crowded probes must still recall. */
++    private static final String CROWDED_COMMAND = "zz-m1660-target-command";
++    /**
++     * Pinned to postgres' hnsw.ef_search default so the crowd size below
++     * always exceeds the non-iterative candidate window, regardless of
++     * server-config drift.
++     */
++    private static final int EF_SEARCH = 40;
++    private static final int FOREIGN_CROWD_SIZE = 200;
++    private static final double SIMILARITY_THRESHOLD = 0.60;
++
++    /**
++     * M1-660 acceptance item 4 — the retrieval proof, not a SQL-string
++     * assert. {@value #FOREIGN_CROWD_SIZE} rows of a second doc_kind are
++     * seeded strictly CLOSER to the query vector than the target command
++     * row, so a non-iterative HNSW probe's whole {@value #EF_SEARCH}-row
++     * candidate window fills with rows the {@code doc_kind} filter then
++     * discards — under-recall to empty, exactly what production hits the
++     * moment M1-649's topic corpus lands. With
++     * {@code hnsw.iterative_scan = strict_order} armed inside the probe's
++     * transaction the scan keeps walking until a filter-surviving row
++     * emerges, so the command is recalled. This test FAILS on main (no
++     * arming) and PASSES with the fix.
++     */
++    @Test
++    void commandRecallSurvivesForeignKindInterleaving() throws Exception {
++        seedDocRow(CROWDED_COMMAND, CommandIntentIndex.DOC_KIND, vectorAtAngle(0.30));
++        seedForeignCrowd();
++        reindexHnswGraph();
++
++        try (Connection conn = dataSource.getConnection()) {
++            try {
++                conn.setAutoCommit(false);
++                forcePlannerToHnswProbe(conn, true);
++                Optional<String> match = CommandIntentIndex.lookupCommand(
++                        conn,
++                        toVectorLiteral(vectorAtAngle(0)),
++                        List.of(CROWDED_COMMAND),
++                        SIMILARITY_THRESHOLD);
++                assertEquals(Optional.of(CROWDED_COMMAND), match,
++                        "a command probe must recall the nearest VISIBLE command-intent "
++                                + "row even when " + FOREIGN_CROWD_SIZE + " closer rows of "
++                                + "another doc_kind crowd the ef_search window — without "
++                                + "iterative_scan the probe stops at " + EF_SEARCH
++                                + " candidates and silently under-recalls");
++            } finally {
++                conn.rollback();
++                conn.setAutoCommit(true);
++            }
++        }
++    }
++
++    /**
++     * M1-660 acceptance item 5 — the no-op-trap pin. Probe A hand-rolls
++     * the naive pre-M1-660 read shape on an AUTOCOMMIT connection:
++     * {@code SET LOCAL hnsw.iterative_scan} is issued exactly as the
++     * fixed path issues it, but with no transaction open the GUC expires
++     * with its own implicit single-statement transaction before the
++     * query runs, so the probe under-recalls to empty. Probe B then
++     * calls the REAL read path on the SAME still-autocommit connection
++     * (ChatAgent.lookupIntentForDelivery's exact borrow shape) and
++     * recalls the command — the only variable separating under-recall
++     * from recall is {@code lookupCommand}'s own transaction + arming.
++     * A refactor that drops {@code setAutoCommit(false)} or the
++     * {@code SET LOCAL} from {@code lookupCommand} turns probe B into
++     * probe A and reds this test rather than silently regressing recall.
++     * Probe A doubles as the fixture's discrimination guard: if the
++     * crowd ever stops defeating a non-iterative window (pgvector
++     * default drift, fixture rot), its EMPTY assert fires and flags the
++     * companion test above as vacuous instead of green-washing it.
++     */
++    @Test
++    void armingOutsideTransactionIsSilentNoOpAndRealPathRecovers() throws Exception {
++        seedDocRow(CROWDED_COMMAND, CommandIntentIndex.DOC_KIND, vectorAtAngle(0.30));
++        seedForeignCrowd();
++        reindexHnswGraph();
++
++        try (Connection conn = dataSource.getConnection()) {
++            try {
++                // Session-scoped (plain SET) so the plan pinning survives
++                // autocommit's per-statement transaction boundaries for
++                // probe A, and stays in effect inside probe B's transaction.
++                forcePlannerToHnswProbe(conn, false);
++
++                // Probe A — the trap: arming without a transaction.
++                try (Statement stmt = conn.createStatement()) {
++                    stmt.execute("SET LOCAL hnsw.iterative_scan = strict_order");
++                }
++                assertTrue(naiveProbe(conn).isEmpty(),
++                        "SET LOCAL on an autocommit connection must be a silent no-op "
++                                + "— if this probe recalls the command, either the arming "
++                                + "unexpectedly took effect outside a transaction or the "
++                                + "crowd fixture no longer defeats a non-iterative "
++                                + "ef_search window, and the companion recall test is "
++                                + "vacuous");
++
++                // Probe B — the real read path on the same bare autocommit
++                // connection.
++                Optional<String> match = CommandIntentIndex.lookupCommand(
++                        conn,
++                        toVectorLiteral(vectorAtAngle(0)),
++                        List.of(CROWDED_COMMAND),
++                        SIMILARITY_THRESHOLD);
++                assertEquals(Optional.of(CROWDED_COMMAND), match,
++                        "lookupCommand must open the transaction its own SET LOCAL "
++                                + "arming needs — on a bare autocommit borrow (the "
++                                + "ChatAgent.lookupIntentForDelivery shape) the arming "
++                                + "must still be effective");
++            } finally {
++                if (!conn.getAutoCommit()) {
++                    conn.rollback();
++                    conn.setAutoCommit(true);
++                }
++                try (Statement stmt = conn.createStatement()) {
++                    stmt.execute("RESET enable_seqscan");
++                    stmt.execute("RESET enable_sort");
++                    stmt.execute("RESET hnsw.ef_search");
++                }
++            }
++        }
++    }
++
++    /**
++     * Rebuild the HNSW graph from the live heap before probing. Sibling
++     * tests in this class churn {@code doc_embedding} (insert + delete
++     * of ~41 IDENTICAL stub vectors per builder run); HNSW deletes leave
++     * dead graph nodes until VACUUM, and a fresh row inserted into that
++     * degenerate duplicate-vector region can become unreachable from
++     * the graph entry point — empirically, even an exhaustive iterative
++     * scan (ef_search=1000, max_scan_tuples=20000) then exhausts after
++     * the reachable component without ever surfacing the row (reproduced
++     * standalone on pgvector/pgvector:pg16, 2026-07-20). REINDEX pins
++     * the precondition these tests rely on — every LIVE row reachable —
++     * so the non-iterative ef_search window is the ONLY recall variable
++     * under test. Production sees no comparable state: the corpus is
++     * rebuilt at most once per boot with diverse real embeddings, not
++     * churned per-test with duplicates.
++     */
++    private void reindexHnswGraph() throws Exception {
++        try (Connection conn = dataSource.getConnection();
++             Statement stmt = conn.createStatement()) {
++            stmt.execute("REINDEX INDEX idx_doc_embedding_hnsw");
++        }
++    }
++
++    /**
++     * Pin the probe to the HNSW index path. On a ~{@value #FOREIGN_CROWD_SIZE}-row
++     * table the planner would otherwise seq-scan (exact — every row sees
++     * the filters) or walk the (doc_kind, target_ref) btree plus an
++     * explicit sort (also exact), and the ef_search window these tests
++     * probe would never come into play. Disabling seq scans and explicit
++     * sorts leaves the distance-ordered HNSW scan as the only plan — the
++     * same plan a production-sized corpus reaches on cost alone.
++     */
++    private static void forcePlannerToHnswProbe(Connection conn, boolean transactionScoped)
++            throws SQLException {
++        String scope = transactionScoped ? "SET LOCAL " : "SET ";
++        try (Statement stmt = conn.createStatement()) {
++            stmt.execute(scope + "enable_seqscan = off");
++            stmt.execute(scope + "enable_sort = off");
++            stmt.execute(scope + "hnsw.ef_search = " + EF_SEARCH);
++        }
++    }
++
++    /**
++     * The pre-M1-660 probe shape: {@code lookupCommand}'s exact SQL with
++     * no transaction and no arming beyond what the caller already issued.
++     */
++    private Optional<String> naiveProbe(Connection conn) throws SQLException {
++        String sql = "SELECT target_ref FROM doc_embedding "
++                + "WHERE doc_kind = ? AND target_ref = ANY(?) "
++                + "AND (embedding <=> ?::vector) < ? "
++                + "ORDER BY (embedding <=> ?::vector) ASC LIMIT 1";
++        String vectorLiteral = toVectorLiteral(vectorAtAngle(0));
++        try (PreparedStatement ps = conn.prepareStatement(sql)) {
++            ps.setString(1, CommandIntentIndex.DOC_KIND);
++            ps.setArray(2, conn.createArrayOf("text", new String[] {CROWDED_COMMAND}));
++            ps.setString(3, vectorLiteral);
++            ps.setDouble(4, 1.0 - SIMILARITY_THRESHOLD);
++            ps.setString(5, vectorLiteral);
++            try (ResultSet rs = ps.executeQuery()) {
++                return rs.next() ? Optional.of(rs.getString("target_ref")) : Optional.empty();
++            }
++        }
++    }
++
++    /**
++     * {@value #FOREIGN_CROWD_SIZE} rows of a second doc_kind, every one
++     * strictly closer to the query vector (angle 0) than the command row
++     * at angle 0.30 — so a non-iterative probe's candidate window holds
++     * only rows the doc_kind filter discards.
++     */
++    private void seedForeignCrowd() throws Exception {
++        try (Connection conn = dataSource.getConnection();
++             PreparedStatement ps = conn.prepareStatement(
++                 "INSERT INTO doc_embedding "
++                     + "(doc_id, doc_kind, target_ref, content_hash, embedding, embedding_model) "
++                     + "VALUES (?, ?, ?, ?, ?::vector, ?)")) {
++            for (int i = 0; i < FOREIGN_CROWD_SIZE; i++) {
++                String docId = "zz-m1660-foreign-" + i;
++                ps.setString(1, docId);
++                ps.setString(2, FOREIGN_KIND);
++                ps.setString(3, docId);
++                ps.setString(4, "crowd-hash");
++                ps.setString(5, toVectorLiteral(vectorAtAngle(0.001 + i * 0.0001)));
++                ps.setString(6, EMBEDDING_MODEL);
++                ps.addBatch();
++            }
++            ps.executeBatch();
++        }
++    }
++
++    private void seedDocRow(String docId, String docKind, float[] embedding) throws Exception {
++        try (Connection conn = dataSource.getConnection();
++             PreparedStatement ps = conn.prepareStatement(
++                 "INSERT INTO doc_embedding "
++                     + "(doc_id, doc_kind, target_ref, content_hash, embedding, embedding_model) "
++                     + "VALUES (?, ?, ?, ?, ?::vector, ?)")) {
++            ps.setString(1, docId);
++            ps.setString(2, docKind);
++            ps.setString(3, docId);
++            ps.setString(4, "m1660-hash");
++            ps.setString(5, toVectorLiteral(embedding));
++            ps.setString(6, EMBEDDING_MODEL);
++            ps.executeUpdate();
++        }
++    }
++
++    private void deleteForeignKindRows() throws Exception {
++        try (Connection conn = dataSource.getConnection();
++             PreparedStatement ps = conn.prepareStatement(
++                 "DELETE FROM doc_embedding WHERE doc_kind = ?")) {
++            ps.setString(1, FOREIGN_KIND);
++            ps.executeUpdate();
++        }
++    }
++
++    /**
++     * Unit vector in the (dim0, dim1) plane at the given angle from the
++     * dim0 axis — cosine similarity to {@code vectorAtAngle(0)} is
++     * exactly {@code cos(radians)}. Same helper shape as
++     * {@code HelpLookupToolIT}.
++     */
++    private static float[] vectorAtAngle(double radians) {
++        float[] v = new float[DIMENSION];
++        v[0] = (float) Math.cos(radians);
++        v[1] = (float) Math.sin(radians);
++        return v;
++    }
++
+     // ---------- helpers ----------
+ 
+     private void mutateRowHash(String command, String newHash) throws Exception {

@@ -1,0 +1,2 @@
+infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java:990:    // (allowed: user, group, source, post, invite, quarantine, asset,
+infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexIT.java:210:     * (every adapter, ban intake, admin auth, invite gate, digests —

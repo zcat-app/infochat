@@ -1,9 +1,23 @@
 ---
 id: M1-660
 title: "doc_embedding read path: arm hnsw.iterative_scan under filter-inside-ANN, in a transaction"
-status: pending
+status: done
 created: 2026-07-18
 last_updated: 2026-07-20
+reviews:
+  - round: 1
+    date: 2026-07-20
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 50
+      added: 3173
+      removed: 30
 blocked_by: []
 files_budget: 8
 files_scope:
@@ -13,6 +27,13 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/HelpLookupToolIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java
+  # budget-breach refine 2026-07-20: the redteam-multi remediation added a
+  # 16th ChatAgent constructor parameter (CancellationService); these four
+  # tests construct ChatAgent manually and each needs one appended null.
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentAuditActorTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentProvenanceTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentRefusalInterceptTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterChatProvenanceTest.java
 complexity: medium
 risk: medium
 round_cap: 3
@@ -44,13 +65,15 @@ acceptance:
     regardless of how many rows of OTHER doc_kinds share the HNSW index.
   - >-
     THE SILENT-NO-OP TRAP IS CLOSED — both existing callers run the lookup
-    inside an explicit transaction (autocommit off): HelpLookupTool
-    (HelpLookupTool.java:168) and ChatAgent.lookupIntentForDelivery
-    (ChatAgent.java:793) today borrow an autocommit
-    `dataSource.getConnection()`, on which `SET LOCAL` has no effect. The GUC
-    is transaction-scoped, dies at pool release, and never leaks to another
-    borrower. The fix's own failure mode — arming a GUC on an autocommit
-    connection — is itself covered by the IT below.
+    inside an explicit transaction (autocommit off). Today only
+    ChatAgent.lookupIntentForDelivery (ChatAgent.java:793) borrows a bare
+    autocommit `dataSource.getConnection()`, on which `SET LOCAL` has no
+    effect; HelpLookupTool (HelpLookupTool.java:168) is already
+    autocommit-off via CancellationService.armToolConnection →
+    applyStatementTimeout (CancellationService.java:114) and must stay
+    that way. The GUC is transaction-scoped, dies at pool release, and
+    never leaks to another borrower. The fix's own failure mode — arming
+    a GUC on an autocommit connection — is itself covered by the IT below.
   - >-
     strict_order (not relaxed_order) is used, preserving D19's exact
     distance-ascending order ("same DB state + same message -> same
@@ -66,12 +89,22 @@ acceptance:
     effect (e.g. a probe that under-recalls without a transaction and
     recalls with one) so a future refactor that drops the transaction wrapper
     reds the build rather than silently regressing recall.
+  - >-
+    Redteam-multi remediation (2026-07-20): ChatAgent.lookupIntentForDelivery
+    applies CancellationService.applyStatementTimeout to its bare pool borrow
+    before the probe, so the armed iterative scan is time-bounded on the
+    delivery path exactly as on the tool path (and the borrow is
+    autocommit-off caller-side, satisfying item 2 on that caller directly).
+    Per the existing bare-borrow read-site pattern the one-line wiring
+    carries no dedicated per-site test; CancellationServiceTest covers the
+    timeout semantics.
   - mvn verify from the repo root is green
 test_plan:
   adds:
     - >-
       infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexIT.java
-      — commandRecallSurvivesForeignKindInterleaving (+ the no-op-trap variant)
+      — new methods in the EXISTING IT class:
+      commandRecallSurvivesForeignKindInterleaving (+ the no-op-trap variant)
   modifies:
     - path: infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/HelpLookupToolIT.java
       change: >-
@@ -87,6 +120,18 @@ spec_refs: []
 decision_refs:
   - D19
   - D54
+clarity_check:
+  date: 2026-07-20
+  verdict: PASS
+  warnings:
+    - >-
+      self-check: ticket claimed BOTH callers borrow autocommit connections;
+      in fact HelpLookupTool is already autocommit-off via
+      CancellationService.armToolConnection (setAutoCommit(false) inside
+      applyStatementTimeout, CancellationService.java:114). The no-op trap
+      is live only on ChatAgent.lookupIntentForDelivery's bare connection.
+      Acceptance item 2 + §The autocommit trap prose corrected inline;
+      required end state and the encapsulated fix are unchanged.
 ---
 
 # M1-660: doc_embedding read path — arm hnsw.iterative_scan under filter-inside-ANN
@@ -126,8 +171,11 @@ body is reconstructed from the M1-648 handoff plus live-code verification.
 Arming is not a one-line `stmt.execute("SET LOCAL …")`. `SET LOCAL` is
 transaction-scoped; on an autocommit connection each statement is its own
 transaction, so the GUC expires before the query runs — a silent no-op (and
-Postgres may warn "SET LOCAL can only be used in transaction blocks"). Both
-current callers borrow an autocommit `dataSource.getConnection()`. The fix
+Postgres may warn "SET LOCAL can only be used in transaction blocks").
+ChatAgent.lookupIntentForDelivery borrows a bare autocommit
+`dataSource.getConnection()`; HelpLookupTool's borrow is already flipped to
+autocommit-off by `CancellationService.armToolConnection`
+(`applyStatementTimeout`, CancellationService.java:114). The fix
 must therefore open an explicit transaction around the probe (setAutoCommit
 false → SET LOCAL → query → commit/rollback), mirroring how
 `SemanticSearchTool.armToolConnection` opens one that its `SET LOCAL`
@@ -154,3 +202,22 @@ cheap insurance, not a blocker.
 **Reference implementation.** `SemanticSearchTool.enableIterativeScan` +
 `armToolConnection` — copy the pattern, including strict_order and the
 pool-release safety.
+
+## Redteam-multi (2026-07-20)
+
+Multi-auditor audit of the pre-review diff (evidence:
+`docs/plan/m1/redteam-multi/M1-660-2026-07-20/`): opencode and codex CLEAN;
+claude flagged one low-severity DOS asymmetry — the delivery-trigger caller
+(`ChatAgent.lookupIntentForDelivery`) borrows a bare connection with no
+`statement_timeout`, and the armed strict_order scan it now runs has a
+larger worst case (up to `hnsw.max_scan_tuples` when no row clears the
+threshold) while the tool caller keeps its `armToolConnection` time cap.
+Remediation folded into this ticket at the user's direction: the delivery
+path now applies `CancellationService.applyStatementTimeout` to its borrow
+— the same profile-driven bound the tool path gets, which also flips
+autocommit off caller-side, satisfying acceptance item 2's explicit-
+transaction requirement on that caller directly. The wiring follows the
+existing bare-borrow read-site pattern; per that pattern's precedent the
+per-site wiring line carries no dedicated test (`CancellationServiceTest`
+covers the timeout semantics). Post-fix re-audit recorded in the `-r2`
+evidence directory.

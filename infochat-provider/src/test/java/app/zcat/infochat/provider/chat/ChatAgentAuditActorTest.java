@@ -44,11 +44,11 @@ class ChatAgentAuditActorTest {
         inboundContext.setAdapterName(ADAPTER_NAME);
 
         // writeAuditRow reads only auditLogWriter, dataSource, and inboundContext;
-        // the other ten collaborators are unused on this path, so they are null.
+        // the remaining collaborators are unused on this path, so they are null.
         ChatAgent agent = new ChatAgent(
                 null, null, null, null, null, null, null, null, null,
                 capturingWriter, SanitizerTestDoubles.noOpDataSource(), inboundContext,
-                null, null, null);
+                null, null, null, null);
 
         agent.writeAuditRow(UUID.randomUUID(), "dm", UUID.randomUUID());
 

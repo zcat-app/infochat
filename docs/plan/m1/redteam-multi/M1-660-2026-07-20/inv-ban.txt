@@ -1,0 +1,1 @@
+infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexIT.java:210:     * (every adapter, ban intake, admin auth, invite gate, digests —

@@ -1,0 +1,48 @@
+[0m
+> threat-actor · glm-5.2
+[0m
+I'll start by reading the required source files to understand my role and instructions.
+[0m→ [0mRead .claude/agents/threat-actor.md
+[0m→ [0mRead docs/process/harness-mapping.md
+[0m→ [0mRead docs/plan/m1/redteam-multi/M1-660-2026-07-20-r2/prompt-opencode.txt
+Now let me read the threat model in full and the diff under audit.
+[0m→ [0mRead docs/spec/security.md
+[0m→ [0mRead docs/plan/m1/redteam-multi/M1-660-2026-07-20-r2/diff.patch
+The threat model is capped at 50KB; I need to read the rest. Let me continue.
+[0m→ [0mRead docs/spec/security.md[90m [offset=696][0m
+Let me read the remaining content of the threat model.
+[0m→ [0mRead docs/spec/security.md[90m [offset=1566][0m
+Let me verify the security-sensitive function's caller set to ensure the remediation covers all paths.
+[0m✱ [0mGrep "applyStatementTimeout|armToolConnection"[90m in infochat-provider/src/main/java · 20 matches[0m
+[0m✱ [0mGrep "lookupIntentForDelivery"[90m in infochat-provider/src/main/java · 3 matches[0m
+[0m✱ [0mGrep "CommandIntentIndex\.lookupCommand"[90m in . · 21 matches[0m
+Let me verify the `applyStatementTimeout` mechanism does what the remediation claims.
+[0m→ [0mRead infochat-provider/src/main/java/app/zcat/infochat/provider/chat/CancellationService.java[90m [offset=95, limit=90][0m
+[0m→ [0mRead infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java[90m [offset=775, limit=45][0m
+Let me check the call site of `lookupIntentForDelivery` to confirm failure-handling is robust.
+[0m→ [0mRead infochat-provider/src/main/java/app/zcat/infochat/provider/help/CommandIntentIndex.java[90m [limit=90, offset=100][0m
+[0m→ [0mRead infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java[90m [limit=30, offset=438][0m
+I've completed my audit. Let me verify my reasoning:
+
+**Prior finding verification (delivery-path statement_timeout):**
+- `ChatAgent.lookupIntentForDelivery` (line 805) now calls `cancellationService.applyStatementTimeout(conn)` before `lookupCommand`. 
+- `applyStatementTimeout` (CancellationService.java:112-118) does `setAutoCommit(false)` + `SET LOCAL statement_timeout = <validated positive int millis>`. The value is range-checked to be a plain integer — no injection. Transaction-local, dies at pool release.
+- This is exactly the same mechanism `armToolConnection` uses internally (line 151), which the tool path (HelpLookupTool) already had. The asymmetry the prior audit flagged is closed.
+- The caller at ChatAgent.java:446 is gated by `!breakerRegistry.wouldShortCircuit(ModelTask.CHAT_AGENT)`, satisfying §Failure handling's "Once the chat endpoint's circuit breaker (below) is OPEN, the pre-fetch is **skipped entirely**" commitment.
+
+**Rest-of-diff scan:**
+- The only two production callers of `lookupCommand` are HelpLookupTool (via `armToolConnection`) and ChatAgent.lookupIntentForDelivery (now remediated). No unbounded path remains.
+- `lookupCommand` adds `conn.setAutoCommit(false)` + `enableIterativeScan` (static `SET LOCAL hnsw.iterative_scan = strict_order` — no injection surface). No commit; transaction dies at pool release. Pool hygiene intact.
+- SQL unchanged: tier filter (`target_ref = ANY(?)` bound to caller-visible set), parameterized vector literal. No new INFO-LEAK / INJECTION / AUTH-BYPASS / PERM-ESCAL / AUDIT-EVASION.
+- Test additions (CommandIntentIndexIT) maintain isolation via `@BeforeEach`/`@AfterEach` foreign-kind cleanup; planner pinning is reset in `finally`.
+- Constructor null-appends in tests: no production impact (dependency is always injected in prod).
+
+The prior finding is correctly remediated; no new gaps. Writing the verdict.
+[0m
+[0m← [0mWrite docs/plan/m1/redteam-multi/M1-660-2026-07-20-r2/verdict-opencode.txt
+Wrote file successfully.
+[0m
+RED-TEAM VERDICT: CLEAN
+Verdict file: /home/infochat/infochat/.claude/worktrees/M1-660/docs/plan/m1/redteam-multi/M1-660-2026-07-20-r2/verdict-opencode.txt
+Findings: critical=0 high=0 medium=0 low=0
+Out-of-model: 0

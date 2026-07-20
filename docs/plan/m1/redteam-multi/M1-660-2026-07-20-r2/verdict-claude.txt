@@ -1,0 +1,59 @@
+RED-TEAM VERDICT: CLEAN
+
+Re-audit of M1-660 after in-branch remediation of the prior audit's sole
+finding (unbounded delivery-path probe). Verification notes:
+
+1. Remediation delivered. ChatAgent.lookupIntentForDelivery
+   (infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java:805)
+   now calls CancellationService.applyStatementTimeout on its bare pool
+   borrow before CommandIntentIndex.lookupCommand runs. applyStatementTimeout
+   (CancellationService.java:112-118) flips autocommit off and issues
+   SET LOCAL statement_timeout with a validated positive-integer millisecond
+   value (validatedTimeoutMillis rejects <=0 and >Integer.MAX_VALUE, so the
+   text spliced into the SET statement is never raw operator text — and
+   operator config is trusted per the threat model anyway). The armed
+   strict_order iterative scan — worst case hnsw.max_scan_tuples when no row
+   clears the threshold — is therefore time-bounded on the delivery path with
+   the same profile-driven cap the tool path gets via armToolConnection. The
+   prior DOS asymmetry is closed.
+
+2. Transaction semantics are correct. applyStatementTimeout's
+   setAutoCommit(false) means pgJDBC opens one transaction at the first
+   statement; the statement_timeout GUC, lookupCommand's own
+   setAutoCommit(false) (a no-op, already off), the
+   SET LOCAL hnsw.iterative_scan = strict_order arming
+   (CommandIntentIndex.java:270-271, enableIterativeScan), and the probe all
+   share that single transaction — the timeout is live when the probe
+   executes, and the M1-660 silent-no-op trap (GUC expiring on an autocommit
+   connection before the query) is closed on both callers, pinned by
+   CommandIntentIndexIT.armingOutsideTransactionIsSilentNoOpAndRealPathRecovers.
+
+3. No GUC leak to other pool borrowers. Both GUCs are SET LOCAL
+   (transaction-scoped); the probe is read-only and never committed; the
+   try-with-resources close returns the connection with the transaction
+   open and the pool's release-time rollback discards it — matching the
+   documented SemanticSearchTool reference shape. The tool path
+   (HelpLookupTool via armToolConnection) is unchanged and keeps its
+   statement_timeout: lookupCommand's setAutoCommit(false) on an
+   already-off connection does not commit the armed transaction.
+
+4. Failure path leaks nothing. statement_timeout expiry (SQLSTATE 57014)
+   surfaces as SQLException, caught at ChatAgent.java:808-812 and degraded
+   to Optional.empty() (no usage block, turn completes); the log line goes
+   through SafeLog with userId only — no user prose (D37), no stack/body
+   reaching the user, no existence-vs-timeout oracle in the reply.
+
+5. Determinism/authorization surface unchanged. strict_order preserves
+   D19's exact distance-ascending order; the tier filter still runs inside
+   the query (visibleTargets bound via target_ref = ANY(?)), so the
+   invisible-command existence-oracle defense is intact; the delivery
+   decision remains deterministic pre-LLM (D67 delivery-ordering contract
+   path (a)) — the diff does not move the emission decision toward the
+   model.
+
+6. Remaining hunks are non-security: ticket/STATUS doc updates, test-only
+   constructor arity changes (appended null CancellationService in unit
+   tests whose stubs override lookupIntentForDelivery or never reach it),
+   and the CommandIntentIndexIT crowd/no-op-trap fixtures, which use
+   session-scoped planner GUCs and REINDEX against DevServices Postgres
+   only, with RESET in finally.

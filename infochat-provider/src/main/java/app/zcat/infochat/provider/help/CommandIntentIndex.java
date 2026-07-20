@@ -6,6 +6,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.List;
 import java.util.Optional;
 
@@ -101,10 +102,15 @@ public final class CommandIntentIndex {
      *
      * <p><b>Connection ownership.</b> The caller manages the
      * connection lifecycle (acquire, arm cancellation if applicable,
-     * close). This method only prepares and executes the statement.
-     * Mirrors the tool's previous private {@code lookup} shape so the
-     * tool's cancellation arming is preserved when it migrates to this
-     * shared entry point.
+     * close). This method flips the connection to autocommit-off (a
+     * no-op when the caller already opened a transaction, e.g. via
+     * {@code CancellationService.armToolConnection}) so its
+     * {@code SET LOCAL} arming below joins a transaction that is still
+     * open when the probe executes — on an autocommit connection the
+     * GUC would expire before the query runs, a silent no-op (M1-660).
+     * The probe is read-only, so the transaction is never committed
+     * here; it dies (with the GUC) at pool release, exactly like
+     * {@code SemanticSearchTool}'s reference shape.
      *
      * @param conn                 an open connection; not closed by this method
      * @param vectorLiteral        the embedded query vector as a pgvector
@@ -135,6 +141,14 @@ public final class CommandIntentIndex {
                 + "  AND (embedding <=> ?::vector) < ? "
                 + "ORDER BY (embedding <=> ?::vector) ASC "
                 + "LIMIT 1";
+        // SET LOCAL is transaction-scoped: on an autocommit connection
+        // each statement is its own transaction, so the arming would
+        // expire before the probe runs — the silent no-op M1-660 exists
+        // to close. Autocommit-off here guarantees the GUC and the query
+        // share one transaction on every caller's connection, armed
+        // (HelpLookupTool) or bare (ChatAgent.lookupIntentForDelivery).
+        conn.setAutoCommit(false);
+        enableIterativeScan(conn);
         double distanceThreshold = 1.0 - similarityThreshold;
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, DOC_KIND);
@@ -145,6 +159,24 @@ public final class CommandIntentIndex {
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? Optional.of(rs.getString("target_ref")) : Optional.empty();
             }
+        }
+    }
+
+    // pgvector iterative index scan (>= 0.8): the HNSW scan keeps walking
+    // until LIMIT rows survive the query's OTHER predicates, so the
+    // doc_kind + tier filters can sit INSIDE the index-driven probe —
+    // recall is exact over the caller-visible command set regardless of
+    // how many rows of OTHER doc_kinds (M1-649 topics) crowd the
+    // ef_search window. Without it the probe stops after ef_search
+    // candidates and silently under-recalls the moment a second corpus
+    // shares idx_doc_embedding_hnsw — the failure arrives with the DATA,
+    // not a code change. strict_order (not relaxed_order) keeps the
+    // emitted order exactly distance-ascending, which D19's "same DB
+    // state + same message -> same set/order" needs. Mirror of
+    // SemanticSearchTool.enableIterativeScan (M1-589 lineage).
+    private static void enableIterativeScan(Connection conn) throws SQLException {
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute("SET LOCAL hnsw.iterative_scan = strict_order");
         }
     }
 
