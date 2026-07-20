@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 678 |
 | deferred | 0 |
 | abandoned | 19 |
-| **total** | **701** |
+| **total** | **702** |
 
 ---
 
@@ -27,6 +27,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-652 — Gap-filling redelivery for per-category digests (complexity: high, risk: medium)
 - M1-660 — doc_embedding read path: arm hnsw.iterative_scan under filter-inside-ANN, in a transaction (complexity: medium, risk: medium)
+- M1-667 — Route user-content exception catches through SafeLog (complexity: medium, risk: low)
 
 ---
 
@@ -904,4 +905,5 @@ M1-664 (done)
   ├── M1-648 (abandoned) [see above]
   ├── M1-649 (pending) [see above]
   └── M1-665 (done) [see above]
+M1-667 (pending) ← runnable
 ```
