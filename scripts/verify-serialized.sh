@@ -72,7 +72,20 @@ fi
 # informational — it must never change the script's exit status or
 # block mvn, so every command in the sampler is best-effort.
 if [ "${VERIFY_TICK:-1}" != "0" ]; then
-    tick_log="$(mktemp -t verify-tick-XXXXXX.log)"
+    # VERIFY_TICK_ONLY=1 → suppress mvn's stdout flood for the interactive
+    # / agent-watching-TUI case: the full log goes to a durable file the
+    # caller retrieves, and only [verify-tick] progress lines (stderr) plus
+    # a final result summary (stdout) reach the terminal. Default (unset)
+    # keeps mvn's full output on stdout for the SKILL.md `> log 2>&1`
+    # capture pattern and CI stdout parsers — unchanged.
+    if [ "${VERIFY_TICK_ONLY:-0}" = "1" ]; then
+        mkdir -p "$repo_root/.scratch"
+        tick_log="$repo_root/.scratch/verify-$$.log"
+        tick_only=1
+    else
+        tick_log="$(mktemp -t verify-tick-XXXXXX.log)"
+        tick_only=0
+    fi
     tick_start=$(date +%s)
 
     # Subshell, not a function, so it can be backgrounded cleanly and
@@ -109,24 +122,40 @@ if [ "${VERIFY_TICK:-1}" != "0" ]; then
     cleanup_tick() {
         # Kill the sampler first so it cannot read a half-deleted file,
         # then wait so the kill is settled, then remove the tmpfile. The
-        # `|| true` and `2>/dev/null` keep cleanup silent under `set -e`
-        # even if the sampler already exited (e.g. very fast mvn failure).
+        # removed in TICK_ONLY mode (tick_log is the durable full log the
+        # caller retrieves); in default mode it is a tmpfile. The `|| true`
+        # and `2>/dev/null` keep cleanup silent under `set -e` even if the
+        # sampler already exited (e.g. very fast mvn failure).
         kill "$tick_pid" 2>/dev/null || true
         wait "$tick_pid" 2>/dev/null || true
-        rm -f "$tick_log"
+        [ "$tick_only" = "1" ] || rm -f "$tick_log"
     }
     trap cleanup_tick EXIT
 
-    # `tee` streams mvn's output to BOTH the caller's stdout (live —
-    # existing `> log` redirect still works) AND tick_log (sampler
-    # reads). PIPESTATUS[0] captures mvn's exit, since the pipeline's
-    # own exit is tee's (always 0 under no pipefail). The explicit
-    # `ec=` capture + `exit "$ec"` keeps the script's exit contract
-    # (exit status is mvn's) intact under `set -e`.
-    "$repo_root/mvnw" -B clean verify "$@" 2>&1 | tee "$tick_log"
+    # `tee` streams mvn's output to tick_log (sampler reads it). In
+    # TICK_ONLY mode `>/dev/null` suppresses the stdout flood so only ticks
+    # (stderr) reach the terminal; default mode still flows mvn's full
+    # output to stdout for the caller's `> log` capture. PIPESTATUS[0]
+    # captures mvn's exit, since the pipeline's own exit is tee's (always 0
+    # under no pipefail). The explicit `ec=` capture + `exit "$ec"` keeps
+    # the script's exit contract (exit status is mvn's) intact under `set -e`.
+    if [ "$tick_only" = "1" ]; then
+        "$repo_root/mvnw" -B clean verify "$@" 2>&1 | tee "$tick_log" >/dev/null
+    else
+        "$repo_root/mvnw" -B clean verify "$@" 2>&1 | tee "$tick_log"
+    fi
     ec=${PIPESTATUS[0]}
     cleanup_tick
     trap - EXIT
+    # TICK_ONLY: the caller's stdout never saw mvn's output — print a
+    # one-screen result summary (build verdict + final test counts) and the
+    # full-log path so the caller can copy it to target/ for review/commit.
+    # The Tests-run anchor is end-anchored to match ONLY the failsafe/surefire
+    # summary line, never the per-class `-- in <class>` lines.
+    if [ "$tick_only" = "1" ]; then
+        grep -E 'BUILD SUCCESS|BUILD FAILURE|^\[INFO\] (Reactor Summary|Total time)|^\[(INFO|WARNING)\] Tests run: [0-9]+, Failures: [0-9]+, Errors: [0-9]+, Skipped: [0-9]+$' "$tick_log"
+        printf 'verify exit: %s\nfull log: %s\n' "$ec" "$tick_log"
+    fi
     exit "$ec"
 fi
 
