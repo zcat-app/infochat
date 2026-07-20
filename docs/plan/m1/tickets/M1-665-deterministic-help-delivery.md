@@ -1,13 +1,13 @@
 ---
 id: M1-665
 title: "Deterministic delivery of matched command usage in chat"
-status: pending
+status: done
 created: 2026-07-19
 last_updated: 2026-07-19
 blocked_by:
   - M1-663
   - M1-664
-files_budget: 11
+files_budget: 15
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/tool/HelpLookupTool.java
@@ -17,6 +17,10 @@ files_scope:
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/bundles/cs.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentAuditActorTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentProvenanceTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentRefusalInterceptTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterChatProvenanceTest.java
   - docs/spec/commands.md
   - docs/spec/decisions.md
   - docs/design/03-commands.md
@@ -104,8 +108,26 @@ acceptance:
     contract: nothing MODEL-ELECTED is appended after sanitize; the
     deterministically-triggered usage block is the single authorized
     exception. The test keeps asserting that a model-elected helpLookup
-    result never reaches the reply un-sanitized. No other pre-existing test
-    changes.
+    result never reaches the reply un-sanitized.
+  - >-
+    AUTHORIZED PRE-EXISTING TEST CHANGES (constructor-signature orphans,
+    round 1 review) — ChatAgent's new (EmbeddingProvider,
+    HelpCommandHandler) constructor signature orphaned the pre-existing
+    constructor calls in four other test files, which are mechanically
+    updated to satisfy the new arity:
+    ChatAgentAuditActorTest passes 2 additional nulls (the test does not
+    exercise the trigger or composeUsageBlock); ChatAgentProvenanceTest
+    and ChatAgentRefusalInterceptTest pass 2 nulls AND override
+    lookupIntentForDelivery() to return Optional.empty() (preserving
+    pre-M1-665 behaviour: the null EmbeddingProvider/HelpCommandHandler
+    the tests pass are never dereferenced, and the trigger is inert on
+    these paths); InboundRouterChatProvenanceTest passes 2 nulls (its
+    StubChatAgent overrides handleTurn outright and never reaches the
+    trigger). No assertions weakened, no @Disabled, no @MockBean
+    replacing real wiring, no catch-and-swallow, no Testcontainers→H2
+    substitution. Round 1 review identified these as SCOPE-DRIFT-CHECK
+    FAIL + TEST-INTEGRITY-CHECK FAIL; this entry authorizes them
+    retroactively per §8 Test-modification authorization.
   - >-
     Decision D67 in docs/spec/decisions.md records the deterministic
     delivery mechanism: trigger derived from the caller's inbound text,
@@ -126,6 +148,29 @@ test_plan:
         adminUsageNeverDeliveredToNonAdmin, atMostOneUsageBlockPerReply.
         AMENDS noToolDerivedTextIsAppendedAfterSanitize per the authorized
         change in acceptance. Everything else byte-for-byte unchanged.
+    - path: infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentAuditActorTest.java
+      change: >-
+        Constructor call gains 2 null params for the new
+        (EmbeddingProvider, HelpCommandHandler) signature. The test does
+        not exercise the trigger or composeUsageBlock; the nulls are
+        never dereferenced. Round 1 review paperwork.
+    - path: infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentProvenanceTest.java
+      change: >-
+        Constructor call gains 2 null params AND TestChatAgent overrides
+        lookupIntentForDelivery() to return Optional.empty() (preserving
+        pre-M1-665 behaviour: the null EmbeddingProvider/HelpCommandHandler
+        are never dereferenced, the trigger is inert on the provenance
+        paths under test). Round 1 review paperwork.
+    - path: infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentRefusalInterceptTest.java
+      change: >-
+        Same shape as ChatAgentProvenanceTest: 2 null constructor params
+        + lookupIntentForDelivery() override returning Optional.empty().
+        Round 1 review paperwork.
+    - path: infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterChatProvenanceTest.java
+      change: >-
+        StubChatAgent super() call gains 2 null params. The StubChatAgent
+        overrides handleTurn outright and never reaches the trigger.
+        Round 1 review paperwork.
   preserves:
     - all tests currently green on main
     - >-
@@ -139,12 +184,70 @@ decision_refs:
   - D43
   - D66
 decomposed_from: M1-648
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-19
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: FAIL
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: PASS
+      assertion_adequacy: PASS
+    diff_stats:
+      files: 18
+      added: 777
+      removed: 104
+    rework_items:
+      - "Add the 4 pre-existing test files the diff modifies to files_scope and bump files_budget 11 → 15 (constructor-call orphans from the new ChatAgent(EmbeddingProvider, HelpCommandHandler) signature)."
+      - "Authorize those 4 test file modifications in the ticket body per §8 Test-modification authorization (amend acceptance item 7's terminal 'No other pre-existing test changes' sentence + add the 4 paths under test_plan.modifies)."
+  - round: 2
+    date: 2026-07-19
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: PASS
+      assertion_adequacy: PASS
+    diff_stats:
+      files: 18
+      added: 868
+      removed: 108
+    note: >
+      Paperwork-only round over round 1: files_budget 11 → 15, +4 paths
+      in files_scope, acceptance item 8 + test_plan.modifies entries
+      authorizing the constructor-signature test orphans. No production
+      or test code touched since round 1's green verify (M1-272 reuse
+      rule applies; round-2 log reuses round-1 green log).
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-07-19
+    verdict: CLEAN
+    base: 705f0721
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-665-2026-07-19.md
+    out_of_model_count: 0
+    note: |
+      Pre-review redteam gate at the /m1-tick run step 4 checkpoint.
+      Audited the uncommitted branch tip (zero-commit working-tree diff
+      against fork point 705f0721, the files-scope-defect refine commit
+      on main). CLEAN — 0 findings, 0 out-of-model items. The diff
+      implements the deterministic delivery trigger (D67) the M1-663
+      spec amendment governs; the adversary found no gap between the
+      threat model's commitments and what the diff delivers.
+clarity_check:
+  date: 2026-07-19
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 
@@ -228,3 +331,27 @@ this diff BEFORE review. Expect the auditor to attack the trigger
 (can retrieved content influence it?), the composition (any inbound bytes?),
 and the ordering (any other post-sanitize accretion?). The ticket is
 designed so each attack has a named test already standing in its way.
+
+## Round 1 rework
+
+Round 1 review returned REWORK on two paperwork items (ACCEPTANCE-CHECK,
+OUT-OF-SCOPE-CHECK, NEGATIVE-SPACE-CHECK, SPEC-CONFORMANCE-CHECK,
+ASSERTION-ADEQUACY-CHECK all PASS; no code changes required):
+
+1. **SCOPE-DRIFT-CHECK FAIL** — the new `ChatAgent(EmbeddingProvider,
+   HelpCommandHandler, ...)` constructor signature orphaned pre-existing
+   constructor calls in four test files outside `files_scope`. Fix:
+   added the four paths to `files_scope` and bumped `files_budget`
+   11 → 15.
+2. **TEST-INTEGRITY-CHECK FAIL** — acceptance item 7's terminal sentence
+   "No other pre-existing test changes." was contradicted by the four
+   test-file modifications. Fix: amended item 7's terminal sentence,
+   added a new acceptance item documenting the constructor-signature
+   orphans + the `lookupIntentForDelivery()` overrides that preserve
+   pre-M1-665 behavior, and added the four paths under
+   `test_plan.modifies` with per-file change descriptions.
+
+Both fixes are ticket-file paperwork only — no production code, no test
+code, no Java/config/DB surface touched since round 1's green
+`mvn verify`. The round-2 verify log is the inert-N/A note per the
+SKILL.md `mvn verify` scope rule.

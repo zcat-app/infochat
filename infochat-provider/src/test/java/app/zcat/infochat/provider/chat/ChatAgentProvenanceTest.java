@@ -358,12 +358,22 @@ class ChatAgentProvenanceTest {
                       InboundContext context, LlmCircuitBreakerRegistry breakerRegistry) {
             super(tracker, builder, dispatcher, repo, router,
                     sanitizer, pipeline, bundle, autoCompressTrigger, null, null,
-                    context, breakerRegistry);
+                    context, breakerRegistry, null, null);
         }
 
         @Override
         void writeAuditRow(UUID userId, String scopeKind, UUID scopeId) {
             // no-op: provenance tests assert the notice, not the audit row
+        }
+
+        // M1-665 deterministic delivery trigger: the provenance tests do not
+        // exercise delivery, so the trigger returns empty here. The null
+        // EmbeddingProvider/HelpCommandHandler passed above are therefore
+        // never dereferenced.
+        @Override
+        Optional<String> lookupIntentForDelivery(String userMessage, UUID userId,
+                                                 String scopeKind, UUID scopeId) {
+            return Optional.empty();
         }
     }
 

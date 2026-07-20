@@ -1493,10 +1493,29 @@ context — the existence-oracle defense M1-647 established, widened from
 the slash-command unknown-name path to free-text input. Below the
 calibrated similarity threshold the tool returns no command and the agent
 is directed to say it does not know and point at `/help <name>` rather
-than restating command syntax from memory. The chat delivery path — how
-a matched command's usage reaches the user — is governed by the M1-663
-spec amendment and implemented by M1-665; this section is deliberately
-silent on it.
+than restating command syntax from memory.
+
+**Command usage delivery is deterministic end-to-end** (decision D67).
+When the caller's own inbound text matches a command intent
+above the delivery threshold, the matched command's usage+examples block
+is composed at delivery time via the same `/help <cmd>` runtime path
+(`HelpCommandHandler.composeUsageBlock`) and appended to the reply after
+sanitize + translate, as a single block under a fixed bundle-localized
+header. The decision to deliver is made by deterministic code from the
+caller's inbound text — it embeds the inbound text and probes
+`doc_embedding` via the SAME shared `CommandIntentIndex.lookupCommand`
+entry point the `helpLookup` tool uses, with the SAME tier-filter-inside-
+WHERE posture — never by a model-elected tool call. A model-elected
+`helpLookup` call reaches the model context only; it cannot cause
+delivery. The trigger threshold is intentionally stricter than the tool's
+(0.70 vs 0.60 similarity) so a turn that merely mentions a topic does
+not acquire an unsolicited usage block. At most one block per reply (the
+SQL is `LIMIT 1`), and the composed bytes interpolate no inbound-derived
+text — every byte is fixed bundle output or a closed-list catalogue
+name. The post-sanitize model-elected-append regression flagged by the
+r2 INJECTION audit is structurally dead under this design; the
+security.md §LLM output sanitizer amendment records this delivery path
+as the single authorized post-sanitize accretion.
 
 **Conversational refinement recovers a weak or ambiguous first answer.**
 In a plain-text messaging surface there are no buttons or facets, so a

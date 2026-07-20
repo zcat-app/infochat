@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.chat;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
@@ -9,7 +10,10 @@ import app.zcat.infochat.llm.routing.LlmCircuitBreakerRegistry;
 import app.zcat.infochat.llm.routing.LlmRouter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.help.CommandIntentIndex;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
+import app.zcat.infochat.provider.messaging.HelpCommandHandler;
+import app.zcat.infochat.provider.messaging.HelpCommandHandler.CallerTier;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
@@ -64,6 +68,16 @@ class ChatAgentTest {
     private final List<String> persistedTexts = new ArrayList<>();
     private boolean ceilingGated;
     private boolean chatBreakerOpen;
+    // M1-665 deterministic delivery trigger test seams. lookupIntentForDelivery
+    // is overridden in TestChatAgent to return Optional.ofNullable(triggerIntentMatch)
+    // — null (default) means "no intent matched above threshold" → no usage block.
+    // The caller-tier botAdmin flag drives resolveCallerTier on the stub
+    // HelpCommandHandler, exercising the composeUsageBlock visibility filter
+    // (adminUsageNeverDeliveredToNonAdmin).
+    private String triggerIntentMatch;
+    private boolean callerBotAdmin;
+    private String composeUsageBlockLastCommand;
+    private int composeUsageBlockCalls;
     private TestChatAgent agent;
 
     @BeforeEach
@@ -86,6 +100,10 @@ class ChatAgentTest {
         lastAuditAction = null;
         ceilingGated = false;
         chatBreakerOpen = false;
+        triggerIntentMatch = null;
+        callerBotAdmin = false;
+        composeUsageBlockLastCommand = null;
+        composeUsageBlockCalls = 0;
 
         agent = buildAgent("en");
     }
@@ -681,22 +699,31 @@ class ChatAgentTest {
         }
     }
 
-    // --- M1-664 / M1-665 boundary pin: no post-sanitize append of
-    // tool-derived text. The M1-648 r2 redteam regression (medium
-    // INJECTION: post-sanitize, model-elected append of privileged
-    // command usage) is what this guard structurally prevents. The
-    // sentinel below is a unique byte sequence the helpLookup tool
-    // emits into the model context; if it appears in the delivered
-    // reply, EITHER the model echoed it through the sanitizer (which
-    // the scripted reply does NOT), OR a post-sanitize append added it
-    // — the latter is the regression. Asserting the sanitizer's INPUT
-    // also excludes the sentinel pins the pre-sanitize direction too:
-    // tool-result bytes must not be pre-pended to the model's reply
-    // before sanitize either. ---
+    // --- M1-664 / M1-665 boundary pin: no MODEL-ELECTED tool-derived text
+    // reaches the delivered reply. The M1-648 r2 redteam regression (medium
+    // INJECTION: post-sanitize, model-elected append of privileged command
+    // usage) is what this guard structurally prevents. The M1-665 amendment
+    // (D67) re-opens ONE authorized post-sanitize accretion: the
+    // deterministically-triggered usage block composed from fixed bundle
+    // text. The sentinel below is unique bytes the helpLookup tool emits
+    // into the MODEL CONTEXT; if it appears in the delivered reply, EITHER
+    // the model echoed it through the sanitizer (which the scripted reply
+    // does NOT), OR a model-elected append added it — the latter is the
+    // regression. The deterministic block (when the trigger fires) carries
+    // a different byte sequence entirely (bundle-resolved keys, not the
+    // tool's sentinel), so the sentinel assertion still holds under the
+    // amended contract. ---
 
     @Test
     void noToolDerivedTextIsAppendedAfterSanitize() {
         final String SENTINEL = "UNIQUE_INTENT_SENTINEL_FROM_HELPLOOKUP_TOOL";
+
+        // Explicitly disable the deterministic trigger for this test so the
+        // assertion isolates the MODEL-ELECTED path: no usage block is
+        // delivered here regardless of caller text. The deterministic
+        // delivery path is exercised by deliveredUsageBodyEqualsHelpComposition
+        // and atMostOneUsageBlockPerReply below.
+        triggerIntentMatch = null;
 
         // Real dispatcher so the model's TOOL_CALL reaches an actual
         // tool handler; the counting stub bypasses dispatch and would
@@ -733,10 +760,191 @@ class ChatAgentTest {
                 "the sanitizer's input must be the LLM's raw reply only — tool-result "
                         + "bytes must not be pre-pended pre-sanitize");
         assertFalse(reply.contains(SENTINEL),
-                "no byte sequence sourced from the helpLookup tool result may appear "
-                        + "in the delivered reply unless the model echoed it through "
-                        + "the sanitizer — post-sanitize append is the M1-648 r2 "
-                        + "regression this ticket structurally refuses to rebuild");
+                "no byte sequence sourced from a MODEL-ELECTED helpLookup tool result "
+                        + "may appear in the delivered reply. The deterministic usage "
+                        + "block (when triggered) is the single authorized post-sanitize "
+                        + "exception, and its bytes come from fixed bundle keys — never "
+                        + "the tool's sentinel");
+        assertEquals(0, composeUsageBlockCalls,
+                "with the deterministic trigger silent, composeUsageBlock must not "
+                        + "run — the model-elected tool call alone never reaches it");
+    }
+
+    // --- M1-665 acceptance tests ---
+    //
+    // The five tests below discharge the M1-665 acceptance items named in
+    // the ticket. They share the trigger override seam in TestChatAgent
+    // (returns Optional.ofNullable(triggerIntentMatch)) so the wiring
+    // (trigger fires → block delivered; trigger silent → no block; defense-
+    // in-depth visibility filter) is drivable without wiring DevServices
+    // Postgres. The actual SQL and tier-filter behaviour lives in
+    // HelpLookupToolIT (same shared CommandIntentIndex.lookupCommand) and
+    // CommandIntentIndexTest.
+
+    @Test
+    void modelElectedHelpLookupNeverTriggersDelivery() {
+        // Caller's text matches NO intent above the delivery threshold →
+        // trigger returns empty. The model still elects to call helpLookup
+        // (its own threshold is lower), and that call's RESULT enters the
+        // model context only — never the delivery decision. The reply
+        // therefore carries no usage block, regardless of the model's call.
+        triggerIntentMatch = null;
+        sanitizerOutput = null;  // identity sanitize, so reply bytes are visible
+
+        // Model calls helpLookup then answers normally.
+        llmProvider.responses.add(
+                new LlmResponse("TOOL_CALL: helpLookup {\"query\": \"something\"}"));
+        llmProvider.responses.add(new LlmResponse("Here is my answer."));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "tell me about zcash");
+
+        assertFalse(reply.contains(BundleKeys.CHAT_HELP_DELIVERY_HEADER),
+                "a model-elected helpLookup call must never cause a usage block to "
+                        + "be delivered — only the deterministic trigger decides delivery");
+        assertEquals(0, composeUsageBlockCalls,
+                "with the trigger silent, composeUsageBlock is never called");
+    }
+
+    @Test
+    void injectedToolCallCannotDeliverAdminUsage() {
+        // The r2 REPRO: an attacker-injected instruction in retrieved post
+        // content steers the model into calling helpLookup for a privileged
+        // command, with a bot-admin caller. The caller's own text did not
+        // request admin usage (trigger returns empty), so the reply carries
+        // NO privileged usage block — the injection is structurally dead.
+        triggerIntentMatch = null;
+        callerBotAdmin = true;  // the r2 REPO's caller WAS bot-admin
+        sanitizerOutput = null;
+
+        // Model calls helpLookup for grant-admin (attacker-steered) then
+        // produces an otherwise-normal reply.
+        llmProvider.responses.add(
+                new LlmResponse("TOOL_CALL: helpLookup {\"query\": \"grant admin\"}"));
+        llmProvider.responses.add(new LlmResponse(
+                "Here is the answer to your question."));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "what is zcash");
+
+        assertFalse(reply.contains(BundleKeys.CHAT_HELP_DELIVERY_HEADER),
+                "the injection repro must NOT deliver a usage block — the caller's "
+                        + "own text did not request one");
+        assertFalse(reply.contains("grant-admin"),
+                "an attacker-influenced model-elected helpLookup for a privileged "
+                        + "command must never deliver that command's usage block");
+        assertEquals(0, composeUsageBlockCalls,
+                "with the trigger silent, composeUsageBlock is never called — even "
+                        + "for a bot-admin caller whose tier would have permitted the "
+                        + "delivery had the trigger actually fired");
+    }
+
+    @Test
+    void deliveredUsageBodyEqualsHelpComposition() {
+        // WHEN the trigger fires, the delivered block is composed via the
+        // SAME runtime path /help <cmd> uses (HelpCommandHandler.composeUsageBlock),
+        // interpolating no inbound-derived bytes. The test's stub
+        // composeUsageBlock walks the REAL CATALOGUE and applies the REAL
+        // visible() predicate — the same logic /help uses — and returns a
+        // deterministic marker for a visible match. The byte-equivalence
+        // with the production /help path is structural: composeUsageBlock
+        // IS the method /help uses, on the same class, reading the same
+        // CATALOGUE. The marker appearing verbatim in the reply proves the
+        // (trigger → composeUsageBlock → reply) wiring is intact.
+        triggerIntentMatch = "unfollow-source";
+        sanitizerOutput = null;
+
+        llmProvider.responses.add(new LlmResponse(
+                "To stop seeing posts from a source, you can unfollow it."));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "how do I mute this feed");
+
+        // unfollow-source is USER_OR_GROUP_ADMIN tier; in a DM scope
+        // (SCOPE_KIND = "dm") with a non-admin caller, visible() returns
+        // true (!group → USER_OR_GROUP_ADMIN visible), so the block is
+        // composed. The marker format encodes the command name and the
+        // caller's botAdmin flag for tight assertions.
+        assertTrue(reply.contains(BundleKeys.CHAT_HELP_DELIVERY_HEADER),
+                "the deterministic header must lead the delivered block. Reply: " + reply);
+        assertTrue(reply.contains("USAGE_BLOCK(unfollow-source,false)"),
+                "the delivered body must be the bytes composeUsageBlock returned for "
+                        + "the matched command + caller's tier. Reply: " + reply);
+        assertEquals(1, composeUsageBlockCalls,
+                "composeUsageBlock runs exactly once per delivered block");
+        assertEquals("unfollow-source", composeUsageBlockLastCommand,
+                "composeUsageBlock receives the trigger's matched command name");
+    }
+
+    @Test
+    void adminUsageNeverDeliveredToNonAdmin() {
+        // Defense-in-depth at the composition layer: even if the SQL tier
+        // filter somehow let an admin command name through to the trigger,
+        // composeUsageBlock re-checks visibility against the caller's tier
+        // and refuses to compose. A non-admin caller therefore never sees
+        // a privileged command's usage block — the property the r2 audit
+        // demanded at every layer.
+        triggerIntentMatch = "grant-admin";  // simulate a filter bypass
+        callerBotAdmin = false;              // non-admin caller
+        sanitizerOutput = null;
+
+        llmProvider.responses.add(new LlmResponse("Here is my reply."));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "anything");
+
+        assertFalse(reply.contains(BundleKeys.CHAT_HELP_DELIVERY_HEADER),
+                "an admin command must never be delivered to a non-admin caller, "
+                        + "even if the SQL tier filter regressed");
+        assertFalse(reply.contains("grant-admin"),
+                "the admin command name must not appear in the delivered reply via "
+                        + "the usage-block path");
+        assertEquals(1, composeUsageBlockCalls,
+                "composeUsageBlock IS consulted (so the visibility check runs) but "
+                        + "returns empty for an invisible command");
+        assertEquals("grant-admin", composeUsageBlockLastCommand);
+    }
+
+    @Test
+    void atMostOneUsageBlockPerReply() {
+        // The trigger produces at most ONE match (SQL LIMIT 1) and is the
+        // sole input to the delivery step. The model may make MANY tool
+        // calls — including multiple helpLookup calls — and none of them
+        // can append a usage block, because the delivery decision is made
+        // BEFORE the LLM is called. The reply therefore carries exactly
+        // one usage block, regardless of how many tool calls the model
+        // makes.
+        triggerIntentMatch = "unfollow-source";
+        sanitizerOutput = null;
+
+        // Model makes several helpLookup calls then a normal reply. None
+        // of these tool calls influence the delivery count.
+        llmProvider.responses.add(
+                new LlmResponse("TOOL_CALL: helpLookup {\"query\": \"unfollow\"}"));
+        llmProvider.responses.add(
+                new LlmResponse("TOOL_CALL: helpLookup {\"query\": \"mute feed\"}"));
+        llmProvider.responses.add(
+                new LlmResponse("TOOL_CALL: helpLookup {\"query\": \"stop source\"}"));
+        llmProvider.responses.add(new LlmResponse(
+                "You can unfollow a source to stop seeing its posts."));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "how do I mute this feed");
+
+        // Count occurrences of the deterministic header in the delivered
+        // reply — must be exactly 1 (one trigger match → one block).
+        String header = BundleKeys.CHAT_HELP_DELIVERY_HEADER;
+        int occurrences = countOccurrences(reply, header);
+        assertEquals(1, occurrences,
+                "exactly one usage block per reply, regardless of how many model "
+                        + "tool calls happened. Reply: " + reply);
+        assertEquals(1, composeUsageBlockCalls,
+                "composeUsageBlock runs exactly once — the trigger's single match");
+    }
+
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        int idx = 0;
+        while ((idx = haystack.indexOf(needle, idx)) != -1) {
+            count++;
+            idx += needle.length();
+        }
+        return count;
     }
 
     @Test
@@ -893,6 +1101,53 @@ class ChatAgentTest {
             @Override public String get(String key, String langCode) { return key; }
         };
 
+        // M1-665 test seam: a HelpCommandHandler whose resolveCallerTier
+        // returns the test's canned CallerTier (no JDBC) and whose
+        // composeUsageBlock runs a REAL CATALOGUE visibility walk (no DB
+        // for non-probation callers — visible() takes the tier switch)
+        // and returns a deterministic marker for visible matches. The
+        // tier-visibility branch is therefore exercised with the real
+        // CATALOGUE's tier metadata (adminUsageNeverDeliveredToNonAdmin);
+        // the byte-equivalence with the production /help <cmd> path is
+        // structural (same CATALOGUE, same visible() predicate — the
+        // production composeUsageBlock composes the usage body via the
+        // same CATALOGUE walk the stub performs).
+        HelpCommandHandler helpHandler = new HelpCommandHandler() {
+            @Override
+            public CallerTier resolveCallerTier(UUID userId, String scopeKind, UUID scopeId) {
+                return new CallerTier(callerBotAdmin, false, false, "group".equals(scopeKind));
+            }
+            @Override
+            public Optional<String> composeUsageBlock(String commandName, CallerTier caller, String language) {
+                composeUsageBlockCalls++;
+                composeUsageBlockLastCommand = commandName;
+                // Real CATALOGUE walk + real visibility check (the same
+                // predicate /help applies). For a non-probation caller
+                // (the test default), visible() consults only the CallerTier
+                // metadata — no DB. A probation caller would NPE on
+                // commandPermissions, which the tests never set.
+                String name = commandName.startsWith("/") ? commandName.substring(1) : commandName;
+                name = name.toLowerCase(java.util.Locale.ROOT);
+                for (HelpCommandHandler.CommandHelp entry : HelpCommandHandler.CATALOGUE) {
+                    if (entry.command().equals(name) && visible(entry, caller)) {
+                        // Deterministic marker: the stub does not duplicate
+                        // composeDetail's bundle-key concatenation (that is
+                        // the production method's job, covered separately
+                        // by HelpCommandHandlerTest). The marker proves the
+                        // (commandName, callerTier) → (visible, block) wiring
+                        // flows through to the delivered reply.
+                        return Optional.of("USAGE_BLOCK(" + name + "," + caller.botAdmin() + ")");
+                    }
+                }
+                return Optional.empty();
+            }
+        };
+
+        // EmbeddingProvider stub: lookupIntentForDelivery is overridden in
+        // TestChatAgent, so the embed() call never runs in tests. The stub
+        // exists only to satisfy the constructor.
+        EmbeddingProvider embeddingProvider = texts -> List.of();
+
         // No-op trigger that never fires (threshold unreachable); the
         // ceiling gate is driven by the test's ceilingGated field.
         AutoCompressTrigger noopTrigger = new AutoCompressTrigger(
@@ -925,7 +1180,7 @@ class ChatAgentTest {
         return new TestChatAgent(
                 inFlightTracker, promptBuilder, dispatcher, sessionRepo,
                 router, sanitizer, pipeline, bundle, noopTrigger, language,
-                breakerRegistry);
+                breakerRegistry, embeddingProvider, helpHandler);
     }
 
     // Builds a test-scoped InboundContext carrying the scope language the
@@ -948,16 +1203,31 @@ class ChatAgentTest {
                       LlmRouter router, LlmOutputSanitizer sanitizer,
                       TranslationPipeline pipeline, BundleLoader bundle,
                       AutoCompressTrigger autoCompressTrigger,
-                      String language, LlmCircuitBreakerRegistry breakerRegistry) {
+                      String language, LlmCircuitBreakerRegistry breakerRegistry,
+                      EmbeddingProvider embeddingProvider, HelpCommandHandler helpHandler) {
             super(tracker, builder, dispatcher, repo, router,
                     sanitizer, pipeline, bundle, autoCompressTrigger, null, null,
-                    inboundContextWith(language), breakerRegistry);
+                    inboundContextWith(language), breakerRegistry,
+                    embeddingProvider, helpHandler);
         }
 
         @Override
         void writeAuditRow(UUID userId, String scopeKind, UUID scopeId) {
             auditCalls++;
             lastAuditAction = AuditAction.CHAT_MODE;
+        }
+
+        // M1-665 deterministic delivery trigger override. The production
+        // path (embed + CommandIntentIndex.lookupCommand) is exercised at
+        // the right level by HelpLookupToolIT (same shared SQL) and
+        // CommandIntentIndexTest; ChatAgentTest overrides to return a
+        // canned match so the wiring (trigger→deliver, trigger-silent→no-
+        // deliver, composeUsageBlock visibility filter) is drivable
+        // without DevServices Postgres.
+        @Override
+        Optional<String> lookupIntentForDelivery(String userMessage, UUID userId,
+                                                 String scopeKind, UUID scopeId) {
+            return Optional.ofNullable(triggerIntentMatch);
         }
     }
 

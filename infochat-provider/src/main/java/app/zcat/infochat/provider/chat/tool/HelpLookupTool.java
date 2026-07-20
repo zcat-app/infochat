@@ -16,13 +16,11 @@ import jakarta.inject.Inject;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -143,12 +141,7 @@ public class HelpLookupTool implements ChatToolRegistry.ChatTool {
         // name never enters the LLM's context (tier-filter-before-return,
         // docs/spec/security.md §Prompt-injection defenses).
         CallerTier caller = helpHandler.resolveCallerTier(userId, scopeKind, scopeId);
-        List<String> visibleTargets = new ArrayList<>();
-        for (CommandHelp entry : HelpCommandHandler.CATALOGUE) {
-            if (helpHandler.visible(entry, caller)) {
-                visibleTargets.add(entry.command());
-            }
-        }
+        List<String> visibleTargets = helpHandler.visibleCommandNames(caller);
         if (visibleTargets.isEmpty()) {
             // Defensive: a caller with no visible catalogue commands
             // cannot match anything; skip the embed round-trip entirely.
@@ -170,51 +163,16 @@ public class HelpLookupTool implements ChatToolRegistry.ChatTool {
             // the metrics log.
             return noMatchJson();
         }
-        String vectorLiteral = toVectorLiteral(queryVector);
+        String vectorLiteral = CommandIntentIndex.toVectorLiteral(queryVector);
 
         try (Connection conn = dataSource.getConnection()) {
             cancellationService.armToolConnection(conn, userId, scopeKind, scopeId);
-            return lookup(conn, vectorLiteral, visibleTargets);
-        }
-    }
-
-    /**
-     * The pgvector probe. ONE statement, tier filter INSIDE the WHERE.
-     * Returns at most one row — the corpus is one row per command, so
-     * the nearest visible match is the answer; below the threshold the
-     * tool returns no match.
-     *
-     * <p>Distance is {@code embedding <=> ?::vector} (cosine distance
-     * per the HNSW {@code vector_cosine_ops} index on doc_embedding,
-     * V60). Similarity = {@code 1 - distance}; the threshold is
-     * expressed as similarity at the API boundary
-     * ({@link #SIMILARITY_THRESHOLD}) and converted to a distance
-     * upper bound here, because pgvector's {@code <=>} returns distance.
-     */
-    private String lookup(Connection conn, String vectorLiteral,
-                          List<String> visibleTargets) throws SQLException {
-        final String sql =
-                "SELECT target_ref "
-                + "FROM doc_embedding "
-                + "WHERE doc_kind = ? "
-                + "  AND target_ref = ANY(?) "
-                + "  AND (embedding <=> ?::vector) < ? "
-                + "ORDER BY (embedding <=> ?::vector) ASC "
-                + "LIMIT 1";
-        double distanceThreshold = 1.0 - SIMILARITY_THRESHOLD;
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, CommandIntentIndex.DOC_KIND);
-            ps.setArray(2, conn.createArrayOf("text", visibleTargets.toArray()));
-            ps.setString(3, vectorLiteral);
-            ps.setDouble(4, distanceThreshold);
-            ps.setString(5, vectorLiteral);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    return noMatchJson();
-                }
-                String command = rs.getString("target_ref");
-                return matchJson(command, describe(command));
+            Optional<String> match = CommandIntentIndex.lookupCommand(
+                    conn, vectorLiteral, visibleTargets, SIMILARITY_THRESHOLD);
+            if (match.isEmpty()) {
+                return noMatchJson();
             }
+            return matchJson(match.get(), describe(match.get()));
         }
     }
 
@@ -250,21 +208,6 @@ public class HelpLookupTool implements ChatToolRegistry.ChatTool {
     /** Sentinel JSON for "no match above threshold". */
     private static String noMatchJson() {
         return "{\"command\":null}";
-    }
-
-    /**
-     * pgvector text literal {@code [f0,f1,...]}, bound via setString
-     * through a {@code ?::vector} cast. Mirrors
-     * {@code SemanticSearchTool.toVectorLiteral}; not shared across
-     * packages to keep the help-side surface self-contained.
-     */
-    private static String toVectorLiteral(float[] vector) {
-        StringBuilder sb = new StringBuilder(vector.length * 12).append('[');
-        for (int i = 0; i < vector.length; i++) {
-            if (i > 0) sb.append(',');
-            sb.append(vector[i]);
-        }
-        return sb.append(']').toString();
     }
 
     /**

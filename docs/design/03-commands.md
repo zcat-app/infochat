@@ -1067,6 +1067,17 @@ result regardless. As an additional safety net, every interruptible
 read-only query runs under a profile-driven `statement_timeout` that
 bounds the worst case even when `pg_cancel_backend` fails:
 
+The deterministic delivery trigger (D67) is not a tool call —
+it runs in `ChatAgent.doHandle` before the LLM is invoked, alongside the
+D28 semantic pre-fetch, and shares the same read-only `doc_embedding`
+SQL the `helpLookup` tool runs (via `CommandIntentIndex.lookupCommand`).
+It does not register with the chat-tool allowlist and does not arm
+`pg_cancel_backend`: its SQL is a single LIMIT-1 pgvector probe under
+the same `statement_timeout` backstop above, and `/stop` interrupts the
+turn at the LLM-call boundary as it does for the semantic pre-fetch.
+The trigger's match never reaches the LLM context — its sole consumer
+is the post-sanitize usage-block composition step (D67).
+
 | Profile | `statement_timeout` for interruptible queries |
 |---|---|
 | `laptop` | 30s |

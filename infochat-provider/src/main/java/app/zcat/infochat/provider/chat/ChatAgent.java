@@ -6,6 +6,8 @@ import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.util.JsonEscaper;
+import app.zcat.infochat.llm.EmbeddingProvider;
+import app.zcat.infochat.llm.EmbeddingResult;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
@@ -14,7 +16,10 @@ import app.zcat.infochat.llm.routing.LlmCircuitBreakerRegistry;
 import app.zcat.infochat.llm.routing.LlmRouter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.help.CommandIntentIndex;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
+import app.zcat.infochat.provider.messaging.HelpCommandHandler;
+import app.zcat.infochat.provider.messaging.HelpCommandHandler.CallerTier;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -109,6 +114,25 @@ public class ChatAgent {
     // false-positive still costs the user one extra line, not a wrong answer.
     static final double CONFIDENT_SIMILARITY_CUTOFF = 0.65;
 
+    /**
+     * Similarity cutoff a command-intent document must clear for the
+     * deterministic delivery trigger (M1-665) to fire. Conservative
+     * relative to {@code HelpLookupTool}'s 0.60: the tool answers the
+     * model's question "which command matches this phrase"; the trigger
+     * answers "did the CALLER ask how to do something" — a different
+     * question with a higher false-positive cost (an unsolicited usage
+     * block on every turn that merely mentions a topic). 0.70 sits
+     * above the tool's 0.60 admit-band and below an overly-strict 0.80
+     * that would miss real phrasings; calibrated by inspection against
+     * the same fixture phrasings HelpLookupToolIT seeds at similarity
+     * &gt; 0.90, with the same recalibrate-as-follow-up posture as the
+     * tool's threshold. Pinned as a code constant so a deployment
+     * change requires a spec amendment, not a silent config tweak
+     * (D19 determinism posture; security.md §LLM output sanitizer
+     * amendment M1-663 governing this delivery path).
+     */
+    static final double INTENT_DELIVERY_SIMILARITY_THRESHOLD = 0.70;
+
     // M1-618 conversational-refinement directives, appended per-turn AFTER
     // the untrusted retrieval block (a trusted region — the model's own
     // instruction surface). They shape the reply; they never quote or list
@@ -148,6 +172,8 @@ public class ChatAgent {
     private final DataSource dataSource;
     private final InboundContext inboundContext;
     private final LlmCircuitBreakerRegistry breakerRegistry;
+    private final EmbeddingProvider embeddingProvider;
+    private final HelpCommandHandler helpHandler;
 
     @Inject
     public ChatAgent(InFlightTracker inFlightTracker,
@@ -162,7 +188,9 @@ public class ChatAgent {
                      AuditLogWriter auditLogWriter,
                      DataSource dataSource,
                      InboundContext inboundContext,
-                     LlmCircuitBreakerRegistry breakerRegistry) {
+                     LlmCircuitBreakerRegistry breakerRegistry,
+                     EmbeddingProvider embeddingProvider,
+                     HelpCommandHandler helpHandler) {
         this.inFlightTracker = inFlightTracker;
         this.promptBuilder = promptBuilder;
         this.toolDispatcher = toolDispatcher;
@@ -176,6 +204,8 @@ public class ChatAgent {
         this.dataSource = dataSource;
         this.inboundContext = inboundContext;
         this.breakerRegistry = breakerRegistry;
+        this.embeddingProvider = embeddingProvider;
+        this.helpHandler = helpHandler;
     }
 
     /**
@@ -393,6 +423,30 @@ public class ChatAgent {
             refinementDirective = AFFORDANCE_DIRECTIVE;
         }
 
+        // 3c. Deterministic command-intent delivery trigger (M1-665, D67).
+        // Whether a usage block is delivered is decided HERE from the
+        // caller's own inbound text, NEVER from the model's tool elections:
+        // the r2 INJECTION regression (docs/plan/m1/redteam/M1-648-2026-07-19-r2.md)
+        // was an attacker-influenced model-elected helpLookup call appending
+        // a privileged command's usage after sanitize. The trigger runs the
+        // SAME tier-filtered SQL the helpLookup tool runs (via the shared
+        // CommandIntentIndex.lookupCommand entry point) but with a
+        // conservative-higher threshold, and its result is the sole input
+        // to the post-sanitize delivery step (step 9b) — a model-elected
+        // helpLookup result reaches the model context only, never the
+        // delivery decision. Skipped when the chat breaker is OPEN for the
+        // same reason the semantic pre-fetch is: the embed round-trip would
+        // be wasted compute on a doomed turn (the trigger's failure mode is
+        // the same friendly-degradation — no block delivered).
+        String deliveredCommandName = null;
+        if (!breakerRegistry.wouldShortCircuit(ModelTask.CHAT_AGENT)) {
+            Optional<String> intentMatch = lookupIntentForDelivery(
+                    userMessage, userId, scopeKind, scopeId);
+            if (intentMatch.isPresent()) {
+                deliveredCommandName = intentMatch.get();
+            }
+        }
+
         // 4. Resolve LLM provider for chat task
         LlmProvider provider = llmRouter.forTask(ModelTask.CHAT_AGENT, scopeLanguage);
 
@@ -449,6 +503,32 @@ public class ChatAgent {
             reply = translationPipeline.run(sanitized, scopeLanguage);
         } else {
             reply = sanitized;
+        }
+
+        // 9b. Deterministic usage-block delivery (M1-665, D67). The single
+        // authorized post-sanitize accretion under the amended security.md
+        // §LLM output sanitizer exemption: BOTH the emission decision
+        // (decided in step 3c from the caller's inbound text via
+        // tier-filtered SQL) AND the composed bytes (the /help <cmd>
+        // runtime body via HelpCommandHandler.composeUsageBlock, plus a
+        // fixed bundle-localized header) are deterministic. The block is
+        // composed bundle-localized per the scope's /lang (the /help
+        // path's existing behavior), so it does NOT pass through
+        // TranslationPipeline (D43 two-path rule); the model's prose
+        // portion above keeps its existing sanitize→translate pipeline
+        // unchanged. At most one block per reply: the trigger produces at
+        // most one match (SQL LIMIT 1), so at most one block is composed.
+        // Defense-in-depth: composeUsageBlock re-checks tier visibility
+        // before composing — a match the SQL tier filter should already
+        // have excluded is caught here too (adminUsageNeverDeliveredToNonAdmin).
+        if (deliveredCommandName != null) {
+            CallerTier caller = helpHandler.resolveCallerTier(userId, scopeKind, scopeId);
+            Optional<String> usageBlock =
+                    helpHandler.composeUsageBlock(deliveredCommandName, caller, scopeLanguage);
+            if (usageBlock.isPresent()) {
+                String header = bundleLoader.get(BundleKeys.CHAT_HELP_DELIVERY_HEADER, scopeLanguage);
+                reply = reply + "\n\n" + header + "\n" + usageBlock.get();
+            }
         }
 
         // 10. Defer persistence + auto-compress to a post-delivery commit.
@@ -668,6 +748,56 @@ public class ChatAgent {
         LlmResponse finalResponse = provider.generate(
                 ModelTask.CHAT_AGENT, baseSystemPrompt, conversation.toString());
         return finalResponse.text();
+    }
+
+    /**
+     * Deterministic command-intent lookup that drives delivery (M1-665, D67).
+     * Embeds the caller's inbound text, queries the shared
+     * {@link CommandIntentIndex#lookupCommand} entry point with the
+     * caller's visible-command-name set (tier-filter-before-return, same
+     * predicate {@code /help} applies), and returns the matched command
+     * name or {@link Optional#empty()}. The model's tool elections have
+     * no influence on this path — it runs before the LLM is called and
+     * never reads tool-loop state.
+     *
+     * <p><b>Failure mode.</b> Embedding-backend or DB failure degrades to
+     * no match (no block delivered) — the same friendly-degradation
+     * posture {@code buildSemanticRetrievalBlock} applies. The caller's
+     * turn still completes normally; only the optional usage block is
+     * dropped. Logged at WARN with userId only (D37 — no user prose).
+     *
+     * <p><b>Test seam.</b> Package-private and non-final so
+     * {@code ChatAgentTest}'s {@code TestChatAgent} subclass can override
+     * and return a canned match (or empty) without wiring DevServices
+     * Postgres. The SQL and tier-filter behaviour is covered at the
+     * right level by {@code HelpLookupToolIT} (same shared SQL) and
+     * {@code HelpCommandHandlerTest}/{@code composeUsageBlock} (defense-
+     * in-depth visibility check).
+     */
+    Optional<String> lookupIntentForDelivery(String userMessage, UUID userId,
+                                             String scopeKind, UUID scopeId) {
+        String query = userMessage.length() > SEMANTIC_QUERY_MAX_CHARS
+                ? userMessage.substring(0, SEMANTIC_QUERY_MAX_CHARS) : userMessage;
+        float[] queryVector;
+        try {
+            List<EmbeddingResult> embedded = embeddingProvider.embed(List.of(query));
+            queryVector = embedded.get(0).vector();
+        } catch (RuntimeException e) {
+            SafeLog.error(log, "intent-trigger embed failed for userId=" + userId
+                    + "; no usage block will be delivered", e);
+            return Optional.empty();
+        }
+        String vectorLiteral = CommandIntentIndex.toVectorLiteral(queryVector);
+        CallerTier caller = helpHandler.resolveCallerTier(userId, scopeKind, scopeId);
+        List<String> visibleTargets = helpHandler.visibleCommandNames(caller);
+        try (Connection conn = dataSource.getConnection()) {
+            return CommandIntentIndex.lookupCommand(
+                    conn, vectorLiteral, visibleTargets, INTENT_DELIVERY_SIMILARITY_THRESHOLD);
+        } catch (SQLException e) {
+            SafeLog.error(log, "intent-trigger lookup failed for userId=" + userId
+                    + "; no usage block will be delivered", e);
+            return Optional.empty();
+        }
     }
 
     /**

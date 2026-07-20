@@ -284,12 +284,22 @@ class ChatAgentRefusalInterceptTest {
                       AutoCompressTrigger autoCompressTrigger) {
             super(tracker, builder, dispatcher, repo, router,
                     sanitizer, pipeline, bundle, autoCompressTrigger, null, null,
-                    inboundContextEn(), closedBreakerRegistry());
+                    inboundContextEn(), closedBreakerRegistry(), null, null);
         }
 
         @Override
         void writeAuditRow(UUID userId, String scopeKind, UUID scopeId) {
             // no-op: the audit path is exercised by ChatAgentTest
+        }
+
+        // M1-665 deterministic delivery trigger: refusal-intercept tests do
+        // not exercise delivery, so the trigger returns empty here. The null
+        // EmbeddingProvider/HelpCommandHandler passed above are therefore
+        // never dereferenced.
+        @Override
+        Optional<String> lookupIntentForDelivery(String userMessage, UUID userId,
+                                                 String scopeKind, UUID scopeId) {
+            return Optional.empty();
         }
     }
 

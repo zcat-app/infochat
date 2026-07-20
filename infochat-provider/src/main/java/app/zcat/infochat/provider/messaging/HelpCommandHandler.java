@@ -22,6 +22,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -413,6 +414,47 @@ public class HelpCommandHandler implements CommandHandler {
             case GROUP_ADMIN -> caller.group() && (caller.groupAdmin() || caller.botAdmin());
             case USER_OR_GROUP_ADMIN -> !caller.group() || caller.groupAdmin() || caller.botAdmin();
         };
+    }
+
+    /**
+     * The caller's visible command-name set, for SQL binding as
+     * {@code target_ref = ANY(?)} inside the intent-lookup WHERE (M1-664,
+     * reused by the M1-665 deterministic delivery trigger). Tier-filter-
+     * before-return: an invisible command's name is absent from this
+     * list, so it can never be matched by the pgvector probe. The same
+     * {@link #visible} predicate {@code /help} applies at listing time.
+     */
+    public List<String> visibleCommandNames(CallerTier caller) {
+        List<String> names = new ArrayList<>();
+        for (CommandHelp entry : CATALOGUE) {
+            if (visible(entry, caller)) {
+                names.add(entry.command());
+            }
+        }
+        return names;
+    }
+
+    /**
+     * Compose the usage+examples block for a single command via the
+     * same runtime path {@code /help <cmd>} takes (M1-665). Returns
+     * empty when the command is not in {@link #CATALOGUE} OR not
+     * visible to the caller — a defense-in-depth visibility check that
+     * catches a match the SQL tier filter should already have excluded
+     * (and would catch a future regression in that filter). Never
+     * interpolates inbound bytes: every byte of the returned block is
+     * fixed bundle text resolved against the caller's scope language.
+     * The caller's tier is resolved by the caller of this method (the
+     * chat delivery trigger passes the same {@code CallerTier} it used
+     * to bind the SQL {@code ANY(?)}, so the two paths cannot diverge).
+     */
+    public Optional<String> composeUsageBlock(String commandName, CallerTier caller, String language) {
+        String name = normalizeCommandName(commandName);
+        for (CommandHelp entry : CATALOGUE) {
+            if (entry.command().equals(name) && visible(entry, caller)) {
+                return Optional.of(composeDetail(entry, caller, language));
+            }
+        }
+        return Optional.empty();
     }
 
     private void appendEnabledAssets(StringBuilder body) {

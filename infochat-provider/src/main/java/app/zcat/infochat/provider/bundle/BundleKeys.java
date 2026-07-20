@@ -186,6 +186,21 @@ public final class BundleKeys {
     public static final String HELP_DETAIL_EXAMPLES_HEADER = "help.detail.examples.header";
 
     /**
+     * Header line for the deterministic help-usage block appended to a
+     * chat reply when the caller's inbound text matched a command intent
+     * above the delivery threshold (M1-665). Sits ABOVE the same
+     * usage+examples body {@code /help <cmd>} produces. Appended AFTER
+     * sanitize + translate (D43 two-path rule: deterministic bot prose
+     * takes the bundle path, never the translator) and is the single
+     * authorized post-sanitize accretion under the amended security.md
+     * §LLM output sanitizer exemption. Never interpolates inbound bytes:
+     * every byte is fixed bundle text. The matched command's actual
+     * usage body follows on subsequent lines (composed separately via
+     * {@code HelpCommandHandler.composeUsageBlock}).
+     */
+    public static final String CHAT_HELP_DELIVERY_HEADER = "reply.chat.help_delivery.header";
+
+    /**
      * Unknown command (either {@code /help <command>} or a bare unrecognized slash) that HAS a
      * close match — suggestions drawn only from the caller-visible command set. Interpolates the
      * suggestions only, never the requested name: this template used to render the name as
