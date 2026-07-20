@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 677 |
 | deferred | 0 |
 | abandoned | 19 |
-| **total** | **699** |
+| **total** | **701** |
 
 ---
 
@@ -26,7 +26,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-642 — Per-category digest delivery + optional roll-up summaries (complexity: high, risk: medium)
-- M1-649 — Conceptual help topics: answer the questions no command's usage string can (complexity: high, risk: high)
+- M1-660 — doc_embedding read path: arm hnsw.iterative_scan under filter-inside-ANN, in a transaction (complexity: medium, risk: medium)
 
 ---
 
@@ -43,7 +43,9 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
+- M1-649 — blocked_by: M1-660 (pending), M1-664 (done)
 - M1-652 — blocked_by: M1-642 (pending)
+- M1-666 — blocked_by: M1-649 (pending), M1-665 (done)
 
 ---
 
@@ -889,13 +891,16 @@ M1-656 (done)
   │     └── M1-658 (done)
   └── M1-658 (done) [see above]
 M1-659 (done)
+M1-660 (pending) ← runnable
+  └── M1-649 (pending)
+        └── M1-666 (pending)
 M1-661 (done)
 M1-662 (abandoned)
 M1-663 (done)
   ├── M1-648 (abandoned) [see above]
   └── M1-665 (done)
         ├── M1-648 (abandoned) [see above]
-        └── M1-649 (pending) ← runnable
+        └── M1-666 (pending) [see above]
 M1-664 (done)
   ├── M1-648 (abandoned) [see above]
   ├── M1-649 (pending) [see above]
