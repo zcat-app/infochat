@@ -10,7 +10,6 @@ blocked_by:
 files_budget: 16
 files_scope:
   - USER_GUIDE.md
-  - infochat-provider/src/main/resources/help-topics/README.md
   - infochat-provider/src/main/java/app/zcat/infochat/provider/help/HelpTopicCorpus.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/help/TopicCorpusBuilder.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/help/CommandIntentIndex.java
@@ -20,6 +19,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/help/HelpTopicCorpusTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/help/TopicCorpusRetrievalIT.java
   - docs/spec/commands.md
+  - docs/spec/decisions.md
 complexity: high
 risk: high
 round_cap: 3
@@ -54,12 +54,17 @@ out_of_scope:
     text … deterministic end-to-end"), so §LLM output sanitizer is not touched
     by this feature at all.
   - >-
-    docs/spec/** and docs/design/** except docs/spec/commands.md (in scope).
+    docs/spec/** and docs/design/** except docs/spec/commands.md and
+    docs/spec/decisions.md (both in scope — the D68 row is written in
+    decisions.md, mirroring how M1-664/M1-665 recorded D66/D67).
     commands.md carries deliberate non-disclosure rules (:226 no admin-command
     existence leak) that reading design docs would defeat.
   - >-
     Rewriting USER_GUIDE.md. Only the two confirmed factual defects below are
-    corrected; not a documentation-quality pass.
+    corrected, plus the invisible HTML-comment anchor markers the guide-hash
+    guard requires (the guide contains zero HTML comments today, so the
+    acceptance-item-4a anchors MUST be inserted by this ticket); not a
+    documentation-quality pass.
   - >-
     Serving conceptual answers to probation users. Chat mode is closed to them
     (InboundRouter step-5 gate; commandNameOf → "chat-mode" sentinel) and this
@@ -86,6 +91,11 @@ acceptance:
     question against a long answer embedding is asymmetric and under-recalls the
     tail phrasings this feature exists to serve; HyDE/query-rewrite are
     out-of-scope (D19), so the match surface must itself be question-shaped.
+    CI NOTE: the suite's embedders are stubs (fixed vectors), so the IT pins
+    the retrieval plumbing with rigged-distance vectors — the established
+    M1-664 pattern (HelpLookupToolIT's phrasing test); real no-shared-word
+    recall is verified by live calibration (the M1-619 pattern), not by CI.
+    Do NOT reach for a real embedding backend in tests.
   - >-
     doc_id NAMESPACE DISJOINTNESS — every topic doc_id is namespaced
     (e.g. "topic:<slug>"), and HelpTopicCorpusTest.topicDocIdsDisjointFromCommandNames
@@ -114,10 +124,15 @@ acceptance:
   - >-
     TIER-FLAT PIN — every topic is user-tier by construction;
     HelpTopicCorpusTest.noTopicReferencesAdminSurface asserts no topic (match
-    text OR answer) names an admin-tier command. NOTE this is necessary but
-    NOT sufficient for delivery safety: user-tier commands topics must name are
-    in the sanitizer CLOSED_LIST, which is exactly why M1-666 delivers
-    deterministically post-sanitize rather than through the model.
+    text OR answer) names a BOT-ADMIN-tier command. The pin is against the
+    bot-admin surface, NOT against CLOSED_LIST membership — the group-admin
+    commands topics must name (/add-source, /lang, /follow-tag, …) are
+    themselves CLOSED_LIST entries and are expected in topic text. Concrete
+    consequence: the invite/access-flow topic describes the flow without
+    naming any /invite subcommand (all bot-admin). NOTE this is necessary but
+    NOT sufficient for delivery safety: the user-reachable commands topics
+    must name are in the sanitizer CLOSED_LIST, which is exactly why M1-666
+    delivers deterministically post-sanitize rather than through the model.
   - >-
     BUILDER — TopicCorpusBuilder embeds one intent doc per topic into
     doc_kind='topic' at startup via DocEmbeddingDao, content-hash-skips
@@ -138,7 +153,8 @@ acceptance:
   - >-
     USER_GUIDE.md DEFECT 1 (currency) corrected — USER_GUIDE.md:317 states
     supported currencies usd/eur/czk/btc next to a Kraken example, but
-    KrakenSnapshotSource.SUPPORTED_VS = {usd, eur, btc}; czk is Coingecko-only.
+    KrakenSnapshotSource.SUPPORTED_VS (infochat-collector module) =
+    {usd, eur, btc}; czk is Coingecko-only.
     State the per-source difference. Prerequisite: deriving a topic from wrong
     text launders the defect into a spoken answer.
   - >-

@@ -108,7 +108,13 @@ acceptance:
     deterministic topic delivery; Decision D69 records the trigger (caller-text,
     lookupTopic), the verbatim post-sanitize composition, the topic-over-command
     precedence, and the one-block cap. (Re-verify D69 is free immediately before
-    writing the row — decision_refs is validated by nothing.)
+    writing the row — decision_refs is validated by nothing.) In the SAME
+    decisions.md edit, amend D67's "the SINGLE authorized post-sanitize
+    accretion" phrase: after this ticket there are exactly two authorized
+    accretions (command usage block, topic block), and D67 must not keep
+    recording the old count. Rows are maintained as current truth (the D64
+    precedent retired false claims the same way); leaving D67 unamended would
+    make decisions.md self-contradictory the moment D69 lands.
   - mvn verify from the repo root is green
 test_plan:
   modifies:
