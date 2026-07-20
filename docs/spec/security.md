@@ -294,7 +294,7 @@ considered untrusted (decision D21):
   | `getReferences` | `uid: string`, `limit: int ≤ profile-driven cap` | list of `{uid, title, url, link_type, score}` | Edges from the `post_reference` graph. Scope-filtered the same way as `searchPosts`. |
   | `recallMemory` | `keywords: list<string>` (each ≤ a profile-driven length cap) | list of `{compressed_at, summary, references}` | Reads `chat_memory` for the calling `(user, scope)` only — D28. **Not** the user-facing `/recall <keyword>` command, which is v2-deferred per SPEC.md §"Deferred to v2". |
   | `listSaves` | `tags: list<personal tag>` (free-form, but length-capped), `window: duration` | list of `{uid, saved_at, personal_tags, snapshot_title, snapshot_url}` | Reads the caller's `saved_post` rows globally (D13: per-user across scopes); never returns another user's saves. |
-  | `helpLookup` | `query: string` (free text, length-capped by the dispatcher's per-turn input cap) | `{command: <name>, description: <runtime one-liner>}` or `{command: null}` | Reads the `doc_embedding` command-intent corpus (M1-664, V60) and resolves a free-text intent to a catalogue command name via one pgvector cosine probe on the **local** embedding backend (D54). The tier filter runs INSIDE the query (`target_ref = ANY(?)` bound to the caller's visible command set, computed via `HelpCommandHandler.visible`/`resolveCallerTier`), so an invisible command's name never enters the model context (M1-647 existence-oracle defense, widened to free-text input). **Match-not-assert invariant:** embedded text is used only for MATCHING; the returned `description` is composed at call time from the runtime `HelpCommandHandler.CATALOGUE`'s short-help bundle key, never from the indexed text — a stale intent row can degrade a match but can never produce wrong syntax. Full usage/examples bodies never enter the model context (the delivery path is M1-665, gated on the M1-663 spec amendment). Below the calibrated similarity threshold the tool returns `{command: null}` and the agent is directed (`ChatAgent.TOOL_INSTRUCTIONS`) to say it does not know and point at `/help` rather than answering from general knowledge. D19 determinism: the match is decided entirely by SQL; D66 records the corpus + invariant + tier-filter-before-return rule. |
+  | `helpLookup` | `query: string` (free text, length-capped by the dispatcher's per-turn input cap) | `{command: <name>, description: <runtime one-liner>}` or `{command: null}` | Reads the `doc_embedding` command-intent corpus (V60) and resolves a free-text intent to a catalogue command name via one pgvector cosine probe on the **local** embedding backend (D54). The tier filter runs INSIDE the query (`target_ref = ANY(?)` bound to the caller's visible command set, computed via `HelpCommandHandler.visible`/`resolveCallerTier`), so an invisible command's name never enters the model context (the existence-oracle defense widened to free-text input). **Match-not-assert invariant:** embedded text is used only for MATCHING; the returned `description` is composed at call time from the runtime `HelpCommandHandler.CATALOGUE`'s short-help bundle key, never from the indexed text — a stale intent row can degrade a match but can never produce wrong syntax. Full usage/examples bodies never enter the model context (the delivery path is governed by the §LLM output sanitizer amendment, decision D67). Below the calibrated similarity threshold the tool returns `{command: null}` and the agent is directed (`ChatAgent.TOOL_INSTRUCTIONS`) to say it does not know and point at `/help` rather than answering from general knowledge. D19 determinism: the match is decided entirely by SQL; D66 records the corpus + invariant + tier-filter-before-return rule. |
 
   <!-- tool-allowlist:end -->
 
@@ -330,14 +330,14 @@ emitting one. The exemption is safe only to the extent deterministic
 output is **bot-authored** — interpolates no inbound-derived text
 (parse-validated echoes, per `commands.md` §Discovery, count as
 bot-authored). That is a property the handlers must **maintain**, not
-one the exemption may assume: M1-647/M1-656 removed the reflecting
-echoes from the friendly-**error** surface and M1-658
-(`InboundReflectionGuardTest`) guards that surface against their
+one the exemption may assume: prior tickets removed the reflecting
+echoes from the friendly-**error** surface and
+`InboundReflectionGuardTest` guards that surface against their
 return. The **reply/success** surface is not yet fully guaranteed: its
 one known live instance — the `/add-source` `--name` display-name echo
-— was closed by M1-659, which constrains the name where the value is
+— was closed by constraining the name where the value is
 produced rather than filtering the reply, but that surface has **no
-mechanical guard** (M1-658's census is error-scoped) and other
+mechanical guard** (the reflection guard's census is error-scoped) and other
 `reply.*` echoes remain unreviewed. So for now this exemption carries a
 **residual risk** on non-error deterministic output, not a proven-safe
 blanket.
@@ -668,8 +668,8 @@ should pick admin placement deliberately:
   authenticated by SMP and the token is a secret only the operator
   holds, so an attacker without the token cannot claim admin and
   cannot influence their own connection-based `contact_id`; an
-  attacker who could only spoof an advertised address (the discarded
-  M1-505 approach) could impersonate the admin outright. The claim is
+   attacker who could only spoof an advertised address (the discarded
+   by-address approach) could impersonate the admin outright. The claim is
   **single-use while a SimpleX admin exists**: the first DM presenting
   the token establishes the admin, and while that admin row exists the
   token grants nothing on any later presentation (same or different
@@ -724,9 +724,9 @@ should pick admin placement deliberately:
   slot by the supplied **target** natural key, which may name any
   enabled adapter regardless of the inbound one — a Signal admin can
   free a SimpleX residual. This is required, not incidental: the
-  command's primary target is the residual join-only SimpleX group
-  that has no native leave signal (so M1-525's automatic freeing
-  never fires), and if SimpleX is the saturated adapter the admin may
+   command's primary target is the residual join-only SimpleX group
+   that has no native leave signal (so the automatic freeing
+   never fires), and if SimpleX is the saturated adapter the admin may
   only be reachable on another. The trade-off rests on a *different*
   basis than `/invite create`: the free grants **neither registration
   nor elevation** — it only clears `removed_at` on a slot the bot
@@ -736,7 +736,7 @@ should pick admin placement deliberately:
   single-adapter admin compromise can therefore drop another adapter's
   D47 cap count, but cannot mint membership, identity, or elevation on
   it; per-adapter re-saturation still gates on real invitations
-  (M1-526; remediates M1-519 redteam Finding 2).
+  (the saturation-reset path; remediates the prior redteam's Finding 2).
 
 ## User ban
 
@@ -1087,11 +1087,11 @@ rules:
 - **Chat-mode replies** with the chat-agent LLM unreachable →
   return a localized "chat assistant is unavailable, try again
   later" friendly error from the bundle (D43); the turn is
-  discarded with no `chat_session` advance, no `chat_memory`
-  write, and no **model-initiated** tool call. The one exception is
-  the deterministic digest-first semantic pre-fetch (M1-589), which
-  runs once before the LLM call by design (the D28 "always runs,
-  folded in" pattern): on an LLM-unreachable turn that read-only
+   discarded with no `chat_session` advance, no `chat_memory`
+   write, and no **model-initiated** tool call. The one exception is
+   the deterministic digest-first semantic pre-fetch, which
+   runs once before the LLM call by design (the D28 "always runs,
+   folded in" pattern): on an LLM-unreachable turn that read-only
   retrieval may already have executed (one local embed + one
   scoped pgvector probe) before the failure surfaced. It is
   bounded — read-only, capped in time (the pgvector probe by
@@ -1102,12 +1102,11 @@ rules:
   chat endpoint's circuit breaker (below) is OPEN, the pre-fetch is
   **skipped entirely** — no embed round-trip, no pgvector probe —
   so an outage window pays that bounded cost at most once per
-  breaker cycle: only the failures that precede the trip (and the
-  cooldown-expiry probe turn, which legitimately needs its
-  grounding) run it (M1-606).
-- **Fail-fast on a known-unreachable provider (circuit breaker,
-  M1-606).** An in-memory circuit breaker keyed by resolved provider
-  endpoint (base-url; all tasks routed to one endpoint share its
+   breaker cycle: only the failures that precede the trip (and the
+   cooldown-expiry probe turn, which legitimately needs its
+   grounding) run it.
+- **Fail-fast on a known-unreachable provider (circuit breaker).** An in-memory circuit breaker keyed by resolved provider
+   endpoint (base-url; all tasks routed to one endpoint share its
   state, matching the D56 one-LLM-service topology — the embedding
   endpoint is tracked separately) guards every LLM/embedding
   transport call. After a configured count of CONSECUTIVE
@@ -1263,7 +1262,7 @@ share a cost profile share a bucket:
   profile-driven. Transport rate is intentionally higher than this
   cap so a flooding user gets quick reject replies without burning
   the only LLM slot.
-- **Per-user interruptible concurrency (M1-636)** — not a rate
+- **Per-user interruptible concurrency** — not a rate
   bucket: a ceiling on one sender's CONCURRENT interruptible
   requests (the D35 interruptible class: chat replies, on-demand
   `/summary`, `/retry` re-rolls except `--digest`; queued +

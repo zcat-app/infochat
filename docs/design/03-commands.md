@@ -298,8 +298,7 @@ NOT NULL AND probation_until > ?`, cutoff from the injected `Clock`;
 D45/D55). Deliberately no `registration_state = 'invited'` arm: post-D47
 `'invited'` is terminal and `/vouch`'s only effect is the single-column
 `probation_until` clear, so "awaiting a vouch" is a subset of the probation
-window and an `'invited'` arm would make the list a permanent full roster
-(M1-579).
+window and an `'invited'` arm would make the list a permanent full roster.
 
 **Admin-only flags are part of command identity.** A non-admin caller passing
 `--all` or `--include-deleted` to `/list-sources`, or `--all` to
@@ -614,7 +613,7 @@ Optional:
 **Kind resolution.** The source `kind` is determined deterministically:
 
 1. An explicit `--type <kind>` wins (case-insensitive enum match);
-   `nitter` is a valid explicit `--type`. **One exception** (M1-456): a
+   `nitter` is a valid explicit `--type`. **One exception**: a
    URL whose host is a configured Nitter instance (the `nitter-hosts`
    row below) may only be added as `--type nitter`. A non-nitter
    `--type` on such a host is rejected with a friendly error naming the
@@ -1058,7 +1057,7 @@ these returns a friendly no-op stating why):
 see the marker-delimited `<!-- tool-allowlist:begin -->` /
 `<!-- tool-allowlist:end -->` table for the single source of truth)
 is a read-only DB query, so the primitive is `pg_cancel_backend(pid)` at
-the released connection. `helpLookup` (M1-664) follows the same primitive:
+the released connection. `helpLookup` follows the same primitive:
 a single read-only pgvector cosine probe over `doc_embedding`, armed via
 `CancellationService.armToolConnection` like every other chat tool.
 **Best-effort** — Postgres may complete the

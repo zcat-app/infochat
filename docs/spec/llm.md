@@ -251,7 +251,7 @@ Adding a fallback chain is a v2 candidate.
 - The pgvector index type is profile-driven (decision D27): HNSW for the                                                                                                                                                                              
   laptop / vps / remote profiles; IVFFlat for Pi (cheaper build,
   acceptable recall at the small live-set size).
-- **Second embedded corpus — command intents** (decision D66, M1-664).
+- **Second embedded corpus — command intents** (decision D66).
   The `doc_embedding` table ships a second embedded corpus alongside
   `post_embedding`: one row per catalogue command, ~41 documents of a
   sentence or two, written by the Provider-side `CommandIntentIndexBuilder`
@@ -273,8 +273,9 @@ Adding a fallback chain is a v2 candidate.
   startup cost is one SELECT (no embedding calls); a change to the
   source text or to the active embedding model forces a re-embed of the
   affected rows, so a stale vector can never outlive its source text.
-  The chat delivery path is governed by the M1-663 spec amendment and
-  implemented by M1-665; this section is deliberately silent on it.
+  The chat delivery path is governed by the §LLM output sanitizer
+  amendment (see commands.md §Chat mode, decision D67); this section is
+  deliberately silent on it.
 
 ## Translation flow
 

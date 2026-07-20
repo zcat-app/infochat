@@ -419,13 +419,13 @@
                                                                                                                                                                                                                                                         
   ### 6.3.7 Inbound back-pressure                                                                                                                                                                                                                           
                                                                                                                                                                                                                                                         
-  - InboundHandler.onMessage may take time (DB-backed intake, non-interruptible command dispatch). To keep the transport read loop responsive, each v1 transport adapter hands inbound delivery to a dedicated single-thread executor (M1-177): `SimpleXWebSocketClient` and `SignalJsonRpcClient` each own one; `InMemoryAdapter` dispatches synchronously and has no dispatch queue. The read thread never blocks on handler work, and inbound is never dropped while the handler is merely busy — slower-than-handler arrivals queue on the executor.
-  - **Interruptible LLM work is offloaded Provider-side (M1-634).** The transport dispatch thread runs only the intake gates (rate cap, size cap, normalize, the authorization steps) and non-interruptible dispatch — the whole inbound turn does NOT run on it. At step 6 the D35 interruptible class — chat-mode turns, user-issued `/summary`, user-issued `/retry` re-roll (never `/retry --digest`) — is handed to `InterruptibleDispatcher`, a bounded per-request worker pool (`infochat.chat.dispatch.max-concurrency`), freeing the dispatch thread the moment intake ends. That concurrency is what makes the spec'd behaviours reachable over live transports: a second same-`(user, scope)` request is admitted while the first still holds its `InFlightTracker` slot and gets the reject-with-guidance reply ([../spec/commands.md](../spec/commands.md) §Surface conventions), and `/stop` — dispatched inline like every other slash command — cancels a worker-held LLM call immediately (D35). Non-interruptible work (periodic digests, ingest, mutating commands, `/retry --digest`) keeps the dispatch thread's arrival order. On pool saturation, submissions degrade to the pre-M1-634 inline-on-dispatch-thread behaviour (caller-runs), so the bounded inbound queue below remains the DOS memory bound and no new drop path is introduced.                                                                                                               
-  - **The dispatch executor's work queue is BOUNDED** (default 1000, `INBOUND_QUEUE_CAPACITY`, a per-client constructor parameter — M1-224). This is the memory bound the threat model's DOS category requires: the Provider's step-1.5 per-`(adapter, contactId)` rate cap (`RateCapBucket` — [../spec/security.md](../spec/security.md) §Rate limiting) runs *inside* the task dispatched onto this executor, strictly downstream of the queue, so it bounds the work done per dequeued item but never the queue's own memory. Without the bound the dispatch executor's default unbounded `LinkedBlockingQueue` would absorb a sustained inbound flood whose passing fraction keeps the single dispatch thread busy, growing without limit until the only user-facing service OOMs.
+  - InboundHandler.onMessage may take time (DB-backed intake, non-interruptible command dispatch). To keep the transport read loop responsive, each v1 transport adapter hands inbound delivery to a dedicated single-thread executor: `SimpleXWebSocketClient` and `SignalJsonRpcClient` each own one; `InMemoryAdapter` dispatches synchronously and has no dispatch queue. The read thread never blocks on handler work, and inbound is never dropped while the handler is merely busy — slower-than-handler arrivals queue on the executor.
+  - **Interruptible LLM work is offloaded Provider-side.** The transport dispatch thread runs only the intake gates (rate cap, size cap, normalize, the authorization steps) and non-interruptible dispatch — the whole inbound turn does NOT run on it. At step 6 the D35 interruptible class — chat-mode turns, user-issued `/summary`, user-issued `/retry` re-roll (never `/retry --digest`) — is handed to `InterruptibleDispatcher`, a bounded per-request worker pool (`infochat.chat.dispatch.max-concurrency`), freeing the dispatch thread the moment intake ends. That concurrency is what makes the spec'd behaviours reachable over live transports: a second same-`(user, scope)` request is admitted while the first still holds its `InFlightTracker` slot and gets the reject-with-guidance reply ([../spec/commands.md](../spec/commands.md) §Surface conventions), and `/stop` — dispatched inline like every other slash command — cancels a worker-held LLM call immediately (D35). Non-interruptible work (periodic digests, ingest, mutating commands, `/retry --digest`) keeps the dispatch thread's arrival order. On pool saturation, submissions degrade to the prior inline-on-dispatch-thread behaviour (caller-runs), so the bounded inbound queue below remains the DOS memory bound and no new drop path is introduced.                                                                                                               
+  - **The dispatch executor's work queue is BOUNDED** (default 1000, `INBOUND_QUEUE_CAPACITY`, a per-client constructor parameter). This is the memory bound the threat model's DOS category requires: the Provider's step-1.5 per-`(adapter, contactId)` rate cap (`RateCapBucket` — [../spec/security.md](../spec/security.md) §Rate limiting) runs *inside* the task dispatched onto this executor, strictly downstream of the queue, so it bounds the work done per dequeued item but never the queue's own memory. Without the bound the dispatch executor's default unbounded `LinkedBlockingQueue` would absorb a sustained inbound flood whose passing fraction keeps the single dispatch thread busy, growing without limit until the only user-facing service OOMs.
   - On overflow — a delivery that cannot be enqueued because the queue is at capacity — the adapter drops the **NEWEST** delivery (the one that just arrived), increments a cumulative dropped-inbound counter, and logs the drop at WARN with the **redacted** `sender.contactId`. Deliveries already queued are preserved. The drop is **silent** to the sender: v1 ships no synchronous throttle reply — the original spec's friendly throttle text was a UX nicety, whereas the security property is the memory bound (error code `E4007`).
   - Persistent overflow from a single sender is a hint that rate-limiting (§4.9) needs tightening; the bounded queue is a last-resort memory guard, not a substitute for the upstream `RateCapBucket` / `LlmRateLimiter`.
-  - **Step-1.5 rate cap is split by registration (M1-229).** The step-1.5 `RateCapBucket` route forks on an in-memory `RegisteredContactSet` lookup BEFORE the router's users-row SELECT (which stays deliberately downstream, so the route adds no per-stranger DB read): a **registered** sender (`registration_state IN ('invited','vouched')` and not banned) gets its own per-`(adapter, contactId)` token bucket; an **unregistered** sender (a set miss) shares a **single per-adapter stranger limiter** and mints no per-id bucket at all. Consequently the per-id bucket map — and the `maxContactBuckets` hard cap (§4.9) that bounds it — now backstops **only the registered (invite-gated) key space**, not all inbound. This remediates the M1-205 medium DOS: a Sybil flood of distinct stranger ids can no longer pin the per-id map at `maxContactBuckets` and silent-drop every brand-new contact's first DM (a registration-availability lockout); the flood now contends for one shared bucket, so a newcomer's invite message is rate-limited transiently and admitted again as that bucket refills, never held behind a capacity wall. The shared limiter is per-adapter (one adapter's flood cannot starve another's newcomers, D46), reuses the contact cap/window, and — its key space being the fixed enabled-adapter count — needs no key-space cap and is not swept by the idle-bucket eviction. `RegisteredContactSet` is rehydrated from `users` at Provider startup (after the bootstrap-admin ensure, before adapter activation) and kept coherent by committed registration effects (invite-accept add, ban remove, unban re-add). The shared stranger bucket loses per-newcomer fairness within it — accepted, consistent with the no-fair-scheduler note below; it is a defense-in-depth hardening of the v1 mechanism, not full Sybil resistance (the v2 connection-gate root fix is out of scope).
-  - Per-user fairness is **not** implemented in v1: the single dispatch thread processes inbound intake and non-interruptible dispatch in arrival order, interruptible turns run on the bounded worker pool (M1-634 above) with no fairness ordering of their own, and one sender's share is bounded by its per-minute rate-cap budget and by the per-user cross-scope concurrency cap (`infochat.chat.dispatch.per-user-cap`, default 2 — M1-636) rather than by a fair scheduler. The concurrency cap is a ceiling on one sender's concurrent share of the worker pool — at most that many non-terminal interruptible turns (queued + running) per sender across ALL scopes at one instant, so ordinary group membership cannot occupy every worker; a request beyond it is rejected at intake with fixed guidance, consuming no rate-cap token, no in-flight slot and no pool slot. It is a bound, never an ordering policy: queue order remains arrival order. A per-user-fair scheduler is deferred to a later revision.
+  - **Step-1.5 rate cap is split by registration.** The step-1.5 `RateCapBucket` route forks on an in-memory `RegisteredContactSet` lookup BEFORE the router's users-row SELECT (which stays deliberately downstream, so the route adds no per-stranger DB read): a **registered** sender (`registration_state IN ('invited','vouched')` and not banned) gets its own per-`(adapter, contactId)` token bucket; an **unregistered** sender (a set miss) shares a **single per-adapter stranger limiter** and mints no per-id bucket at all. Consequently the per-id bucket map — and the `maxContactBuckets` hard cap (§4.9) that bounds it — now backstops **only the registered (invite-gated) key space**, not all inbound. This remediates the prior medium DOS finding: a Sybil flood of distinct stranger ids can no longer pin the per-id map at `maxContactBuckets` and silent-drop every brand-new contact's first DM (a registration-availability lockout); the flood now contends for one shared bucket, so a newcomer's invite message is rate-limited transiently and admitted again as that bucket refills, never held behind a capacity wall. The shared limiter is per-adapter (one adapter's flood cannot starve another's newcomers, D46), reuses the contact cap/window, and — its key space being the fixed enabled-adapter count — needs no key-space cap and is not swept by the idle-bucket eviction. `RegisteredContactSet` is rehydrated from `users` at Provider startup (after the bootstrap-admin ensure, before adapter activation) and kept coherent by committed registration effects (invite-accept add, ban remove, unban re-add). The shared stranger bucket loses per-newcomer fairness within it — accepted, consistent with the no-fair-scheduler note below; it is a defense-in-depth hardening of the v1 mechanism, not full Sybil resistance (the v2 connection-gate root fix is out of scope).
+  - Per-user fairness is **not** implemented in v1: the single dispatch thread processes inbound intake and non-interruptible dispatch in arrival order, interruptible turns run on the bounded worker pool (above) with no fairness ordering of their own, and one sender's share is bounded by its per-minute rate-cap budget and by the per-user cross-scope concurrency cap (`infochat.chat.dispatch.per-user-cap`, default 2) rather than by a fair scheduler. The concurrency cap is a ceiling on one sender's concurrent share of the worker pool — at most that many non-terminal interruptible turns (queued + running) per sender across ALL scopes at one instant, so ordinary group membership cannot occupy every worker; a request beyond it is rejected at intake with fixed guidance, consuming no rate-cap token, no in-flight slot and no pool slot. It is a bound, never an ordering policy: queue order remains arrival order. A per-user-fair scheduler is deferred to a later revision.
 
   ### 6.3.8 Progress notifications
 
@@ -453,7 +453,7 @@
     Provider-side logic relies on this fallback to remain transport-neutral —
     callers MUST NOT condition on the capability flag themselves.
 
-  The provider-side concrete notifier is `StageProgressNotifier` (M1-212); it
+  The provider-side concrete notifier is `StageProgressNotifier`; it
   drives this lifecycle for `/summary` (digest and chat-agent wiring remain named
   follow-ups). It resolves the bound adapter from
   `AdapterRegistry.activatedAdapters()` keyed by the inbound `adapterName`, sends
@@ -499,7 +499,7 @@
    
   - Connection: WebSocket to the local simplex-chat on a loopback port (default 5225), configured via infochat.adapters.simplex.ws-port; the simplex-chat executable is infochat.adapters.simplex.binary.
   - Authentication: none. The WebSocket bot API is a loopback channel to the co-located simplex-chat subprocess the adapter itself spawns, so there is no session, cookie, or token to present. The bot identity material lives in the subprocess data-dir (infochat.adapters.simplex.data-dir). Session-token auth is deferred for the v1 loopback-IPC transport (§6.4.6).
-  - **Bot identity**: SimpleX group @-mention recognition resolves against the bot's **per-group `memberId`**, read per-frame from `chatInfo.groupInfo.membership.memberId` (decision D51, see §Mention anchoring below), so the bot needs no derived account-level identity. The earlier `/show_address` self-address derivation — queried from the running simplex-chat over the adapter's own WebSocket at `start()` and re-derived on supervised restart — became consumer-less once D51 landed and was **removed in M1-518**; `start()` now issues no identity query and builds the group-candidate handler directly. The bot identity material is the subprocess data-dir, not an operator-typed property and not parsed from disk.
+  - **Bot identity**: SimpleX group @-mention recognition resolves against the bot's **per-group `memberId`**, read per-frame from `chatInfo.groupInfo.membership.memberId` (decision D51, see §Mention anchoring below), so the bot needs no derived account-level identity. The earlier `/show_address` self-address derivation — queried from the running simplex-chat over the adapter's own WebSocket at `start()` and re-derived on supervised restart — became consumer-less once D51 landed and was **removed**; `start()` now issues no identity query and builds the group-candidate handler directly. The bot identity material is the subprocess data-dir, not an operator-typed property and not parsed from disk.
   - Identity: the SimpleX contact display ID (e.g., xftp://...); cryptographically bound. trustLevel = HIGH.
   - **Mention anchoring (D51):** SimpleX's group `newChatItem` carries a top-level `mentions{}` object (display name → per-group `memberId`), and the bot's own per-group `memberId` is in the same frame at `chatInfo.groupInfo.membership.memberId`. The adapter recognises a bot @mention by **byte-equality of a `mentions{}` memberId against `groupInfo.membership.memberId`**; it does NOT scan the message body for the bot's display name. The bot's own mention span is located by resolving the matched memberId back to its `mentions{}` display-name key and stripping the `formattedText` segment(s) carrying that `memberName`, leaving co-mentions of other members intact. `supportsMentionByContactId = true`.
 
@@ -548,7 +548,7 @@
                                                                                                                                                                                                                                                         
   The decoder is pure (no I/O) and unit-tested with recorded JSON fixtures.
 
-  #### Live v6.5.4.1 field locations (M1-510)
+  #### Live v6.5.4.1 field locations
 
   The decoded field paths below are confirmed against frames captured from a
   live simplex-chat **v6.5.4.1** deployment (a throwaway loopback
@@ -577,7 +577,7 @@
     Unrecognized tags still fail closed to PERMANENT (§6.4.7).                                                                                                                                                                             
 
 
-  #### Group invitation auto-accept (M1-515)
+  #### Group invitation auto-accept
 
   A `receivedGroupInvitation` async event (the bot was added to a group but has
   not yet joined — `membership.memberStatus == "invited"`) decodes to a
@@ -600,7 +600,7 @@
   from an unregistered or banned inviter is **ignored, not declined**: the bot
   neither joins nor replies, so it does not join an arbitrary group and does not
   reveal it processed the invitation (less traffic, no presence signal). This
-  closes redteam vector 3 from M1-511 — the gate cannot be bypassed to make the
+  closes a prior redteam's vector 3 — the gate cannot be bypassed to make the
   bot join arbitrary groups.
 
   `/_join #<groupId>` is live-confirmed against v6.5.4.1: it returns a
@@ -654,7 +654,7 @@
   (decision D50). SimpleX cannot prove a sender's advertised address — inbound
   identity is the per-connection `contact_id`, and a sender's profile address is
   self-asserted, not verified — so the by-address bootstrap `AdminBootstrap` uses
-  for Signal is impossible here (the discarded M1-505 approach of trusting the
+  for Signal is impossible here (the discarded by-address approach of trusting the
   advertised address let any contact spoof the admin). Instead the operator
   configures a secret `infochat.adapters.simplex.admin-token`, and the **first DM
   whose normalized body equals the token** registers that connection's
@@ -665,10 +665,10 @@
   only the token).
 
   The `extractQueueAddressId` parser still exists; since the bot's own
-  queue-address derivation was removed in M1-518 (the mention anchor is the
+  queue-address derivation was removed (the mention anchor is the
   per-group `memberId`, D51), its surviving caller is
   `SimpleXAdapter.canonicalizeContactId`, which canonicalizes an operator-supplied
-  admin contact link to the bare queue id (M1-465). The wizard (`6-adapter.sh`)
+  admin contact link to the bare queue id. The wizard (`6-adapter.sh`)
   collects only the secret token.
 
   ### 6.4.5 Command encoding                                                                                                                                                                                                                                
@@ -678,7 +678,7 @@
   - DM: /_send @<contact> text=<base64-encoded text>                                                                                                                                                                                                    
   - Group: /_send #<group> text=<base64-encoded text>                              
 
-  #### Send content shape (live v6.5.4.1, M1-510)
+  #### Send content shape (live v6.5.4.1)
 
   The actual v6.5.4.1 bot-API `/_send` form (live-confirmed, superseding the
   `text=<base64>` sketch above) takes the message content as a JSON **array** of
@@ -1099,7 +1099,7 @@
   ---                                                                                                                                                                                                                                                   
   ## 6.12 Observability                                                               
                     
-  Status: scheduled, not yet built — no `AdapterMetrics` exists in any `infochat-*` main source as of 2026-06-12. Ticket M1-322 (blocked on M1-321's Micrometer dependency) implements the catalogue below, including the §6.3.8 `adapter.outbound.update.total{outcome=fallback_send}` counter M1-285 explicitly deferred; the /status reporting line at the end of this section is a named follow-up to be filed when M1-322 lands.
+  Status: scheduled, not yet built — no `AdapterMetrics` exists in any `infochat-*` main source as of 2026-06-12. The planned implementation ticket (blocked on its Micrometer dependency) implements the catalogue below, including the §6.3.8 `adapter.outbound.update.total{outcome=fallback_send}` counter previously explicitly deferred; the /status reporting line at the end of this section is a named follow-up to be filed when that ticket lands.
 
   AdapterMetrics (Micrometer):
                                                                                                                                                                                                                                                         
@@ -1185,7 +1185,7 @@
 
   ## SPI surface decisions (D47/D31 reconciliation)
 
-  Three adapter SPI surfaces were structurally inconsistent with the as-built adapters; each entry below records the reconciliation verdict and rationale (per the inlined §Contract block in ticket M1-162).
+  Three adapter SPI surfaces were structurally inconsistent with the as-built adapters; each entry below records the reconciliation verdict and rationale (per the inlined §Contract block in the relevant ticket).
 
   ### (a) `MessagingAdapter.onMembershipEvent` dispatch shape — verdict: **remove**
 
@@ -1195,8 +1195,8 @@
 
   Signal's group path is spec-live, not vestigial: group bot-mentions are the D10 group-mode surface. (The original wire assumption here — `memberJoined`/`memberLeft` ACI arrays in `groupV2` update envelopes, `supportsMembershipEvents = true` — was falsified live by F-live-10: signal-cli 0.14.5 emits the group stanza as `groupInfo{groupId}` and no membership arrays at all, so the flag is now false per spec/messaging.md §Required SPI surface — Membership events, and the membership dispatch loop is removed; see §6.5.2/§6.5.6.) `SignalJsonRpcClient` routes every `receive` notification that is not DM-scope to a group-notification route, which `SignalAdapter` wires to its `groupHandler()` factory when attaching the connected client. The envelope decode is split, not duplicated: `SignalMessageCodec.extractDm` keeps only DM-scope envelopes and `SignalGroupHandler.handleReceive` keeps only group-scope ones — complementary filters over the same notification stream.
 
-  ### (c) `ProgressNotifier` — verdict: **wired (M1-212)**
+  ### (c) `ProgressNotifier` — verdict: **wired**
 
-  spec/messaging.md §Progress notifications (D31; §6.3.8 above) mandates the surface: long-running handlers (`/summary`, periodic digest, chat agent) publish stage events to a cross-cutting `ProgressNotifier`. M1-212 wired the concrete `StageProgressNotifier` (§6.3.8) and made `/summary` publish through it — the prior keep-as-seam verdict (an unshipped v1 surface awaiting follow-up wiring) is superseded. The interface gained payload-carrying terminal calls (`complete`/`fail`) and stays an interface; `ProgressStage` keeps its seven values, so the SPI load tests are unchanged. Digest and chat-agent wiring through the same notifier remain named follow-ups (out of scope for M1-212).
+  spec/messaging.md §Progress notifications (D31; §6.3.8 above) mandates the surface: long-running handlers (`/summary`, periodic digest, chat agent) publish stage events to a cross-cutting `ProgressNotifier`. The concrete `StageProgressNotifier` (§6.3.8) is wired and `/summary` publishes through it — the prior keep-as-seam verdict (an unshipped v1 surface awaiting follow-up wiring) is superseded. The interface gained payload-carrying terminal calls (`complete`/`fail`) and stays an interface; `ProgressStage` keeps its seven values, so the SPI load tests are unchanged. Digest and chat-agent wiring through the same notifier remain named follow-ups (out of scope for that wiring ticket).
 
   ---

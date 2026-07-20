@@ -190,7 +190,7 @@ infochat.adapters=simplex,signal
 # defaults this to the operator-owned runtime dir (prod/runtime/simplex,
 # resolved absolute on $PROD_DIR), not /var/lib, so 6b's own mkdir -p succeeds
 # as the non-root operator; container-root still writes root-owned files there
-# (pre-existing ownership wrinkle, uid-mapping deferred — M1-440).
+# (pre-existing ownership wrinkle, uid-mapping deferred).
 infochat.adapters.simplex.binary=/usr/local/bin/simplex-chat
 infochat.adapters.simplex.data-dir=prod/runtime/simplex
 infochat.adapters.simplex.ws-port=5225
@@ -231,11 +231,11 @@ infochat.adapters.signal.admin=${INFOCHAT_SIGNAL_ADMIN_CONTACT_ID}
 # infochat.llm.summarizer.api-key=${NANOGPT_API_KEY}
 # infochat.llm.summarizer.model=llama-3.1-70b-instruct
 
-# Remote provider example (DeepSeek — the dedicated `deepseek` dialect, M1-608).
+# Remote provider example (DeepSeek — the dedicated `deepseek` dialect).
 # The wizard (4-llm.sh step 4 / switch-llm.sh) writes the shared-default form:
 # one endpoint + key for every task (D56), provider=deepseek so deepseek-v4-flash
 # runs thinking-off (deepseek-chat is deprecated 2026-07-24). No reasoning-effort
-# key — thinking stays off (M1-610). Set the model on every generative task.
+# key — thinking stays off. Set the model on every generative task.
 # infochat.llm.default.provider=deepseek
 # infochat.llm.default.base-url=https://api.deepseek.com
 # infochat.llm.default.api-key=${INFOCHAT_LLM_API_KEY}
@@ -500,7 +500,7 @@ Loader behavior (Collector startup, when configured):
 Each enabled adapter has its **own** bootstrap-admin path, but the two v1 production adapters use **different shapes** because they prove sender identity differently (decision D50):
 
 - **Address-based adapters (Signal, in-memory):** the operator configures the admin's contact id via `infochat.adapters.<name>.admin` (§7.4 example) — a Signal ACI. On startup `AdminBootstrap` **pre-seeds** an `is_admin = true` row for that contact (the row shape below).
-- **SimpleX (claim-token):** SimpleX has no pre-seedable cryptographic sender address — inbound identity is the per-connection contact id, and a sender's advertised profile address is self-asserted, not verified (out of scope of the SMP protocol) — so there is nothing to pre-seed by address, and the discarded by-address approach let any contact spoof the admin (M1-505). Instead the operator configures a secret `infochat.adapters.simplex.admin-token`, and the **first DM whose body equals the token** registers that connection's contact id and flips `is_admin = true` on it (`SimpleXAdminClaim`, [06-messaging.md §6.4.4](06-messaging.md)). The token is **single-use while a SimpleX admin exists**, and `AdminBootstrap` deliberately **skips** SimpleX (a stray `infochat.adapters.simplex.admin` is ignored — the protocol-unsound by-address mapping cannot be reintroduced).
+- **SimpleX (claim-token):** SimpleX has no pre-seedable cryptographic sender address — inbound identity is the per-connection contact id, and a sender's advertised profile address is self-asserted, not verified (out of scope of the SMP protocol) — so there is nothing to pre-seed by address, and the discarded by-address approach let any contact spoof the admin. Instead the operator configures a secret `infochat.adapters.simplex.admin-token`, and the **first DM whose body equals the token** registers that connection's contact id and flips `is_admin = true` on it (`SimpleXAdminClaim`, [06-messaging.md §6.4.4](06-messaging.md)). The token is **single-use while a SimpleX admin exists**, and `AdminBootstrap` deliberately **skips** SimpleX (a stray `infochat.adapters.simplex.admin` is ignored — the protocol-unsound by-address mapping cannot be reintroduced).
 
 The configured value (address or token) is **optional per adapter** — an adapter without one still serves users on that adapter, but establishes no admin row of its own. The deployment-wide constraint is that **the union of bootstrap-admin paths across all enabled adapters MUST be non-empty** (`AdapterRegistry.hasBootstrapAdminPath`: SimpleX → the `admin-token`, every other adapter → the `.admin` address); Provider refuses to start otherwise (last-admin protection only works if at least one admin row exists somewhere — [../spec/deployment.md](../spec/deployment.md) §Operator inputs item 2).
 
@@ -615,7 +615,7 @@ The scripts themselves are not implemented in Milestone 0 — they ship at Miles
 
 Flyway already creates the application roles and the pgvector extension: `V1__init.sql` runs `CREATE EXTENSION vector`, `V2__roles.sql` creates `infochat_collector` / `infochat_provider` / `infochat_admin`, and `V31` grants `LOGIN` to the two service roles. What Flyway **cannot** do is set the service-role *passwords* — a SQL migration cannot read the container's environment, and the passwords live in env vars (§7.5). `docker/postgres-init.sh` fills exactly that gap. It runs at container init (before the Collector's first Flyway pass), so it creates the roles **with** their passwords; Flyway's `V2` `DO`-block `IF NOT EXISTS` role guard then idempotently no-ops, and the `V4`/`V31` `ALTER ROLE … NOLOGIN`/`LOGIN` toggling leaves the password untouched.
 
-**Owner privilege — CREATEROLE, not SUPERUSER (M1-393).** The Collector holds the `infochat` owner credentials to run Flyway, so that role's privilege set is the blast radius of a credential leak. The owner is created `CREATEROLE` (not `SUPERUSER`), the **minimum** the migration set needs. The full `V1..V51` set was replayed against `pgvector/pgvector:pg16` as a `LOGIN`/`CREATEROLE`-only owner (no `SUPERUSER`, no `CREATEDB`) and applied cleanly. The determination:
+**Owner privilege — CREATEROLE, not SUPERUSER.** The Collector holds the `infochat` owner credentials to run Flyway, so that role's privilege set is the blast radius of a credential leak. The owner is created `CREATEROLE` (not `SUPERUSER`), the **minimum** the migration set needs. The full `V1..V51` set was replayed against `pgvector/pgvector:pg16` as a `LOGIN`/`CREATEROLE`-only owner (no `SUPERUSER`, no `CREATEDB`) and applied cleanly. The determination:
 
 - **`SUPERUSER` — not required.** No migration creates a superuser role, runs `ALTER SYSTEM`, accesses another database, or uses a superuser-only path (`COPY … FROM PROGRAM`, untrusted PL, event triggers). The schema enforces its trust split with `GRANT`/`REVOKE` and `SECURITY DEFINER` functions, not RLS, so there is no `BYPASSRLS` to preserve. Dropping `SUPERUSER` contains a leaked owner credential to this one database: no cluster takeover, no reading of other databases, no OS-level access.
 - **`CREATEDB` — not required.** The database is created here by the bootstrap superuser (`CREATE DATABASE infochat OWNER infochat`); no migration issues `CREATE DATABASE`.
@@ -623,7 +623,7 @@ Flyway already creates the application roles and the pgvector extension: `V1__in
 - **`ADMIN OPTION` on the two service roles — required.** On PG16 a `CREATEROLE` (non-superuser) role may only `ALTER` roles it administers. Because `infochat_collector` / `infochat_provider` are created here by the **bootstrap superuser** (not by the owner), `V4`/`V31`'s `ALTER ROLE … NOLOGIN`/`LOGIN` fail with *"permission denied to alter role"* unless the script grants the owner `ADMIN OPTION` on them. The grant changes only the owner's administrative reach over those roles — it does not alter the service roles' own attributes, privileges, or passwords (so the least-privilege service-role split is preserved). `infochat_admin` needs no such grant: the owner creates it (`V2`) and so administers it automatically.
 - **`CREATE EXTENSION` — not the owner's privilege.** `vector` is an untrusted extension whose install normally needs `SUPERUSER`, but it (and `pgcrypto`) are created here by the image's bootstrap superuser before Flyway runs, so `V1`'s `CREATE EXTENSION IF NOT EXISTS vector` is a no-op skip under the owner.
 
-**Why a `.sh`, not a `.sql`** — the official `postgres` image runs `/docker-entrypoint-initdb.d/*.sql` files through `psql`, which does **not** expand shell `${VAR}` references; only `*.sh` init files are shell-evaluated. A `.sql` would therefore store the literal string `${INFOCHAT_DB_PASSWORD:?…}` as the password and complete init silently. The `.sh` pipes a here-doc to `psql`, so the **shell** performs the `${VAR:?…}` expansion: an unset *or* empty variable (the `:?` colon form fails on both) aborts the script and exits the container non-zero rather than creating an unusable role. (Verified against `pgvector/pgvector:pg16`, M1-378.)
+**Why a `.sh`, not a `.sql`** — the official `postgres` image runs `/docker-entrypoint-initdb.d/*.sql` files through `psql`, which does **not** expand shell `${VAR}` references; only `*.sh` init files are shell-evaluated. A `.sql` would therefore store the literal string `${INFOCHAT_DB_PASSWORD:?…}` as the password and complete init silently. The `.sh` pipes a here-doc to `psql`, so the **shell** performs the `${VAR:?…}` expansion: an unset *or* empty variable (the `:?` colon form fails on both) aborts the script and exits the container non-zero rather than creating an unusable role. (Verified against `pgvector/pgvector:pg16`.)
 
 **No literal passwords in this file.**
 
@@ -696,7 +696,7 @@ The right-hand column maps each step to the operator inputs enumerated in [../sp
 | 1 | `1-profile.sh` | Pick `laptop`\|`vps`\|`pi`\|`remote-llm` (§7.2). Default `laptop`. Writes `quarkus.profile`. | 1 (profile) |
 | 2 | `2-secrets.sh` | `openssl rand` the three DB-role passwords; prompt for any LLM API key. Writes the runtime `secrets.env` mode 0600 (§7.3 — secrets never enter a committed file). Skips any value already present. | 5 (DB creds), 6 (API key) |
 | 3 | `3-postgres.sh` | `docker compose --profile prod up -d postgres`; the service-role password bootstrap runs from `docker/postgres-init.sh` (§7.7) on first container init. | 5 (DB creds) |
-| 4 | `4-llm.sh` | Branch on the choice. **Ollama:** start the ollama service and `ollama pull` the profile's chat / security / embedding models. **llama.cpp (D49):** fetch the chosen generative GGUF (curated checksum-pinned default or operator override), mint its filename plus its download URL + SHA into `secrets.env` (the URL/SHA let a host clone recover a *custom* GGUF on restore, M1-571), and start the `llamacpp` service (`LLAMA_ARG_MODEL`/`LLAMA_ARG_HOST`); then wire embeddings to the operator-chosen backend — a second `llamacpp-embeddings` instance (nomic GGUF, `--embeddings`) or the co-running Ollama nomic embedder — never the generative GGUF, dimension 768. **Remote:** collect base-URL + key only. All backends then prompt for chat/summarizer `timeout-ms` + `max-tokens` with backend/profile-sized recommended defaults (F-live-5; `--defaults` takes them unchanged). Writes `infochat.llm.*` and `infochat.embeddings.*` (§7.4). | 6 (LLM config) |
+| 4 | `4-llm.sh` | Branch on the choice. **Ollama:** start the ollama service and `ollama pull` the profile's chat / security / embedding models. **llama.cpp (D49):** fetch the chosen generative GGUF (curated checksum-pinned default or operator override), mint its filename plus its download URL + SHA into `secrets.env` (the URL/SHA let a host clone recover a *custom* GGUF on restore), and start the `llamacpp` service (`LLAMA_ARG_MODEL`/`LLAMA_ARG_HOST`); then wire embeddings to the operator-chosen backend — a second `llamacpp-embeddings` instance (nomic GGUF, `--embeddings`) or the co-running Ollama nomic embedder — never the generative GGUF, dimension 768. **Remote:** collect base-URL + key only. All backends then prompt for chat/summarizer `timeout-ms` + `max-tokens` with backend/profile-sized recommended defaults (F-live-5; `--defaults` takes them unchanged). Writes `infochat.llm.*` and `infochat.embeddings.*` (§7.4). | 6 (LLM config) |
 | 5 | `5-bootstrap.sh` | Seed the runtime `bootstrap-sources.json` — from the `prod/config/` template (plain Enter, never clobbering an existing runtime file) or from an operator-supplied custom path; enable asset commands by default — copy the bundled `bootstrap-assets.json` (zcash + monero) into the runtime dir and wire `infochat.bootstrap.assets-file`, unless the operator supplies a custom path or opts out (§7.6.2 — Wizard default). | 3 (sources), 4 (assets) |
 | 6 | `6-adapter.sh` | For each chosen adapter capture the `binary` path + `data-dir`, and collect that adapter's bootstrap-admin credential — **SimpleX** a secret `admin-token` (read with no echo; first DM claims admin — D50), **Signal** the `admin` contact id (ACI). **SimpleX** additionally prompts for the bot **display name** (consumed by the step-7 provisioning below); **Signal** captures its `account` and stays interactive (phone+captcha out-of-band — §7.7 operator note, [06-messaging.md §6.5.1](06-messaging.md)). Enforces a non-empty admin union before proceeding (§7.6.3). Writes `infochat.adapters` and the per-adapter blocks (§7.4). | 2 (bootstrap admin), 7 (adapters) |
 | 7 | `7-apps.sh` | Build both images, then — when `simplex` is enabled — provision the SimpleX bot identity via `6b-simplex-provision.sh` (below) before any app container serves traffic, then `docker compose --profile prod up -d` the Collector (which runs Flyway), wait until it is healthy, then the Provider — encoding the [../spec/deployment.md](../spec/deployment.md) §Topology startup ordering (only the Collector migrates in production). | — |
@@ -709,7 +709,7 @@ Every subscript obeys the §7.7.1 script shape (`set -euo pipefail`, echoes the 
 - **Prefilled defaults.** Every prompt shows its default in brackets; an empty answer takes the default. A `laptop`-profile, Ollama, single-adapter setup is completable by pressing Enter at every prompt except the adapter-registration interaction that genuinely needs a human (below).
 - **Idempotent / resumable.** Re-running `prod/setup.sh` reads `.setup-state` and offers to resume from the first incomplete step. No generated secret is overwritten and no DB role is re-created.
 - **Non-interactive escape hatch.** `prod/setup.sh --defaults` runs end-to-end taking every default (still pausing only where adapter registration needs a human), for scripted or CI smoke use.
-- **Reset.** `prod/setup.sh --reset` first *detects* what the project actually has up and tears down only that (`docker compose down` across the four backend profiles, M1-463) — on a clean host it removes nothing and prints nothing — then clears `.setup-state` and **continues into the wizard**, so a reset is "clean up if needed, then set up fresh" (combine with `--defaults` to re-setup non-interactively). The default **keeps all volumes**; dropping the database is an explicit opt-in via `prod/setup.sh --reset --hard`, and even then only when the pgdata volume exists. `--hard` is scoped to the **database (pgdata) volume only**: the teardown is always plain `docker compose down` (containers + network), and `--hard` removes `<project>_infochat-pgdata` explicitly afterwards — it deliberately does **not** `down -v`, because that would also delete the LLM model caches (`infochat-llamacpp-models` and the ollama cache), forcing a multi-GB GGUF re-download. The model caches are reused across resets via the wizard's presence check (`4-llm.sh` `fetch_gguf` skips an already-present GGUF; `ollama pull` is idempotent), so a reset never re-downloads them. An operator who genuinely wants them gone passes `--wipe-models` (only valid with `--reset`): after the `down`, it `docker volume rm`s `infochat-llamacpp-models` (shared by the llama.cpp server + embeddings services, pinned name) and `<project>_infochat-ollama` — only the volumes that exist, so it stays silent when there is nothing to wipe. `--wipe-models` is **independent of `--hard`**: model caches and the database volume are deleted by separate explicit opt-ins, never one riding along with the other, because re-downloading multi-GB GGUFs is its own deliberate cost. This replaces the earlier interactive `[y/N]` data-volume confirmation with explicit flags — still the repo's confirm-before-delete posture, since losing data or models requires a deliberate `--hard` / `--wipe-models` rather than a default or a mistyped prompt answer (it never auto-removes a generated secret, data, or model volume without one).
+- **Reset.** `prod/setup.sh --reset` first *detects* what the project actually has up and tears down only that (`docker compose down` across the four backend profiles) — on a clean host it removes nothing and prints nothing — then clears `.setup-state` and **continues into the wizard**, so a reset is "clean up if needed, then set up fresh" (combine with `--defaults` to re-setup non-interactively). The default **keeps all volumes**; dropping the database is an explicit opt-in via `prod/setup.sh --reset --hard`, and even then only when the pgdata volume exists. `--hard` is scoped to the **database (pgdata) volume only**: the teardown is always plain `docker compose down` (containers + network), and `--hard` removes `<project>_infochat-pgdata` explicitly afterwards — it deliberately does **not** `down -v`, because that would also delete the LLM model caches (`infochat-llamacpp-models` and the ollama cache), forcing a multi-GB GGUF re-download. The model caches are reused across resets via the wizard's presence check (`4-llm.sh` `fetch_gguf` skips an already-present GGUF; `ollama pull` is idempotent), so a reset never re-downloads them. An operator who genuinely wants them gone passes `--wipe-models` (only valid with `--reset`): after the `down`, it `docker volume rm`s `infochat-llamacpp-models` (shared by the llama.cpp server + embeddings services, pinned name) and `<project>_infochat-ollama` — only the volumes that exist, so it stays silent when there is nothing to wipe. `--wipe-models` is **independent of `--hard`**: model caches and the database volume are deleted by separate explicit opt-ins, never one riding along with the other, because re-downloading multi-GB GGUFs is its own deliberate cost. This replaces the earlier interactive `[y/N]` data-volume confirmation with explicit flags — still the repo's confirm-before-delete posture, since losing data or models requires a deliberate `--hard` / `--wipe-models` rather than a default or a mistyped prompt answer (it never auto-removes a generated secret, data, or model volume without one).
 
 #### What stays manual
 
@@ -721,7 +721,7 @@ What still requires a human is **Signal** account registration — the phone-num
 
 The wizard writes its generated config to the git-ignored runtime directory (above); the containerized Collector and Provider consume it through three seams the `prod` compose profile wires up. All three are **load-bearing — without them the prod stack does not start**: the Provider's `AdapterRegistry` gate 1 fails fast when `infochat.adapters` is unset, and `docker/postgres-init.sh`'s `${VAR:?}` guard aborts the Postgres container when the role passwords are empty.
 
-- **`secrets.env` → compose's `--env-file`.** Each wizard subscript that runs `docker compose` passes the runtime `secrets.env` to compose's own dotenv parser — `docker compose --env-file "$SECRETS_FILE" …` — so the compose file's `${INFOCHAT_*_PASSWORD}` / `${INFOCHAT_LLM_API_KEY}` / `${INFOCHAT_*_ADMIN_CONTACT_ID}` interpolations and the Provider `environment:` passthroughs resolve (§7.5). The orchestrator does **not** `source` `secrets.env` into its own shell environment: operator-pasted values are hostile to shell evaluation — a SimpleX bootstrap-admin queue address carries `#` / `&` / `?` / `+` / `=`, an API key arbitrary bytes — so sourcing would truncate a value at its first `#` (silently corrupting the configured id) or execute an embedded `$(…)` / backtick at wizard runtime; compose's dotenv parser instead reads each quoted `KEY="value"` line as data and never evaluates it (M1-389). Compose auto-loads only a repo-root `.env`, never the runtime-dir `secrets.env`, so the wizard names it explicitly on each invocation. Secrets stay in the environment, never in a mounted config file (§7.3).
+- **`secrets.env` → compose's `--env-file`.** Each wizard subscript that runs `docker compose` passes the runtime `secrets.env` to compose's own dotenv parser — `docker compose --env-file "$SECRETS_FILE" …` — so the compose file's `${INFOCHAT_*_PASSWORD}` / `${INFOCHAT_LLM_API_KEY}` / `${INFOCHAT_*_ADMIN_CONTACT_ID}` interpolations and the Provider `environment:` passthroughs resolve (§7.5). The orchestrator does **not** `source` `secrets.env` into its own shell environment: operator-pasted values are hostile to shell evaluation — a SimpleX bootstrap-admin queue address carries `#` / `&` / `?` / `+` / `=`, an API key arbitrary bytes — so sourcing would truncate a value at its first `#` (silently corrupting the configured id) or execute an embedded `$(…)` / backtick at wizard runtime; compose's dotenv parser instead reads each quoted `KEY="value"` line as data and never evaluates it. Compose auto-loads only a repo-root `.env`, never the runtime-dir `secrets.env`, so the wizard names it explicitly on each invocation. Secrets stay in the environment, never in a mounted config file (§7.3).
 - **`runtime/application.properties` → mounted at `config/application.properties` in each app container.** The fast-jar runs from the image's working directory, so Quarkus reads `config/application.properties` relative to it at a higher config ordinal than the image-baked per-service defaults and a lower one than the explicit compose `environment:` overrides (datasource URL, role password). This is how the operator's `quarkus.profile`, `infochat.llm.*`, `infochat.adapters`, and the per-adapter blocks reach the running services. The `application.properties` baked into each image carries only the profile-independent defaults — and the Provider's image declares **no production `infochat.adapters`** (only `%test`), so that key MUST arrive via this mount or the Provider refuses to boot.
 - **Adapter `data-dir`s → bind-mounted into the Provider.** The out-of-band identity material the operator registered in step 6 lives on the host at each adapter's `data-dir`; the Provider container bind-mounts those paths so the running adapters can read the queue keypair / `signal-cli` account directory they validate at startup (§7.5, [06-messaging.md §6.4.1, §6.5.4](06-messaging.md)).
 - **`runtime/bootstrap-{sources,assets}.json` → mounted at the fast-jar workdir.** Step 5 seeds these into the runtime dir; compose bind-mounts each at `/app/<basename>` so the loaders resolve them via the **basename** values `5-bootstrap.sh` writes for `infochat.bootstrap.{sources,assets}-file` — never a host path, which does not exist inside the container. The Collector mounts both (`BootstrapLoader` + `BootstrapAssetsLoader`); the Provider mounts only `bootstrap-assets.json` (`AssetRegistry` reads it; sources are Collector-only). The runtime assets file is always seeded even when asset commands are disabled, so the unconditional mount never materialises an empty directory; the `assets-file` property, not the file's presence, gates the feature.
@@ -991,7 +991,7 @@ for it; the manual steps 1-5 above remain the under-the-hood description of what
   ("file changed as we read it") or a torn SQLite/ratchet snapshot discovered only
   after cutover, on the unrecoverable identity. `pack.sh` prints a loud WARN when
   the Provider is running — it never refuses (a live pack stays legitimate for
-  periodic precaution bundles; M1-582). Bundles everything needed to
+  periodic precaution bundles). Bundles everything needed to
   reconstruct the deployment into ONE archive (`infochat-migration-YYYYMMDD.tgz`,
   default `prod/runtime/migration`): the `infochat` DB (`pg_dump -F c`, audit log
   included), every configured adapter identity data-dir (modes preserved),
@@ -1014,11 +1014,11 @@ for it; the manual steps 1-5 above remain the under-the-hood description of what
   (a Flyway-migrated empty DB would collide with the dump's schema), re-provisions
   models from the restored backend config (idempotent `ollama pull` / GGUF fetch;
   a pinned-default GGUF is re-fetched from its known URL and a custom GGUF from the
-  URL + SHA `4-llm.sh` persisted into `secrets.env` at setup (M1-571) — only a custom
-  GGUF from an OLDER bundle (pre-M1-571, no persisted URL) fails loud; a remote
+  URL + SHA `4-llm.sh` persisted into `secrets.env` at setup — only a custom
+  GGUF from an OLDER bundle (one with no persisted URL) fails loud; a remote
   backend needs no model step), then
-  starts the Collector and **gates the Provider start on single-owner consent**
-  (M1-582): the Provider is the messaging-identity consumer, so before
+  starts the Collector and **gates the Provider start on single-owner consent**:
+  the Provider is the messaging-identity consumer, so before
   `compose up -d infochat-provider` the script prints the single-owner invariant
   and requires either an interactive y/N confirmation (default No, TTY-checked —
   the `shred-bundle.sh` consent shape) or the explicit `--source-stopped` flag.
@@ -1028,7 +1028,7 @@ for it; the manual steps 1-5 above remain the under-the-hood description of what
   `--source-stopped` to reach the Provider start. With consent it starts the
   Provider and runs the §7.10 step-5 health verification.
 - **`shred-bundle.sh [-y|--yes] <target>`** — the closing step of the migration
-  lifecycle: pack → transfer → restore → verify → **dispose** (M1-572). Once the
+  lifecycle: pack → transfer → restore → verify → **dispose**. Once the
   clone is verified healthy and the source decommissioned, the bundle — and any
   independent safety copy of it — is the last remaining every-secret-at-once
   artifact; a plain `rm` leaves that material in freed blocks. The helper
@@ -1061,7 +1061,7 @@ for it; the manual steps 1-5 above remain the under-the-hood description of what
   (the same class of caveat as the D34 transfer/storage-encryption
   responsibility).
 
-**Root-owned identity dirs (M1-569).** The Provider container runs as root, so both
+**Root-owned identity dirs.** The Provider container runs as root, so both
 adapters' identity stores are root-owned — and `signal-cli` locks its account store
 to mode `0700`, unreadable to a non-root host `tar`. So `pack.sh` and `restore.sh`
 run the identity tar (pack) and untar (restore) as **root inside a throwaway
@@ -1070,27 +1070,27 @@ bind-mounting each configured data-dir at its absolute path — no interactive `
 on the host. This is adapter-agnostic: SimpleX and Signal dirs go through the
 identical privileged path (no reliance on SimpleX's incidental `0644`), and the
 restore untar preserves `root:root` ownership + modes so each daemon accepts the
-restored identity as its own. Because the restore untar now runs as root, the M1-568
-allowlist — extract ONLY the configured data-dir members — is **load-bearing** for an
+restored identity as its own. Because the restore untar now runs as root, the
+identity-extraction allowlist — extract ONLY the configured data-dir members — is **load-bearing** for an
 honest-config bundle's EXTRA members, not merely defense-in-depth; the untar mounts
 only the configured data-dirs writable. This does NOT stop a COHERENTLY tampered
 bundle: the writable mount target is derived from the same operator-controlled
 `INFOCHAT_<NAME>_DATA_DIR` the allowlist is built from, so a tamper naming a system dir
 (with a matching tar member) would let the root untar write there — an out-of-model,
 supply-chain case (security.md keeps the bundle trusted). Running the untar as root
-also removed the M1-568-era incidental EACCES backstop against root-owned system dirs;
+also removed an earlier incidental EACCES backstop against root-owned system dirs;
 `pack.sh` and `restore.sh` restore an explicit equivalent by **refusing**, before any
 mount is built and naming the offending key, a `data-dir` that resolves under a
 clearly-system prefix (`/etc /root /boot /bin /sbin /lib /lib64 /dev /proc /sys
-/var/lib/docker`) or that contains a `:` — docker's `-v` mount-spec separator (M1-584).
-`backup.sh` (§7.10) uses the SAME root-privileged in-container tar (M1-587), so its
+/var/lib/docker`) or that contains a `:` — docker's `-v` mount-spec separator.
+`backup.sh` (§7.10) uses the SAME root-privileged in-container tar, so its
 step-1 identity backup succeeds when run as the non-root deploy user — the way
 `upgrade.sh` invokes it — not only under a root cron. backup.sh only READS the identity
 dirs (its bind-mounts are `:ro`) and streams the tgz to a host file, so it carries the
-same M1-584 colon / system-prefix `data-dir` guard but none of the write-side allowlist
+same colon / system-prefix `data-dir` guard but none of the write-side allowlist
 the restore untar needs.
 
-**Flyway-created principal roles (M1-570).** `pack.sh` dumps the database with a
+**Flyway-created principal roles.** `pack.sh` dumps the database with a
 single-database `pg_dump -F c`, which does NOT carry cluster-global roles. But
 `infochat_admin` — the NOLOGIN principal the service roles are GRANTed against — is
 created by **Flyway V2** (`V2__roles.sql`), not by `postgres-init.sh` (which mints
@@ -1108,15 +1108,15 @@ guarded by a `pg_roles` NOT EXISTS check, mirroring V2) **after** Postgres is up
 **before** `pg_restore`, so the dump's ACL entries apply cleanly on the first restore —
 the repair happens at restore time, not via a later migration pass. `infochat` is
 `CREATEROLE`, so no superuser is needed; NOLOGIN carries no password. (The live
-deployment was recovered the same way during the M1-567 round trip that surfaced this.)
+ deployment was recovered the same way during the round trip that surfaced this.)
 One residue is NOT repaired and cannot be: personal operator LOGIN roles and their
 `GRANT infochat_admin TO …` memberships (the V43-documented `ops_alice` workflow) are
 likewise cluster-global and absent from the single-DB dump — their password hashes
 were deliberately never in the bundle — so they must be re-created by hand on the
 clone. This is the one silent divergence from the exact-clone promise (everything
-else fails loud); `restore.sh` prints this reminder at the end of every run (M1-581).
+else fails loud); `restore.sh` prints this reminder at the end of every run.
 
-**Bounded pg_restore error tolerance (M1-580).** `postgres-init.sh` pre-creates the
+**Bounded pg_restore error tolerance.** `postgres-init.sh` pre-creates the
 `vector` and `pgcrypto` extensions at first volume init, owned by the bootstrap
 superuser — so the dump's two `COMMENT ON EXTENSION` statements, replayed by the
 non-owner `infochat` role, always fail `must be owner of extension pgcrypto` /
@@ -1136,7 +1136,7 @@ a partially-populated database, and `restore.sh`'s fresh-host gates will refuse 
 plain re-run. Return the target to fresh — remove the Postgres data volume
 (`docker volume rm <project>_infochat-pgdata`), the placed `prod/runtime` files, and
 the restored identity dirs (root-owned; remove via a root container) — `restore.sh`
-prints this exact recipe on any post-mutation failure (M1-581). `prod/setup.sh
+prints this exact recipe on any post-mutation failure. `prod/setup.sh
 --reset --hard` is NOT a substitute: it keeps `secrets.env`, so the fresh-host gate
 still refuses, and it falls through into the interactive setup wizard. Fix the
 underlying cause, then re-run `restore.sh` with the bundle.
@@ -1148,7 +1148,7 @@ follow-up, not v1; `restore.sh` fails loud on a path mismatch rather than
 silently half-restoring.
 
 **Single-owner cutover — the binding constraint.** Exactly ONE instance may own
-each messaging identity at a time. This is **not** enforced by the M1-009
+each messaging identity at a time. This is **not** enforced by the database
 advisory lock: that lock is per-*database* (§7.8.5), and the clone restores into
 its OWN database, so the two hosts hold two independent locks and both would
 start. Signal treats `signal-cli` as the account's single primary device and a
@@ -1159,7 +1159,7 @@ session/ratchet state. The operator must observe the ordering:
 stop-source → pack → transfer → restore + verify → decommission-source
 ```
 
-Two pieces of tooling friction back the ordering (M1-582): `pack.sh` WARNs — never
+Two pieces of tooling friction back the ordering: `pack.sh` WARNs — never
 refuses — when the Provider is still running (read-only, so a live pack cannot hurt
 the source, but it can bundle a torn identity snapshot; see the `pack.sh` bullet
 above), and `restore.sh` will not start the Provider without operator consent
@@ -1238,8 +1238,8 @@ confirms before each irreversible gate):
    rebuild that yields byte-identical images is a no-op with zero downtime, with
    no separate image-id bookkeeping. It `up -d --wait` the Collector (it runs
    Flyway under the §7.8.5 advisory lock) so its healthcheck must pass before the
-   Provider starts against the migrated schema, then `up -d` the Provider. (M1-503
-   replaced an earlier hand-rolled image-id comparison that read `docker compose
+   Provider starts against the migrated schema, then `up -d` the Provider. (The
+   healthcheck used here replaced an earlier hand-rolled image-id comparison that read `docker compose
    images -q` — which reports the running container's image, not the freshly-built
    tag — and so never redeployed a rebuilt app while it was running.)
 7. **Health gate**: confirm the Collector reports `healthy` (it declares a
@@ -1448,15 +1448,15 @@ SimpleX admin is established by claim, not by address (§7.6.3), so there is no 
 
 **"An admin row exists but no one can act as it (phantom / unreachable admin)."**
 
-Last-admin protection counts `is_admin = true AND is_banned = false` rows with no reachability check ([../spec/security.md](../spec/security.md) §Authorization model), so a bootstrap-seeded admin whose `contact_id` never byte-matches inbound messages — a **phantom admin** — counts as a live admin even though no message can ever be attributed to it. The hazard is that a reachable co-admin can `/revoke-admin` the other reachable admins down to only the phantom, leaving the deployment locked out of admin while the trigger still believes one admin remains. This is operator misconfiguration, not an adversary path. Two sources, by adapter: for **address-based** adapters a mistyped bare contact id (Signal ACI); for **SimpleX**, a phantom is no longer produced by the current claim-token bootstrap — the admin row is claim-minted from the actual inbound connection's `contact_id`, which byte-matches inbound by construction (§7.6.3) — but a deployment **bootstrapped by address before M1-506** carries a leftover phantom `(simplex, is_admin = true)` row that ALSO blocks the token claim; recover that case via the **migration runbook** below, not the drift step here.
+Last-admin protection counts `is_admin = true AND is_banned = false` rows with no reachability check ([../spec/security.md](../spec/security.md) §Authorization model), so a bootstrap-seeded admin whose `contact_id` never byte-matches inbound messages — a **phantom admin** — counts as a live admin even though no message can ever be attributed to it. The hazard is that a reachable co-admin can `/revoke-admin` the other reachable admins down to only the phantom, leaving the deployment locked out of admin while the trigger still believes one admin remains. This is operator misconfiguration, not an adversary path. Two sources, by adapter: for **address-based** adapters a mistyped bare contact id (Signal ACI); for **SimpleX**, a phantom is no longer produced by the current claim-token bootstrap — the admin row is claim-minted from the actual inbound connection's `contact_id`, which byte-matches inbound by construction (§7.6.3) — but a deployment **bootstrapped by the legacy by-address path** carries a leftover phantom `(simplex, is_admin = true)` row that ALSO blocks the token claim; recover that case via the **migration runbook** below, not the drift step here.
 
 1. **Detect.** Enumerate live admin rows with `psql`: `SELECT adapter, contact_id, is_admin, is_banned FROM users WHERE is_admin = true AND is_banned = false`. Confirm each `contact_id` matches what its adapter reports for an actual inbound message from that person — a row whose id no inbound message has ever carried is the phantom. (There is no in-chat admin-roster command in v1; this check is operator-side.)
 2. **Recover via bootstrap-admin drift — address adapters (works even when the phantom is the only admin left).** Point the address adapter's `infochat.adapters.<name>.admin` at the intended reachable contact id and restart Provider. Drift **adds** the corrected admin row and leaves the phantom in place (§7.6.3), so the deployment now has a reachable admin alongside the phantom — there is no in-chat dead end even if the phantom was the sole admin before the restart. From the now-reachable admin's chat, run `/revoke-admin <phantom-contact-id>`; last-admin protection is satisfied because the drift-added reachable admin remains. (A **SimpleX** phantom has no drift path — the token claim is blocked while the phantom row exists; use the migration runbook below.)
 3. **Direct-DB last resort (only if the drift path is unavailable).** With the services stopped, set `is_admin = true` on the intended reachable contact's `users` row (creating it if absent) via `psql`, restart, then revoke the phantom in-chat. Write an `audit_log` row recording the manual intervention and its cause. This is the same shape of direct-DB intervention an operator would use for any zero-reachable-admin lockout; in the phantom case step 2 normally suffices, so this is rarely needed.
 
-**"Migrate a pre-M1-506 SimpleX by-address bootstrap."**
+**"Migrate a legacy by-address SimpleX bootstrap."**
 
-Before M1-506 the SimpleX bootstrap was configured **by address** (`infochat.adapters.simplex.admin=<SimpleX address>`) and **seeded at startup**, which minted a `(simplex, <address>, is_admin = true)` `users` row. The DB volume survives `upgrade.sh` (state is preserved), so after upgrading to the claim-token build that row persists — and it is a problem on two counts: (a) it was **never reachable** (inbound SimpleX DMs resolve to a per-connection `contact_id`, never the advertised address — the M1-505/506 root cause), and (b) it now **blocks the token claim**, because the single-use gate is `WHERE NOT EXISTS (… adapter = 'simplex' AND is_admin = TRUE)` — with the phantom present, the first token DM never claims. **Symptom:** you set `admin-token`, DM the token, and get the fixed `error.invite.required` reply instead of becoming admin.
+Before the claim-token build the SimpleX bootstrap was configured **by address** (`infochat.adapters.simplex.admin=<SimpleX address>`) and **seeded at startup**, which minted a `(simplex, <address>, is_admin = true)` `users` row. The DB volume survives `upgrade.sh` (state is preserved), so after upgrading to the claim-token build that row persists — and it is a problem on two counts: (a) it was **never reachable** (inbound SimpleX DMs resolve to a per-connection `contact_id`, never the advertised address — the prior root cause for replacing the by-address path), and (b) it now **blocks the token claim**, because the single-use gate is `WHERE NOT EXISTS (… adapter = 'simplex' AND is_admin = TRUE)` — with the phantom present, the first token DM never claims. **Symptom:** you set `admin-token`, DM the token, and get the fixed `error.invite.required` reply instead of becoming admin.
 
 Recovery — **set the token → clear the phantom → claim → unset the token**:
 
@@ -1502,7 +1502,7 @@ See §7.8.5. Likely causes: a previous Provider crashed without releasing its ad
 | Compromised LLM API key | Rotate the env var. Restart Provider. Add an audit row noting rotation reason. |
 | Lost SimpleX bootstrap admin | Rotate via the claim-token model (§7.14, "Rotate the SimpleX bootstrap admin"): `/revoke-admin` the current SimpleX admin (needs another global admin to remain), set a fresh `infochat.adapters.simplex.admin-token`, restart, have the new admin DM the token to claim, then unset the token. There is **no** by-address drift for SimpleX (D50). |
 | Lost Signal bootstrap admin | Rotate `infochat.adapters.signal.admin` to a different ACI, restart (bootstrap admin drift, §7.6.3), `/revoke-admin` the prior. |
-| Phantom (unreachable) bootstrap admin | A seeded admin whose `contact_id` never byte-matches inbound counts toward last-admin protection but no one can act as it; a co-admin can then revoke the reachable admins down to only the phantom ([../spec/security.md](../spec/security.md) §Authorization model). Operator misconfiguration, not an adversary path. Detect via the `psql` admin-row check (§7.14, "phantom / unreachable admin"). **Address adapters:** re-seed the intended contact through bootstrap-admin drift (§7.6.3) and `/revoke-admin` the phantom. **SimpleX (legacy by-address bootstrap, pre-M1-506):** the phantom also blocks the token claim — recover via the migration runbook (§7.14, "Migrate a pre-M1-506 SimpleX by-address bootstrap"). |
+| Phantom (unreachable) bootstrap admin | A seeded admin whose `contact_id` never byte-matches inbound counts toward last-admin protection but no one can act as it; a co-admin can then revoke the reachable admins down to only the phantom ([../spec/security.md](../spec/security.md) §Authorization model). Operator misconfiguration, not an adversary path. Detect via the `psql` admin-row check (§7.14, "phantom / unreachable admin"). **Address adapters:** re-seed the intended contact through bootstrap-admin drift (§7.6.3) and `/revoke-admin` the phantom. **SimpleX (legacy by-address bootstrap):** the phantom also blocks the token claim — recover via the migration runbook (§7.14, "Migrate a legacy by-address SimpleX bootstrap"). |
 | Bot account compromised on one adapter | Per-adapter scope ([04-security.md §4.4](04-security.md)). Recover the relevant client (rotate the SimpleX bootstrap admin via the claim-token model / re-register Signal per §7.14); rotate the bootstrap admin per the rows above; reissue invite links to known users. Source data and the other adapter are untouched. Cross-adapter elevation is impossible by design (`/grant-admin` and `/revoke-admin` are inbound-adapter-scoped). |
 | Both messaging clients lost simultaneously | Treat each adapter recovery independently; Provider stays down (zero adapters connected → readiness fails) until at least one is restored. Source data is untouched. |
 | Duplicate-instance brought up by a misconfigured deploy | The new instance is rejected by `pg_try_advisory_lock` (§7.8.5) and exits non-zero; the running instance is unaffected. Fix the deploy script. |

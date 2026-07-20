@@ -52,7 +52,7 @@ Each post entering the Collector goes through **two stages** of security before 
 > **Layering is conceptual, not a process boundary.** Stage 1 and Stage 2 run
 > in the same Collector process: when Stage 1 flags a post, `Stage1Worker`
 > invokes the Stage 2 LLM judge **in-process** (no inter-stage queue or
-> channel — the `@Channel("stage2-queue")` shape was rejected in M1-033). The
+> channel — the `@Channel("stage2-queue")` shape was rejected earlier). The
 > two-stage split below describes the security contract (Stage 2 runs only on
 > Stage 1 hits), not a distributed pipeline.                                                                                                                                                  
 
@@ -188,7 +188,7 @@ System-prompt rules instruct the model to:
                                                                                                                                                                                                                                                       
 ### LLM tool surface — strict allowlist (closed; count tracked at spec level)
 
-The Chat Agent is given a **fixed, narrow tool set**. The set is **closed** — adding or removing a tool is a spec amendment, not a design tweak. The exact count and members live in [../spec/security.md](../spec/security.md) §Prompt-injection defenses (the marker-delimited `<!-- tool-allowlist:begin -->` / `<!-- tool-allowlist:end -->` table, which is the single source of truth); this section is a design mirror and must not contradict it. CI asserts the runtime registry's name set equals the marked table byte-for-byte (M1-654 parity guard).
+The Chat Agent is given a **fixed, narrow tool set**. The set is **closed** — adding or removing a tool is a spec amendment, not a design tweak. The exact count and members live in [../spec/security.md](../spec/security.md) §Prompt-injection defenses (the marker-delimited `<!-- tool-allowlist:begin -->` / `<!-- tool-allowlist:end -->` table, which is the single source of truth); this section is a design mirror and must not contradict it. CI asserts the runtime registry's name set equals the marked table byte-for-byte (parity guard).
 
 | Tool | What it does | Constraints |
 |---|---|---|
@@ -198,7 +198,7 @@ The Chat Agent is given a **fixed, narrow tool set**. The set is **closed** — 
 | `getReferences(uid, limit)` | Edges from the `post_reference` graph | Read-only; scope-filtered the same way as `searchPosts`. `limit` ≤ profile-driven cap. |
 | `recallMemory(keywords)` | GIN search on `chat_memory` for the calling `(user, scope)` (D28) | Read-only; per-(user, scope) only. Each keyword length-bounded by a profile-driven cap. **Not** the user-facing `/recall <keyword>` command, which is v2-deferred per [SPEC.md](../SPEC.md) §"Deferred to v2". |
 | `listSaves(tags, window)` | List `saved_post` rows for the calling user, globally across scopes (D13) | Per-user only — never returns another user's saves. Tags free-form (personal tags, not Tier-1 controlled vocabulary), but length-capped. |
-| `helpLookup(query)` | Resolve a free-text command intent to a catalogue command name via the `doc_embedding` corpus (M1-664, D66) | Read-only; one pgvector cosine probe against the command-intent index. Tier filter rides INSIDE the SQL WHERE (`target_ref = ANY(?)` bound to the caller's visible command set), so an invisible command's name never enters the model context. Returns the matched command NAME + runtime catalogue one-line description (match-not-assert — embedded text used only for MATCHING, never ASSERTING). Below threshold: `{command: null}`. |
+| `helpLookup(query)` | Resolve a free-text command intent to a catalogue command name via the `doc_embedding` corpus (D66) | Read-only; one pgvector cosine probe against the command-intent index. Tier filter rides INSIDE the SQL WHERE (`target_ref = ANY(?)` bound to the caller's visible command set), so an invisible command's name never enters the model context. Returns the matched command NAME + runtime catalogue one-line description (match-not-assert — embedded text used only for MATCHING, never ASSERTING). Below threshold: `{command: null}`. |
                                                                                                                                                                                                                                                       
 **Not exposed (forever)**:                                                                                                                                                                                                                            
 - Any tool that can mutate `users`, `group_membership`, `is_admin`, `is_banned`, `audit_log`                                                                                                                                                          

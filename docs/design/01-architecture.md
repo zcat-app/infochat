@@ -153,7 +153,7 @@ Enqueue post_id on the eval channel  ──────────┐
                                          eval workers (§1.3.4)
 ```
 
-**Per-host outbound pacing (M1-466).** When a kind is due, the scheduler does
+**Per-host outbound pacing.** When a kind is due, the scheduler does
 not blast every active source of that kind in one pass: several sources often
 share a host (e.g. the ~22 nitter feeds all on `rss.xcancel.com`), and bursting
 them trips the host's rate limit (a `403` whose HTML body fails the RSS parser,

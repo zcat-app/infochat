@@ -718,7 +718,7 @@ CREATE TABLE post (
   stage2_done     BOOLEAN NOT NULL DEFAULT FALSE,
   tagger_done     BOOLEAN NOT NULL DEFAULT FALSE,
   embedding_done  BOOLEAN NOT NULL DEFAULT FALSE,
-  classifier_done BOOLEAN NOT NULL DEFAULT FALSE,    -- classification stage cursor (V57, M1-597)
+  classifier_done BOOLEAN NOT NULL DEFAULT FALSE,    -- classification stage cursor (V57)
   stage1_flagged  BOOLEAN NOT NULL DEFAULT FALSE,    -- Stage 1 produced ≥1 quarantine span
   stage2_failed   BOOLEAN NOT NULL DEFAULT FALSE,    -- Stage 2 LLM errored after retry
                                                      --   (release-on-stage2-failure path may set
@@ -735,7 +735,7 @@ CREATE TABLE post (
                                                      --   computed and stored, NOT summarizer-authored
                                                      --   (D19/D36 byte-identical replay). CHECK:
                                                      --   <@ {factual,opinion,technical,urgent,ongoing,
-                                                     --   unknown} AND cardinality >= 1 (V57, M1-597).
+                                                     --   unknown} AND cardinality >= 1 (V57).
   social_score    INT,                               -- 2 * reposts + likes; see docs/design/05-llm.md §5.4
   likes           INT,
   reposts         INT,
@@ -744,7 +744,7 @@ CREATE TABLE post (
       to_tsvector('english',
                   coalesce(title, '') || ' ' || coalesce(body, ''))
     ) STORED,                                        -- lexical arm of hybrid chat retrieval
-                                                     --   (05-llm §5.4.6, D58; V58, M1-617).
+                                                     --   (05-llm §5.4.6, D58; V58).
                                                      --   2-arg to_tsvector REQUIRED: the 1-arg
                                                      --   form is GUC-dependent (only STABLE) —
                                                      --   rejected in a generated column and a
@@ -870,7 +870,7 @@ CREATE TABLE post_reference (
                                                        --   entity/semantic edges always set
   to_upstream_identifier TEXT,                         -- original event id, verbatim; set only for
                                                        --   link_type='repost' edges (V34)
-  link_type   TEXT NOT NULL                            -- 'entity','semantic','repost' ('repost' written by Nostr kind-6, M1-100)
+  link_type   TEXT NOT NULL                            -- 'entity','semantic','repost' ('repost' written by Nostr kind-6)
     CHECK (link_type IN ('entity','semantic','repost')),
   score       REAL NOT NULL,                           -- shared-entity count or cosine similarity
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()

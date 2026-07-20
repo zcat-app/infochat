@@ -251,9 +251,9 @@ them to the marked region — doing so would red the build.
   The unknown-command reply **never reflects the requested name
   back**. The name selects the suggestions and then stops; every byte
   delivered is fixed bundle text or a caller-visible command name.
-  The same rule now holds for the unknown-tag, unknown-timezone,
-  unknown-asset-sub-verb and unknown-`--type`/`--category` replies
-  (M1-656): none of them reflects the user's token either. The
+   The same rule now holds for the unknown-tag, unknown-timezone,
+   unknown-asset-sub-verb and unknown-`--type`/`--category` replies:
+   none of them reflects the user's token either. The
   rule is scoped by **who can reach the reply**, and two categories
   are deliberately left echoing.
 
@@ -273,8 +273,8 @@ them to the marked region — doing so would red the build.
   social-engineering value is near zero. Every such reply is gated by
   an `is_admin` check that PRECEDES the reflecting parse — the gate's
   position in control flow, not the command's catalogue tier, is what
-  makes the property hold (M1-657 fixed `/approve-group`, whose gate
-  had sat after the parse). **Any friendly error
+   makes the property hold (the `/approve-group` gate
+   had sat after the parse). **Any friendly error
   reachable below bot admin must not reflect inbound text** — that is
   the property to check when adding a command, and enumerating today's
   exceptions would only rot. Reflection, not slash-synthesis, is the property
@@ -288,7 +288,7 @@ them to the marked region — doing so would red the build.
   also makes the §Permission model no-existence-leak property exact:
   a hidden-but-real command and a nonexistent one produce
   byte-identical replies, not merely similar-looking ones.
-  This property is mechanically guarded (M1-658): `InboundReflectionGuardTest`
+   This property is mechanically guarded: `InboundReflectionGuardTest`
   censuses every `error.*` template interpolation and fails the build on a
   new one that is neither trivially bot-authored nor recorded, with its
   provenance, in the error-reflection baseline. The guard's scope is its
@@ -297,16 +297,16 @@ them to the marked region — doing so would red the build.
   (a taint-carrying type for inbound strings) remains future work — so a
   green guard means "no unrecorded error reflection", not "reflection is
   impossible". The reply surface is not merely a theoretical gap: one live
-  instance — the `/add-source` success reply echoing an unconstrained
-  `--name` — was found in it. That instance is **closed** (M1-659): a
-  caller-supplied `--name` is constrained where the value is produced.
+   instance — the `/add-source` success reply echoing an unconstrained
+   `--name` — was found in it. That instance is **closed**: a
+   caller-supplied `--name` is constrained where the value is produced.
   Control characters are stripped from the name and the remainder is
   kept; a name containing **any** slash, or over-long input — or one
   left empty by the strip — is discarded whole in favour of the
   host-derived default. Only an ordinary slash-free name is stored and
   echoed. The slash rule is deliberately absolute rather than a
-  judgement about whether the slash begins a command: two M1-659 audits
-  defeated the boundary form on each side in turn (U+2800, category
+   judgement about whether the slash begins a command: two prior audits
+   defeated the boundary form on each side in turn (U+2800, category
   `OTHER_SYMBOL`, then the Hangul fillers, category `OTHER_LETTER` —
   both render as a blank gap), which establishes that no
   character-category test can decide the question. Since slash-prefix
@@ -588,7 +588,7 @@ over the whole world (§Per-scope tag preferences).
      friendly-error path with fuzzy suggestions over the enum, the
      same path as an unknown tag argument. The value never reaches
      a SQL query as free-form text — the enum check is the validation
-     boundary — and since M1-656 it does not reach the reply text
+     boundary — and it does not reach the reply text
      either: the friendly error names the valid types without echoing
      what was typed, exactly as the unknown-tag path does. **One exception qualifies "explicit `--type` wins":** a
      URL whose host is a configured Nitter instance (the operator
@@ -1019,7 +1019,7 @@ and makes the digest query depend on row presence.
    for the single source of truth) is a read-only DB query**, so the cancellation
    primitive is `pg_cancel_backend(pid)` at the released connection,
    best-effort because Postgres may complete the query before the
-   cancel takes effect. `helpLookup` (M1-664) follows the same
+   cancel takes effect. `helpLookup` follows the same
    primitive: a single read-only pgvector cosine probe over
    `doc_embedding`, armed via `CancellationService.armToolConnection`
    like every other chat tool. Tools added in future spec amendments MUST
@@ -1231,8 +1231,8 @@ contacts and contradict the registration-state model
 - `/invite revoke <code>` — immediately transition a PENDING code to REVOKED.
   Requires confirm.
 - `/invite bot-contact [--adapter <name>]` — return the bot's own shareable
-  connect contact in-band, so an admin can onboard a new person without shell
-  access to the server (M1-620): SimpleX answers its **live current** contact
+   connect contact in-band, so an admin can onboard a new person without shell
+   access to the server: SimpleX answers its **live current** contact
   URL (queried from the running simplex-chat at command time, never a boot-time
   snapshot), Signal answers its registered number. The target adapter is the
   inbound one by default; `--adapter <name>` selects any single activated
@@ -1478,7 +1478,7 @@ feed-derived text. Degrade and rejection replies (unavailable, in-flight,
 ceiling-gated, refusal, /stop) carry no provenance notice. Exact wording
 lives in design notes (05 §5.4.6).
 
-**Command-intent retrieval is match-not-assert** (decision D66, M1-664).
+**Command-intent retrieval is match-not-assert** (decision D66).
 The `helpLookup` tool resolves a free-text intent to a catalogue command
 name via one pgvector cosine probe against the `doc_embedding` corpus,
 built at Provider startup from the runtime `HelpCommandHandler.CATALOGUE`
@@ -1489,8 +1489,8 @@ MATCHING, never for ASSERTING, so a stale intent document can degrade a
 match but can never produce wrong syntax. The tier filter rides INSIDE
 the SQL WHERE clause (`target_ref = ANY(?)` bound to the caller's visible
 command-name set), so an invisible command's name never enters the model
-context — the existence-oracle defense M1-647 established, widened from
-the slash-command unknown-name path to free-text input. Below the
+context — the existence-oracle defense established for the
+slash-command unknown-name path, widened to free-text input. Below the
 calibrated similarity threshold the tool returns no command and the agent
 is directed to say it does not know and point at `/help <name>` rather
 than restating command syntax from memory.
