@@ -3,20 +3,23 @@ id: M1-652
 title: "Gap-filling redelivery for per-category digests"
 status: pending
 created: 2026-07-18
-last_updated: 2026-07-18
+last_updated: 2026-07-20
 blocked_by:
   - M1-642
-files_budget: 12
+files_budget: 16
 files_scope:
-  - infochat-core/src/main/resources/db/migration/V61__digest_category_delivery.sql
+  - infochat-core/src/main/resources/db/migration/V61__digest_replay_state.sql
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestSectionRepository.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestCategoryDeliveryRepository.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestDelivery.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRetryService.java
   - infochat-provider/src/main/resources/application.properties
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestSectionRepositoryIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestCategoryDeliveryRepositoryIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestDeliveryTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRetryServiceTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java
   - docs/spec/commands.md
   - docs/spec/decisions.md
 complexity: high
@@ -42,6 +45,32 @@ escalations:
       + tests) or a spec amendment (docs/spec/commands.md) — none of which are
       in files_scope. Structural, not a prose defect; not self-refinable.
 revisions:
+  - date: 2026-07-20
+    reason: >-
+      Fork resolved — user chose arm (b): replay persisted render output.
+      Acceptance rewritten for (b) and the RESOLVE-BEFORE-START gate
+      removed. V61 (renamed digest_replay_state) now creates digest_section
+      alongside digest_category_delivery; sections are persisted at render
+      time as the exact delivery bytes (M1-642's arm-(b) pin: affordance
+      folded into the last section, roll-up prefixes inside sections);
+      /retry --digest replays only missing categories — deterministic,
+      byte-faithful, LLM-free — through deliverSequenceToGroup, with a
+      full-re-run fallback for section-less slots whose render budget is
+      bounded by the digest window width; summary_cache.expires_at decoupled
+      from retry-cooldown via infochat.digest.replay-retention (default
+      PT24H). files_budget 12 -> 16 (DigestSectionRepository + its IT,
+      DigestWorkerTest, application.properties enter scope; migration file
+      renamed while unclaimed). V60 verified landed and V61 verified
+      unclaimed 2026-07-20.
+    snapshot:
+      files_budget: 12
+      migration_file: V61__digest_category_delivery.sql
+      acceptance_gate: >-
+        RESOLVE-BEFORE-START: the degraded-retry fork below must be closed
+        and this acceptance list rewritten to match the chosen arm before
+        /m1-tick start is run. See Notes §"The fork". Filed 2026-07-18 with
+        the fork open because the ticket is blocked on M1-642 and the answer
+        depends on DigestDelivery's final shape.
   - date: 2026-07-18
     reason: >-
       Clarity-fail rework, and a full repurpose. The original ticket
@@ -88,58 +117,107 @@ out_of_scope:
     ticket makes the retry fill gaps, it does not add a notification.
   - >-
     Per-category summary_cache rows. The single-row-per-slot cache model
-    (D17) is retained.
+    (D17) is retained: digest_section is replay state keyed to the slot, not
+    additional cache rows, and summary_cache.content KEEPS having no reader
+    — replay reads digest_section, never the joined cache string.
+  - >-
+    The scheduled-delivery path. Scheduled slots deliver exactly as M1-642
+    built them; this ticket changes only what /retry --digest does (plus the
+    render-time section write and delivery-record write it needs).
 acceptance:
   - >-
-    RESOLVE-BEFORE-START: the degraded-retry fork below must be closed and this
-    acceptance list rewritten to match the chosen arm before /m1-tick start is
-    run. See Notes §"The fork". Filed 2026-07-18 with the fork open because the
-    ticket is blocked on M1-642 and the answer depends on DigestDelivery's
-    final shape.
+    Migration V61 (digest_replay_state) creates BOTH tables. digest_section:
+    (group_id UUID, window_start TIMESTAMPTZ, category_slug TEXT, position
+    INT NOT NULL, content TEXT NOT NULL, PRIMARY KEY (group_id, window_start,
+    category_slug)) — the persisted render output, one row per section in
+    renderSections() order. digest_category_delivery: (group_id UUID,
+    window_start TIMESTAMPTZ, category_slug TEXT, delivered_at TIMESTAMPTZ
+    NOT NULL, PRIMARY KEY (group_id, window_start, category_slug)) — the
+    delivery record. Provider role gets SELECT + INSERT + DELETE on both.
+    V60 landed with M1-664 and V61 was verified unclaimed 2026-07-20 —
+    RE-VERIFY the number is still next at /m1-tick start.
   - >-
-    Migration V61 creates digest_category_delivery (group_id UUID,
-    window_start TIMESTAMPTZ, category_slug TEXT, delivered_at TIMESTAMPTZ NOT
-    NULL, PRIMARY KEY (group_id, window_start, category_slug)) and grants the
-    provider role SELECT + INSERT + DELETE. V59 is the highest migration on
-    disk (verified 2026-07-18) and V60 is reserved by M1-664 (the M1-648
-    decomposition), so V61 is next.
+    Section persistence: every render that produces sections persists the
+    ordered list renderSections() returned — the EXACT delivery bytes
+    (affordance folded into the last section; flag-on roll-up prefixes
+    inside their sections, per M1-642's arm-(b) pin) — alongside the
+    summary_cache upsert for the slot. Degraded and zero-post slots persist
+    no sections. A crash that strands a cache row without its sections is
+    safe: the fallback item below covers it, and replay never half-applies.
+    DigestWorkerTest.persistsSectionsAlongsideCacheRow passes.
   - >-
     A category message that the adapter accepts records a
-    digest_category_delivery row. A failed send records nothing, so the
-    existing per-category TRANSIENT/PERMANENT ladder is unchanged.
+    digest_category_delivery row — on scheduled delivery AND on replay
+    delivery alike. A failed send records nothing, so the existing
+    per-category TRANSIENT/PERMANENT ladder is unchanged.
     DigestDeliveryTest.recordsDeliveryOnlyOnAdapterAcceptance passes.
   - >-
-    A /retry --digest for a slot with existing delivery rows sends only the
-    categories with no row, and reports how many were skipped. It never sends
-    zero messages silently: if every category is already recorded, the admin
-    is told so explicitly rather than receiving a bare SUCCESS.
-    DigestRetryServiceTest.retryFillsOnlyMissingCategories passes.
+    Replay: a /retry --digest for a slot WITH persisted sections replays
+    those bytes — no post re-collection, no render, no LLM call — sending
+    ONLY the categories with no delivery row, sequentially in stored
+    position order, through OutboundDelivery.deliverSequenceToGroup
+    (M1-642's one-aggregate-counter-outcome semantics). It reports how many
+    categories were skipped as already delivered, and never sends zero
+    messages silently: if every category is recorded, the caller is told so
+    explicitly rather than receiving a bare SUCCESS.
+    DigestRetryServiceTest.retryFillsOnlyMissingCategories and
+    DigestRetryServiceTest.replaySendsPersistedBytesWithoutRerender pass.
+  - >-
+    Fallback: a /retry --digest for a slot with NO persisted sections
+    (pre-V61 row, degraded slot, zero-post slot, or a crash-stranded cache
+    row) falls back to today's full re-run path (re-collect, re-render or
+    degrade per D17). The fallback's render budget is bounded by a sane
+    per-retry budget — the configured digest window width — never by the
+    full replay-retention horizon (a retry must not acquire a
+    many-hours LLM timeout).
+    DigestRetryServiceTest.retryWithoutSectionsFallsBackToRerun passes.
+  - >-
+    Horizon decoupling: summary_cache.expires_at stops reusing
+    infochat.digest.retry-cooldown as its horizon. A new property
+    infochat.digest.replay-retention (default PT24H) sets expires_at at
+    cache-write time; retry-cooldown returns to cooldown-only duty. Replay
+    works at any point inside the retention horizon — the ~2-minute
+    degraded-retry cliff this ticket's fork existed to resolve is gone.
   - >-
     Gap-filling state survives a Provider restart, since it is a table rather
     than in-process state — the mid-sequence-death case is the whole point.
-    DigestCategoryDeliveryRepositoryIT.deliveryStateSurvivesRepositoryReconstruction passes.
+    DigestCategoryDeliveryRepositoryIT.deliveryStateSurvivesRepositoryReconstruction
+    and DigestSectionRepositoryIT.sectionsSurviveRepositoryReconstruction pass.
   - >-
-    Rows are pruned on the same schedule and by the same retention rule as the
-    summary_cache row for their slot, so the two cannot diverge. The retention
-    comparison reads "now" from the injected java.time.Clock, never an inline
-    Instant.now() or SQL now(), per CLAUDE.md §Injectable time in decision logic.
+    digest_section and digest_category_delivery rows are pruned on the same
+    schedule and by the same retention rule as the summary_cache row for
+    their slot, so the three cannot diverge. The retention comparison reads
+    "now" from the injected java.time.Clock, never an inline Instant.now()
+    or SQL now(), per CLAUDE.md §Injectable time in decision logic.
   - >-
     docs/spec/commands.md is amended, at the "Cached digest message handle"
     paragraph under §Conversation control (commands.md:1018-1024), to state
     what /retry --digest does for a partially-delivered slot. The existing
     commitment that it posts a NEW message (never edits, never silently
     suppresses) is preserved verbatim — this ticket narrows WHICH categories
-    are posted, it does not reintroduce whole-message suppression.
-  - A new decision D65 records the gap-filling policy.
+    are posted, it does not reintroduce whole-message suppression. The
+    amendment also records that replayed retries are DETERMINISTIC: they
+    deliver the digest they are retrying (the originally rendered bytes),
+    closing the previously-unfiled oddity that a retry could sweep in posts
+    published since the crash.
+  - >-
+    A new decision D65 records the gap-filling policy: replay-from-persisted-
+    sections, the delivery-record rule, the no-sections fallback, and the
+    replay-retention decoupling.
   - mvn verify is green
 test_plan:
   adds:
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestSectionRepositoryIT.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestCategoryDeliveryRepositoryIT.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRetryServiceTest.java
   modifies:
     - >-
       DigestDeliveryTest.java — ADDS cases for delivery recording. The
       per-category delivery cases M1-642 authored must keep passing unmodified.
+    - >-
+      DigestWorkerTest.java — ADDS the persistsSectionsAlongsideCacheRow
+      case (and a degraded/zero-post case proving no sections are written).
+      The cases M1-642 authored must keep passing unmodified.
   preserves:
     - >-
       M1-642's per-category delivery behavior and its DigestDeliveryTest cases.
@@ -181,12 +259,16 @@ already landed. That is correct-by-spec (`docs/spec/commands.md` §"Cached
 digest message handle" commits that retry posts a new message) but crude.
 
 This ticket makes that retry fill the gap instead: send the categories that
-have no delivery record, skip the ones that do.
+have no delivery record, skip the ones that do — by REPLAYING the section
+bytes persisted at render time (arm (b), user decision 2026-07-20), so the
+gap-fill is deterministic, byte-faithful to the original digest, and free of
+LLM cost.
 
 ## Acceptance
 
-See `acceptance`. **The first item is a gate, not a criterion** — the fork in
-§Notes must be closed and this list rewritten before `start`.
+See `acceptance`. The former RESOLVE-BEFORE-START gate is closed: the fork
+was resolved to arm (b) on 2026-07-20 and the list above is the arm-(b)
+rewrite. Nothing gates `start` beyond `blocked_by: [M1-642]`.
 
 ## Out-of-scope
 
@@ -195,10 +277,23 @@ chokepoint-level or system-wide idempotency is added or implied.
 
 ## Notes
 
-### The fork (RESOLVE BEFORE START)
+### The fork — RESOLVED 2026-07-20: arm (b)
 
-Gap-filling needs per-category messages to fill gaps *in*. A retry does not
-always produce them:
+**User decision 2026-07-20: arm (b) — replay persisted render output.** The
+acceptance list above is the arm-(b) rewrite; the pre-resolution gate item is
+snapshotted in `revisions[0]`. The re-parse variant of (b) was rejected as
+fragile (headers are bare uppercase bundle lines; sanitized LLM prose can
+still legally contain an all-caps line; bundle copy changes would break
+parsing of previously-cached rows), so the section list is PERSISTED at
+render time (`digest_section`) as the exact delivery bytes — M1-642 pins
+`renderSections()` output as those bytes, closing affordance folded into
+the last section. What (b) buys: gap-filling works anywhere inside the
+(now PT24H-default) retention horizon instead of a ~2-minute window; replayed
+retries are deterministic (they deliver the digest they retry) and LLM-free;
+and `summary_cache.content` keeps having no reader.
+
+The original fork, for the record — gap-filling needs per-category messages
+to fill gaps *in*, and a retry did not always produce them:
 
 `DigestRetryService.retryDigest` rebuilds the slot as
 `new DigestSlot(groupId, timezone, coords.slotKind, coords.slotFiredAt,
@@ -232,10 +327,14 @@ Two ways out, and this ticket must pick one before it starts:
   work at any point in the cache row's life. Larger: it touches the D17 cache
   contract's read path and needs its own acceptance items.
 
-(b) is the more valuable shape and also fixes a second oddity nobody filed —
-that `/retry --digest` today can deliver a digest that does not match the one
-it is retrying. It is also clearly bigger. **Do not start this ticket until
-the user picks.** If (b) is chosen, re-check `files_budget: 12`.
+(b) was judged the more valuable shape — it also fixes a second oddity
+nobody filed, that `/retry --digest` could deliver a digest that does not
+match the one it is retrying — and the user confirmed it 2026-07-20. The
+`files_budget: 12` re-check happened with the rewrite: 16. One coupling the
+rewrite resolves explicitly: `infochat.digest.retry-cooldown` did double
+duty as the cache retry horizon (`DigestWorker.java:94-95`), so the horizon
+could not be widened without widening the user-facing cooldown — hence the
+new `infochat.digest.replay-retention` property in the acceptance list.
 
 ### Why not the chokepoint
 
