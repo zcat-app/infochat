@@ -163,6 +163,22 @@ acceptance:
     DigestRetryServiceTest.retryFillsOnlyMissingCategories and
     DigestRetryServiceTest.replaySendsPersistedBytesWithoutRerender pass.
   - >-
+    Empty-list counter-safety on the replay path: replay MUST NOT call
+    OutboundDelivery.deliverSequenceToGroup with an empty message list, and a
+    no-op retry (every category already delivered) MUST NOT increment the
+    per-group consecutive-permanent-failure counter. Today
+    deliverSequenceToGroup (OutboundDelivery.java:988) applies
+    onPermanentGroupFailure whenever anyDelivered is false — including for an
+    empty list — so a replay that filters categories down to zero and still
+    calls the method would, after three such retries, silently soft-remove a
+    healthy group, contradicting the D63/"always > 1" calibration. Either
+    short-circuit before the call (the "caller is told so explicitly" rule in
+    the replay item above already implies this) or harden the method to
+    early-return without counter mutation on empty. (From M1-642 redteam
+    out-of-model item, 2026-07-20; not adversary-reachable via any current
+    caller, but this ticket's filtering replay caller is the first that can
+    produce an empty list.)
+  - >-
     Fallback: a /retry --digest for a slot with NO persisted sections
     (pre-V61 row, degraded slot, zero-post slot, or a crash-stranded cache
     row) falls back to today's full re-run path (re-collect, re-render or
