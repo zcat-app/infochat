@@ -1,0 +1,11 @@
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:666:     * (D50). A claimed contact is created is_admin=true + vouched with no
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:698:    /** {@code /ban} of the only remaining {@code is_admin=TRUE AND is_banned=FALSE} row — caught from the V5 {@code trg_last_admin_protection_update} trigger. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:704:    /** {@code /unban} success on the non-preban path with {@code is_group_admin=TRUE} rows restored; value MUST contain {@code {0}} for the comma-joined group list and the literal {@code /demote} hint. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:936:    // users.is_admin and are inbound-adapter-scoped; the V5
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:944:    /** {@code /grant-admin <contact>} against a row that is already {@code is_admin=TRUE} (no-op friendly reply). */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:953:    /** {@code /revoke-admin <contact>} against a row that is already {@code is_admin=FALSE} (no-op friendly reply). */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:956:    /** {@code /revoke-admin} of the only remaining {@code is_admin=TRUE AND is_banned=FALSE} row — caught from the V5 {@code trg_last_admin_protection_update} trigger. Mentions the global last-admin invariant + a hint that another admin must be granted first. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:1791:    // groups line is appended ONLY when the caller resolves to is_admin=TRUE
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:1804:     * resolves to {@code is_admin=TRUE}.
+infochat-provider/src/main/resources/bundles/cs.properties:210:# claimed contact is is_admin=true + vouched with no probation, so this
+infochat-provider/src/main/resources/bundles/en.properties:219:# claimed contact is is_admin=true + vouched with no probation, so this

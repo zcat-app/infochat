@@ -17,6 +17,7 @@ import app.zcat.infochat.llm.routing.LlmRouter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.help.CommandIntentIndex;
+import app.zcat.infochat.provider.help.HelpTopicCorpus;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.HelpCommandHandler;
 import app.zcat.infochat.provider.messaging.HelpCommandHandler.CallerTier;
@@ -426,27 +427,37 @@ public class ChatAgent {
             refinementDirective = AFFORDANCE_DIRECTIVE;
         }
 
-        // 3c. Deterministic command-intent delivery trigger (M1-665, D67).
-        // Whether a usage block is delivered is decided HERE from the
-        // caller's own inbound text, NEVER from the model's tool elections:
-        // the r2 INJECTION regression (docs/plan/m1/redteam/M1-648-2026-07-19-r2.md)
-        // was an attacker-influenced model-elected helpLookup call appending
-        // a privileged command's usage after sanitize. The trigger runs the
-        // SAME tier-filtered SQL the helpLookup tool runs (via the shared
-        // CommandIntentIndex.lookupCommand entry point) but with a
-        // conservative-higher threshold, and its result is the sole input
-        // to the post-sanitize delivery step (step 9b) — a model-elected
-        // helpLookup result reaches the model context only, never the
-        // delivery decision. Skipped when the chat breaker is OPEN for the
-        // same reason the semantic pre-fetch is: the embed round-trip would
-        // be wasted compute on a doomed turn (the trigger's failure mode is
-        // the same friendly-degradation — no block delivered).
+        // 3c. Deterministic help-delivery triggers (M1-665/D67 command
+        // usage, M1-666/D69 topic answer). Whether ANY help block is
+        // delivered is decided HERE from the caller's own inbound text,
+        // NEVER from the model's tool elections: the r2 INJECTION
+        // regression (docs/plan/m1/redteam/M1-648-2026-07-19-r2.md) was
+        // an attacker-influenced model-elected helpLookup call appending
+        // a privileged command's usage after sanitize. One embed
+        // round-trip serves both probes (the same per-turn 768-vector);
+        // each probe is a LIMIT-1 pgvector query whose result is the sole
+        // input to the post-sanitize delivery step (step 9b) — a
+        // model-elected helpLookup result reaches the model context only,
+        // never the delivery decision. Precedence (D69): the topic probe
+        // runs FIRST and a match short-circuits the command probe — a
+        // caller whose question trips both wants the explanation, not a
+        // bare usage block — which makes the at-most-one-help-block cap
+        // structural rather than checked. Skipped when the chat breaker
+        // is OPEN for the same reason the semantic pre-fetch is: the
+        // embed round-trip would be wasted compute on a doomed turn
+        // (every failure mode here is the same friendly degradation — no
+        // block delivered).
+        String deliveredTopicSlug = null;
         String deliveredCommandName = null;
         if (!breakerRegistry.wouldShortCircuit(ModelTask.CHAT_AGENT)) {
-            Optional<String> intentMatch = lookupIntentForDelivery(
-                    userMessage, userId, scopeKind, scopeId);
-            if (intentMatch.isPresent()) {
-                deliveredCommandName = intentMatch.get();
+            Optional<String> deliveryVector = embedDeliveryQueryLiteral(userMessage, userId);
+            if (deliveryVector.isPresent()) {
+                deliveredTopicSlug =
+                        lookupTopicForDelivery(deliveryVector.get(), userId).orElse(null);
+                if (deliveredTopicSlug == null) {
+                    deliveredCommandName = lookupIntentForDelivery(
+                            deliveryVector.get(), userId, scopeKind, scopeId).orElse(null);
+                }
             }
         }
 
@@ -508,23 +519,40 @@ public class ChatAgent {
             reply = sanitized;
         }
 
-        // 9b. Deterministic usage-block delivery (M1-665, D67). The single
-        // authorized post-sanitize accretion under the amended security.md
-        // §LLM output sanitizer exemption: BOTH the emission decision
-        // (decided in step 3c from the caller's inbound text via
-        // tier-filtered SQL) AND the composed bytes (the /help <cmd>
-        // runtime body via HelpCommandHandler.composeUsageBlock, plus a
-        // fixed bundle-localized header) are deterministic. The block is
-        // composed bundle-localized per the scope's /lang (the /help
-        // path's existing behavior), so it does NOT pass through
-        // TranslationPipeline (D43 two-path rule); the model's prose
-        // portion above keeps its existing sanitize→translate pipeline
-        // unchanged. At most one block per reply: the trigger produces at
-        // most one match (SQL LIMIT 1), so at most one block is composed.
-        // Defense-in-depth: composeUsageBlock re-checks tier visibility
-        // before composing — a match the SQL tier filter should already
-        // have excluded is caught here too (adminUsageNeverDeliveredToNonAdmin).
-        if (deliveredCommandName != null) {
+        // 9b. Deterministic help-block delivery — the two authorized
+        // post-sanitize accretions under the amended security.md §LLM
+        // output sanitizer exemption (M1-663 path (a)): the command usage
+        // block (M1-665, D67) and the topic answer block (M1-666, D69).
+        // For both, the emission decision (step 3c, caller's inbound text
+        // via LIMIT-1 SQL) AND the composed bytes (fixed bundle values;
+        // for commands the /help <cmd> runtime body via
+        // HelpCommandHandler.composeUsageBlock) are deterministic
+        // end-to-end — which is what qualifies them to sit after the
+        // sanitizer: a topic answer must name user-tier CLOSED_LIST
+        // commands (/add-source, /follow-tag, ...) that the sanitizer
+        // would redact out of model-authored text. Both blocks are
+        // bundle-localized per the scope's /lang, so neither passes
+        // through TranslationPipeline (D43 two-path rule); the model's
+        // prose above keeps its existing sanitize→translate pipeline
+        // unchanged. AT MOST ONE help block per reply: step 3c's
+        // topic-first short-circuit sets at most one of the two locals,
+        // and each probe's SQL is LIMIT 1.
+        if (deliveredTopicSlug != null) {
+            // Match-not-assert (D66, carried to topics by D68): the probe
+            // returned a POINTER (the topic slug); the served bytes come
+            // from the in-memory corpus's bundle key, never from
+            // doc_embedding. A stale target_ref that no longer resolves
+            // degrades to no block.
+            Optional<HelpTopicCorpus.Topic> topic = HelpTopicCorpus.byTargetRef(deliveredTopicSlug);
+            if (topic.isPresent()) {
+                String header = bundleLoader.get(BundleKeys.CHAT_TOPIC_DELIVERY_HEADER, scopeLanguage);
+                String answer = bundleLoader.get(topic.get().answerBundleKey(), scopeLanguage);
+                reply = reply + "\n\n" + header + "\n" + answer;
+            }
+        } else if (deliveredCommandName != null) {
+            // Defense-in-depth: composeUsageBlock re-checks tier visibility
+            // before composing — a match the SQL tier filter should already
+            // have excluded is caught here too (adminUsageNeverDeliveredToNonAdmin).
             CallerTier caller = helpHandler.resolveCallerTier(userId, scopeKind, scopeId);
             Optional<String> usageBlock =
                     helpHandler.composeUsageBlock(deliveredCommandName, caller, scopeLanguage);
@@ -754,19 +782,85 @@ public class ChatAgent {
     }
 
     /**
-     * Deterministic command-intent lookup that drives delivery (M1-665, D67).
-     * Embeds the caller's inbound text, queries the shared
-     * {@link CommandIntentIndex#lookupCommand} entry point with the
-     * caller's visible-command-name set (tier-filter-before-return, same
-     * predicate {@code /help} applies), and returns the matched command
-     * name or {@link Optional#empty()}. The model's tool elections have
-     * no influence on this path — it runs before the LLM is called and
-     * never reads tool-loop state.
+     * Embeds the caller's inbound text ONCE for both deterministic
+     * help-delivery probes (topic, command intent) and returns it as a
+     * pgvector text literal. One embed round-trip serves the two LIMIT-1
+     * probes in step 3c — the M1-666 topic probe adds an indexed query,
+     * not a second embed.
      *
-     * <p><b>Failure mode.</b> Embedding-backend or DB failure degrades to
-     * no match (no block delivered) — the same friendly-degradation
-     * posture {@code buildSemanticRetrievalBlock} applies. The caller's
-     * turn still completes normally; only the optional usage block is
+     * <p><b>Failure mode.</b> Embedding-backend failure degrades to
+     * empty (no probe runs, no help block delivered) — the same
+     * friendly-degradation posture {@code buildSemanticRetrievalBlock}
+     * applies. The caller's turn still completes normally. Logged with
+     * userId only (D37 — no user prose).
+     */
+    private Optional<String> embedDeliveryQueryLiteral(String userMessage, UUID userId) {
+        String query = userMessage.length() > SEMANTIC_QUERY_MAX_CHARS
+                ? userMessage.substring(0, SEMANTIC_QUERY_MAX_CHARS) : userMessage;
+        try {
+            List<EmbeddingResult> embedded = embeddingProvider.embed(List.of(query));
+            return Optional.of(CommandIntentIndex.toVectorLiteral(embedded.get(0).vector()));
+        } catch (RuntimeException e) {
+            SafeLog.error(log, "help-delivery embed failed for userId=" + userId
+                    + "; no help block will be delivered", e);
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Deterministic topic lookup that drives topic-answer delivery
+     * (M1-666, D69). Probes the {@code doc_kind='topic'} corpus via
+     * {@link CommandIntentIndex#lookupTopic} and returns the matched
+     * topic slug or {@link Optional#empty()}. No tier filter: topics are
+     * tier-flat by construction (D68). The threshold is the
+     * M1-649-pinned {@link CommandIntentIndex#TOPIC_SIMILARITY_THRESHOLD}
+     * — unlike the command trigger there is no lower-threshold tool path
+     * to be conservative against (this trigger is the corpus's ONLY
+     * consumer), so the pinned starting value applies directly, with the
+     * same recalibrate-as-follow-up posture (the M1-619 pattern).
+     *
+     * <p><b>Failure mode.</b> DB failure degrades to no match (no block
+     * delivered); the turn completes normally. Logged with userId only
+     * (D37 — no user prose).
+     *
+     * <p><b>Test seam.</b> Package-private and non-final so
+     * {@code ChatAgentTest}'s {@code TestChatAgent} subclass can return
+     * a canned match (or empty) without wiring DevServices Postgres.
+     * The SQL shape is covered by {@code CommandIntentIndexTest} and the
+     * M1-649 corpus tests.
+     */
+    Optional<String> lookupTopicForDelivery(String vectorLiteral, UUID userId) {
+        try (Connection conn = dataSource.getConnection()) {
+            // Same borrow shape as lookupIntentForDelivery below: no
+            // armToolConnection (the trigger runs before the tool loop);
+            // the profile-driven statement_timeout bounds the probe in
+            // time and flips autocommit off, so lookupTopic's SET LOCAL
+            // arming joins a live transaction (M1-660).
+            cancellationService.applyStatementTimeout(conn);
+            return CommandIntentIndex.lookupTopic(
+                    conn, vectorLiteral, CommandIntentIndex.TOPIC_SIMILARITY_THRESHOLD);
+        } catch (SQLException e) {
+            SafeLog.error(log, "topic-trigger lookup failed for userId=" + userId
+                    + "; no topic block will be delivered", e);
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Deterministic command-intent lookup that drives delivery (M1-665, D67).
+     * Queries the shared {@link CommandIntentIndex#lookupCommand} entry
+     * point with the caller's visible-command-name set
+     * (tier-filter-before-return, same predicate {@code /help} applies)
+     * and returns the matched command name or {@link Optional#empty()}.
+     * The query vector is the step-3c shared embed
+     * ({@link #embedDeliveryQueryLiteral}); the model's tool elections
+     * have no influence on this path — it runs before the LLM is called
+     * and never reads tool-loop state.
+     *
+     * <p><b>Failure mode.</b> DB failure degrades to no match (no block
+     * delivered) — the same friendly-degradation posture
+     * {@code buildSemanticRetrievalBlock} applies. The caller's turn
+     * still completes normally; only the optional usage block is
      * dropped. Logged at WARN with userId only (D37 — no user prose).
      *
      * <p><b>Test seam.</b> Package-private and non-final so
@@ -777,20 +871,8 @@ public class ChatAgent {
      * {@code HelpCommandHandlerTest}/{@code composeUsageBlock} (defense-
      * in-depth visibility check).
      */
-    Optional<String> lookupIntentForDelivery(String userMessage, UUID userId,
+    Optional<String> lookupIntentForDelivery(String vectorLiteral, UUID userId,
                                              String scopeKind, UUID scopeId) {
-        String query = userMessage.length() > SEMANTIC_QUERY_MAX_CHARS
-                ? userMessage.substring(0, SEMANTIC_QUERY_MAX_CHARS) : userMessage;
-        float[] queryVector;
-        try {
-            List<EmbeddingResult> embedded = embeddingProvider.embed(List.of(query));
-            queryVector = embedded.get(0).vector();
-        } catch (RuntimeException e) {
-            SafeLog.error(log, "intent-trigger embed failed for userId=" + userId
-                    + "; no usage block will be delivered", e);
-            return Optional.empty();
-        }
-        String vectorLiteral = CommandIntentIndex.toVectorLiteral(queryVector);
         CallerTier caller = helpHandler.resolveCallerTier(userId, scopeKind, scopeId);
         List<String> visibleTargets = helpHandler.visibleCommandNames(caller);
         try (Connection conn = dataSource.getConnection()) {

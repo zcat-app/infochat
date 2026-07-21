@@ -191,14 +191,31 @@ public final class BundleKeys {
      * above the delivery threshold (M1-665). Sits ABOVE the same
      * usage+examples body {@code /help <cmd>} produces. Appended AFTER
      * sanitize + translate (D43 two-path rule: deterministic bot prose
-     * takes the bundle path, never the translator) and is the single
-     * authorized post-sanitize accretion under the amended security.md
-     * §LLM output sanitizer exemption. Never interpolates inbound bytes:
-     * every byte is fixed bundle text. The matched command's actual
-     * usage body follows on subsequent lines (composed separately via
+     * takes the bundle path, never the translator) — one of the two
+     * authorized post-sanitize accretions under the amended security.md
+     * §LLM output sanitizer exemption (the other is the
+     * {@link #CHAT_TOPIC_DELIVERY_HEADER} topic block; at most one of
+     * the two appears per reply — topic-over-command precedence, D69).
+     * Never interpolates inbound bytes: every byte is fixed bundle text.
+     * The matched command's actual usage body follows on subsequent
+     * lines (composed separately via
      * {@code HelpCommandHandler.composeUsageBlock}).
      */
     public static final String CHAT_HELP_DELIVERY_HEADER = "reply.chat.help_delivery.header";
+
+    /**
+     * Header line for the deterministic topic-answer block appended to a
+     * chat reply when the caller's inbound text matched a curated
+     * conceptual topic (M1-666, D69). Sits ABOVE the bundle-localized
+     * {@code topic.<slug>.answer} value delivered verbatim from
+     * {@code HelpTopicCorpus}. Appended AFTER sanitize + translate (D43
+     * two-path rule) — the second of the two authorized post-sanitize
+     * accretions (the first is {@link #CHAT_HELP_DELIVERY_HEADER}'s
+     * usage block); at most one of the two appears per reply
+     * (topic-over-command precedence, D69). Never interpolates inbound
+     * bytes: every byte is fixed bundle text.
+     */
+    public static final String CHAT_TOPIC_DELIVERY_HEADER = "reply.chat.topic_delivery.header";
 
     /**
      * Unknown command (either {@code /help <command>} or a bare unrecognized slash) that HAS a

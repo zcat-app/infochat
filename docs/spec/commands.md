@@ -1526,9 +1526,10 @@ not acquire an unsolicited usage block. At most one block per reply (the
 SQL is `LIMIT 1`), and the composed bytes interpolate no inbound-derived
 text — every byte is fixed bundle output or a closed-list catalogue
 name. The post-sanitize model-elected-append regression flagged by the
-r2 INJECTION audit is structurally dead under this design; the
-security.md §LLM output sanitizer amendment records this delivery path
-as the single authorized post-sanitize accretion.
+r2 INJECTION audit is structurally dead under this design; this delivery
+path is one of the two authorized post-sanitize accretions under the
+security.md §LLM output sanitizer amendment (the other is the D69 topic
+answer block below; at most one of the two appears in any reply).
 
 **Conversational refinement recovers a weak or ambiguous first answer.**
 In a plain-text messaging surface there are no buttons or facets, so a
@@ -1576,8 +1577,36 @@ topic text). Every topic `doc_id` is namespaced (`topic:<slug>`) so it
 cannot collide with a command_intent `doc_id` under V60's single-column
 primary key. `ADMIN_GUIDE.md` is deliberately excluded — admin-tier
 conceptual answers are a separate ticket with their own threat review. This
-section records the corpus's existence and shape; it does NOT describe a
-delivery mechanism. Topic delivery is M1-666.
+paragraph records the corpus's existence and shape; the delivery mechanism
+is D69, next.
+
+**Topic answer delivery is deterministic end-to-end** (decision D69). When
+the caller's own inbound text matches a curated topic above the pinned
+topic threshold, the topic's bundle-localized answer is appended to the
+reply after sanitize + translate, verbatim, under a fixed bundle-localized
+header — the second authorized post-sanitize accretion alongside the D67
+usage block. The decision reuses the D67 trigger's embed round-trip: one
+embed of the caller's inbound text serves both probes, with the topic
+probe (`CommandIntentIndex.lookupTopic`, doc_kind-scoped, tier-flat per
+D68) running FIRST. A topic match short-circuits the command probe —
+topic-over-command precedence: a caller whose question trips both wants
+the explanation, not a bare usage block — so AT MOST ONE help block (of
+either kind) appears in any reply. The answer is served from the
+in-memory corpus's bundle key at the scope's `/lang` (match-not-assert:
+the probe returns a slug pointer, never stored text; a stale pointer
+degrades to no block) and passes through neither `TranslationPipeline`
+(D43 two-path rule) nor the sanitizer — deliberately, because topics must
+name user-tier `CLOSED_LIST` commands (`/add-source`, `/follow-tag`, …)
+that the sanitizer redacts out of model-authored text; both the emission
+decision and the composed bytes are deterministic end-to-end, which is
+what the security.md §LLM output sanitizer exemption requires. A
+model-elected tool call or attacker-injected retrieved content cannot
+cause topic delivery: the decision is made from the caller's parsed text
+before the LLM runs, and tool-loop state never feeds it. Below the
+threshold no block is delivered and the model's own answer stands — a
+deliberate consequence: there is no model-side topic tool, so the
+corpus-miss tail is served by the model's ordinary answer, and recall is
+the job of the corpus's intent-shaped matching (D68).
 
 ## Onboarding
 

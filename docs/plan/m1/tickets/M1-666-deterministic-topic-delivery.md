@@ -1,9 +1,35 @@
 ---
 id: M1-666
 title: "Deterministic delivery of conceptual topic answers in chat"
-status: pending
+status: done
 created: 2026-07-20
-last_updated: 2026-07-20
+last_updated: 2026-07-21
+clarity_check:
+  date: 2026-07-21
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-21
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 30
+      added: 3328
+      removed: 110
+redteam_audits:
+  - date: 2026-07-21
+    round: 1
+    mode: redteam-multi
+    auditors: [claude, opencode, codex]
+    verdict: CLEAN
+    evidence: docs/plan/m1/redteam-multi/M1-666-2026-07-21/
 blocked_by:
   - M1-649
   - M1-665

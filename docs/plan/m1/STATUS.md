@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 681 |
+| done | 682 |
 | deferred | 0 |
 | abandoned | 19 |
 | **total** | **702** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-666 — Deterministic delivery of conceptual topic answers in chat (complexity: medium, risk: high)
 - M1-667 — Route user-content exception catches through SafeLog (complexity: medium, risk: low)
 
 ---
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-666 | Deterministic delivery of conceptual topic answers in chat | 2026-07-21 | round 1 APPROVE |
 | M1-652 | Gap-filling redelivery for per-category digests | 2026-07-21 | round 2 APPROVE |
 | M1-649 | Conceptual topic corpus: curated answers, intent-shaped matching, code-anchored guards (retrieval only) | 2026-07-21 | round 1 APPROVE |
 | M1-660 | doc_embedding read path: arm hnsw.iterative_scan under filter-inside-ANN, in a transaction | 2026-07-20 | round 1 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-663 | Spec: deterministic-delivery contract for chat help text | 2026-07-19 | round 1 APPROVE |
 | M1-661 | Add an ASSERTION-ADEQUACY check to the reviewer gate | 2026-07-19 | round 1 APPROVE |
 | M1-659 | Stop /add-source success reply reflecting raw --name | 2026-07-19 | round 5 APPROVE |
-| M1-658 | Guard: no inbound-text reflection in outbound templates | 2026-07-18 | round 3 APPROVE |
 
 ---
 
@@ -891,14 +890,14 @@ M1-656 (done)
 M1-659 (done)
 M1-660 (done)
   └── M1-649 (done)
-        └── M1-666 (pending) ← runnable
+        └── M1-666 (done)
 M1-661 (done)
 M1-662 (abandoned)
 M1-663 (done)
   ├── M1-648 (abandoned) [see above]
   └── M1-665 (done)
         ├── M1-648 (abandoned) [see above]
-        └── M1-666 (pending) [see above]
+        └── M1-666 (done) [see above]
 M1-664 (done)
   ├── M1-648 (abandoned) [see above]
   ├── M1-649 (done) [see above]

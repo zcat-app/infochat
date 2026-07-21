@@ -1077,6 +1077,26 @@ turn at the LLM-call boundary as it does for the semantic pre-fetch.
 The trigger's match never reaches the LLM context — its sole consumer
 is the post-sanitize usage-block composition step (D67).
 
+The topic-delivery trigger (D69, M1-666) rides the same shape: the SAME
+embed round-trip's vector probes `doc_kind='topic'` FIRST via
+`CommandIntentIndex.lookupTopic` — at the pinned
+`CommandIntentIndex.TOPIC_SIMILARITY_THRESHOLD` (0.60; no tier filter,
+topics are tier-flat per D68) — and a match short-circuits the command
+probe (topic-over-command precedence, D69; at most one help block per
+reply). Same LIMIT-1 + `statement_timeout` bounds, same friendly
+degradation (embed or DB failure → no block, the turn completes). Its
+sole consumer is the post-sanitize topic-answer composition step:
+`HelpTopicCorpus.byTargetRef(slug)` resolves the pointer in memory and
+the topic's `topic.<slug>.answer` bundle value at the scope's `/lang`
+is appended verbatim under the fixed `reply.chat.topic_delivery.header`
+line — never through the sanitizer (topics name user-tier `CLOSED_LIST`
+commands) and never through `TranslationPipeline` (D43 two-path rule).
+The threshold is the tool-parity 0.60 rather than the command trigger's
+conservative 0.70 because there is no lower-threshold tool path to
+distinguish from: this trigger is the topic corpus's only consumer, and
+the M1-649 pinned starting value applies directly (recalibration is a
+named follow-up, the M1-619 pattern).
+
 | Profile | `statement_timeout` for interruptible queries |
 |---|---|
 | `laptop` | 30s |
