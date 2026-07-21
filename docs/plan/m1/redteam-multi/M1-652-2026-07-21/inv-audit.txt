@@ -1,0 +1,3 @@
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:1606:    // §DB roles. Reads audit_log_view (V5 redacted view). Filters by
+infochat-provider/src/main/resources/bundles/en.properties:695:# §DB roles. Reads audit_log_view (V5 redacted view). Plain text only.
+infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryDigestCommandTest.java:313:        boolean isAuditInsert = sql.contains("audit_log");

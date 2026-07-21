@@ -1490,6 +1490,20 @@ public final class BundleKeys {
     /** {@code /retry --digest} success — digest re-generation initiated. */
     public static final String REPLY_RETRY_DIGEST_SUCCESS = "reply.retry.digest_success";
 
+    /**
+     * {@code /retry --digest} replayed the missing categories from the
+     * persisted render — gap-filling redelivery (M1-652, D65).
+     */
+    public static final String REPLY_RETRY_DIGEST_REPLAYED_MISSING =
+            "reply.retry.digest_replayed_missing";
+
+    /**
+     * {@code /retry --digest} for a slot where every category already
+     * landed — nothing was re-sent (M1-652, D65).
+     */
+    public static final String REPLY_RETRY_DIGEST_ALL_ALREADY_DELIVERED =
+            "reply.retry.digest_all_already_delivered";
+
     // ----- /promote + /demote + /group-timezone (M1-079c) ---------------------
     // Per docs/spec/security.md §Authorization model (one group admin per
     // group, first-mention auto-promote, /promote swaps admin) +

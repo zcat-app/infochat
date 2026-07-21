@@ -15,12 +15,15 @@ import app.zcat.infochat.provider.messaging.OutboundDelivery;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.sql.SQLException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -218,6 +221,79 @@ class DigestDeliveryTest {
     }
 
     @Test
+    void recordsDeliveryOnlyOnAdapterAcceptance() {
+        // M1-652 acceptance item 3: a category message the adapter ACCEPTS
+        // records a digest_category_delivery row; a failed send records
+        // nothing, so the existing per-category ladder is unchanged. One
+        // category fails PERMANENT, the rest succeed — only the successful
+        // categories' slugs land in the delivery record.
+        RecordingDeliveryRepo deliveryRepo = new RecordingDeliveryRepo();
+        ScriptedAdapter adapter = new ScriptedAdapter(ADAPTER_NAME);
+        UUID groupId = UUID.randomUUID();
+        Instant windowStart = Instant.now();
+        // "security" fails PERMANENT on the first attempt and never lands;
+        // the other three succeed on the first try.
+        adapter.script(correlationId(groupId, windowStart, "security"),
+                FailureCategory.PERMANENT);
+        DigestDelivery digestDelivery = wiredDelivery(new RecordingRepo(), deliveryRepo);
+
+        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
+                section("security", "section A"),
+                section("crypto", "section B"),
+                section("ai", "section C"),
+                section(null, "section Other")));
+
+        assertEquals(Set.of("crypto", "ai", "other"),
+                deliveryRepo.recordedSlugs(groupId, windowStart),
+                "only accepted categories record a delivery — the PERMANENT-failing "
+                        + "category records nothing");
+    }
+
+    @Test
+    void recordsDeliveryOnceForRetriedThenSuccessfulCategory() {
+        // A TRANSIENT-then-successful category throws on the failed attempt
+        // (no recording) and returns once on the retry (one recording). The
+        // delivery record fires exactly once per delivered message, not per
+        // attempt — the recording seam runs inside the wrapper's send() on
+        // normal return only.
+        RecordingDeliveryRepo deliveryRepo = new RecordingDeliveryRepo();
+        ScriptedAdapter adapter = new ScriptedAdapter(ADAPTER_NAME);
+        UUID groupId = UUID.randomUUID();
+        Instant windowStart = Instant.now();
+        adapter.script(correlationId(groupId, windowStart, "security"),
+                FailureCategory.TRANSIENT);
+        DigestDelivery digestDelivery = wiredDelivery(new RecordingRepo(), deliveryRepo);
+
+        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
+                section("security", "section A")));
+
+        assertEquals(1, deliveryRepo.recordCount(groupId, windowStart, "security"),
+                "a retried-then-successful category records exactly once");
+    }
+
+    @Test
+    void deliveryRecordWriteFailure_doesNotAbortRemainingCategories() {
+        // A record-write failure degrades to the spec-sanctioned duplicate
+        // on later replay (D64 at-least-once) — propagation would abort the
+        // remaining categories, the very defect this ticket fixes. The
+        // wrapper catches, logs, and continues; every category still sends.
+        RecordingDeliveryRepo deliveryRepo = RecordingDeliveryRepo.failingAlways();
+        ScriptedAdapter adapter = new ScriptedAdapter(ADAPTER_NAME);
+        UUID groupId = UUID.randomUUID();
+        Instant windowStart = Instant.now();
+        DigestDelivery digestDelivery = wiredDelivery(new RecordingRepo(), deliveryRepo);
+
+        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
+                section("security", "A"),
+                section("crypto", "B"),
+                section(null, "Other")));
+
+        assertEquals(3, adapter.sent.size(),
+                "all three categories still delivered — a record-write failure must NOT "
+                        + "abort the remaining categories");
+    }
+
+    @Test
     void appendsClosingAffordanceOnlyToFinalMessage() {
         // The closing affordance is folded into the LAST section's text
         // inside renderSections() (M1-652 fork closed, arm (b), 2026-07-20).
@@ -254,6 +330,14 @@ class DigestDeliveryTest {
     private static DigestDelivery wiredDelivery(RecordingRepo repo) {
         DigestDelivery digestDelivery = new DigestDelivery();
         digestDelivery.outboundDelivery = newDelivery(repo);
+        digestDelivery.deliveryRepository = new RecordingDeliveryRepo();
+        return digestDelivery;
+    }
+
+    private static DigestDelivery wiredDelivery(RecordingRepo repo, RecordingDeliveryRepo deliveryRepo) {
+        DigestDelivery digestDelivery = new DigestDelivery();
+        digestDelivery.outboundDelivery = newDelivery(repo);
+        digestDelivery.deliveryRepository = deliveryRepo;
         return digestDelivery;
     }
 
@@ -271,6 +355,48 @@ class DigestDeliveryTest {
         @Override
         public void markRemovedAudited(UUID groupId, String adapter) {
             removed.add(groupId);
+        }
+    }
+
+    /**
+     * Recording {@link DigestCategoryDeliveryRepository} stub: captures
+     * {@code recordDelivery} calls keyed by (groupId, windowStart, slug)
+     * without touching the DB; can be made to throw on every write to pin
+     * the catch-and-log path.
+     */
+    static final class RecordingDeliveryRepo extends DigestCategoryDeliveryRepository {
+        private final Map<String, Integer> counts = new HashMap<>();
+        private final boolean fail;
+
+        RecordingDeliveryRepo() { this(false); }
+
+        private RecordingDeliveryRepo(boolean fail) { this.fail = fail; }
+
+        static RecordingDeliveryRepo failingAlways() { return new RecordingDeliveryRepo(true); }
+
+        Set<String> recordedSlugs(UUID groupId, Instant windowStart) {
+            Set<String> slugs = new HashSet<>();
+            String prefix = groupId + "|" + windowStart + "|";
+            for (String key : counts.keySet()) {
+                if (key.startsWith(prefix)) {
+                    slugs.add(key.substring(prefix.length()));
+                }
+            }
+            return slugs;
+        }
+
+        int recordCount(UUID groupId, Instant windowStart, String slug) {
+            return counts.getOrDefault(groupId + "|" + windowStart + "|" + slug, 0);
+        }
+
+        @Override
+        public void recordDelivery(UUID groupId, Instant windowStart, String categorySlug)
+                throws SQLException {
+            if (fail) {
+                throw new SQLException("scripted record-write failure");
+            }
+            String key = groupId + "|" + windowStart + "|" + categorySlug;
+            counts.merge(key, 1, Integer::sum);
         }
     }
 

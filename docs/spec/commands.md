@@ -1124,8 +1124,21 @@ and makes the digest query depend on row presence.
   persistence). After a Provider restart, a `/retry --digest`
   posts a *new* message (with prose noting it replaces the prior
   cached digest for subsequent reads); the original message is
-  not edited because the handle is gone. See decision D36 and
-  `messaging.md` §Failure handling for adjacent delivery rules.
+  not edited because the handle is gone. For a partially-delivered
+  slot (the Provider died mid-sequence), `/retry --digest` narrows
+  WHICH categories it posts — only those with no persisted
+  delivery record — replayed byte-faithfully from the render
+  persisted at the original slot's fire time (decision D65). This
+  is deterministic: the replay delivers the digest it is retrying
+  (the originally rendered bytes), not a re-collection that could
+  sweep in posts published since the crash. A slot with no
+  persisted sections (a degraded slot, a zero-post slot, a pre-V61
+  cache row, or a crash-stranded cache row) falls back to today's
+  full re-run. The "posts a *new* message" commitment is preserved
+  verbatim — this narrows which categories are posted, it never
+  edits and never silently suppresses the whole message. See
+  decision D36, D65, and `messaging.md` §Failure handling for
+  adjacent delivery rules.
 
 ### Admin (bot admin)
 
@@ -1735,19 +1748,20 @@ per-message attribution would let one simplex-chat subprocess
 restart yield ≥3 instant PERMANENTs in milliseconds). See
 `messaging.md` §Failure handling for the chokepoint primitive.
 
-**Redelivery may duplicate (D63, D64).** Nothing in v1 records
-which categories were delivered, so a `/retry --digest` re-runs
-the slot and re-posts every category it produces, including any
-that already landed — consistent with §Conversation control,
-which commits that `/retry --digest` posts a new message. Each
-category message carries a per-(slot, category) correlationId
+**Redelivery may duplicate (D63, D64).** `/retry --digest` for a
+fully-delivered slot still re-posts every category (gap-filling
+replay finds nothing missing and reports so explicitly). For a
+partially-delivered slot, `/retry --digest` posts only the
+categories with no persisted delivery record (decision D65),
+replayed byte-faithfully from the originally-rendered bytes —
+still consistent with §Conversation control, which commits that
+`/retry --digest` posts a new message. Each category message
+carries a per-(slot, category) correlationId
 `digest-<groupId>-<windowStart>-<categorySlug>` (the literal
 `other` for the Other bucket); the id is NOT stable across
-regenerations and nothing dedups on it (D64). Gap-filling
-redelivery — sending only the categories a prior attempt missed
-— needs persisted per-(slot, category) delivery state and is a
-follow-up ticket's job; until then, `/retry --digest` re-posts
-every category.
+regenerations and nothing dedups on it (D64) — a full re-run
+fallback still produces fresh bytes, and even the byte-faithful
+replay posts a NEW message (it never edits the original).
 
 **Optional per-category roll-up.** When
 `infochat.digest.category-summary-enabled` (default `false`) is

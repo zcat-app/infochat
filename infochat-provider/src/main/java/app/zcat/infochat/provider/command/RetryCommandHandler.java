@@ -449,6 +449,10 @@ public class RetryCommandHandler implements CommandHandler {
         return switch (result) {
             case SUCCESS -> reply(scope,
                     bundleLoader.get(BundleKeys.REPLY_RETRY_DIGEST_SUCCESS, inboundContext.effectiveLanguage()));
+            case REPLAYED_MISSING -> reply(scope,
+                    bundleLoader.get(BundleKeys.REPLY_RETRY_DIGEST_REPLAYED_MISSING, inboundContext.effectiveLanguage()));
+            case ALL_ALREADY_DELIVERED -> reply(scope,
+                    bundleLoader.get(BundleKeys.REPLY_RETRY_DIGEST_ALL_ALREADY_DELIVERED, inboundContext.effectiveLanguage()));
             case ALREADY_IN_PROGRESS -> reply(scope,
                     bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_ALREADY_IN_PROGRESS, inboundContext.effectiveLanguage()));
             case NO_PRIOR_DIGEST -> reply(scope,

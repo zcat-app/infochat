@@ -1,0 +1,2672 @@
+diff --git a/docs/plan/m1/STATUS.md b/docs/plan/m1/STATUS.md
+index 1bcc23f5..b165e157 100644
+--- a/docs/plan/m1/STATUS.md
++++ b/docs/plan/m1/STATUS.md
+@@ -10,8 +10,8 @@
+ 
+ | Status | Count |
+ |---|---|
+-| pending | 4 |
+-| in-progress | 0 |
++| pending | 3 |
++| in-progress | 1 |
+ | in-review | 0 |
+ | escalated | 0 |
+ | done | 679 |
+@@ -26,7 +26,6 @@
+ Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
+ 
+ - M1-649 — Conceptual topic corpus: curated answers, intent-shaped matching, code-anchored guards (retrieval only) (complexity: high, risk: high)
+-- M1-652 — Gap-filling redelivery for per-category digests (complexity: high, risk: medium)
+ - M1-667 — Route user-content exception catches through SafeLog (complexity: medium, risk: low)
+ 
+ ---
+@@ -35,8 +34,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
+ 
+ | ID | Title | Status | Last review |
+ |---|---|---|---|
+-
+-_(none)_
++| M1-652 | Gap-filling redelivery for per-category digests | in-progress | (none) |
+ 
+ ---
+ 
+@@ -869,7 +867,7 @@ M1-639 (done)
+ M1-640 (done)
+ M1-641 (done)
+   ├── M1-642 (done)
+-  │     └── M1-652 (pending) ← runnable
++  │     └── M1-652 (in-progress)
+   └── M1-643 (abandoned)
+ M1-644 (done)
+ M1-645 (done)
+diff --git a/docs/plan/m1/tickets/M1-652-gap-filling-digest-redelivery.md b/docs/plan/m1/tickets/M1-652-gap-filling-digest-redelivery.md
+index 0cfeff74..7e1cf6cf 100644
+--- a/docs/plan/m1/tickets/M1-652-gap-filling-digest-redelivery.md
++++ b/docs/plan/m1/tickets/M1-652-gap-filling-digest-redelivery.md
+@@ -1,7 +1,7 @@
+ ---
+ id: M1-652
+ title: "Gap-filling redelivery for per-category digests"
+-status: pending
++status: in-progress
+ created: 2026-07-18
+ last_updated: 2026-07-21
+ blocked_by:
+@@ -33,6 +33,13 @@ risk: medium
+ round_cap: 3
+ security_relevant: false
+ migration_touch: true
++outline_file: target/m1-tick-outline-M1-652.md
++clarity_check:
++  date: 2026-07-21
++  verdict: PASS
++  warnings:
++    - "Self-check at start, post-refine round 2: lint PASS 0/0. V61 re-verified next (max V60 on disk) and D65 re-verified reserved for this ticket, both this session. Full consumer-closure sweep of every changed surface performed in-session before the refine: retryHorizon (3 files, all in scope), RetryResult (sole production call site RetryCommandHandler:448; out-of-scope IT references survive enum growth), expires_at (no readers outside in-scope digest classes), delivery seam (deliverSequenceToGroup takes adapter param; DigestDelivery:89 supplies it), pruning premise corrected (no summary_cache DELETE exists), fallback clamp property exists (application.properties:574). All five new scope paths verified on disk."
++  blockers: []
+ escalations:
+   - date: 2026-07-18
+     reason: clarity-fail
+diff --git a/docs/spec/commands.md b/docs/spec/commands.md
+index f62bbb2d..6016b977 100644
+--- a/docs/spec/commands.md
++++ b/docs/spec/commands.md
+@@ -1124,8 +1124,21 @@ and makes the digest query depend on row presence.
+   persistence). After a Provider restart, a `/retry --digest`
+   posts a *new* message (with prose noting it replaces the prior
+   cached digest for subsequent reads); the original message is
+-  not edited because the handle is gone. See decision D36 and
+-  `messaging.md` §Failure handling for adjacent delivery rules.
++  not edited because the handle is gone. For a partially-delivered
++  slot (the Provider died mid-sequence), `/retry --digest` narrows
++  WHICH categories it posts — only those with no persisted
++  delivery record — replayed byte-faithfully from the render
++  persisted at the original slot's fire time (decision D65). This
++  is deterministic: the replay delivers the digest it is retrying
++  (the originally rendered bytes), not a re-collection that could
++  sweep in posts published since the crash. A slot with no
++  persisted sections (a degraded slot, a zero-post slot, a pre-V61
++  cache row, or a crash-stranded cache row) falls back to today's
++  full re-run. The "posts a *new* message" commitment is preserved
++  verbatim — this narrows which categories are posted, it never
++  edits and never silently suppresses the whole message. See
++  decision D36, D65, and `messaging.md` §Failure handling for
++  adjacent delivery rules.
+ 
+ ### Admin (bot admin)
+ 
+@@ -1735,19 +1748,20 @@ per-message attribution would let one simplex-chat subprocess
+ restart yield ≥3 instant PERMANENTs in milliseconds). See
+ `messaging.md` §Failure handling for the chokepoint primitive.
+ 
+-**Redelivery may duplicate (D63, D64).** Nothing in v1 records
+-which categories were delivered, so a `/retry --digest` re-runs
+-the slot and re-posts every category it produces, including any
+-that already landed — consistent with §Conversation control,
+-which commits that `/retry --digest` posts a new message. Each
+-category message carries a per-(slot, category) correlationId
++**Redelivery may duplicate (D63, D64).** `/retry --digest` for a
++fully-delivered slot still re-posts every category (gap-filling
++replay finds nothing missing and reports so explicitly). For a
++partially-delivered slot, `/retry --digest` posts only the
++categories with no persisted delivery record (decision D65),
++replayed byte-faithfully from the originally-rendered bytes —
++still consistent with §Conversation control, which commits that
++`/retry --digest` posts a new message. Each category message
++carries a per-(slot, category) correlationId
+ `digest-<groupId>-<windowStart>-<categorySlug>` (the literal
+ `other` for the Other bucket); the id is NOT stable across
+-regenerations and nothing dedups on it (D64). Gap-filling
+-redelivery — sending only the categories a prior attempt missed
+-— needs persisted per-(slot, category) delivery state and is a
+-follow-up ticket's job; until then, `/retry --digest` re-posts
+-every category.
++regenerations and nothing dedups on it (D64) — a full re-run
++fallback still produces fresh bytes, and even the byte-faithful
++replay posts a NEW message (it never edits the original).
+ 
+ **Optional per-category roll-up.** When
+ `infochat.digest.category-summary-enabled` (default `false`) is
+diff --git a/docs/spec/decisions.md b/docs/spec/decisions.md
+index 67b3283f..13de940c 100644
+--- a/docs/spec/decisions.md
++++ b/docs/spec/decisions.md
+@@ -79,6 +79,7 @@ edits the existing row and notes the supersession (do not delete).
+ | D62 | Periodic digest structure is deterministic tag arithmetic; the LLM touches only per-cluster prose | The non-degraded periodic group digest groups its clusters under topic category headers computed by **pure tag arithmetic** — a qualifying-tag threshold (a tag must be carried by at least N clusters, default 3), highest-digest-wide-count assignment with alphabetical tie-break, a fold-back second pass that folds under-threshold categories into Other, section order by assigned-cluster count descending then alphabetical with Other always last, a per-section item cap (default 12) with a localized "+N more" line, and one closing affordance line (`commands.md` §Periodic group digests). No LLM call participates in the structure: given the same clusters + tags the section layout is byte-identical, extending the D19 "deterministic retrieval, LLM only for prose" boundary from the retrieved set to the digest's rendered structure. Per-cluster LLM prose is generated only for the clusters actually shown (capped-out clusters would waste LLM calls on never-rendered prose). The per-cluster prose step, `/summary`'s flat interactive format, and the degraded digest (D17) are unchanged. |
+ | D63 | Periodic digest delivery is one message per category; one slot contributes at most one aggregate counter outcome; redelivery may duplicate | A non-degraded periodic digest (D62) with at least one post is delivered as **one outbound message per category** (plus one "Other" message when the Other bucket is non-empty, bounded at categories+1) — never two categories merged into one message, never one category split across two. Category messages are sent **sequentially in section order** (D62 order: assigned-cluster count descending, alphabetical ties, Other last), never fanned out in parallel; sequential order is what makes "closing affordance on the last message" deterministic and preserves the digest's narrative order (a parallel implementation would pass every other listed delivery property). The closing affordance is folded into the LAST section's text inside the render pass, so the per-message affordance lands once per digest on the final category message only. The zero-posts fixed reply and the degraded (D17) headlines-only digest stay single-message — they have no per-category structure. **Partial-failure policy:** each category message runs the existing per-message TRANSIENT-retry / PERMANENT-abort ladder independently; a TRANSIENT failure retries only that message, and a PERMANENT failure on one category still delivers the others (partial success is visible, not all-or-nothing). **Slot-level counter attribution:** one digest slot contributes at most ONE outcome to the per-group consecutive-permanent-failure counter — delivered via the new `OutboundDelivery.deliverSequenceToGroup(adapter, messages, groupId)`, which loops the per-message ladder unattributed (the same form `deliver` uses for DMs) and applies a single aggregate afterwards: any success resets, all-permanent increments once, an interrupt that stops the sequence early attributes nothing. This is not optional hardening: the threshold (3 in every profile except `pi`, 5) was calibrated for one message per slot, and SimpleX classifies a send on a closed or not-yet-started WebSocket as an IMMEDIATE PERMANENT (`SimpleXWebSocketClient.sendCommand`; `onClose` fails every pending future the same way), so naive per-category `deliverToGroup` calls would let one routine simplex-chat subprocess restart during the sequential loop yield ≥3 instant PERMANENTs in milliseconds — soft-removing a healthy group with no admin notification. The threshold's documented "always > 1, so a single misclassified failure cannot trigger it" invariant dies under naive per-message attribution; collapsing the slot to one aggregate preserves it. Each category message carries a per-(slot, category) correlationId `digest-<groupId>-<windowStart>-<categorySlug>`, where `categorySlug` is the category's tag string as-is and the literal `other` for the Other bucket; the id is NOT stable across regenerations and nothing dedups on it (D64). **Redelivery may duplicate:** nothing in v1 records which categories were delivered, so `/retry --digest` re-runs the slot and re-posts every category it produces, including any that already landed — consistent with `commands.md` §Conversation control, which commits that `/retry --digest` posts a new message. Each call is independent and produces a fresh N sends. Gap-filling redelivery — sending only the categories a prior attempt missed — needs persisted per-(slot, category) delivery state AND replay state, and is M1-652's job (decided 2026-07-20, arm (b): M1-652 also persists the section list at render time and replays it on retry); this row records that **M1-642 owns none of it**. Recorded by M1-642. |
+ | D64 | Outbound delivery is at-least-once; `correlationId` is not a dedup key and no chokepoint mechanism will make it one | v1 outbound delivery is **at-least-once**: a retry after an ambiguous send failure MAY deliver a duplicate, and nothing suppresses it. `OutboundMessage.correlationId`'s only SPI commitment is **non-nullity** — the prior javadoc claim that it is "stable across retries of the same logical outbound" was **false** and is retired, as is `06-messaging.md` §6.3.5's "adapters SHOULD deduplicate by correlationId over a 60-second window" (no adapter ever did). Stability is a per-call-site property: all but three `new OutboundMessage(...)` sites mint a fresh `UUID.randomUUID()`, so a correlationId-keyed dedup table is inert at nearly every site, and the three stable-id sites (`DigestWorker`, `ApproveGroupCommandHandler`, `RejectGroupCommandHandler`) are deliberate re-sends that must NOT be suppressed — `/retry --digest` is spec-mandated to post again (`commands.md` §Conversation control). The retired 60 s window was also shorter than the sequence it covered: back-off sleeps total under 750 ms, but `SimpleXAdapter.ACK_TIMEOUT` is 30 s per transmit, so three attempts span ~90 s (× N for an N-chunk send). **The bar to reopening this is a transport-level fact, not a Provider-side design:** the duplicate arises from an ambiguous transmit, and only the adapter or transport can observe whether it landed — a Provider chokepoint records success only after the adapter reports it, so it is structurally blind to that case. Any future at-most-once work is therefore adapter/transport-level. This row exists because the false stability claim was load-bearing in two ticket designs (M1-642, M1-652) before anyone checked the call sites; recording the *reason* the guarantee is unavailable is what keeps it from being re-derived. Recorded by M1-653 (pure-doc; no behavior change). |
++| D65 | Gap-filling `/retry --digest` replays persisted render bytes for the categories a prior attempt missed; the cache-row horizon is decoupled from the user-facing cooldown | A `/retry --digest` for a slot whose render persisted its per-category sections (V61 `digest_section`, written by `DigestWorker.executeSlot` at render time alongside the `summary_cache` upsert) replays ONLY the categories with no `digest_category_delivery` row — byte-faithfully, deterministically, and LLM-free: no post re-collection, no re-render, no translation. The replayed bytes are the exact `renderSections()` output the slot originally produced (the M1-642 arm-(b) pin), so a retry delivers the digest it is retrying rather than one that sweeps in posts published since the crash (a previously-unfiled oddity). A slot with no persisted sections (a degraded slot, a zero-post slot, a pre-V61 cache row, or a crash-stranded cache row) falls back to today's full re-run path; the fallback's render budget is bounded by the configured digest window width, never by the retention horizon, so a retry never acquires a many-hours LLM timeout. **Delivery recording rule:** a category message the adapter accepts records a `digest_category_delivery` row on scheduled delivery AND on replay delivery alike — through the same `DigestDelivery.deliver` seam (a delegating adapter wrapper), so a failed send records nothing and the existing per-category TRANSIENT/PERMANENT ladder is unchanged. The recording is idempotent (`ON CONFLICT DO NOTHING`) to tolerate the scheduled-vs-replay race D64's at-least-once permits. **Counter-safety guard:** a replay that filters down to zero categories short-circuits BEFORE the chokepoint (`OutboundDelivery.deliverSequenceToGroup`'s empty-list path would increment the permanent-failure counter — the method is frozen, so the caller-side guard is the only in-scope option) and returns a distinct `ALL_ALREADY_DELIVERED` reply. **Horizon decoupling:** `summary_cache.expires_at` and the V61 tables' prune eligibility move from `infochat.digest.retry-cooldown` (default PT2M) to a new `infochat.digest.replay-retention` (default PT24H); the cooldown returns to cooldown-only duty. The decoupling is load-bearing: the replay path needs a horizon wide enough to cover the operator window a human notices a truncated digest (~hours), but the cooldown must stay short to bound LLM cost from rapid retries. Coupling them — the pre-M1-652 shape — meant widening the horizon widened the cooldown, so the ~2-minute cliff was unreachable. The fallback slot's `windowEnd` is clamped to `min(cache.expires_at, now + window_width)` so the clamp preserves today's expired-row-degrades semantics while still killing the cliff for live rows. **Persistence ordering:** sections persist BEFORE any category message leaves the process (after the cache upsert, before the adapter lookup) so a crash between render and deliver leaves the bytes durably readable for a later gap-filling retry — the crash-window correctness property the whole design rests on. Landed by M1-652 (V61 + the replay/delivery path). |
+ | D66 | The command-intent corpus is the second embedded corpus; retrieval is match-not-assert, tier-filter-before-return, and explicitly silent on chat delivery | The `doc_embedding` table (V60) is the second embedded corpus alongside `post_embedding` (V11) — one Postgres, one pgvector, one embedding model, both corpora at the 768 dimension pinned by `embedding_metadata`'s singleton (D54). The shape is the structural opposite of `post_embedding` on every load-bearing axis: NOT partitioned (a command-intent document has no TTL — it is correct until the command itself changes), Provider-written (the `CommandIntentIndexBuilder` runs at Provider startup and is the sole writer), and grant-opened to provider INSERT + DELETE so the DELETE-then-INSERT upsert can run (UPDATE withheld; the narrow-grant posture the M1-648 r2 CLEAN audit verified). Three invariants govern the read path (the `helpLookup` chat tool): (1) **Match-not-assert** — embedded text is used only for MATCHING, never for ASSERTING. The tool returns the matched command NAME plus the catalogue's one-line short-help line, composed at call time from the runtime `HelpCommandHandler.CATALOGUE`'s `bundleKey`; full usage/example bodies never enter the model context (the second out-of-scope entry of M1-664). A stale intent row can degrade a match but can never produce wrong syntax, because the tool never reads the stored text. (2) **Tier-filter-before-return** — the caller's visible command-name set is bound as `target_ref = ANY(?)` INSIDE the WHERE of the pgvector query, so an invisible command's name never enters the model context. This is the M1-647 existence-oracle defense widened to free-text input (a wider attack surface than the slash-command unknown-name path). The visible set is computed by the SAME `HelpCommandHandler.visible` tier predicate `/help` applies at listing time, resolved for the chat-tool identity via `HelpCommandHandler.resolveCallerTier(userId, scopeKind, scopeId)`. (3) **D19 determinism** — the match is decided entirely by SQL (pgvector cosine + threshold + tier filter), reproducible on unchanged DB state; the LLM never picks the match. This row is **explicitly silent on chat delivery**: how a matched command's usage reaches the user is the M1-663 spec amendment, implemented by M1-665. The M1-648 r2 redteam regression (medium INJECTION: post-sanitize, model-elected append of privileged command usage) is what the silence buys — the delivery decision is made deliberately elsewhere, not inherited here. Companion to M1-647 (the probation-reachable synonym path, NOT superseded by this corpus — both tiers ship). Recorded by M1-664. |
+ | D67 | Chat-mode command usage is delivered by a deterministic trigger over the caller's inbound text, composed via the `/help` runtime path, capped at one block per reply | When a chat-mode caller asks in free text how to do something a command provides ("how do I stop seeing posts from this source" → `/unfollow-source`), the usage block is delivered by **deterministic code**, not by the model electing to deliver it. The trigger lives in `ChatAgent.doHandle` ahead of the LLM call: it embeds the caller's inbound text and probes `doc_embedding` (the M1-664 command-intent corpus) via the SAME `CommandIntentIndex.lookupCommand` entry point the `helpLookup` tool uses, with the caller's visible command set bound as `target_ref = ANY(?)` INSIDE the WHERE (tier-filter-before-return, inherited from D66). A model-elected `helpLookup` call reaches the model context only — never the delivery decision. The trigger's similarity threshold (0.70) is intentionally higher than the tool's (0.60): the tool answers the model's question "which command matches this phrase"; the trigger answers "did the CALLER ask how to do something" — a different question with a higher false-positive cost (an unsolicited usage block on every turn that merely mentions a topic). Both thresholds are pinned as code constants; recalibration is a follow-up. The composed block is the byte-identical output of `HelpCommandHandler.composeUsageBlock` — the same method `/help <cmd>` invokes — plus a fixed bundle-localized header (`CHAT_HELP_DELIVERY_HEADER`). It is appended AFTER sanitize + translate and is the SINGLE authorized post-sanitize accretion under the M1-663 amendment to security.md §LLM output sanitizer: both the emission DECISION (deterministic SQL) and the composed BYTES (fixed bundle keys + closed-list CATALOGUE walk) are deterministic end-to-end. The block is bundle-localized per the scope's `/lang` (the `/help` path's existing behavior), so it does NOT pass through `TranslationPipeline` (D43 two-path rule). At most ONE block per reply: the trigger's SQL is `LIMIT 1`, so at most one match drives at most one composeUsageBlock call. Defense-in-depth: `composeUsageBlock` re-checks tier visibility before composing (a match the SQL tier filter should already have excluded is caught here too — `adminUsageNeverDeliveredToNonAdmin`). The M1-648 r2 INJECTION regression (post-sanitize, model-elected append of privileged command usage) is structurally dead under this design: an attacker-influenced model cannot cause delivery, because the model is never asked and its tool elections do not flow into the trigger. Recorded by M1-665. |
+ 
+diff --git a/infochat-core/src/main/resources/db/migration/V61__digest_replay_state.sql b/infochat-core/src/main/resources/db/migration/V61__digest_replay_state.sql
+new file mode 100644
+index 00000000..80361140
+--- /dev/null
++++ b/infochat-core/src/main/resources/db/migration/V61__digest_replay_state.sql
+@@ -0,0 +1,113 @@
++-- V61: digest_replay_state — persisted render output + per-category delivery
++-- records (M1-652).
++--
++-- Lands the two tables the gap-filling /retry --digest path needs so a
++-- mid-sequence Provider death stops silently losing undelivered digest
++-- categories. arm (b) of the M1-652 fork (user decision 2026-07-20): the
++-- rendered section list is PERSISTED at render time as the exact delivery
++-- bytes, and /retry --digest replays only the categories with no delivery
++-- record — deterministic, byte-faithful, LLM-free. A full re-run fallback
++-- covers section-less slots (pre-V61 rows, degraded slots, zero-post slots,
++-- crash-stranded cache rows); see docs/spec/commands.md §Conversation control
++-- and decision D65.
++--
++-- Both tables are keyed by (group_id, window_start, category_slug) — the SAME
++-- tuple DigestDelivery composes the per-(slot, category) correlationId from
++-- (DigestDelivery.java:82), so the persisted delivery-state key and the
++-- outbound correlationId cannot drift. window_start joins summary_cache.
++-- slot_fired_at exactly (the cache upsert keys on windowStart ==
++-- DigestSlot.windowStart()); slot_kind is omitted because morning/evening
++-- slots use distinct center hours (DigestScheduler), so (group_id,
++-- window_start) cannot collide across slot kinds — the pinned PKs are safe.
++--
++-- Atomic Flyway migration: both CREATE TABLEs + grants apply in one
++-- transaction so a partial failure rolls back cleanly.
++
++-- ---------------------------------------------------------------------
++-- digest_section — the persisted render output, one row per section in
++-- renderSections() order. Written alongside the summary_cache upsert at
++-- render time (DigestWorker.executeSlot, after renderSections() returns
++-- and before per-category delivery) so a crash between render and deliver
++-- leaves the sections durably readable for replay. Deleted-then-inserted
++-- atomically per slot (a slot's prior sections are wiped before the new
++-- list is written, in one transaction with the matching delivery-record
++-- wipe — see DigestSectionRepository.replaceSlotSections — so replay never
++-- half-applies when a regeneration supersedes an existing row).
++--
++-- group_id        Internal groups.id; joins summary_cache.group_id.
++-- window_start    DigestSlot.windowStart(); joins summary_cache.slot_fired_at.
++-- category_slug   The section's tag string as-is, literal "other" for the
++--                 null (Other) bucket — identical to DigestDelivery.java:81.
++-- position        0-based list index of the section in renderSections()
++--                 output; drives replay's position-order traversal.
++-- content         The EXACT delivery bytes — RenderedSection.text(),
++--                 affordance folded into the last section and flag-on
++--                 roll-up prefixes inside their sections (M1-642 arm-(b) pin).
++-- ---------------------------------------------------------------------
++
++CREATE TABLE digest_section (
++    group_id       UUID NOT NULL,
++    window_start   TIMESTAMPTZ NOT NULL,
++    category_slug  TEXT NOT NULL,
++    position       INT NOT NULL,
++    content        TEXT NOT NULL,
++    PRIMARY KEY (group_id, window_start, category_slug)
++);
++
++-- position-order traversal of a slot's sections. The PK already covers
++-- (group_id, window_start) lookups via the prefix, but a position-ordered
++-- read would otherwise need a sort; this secondary index keeps the replay
++-- path a single ordered scan.
++CREATE INDEX idx_digest_section_slot_order
++    ON digest_section (group_id, window_start, position);
++
++-- ---------------------------------------------------------------------
++-- digest_category_delivery — the per-(slot, category) delivery record.
++-- A row exists iff the adapter accepted that category's message (recorded
++-- by the delegating MessagingAdapter wrapper inside DigestDelivery on a
++-- normal return from send(); a failed send records nothing, so the existing
++-- per-category TRANSIENT/PERMANENT ladder is unchanged). /retry --digest
++-- reads this to compute which categories still need sending and skips the
++-- rest — the gap-fill.
++--
++-- delivered_at is a record-only write (it logs WHEN the adapter accepted,
++-- it gates nothing), so it stays on SQL now() rather than the injected
++-- java.time.Clock the replay decision gates use (CLAUDE.md §Injectable
++-- time in decision logic — the display/record exemption).
++-- ---------------------------------------------------------------------
++
++CREATE TABLE digest_category_delivery (
++    group_id       UUID NOT NULL,
++    window_start   TIMESTAMPTZ NOT NULL,
++    category_slug  TEXT NOT NULL,
++    delivered_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
++    PRIMARY KEY (group_id, window_start, category_slug)
++);
++
++-- ---------------------------------------------------------------------
++-- Per-table GRANTs (aligned with docs/spec/security.md §DB roles, V60's
++-- narrow-grant posture the M1-648 r2 CLEAN audit verified).
++--
++-- Both tables are Provider-owned: DigestWorker writes sections at render
++-- time, DigestDelivery records deliveries on adapter acceptance, and the
++-- retry path reads both. The replace shape is DELETE-then-INSERT (one
++-- transaction), the delivery record is idempotent INSERT ON CONFLICT DO
++-- NOTHING, and pruning is a prefix DELETE — so INSERT + DELETE + SELECT
++-- is the full surface. UPDATE is withheld and REVOKEd: nothing in the
++-- Provider ever needs to mutate a row in place (every change is a full
++-- slot-replace or a no-op-conflict insert), and withholding UPDATE keeps
++-- the grant surface minimal in case a role-inheritance surprise widens
++-- the defaults.
++--
++-- The Collector is granted NOTHING on either table. Replay state is
++-- Provider-only; the Collector's summary_cache grants (V23/V46) are
++-- unchanged.
++-- ---------------------------------------------------------------------
++
++GRANT SELECT, INSERT, DELETE ON digest_section TO infochat_provider;
++REVOKE UPDATE ON digest_section FROM infochat_provider;
++REVOKE UPDATE ON digest_section FROM PUBLIC;
++
++GRANT SELECT, INSERT, DELETE ON digest_category_delivery TO infochat_provider;
++REVOKE UPDATE ON digest_category_delivery FROM infochat_provider;
++REVOKE UPDATE ON digest_category_delivery FROM PUBLIC;
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
+index af6bdd61..62754fa3 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
+@@ -1490,6 +1490,20 @@ public final class BundleKeys {
+     /** {@code /retry --digest} success — digest re-generation initiated. */
+     public static final String REPLY_RETRY_DIGEST_SUCCESS = "reply.retry.digest_success";
+ 
++    /**
++     * {@code /retry --digest} replayed the missing categories from the
++     * persisted render — gap-filling redelivery (M1-652, D65).
++     */
++    public static final String REPLY_RETRY_DIGEST_REPLAYED_MISSING =
++            "reply.retry.digest_replayed_missing";
++
++    /**
++     * {@code /retry --digest} for a slot where every category already
++     * landed — nothing was re-sent (M1-652, D65).
++     */
++    public static final String REPLY_RETRY_DIGEST_ALL_ALREADY_DELIVERED =
++            "reply.retry.digest_all_already_delivered";
++
+     // ----- /promote + /demote + /group-timezone (M1-079c) ---------------------
+     // Per docs/spec/security.md §Authorization model (one group admin per
+     // group, first-mention auto-promote, /promote swaps admin) +
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java
+index a199c2e3..6ec4d4d2 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java
+@@ -449,6 +449,10 @@ public class RetryCommandHandler implements CommandHandler {
+         return switch (result) {
+             case SUCCESS -> reply(scope,
+                     bundleLoader.get(BundleKeys.REPLY_RETRY_DIGEST_SUCCESS, inboundContext.effectiveLanguage()));
++            case REPLAYED_MISSING -> reply(scope,
++                    bundleLoader.get(BundleKeys.REPLY_RETRY_DIGEST_REPLAYED_MISSING, inboundContext.effectiveLanguage()));
++            case ALL_ALREADY_DELIVERED -> reply(scope,
++                    bundleLoader.get(BundleKeys.REPLY_RETRY_DIGEST_ALL_ALREADY_DELIVERED, inboundContext.effectiveLanguage()));
+             case ALREADY_IN_PROGRESS -> reply(scope,
+                     bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_ALREADY_IN_PROGRESS, inboundContext.effectiveLanguage()));
+             case NO_PRIOR_DIGEST -> reply(scope,
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestCategoryDeliveryRepository.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestCategoryDeliveryRepository.java
+new file mode 100644
+index 00000000..c1eea31f
+--- /dev/null
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestCategoryDeliveryRepository.java
+@@ -0,0 +1,104 @@
++package app.zcat.infochat.provider.digest;
++
++import jakarta.enterprise.context.ApplicationScoped;
++import jakarta.inject.Inject;
++
++import javax.sql.DataSource;
++import java.sql.Connection;
++import java.sql.PreparedStatement;
++import java.sql.ResultSet;
++import java.sql.SQLException;
++import java.sql.Timestamp;
++import java.time.Instant;
++import java.util.HashSet;
++import java.util.Set;
++import java.util.UUID;
++
++/**
++ * JDBC repository for the {@code digest_category_delivery} table (V61) — the
++ * per-(slot, category) delivery record that gap-filling {@code /retry --digest}
++ * reads to compute which categories still need sending. A row exists iff the
++ * adapter accepted that category's message (recorded by the delegating
++ * {@link MessagingAdapter} wrapper inside {@link DigestDelivery} on a normal
++ * return from {@code send()}); a failed send records nothing, so the existing
++ * per-category TRANSIENT/PERMANENT ladder is unchanged (M1-652, decision D65).
++ *
++ * <p>Recording is idempotent ({@link #recordDelivery} uses {@code ON CONFLICT
++ * DO NOTHING}): the scheduled-vs-replay race D64's at-least-once already
++ * permits means a category may be delivered twice, and the second recording
++ * must not error. The {@code delivered_at} write is record-only — it logs
++ * when the adapter accepted, it gates nothing — so it stays on SQL
++ * {@code now()} rather than the injected {@link java.time.Clock} the replay
++ * decision gates use (CLAUDE.md §Injectable time in decision logic — the
++ * display/record exemption).
++ *
++ * <p>The slot-level prune ({@link DigestSectionRepository#pruneExpiredForGroup})
++ * covers both replay tables in one transaction; this repo exposes no separate
++ * prune because the two tables MUST be pruned atomically (a divergent
++ * section/delivery retention is exactly the half-state the design rules out).
++ */
++@ApplicationScoped
++public class DigestCategoryDeliveryRepository {
++
++    @Inject
++    DataSource dataSource;
++
++    /**
++     * Record that a category was delivered — called by the delegating
++     * {@code MessagingAdapter.send()} wrapper inside {@link DigestDelivery}
++     * on a normal return (the adapter accepted the message). A retried-
++     * then-successful send throws on failed attempts and returns once, so
++     * this records exactly once per delivered message. Idempotent on the
++     * (group_id, window_start, category_slug) PK via {@code ON CONFLICT DO
++     * NOTHING}: a duplicate record (the scheduled-vs-replay race D64
++     * permits) is a silent no-op, not an error.
++     *
++     * @param windowStart the digest slot's {@code window_start} (joins
++     *                    {@code summary_cache.slot_fired_at}); part of the
++     *                    PK, so the slug+slot tuple identifies one delivery
++     * @param categorySlug the section's slug — identical to the
++     *                     {@code correlationId} component {@link DigestDelivery}
++     *                     mints, never derived independently here
++     */
++    public void recordDelivery(UUID groupId,
++                               Instant windowStart,
++                               String categorySlug) throws SQLException {
++        try (Connection conn = dataSource.getConnection();
++             PreparedStatement ps = conn.prepareStatement(
++                     "INSERT INTO digest_category_delivery"
++                             + " (group_id, window_start, category_slug, delivered_at)"
++                             + " VALUES (?, ?, ?, now())"
++                             + " ON CONFLICT (group_id, window_start, category_slug)"
++                             + " DO NOTHING")) {
++            ps.setObject(1, groupId);
++            ps.setTimestamp(2, Timestamp.from(windowStart));
++            ps.setString(3, categorySlug);
++            ps.executeUpdate();
++        }
++    }
++
++    /**
++     * Read the set of category slugs already delivered for this slot.
++     * {@link DigestRetryService} subtracts this from the persisted sections
++     * to compute the missing set; an empty set means "replay everything"
++     * (the first attempt recorded nothing, e.g. it crashed before any
++     * delivery landed).
++     */
++    public Set<String> findDeliveredSlugs(UUID groupId,
++                                          Instant windowStart) throws SQLException {
++        try (Connection conn = dataSource.getConnection();
++             PreparedStatement ps = conn.prepareStatement(
++                     "SELECT category_slug FROM digest_category_delivery"
++                             + " WHERE group_id = ? AND window_start = ?")) {
++            ps.setObject(1, groupId);
++            ps.setTimestamp(2, Timestamp.from(windowStart));
++            Set<String> slugs = new HashSet<>();
++            try (ResultSet rs = ps.executeQuery()) {
++                while (rs.next()) {
++                    slugs.add(rs.getString("category_slug"));
++                }
++            }
++            return slugs;
++        }
++    }
++}
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestDelivery.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestDelivery.java
+index def5fc00..d45f820e 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestDelivery.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestDelivery.java
+@@ -1,6 +1,10 @@
+ package app.zcat.infochat.provider.digest;
+ 
++import app.zcat.infochat.messaging.AdapterTrustLevel;
++import app.zcat.infochat.messaging.CapabilityFlags;
++import app.zcat.infochat.messaging.MessageHandle;
+ import app.zcat.infochat.messaging.MessagingAdapter;
++import app.zcat.infochat.messaging.MessagingException;
+ import app.zcat.infochat.messaging.OutboundMessage;
+ import app.zcat.infochat.messaging.ScopeRef;
+ import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
+@@ -8,11 +12,16 @@ import app.zcat.infochat.provider.messaging.OutboundDelivery;
+ import jakarta.enterprise.context.ApplicationScoped;
+ import jakarta.inject.Inject;
+ 
++import java.sql.SQLException;
+ import java.time.Instant;
+ import java.util.ArrayList;
++import java.util.IdentityHashMap;
+ import java.util.List;
++import java.util.Map;
+ import java.util.UUID;
+ 
++import org.jboss.logging.Logger;
++
+ /**
+  * Delivers a per-category digest — one {@link OutboundMessage} per
+  * rendered section, sent SEQUENTIALLY in section order through
+@@ -42,34 +51,60 @@ import java.util.UUID;
+  * category, including ones already delivered (M1-652 owns gap-filling
+  * redelivery).
+  *
++ * <p><b>Delivery recording (M1-652, D65).</b> A category message the adapter
++ * ACCEPTS records a {@code digest_category_delivery} row — on scheduled
++ * delivery AND on replay delivery alike (both reach the adapter through
++ * this same {@code deliver()} method, so the recording seam is shared). A
++ * failed send records nothing, so the existing per-category
++ * TRANSIENT/PERMANENT ladder is unchanged. Recording happens inside a
++ * delegating wrapper around the adapter so the chokepoint
++ * ({@link OutboundDelivery#deliverSequenceToGroup}) is untouched
++ * (OutboundDelivery is frozen, M1-652 out-of-scope). A record-write failure
++ * is caught and logged: a missing record degrades to the spec-sanctioned
++ * duplicate on later replay (D64 at-least-once), while propagation would
++ * abort the remaining categories — the very defect this ticket fixes.
++ *
+  * <p>This class sends whatever ordered section list it is handed; it
+  * appends nothing, mutates nothing, and joins nothing.
+  * {@link DigestRenderer#renderSections}'s output is the exact delivery
+- * bytes (M1-652 fork closed, arm (b), 2026-07-20).
++ * bytes (M1-652 fork closed, arm (b), 2026-07-20). Replay filters the
++ * section list BEFORE calling {@code deliver()} ({@link DigestRetryService}),
++ * never inside it — {@code deliver()} itself never filters.
+  */
+ @ApplicationScoped
+ public class DigestDelivery {
+ 
++    private static final Logger LOG = Logger.getLogger(DigestDelivery.class);
++
+     @Inject
+     OutboundDelivery outboundDelivery;
+ 
++    @Inject
++    DigestCategoryDeliveryRepository deliveryRepository;
++
+     /**
+      * Send one {@link OutboundMessage} per section sequentially in section
+      * order. Single-message paths (zero-posts fixed reply, degraded
+      * headlines-only) never enter this class — they keep today's
+      * {@link OutboundDelivery#deliverToGroup} call.
+      *
++     * <p>Both the scheduled path ({@link DigestWorker}) and the replay path
++     * ({@link DigestRetryService}) call this method, so delivery recording
++     * runs through the same seam for both — satisfying "on scheduled
++     * delivery AND on replay delivery alike" (acceptance item 3).
++     *
+      * @param adapter            the activated messaging adapter for the group
+      * @param upstreamGroupId    the adapter's group id (becomes the
+      *                           {@link ScopeRef.Group} target)
+      * @param internalGroupId    the internal {@code groups.id} (drives the
+-     *                           per-group permanent-failure counter and the
+-     *                           correlationId)
++     *                           per-group permanent-failure counter, the
++     *                           correlationId, and the delivery-record key)
+      * @param windowStart        the digest slot's {@code window_start}
+      *                           (correlationId component; M1-652's
+      *                           delivery-state key inherits the tuple)
+      * @param sections           the ordered per-category rendered sections
+      *                           from {@link DigestRenderer#renderSections}
++     *                           (or the filtered subset for replay)
+      */
+     public void deliver(MessagingAdapter adapter,
+                         String upstreamGroupId,
+@@ -77,15 +112,94 @@ public class DigestDelivery {
+                         Instant windowStart,
+                         List<RenderedSection> sections) {
+         List<OutboundMessage> messages = new ArrayList<>(sections.size());
++        // Identity map so the wrapper can recover the slug from the exact
++        // message object the chokepoint hands back to adapter.send(). An
++        // equals-based map would also work (records have structural equals),
++        // but identity is tighter and free.
++        Map<OutboundMessage, String> messageSlugs = new IdentityHashMap<>();
+         for (RenderedSection section : sections) {
+-            String categorySlug = section.tag() != null ? section.tag() : "other";
++            String categorySlug = DigestSectionRepository.slugOf(section);
+             String correlationId = "digest-" + internalGroupId + "-" + windowStart + "-" + categorySlug;
+-            messages.add(new OutboundMessage(
++            OutboundMessage msg = new OutboundMessage(
+                     new ScopeRef.Group(upstreamGroupId),
+                     section.text(),
+                     Instant.now(),
+-                    correlationId));
++                    correlationId);
++            messages.add(msg);
++            messageSlugs.put(msg, categorySlug);
++        }
++        MessagingAdapter recording = new RecordingAdapter(
++                adapter, deliveryRepository, internalGroupId, windowStart, messageSlugs);
++        outboundDelivery.deliverSequenceToGroup(recording, messages, internalGroupId);
++    }
++
++    /**
++     * Delegating {@link MessagingAdapter} that records a delivery row on the
++     * adapter's normal return from {@code send()}. The chokepoint's retry
++     * ladder calls {@code send()} directly; a failed attempt throws (no
++     * recording), and a retried-then-successful attempt throws on the failed
++     * attempts then returns once — so {@code recordDelivery} fires exactly
++     * once per delivered message. Every other method is pure delegation.
++     */
++    private static final class RecordingAdapter implements MessagingAdapter {
++        private final MessagingAdapter delegate;
++        private final DigestCategoryDeliveryRepository deliveryRepository;
++        private final UUID internalGroupId;
++        private final Instant windowStart;
++        private final Map<OutboundMessage, String> messageSlugs;
++
++        RecordingAdapter(MessagingAdapter delegate,
++                         DigestCategoryDeliveryRepository deliveryRepository,
++                         UUID internalGroupId,
++                         Instant windowStart,
++                         Map<OutboundMessage, String> messageSlugs) {
++            this.delegate = delegate;
++            this.deliveryRepository = deliveryRepository;
++            this.internalGroupId = internalGroupId;
++            this.windowStart = windowStart;
++            this.messageSlugs = messageSlugs;
++        }
++
++        @Override
++        public MessageHandle send(OutboundMessage msg) throws MessagingException {
++            // Delegate first — a throw means the adapter did NOT accept, so
++            // no delivery is recorded and the existing ladder runs unchanged.
++            MessageHandle handle = delegate.send(msg);
++            String slug = messageSlugs.get(msg);
++            if (slug != null) {
++                try {
++                    deliveryRepository.recordDelivery(internalGroupId, windowStart, slug);
++                } catch (SQLException e) {
++                    // Catch-and-log, never propagate: a missing record
++                    // degrades to the spec-sanctioned duplicate on the next
++                    // replay (D64 at-least-once permits it), while throwing
++                    // here would abort the remaining categories — the very
++                    // defect M1-652 exists to fix.
++                    LOG.warnf(e,
++                            "Delivery record write failed for group %s category %s — "
++                                    + "degrading to duplicate-on-replay",
++                            internalGroupId, slug);
++                }
++            }
++            return handle;
++        }
++
++        @Override public String name() { return delegate.name(); }
++        @Override public CapabilityFlags capabilities() { return delegate.capabilities(); }
++        @Override public AdapterTrustLevel trustLevel() { return delegate.trustLevel(); }
++        @Override public boolean isWellFormedContactId(String contactId) {
++            return delegate.isWellFormedContactId(contactId);
++        }
++        @Override public void update(MessageHandle h, String b) throws MessagingException {
++            delegate.update(h, b);
++        }
++        @Override public void finalizeMessage(MessageHandle h, String b) throws MessagingException {
++            delegate.finalizeMessage(h, b);
++        }
++        @Override public void setTyping(ScopeRef s, boolean t) { delegate.setTyping(s, t); }
++        @Override public void setInboundHandler(InboundHandler h) {
++            delegate.setInboundHandler(h);
+         }
+-        outboundDelivery.deliverSequenceToGroup(adapter, messages, internalGroupId);
+     }
+ }
++
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRetryService.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRetryService.java
+index 98c078b8..b642b78f 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRetryService.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRetryService.java
+@@ -1,5 +1,8 @@
+ package app.zcat.infochat.provider.digest;
+ 
++import app.zcat.infochat.messaging.MessagingAdapter;
++import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
++import app.zcat.infochat.provider.messaging.AdapterRegistry;
+ import jakarta.enterprise.context.ApplicationScoped;
+ import jakarta.inject.Inject;
+ import org.eclipse.microprofile.config.inject.ConfigProperty;
+@@ -15,6 +18,7 @@ import java.time.Duration;
+ import java.time.Instant;
+ import java.util.UUID;
+ import java.util.concurrent.ConcurrentHashMap;
++import java.util.List;
+ 
+ /**
+  * Per-group serialized retry of the most recent digest. Invoked by
+@@ -22,6 +26,18 @@ import java.util.concurrent.ConcurrentHashMap;
+  * the {@code --digest} flag is present. At most one retry is in flight
+  * per group at any time (Provider-instance-local; a restart clears
+  * in-progress state per spec).
++ *
++ * <p><b>Gap-filling replay (M1-652, D65).</b> A retry for a slot with
++ * persisted sections (written by {@link DigestWorker} at render time)
++ * replays those bytes — no re-collection, no render, no LLM call — sending
++ * ONLY the categories with no delivery record, sequentially in stored
++ * position order, through {@link DigestDelivery#deliver} (which routes
++ * through {@code OutboundDelivery.deliverSequenceToGroup} and records each
++ * accepted category). A slot with NO persisted sections (pre-V61 row,
++ * degraded slot, zero-post slot, or a crash-stranded cache row) falls back
++ * to today's full re-run path. The fallback's render budget is bounded by
++ * the configured digest window width, never by the 24-hour replay-retention
++ * horizon, so a retry never acquires a many-hours LLM timeout.
+  */
+ @ApplicationScoped
+ public class DigestRetryService {
+@@ -32,8 +48,9 @@ public class DigestRetryService {
+                     + " WHERE group_id = ?"
+                     + " ORDER BY slot_fired_at DESC LIMIT 1";
+ 
+-    private static final String SELECT_GROUP_TIMEZONE =
+-            "SELECT timezone FROM groups WHERE id = ?";
++    private static final String SELECT_GROUP_FOR_REPLAY =
++            "SELECT timezone, adapter, upstream_group_id"
++                    + " FROM groups WHERE id = ?";
+ 
+     // Provider-instance-local lock: cleared on restart per spec
+     private final ConcurrentHashMap<UUID, Boolean> inFlight = new ConcurrentHashMap<>();
+@@ -46,6 +63,18 @@ public class DigestRetryService {
+     @Inject
+     DigestWorker digestWorker;
+ 
++    @Inject
++    DigestSectionRepository sectionRepository;
++
++    @Inject
++    DigestCategoryDeliveryRepository deliveryRepository;
++
++    @Inject
++    DigestDelivery digestDelivery;
++
++    @Inject
++    AdapterRegistry adapterRegistry;
++
+     // Per-group cooldown decision time comes from the injected Clock, not
+     // Instant.now(), so the retry-cooldown gate is pinnable in tests. The
+     // lastRetryAt write and the cooldown read both sample this one Clock — the
+@@ -57,20 +86,28 @@ public class DigestRetryService {
+     @ConfigProperty(name = "infochat.digest.retry-cooldown", defaultValue = "PT2M")
+     Duration retryCooldown;
+ 
++    // The fallback render budget is bounded by the digest window width so a
++    // section-less retry never acquires a many-hours LLM timeout (the
++    // replay-retention horizon). An int-minutes property matching
++    // DigestScheduler's slot window; the @ConfigProperty default carries the
++    // same value as application.properties.
++    @ConfigProperty(name = "infochat.digest.window-width-minutes", defaultValue = "30")
++    int windowWidthMinutes;
++
+     /**
+-     * Retry the most recent digest for the given group by re-executing the
+-     * digest worker with a synthetic slot built from the old row's
+-     * coordinates. The worker overwrites the cache row atomically (UPSERT),
+-     * so the existing digest is never deleted ahead of its replacement.
++     * Retry the most recent digest for the given group. Gate order is
++     * preserved from pre-M1-652: cooldown first, then per-group in-flight,
++     * then cache-row existence. Only the cache-row path is widened — a
++     * live, section-bearing row now replays instead of re-running.
+      *
+-     * <p>If the worker skips the run because a concurrent scheduled execution
+-     * already holds its in-flight guard, the cache row is left untouched and
+-     * this returns {@link RetryResult#ALREADY_IN_PROGRESS} — not SUCCESS, which
+-     * would falsely claim a regeneration that never happened.
++     * <p>Cooldown stamping: stamped on REPLAYED_MISSING and the fallback
++     * SUCCESS (both sent messages); NOT stamped on ALL_ALREADY_DELIVERED
++     * (nothing sent, LLM-free — a later real retry should not be blocked).
+      */
+     public RetryResult retryDigest(UUID groupId) {
++        Instant now = clock.instant();
+         Instant last = lastRetryAt.get(groupId);
+-        if (last != null && clock.instant().isBefore(last.plus(retryCooldown))) {
++        if (last != null && now.isBefore(last.plus(retryCooldown))) {
+             return RetryResult.RATE_LIMITED;
+         }
+         if (inFlight.putIfAbsent(groupId, Boolean.TRUE) != null) {
+@@ -81,25 +118,116 @@ public class DigestRetryService {
+             if (coords == null) {
+                 return RetryResult.NO_PRIOR_DIGEST;
+             }
+-            String timezone = lookupGroupTimezone(groupId);
+-            if (timezone == null) {
++            GroupReplayMeta meta = lookupGroupForReplay(groupId);
++            if (meta == null) {
+                 return RetryResult.NO_PRIOR_DIGEST;
+             }
+-            DigestSlot slot = new DigestSlot(
+-                    groupId, timezone, coords.slotKind,
+-                    coords.slotFiredAt, coords.expiresAt);
+-            if (digestWorker.execute(slot) == DigestWorker.SlotOutcome.SKIPPED_IN_FLIGHT) {
+-                // A concurrent scheduled run owns the slot — the cache is
+-                // intact (we never deleted it) and untouched by this retry.
+-                return RetryResult.ALREADY_IN_PROGRESS;
++            // Replay path: a non-expired cache row with persisted sections
++            // replays the exact delivery bytes. Expired row OR missing
++            // sections → fallback to the full re-run (clamped window).
++            if (coords.expiresAt.isAfter(now)) {
++                List<RenderedSection> sections;
++                try {
++                    sections = sectionRepository.findOrderedSections(groupId, coords.slotFiredAt);
++                } catch (SQLException e) {
++                    throw new IllegalStateException(
++                            "DigestRetryService: section lookup failed", e);
++                }
++                if (!sections.isEmpty()) {
++                    return replayMissing(groupId, coords, meta, sections, now);
++                }
+             }
+-            lastRetryAt.put(groupId, clock.instant());
+-            return RetryResult.SUCCESS;
++            return fallbackRerun(groupId, coords, meta, now);
+         } finally {
+             inFlight.remove(groupId);
+         }
+     }
+ 
++    /**
++     * Replay only the categories with no delivery record. Returns
++     * {@link RetryResult#ALL_ALREADY_DELIVERED} — WITHOUT touching
++     * {@code deliverSequenceToGroup} — when every category is already
++     * recorded, so an empty filtered list never reaches the chokepoint
++     * (acceptance item 5's counter-safety guard; OutboundDelivery is
++     * frozen so the caller-side short-circuit is the only in-scope option).
++     * Stamps {@code lastRetryAt} only when messages were actually sent.
++     */
++    private RetryResult replayMissing(UUID groupId, SlotCoordinates coords,
++                                      GroupReplayMeta meta,
++                                      List<RenderedSection> sections,
++                                      Instant now) {
++        java.util.Set<String> delivered;
++        try {
++            delivered = deliveryRepository.findDeliveredSlugs(groupId, coords.slotFiredAt);
++        } catch (SQLException e) {
++            throw new IllegalStateException(
++                    "DigestRetryService: delivery lookup failed", e);
++        }
++        List<RenderedSection> missing = new java.util.ArrayList<>();
++        for (RenderedSection s : sections) {
++            if (!delivered.contains(DigestSectionRepository.slugOf(s))) {
++                missing.add(s);
++            }
++        }
++        if (missing.isEmpty()) {
++            // No-op retry: every category already delivered. Stamp NOTHING
++            // (nothing was sent, no LLM cost) and report explicitly rather
++            // than a bare SUCCESS — the caller surfaces a distinct reply.
++            return RetryResult.ALL_ALREADY_DELIVERED;
++        }
++        MessagingAdapter adapter = findAdapter(meta.adapterName());
++        if (adapter == null) {
++            // No activated adapter for the group: mirror today's log-and-
++            // succeed shape (DigestWorker:229-233) — the bytes are
++            // persisted, a later delivery attempt picks them up. The
++            // acceptance pins exactly two new constants, so inventing a
++            // failure constant here is off the table.
++            return RetryResult.REPLAYED_MISSING;
++        }
++        digestDelivery.deliver(adapter, meta.upstreamGroupId(), groupId,
++                coords.slotFiredAt, missing);
++        lastRetryAt.put(groupId, now);
++        return RetryResult.REPLAYED_MISSING;
++    }
++
++    /**
++     * Fallback full re-run for a slot with no persisted sections: rebuild
++     * the synthetic slot and invoke the worker. The slot's windowEnd is
++     * clamped to {@code min(coords.expiresAt, now + windowWidth)} so the
++     * worker's render budget is bounded by the window width (never the
++     * 24-hour retention horizon), while an expired row still degrades
++     * exactly as today (preserving the current behavior nothing in this
++     * ticket authorizes changing).
++     */
++    private RetryResult fallbackRerun(UUID groupId, SlotCoordinates coords,
++                                      GroupReplayMeta meta, Instant now) {
++        Duration windowWidth = Duration.ofMinutes(windowWidthMinutes);
++        Instant clampedWindowEnd = min(coords.expiresAt, now.plus(windowWidth));
++        DigestSlot slot = new DigestSlot(
++                groupId, meta.timezone, coords.slotKind,
++                coords.slotFiredAt, clampedWindowEnd);
++        if (digestWorker.execute(slot) == DigestWorker.SlotOutcome.SKIPPED_IN_FLIGHT) {
++            // A concurrent scheduled run owns the slot — the cache is
++            // intact (we never deleted it) and untouched by this retry.
++            return RetryResult.ALREADY_IN_PROGRESS;
++        }
++        lastRetryAt.put(groupId, now);
++        return RetryResult.SUCCESS;
++    }
++
++    private static Instant min(Instant a, Instant b) {
++        return a.isBefore(b) ? a : b;
++    }
++
++    private @Nullable MessagingAdapter findAdapter(String adapterName) {
++        for (MessagingAdapter adapter : adapterRegistry.activatedAdapters()) {
++            if (adapter.name().equals(adapterName)) {
++                return adapter;
++            }
++        }
++        return null;
++    }
++
+     private @Nullable SlotCoordinates findLatestCacheEntry(UUID groupId) {
+         try (Connection conn = dataSource.getConnection();
+              PreparedStatement ps = conn.prepareStatement(SELECT_LATEST_CACHE)) {
+@@ -119,24 +247,29 @@ public class DigestRetryService {
+         }
+     }
+ 
+-    private @Nullable String lookupGroupTimezone(UUID groupId) {
++    private @Nullable GroupReplayMeta lookupGroupForReplay(UUID groupId) {
+         try (Connection conn = dataSource.getConnection();
+-             PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_TIMEZONE)) {
++             PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_FOR_REPLAY)) {
+             ps.setObject(1, groupId);
+             try (ResultSet rs = ps.executeQuery()) {
+                 if (!rs.next()) {
+                     return null;
+                 }
+-                return rs.getString("timezone");
++                return new GroupReplayMeta(
++                        rs.getString("timezone"),
++                        rs.getString("adapter"),
++                        rs.getString("upstream_group_id"));
+             }
+         } catch (SQLException e) {
+             throw new IllegalStateException(
+-                    "DigestRetryService.lookupGroupTimezone failed", e);
++                    "DigestRetryService.lookupGroupForReplay failed", e);
+         }
+     }
+ 
+     public enum RetryResult {
+         SUCCESS,
++        REPLAYED_MISSING,
++        ALL_ALREADY_DELIVERED,
+         ALREADY_IN_PROGRESS,
+         NO_PRIOR_DIGEST,
+         RATE_LIMITED
+@@ -147,4 +280,10 @@ public class DigestRetryService {
+             Instant slotFiredAt,
+             Instant expiresAt) {
+     }
++
++    record GroupReplayMeta(
++            String timezone,
++            String adapterName,
++            String upstreamGroupId) {
++    }
+ }
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestSectionRepository.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestSectionRepository.java
+new file mode 100644
+index 00000000..d2ed8cfa
+--- /dev/null
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestSectionRepository.java
+@@ -0,0 +1,225 @@
++package app.zcat.infochat.provider.digest;
++
++import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
++
++import jakarta.enterprise.context.ApplicationScoped;
++import jakarta.inject.Inject;
++
++import javax.sql.DataSource;
++import java.sql.Connection;
++import java.sql.PreparedStatement;
++import java.sql.ResultSet;
++import java.sql.SQLException;
++import java.sql.Timestamp;
++import java.time.Instant;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.UUID;
++
++/**
++ * JDBC repository for the {@code digest_section} table (V61) — the persisted
++ * render output that gap-filling {@code /retry --digest} replays. One row per
++ * section in {@link DigestRenderer#renderSections} order; written at render
++ * time alongside the {@code summary_cache} upsert, replayed byte-faithfully
++ * by {@link DigestRetryService} when the slot has missing categories (M1-652
++ * arm (b), decision D65).
++ *
++ * <p>The slot-replace operation ({@link #replaceSlotSections}) is atomic
++ * across BOTH replay tables: it wipes this slot's prior sections AND delivery
++ * records in one transaction before inserting the new section list, so a
++ * regeneration never leaves stale delivery records that would suppress
++ * categories the new render would re-send. "Replay never half-applies" is
++ * a load-bearing property of the gap-fill design.
++ *
++ * <p>Slug derivation ({@link #slugOf}) is the single shared tag→slug rule
++ * the delivery path and the persistence path must agree on; {@link DigestDelivery}
++ * uses the identical rule, so the persisted {@code (group_id, window_start,
++ * category_slug)} key and the per-message {@code correlationId} cannot drift.
++ */
++@ApplicationScoped
++public class DigestSectionRepository {
++
++    @Inject
++    DataSource dataSource;
++
++    /**
++     * Atomically replace this slot's persisted sections AND delivery records,
++     * then opportunistically prune expired rows for the group. A regeneration
++     * produces new bytes, so every prior row tied to the old render (sections
++     * AND delivery records) is wiped before the new section list is written —
++     * all in one transaction so a partial commit cannot leave stale state
++     * behind. The opportunistic prune keeps the two tables from growing
++     * unboundedly across slots without a separate scheduled prune job.
++     *
++     * @param now decision-gate "now" from the injected {@link java.time.Clock}
++     *            of the caller ({@link DigestWorker}); never an inline
++     *            {@code Instant.now()} (CLAUDE.md §Injectable time in decision
++     *            logic). Drives the prune comparison only.
++     */
++    public void replaceSlotSections(UUID groupId,
++                                    Instant windowStart,
++                                    List<RenderedSection> sections,
++                                    Instant now) throws SQLException {
++        try (Connection conn = dataSource.getConnection()) {
++            conn.setAutoCommit(false);
++            try {
++                replaceSlotSections(conn, groupId, windowStart, sections);
++                pruneExpiredForGroup(conn, groupId, now);
++                conn.commit();
++            } catch (SQLException e) {
++                conn.rollback();
++                throw e;
++            } finally {
++                conn.setAutoCommit(true);
++            }
++        }
++    }
++
++    /**
++     * Connection-accepting variant for callers that compose this with other
++     * writes in an enclosing transaction. Does not commit or roll back;
++     * transaction control stays with the caller.
++     */
++    public void replaceSlotSections(Connection conn,
++                                    UUID groupId,
++                                    Instant windowStart,
++                                    List<RenderedSection> sections) throws SQLException {
++        // Wipe prior state in BOTH replay tables. A regeneration's bytes
++        // diverge from the prior render, so the prior delivery records no
++        // longer correspond to anything the new render would send — leaving
++        // them would suppress categories in the next replay.
++        try (PreparedStatement delSections = conn.prepareStatement(
++                "DELETE FROM digest_section"
++                        + " WHERE group_id = ? AND window_start = ?")) {
++            delSections.setObject(1, groupId);
++            delSections.setTimestamp(2, Timestamp.from(windowStart));
++            delSections.executeUpdate();
++        }
++        try (PreparedStatement delDeliveries = conn.prepareStatement(
++                "DELETE FROM digest_category_delivery"
++                        + " WHERE group_id = ? AND window_start = ?")) {
++            delDeliveries.setObject(1, groupId);
++            delDeliveries.setTimestamp(2, Timestamp.from(windowStart));
++            delDeliveries.executeUpdate();
++        }
++        if (sections.isEmpty()) {
++            // A degraded or zero-post render persists no sections; the two
++            // deletes above still ran so any prior slot state is gone.
++            return;
++        }
++        try (PreparedStatement ps = conn.prepareStatement(
++                "INSERT INTO digest_section"
++                        + " (group_id, window_start, category_slug, position, content)"
++                        + " VALUES (?, ?, ?, ?, ?)")) {
++            for (int i = 0; i < sections.size(); i++) {
++                RenderedSection s = sections.get(i);
++                ps.setObject(1, groupId);
++                ps.setTimestamp(2, Timestamp.from(windowStart));
++                ps.setString(3, slugOf(s));
++                ps.setInt(4, i);
++                ps.setString(5, s.text());
++                ps.addBatch();
++            }
++            ps.executeBatch();
++        }
++    }
++
++    /**
++     * Read this slot's persisted sections in {@code renderSections()} order
++     * (position ascending). Empty for a slot that never produced sections
++     * (degraded, zero-post, pre-V61 row, or crash-stranded cache row) —
++     * {@link DigestRetryService} treats that as the fallback signal.
++     */
++    public List<RenderedSection> findOrderedSections(UUID groupId,
++                                                     Instant windowStart) throws SQLException {
++        try (Connection conn = dataSource.getConnection();
++             PreparedStatement ps = conn.prepareStatement(
++                     "SELECT category_slug, content FROM digest_section"
++                             + " WHERE group_id = ? AND window_start = ?"
++                             + " ORDER BY position")) {
++            ps.setObject(1, groupId);
++            ps.setTimestamp(2, Timestamp.from(windowStart));
++            List<RenderedSection> sections = new ArrayList<>();
++            try (ResultSet rs = ps.executeQuery()) {
++                while (rs.next()) {
++                    String slug = rs.getString("category_slug");
++                    String tag = "other".equals(slug) ? null : slug;
++                    sections.add(new RenderedSection(tag, rs.getString("content")));
++                }
++            }
++            return sections;
++        }
++    }
++
++    /**
++     * Prune expired replay state for a group — rows whose slot's
++     * {@code summary_cache.expires_at} is at or before {@code now}. Mirrors
++     * the {@code summary_cache} retention rule exactly (a slot's sections
++     * and delivery records live exactly as long as its cache row), so the
++     * three cannot diverge. Manages its own transaction.
++     *
++     * @param now decision-gate "now" from the caller's injected Clock; never
++     *            SQL {@code now()} (the comparison is a retention decision)
++     */
++    public int pruneExpiredForGroup(UUID groupId, Instant now) throws SQLException {
++        try (Connection conn = dataSource.getConnection()) {
++            conn.setAutoCommit(false);
++            try {
++                int deleted = pruneExpiredForGroup(conn, groupId, now);
++                conn.commit();
++                return deleted;
++            } catch (SQLException e) {
++                conn.rollback();
++                throw e;
++            } finally {
++                conn.setAutoCommit(true);
++            }
++        }
++    }
++
++    /**
++     * Connection-accepting variant. Deletes from BOTH replay tables the rows
++     * whose slot's {@code summary_cache} row has expired. Uses an INNER join
++     * to {@code summary_cache}: a stranded section with no cache row is not
++     * pruned here (and is not reachable by replay either, which resolves the
++     * slot through the cache row first), mirroring the cache row's own
++     * retention exactly.
++     */
++    public int pruneExpiredForGroup(Connection conn, UUID groupId, Instant now) throws SQLException {
++        int deleted = 0;
++        try (PreparedStatement ps = conn.prepareStatement(
++                "DELETE FROM digest_section"
++                        + " WHERE group_id = ?"
++                        + "   AND window_start IN ("
++                        + "       SELECT slot_fired_at FROM summary_cache"
++                        + "        WHERE group_id = ? AND expires_at <= ?)")) {
++            ps.setObject(1, groupId);
++            ps.setObject(2, groupId);
++            ps.setTimestamp(3, Timestamp.from(now));
++            deleted += ps.executeUpdate();
++        }
++        try (PreparedStatement ps = conn.prepareStatement(
++                "DELETE FROM digest_category_delivery"
++                        + " WHERE group_id = ?"
++                        + "   AND window_start IN ("
++                        + "       SELECT slot_fired_at FROM summary_cache"
++                        + "        WHERE group_id = ? AND expires_at <= ?)")) {
++            ps.setObject(1, groupId);
++            ps.setObject(2, groupId);
++            ps.setTimestamp(3, Timestamp.from(now));
++            deleted += ps.executeUpdate();
++        }
++        return deleted;
++    }
++
++    /**
++     * The shared tag→slug rule. {@code tag} is the section's controlled-
++     * vocabulary string as-is; the null (Other) bucket maps to the literal
++     * {@code "other"}. Identical to {@code DigestDelivery.java:81} so the
++     * persisted {@code category_slug} and the per-message {@code correlationId}
++     * cannot drift — this is the one place that rule is named.
++     */
++    static String slugOf(RenderedSection section) {
++        return section.tag() != null ? section.tag() : "other";
++    }
++}
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java
+index 5285c069..7c7735f4 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java
+@@ -70,6 +70,9 @@ public class DigestWorker {
+     @Inject
+     SummaryCacheRepository cacheRepository;
+ 
++    @Inject
++    DigestSectionRepository sectionRepository;
++
+     @Inject
+     BundleLoader bundleLoader;
+ 
+@@ -92,12 +95,15 @@ public class DigestWorker {
+     Clock clock = Clock.systemUTC();
+ 
+     // How long the cache row stays findable (non-expired) past the slot
+-    // window for /retry --digest. Reuses DigestRetryService's cooldown
+-    // property rather than introducing a new constant: the row's expires_at
+-    // becomes the synthetic retry slot's windowEnd, so it must outlive the
+-    // window the retry the cooldown permits is issued in.
+-    @ConfigProperty(name = "infochat.digest.retry-cooldown", defaultValue = "PT2M")
+-    Duration retryHorizon;
++    // window for /retry --digest, AND how long the persisted render output
++    // (digest_section) + delivery records (digest_category_delivery) stay
++    // prune-eligible (M1-652, D65). Decoupled from the user-facing cooldown
++    // (infochat.digest.retry-cooldown) so widening the replay horizon does
++    // not widen the cooldown: a retry now works at any point inside the
++    // retention horizon instead of a ~2-minute window. Default PT24H per
++    // M1-652 acceptance item 7.
++    @ConfigProperty(name = "infochat.digest.replay-retention", defaultValue = "PT24H")
++    Duration replayRetention;
+ 
+     // In-flight guard (ConcurrentHashMap-backed, keyed groupId+slotKind): a
+     // scheduler tick overrun re-fires a slot whose previous execution is
+@@ -220,10 +226,37 @@ public class DigestWorker {
+                 collection.sourceSubscriptionVersion(),
+                 content,
+                 isDegraded,
+-                // Outlive the slot window by the retry horizon so a
++                // Outlive the slot window by the replay retention so a
+                 // /retry --digest issued after windowEnd still finds a
+-                // non-expired row instead of degrading immediately.
+-                slot.windowEnd().plus(retryHorizon));
++                // non-expired row AND can replay persisted sections (M1-652
++                // decoupled this from retry-cooldown so the horizon can be
++                // PT24H without widening the user-facing cooldown).
++                slot.windowEnd().plus(replayRetention));
++
++        if (renderedSections != null) {
++            // Persist the exact delivery bytes (M1-652 arm (b)) right after
++            // the cache upsert and BEFORE any category message leaves the
++            // process (including before the adapter lookup below). A crash
++            // between this persist and the delivery call leaves the sections
++            // durably readable for a later gap-filling retry; a crash during
++            // the delivery loop leaves the undelivered categories' bytes
++            // intact. Persist-before-deliver is the crash-window correctness
++            // property the whole ticket exists for; a persist-after-deliver
++            // mistake would pass every happy-path test but lose the window.
++            // A persist failure logs and continues — the digest still
++            // delivers; a later retry falls back to the full re-run path
++            // (no sections found → fallback), so the system degrades
++            // gracefully rather than dropping the user's digest.
++            try {
++                sectionRepository.replaceSlotSections(
++                        slot.groupId(), slot.windowStart(),
++                        renderedSections, clock.instant());
++            } catch (SQLException persistFailure) {
++                LOG.warnf(persistFailure,
++                        "Section persist failed for group %s slot %s — delivering without replay state",
++                        slot.groupId(), slot.slotKind());
++            }
++        }
+ 
+         MessagingAdapter adapter = findAdapter(meta.adapterName());
+         if (adapter == null) {
+diff --git a/infochat-provider/src/main/resources/application.properties b/infochat-provider/src/main/resources/application.properties
+index a5ceda42..2da0f3bb 100644
+--- a/infochat-provider/src/main/resources/application.properties
++++ b/infochat-provider/src/main/resources/application.properties
+@@ -575,6 +575,12 @@ infochat.digest.window-width-minutes=30
+ %pi.infochat.digest.window-width-minutes=60
+ infochat.digest.tick-interval=60s
+ %test.infochat.digest.tick-interval=off
++# M1-652 replay-retention: how long the cache row + persisted render
++# sections + per-category delivery records stay findable past the slot
++# window for gap-filling /retry --digest. Decoupled from retry-cooldown
++# so the horizon can be PT24H without widening the user-facing cooldown.
++# The @ConfigProperty default carries the same value.
++infochat.digest.replay-retention=PT24H
+ 
+ # D47 group approval gate (M1-112). Per docs/design/04-security.md §4.9
+ # (per-group rate caps + per-user activation cap + global max-groups).
+diff --git a/infochat-provider/src/main/resources/bundles/cs.properties b/infochat-provider/src/main/resources/bundles/cs.properties
+index 9e81ff02..e0536a70 100644
+--- a/infochat-provider/src/main/resources/bundles/cs.properties
++++ b/infochat-provider/src/main/resources/bundles/cs.properties
+@@ -565,6 +565,8 @@ error.retry.digest_already_in_progress=Opakování souhrnu pro tuto skupinu již
+ error.retry.digest_no_prior=Pro tuto skupinu není žádný předchozí souhrn k opakování.
+ error.retry.digest_rate_limited=Před dalším opakováním souhrnu prosím počkejte několik minut.
+ reply.retry.digest_success=Opakování souhrnu dokončeno. Nově vygenerovaný souhrn nahrazuje předchozí.
++reply.retry.digest_replayed_missing=Opakování souhrnu dokončeno. Kategorie, které minule nedorazily, byly znovu odeslány z původního souhrnu; ty, které již dorazily, zůstaly beze změny.
++reply.retry.digest_all_already_delivered=Opakování souhrnu dokončeno. Všechny kategorie tohoto souhrnu již dorazily — nic nebylo znovu odesláno.
+ 
+ # ----- /promote (D47) -------------------------------------------------------
+ error.promote.group_scope_required=/promote vyžaduje rozsah skupiny. Spusťte jej ve skupině.
+diff --git a/infochat-provider/src/main/resources/bundles/en.properties b/infochat-provider/src/main/resources/bundles/en.properties
+index 4a3b680d..6d3deb3d 100644
+--- a/infochat-provider/src/main/resources/bundles/en.properties
++++ b/infochat-provider/src/main/resources/bundles/en.properties
+@@ -636,6 +636,8 @@ error.retry.digest_already_in_progress=A digest retry is already in progress for
+ error.retry.digest_no_prior=No prior digest to retry for this group.
+ error.retry.digest_rate_limited=Please wait a few minutes before retrying the digest again.
+ reply.retry.digest_success=Digest retry complete. The regenerated digest replaces the previous one.
++reply.retry.digest_replayed_missing=Digest retry complete. The categories that did not arrive last time were re-sent from the original digest; the ones that already landed were left as-is.
++reply.retry.digest_all_already_delivered=Digest retry complete. Every category of this digest already arrived — nothing was re-sent.
+ 
+ # ----- /promote + /demote + /group-timezone (M1-079c) -------------------------
+ # Per docs/spec/security.md §Authorization model (one group admin per group,
+diff --git a/infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryDigestCommandTest.java b/infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryDigestCommandTest.java
+index f62ec567..4071b57e 100644
+--- a/infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryDigestCommandTest.java
++++ b/infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryDigestCommandTest.java
+@@ -78,6 +78,34 @@ class RetryDigestCommandTest {
+                 "reply must indicate success. Got: " + reply.text());
+     }
+ 
++    @Test
++    void retryDigest_replayedMissingReply() {
++        // M1-652: a replay that re-sent the missing categories surfaces the
++        // distinct bundle reply so the admin knows it was a gap-fill, not a
++        // full re-generation.
++        digestRetryService.nextResult = RetryResult.REPLAYED_MISSING;
++
++        OutboundMessage reply = handler.handle(
++                new ScopeRef.Group("group-1"), "/retry --digest");
++
++        assertTrue(reply.text().contains("re-sent from the original digest"),
++                "reply must indicate the missing categories were replayed. Got: " + reply.text());
++    }
++
++    @Test
++    void retryDigest_allAlreadyDeliveredReply() {
++        // M1-652: a no-op retry (every category already arrived) surfaces the
++        // distinct reply so the admin knows nothing was re-sent, rather than
++        // a bare SUCCESS.
++        digestRetryService.nextResult = RetryResult.ALL_ALREADY_DELIVERED;
++
++        OutboundMessage reply = handler.handle(
++                new ScopeRef.Group("group-1"), "/retry --digest");
++
++        assertTrue(reply.text().contains("nothing was re-sent"),
++                "reply must indicate nothing was re-sent. Got: " + reply.text());
++    }
++
+     @Test
+     void retryDigest_rejectsNonAdmin() {
+         DataSource nonAdminStub = stubDigestDataSource(USER_ID, false, GROUP_ID);
+diff --git a/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestCategoryDeliveryRepositoryIT.java b/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestCategoryDeliveryRepositoryIT.java
+new file mode 100644
+index 00000000..5311128d
+--- /dev/null
++++ b/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestCategoryDeliveryRepositoryIT.java
+@@ -0,0 +1,175 @@
++package app.zcat.infochat.provider.digest;
++
++import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
++import app.zcat.infochat.provider.testsupport.SeedDataSource;
++import io.quarkus.test.junit.QuarkusTest;
++import jakarta.inject.Inject;
++import org.junit.jupiter.api.AfterEach;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++
++import javax.sql.DataSource;
++import java.sql.Connection;
++import java.sql.PreparedStatement;
++import java.sql.SQLException;
++import java.sql.Timestamp;
++import java.time.Instant;
++import java.util.List;
++import java.util.Set;
++import java.util.UUID;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++/**
++ * DB-tier IT for {@link DigestCategoryDeliveryRepository}: exercises the V61
++ * {@code digest_category_delivery} table under the {@code infochat_provider}
++ * grants, the idempotent INSERT ON CONFLICT DO NOTHING record (the
++ * scheduled-vs-replay race D64 permits), and the {@link
++ * DigestSectionRepository#pruneExpiredForGroup} cross-table prune that
++ * covers both replay tables atomically (acceptance items 1, 8, 9).
++ */
++@QuarkusTest
++class DigestCategoryDeliveryRepositoryIT {
++
++    private static final UUID GROUP = UUID.fromString("d1e52320-0c52-4000-8000-000000000001");
++    private static final UUID OTHER_GROUP = UUID.fromString("d1e52320-0c52-4000-8000-000000000002");
++    private static final Instant WINDOW_START = Instant.parse("2026-07-21T07:00:00Z");
++    private static final Instant EXPIRED = Instant.parse("2026-07-21T06:00:00Z");
++    private static final Instant LIVE = Instant.parse("2026-07-22T00:00:00Z");
++
++    @Inject @SeedDataSource DataSource dataSource;
++
++    @BeforeEach
++    @AfterEach
++    void cleanup() throws Exception {
++        try (Connection conn = dataSource.getConnection()) {
++            exec(conn, "DELETE FROM digest_section WHERE group_id IN (?, ?)", GROUP, OTHER_GROUP);
++            exec(conn, "DELETE FROM digest_category_delivery WHERE group_id IN (?, ?)", GROUP, OTHER_GROUP);
++            exec(conn, "DELETE FROM summary_cache WHERE group_id IN (?, ?)", GROUP, OTHER_GROUP);
++            exec(conn, "DELETE FROM groups WHERE id IN (?, ?)", GROUP, OTHER_GROUP);
++        }
++    }
++
++    @Test
++    void deliveryStateSurvivesRepositoryReconstruction() throws Exception {
++        // Acceptance item 8: write via one instance, read via a freshly
++        // constructed instance on the same DataSource — the delivery record
++        // must survive a Provider restart so a retry after the crash knows
++        // which categories already landed.
++        DigestCategoryDeliveryRepository writer = newRepo();
++        writer.recordDelivery(GROUP, WINDOW_START, "security");
++        writer.recordDelivery(GROUP, WINDOW_START, "crypto");
++
++        DigestCategoryDeliveryRepository reader = newRepo();
++        Set<String> delivered = reader.findDeliveredSlugs(GROUP, WINDOW_START);
++
++        assertEquals(Set.of("security", "crypto"), delivered,
++                "delivery state must survive repository reconstruction");
++    }
++
++    @Test
++    void recordDelivery_isIdempotentOnConflict() throws Exception {
++        // The scheduled-vs-replay race (D64 at-least-once) means a category
++        // may be delivered twice. The PK upsert with ON CONFLICT DO NOTHING
++        // makes the second record a silent no-op rather than an error, so a
++        // duplicate delivery cannot break the retry path.
++        DigestCategoryDeliveryRepository repo = newRepo();
++        repo.recordDelivery(GROUP, WINDOW_START, "security");
++        repo.recordDelivery(GROUP, WINDOW_START, "security");
++        repo.recordDelivery(GROUP, WINDOW_START, "security");
++
++        assertEquals(Set.of("security"), repo.findDeliveredSlugs(GROUP, WINDOW_START),
++                "duplicate records collapse to one row — ON CONFLICT DO NOTHING");
++    }
++
++    @Test
++    void pruneExpiredForGroup_dropsOnlyExpiredSlotsDeliveryRecords() throws Exception {
++        // Acceptance item 9 (cross-table coverage from the delivery side):
++        // the prune in DigestSectionRepository deletes from BOTH tables
++        // atomically. Seeding one expired + one live cache row, only the
++        // expired slot's delivery records drop.
++        seedGroup(GROUP);
++        seedGroup(OTHER_GROUP);
++        seedCacheRow(GROUP, WINDOW_START, EXPIRED);
++        seedCacheRow(OTHER_GROUP, WINDOW_START, LIVE);
++        DigestCategoryDeliveryRepository deliveries = newRepo();
++        // Seed the delivery rows via the section repo's replace so the
++        // cross-table replace also covers delivery (which it wipes first).
++        // Pass an EARLY now so the internal prune does not drop the rows
++        // before the test's explicit prune call.
++        Instant seedNow = Instant.parse("2026-07-21T05:00:00Z");
++        DigestSectionRepository seeder = newSectionRepo();
++        seeder.replaceSlotSections(GROUP, WINDOW_START, List.of(
++                new RenderedSection("security", "expired-slot section")), seedNow);
++        seeder.replaceSlotSections(OTHER_GROUP, WINDOW_START, List.of(
++                new RenderedSection("security", "live-slot section")), seedNow);
++        // Record deliveries for both groups (the replace wiped them; add
++        // them back directly for the prune test).
++        deliveries.recordDelivery(GROUP, WINDOW_START, "security");
++        deliveries.recordDelivery(OTHER_GROUP, WINDOW_START, "security");
++
++        Instant now = Instant.parse("2026-07-21T07:30:00Z");
++        int deleted = seeder.pruneExpiredForGroup(GROUP, now);
++
++        assertEquals(2, deleted,
++                "two rows pruned for the expired slot — one section + one delivery "
++                        + "(the cross-table prune deletes atomically from both)");
++        assertTrue(deliveries.findDeliveredSlugs(GROUP, WINDOW_START).isEmpty(),
++                "the expired slot's delivery records are gone");
++        assertEquals(Set.of("security"),
++                deliveries.findDeliveredSlugs(OTHER_GROUP, WINDOW_START),
++                "the live slot's delivery records in a different group are untouched");
++    }
++
++    // -- helpers ----------------------------------------------------------------
++
++    private DigestCategoryDeliveryRepository newRepo() {
++        DigestCategoryDeliveryRepository repo = new DigestCategoryDeliveryRepository();
++        repo.dataSource = dataSource;
++        return repo;
++    }
++
++    private DigestSectionRepository newSectionRepo() {
++        DigestSectionRepository repo = new DigestSectionRepository();
++        repo.dataSource = dataSource;
++        return repo;
++    }
++
++    private void seedGroup(UUID groupId) throws SQLException {
++        try (Connection conn = dataSource.getConnection();
++             PreparedStatement ps = conn.prepareStatement(
++                     "INSERT INTO groups (id, adapter, upstream_group_id,"
++                             + " display_name, timezone, approval_status)"
++                             + " VALUES (?, 'inmemory', ?, 'IT group', 'UTC', 'approved')"
++                             + " ON CONFLICT (id) DO NOTHING")) {
++            ps.setObject(1, groupId);
++            ps.setString(2, "upstream-" + groupId);
++            ps.executeUpdate();
++        }
++    }
++
++    private void seedCacheRow(UUID groupId, Instant windowStart, Instant expiresAt) throws SQLException {
++        try (Connection conn = dataSource.getConnection();
++             PreparedStatement ps = conn.prepareStatement(
++                     "INSERT INTO summary_cache"
++                     + " (group_id, slot_kind, slot_fired_at,"
++                     + "  tag_subscription_version, source_subscription_version,"
++                     + "  content, is_degraded, expires_at)"
++                     + " VALUES (?, 'morning', ?, 1, 1, 'fixture', false, ?)")) {
++            ps.setObject(1, groupId);
++            ps.setTimestamp(2, Timestamp.from(windowStart));
++            ps.setTimestamp(3, Timestamp.from(expiresAt));
++            ps.executeUpdate();
++        }
++    }
++
++    private static void exec(Connection conn, String sql, Object... params) throws SQLException {
++        try (PreparedStatement ps = conn.prepareStatement(sql)) {
++            for (int i = 0; i < params.length; i++) {
++                ps.setObject(i + 1, params[i]);
++            }
++            ps.executeUpdate();
++        }
++    }
++}
+diff --git a/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestDeliveryTest.java b/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestDeliveryTest.java
+index 736a556b..1a7ba7e9 100644
+--- a/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestDeliveryTest.java
++++ b/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestDeliveryTest.java
+@@ -15,12 +15,15 @@ import app.zcat.infochat.provider.messaging.OutboundDelivery;
+ import org.junit.jupiter.api.Test;
+ 
+ import java.time.Instant;
++import java.sql.SQLException;
+ import java.util.ArrayDeque;
+ import java.util.ArrayList;
+ import java.util.Deque;
+ import java.util.HashMap;
++import java.util.HashSet;
+ import java.util.List;
+ import java.util.Map;
++import java.util.Set;
+ import java.util.UUID;
+ import java.util.concurrent.CopyOnWriteArrayList;
+ import java.util.concurrent.atomic.AtomicInteger;
+@@ -217,6 +220,79 @@ class DigestDeliveryTest {
+                 "a PERMANENT on one category still delivers the others");
+     }
+ 
++    @Test
++    void recordsDeliveryOnlyOnAdapterAcceptance() {
++        // M1-652 acceptance item 3: a category message the adapter ACCEPTS
++        // records a digest_category_delivery row; a failed send records
++        // nothing, so the existing per-category ladder is unchanged. One
++        // category fails PERMANENT, the rest succeed — only the successful
++        // categories' slugs land in the delivery record.
++        RecordingDeliveryRepo deliveryRepo = new RecordingDeliveryRepo();
++        ScriptedAdapter adapter = new ScriptedAdapter(ADAPTER_NAME);
++        UUID groupId = UUID.randomUUID();
++        Instant windowStart = Instant.now();
++        // "security" fails PERMANENT on the first attempt and never lands;
++        // the other three succeed on the first try.
++        adapter.script(correlationId(groupId, windowStart, "security"),
++                FailureCategory.PERMANENT);
++        DigestDelivery digestDelivery = wiredDelivery(new RecordingRepo(), deliveryRepo);
++
++        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
++                section("security", "section A"),
++                section("crypto", "section B"),
++                section("ai", "section C"),
++                section(null, "section Other")));
++
++        assertEquals(Set.of("crypto", "ai", "other"),
++                deliveryRepo.recordedSlugs(groupId, windowStart),
++                "only accepted categories record a delivery — the PERMANENT-failing "
++                        + "category records nothing");
++    }
++
++    @Test
++    void recordsDeliveryOnceForRetriedThenSuccessfulCategory() {
++        // A TRANSIENT-then-successful category throws on the failed attempt
++        // (no recording) and returns once on the retry (one recording). The
++        // delivery record fires exactly once per delivered message, not per
++        // attempt — the recording seam runs inside the wrapper's send() on
++        // normal return only.
++        RecordingDeliveryRepo deliveryRepo = new RecordingDeliveryRepo();
++        ScriptedAdapter adapter = new ScriptedAdapter(ADAPTER_NAME);
++        UUID groupId = UUID.randomUUID();
++        Instant windowStart = Instant.now();
++        adapter.script(correlationId(groupId, windowStart, "security"),
++                FailureCategory.TRANSIENT);
++        DigestDelivery digestDelivery = wiredDelivery(new RecordingRepo(), deliveryRepo);
++
++        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
++                section("security", "section A")));
++
++        assertEquals(1, deliveryRepo.recordCount(groupId, windowStart, "security"),
++                "a retried-then-successful category records exactly once");
++    }
++
++    @Test
++    void deliveryRecordWriteFailure_doesNotAbortRemainingCategories() {
++        // A record-write failure degrades to the spec-sanctioned duplicate
++        // on later replay (D64 at-least-once) — propagation would abort the
++        // remaining categories, the very defect this ticket fixes. The
++        // wrapper catches, logs, and continues; every category still sends.
++        RecordingDeliveryRepo deliveryRepo = RecordingDeliveryRepo.failingAlways();
++        ScriptedAdapter adapter = new ScriptedAdapter(ADAPTER_NAME);
++        UUID groupId = UUID.randomUUID();
++        Instant windowStart = Instant.now();
++        DigestDelivery digestDelivery = wiredDelivery(new RecordingRepo(), deliveryRepo);
++
++        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
++                section("security", "A"),
++                section("crypto", "B"),
++                section(null, "Other")));
++
++        assertEquals(3, adapter.sent.size(),
++                "all three categories still delivered — a record-write failure must NOT "
++                        + "abort the remaining categories");
++    }
++
+     @Test
+     void appendsClosingAffordanceOnlyToFinalMessage() {
+         // The closing affordance is folded into the LAST section's text
+@@ -254,6 +330,14 @@ class DigestDeliveryTest {
+     private static DigestDelivery wiredDelivery(RecordingRepo repo) {
+         DigestDelivery digestDelivery = new DigestDelivery();
+         digestDelivery.outboundDelivery = newDelivery(repo);
++        digestDelivery.deliveryRepository = new RecordingDeliveryRepo();
++        return digestDelivery;
++    }
++
++    private static DigestDelivery wiredDelivery(RecordingRepo repo, RecordingDeliveryRepo deliveryRepo) {
++        DigestDelivery digestDelivery = new DigestDelivery();
++        digestDelivery.outboundDelivery = newDelivery(repo);
++        digestDelivery.deliveryRepository = deliveryRepo;
+         return digestDelivery;
+     }
+ 
+@@ -274,6 +358,48 @@ class DigestDeliveryTest {
+         }
+     }
+ 
++    /**
++     * Recording {@link DigestCategoryDeliveryRepository} stub: captures
++     * {@code recordDelivery} calls keyed by (groupId, windowStart, slug)
++     * without touching the DB; can be made to throw on every write to pin
++     * the catch-and-log path.
++     */
++    static final class RecordingDeliveryRepo extends DigestCategoryDeliveryRepository {
++        private final Map<String, Integer> counts = new HashMap<>();
++        private final boolean fail;
++
++        RecordingDeliveryRepo() { this(false); }
++
++        private RecordingDeliveryRepo(boolean fail) { this.fail = fail; }
++
++        static RecordingDeliveryRepo failingAlways() { return new RecordingDeliveryRepo(true); }
++
++        Set<String> recordedSlugs(UUID groupId, Instant windowStart) {
++            Set<String> slugs = new HashSet<>();
++            String prefix = groupId + "|" + windowStart + "|";
++            for (String key : counts.keySet()) {
++                if (key.startsWith(prefix)) {
++                    slugs.add(key.substring(prefix.length()));
++                }
++            }
++            return slugs;
++        }
++
++        int recordCount(UUID groupId, Instant windowStart, String slug) {
++            return counts.getOrDefault(groupId + "|" + windowStart + "|" + slug, 0);
++        }
++
++        @Override
++        public void recordDelivery(UUID groupId, Instant windowStart, String categorySlug)
++                throws SQLException {
++            if (fail) {
++                throw new SQLException("scripted record-write failure");
++            }
++            String key = groupId + "|" + windowStart + "|" + categorySlug;
++            counts.merge(key, 1, Integer::sum);
++        }
++    }
++
+     /**
+      * Adapter that records every successful send and lets a test script
+      * per-correlationId failure sequences. A correlationId with no script
+diff --git a/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRetryServiceTest.java b/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRetryServiceTest.java
+index b76240a2..9e3679b6 100644
+--- a/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRetryServiceTest.java
++++ b/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRetryServiceTest.java
+@@ -1,10 +1,20 @@
+ package app.zcat.infochat.provider.digest;
+ 
++import app.zcat.infochat.messaging.MessageHandle;
++import app.zcat.infochat.messaging.MessagingAdapter;
++import app.zcat.infochat.messaging.OutboundMessage;
++import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
+ import app.zcat.infochat.provider.digest.DigestRetryService.RetryResult;
+ import org.junit.jupiter.api.BeforeEach;
+ import org.junit.jupiter.api.Test;
+ 
++import java.time.Clock;
+ import java.time.Duration;
++import java.time.Instant;
++import java.time.ZoneOffset;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.UUID;
+ 
+ import javax.sql.DataSource;
+ import java.io.PrintWriter;
+@@ -14,13 +24,20 @@ import java.sql.PreparedStatement;
+ import java.sql.ResultSet;
+ import java.sql.SQLFeatureNotSupportedException;
+ import java.sql.Timestamp;
+-import java.time.Instant;
+-import java.util.UUID;
+ import java.util.logging.Logger;
+ 
+ import static org.junit.jupiter.api.Assertions.assertEquals;
+ import static org.junit.jupiter.api.Assertions.assertFalse;
+-
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++/**
++ * Plain-JUnit tests for {@link DigestRetryService}'s gap-filling replay path
++ * (M1-652). Three regimes: the pre-M1-652 fallback re-run (no sections →
++ * worker.execute with a clamped windowEnd), byte-faithful replay (sections
++ * present → only missing categories re-sent, worker never invoked), and the
++ * no-op all-already-delivered short-circuit (acceptance item 5's
++ * empty-list guard).
++ */
+ class DigestRetryServiceTest {
+ 
+     private static final UUID GROUP_ID = UUID.randomUUID();
+@@ -28,65 +45,69 @@ class DigestRetryServiceTest {
+     private static final Instant SLOT_FIRED_AT = Instant.parse("2026-05-26T07:45:00Z");
+     private static final Instant EXPIRES_AT = Instant.parse("2026-05-26T08:15:00Z");
+     private static final String GROUP_TIMEZONE = "UTC";
++    private static final String ADAPTER_NAME = "inmemory";
++    private static final String UPSTREAM_GROUP_ID = "group-retry";
+ 
+     private DigestRetryService service;
+     private RecordingDigestWorker digestWorker;
+-    private boolean[] deleteExecuted;
++    private RecordingSectionRepository sectionRepository;
++    private RecordingCategoryDeliveryRepository deliveryRepository;
++    private RecordingDigestDelivery digestDelivery;
+ 
+     @BeforeEach
+     void setUp() {
+         service = new DigestRetryService();
+         digestWorker = new RecordingDigestWorker();
++        sectionRepository = new RecordingSectionRepository();
++        deliveryRepository = new RecordingCategoryDeliveryRepository();
++        digestDelivery = new RecordingDigestDelivery();
+         service.digestWorker = digestWorker;
++        service.sectionRepository = sectionRepository;
++        service.deliveryRepository = deliveryRepository;
++        service.digestDelivery = digestDelivery;
++        service.adapterRegistry = new StubAdapterRegistry(ADAPTER_NAME);
+         service.retryCooldown = Duration.ofMinutes(2);
+-        deleteExecuted = new boolean[] { false };
++        service.windowWidthMinutes = 30;
++        service.dataSource = stubDataSource(false);
+     }
+ 
++    // ----- fallback path (no sections / expired row) ------------------------
++
+     @Test
+     void retryDigest_replacesCacheRow() {
+-        service.dataSource = stubDataSource(
+-                SLOT_KIND, SLOT_FIRED_AT, EXPIRES_AT, false,
+-                GROUP_TIMEZONE, deleteExecuted);
++        // No sections → fallback worker.execute. EXPIRES_AT is in the past
++        // relative to the test's wall clock, so the clamp min(EXPIRES_AT,
++        // now + windowWidth) resolves to EXPIRES_AT — the pre-M1-652
++        // windowEnd, preserved byte-for-byte.
++        service.dataSource = stubDataSource(false);
+ 
+         RetryResult result = service.retryDigest(GROUP_ID);
+ 
+         assertEquals(RetryResult.SUCCESS, result);
+-        assertFalse(deleteExecuted[0],
+-                "retry must NOT delete — the worker UPSERT overwrites the row atomically");
+         assertEquals(1, digestWorker.executeCount,
+-                "DigestWorker.execute must be called once");
++                "DigestWorker.execute must be called once on the fallback path");
+         assertEquals(GROUP_ID, digestWorker.lastSlot.groupId());
+         assertEquals(SLOT_KIND, digestWorker.lastSlot.slotKind());
+         assertEquals(SLOT_FIRED_AT, digestWorker.lastSlot.windowStart());
+-        assertEquals(EXPIRES_AT, digestWorker.lastSlot.windowEnd());
++        assertEquals(EXPIRES_AT, digestWorker.lastSlot.windowEnd(),
++                "an expired row clamps to its own expires_at (min of past + future)");
+         assertEquals(GROUP_TIMEZONE, digestWorker.lastSlot.groupTimezone());
+     }
+ 
+     @Test
+     void retryDigest_regeneratesFullProseFromDegraded() {
+-        // Cache row has isDegraded=true — retry should still call worker
+-        // (worker tries full prose first, falls back to degraded on LLM failure)
+-        service.dataSource = stubDataSource(
+-                SLOT_KIND, SLOT_FIRED_AT, EXPIRES_AT, true,
+-                GROUP_TIMEZONE, deleteExecuted);
++        // Cache row has isDegraded=true — fallback still calls worker.
++        service.dataSource = stubDataSource(true);
+ 
+         RetryResult result = service.retryDigest(GROUP_ID);
+ 
+         assertEquals(RetryResult.SUCCESS, result);
+-        assertFalse(deleteExecuted[0],
+-                "retry must NOT delete the degraded row — UPSERT overwrites it in place");
+         assertEquals(1, digestWorker.executeCount,
+-                "worker must be called to regenerate full prose");
++                "worker must be called to regenerate full prose on the fallback path");
+     }
+ 
+     @Test
+-    void retryDigest_workerSkippedInFlight_returnsAlreadyInProgress_cacheUntouched() {
+-        // A concurrent scheduled run holds the worker's in-flight guard, so
+-        // the worker reports it did not run. The retry must surface that as
+-        // ALREADY_IN_PROGRESS — never SUCCESS — and must not touch the cache.
+-        service.dataSource = stubDataSource(
+-                SLOT_KIND, SLOT_FIRED_AT, EXPIRES_AT, false,
+-                GROUP_TIMEZONE, deleteExecuted);
++    void retryDigest_workerSkippedInFlight_returnsAlreadyInProgress() {
+         digestWorker.outcome = DigestWorker.SlotOutcome.SKIPPED_IN_FLIGHT;
+ 
+         RetryResult result = service.retryDigest(GROUP_ID);
+@@ -95,34 +116,22 @@ class DigestRetryServiceTest {
+                 "a skipped worker run must never be reported as SUCCESS");
+         assertEquals(1, digestWorker.executeCount,
+                 "worker must be invoked exactly once");
+-        assertFalse(deleteExecuted[0],
+-                "cache row must be left intact when the worker skips");
+     }
+ 
+     @Test
+     void retryDigest_serializedPerGroup() {
+-        // Simulate an in-flight retry by acquiring the slot manually
+-        service.dataSource = stubDataSource(
+-                SLOT_KIND, SLOT_FIRED_AT, EXPIRES_AT, false,
+-                GROUP_TIMEZONE, deleteExecuted);
+-
+-        // First call succeeds and invokes the worker once.
+         RetryResult first = service.retryDigest(GROUP_ID);
+         assertEquals(RetryResult.SUCCESS, first);
+         assertEquals(1, digestWorker.executeCount);
+ 
+-        // Simulate a concurrent retry already holding the per-group guard by
+-        // seeding the (private) inFlight map directly — there is no non-reflective
+-        // seam to inject a concurrent hold, since retryDigest releases the entry
+-        // in its finally block. The non-circular proof of serialization is the
+-        // observable below: the second retry must NOT invoke the worker again,
+-        // not merely echo the injected flag back in its return value.
++        // Hold the per-group in-flight guard reflectively (same seam the
++        // pre-M1-652 test used) to prove serialization.
+         try {
+-            // Clear cooldown so the rate limiter doesn't fire before inFlight
+             var cooldownField = DigestRetryService.class.getDeclaredField("lastRetryAt");
+             cooldownField.setAccessible(true);
+             @SuppressWarnings("unchecked")
+-            var cooldownMap = (java.util.concurrent.ConcurrentHashMap<UUID, Instant>) cooldownField.get(service);
++            var cooldownMap = (java.util.concurrent.ConcurrentHashMap<UUID, Instant>)
++                    cooldownField.get(service);
+             cooldownMap.remove(GROUP_ID);
+ 
+             var field = DigestRetryService.class.getDeclaredField("inFlight");
+@@ -136,15 +145,122 @@ class DigestRetryServiceTest {
+                     "second concurrent retry must be rejected");
+             assertEquals(1, digestWorker.executeCount,
+                     "the rejected retry must short-circuit before re-invoking the worker");
+-
+-            // Clean up
+             map.remove(GROUP_ID);
+         } catch (ReflectiveOperationException e) {
+             throw new AssertionError("Reflection setup failed", e);
+         }
+     }
+ 
+-    // ----- stubs -------------------------------------------------------------
++    @Test
++    void retryWithoutSectionsFallsBackToRerun() {
++        // Sections empty (pre-V61 row, degraded, zero-post, or
++        // crash-stranded) → fallback re-run. Acceptance item 6.
++        assertTrue(sectionRepository.findOrderedSections(GROUP_ID, SLOT_FIRED_AT).isEmpty(),
++                "fixture: no persisted sections");
++
++        RetryResult result = service.retryDigest(GROUP_ID);
++
++        assertEquals(RetryResult.SUCCESS, result,
++                "a section-less slot falls back to the full re-run");
++        assertEquals(1, digestWorker.executeCount,
++                "the worker must be invoked on the fallback path");
++        assertEquals(0, digestDelivery.deliverCalls.size(),
++                "DigestDelivery is not invoked on the fallback path — the worker delivers");
++    }
++
++    // ----- replay path (persisted sections present, row non-expired) --------
++
++    @Test
++    void replaySendsPersistedBytesWithoutRerender() {
++        // A non-expired row with persisted sections replays the bytes — no
++        // re-collection, no render, no LLM call. The worker is NEVER
++        // invoked; DigestDelivery receives the section list as-is.
++        // Acceptance item 4.
++        pinClockToLiveRow();
++        sectionRepository.seedSections(List.of(
++                new RenderedSection("security", "section A bytes"),
++                new RenderedSection("crypto", "section B bytes"),
++                new RenderedSection(null, "section Other bytes")));
++
++        RetryResult result = service.retryDigest(GROUP_ID);
++
++        assertEquals(RetryResult.REPLAYED_MISSING, result);
++        assertEquals(0, digestWorker.executeCount,
++                "the worker must NOT be invoked on a replay — no re-collection, no render, no LLM");
++        assertEquals(1, digestDelivery.deliverCalls.size(),
++                "DigestDelivery.deliver is called exactly once");
++        RecordingDigestDelivery.DeliverCall call = digestDelivery.deliverCalls.get(0);
++        assertEquals(GROUP_ID, call.internalGroupId());
++        assertEquals(SLOT_FIRED_AT, call.windowStart());
++        assertEquals(List.of(
++                new RenderedSection("security", "section A bytes"),
++                new RenderedSection("crypto", "section B bytes"),
++                new RenderedSection(null, "section Other bytes")),
++                call.sections(),
++                "replay delivers the persisted bytes verbatim — no re-derivation");
++    }
++
++    @Test
++    void retryFillsOnlyMissingCategories() {
++        // Acceptance item 4: replay sends ONLY the categories with no
++        // delivery record, in stored position order. Categories already
++        // delivered are skipped.
++        pinClockToLiveRow();
++        sectionRepository.seedSections(List.of(
++                new RenderedSection("security", "section A"),
++                new RenderedSection("crypto", "section B"),
++                new RenderedSection("ai", "section C"),
++                new RenderedSection(null, "section Other")));
++        deliveryRepository.seedDelivered(java.util.Set.of("security", "ai"));
++
++        RetryResult result = service.retryDigest(GROUP_ID);
++
++        assertEquals(RetryResult.REPLAYED_MISSING, result);
++        assertEquals(0, digestWorker.executeCount);
++        assertEquals(List.of(
++                new RenderedSection("crypto", "section B"),
++                new RenderedSection(null, "section Other")),
++                digestDelivery.deliverCalls.get(0).sections(),
++                "only the missing categories are replayed, in stored position order");
++    }
++
++    @Test
++    void replayWhenAllCategoriesAlreadyDelivered_returnsAllAlreadyDelivered() {
++        // Acceptance item 5's counter-safety guard: a replay that filters
++        // down to zero categories MUST NOT call DigestDelivery
++        // (deliverSequenceToGroup's empty-list path would increment the
++        // permanent-failure counter). Returns ALL_ALREADY_DELIVERED without
++        // touching the delivery seam.
++        pinClockToLiveRow();
++        sectionRepository.seedSections(List.of(
++                new RenderedSection("security", "section A"),
++                new RenderedSection("crypto", "section B")));
++        deliveryRepository.seedDelivered(java.util.Set.of("security", "crypto"));
++
++        RetryResult result = service.retryDigest(GROUP_ID);
++
++        assertEquals(RetryResult.ALL_ALREADY_DELIVERED, result);
++        assertEquals(0, digestWorker.executeCount,
++                "no worker invocation for a no-op retry");
++        assertTrue(digestDelivery.deliverCalls.isEmpty(),
++                "an all-delivered slot MUST NOT reach DigestDelivery — the empty-list "
++                        + "counter-safety short-circuit (OutboundDelivery is frozen)");
++    }
++
++    // ----- helpers ----------------------------------------------------------
++
++    /**
++     * Pin the service clock so EXPIRES_AT is in the future, putting the row
++     * on the replay path (non-expired). The cache row's expires_at is
++     * 2026-05-26T08:15:00Z; pinning now to 2026-05-26T07:45:00Z makes
++     * expires_at 30 minutes ahead — the replay gate's
++     * {@code coords.expiresAt.isAfter(now)} passes.
++     */
++    private void pinClockToLiveRow() {
++        service.clock = Clock.fixed(SLOT_FIRED_AT, ZoneOffset.UTC);
++    }
++
++    // ----- stubs ------------------------------------------------------------
+ 
+     static class RecordingDigestWorker extends DigestWorker {
+         int executeCount = 0;
+@@ -158,25 +274,65 @@ class DigestRetryServiceTest {
+             return outcome;
+         }
+ 
+-        // Override the inherited @Observes onDigestSlot WITHOUT the
+-        // annotation: an inherited observer method is bean-defining, which
+-        // would make this manual test double a competing DigestWorker CDI
+-        // bean (AmbiguousResolutionException in the @QuarkusTest deployment).
+         @Override
+         public void onDigestSlot(DigestSlot slot) {
+             // no-op: tests drive execute(...) directly
+         }
+     }
+ 
++    /** Captures {@code deliver()} calls so replay tests can assert the section list. */
++    static final class RecordingDigestDelivery extends DigestDelivery {
++        final List<DeliverCall> deliverCalls = new ArrayList<>();
++
++        @Override
++        public void deliver(MessagingAdapter adapter, String upstreamGroupId,
++                            UUID internalGroupId, Instant windowStart,
++                            List<RenderedSection> sections) {
++            deliverCalls.add(new DeliverCall(adapter, upstreamGroupId,
++                    internalGroupId, windowStart, List.copyOf(sections)));
++        }
++
++        record DeliverCall(MessagingAdapter adapter, String upstreamGroupId,
++                           UUID internalGroupId, Instant windowStart,
++                           List<RenderedSection> sections) {}
++    }
++
++    static final class StubAdapterRegistry extends app.zcat.infochat.provider.messaging.AdapterRegistry {
++        private final List<MessagingAdapter> adapters;
++
++        StubAdapterRegistry(String... names) {
++            this.adapters = java.util.Arrays.stream(names)
++                    .map(n -> new NameOnlyAdapter(n))
++                    .map(a -> (MessagingAdapter) a)
++                    .toList();
++        }
++
++        @Override
++        public List<MessagingAdapter> activatedAdapters() { return adapters; }
++    }
++
++    static final class NameOnlyAdapter implements MessagingAdapter {
++        private final String name;
++        NameOnlyAdapter(String name) { this.name = name; }
++        @Override public String name() { return name; }
++        @Override public app.zcat.infochat.messaging.CapabilityFlags capabilities() { return null; }
++        @Override public app.zcat.infochat.messaging.AdapterTrustLevel trustLevel() {
++            return app.zcat.infochat.messaging.AdapterTrustLevel.HIGH;
++        }
++        @Override public boolean isWellFormedContactId(String contactId) { return true; }
++        @Override public MessageHandle send(OutboundMessage msg) { return null; }
++        @Override public void update(MessageHandle h, String b) {}
++        @Override public void finalizeMessage(MessageHandle h, String b) {}
++        @Override public void setTyping(app.zcat.infochat.messaging.ScopeRef s, boolean t) {}
++        @Override public void setInboundHandler(InboundHandler h) {}
++    }
++
+     /**
+-     * Stub DataSource for DigestRetryService. Handles three SQL patterns:
+-     * 1. SELECT ... FROM summary_cache WHERE group_id = ? ORDER BY ... LIMIT 1
+-     * 2. SELECT timezone FROM groups WHERE id = ?
+-     * 3. DELETE FROM summary_cache WHERE ...
++     * Stub DataSource for DigestRetryService. Handles two SQL patterns:
++     * 1. SELECT slot_kind, slot_fired_at, expires_at FROM summary_cache ...
++     * 2. SELECT timezone, adapter, upstream_group_id FROM groups ...
+      */
+-    private static DataSource stubDataSource(
+-            String slotKind, Instant slotFiredAt, Instant expiresAt,
+-            boolean isDegraded, String timezone, boolean[] deleteFlag) {
++    private static DataSource stubDataSource(boolean isDegraded) {
+         return new DataSource() {
+             @Override
+             public Connection getConnection() {
+@@ -186,8 +342,7 @@ class DigestRetryServiceTest {
+                         (proxy, method, args) -> switch (method.getName()) {
+                             case "prepareStatement" -> {
+                                 String sql = (String) args[0];
+-                                yield stubPs(sql, slotKind, slotFiredAt, expiresAt,
+-                                        isDegraded, timezone, deleteFlag);
++                                yield stubPs(sql, isDegraded);
+                             }
+                             case "close" -> null;
+                             default -> throw new UnsupportedOperationException(
+@@ -206,34 +361,27 @@ class DigestRetryServiceTest {
+         };
+     }
+ 
+-    private static PreparedStatement stubPs(
+-            String sql, String slotKind, Instant slotFiredAt, Instant expiresAt,
+-            boolean isDegraded, String timezone, boolean[] deleteFlag) {
++    private static PreparedStatement stubPs(String sql, boolean isDegraded) {
+         boolean isCacheQuery = sql.contains("summary_cache") && sql.contains("SELECT");
+-        boolean isTimezoneQuery = sql.contains("FROM groups");
+-        boolean isDelete = sql.contains("DELETE");
++        boolean isGroupQuery = sql.contains("FROM groups");
+         return (PreparedStatement) Proxy.newProxyInstance(
+                 PreparedStatement.class.getClassLoader(),
+                 new Class<?>[] { PreparedStatement.class },
+                 (proxy, method, args) -> switch (method.getName()) {
+                     case "setString", "setObject", "setTimestamp" -> null;
+                     case "executeQuery" -> {
+-                        if (isCacheQuery) yield cacheResultSet(slotKind, slotFiredAt, expiresAt, isDegraded);
+-                        if (isTimezoneQuery) yield timezoneResultSet(timezone);
++                        if (isCacheQuery) yield cacheResultSet(isDegraded);
++                        if (isGroupQuery) yield groupResultSet();
+                         yield emptyResultSet();
+                     }
+-                    case "executeUpdate" -> {
+-                        if (isDelete) deleteFlag[0] = true;
+-                        yield 1;
+-                    }
++                    case "executeUpdate" -> 1;
+                     case "close" -> null;
+                     default -> throw new UnsupportedOperationException(
+                             "PS." + method.getName());
+                 });
+     }
+ 
+-    private static ResultSet cacheResultSet(
+-            String slotKind, Instant slotFiredAt, Instant expiresAt, boolean isDegraded) {
++    private static ResultSet cacheResultSet(boolean isDegraded) {
+         boolean[] consumed = { false };
+         return (ResultSet) Proxy.newProxyInstance(
+                 ResultSet.class.getClassLoader(),
+@@ -244,12 +392,12 @@ class DigestRetryServiceTest {
+                         consumed[0] = true;
+                         yield true;
+                     }
+-                    case "getString" -> slotKind;
++                    case "getString" -> SLOT_KIND;
+                     case "getTimestamp" -> {
+                         String col = (String) args[0];
+                         yield switch (col) {
+-                            case "slot_fired_at" -> Timestamp.from(slotFiredAt);
+-                            case "expires_at" -> Timestamp.from(expiresAt);
++                            case "slot_fired_at" -> Timestamp.from(SLOT_FIRED_AT);
++                            case "expires_at" -> Timestamp.from(EXPIRES_AT);
+                             default -> throw new UnsupportedOperationException("col: " + col);
+                         };
+                     }
+@@ -259,7 +407,7 @@ class DigestRetryServiceTest {
+                 });
+     }
+ 
+-    private static ResultSet timezoneResultSet(String timezone) {
++    private static ResultSet groupResultSet() {
+         boolean[] consumed = { false };
+         return (ResultSet) Proxy.newProxyInstance(
+                 ResultSet.class.getClassLoader(),
+@@ -270,7 +418,15 @@ class DigestRetryServiceTest {
+                         consumed[0] = true;
+                         yield true;
+                     }
+-                    case "getString" -> timezone;
++                    case "getString" -> {
++                        String col = (String) args[0];
++                        yield switch (col) {
++                            case "timezone" -> GROUP_TIMEZONE;
++                            case "adapter" -> ADAPTER_NAME;
++                            case "upstream_group_id" -> UPSTREAM_GROUP_ID;
++                            default -> throw new UnsupportedOperationException("col: " + col);
++                        };
++                    }
+                     case "close" -> null;
+                     default -> throw new UnsupportedOperationException("RS." + method.getName());
+                 });
+diff --git a/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestSectionRepositoryIT.java b/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestSectionRepositoryIT.java
+new file mode 100644
+index 00000000..a7c649ac
+--- /dev/null
++++ b/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestSectionRepositoryIT.java
+@@ -0,0 +1,206 @@
++package app.zcat.infochat.provider.digest;
++
++import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
++import app.zcat.infochat.provider.testsupport.SeedDataSource;
++import io.quarkus.test.junit.QuarkusTest;
++import jakarta.inject.Inject;
++import org.junit.jupiter.api.AfterEach;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++
++import javax.sql.DataSource;
++import java.sql.Connection;
++import java.sql.PreparedStatement;
++import java.sql.SQLException;
++import java.sql.Timestamp;
++import java.time.Instant;
++import java.util.List;
++import java.util.UUID;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++/**
++ * DB-tier IT for {@link DigestSectionRepository}: exercises the V61
++ * {@code digest_section} table under the {@code infochat_provider} grants
++ * the migration lands, the slot-replace atomicity (sections + delivery
++ * records wiped together), and the cache-row-join prune (acceptance items
++ * 1, 8, 9). Mirrors {@code DigestRetryConcurrencyIT}'s
++ * {@code @SeedDataSource} seeding + service-role write pattern.
++ */
++@QuarkusTest
++class DigestSectionRepositoryIT {
++
++    private static final UUID GROUP = UUID.fromString("d1e52320-0652-4000-8000-000000000001");
++    private static final UUID OTHER_GROUP = UUID.fromString("d1e52320-0652-4000-8000-000000000002");
++    private static final Instant WINDOW_START = Instant.parse("2026-07-21T07:00:00Z");
++    private static final Instant EXPIRED = Instant.parse("2026-07-21T06:00:00Z");
++    private static final Instant LIVE = Instant.parse("2026-07-22T00:00:00Z");
++
++    @Inject @SeedDataSource DataSource dataSource;
++
++    @BeforeEach
++    @AfterEach
++    void cleanup() throws Exception {
++        try (Connection conn = dataSource.getConnection()) {
++            exec(conn, "DELETE FROM digest_section WHERE group_id IN (?, ?)", GROUP, OTHER_GROUP);
++            exec(conn, "DELETE FROM digest_category_delivery WHERE group_id IN (?, ?)", GROUP, OTHER_GROUP);
++            exec(conn, "DELETE FROM summary_cache WHERE group_id IN (?, ?)", GROUP, OTHER_GROUP);
++            exec(conn, "DELETE FROM groups WHERE id IN (?, ?)", GROUP, OTHER_GROUP);
++        }
++    }
++
++    @Test
++    void sectionsSurviveRepositoryReconstruction() throws Exception {
++        // Acceptance item 8: write via one instance, read via a freshly
++        // constructed instance on the same DataSource — the persisted state
++        // must live in the table, not in process memory, so a Provider
++        // restart finds it (the whole point of the gap-fill design).
++        DigestSectionRepository writer = newRepo();
++        writer.replaceSlotSections(GROUP, WINDOW_START, List.of(
++                new RenderedSection("security", "section A bytes"),
++                new RenderedSection("crypto", "section B bytes"),
++                new RenderedSection(null, "section Other bytes")),
++                Instant.now());
++
++        DigestSectionRepository reader = newRepo();
++        List<RenderedSection> readBack = reader.findOrderedSections(GROUP, WINDOW_START);
++
++        assertEquals(List.of(
++                new RenderedSection("security", "section A bytes"),
++                new RenderedSection("crypto", "section B bytes"),
++                new RenderedSection(null, "section Other bytes")),
++                readBack,
++                "persisted sections must survive repository reconstruction in position order");
++    }
++
++    @Test
++    void replaceSlotSections_secondReplaceFullySupersedes() throws Exception {
++        // The slot-replace is atomic across BOTH tables: a second replace
++        // for the same slot wipes every prior section AND every prior
++        // delivery record before inserting the new list, so stale state
++        // from a superseded render can never leak into a later replay
++        // (the "replay never half-applies" property).
++        DigestSectionRepository sections = newRepo();
++        DigestCategoryDeliveryRepository deliveries = newDeliveryRepo();
++        sections.replaceSlotSections(GROUP, WINDOW_START, List.of(
++                new RenderedSection("security", "old A"),
++                new RenderedSection("crypto", "old B")),
++                Instant.now());
++        deliveries.recordDelivery(GROUP, WINDOW_START, "security");
++        deliveries.recordDelivery(GROUP, WINDOW_START, "crypto");
++
++        sections.replaceSlotSections(GROUP, WINDOW_START, List.of(
++                new RenderedSection("ai", "new A bytes"),
++                new RenderedSection("news", "new B bytes")),
++                Instant.now());
++
++        assertEquals(List.of(
++                new RenderedSection("ai", "new A bytes"),
++                new RenderedSection("news", "new B bytes")),
++                sections.findOrderedSections(GROUP, WINDOW_START),
++                "second replace fully supersedes — prior sections are gone, not merged");
++        assertTrue(deliveries.findDeliveredSlugs(GROUP, WINDOW_START).isEmpty(),
++                "second replace wipes prior delivery records too — a regeneration's bytes "
++                        + "diverge, so the old delivery records must not survive to suppress "
++                        + "the next replay");
++    }
++
++    @Test
++    void replaceSlotSections_emptyListPersistsNothingButWipesPriorState() throws Exception {
++        // Degraded and zero-post slots persist no sections (acceptance item
++        // 2), but the replace must STILL wipe prior state — a slot that
++        // re-runs degraded after a sectioned render must not leave the old
++        // sections behind to mislead a later replay.
++        DigestSectionRepository sections = newRepo();
++        sections.replaceSlotSections(GROUP, WINDOW_START, List.of(
++                new RenderedSection("security", "A")), Instant.now());
++        sections.replaceSlotSections(GROUP, WINDOW_START, List.of(), Instant.now());
++
++        assertTrue(sections.findOrderedSections(GROUP, WINDOW_START).isEmpty(),
++                "a degraded/zero-post replace leaves no sections behind");
++    }
++
++    @Test
++    void pruneExpiredForGroup_dropsOnlyExpiredSlotsSections() throws Exception {
++        // Acceptance item 9: prune reads `now` from the injected Clock the
++        // caller passes (never SQL now()), and joins summary_cache so a
++        // slot's sections live exactly as long as its cache row. Seeding
++        // one expired + one live cache row, only the expired slot's
++        // sections drop.
++        seedGroup(GROUP);
++        seedGroup(OTHER_GROUP);
++        seedCacheRow(GROUP, WINDOW_START, EXPIRED);
++        seedCacheRow(OTHER_GROUP, WINDOW_START, LIVE);
++        // Pass an EARLY now during the seed replace so the internal prune
++        // does not drop the sections before the test's explicit prune call.
++        Instant seedNow = Instant.parse("2026-07-21T05:00:00Z");
++        DigestSectionRepository sections = newRepo();
++        sections.replaceSlotSections(GROUP, WINDOW_START, List.of(
++                new RenderedSection("security", "expired-slot section")), seedNow);
++        sections.replaceSlotSections(OTHER_GROUP, WINDOW_START, List.of(
++                new RenderedSection("security", "live-slot section")), seedNow);
++
++        // now is AFTER GROUP's cache expires_at but BEFORE OTHER_GROUP's.
++        Instant now = Instant.parse("2026-07-21T07:30:00Z");
++        int deleted = sections.pruneExpiredForGroup(GROUP, now);
++        // The prune is per-group, so only GROUP's expired-slot section drops.
++        assertEquals(1, deleted,
++                "one section row (the expired slot's) was pruned");
++        assertTrue(sections.findOrderedSections(GROUP, WINDOW_START).isEmpty(),
++                "the expired slot's sections are gone");
++        assertEquals(1, sections.findOrderedSections(OTHER_GROUP, WINDOW_START).size(),
++                "the live slot's sections in a different group are untouched");
++    }
++
++    // -- helpers ----------------------------------------------------------------
++
++    private DigestSectionRepository newRepo() {
++        DigestSectionRepository repo = new DigestSectionRepository();
++        repo.dataSource = dataSource;
++        return repo;
++    }
++
++    private DigestCategoryDeliveryRepository newDeliveryRepo() {
++        DigestCategoryDeliveryRepository repo = new DigestCategoryDeliveryRepository();
++        repo.dataSource = dataSource;
++        return repo;
++    }
++
++    private void seedGroup(UUID groupId) throws SQLException {
++        try (Connection conn = dataSource.getConnection();
++             PreparedStatement ps = conn.prepareStatement(
++                     "INSERT INTO groups (id, adapter, upstream_group_id,"
++                             + " display_name, timezone, approval_status)"
++                             + " VALUES (?, 'inmemory', ?, 'IT group', 'UTC', 'approved')"
++                             + " ON CONFLICT (id) DO NOTHING")) {
++            ps.setObject(1, groupId);
++            ps.setString(2, "upstream-" + groupId);
++            ps.executeUpdate();
++        }
++    }
++
++    private void seedCacheRow(UUID groupId, Instant windowStart, Instant expiresAt) throws SQLException {
++        try (Connection conn = dataSource.getConnection();
++             PreparedStatement ps = conn.prepareStatement(
++                     "INSERT INTO summary_cache"
++                             + " (group_id, slot_kind, slot_fired_at,"
++                             + "  tag_subscription_version, source_subscription_version,"
++                             + "  content, is_degraded, expires_at)"
++                             + " VALUES (?, 'morning', ?, 1, 1, 'fixture', false, ?)")) {
++            ps.setObject(1, groupId);
++            ps.setTimestamp(2, Timestamp.from(windowStart));
++            ps.setTimestamp(3, Timestamp.from(expiresAt));
++            ps.executeUpdate();
++        }
++    }
++
++    private static void exec(Connection conn, String sql, Object... params) throws SQLException {
++        try (PreparedStatement ps = conn.prepareStatement(sql)) {
++            for (int i = 0; i < params.length; i++) {
++                ps.setObject(i + 1, params[i]);
++            }
++            ps.executeUpdate();
++        }
++    }
++}
+diff --git a/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerClockTest.java b/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerClockTest.java
+index ce74c0aa..a8b72958 100644
+--- a/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerClockTest.java
++++ b/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerClockTest.java
+@@ -36,13 +36,14 @@ class DigestWorkerClockTest {
+     private static final UUID GROUP_ID = UUID.randomUUID();
+     private static final String ADAPTER_NAME = "inmemory";
+     private static final String UPSTREAM_GROUP_ID = "group-clock";
+-    private static final Duration RETRY_HORIZON = Duration.ofMinutes(10);
++    private static final Duration REPLAY_RETENTION = Duration.ofMinutes(10);
+ 
+     private DigestWorker worker;
+     private RecordingPostCollector postCollector;
+     private RecordingDigestRenderer digestRenderer;
+     private RecordingDegradedRenderer degradedRenderer;
+     private RecordingCacheRepository cacheRepository;
++    private RecordingSectionRepository sectionRepository;
+ 
+     @BeforeEach
+     void setUp() {
+@@ -51,16 +52,20 @@ class DigestWorkerClockTest {
+         digestRenderer = new RecordingDigestRenderer();
+         degradedRenderer = new RecordingDegradedRenderer();
+         cacheRepository = new RecordingCacheRepository();
++        sectionRepository = new RecordingSectionRepository();
+ 
+         worker.postCollector = postCollector;
+         worker.digestRenderer = digestRenderer;
+         worker.degradedRenderer = degradedRenderer;
+         worker.cacheRepository = cacheRepository;
++        worker.sectionRepository = sectionRepository;
+         // No activated adapter → executeSlot returns right after the cache
+-        // upsert, so the outbound chokepoint is never exercised.
++        // upsert and section persist, so the outbound chokepoint is never
++        // exercised. The persist step DOES run on the render path now
++        // (M1-652), which is why the section-repo stub is wired here.
+         worker.adapterRegistry = new AdapterRegistry();
+         worker.dataSource = new StubGroupDataSource(ADAPTER_NAME, UPSTREAM_GROUP_ID, "en");
+-        worker.retryHorizon = RETRY_HORIZON;
++        worker.replayRetention = REPLAY_RETENTION;
+     }
+ 
+     @Test
+diff --git a/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java b/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java
+index 7c3cd420..2e83b483 100644
+--- a/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java
++++ b/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java
+@@ -43,15 +43,17 @@ class DigestWorkerTest {
+     private static final UUID GROUP_ID = UUID.randomUUID();
+     private static final String ADAPTER_NAME = "inmemory";
+     private static final String UPSTREAM_GROUP_ID = "group-456";
+-    private static final Duration RETRY_HORIZON = Duration.ofMinutes(10);
++    private static final Duration REPLAY_RETENTION = Duration.ofMinutes(10);
+ 
+     private DigestWorker worker;
+     private RecordingPostCollector postCollector;
+     private RecordingDigestRenderer digestRenderer;
+     private RecordingDegradedRenderer degradedRenderer;
+     private RecordingCacheRepository cacheRepository;
++    private RecordingSectionRepository sectionRepository;
+     private RecordingAdapter recordingAdapter;
+     private StubBundleLoader bundleLoader;
++    private List<String> callLog;
+ 
+     @BeforeEach
+     void setUp() {
+@@ -60,17 +62,20 @@ class DigestWorkerTest {
+         digestRenderer = new RecordingDigestRenderer();
+         degradedRenderer = new RecordingDegradedRenderer();
+         cacheRepository = new RecordingCacheRepository();
++        callLog = new ArrayList<>();
++        sectionRepository = new RecordingSectionRepository(callLog);
+         bundleLoader = new StubBundleLoader();
+-        recordingAdapter = new RecordingAdapter(ADAPTER_NAME);
++        recordingAdapter = new RecordingAdapter(ADAPTER_NAME, callLog);
+ 
+         worker.postCollector = postCollector;
+         worker.digestRenderer = digestRenderer;
+         worker.degradedRenderer = degradedRenderer;
+         worker.cacheRepository = cacheRepository;
++        worker.sectionRepository = sectionRepository;
+         worker.bundleLoader = bundleLoader;
+         worker.adapterRegistry = new StubAdapterRegistry(recordingAdapter);
+         worker.dataSource = new StubGroupDataSource(ADAPTER_NAME, UPSTREAM_GROUP_ID, "en");
+-        worker.retryHorizon = RETRY_HORIZON;
++        worker.replayRetention = REPLAY_RETENTION;
+         // Pass-through chokepoint via the public constructor: the recording
+         // adapter never throws, so the retry/cleanup collaborators (notifier,
+         // group repo) are never exercised on these success/programming-error
+@@ -81,6 +86,7 @@ class DigestWorkerTest {
+                 3, 0L, 2.0, 3);
+         DigestDelivery digestDelivery = new DigestDelivery();
+         digestDelivery.outboundDelivery = worker.outboundDelivery;
++        digestDelivery.deliveryRepository = new RecordingCategoryDeliveryRepository();
+         worker.digestDelivery = digestDelivery;
+     }
+ 
+@@ -180,21 +186,91 @@ class DigestWorkerTest {
+     }
+ 
+     @Test
+-    void execute_cacheExpiryOutlivesWindowEndByRetryHorizon() {
++    void execute_cacheExpiryOutlivesWindowEndByReplayRetention() {
+         postCollector.seed(testPosts(), 1, 1);
+         digestRenderer.setResponse("prose");
+         DigestSlot slot = futureSlot();
+ 
+         worker.execute(slot);
+ 
+-        assertEquals(slot.windowEnd().plus(RETRY_HORIZON), cacheRepository.lastExpiresAt(),
+-                "expires_at must outlive the slot window by the retry horizon");
++        assertEquals(slot.windowEnd().plus(REPLAY_RETENTION), cacheRepository.lastExpiresAt(),
++                "expires_at must outlive the slot window by the replay retention (PT24H default), "
++                        + "decoupled from retry-cooldown so a later retry replays persisted sections "
++                        + "instead of degrading immediately");
+     }
+ 
+     @Test
+-    void retryAfterWindowEnd_withinRetryHorizon_rendersFullProse() {
++    void execute_persistsSectionsAlongsideCacheRow() {
++        // M1-652 acceptance item 2: every render that produces sections
++        // persists the ordered list alongside the cache upsert, as the EXACT
++        // delivery bytes. The persist MUST happen before delivery so a crash
++        // between them leaves the sections durably readable for replay —
++        // pinned here via the shared call-log ordering.
++        postCollector.seed(testPosts(), 1, 1);
++        digestRenderer.setMultiSections(List.of(
++                new RenderedSection("security", "section A prose"),
++                new RenderedSection("crypto", "section B prose"),
++                new RenderedSection(null, "section Other prose")));
++        DigestSlot slot = futureSlot();
++
++        worker.execute(slot);
++
++        assertEquals(1, sectionRepository.replaceCalls().size(),
++                "the rendered section list is persisted exactly once");
++        RecordingSectionRepository.ReplaceCall persist = sectionRepository.replaceCalls().get(0);
++        assertEquals(GROUP_ID, persist.groupId());
++        assertEquals(slot.windowStart(), persist.windowStart());
++        assertEquals(List.of(
++                new RenderedSection("security", "section A prose"),
++                new RenderedSection("crypto", "section B prose"),
++                new RenderedSection(null, "section Other prose")),
++                persist.sections(),
++                "persisted bytes are the exact renderSections() output in order");
++        // Persist-before-deliver: the shared call-log records "replace" when
++        // the persist lands and "send" when each adapter send fires; the
++        // persist marker must precede every send marker.
++        int firstSend = callLog.indexOf("send");
++        int replace = callLog.indexOf("replace");
++        assertTrue(replace >= 0 && firstSend >= 0,
++                "both persist and delivery markers recorded: " + callLog);
++        assertTrue(replace < firstSend,
++                "persist MUST happen before delivery — call-log order: " + callLog);
++    }
++
++    @Test
++    void execute_degradedRenderPersistsNoSections() {
++        // A degraded render (window closed) keeps the single-message path —
++        // no per-category structure, so no sections to persist. The gap-fill
++        // replay path later finds no sections and falls back to the full
++        // re-run (acceptance item 6).
++        postCollector.seed(testPosts(), 1, 1);
++        degradedRenderer.setResponse("Headlines only");
++        DigestSlot slot = pastSlot();
++
++        worker.execute(slot);
++
++        assertTrue(sectionRepository.replaceCalls().isEmpty(),
++                "degraded renders persist no sections — the fallback path owns them");
++        assertTrue(cacheRepository.lastIsDegraded());
++    }
++
++    @Test
++    void execute_zeroPostsPersistsNoSections() {
++        // The zero-posts fixed reply keeps the single-message path too.
++        postCollector.seed(List.of(), 0, 0);
++        DigestSlot slot = futureSlot();
++
++        worker.execute(slot);
++
++        assertTrue(sectionRepository.replaceCalls().isEmpty(),
++                "zero-posts renders persist no sections");
++    }
++
++    @Test
++    void retryAfterWindowEnd_withinReplayRetention_rendersFullProse() {
+         // Scheduled run whose window already closed: it degrades, but writes
+-        // expires_at = windowEnd + horizon, which is still in the future.
++        // expires_at = windowEnd + replayRetention, which is still in the
++        // future (PT24H default horizon, not the old PT2M cooldown).
+         postCollector.seed(testPosts(), 1, 1);
+         degradedRenderer.setResponse("Headlines only");
+         digestRenderer.setResponse("Full retry prose");
+@@ -207,8 +283,8 @@ class DigestWorkerTest {
+         // /retry --digest rebuilds the slot from the cache row's coordinates
+         // with windowEnd = the row's expires_at (pinned by
+         // DigestRetryServiceTest.retryDigest_replacesCacheRow). Within the
+-        // horizon that instant is still ahead, so the retry renders full
+-        // prose instead of degrading again.
++        // replay retention that instant is still ahead, so the retry renders
++        // full prose instead of degrading again.
+         Instant expiresAt = cacheRepository.lastExpiresAt();
+         assertTrue(expiresAt.isAfter(Instant.now()),
+                 "the cache row must be non-expired after windowEnd");
+@@ -218,7 +294,7 @@ class DigestWorkerTest {
+         worker.execute(retrySlot);
+ 
+         assertFalse(cacheRepository.lastIsDegraded(),
+-                "a retry within the horizon must render full prose, not degrade");
++                "a retry within the replay retention must render full prose, not degrade");
+         assertEquals("Full retry prose", cacheRepository.lastContent());
+     }
+ 
+@@ -360,8 +436,14 @@ class DigestWorkerTest {
+     private static final class RecordingAdapter implements MessagingAdapter {
+         private final String name;
+         private final List<OutboundMessage> sent = new ArrayList<>();
++        private final List<String> callLog;
+ 
+-        RecordingAdapter(String name) { this.name = name; }
++        RecordingAdapter(String name) { this(name, new ArrayList<>()); }
++
++        RecordingAdapter(String name, List<String> callLog) {
++            this.name = name;
++            this.callLog = callLog;
++        }
+ 
+         int sendCount() { return sent.size(); }
+         OutboundMessage lastMessage() { return sent.getLast(); }
+@@ -372,6 +454,7 @@ class DigestWorkerTest {
+         @Override public boolean isWellFormedContactId(String contactId) { return true; }
+         @Override public MessageHandle send(OutboundMessage msg) {
+             sent.add(msg);
++            callLog.add("send");
+             return null;
+         }
+         @Override public void update(MessageHandle h, String b) {}
+diff --git a/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/RecordingCategoryDeliveryRepository.java b/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/RecordingCategoryDeliveryRepository.java
+new file mode 100644
+index 00000000..5509705a
+--- /dev/null
++++ b/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/RecordingCategoryDeliveryRepository.java
+@@ -0,0 +1,34 @@
++package app.zcat.infochat.provider.digest;
++
++import java.sql.SQLException;
++import java.time.Instant;
++import java.util.HashSet;
++import java.util.Set;
++import java.util.UUID;
++
++/**
++ * Recording {@link DigestCategoryDeliveryRepository} stub: captures
++ * {@code recordDelivery} calls and seeds the slugs {@code findDeliveredSlugs}
++ * returns, without touching the DB. Used by {@link DigestRetryServiceTest}
++ * to seed replay scenarios (which categories are already delivered) and
++ * by {@link DigestWorkerTest}-style tests that need the delivery-repo
++ * collaborator wired without DB I/O.
++ */
++final class RecordingCategoryDeliveryRepository extends DigestCategoryDeliveryRepository {
++    private final Set<String> recorded = new HashSet<>();
++    private Set<String> seededDelivered = new HashSet<>();
++
++    void seedDelivered(Set<String> slugs) { this.seededDelivered = new HashSet<>(slugs); }
++
++    Set<String> recorded() { return recorded; }
++
++    @Override
++    public void recordDelivery(UUID groupId, Instant windowStart, String categorySlug) {
++        recorded.add(categorySlug);
++    }
++
++    @Override
++    public Set<String> findDeliveredSlugs(UUID groupId, Instant windowStart) {
++        return seededDelivered;
++    }
++}
+diff --git a/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/RecordingSectionRepository.java b/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/RecordingSectionRepository.java
+new file mode 100644
+index 00000000..e6fd3842
+--- /dev/null
++++ b/infochat-provider/src/test/java/app/zcat/infochat/provider/digest/RecordingSectionRepository.java
+@@ -0,0 +1,76 @@
++package app.zcat.infochat.provider.digest;
++
++import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
++
++import java.sql.Connection;
++import java.time.Instant;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.UUID;
++
++/**
++ * Recording {@link DigestSectionRepository} stub: captures every
++ * {@code replaceSlotSections} call's arguments without touching the DB, and
++ * appends to an optional shared call-log so a test can pin cross-stub call
++ * order (M1-652's persist-before-deliver property). Used by
++ * {@link DigestWorkerTest} and {@link DigestRetryServiceTest}; the read-back
++ * methods are overridable for replay seeding.
++ */
++class RecordingSectionRepository extends DigestSectionRepository {
++    private final List<ReplaceCall> replaceCalls = new ArrayList<>();
++    private final List<String> callLog;
++    private List<RenderedSection> seededSections = List.of();
++
++    /** Captured arguments of one {@code replaceSlotSections} call. */
++    record ReplaceCall(UUID groupId, Instant windowStart,
++                       List<RenderedSection> sections, Instant now) {}
++
++    RecordingSectionRepository() { this(new ArrayList<>()); }
++
++    /** Share a call-log so cross-stub ordering is observable; appends {@code marker}. */
++    RecordingSectionRepository(List<String> sharedCallLog) {
++        this.callLog = sharedCallLog;
++    }
++
++    List<ReplaceCall> replaceCalls() { return replaceCalls; }
++
++    void mark(String marker) { callLog.add(marker); }
++
++    /** Seed the sections {@code findOrderedSections} returns (replay tests). */
++    void seedSections(List<RenderedSection> sections) { this.seededSections = sections; }
++
++    @Override
++    public void replaceSlotSections(UUID groupId,
++                                    Instant windowStart,
++                                    List<RenderedSection> sections,
++                                    Instant now) {
++        replaceCalls.add(new ReplaceCall(
++                groupId, windowStart, List.copyOf(sections), now));
++        callLog.add("replace");
++    }
++
++    @Override
++    public void replaceSlotSections(Connection conn,
++                                    UUID groupId,
++                                    Instant windowStart,
++                                    List<RenderedSection> sections) {
++        replaceCalls.add(new ReplaceCall(
++                groupId, windowStart, List.copyOf(sections), Instant.now()));
++        callLog.add("replace");
++    }
++
++    @Override
++    public List<RenderedSection> findOrderedSections(UUID groupId, Instant windowStart) {
++        return seededSections;
++    }
++
++    @Override
++    public int pruneExpiredForGroup(UUID groupId, Instant now) {
++        return 0;
++    }
++
++    @Override
++    public int pruneExpiredForGroup(Connection conn, UUID groupId, Instant now) {
++        return 0;
++    }
++}

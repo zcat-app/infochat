@@ -1,0 +1,83 @@
+RED-TEAM VERDICT: CLEAN
+
+Audited M1-652 (gap-filling `/retry --digest` redelivery: V61 `digest_section` +
+`digest_category_delivery` tables, byte-faithful replay path in
+`DigestRetryService`, delivery-recording wrapper in `DigestDelivery`,
+render-time section persistence in `DigestWorker`, PT2M→PT24H replay-retention
+decoupling) against docs/spec/security.md. No threat-model promise is broken by
+the diff. The security-relevant seams were each checked against the commitment
+they touch:
+
+- AUTHORIZATION (§Authorization model, "Two admin tiers"; step 7 permission
+  check). Unchanged. `/retry --digest` still gates on
+  `actor.isAdmin || groupMembershipRepository.isGroupAdmin(...)` before any
+  replay work (RetryCommandHandler.java:412-416), plus the `digestEnabled`
+  gate (:425) and the inbound step-3.5 group-approval short-circuit upstream.
+  The two new RetryResult values (REPLAYED_MISSING, ALL_ALREADY_DELIVERED) are
+  reply-string mappings only (:452-455); they add no reachable pre-auth path.
+
+- LLM OUTPUT SANITIZER (§LLM output sanitizer — "periodic group digests" and
+  "/retry re-rolls" are named surfaces). Preserved. The sanitizer runs at
+  render time inside DigestRenderer.renderSections (DigestRenderer.java:131,
+  `llmOutputSanitizer.sanitize(cp.prose())`), so the persisted
+  `digest_section.content` bytes are already post-sanitize + post-translate.
+  Byte-faithful replay (DigestRetryService.replayMissing → DigestDelivery.deliver
+  → section.text()) delivers already-sanitized bytes; no LLM-authored text
+  bypasses the outbound pass. The two new bundle keys are static bot-authored
+  strings with no inbound interpolation (deterministic-command-output exemption).
+
+- PER-(user,scope) ISOLATION. Replay reads are keyed by the resolved inbound
+  groupId and that group's own cache-row slot_fired_at
+  (DigestRetryService.java:738, :770); both prune subqueries re-scope to the
+  same group_id (DigestSectionRepository.java:1084-1103). No cross-group read
+  or delete.
+
+- DB ROLES (§DB roles — Provider least-privilege). V61 grants
+  SELECT/INSERT/DELETE to infochat_provider and REVOKEs UPDATE on both tables;
+  Collector granted nothing (V61__digest_replay_state.sql:254-260). Aligned
+  with the narrow-grant posture. All writes/reads are parameterized
+  PreparedStatements — no SQL injection surface.
+
+- AUDIT (§Authorization model step 8). The DIGEST_RETRY intent is audit-logged
+  for every authorized attempt before the rate-cap gates
+  (RetryCommandHandler.java:429). Delivery records are not privileged
+  operations and require no separate audit.
+
+- RATE-LIMIT / DOS. Each retry (including the no-op ALL_ALREADY_DELIVERED path)
+  still draws a per-user LLM token and a per-group LLM token
+  (RetryCommandHandler.java:441-447) and is bounded upstream by the
+  transport-level (step 1.5) and per-group command caps. The fallback re-run
+  clamps the render window to min(expiresAt, now+windowWidth)
+  (DigestRetryService.java:813-814), so no many-hours LLM budget is acquired.
+  The empty-filtered-list counter-safety guard (replayMissing returns
+  ALL_ALREADY_DELIVERED without touching deliverSequenceToGroup,
+  DigestRetryService.java:781-785) prevents an empty send from spuriously
+  incrementing the per-group permanent-failure counter (D63 slot-level
+  attribution preserved). The cooldown-not-stamped-on-no-op behaviour loosens
+  only a non-spec implementation mechanism; the spec-level LLM buckets still
+  gate.
+
+- SECRETS / USER-CONTENT LOGGING (§Secrets handling, §User content in
+  exceptions). New log statements interpolate only group_id (UUID),
+  slot_kind (enum), and category_slug (controlled-vocabulary tag)
+  (DigestWorker.java:255-257, DigestDelivery.java:577-580); none of the
+  protected user-authored categories (chat bodies, post bodies, saved-post
+  annotations, command arguments). Digest content is bot-authored summary prose.
+
+OUT-OF-MODEL:
+  - Widened stale-digest replay window vs. post-render quarantine. A digest
+    section is rendered and persisted at slot fire time from posts that were
+    READY then; the bytes are a point-in-time snapshot. If a summarized post is
+    later re-evaluated to INJECTION/MALWARE/UNKNOWN and QUARANTINED (§Quarantine
+    workflow — a hidden post), the persisted `digest_section.content` still
+    contains its (Stage-1-redacted, LLM-summarized, output-sanitized) prose, and
+    a gap-filling `/retry --digest` will re-deliver it. This snapshot behaviour
+    pre-dates M1-652 (`summary_cache` already persisted rendered digest prose
+    for `/retry --digest`); M1-652 widens the window during which it can be
+    replayed from ~PT2M (old retry-cooldown-coupled horizon) to PT24H
+    (`infochat.digest.replay-retention`). The threat model commits that a
+    QUARANTINED *post* is hidden from retrieval, but does not commit to
+    retroactively scrubbing or un-delivering already-generated derived digest
+    prose, so this falls outside the documented model. Flagged so the user can
+    decide whether the widened replay window warrants bounding the horizon or
+    re-validating post visibility at replay time.

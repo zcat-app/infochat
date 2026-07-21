@@ -21,9 +21,11 @@ import java.util.concurrent.TimeoutException;
 import javax.sql.DataSource;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
@@ -47,7 +49,7 @@ import jakarta.inject.Inject;
 @ApplicationScoped
 public class DigestWorker {
 
-    private static final Logger LOG = Logger.getLogger(DigestWorker.class);
+    private static final Logger LOG = LoggerFactory.getLogger(DigestWorker.class);
 
     // Bean-owned, not static: the executor's lifetime is tied to this
     // @ApplicationScoped bean (shut down in @PreDestroy with the application),
@@ -71,6 +73,9 @@ public class DigestWorker {
     SummaryCacheRepository cacheRepository;
 
     @Inject
+    DigestSectionRepository sectionRepository;
+
+    @Inject
     BundleLoader bundleLoader;
 
     @Inject
@@ -92,12 +97,15 @@ public class DigestWorker {
     Clock clock = Clock.systemUTC();
 
     // How long the cache row stays findable (non-expired) past the slot
-    // window for /retry --digest. Reuses DigestRetryService's cooldown
-    // property rather than introducing a new constant: the row's expires_at
-    // becomes the synthetic retry slot's windowEnd, so it must outlive the
-    // window the retry the cooldown permits is issued in.
-    @ConfigProperty(name = "infochat.digest.retry-cooldown", defaultValue = "PT2M")
-    Duration retryHorizon;
+    // window for /retry --digest, AND how long the persisted render output
+    // (digest_section) + delivery records (digest_category_delivery) stay
+    // prune-eligible (M1-652, D65). Decoupled from the user-facing cooldown
+    // (infochat.digest.retry-cooldown) so widening the replay horizon does
+    // not widen the cooldown: a retry now works at any point inside the
+    // retention horizon instead of a ~2-minute window. Default PT24H per
+    // M1-652 acceptance item 7.
+    @ConfigProperty(name = "infochat.digest.replay-retention", defaultValue = "PT24H")
+    Duration replayRetention;
 
     // In-flight guard (ConcurrentHashMap-backed, keyed groupId+slotKind): a
     // scheduler tick overrun re-fires a slot whose previous execution is
@@ -132,7 +140,7 @@ public class DigestWorker {
     public SlotOutcome execute(DigestSlot slot) {
         String inFlightKey = slot.groupId() + ":" + slot.slotKind();
         if (!inFlightSlots.add(inFlightKey)) {
-            LOG.warnf("Digest already in flight for group %s slot %s — skipping overlapping execution",
+            LOG.warn("Digest already in flight for group {} slot {} — skipping overlapping execution",
                     slot.groupId(), slot.slotKind());
             return SlotOutcome.SKIPPED_IN_FLIGHT;
         }
@@ -141,8 +149,13 @@ public class DigestWorker {
         } catch (SQLException e) {
             // Expected operational failures only — programming errors propagate.
             // Outbound delivery failures no longer surface here: the chokepoint
-            // absorbs them (retry/abort) inside executeSlot.
-            LOG.errorf(e, "Digest failed for group %s slot %s", slot.groupId(), slot.slotKind());
+            // absorbs them (retry/abort) inside executeSlot. Routed through
+            // SafeLog: the guarded executeSlot binds post-derived prose into
+            // the cache/section tables, and §Secrets handling commits the
+            // Throwable never reaches the underlying SLF4J logger.
+            SafeLog.error(LOG,
+                    "Digest failed for group " + slot.groupId() + " slot " + slot.slotKind(),
+                    e);
         } finally {
             inFlightSlots.remove(inFlightKey);
         }
@@ -220,14 +233,58 @@ public class DigestWorker {
                 collection.sourceSubscriptionVersion(),
                 content,
                 isDegraded,
-                // Outlive the slot window by the retry horizon so a
+                // Outlive the slot window by the replay retention so a
                 // /retry --digest issued after windowEnd still finds a
-                // non-expired row instead of degrading immediately.
-                slot.windowEnd().plus(retryHorizon));
+                // non-expired row AND can replay persisted sections (M1-652
+                // decoupled this from retry-cooldown so the horizon can be
+                // PT24H without widening the user-facing cooldown).
+                slot.windowEnd().plus(replayRetention));
+
+        if (renderedSections != null) {
+            // Persist the exact delivery bytes (M1-652 arm (b)) right after
+            // the cache upsert and BEFORE any category message leaves the
+            // process (including before the adapter lookup below). A crash
+            // between this persist and the delivery call leaves the sections
+            // durably readable for a later gap-filling retry; a crash during
+            // the delivery loop leaves the undelivered categories' bytes
+            // intact. Persist-before-deliver is the crash-window correctness
+            // property the whole ticket exists for; a persist-after-deliver
+            // mistake would pass every happy-path test but lose the window.
+            //
+            // SECURITY INVARIANT: these bytes are POST-SANITIZE. The
+            // sanitizer runs inside DigestRenderer.renderSections() (:131)
+            // before the sections are returned, so the persisted
+            // digest_section.content is already clean. The replay path
+            // (DigestRetryService.replayMissing) delivers these bytes
+            // verbatim WITHOUT re-sanitizing — that is correct by design,
+            // not an oversight. If a future change persists pre-sanitize
+            // bytes, replay would deliver unsanitized content; the test
+            // DigestRendererTest.renderSections_stripsAdminCommandTokens_
+            // beforePersistenceAndReplay pins this boundary.
+            // A persist failure logs and continues — the digest still
+            // delivers; a later retry falls back to the full re-run path
+            // (no sections found → fallback), so the system degrades
+            // gracefully rather than dropping the user's digest.
+            try {
+                sectionRepository.replaceSlotSections(
+                        slot.groupId(), slot.windowStart(),
+                        renderedSections, clock.instant());
+            } catch (SQLException persistFailure) {
+                // Catch-and-log, never propagate — the digest still delivers.
+                // Routed through SafeLog: replaceSlotSections batch-INSERTs
+                // digest_section.content (post-derived prose), and §Secrets
+                // handling commits the Throwable is never passed to the
+                // underlying SLF4J logger.
+                SafeLog.warn(LOG,
+                        "Section persist failed for group " + slot.groupId()
+                                + " slot " + slot.slotKind() + " — delivering without replay state",
+                        persistFailure);
+            }
+        }
 
         MessagingAdapter adapter = findAdapter(meta.adapterName());
         if (adapter == null) {
-            LOG.warnf("No activated adapter '%s' for group %s — digest cached but not delivered",
+            LOG.warn("No activated adapter '{}' for group {} — digest cached but not delivered",
                     meta.adapterName(), slot.groupId());
             return;
         }
@@ -251,7 +308,7 @@ public class DigestWorker {
             // drives bot-removed cleanup. A null return means the delivery was
             // aborted — logged here; the next slot retries (spec §Failure handling).
             if (outboundDelivery.deliverToGroup(adapter, msg, slot.groupId()) == null) {
-                LOG.warnf("Digest delivery aborted for group %s slot %s",
+                LOG.warn("Digest delivery aborted for group {} slot {}",
                         slot.groupId(), slot.slotKind());
             }
         }

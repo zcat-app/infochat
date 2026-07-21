@@ -1,0 +1,71 @@
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:190:     * chat reply when the caller's inbound text matched a command intent
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:196:     * §LLM output sanitizer exemption. Never interpolates inbound bytes:
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:207:     * <code>`/{0}`</code>, which supplied the slash and turned an inbound word into a
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:461:    /** Deterministic reply for an unknown slash command, looked up by InboundRouter's slash dispatch in the requester's effective scope language. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:464:    /** Deterministic reply for any uncaught dispatch exception, looked up by InboundRouter's catch-all; the exception's own message is NEVER interpolated into it. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:621:    // Welcome messages. These keys are looked up by InboundRouter at the
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:634:     * user receives one fixed reply per inbound message, regardless of
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:789:     * connected-but-unregistered contacts on the inbound adapter, sourced
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:860:    // The probation gate (InboundRouter step 5) emits
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:919:    // users.is_admin and are inbound-adapter-scoped; the V5
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:957:    // contact id), so the CommandHandler SPI cannot resolve the inbound
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:1171:    // frozen CommandHandler SPI does not carry the inbound caller's
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:1224:    // CommandHandler.handle(ScopeRef, String) SPI carries no inbound
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:1331:    // dispatch path (InboundRouter + ChatAgent); never by command handlers.
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:1639:    // the InboundRouter step-3.5 short-circuits + GroupApprovalService cap
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:1828:    // reply literals in InboundRouter and ExportCommandHandler. {0}/{1}
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:1833:     * Defense-in-depth oversize-inbound reply. Looked up by
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:1834:     * InboundRouter BEFORE any DB step runs (the size cap fires ahead
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:20:import app.zcat.infochat.provider.messaging.InboundContext;
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:109:    InboundContext inboundContext;
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:150:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ANCHOR, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:155:        // the actual inbound scope, scope_id is the caller's own id in a DM
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:161:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ANCHOR, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:168:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ANCHOR, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:180:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ELIGIBLE_POSTS, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:191:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_IN_FLIGHT, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:203:                        inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:217:                        bundleLoader.get(BundleKeys.ERROR_RETRY_CAP_EXHAUSTED, inboundContext.effectiveLanguage()),
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:228:                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:239:                return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ELIGIBLE_POSTS, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:253:                        bundleLoader.get(BundleKeys.REPLY_RETRY_STATUS_DRIFT_NOTICE, inboundContext.effectiveLanguage()),
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:260:                out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:360:        // InboundContext carries the sender's contact id for both DM and group
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:364:            case ScopeRef.Group ignored -> inboundContext.senderContactId();
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:366:        return userRepository.resolveUserId(inboundContext.adapterName(), contactId);
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:400:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_GROUP_ONLY, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:404:        String adapter = inboundContext.adapterName();
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:405:        String contactId = inboundContext.senderContactId();
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:408:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_GROUP_ADMIN_REQUIRED, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:415:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_GROUP_ADMIN_REQUIRED, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:426:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_PAUSED, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:442:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:446:            return reply(scope, bundleLoader.get(BundleKeys.GROUP_LLM_RATE_LIMIT, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:451:                    bundleLoader.get(BundleKeys.REPLY_RETRY_DIGEST_SUCCESS, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:453:                    bundleLoader.get(BundleKeys.REPLY_RETRY_DIGEST_REPLAYED_MISSING, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:455:                    bundleLoader.get(BundleKeys.REPLY_RETRY_DIGEST_ALL_ALREADY_DELIVERED, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:457:                    bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_ALREADY_IN_PROGRESS, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:459:                    bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_NO_PRIOR, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:461:                    bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_RATE_LIMITED, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:493:        String adapter = inboundContext.adapterName();
+infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestDelivery.java:200:        @Override public void setInboundHandler(InboundHandler h) {
+infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestDelivery.java:201:            delegate.setInboundHandler(h);
+infochat-provider/src/main/resources/application.properties:90:# most 1 transient connection per tick; the remaining demand is inbound
+infochat-provider/src/main/resources/application.properties:92:# (infochat.rate-cap.inbound-per-minute, infochat.chat.llm-rate-cap-*).
+infochat-provider/src/main/resources/application.properties:93:#   laptop     = 12  (2 pinned + 3 jobs + ~4 concurrent inbound, rounded up)
+infochat-provider/src/main/resources/application.properties:94:#   vps        = 16  (2 pinned + 3 jobs + ~8 concurrent inbound, production)
+infochat-provider/src/main/resources/application.properties:110:# @PostConstruct calls AdapterRegistry.start() at boot, which runs the
+infochat-provider/src/main/resources/application.properties:183:# transport dispatch thread), so the transport's bounded inbound queue stays
+infochat-provider/src/main/resources/application.properties:241:# InboundRouter body-size cap (defense in depth). The router enforces this
+infochat-provider/src/main/resources/application.properties:244:# cannot amplify NFKC cost. The adapter SPI's `maxInboundMessageBytes`
+infochat-provider/src/main/resources/application.properties:256:infochat.router.max-inbound-body-bytes=65536
+infochat-provider/src/main/resources/application.properties:268:infochat.rate-cap.inbound-per-minute=60
+infochat-provider/src/main/resources/bundles/en.properties:278:# attempts) on the inbound adapter, so an admin can copy the FULL contact id
+infochat-provider/src/main/resources/bundles/en.properties:706:# awaiting vouch), scoped to the inbound adapter so each contact id is directly
+infochat-provider/src/main/resources/bundles/en.properties:716:# docs/spec/messaging.md §Identity and groups. InboundRouter step 3.5
+infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryDigestCommandTest.java:12:import app.zcat.infochat.provider.messaging.InboundContext;
+infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryDigestCommandTest.java:64:        InboundContext ctx = new InboundContext();
+infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryDigestCommandTest.java:67:        handler.inboundContext = ctx;
+infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestDeliveryTest.java:455:        @Override public void setInboundHandler(InboundHandler h) { }
+infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRetryServiceTest.java:327:        @Override public void setInboundHandler(InboundHandler h) {}
+infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java:463:        @Override public void setInboundHandler(InboundHandler h) {}

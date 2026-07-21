@@ -79,6 +79,34 @@ class RetryDigestCommandTest {
     }
 
     @Test
+    void retryDigest_replayedMissingReply() {
+        // M1-652: a replay that re-sent the missing categories surfaces the
+        // distinct bundle reply so the admin knows it was a gap-fill, not a
+        // full re-generation.
+        digestRetryService.nextResult = RetryResult.REPLAYED_MISSING;
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Group("group-1"), "/retry --digest");
+
+        assertTrue(reply.text().contains("re-sent from the original digest"),
+                "reply must indicate the missing categories were replayed. Got: " + reply.text());
+    }
+
+    @Test
+    void retryDigest_allAlreadyDeliveredReply() {
+        // M1-652: a no-op retry (every category already arrived) surfaces the
+        // distinct reply so the admin knows nothing was re-sent, rather than
+        // a bare SUCCESS.
+        digestRetryService.nextResult = RetryResult.ALL_ALREADY_DELIVERED;
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Group("group-1"), "/retry --digest");
+
+        assertTrue(reply.text().contains("nothing was re-sent"),
+                "reply must indicate nothing was re-sent. Got: " + reply.text());
+    }
+
+    @Test
     void retryDigest_rejectsNonAdmin() {
         DataSource nonAdminStub = stubDigestDataSource(USER_ID, false, GROUP_ID);
         handler.dataSource = nonAdminStub;

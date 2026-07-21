@@ -36,13 +36,14 @@ class DigestWorkerClockTest {
     private static final UUID GROUP_ID = UUID.randomUUID();
     private static final String ADAPTER_NAME = "inmemory";
     private static final String UPSTREAM_GROUP_ID = "group-clock";
-    private static final Duration RETRY_HORIZON = Duration.ofMinutes(10);
+    private static final Duration REPLAY_RETENTION = Duration.ofMinutes(10);
 
     private DigestWorker worker;
     private RecordingPostCollector postCollector;
     private RecordingDigestRenderer digestRenderer;
     private RecordingDegradedRenderer degradedRenderer;
     private RecordingCacheRepository cacheRepository;
+    private RecordingSectionRepository sectionRepository;
 
     @BeforeEach
     void setUp() {
@@ -51,16 +52,20 @@ class DigestWorkerClockTest {
         digestRenderer = new RecordingDigestRenderer();
         degradedRenderer = new RecordingDegradedRenderer();
         cacheRepository = new RecordingCacheRepository();
+        sectionRepository = new RecordingSectionRepository();
 
         worker.postCollector = postCollector;
         worker.digestRenderer = digestRenderer;
         worker.degradedRenderer = degradedRenderer;
         worker.cacheRepository = cacheRepository;
+        worker.sectionRepository = sectionRepository;
         // No activated adapter → executeSlot returns right after the cache
-        // upsert, so the outbound chokepoint is never exercised.
+        // upsert and section persist, so the outbound chokepoint is never
+        // exercised. The persist step DOES run on the render path now
+        // (M1-652), which is why the section-repo stub is wired here.
         worker.adapterRegistry = new AdapterRegistry();
         worker.dataSource = new StubGroupDataSource(ADAPTER_NAME, UPSTREAM_GROUP_ID, "en");
-        worker.retryHorizon = RETRY_HORIZON;
+        worker.replayRetention = REPLAY_RETENTION;
     }
 
     @Test

@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newEnShortCircuitPipeline;
 import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newRealBundleLoader;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -153,6 +154,42 @@ class DigestRendererTest {
 
         assertEquals(first, second,
                 "same clusters + tags produce a byte-identical section layout");
+    }
+
+    @Test
+    void renderSections_stripsAdminCommandTokens_beforePersistenceAndReplay() {
+        // SECURITY INVARIANT (codex redteam 2026-07-21, falsified by
+        // claude's data-flow trace): the sanitizer runs INSIDE
+        // renderSections() — every ClusterProse body is passed through
+        // llmOutputSanitizer.sanitize() before it enters a RenderedSection.
+        // DigestWorker persists those post-sanitize bytes verbatim
+        // (DigestSectionRepository.replaceSlotSections), and
+        // DigestRetryService.replayMissing delivers them byte-faithfully
+        // WITHOUT re-sanitizing — the replay path has no sanitizer call by
+        // design, because the stored bytes are already clean.
+        //
+        // This test pins the boundary: if the sanitizer call is removed
+        // from renderSections(), the injection payload survives into the
+        // returned section text — and this test fails, surfacing the break
+        // before it reaches persistence or replay. The setUp wires the
+        // REAL LlmOutputSanitizer (via SanitizerTestDoubles.noAuditSanitizer,
+        // which sanitizes for real — only the audit DB write is stubbed).
+        proseGenerator.setResponseText("Important update (/grant-admin)");
+        List<Post> posts = List.of(
+                post("s1", "Sec 1", List.of("security")),
+                post("s2", "Sec 2", List.of("security")),
+                post("s3", "Sec 3", List.of("security")));
+
+        List<DigestRenderer.RenderedSection> sections = renderer.renderSections(posts, "en");
+
+        assertFalse(sections.isEmpty(), "fixture: at least one section rendered");
+        for (DigestRenderer.RenderedSection section : sections) {
+            assertFalse(section.text().contains("/grant-admin"),
+                    "admin command token MUST be stripped by the sanitizer before the "
+                            + "section bytes are returned for persistence — if this fails, "
+                            + "the replay path would deliver unsanitized content. Section: "
+                            + section.text());
+        }
     }
 
     // ----- helpers ----------------------------------------------------------

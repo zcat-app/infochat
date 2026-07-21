@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 679 |
+| done | 680 |
 | deferred | 0 |
 | abandoned | 19 |
 | **total** | **702** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-649 — Conceptual topic corpus: curated answers, intent-shaped matching, code-anchored guards (retrieval only) (complexity: high, risk: high)
-- M1-652 — Gap-filling redelivery for per-category digests (complexity: high, risk: medium)
 - M1-667 — Route user-content exception catches through SafeLog (complexity: medium, risk: low)
 
 ---
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-652 | Gap-filling redelivery for per-category digests | 2026-07-21 | round 2 APPROVE |
 | M1-660 | doc_embedding read path: arm hnsw.iterative_scan under filter-inside-ANN, in a transaction | 2026-07-20 | round 1 APPROVE |
 | M1-642 | Per-category digest delivery + optional roll-up summaries | 2026-07-20 | round 2 APPROVE |
 | M1-665 | Deterministic delivery of matched command usage in chat | 2026-07-19 | round 2 APPROVE |
@@ -72,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-659 | Stop /add-source success reply reflecting raw --name | 2026-07-19 | round 5 APPROVE |
 | M1-658 | Guard: no inbound-text reflection in outbound templates | 2026-07-18 | round 3 APPROVE |
 | M1-657 | Gate /approve-group: admin check before group-id parse | 2026-07-18 | round 1 APPROVE |
-| M1-656 | Stop friendly errors reflecting unvalidated inbound text | 2026-07-18 | round 3 APPROVE |
 
 ---
 
@@ -869,7 +868,7 @@ M1-639 (done)
 M1-640 (done)
 M1-641 (done)
   ├── M1-642 (done)
-  │     └── M1-652 (pending) ← runnable
+  │     └── M1-652 (done)
   └── M1-643 (abandoned)
 M1-644 (done)
 M1-645 (done)

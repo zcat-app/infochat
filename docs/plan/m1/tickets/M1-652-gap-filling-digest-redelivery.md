@@ -1,12 +1,12 @@
 ---
 id: M1-652
 title: "Gap-filling redelivery for per-category digests"
-status: pending
+status: done
 created: 2026-07-18
 last_updated: 2026-07-21
 blocked_by:
   - M1-642
-files_budget: 22
+files_budget: 25
 files_scope:
   - infochat-core/src/main/resources/db/migration/V61__digest_replay_state.sql
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestSectionRepository.java
@@ -25,6 +25,9 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRetryServiceTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerClockTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/RecordingSectionRepository.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/RecordingCategoryDeliveryRepository.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryDigestCommandTest.java
   - docs/spec/commands.md
   - docs/spec/decisions.md
@@ -33,6 +36,40 @@ risk: medium
 round_cap: 3
 security_relevant: false
 migration_touch: true
+outline_file: target/m1-tick-outline-M1-652.md
+clarity_check:
+  date: 2026-07-21
+  verdict: PASS
+  warnings:
+    - "Self-check at start, post-refine round 2: lint PASS 0/0. V61 re-verified next (max V60 on disk) and D65 re-verified reserved for this ticket, both this session. Full consumer-closure sweep of every changed surface performed in-session before the refine: retryHorizon (3 files, all in scope), RetryResult (sole production call site RetryCommandHandler:448; out-of-scope IT references survive enum growth), expires_at (no readers outside in-scope digest classes), delivery seam (deliverSequenceToGroup takes adapter param; DigestDelivery:89 supplies it), pruning premise corrected (no summary_cache DELETE exists), fallback clamp property exists (application.properties:574). All five new scope paths verified on disk."
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-21
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 56
+      added: 10469
+      removed: 161
+  - round: 2
+    date: 2026-07-21
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 56
+      added: 10499
+      removed: 162
 escalations:
   - date: 2026-07-18
     reason: clarity-fail
@@ -647,3 +684,15 @@ EVIDENCE:
   ticket should acknowledge the wrapper seam so the developer is not left
   choosing between an unauthorized signature change and an
   apparently-unsanctioned decorator.
+
+## Round 1 rework
+
+**SCOPE-DRIFT-CHECK FAIL (reviewer option (a) applied).** Three test files
+were outside the declared `files_scope`: `DigestRendererTest.java` (the
+redteam-remediation sanitizer-invariant test), `RecordingSectionRepository.java`
+and `RecordingCategoryDeliveryRepository.java` (shared test doubles for the
+in-scope repositories). Resolution: added all three to `files_scope` and
+bumped `files_budget` from 22 to 25. No code change — frontmatter
+reconciliation only. The prior green `mvn verify` log
+(`target/m1-tick-test-M1-652-r2.log`) covers the current testable surface
+(no `*.java`/`pom.xml`/`src/**/resources/**` changed since it ran).

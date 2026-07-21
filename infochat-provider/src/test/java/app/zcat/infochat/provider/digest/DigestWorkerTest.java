@@ -43,15 +43,17 @@ class DigestWorkerTest {
     private static final UUID GROUP_ID = UUID.randomUUID();
     private static final String ADAPTER_NAME = "inmemory";
     private static final String UPSTREAM_GROUP_ID = "group-456";
-    private static final Duration RETRY_HORIZON = Duration.ofMinutes(10);
+    private static final Duration REPLAY_RETENTION = Duration.ofMinutes(10);
 
     private DigestWorker worker;
     private RecordingPostCollector postCollector;
     private RecordingDigestRenderer digestRenderer;
     private RecordingDegradedRenderer degradedRenderer;
     private RecordingCacheRepository cacheRepository;
+    private RecordingSectionRepository sectionRepository;
     private RecordingAdapter recordingAdapter;
     private StubBundleLoader bundleLoader;
+    private List<String> callLog;
 
     @BeforeEach
     void setUp() {
@@ -60,17 +62,20 @@ class DigestWorkerTest {
         digestRenderer = new RecordingDigestRenderer();
         degradedRenderer = new RecordingDegradedRenderer();
         cacheRepository = new RecordingCacheRepository();
+        callLog = new ArrayList<>();
+        sectionRepository = new RecordingSectionRepository(callLog);
         bundleLoader = new StubBundleLoader();
-        recordingAdapter = new RecordingAdapter(ADAPTER_NAME);
+        recordingAdapter = new RecordingAdapter(ADAPTER_NAME, callLog);
 
         worker.postCollector = postCollector;
         worker.digestRenderer = digestRenderer;
         worker.degradedRenderer = degradedRenderer;
         worker.cacheRepository = cacheRepository;
+        worker.sectionRepository = sectionRepository;
         worker.bundleLoader = bundleLoader;
         worker.adapterRegistry = new StubAdapterRegistry(recordingAdapter);
         worker.dataSource = new StubGroupDataSource(ADAPTER_NAME, UPSTREAM_GROUP_ID, "en");
-        worker.retryHorizon = RETRY_HORIZON;
+        worker.replayRetention = REPLAY_RETENTION;
         // Pass-through chokepoint via the public constructor: the recording
         // adapter never throws, so the retry/cleanup collaborators (notifier,
         // group repo) are never exercised on these success/programming-error
@@ -81,6 +86,7 @@ class DigestWorkerTest {
                 3, 0L, 2.0, 3);
         DigestDelivery digestDelivery = new DigestDelivery();
         digestDelivery.outboundDelivery = worker.outboundDelivery;
+        digestDelivery.deliveryRepository = new RecordingCategoryDeliveryRepository();
         worker.digestDelivery = digestDelivery;
     }
 
@@ -180,21 +186,91 @@ class DigestWorkerTest {
     }
 
     @Test
-    void execute_cacheExpiryOutlivesWindowEndByRetryHorizon() {
+    void execute_cacheExpiryOutlivesWindowEndByReplayRetention() {
         postCollector.seed(testPosts(), 1, 1);
         digestRenderer.setResponse("prose");
         DigestSlot slot = futureSlot();
 
         worker.execute(slot);
 
-        assertEquals(slot.windowEnd().plus(RETRY_HORIZON), cacheRepository.lastExpiresAt(),
-                "expires_at must outlive the slot window by the retry horizon");
+        assertEquals(slot.windowEnd().plus(REPLAY_RETENTION), cacheRepository.lastExpiresAt(),
+                "expires_at must outlive the slot window by the replay retention (PT24H default), "
+                        + "decoupled from retry-cooldown so a later retry replays persisted sections "
+                        + "instead of degrading immediately");
     }
 
     @Test
-    void retryAfterWindowEnd_withinRetryHorizon_rendersFullProse() {
+    void execute_persistsSectionsAlongsideCacheRow() {
+        // M1-652 acceptance item 2: every render that produces sections
+        // persists the ordered list alongside the cache upsert, as the EXACT
+        // delivery bytes. The persist MUST happen before delivery so a crash
+        // between them leaves the sections durably readable for replay —
+        // pinned here via the shared call-log ordering.
+        postCollector.seed(testPosts(), 1, 1);
+        digestRenderer.setMultiSections(List.of(
+                new RenderedSection("security", "section A prose"),
+                new RenderedSection("crypto", "section B prose"),
+                new RenderedSection(null, "section Other prose")));
+        DigestSlot slot = futureSlot();
+
+        worker.execute(slot);
+
+        assertEquals(1, sectionRepository.replaceCalls().size(),
+                "the rendered section list is persisted exactly once");
+        RecordingSectionRepository.ReplaceCall persist = sectionRepository.replaceCalls().get(0);
+        assertEquals(GROUP_ID, persist.groupId());
+        assertEquals(slot.windowStart(), persist.windowStart());
+        assertEquals(List.of(
+                new RenderedSection("security", "section A prose"),
+                new RenderedSection("crypto", "section B prose"),
+                new RenderedSection(null, "section Other prose")),
+                persist.sections(),
+                "persisted bytes are the exact renderSections() output in order");
+        // Persist-before-deliver: the shared call-log records "replace" when
+        // the persist lands and "send" when each adapter send fires; the
+        // persist marker must precede every send marker.
+        int firstSend = callLog.indexOf("send");
+        int replace = callLog.indexOf("replace");
+        assertTrue(replace >= 0 && firstSend >= 0,
+                "both persist and delivery markers recorded: " + callLog);
+        assertTrue(replace < firstSend,
+                "persist MUST happen before delivery — call-log order: " + callLog);
+    }
+
+    @Test
+    void execute_degradedRenderPersistsNoSections() {
+        // A degraded render (window closed) keeps the single-message path —
+        // no per-category structure, so no sections to persist. The gap-fill
+        // replay path later finds no sections and falls back to the full
+        // re-run (acceptance item 6).
+        postCollector.seed(testPosts(), 1, 1);
+        degradedRenderer.setResponse("Headlines only");
+        DigestSlot slot = pastSlot();
+
+        worker.execute(slot);
+
+        assertTrue(sectionRepository.replaceCalls().isEmpty(),
+                "degraded renders persist no sections — the fallback path owns them");
+        assertTrue(cacheRepository.lastIsDegraded());
+    }
+
+    @Test
+    void execute_zeroPostsPersistsNoSections() {
+        // The zero-posts fixed reply keeps the single-message path too.
+        postCollector.seed(List.of(), 0, 0);
+        DigestSlot slot = futureSlot();
+
+        worker.execute(slot);
+
+        assertTrue(sectionRepository.replaceCalls().isEmpty(),
+                "zero-posts renders persist no sections");
+    }
+
+    @Test
+    void retryAfterWindowEnd_withinReplayRetention_rendersFullProse() {
         // Scheduled run whose window already closed: it degrades, but writes
-        // expires_at = windowEnd + horizon, which is still in the future.
+        // expires_at = windowEnd + replayRetention, which is still in the
+        // future (PT24H default horizon, not the old PT2M cooldown).
         postCollector.seed(testPosts(), 1, 1);
         degradedRenderer.setResponse("Headlines only");
         digestRenderer.setResponse("Full retry prose");
@@ -207,8 +283,8 @@ class DigestWorkerTest {
         // /retry --digest rebuilds the slot from the cache row's coordinates
         // with windowEnd = the row's expires_at (pinned by
         // DigestRetryServiceTest.retryDigest_replacesCacheRow). Within the
-        // horizon that instant is still ahead, so the retry renders full
-        // prose instead of degrading again.
+        // replay retention that instant is still ahead, so the retry renders
+        // full prose instead of degrading again.
         Instant expiresAt = cacheRepository.lastExpiresAt();
         assertTrue(expiresAt.isAfter(Instant.now()),
                 "the cache row must be non-expired after windowEnd");
@@ -218,7 +294,7 @@ class DigestWorkerTest {
         worker.execute(retrySlot);
 
         assertFalse(cacheRepository.lastIsDegraded(),
-                "a retry within the horizon must render full prose, not degrade");
+                "a retry within the replay retention must render full prose, not degrade");
         assertEquals("Full retry prose", cacheRepository.lastContent());
     }
 
@@ -360,8 +436,14 @@ class DigestWorkerTest {
     private static final class RecordingAdapter implements MessagingAdapter {
         private final String name;
         private final List<OutboundMessage> sent = new ArrayList<>();
+        private final List<String> callLog;
 
-        RecordingAdapter(String name) { this.name = name; }
+        RecordingAdapter(String name) { this(name, new ArrayList<>()); }
+
+        RecordingAdapter(String name, List<String> callLog) {
+            this.name = name;
+            this.callLog = callLog;
+        }
 
         int sendCount() { return sent.size(); }
         OutboundMessage lastMessage() { return sent.getLast(); }
@@ -372,6 +454,7 @@ class DigestWorkerTest {
         @Override public boolean isWellFormedContactId(String contactId) { return true; }
         @Override public MessageHandle send(OutboundMessage msg) {
             sent.add(msg);
+            callLog.add("send");
             return null;
         }
         @Override public void update(MessageHandle h, String b) {}
