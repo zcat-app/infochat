@@ -1,7 +1,7 @@
 ---
 id: M1-667
 title: Route user-content exception catches through SafeLog
-status: pending
+status: in-progress
 created: 2026-07-20
 last_updated: 2026-07-21
 blocked_by: []
