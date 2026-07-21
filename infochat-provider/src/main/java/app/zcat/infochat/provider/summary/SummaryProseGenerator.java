@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.summary;
 
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
@@ -8,7 +9,8 @@ import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jboss.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,7 +34,7 @@ import java.util.stream.Collectors;
 @ApplicationScoped
 public class SummaryProseGenerator {
 
-    private static final Logger LOG = Logger.getLogger(SummaryProseGenerator.class);
+    private static final Logger LOG = LoggerFactory.getLogger(SummaryProseGenerator.class);
 
     /**
      * System-role framing for the SUMMARIZER task. Asks the LLM ONLY
@@ -103,7 +105,7 @@ public class SummaryProseGenerator {
         try {
             provider = llmRouter.forTask(ModelTask.SUMMARIZER, scopeLanguage);
         } catch (RuntimeException e) {
-            LOG.warnf(e, "SUMMARIZER provider unresolvable; degrading every cluster");
+            SafeLog.warn(LOG, "SUMMARIZER provider unresolvable; degrading every cluster", e);
             return clusters.stream()
                     .map(c -> new ClusterProse(c, degradedProseFor(c), true))
                     .collect(Collectors.toList());
@@ -123,19 +125,19 @@ public class SummaryProseGenerator {
                     // outcome on the same per-cluster boundary as empty-text
                     // and provider-exception cases — never surface the marker
                     // (or any LLM-authored prose) to the user.
-                    LOG.warnf("SUMMARIZER returned refusal marker for topic %s; degrading",
+                    LOG.warn("SUMMARIZER returned refusal marker for topic {}; degrading",
                             cluster.topicId());
                     out.add(new ClusterProse(cluster, degradedProseFor(cluster), true));
                 } else if (text.isEmpty()) {
-                    LOG.warnf("SUMMARIZER returned empty text for topic %s; degrading",
+                    LOG.warn("SUMMARIZER returned empty text for topic {}; degrading",
                             cluster.topicId());
                     out.add(new ClusterProse(cluster, degradedProseFor(cluster), true));
                 } else {
                     out.add(new ClusterProse(cluster, text, false));
                 }
             } catch (RuntimeException e) {
-                LOG.warnf(e, "SUMMARIZER call failed for topic %s; degrading",
-                        cluster.topicId());
+                SafeLog.warn(LOG, "SUMMARIZER call failed for topic " + cluster.topicId() + "; degrading",
+                        e);
                 out.add(new ClusterProse(cluster, degradedProseFor(cluster), true));
             }
         }

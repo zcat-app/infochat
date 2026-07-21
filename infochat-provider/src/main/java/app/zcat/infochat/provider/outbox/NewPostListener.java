@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.outbox;
 
+import app.zcat.infochat.core.log.SafeLog;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -8,6 +9,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 import org.postgresql.PGNotification;
+import org.slf4j.LoggerFactory;
 
 import java.sql.SQLException;
 import java.time.Instant;
@@ -60,6 +62,8 @@ public class NewPostListener extends AbstractPgListener {
 
     private static final Logger LOG = Logger.getLogger(NewPostListener.class);
 
+    private static final org.slf4j.Logger SAFE_LOG = LoggerFactory.getLogger(NewPostListener.class);
+
     @Inject
     NewPostHandler newPostHandler;
 
@@ -108,14 +112,13 @@ public class NewPostListener extends AbstractPgListener {
             // The exception carries a shape-only message (parsePayload no
             // longer echoes the raw payload); keep the raw NOTIFY bytes out
             // of the log too — info-leak hygiene on this boundary.
-            LOG.error("NewPostListener: unparseable new_post payload (dropped)", e);
+            SafeLog.error(SAFE_LOG, "NewPostListener: unparseable new_post payload (dropped)", e);
             return;
         }
         try {
             newPostHandler.handle(payload.postId(), payload.readyAt());
         } catch (SQLException e) {
-            LOG.errorf(e, "NewPostListener: handler failed for post_id=%s",
-                payload.postId());
+            SafeLog.error(SAFE_LOG, "NewPostListener: handler failed for post_id=" + payload.postId(), e);
         }
     }
 

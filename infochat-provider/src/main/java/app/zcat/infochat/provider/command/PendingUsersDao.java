@@ -1,8 +1,10 @@
 package app.zcat.infochat.provider.command;
 
+import app.zcat.infochat.core.log.SafeLog;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jboss.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -36,7 +38,7 @@ import java.util.UUID;
 @ApplicationScoped
 public class PendingUsersDao {
 
-    private static final Logger LOG = Logger.getLogger(PendingUsersDao.class);
+    private static final Logger LOG = LoggerFactory.getLogger(PendingUsersDao.class);
 
     // Shared actionable-set predicate: an un-banned user still inside the
     // slow-start probation window. The single '?' is the probation cutoff
@@ -88,7 +90,7 @@ public class PendingUsersDao {
                         rs.getObject("id", UUID.class), rs.getBoolean("is_admin")));
             }
         } catch (SQLException e) {
-            LOG.errorf(e, "lookupActor failed for adapter=%s", adapter);
+            SafeLog.error(LOG, "lookupActor failed for adapter=" + adapter, e);
             return Optional.empty();
         }
     }

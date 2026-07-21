@@ -5,6 +5,7 @@ import app.zcat.infochat.core.audit.AuditVerb;
 import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.util.JsonEscaper;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
@@ -15,7 +16,8 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -52,7 +54,7 @@ import java.util.stream.Collectors;
 @ApplicationScoped
 public class AuditCommandHandler implements CommandHandler {
 
-    private static final Logger LOG = Logger.getLogger(AuditCommandHandler.class);
+    private static final Logger LOG = LoggerFactory.getLogger(AuditCommandHandler.class);
 
     private static final String SELECT_USER_SQL =
             "SELECT id, contact_id, is_admin FROM users WHERE adapter = ? AND contact_id = ?";
@@ -155,7 +157,7 @@ public class AuditCommandHandler implements CommandHandler {
                 throw e;
             }
         } catch (SQLException e) {
-            LOG.errorf(e, "/audit audit write failed");
+            SafeLog.error(LOG, "/audit audit write failed", e);
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
         }
 
@@ -238,7 +240,7 @@ public class AuditCommandHandler implements CommandHandler {
             }
             return reply(scope, sb.toString());
         } catch (SQLException e) {
-            LOG.errorf(e, "/audit query failed");
+            SafeLog.error(LOG, "/audit query failed", e);
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
         }
     }
@@ -276,7 +278,7 @@ public class AuditCommandHandler implements CommandHandler {
                         rs.getBoolean("is_admin")));
             }
         } catch (SQLException e) {
-            LOG.errorf(e, "lookupActor failed for adapter=%s", adapter);
+            SafeLog.error(LOG, "lookupActor failed for adapter=" + adapter, e);
             return Optional.empty();
         }
     }

@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.outbox;
 
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
@@ -10,6 +11,7 @@ import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import org.jboss.logging.Logger;
 import org.postgresql.PGNotification;
+import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -72,6 +74,8 @@ public class QuarantineReviewListener extends AbstractPgListener {
     static final String CHANNEL = "quarantine_review";
 
     private static final Logger LOG = Logger.getLogger(QuarantineReviewListener.class);
+
+    private static final org.slf4j.Logger SAFE_LOG = LoggerFactory.getLogger(QuarantineReviewListener.class);
 
     private static final Pattern TARGET_KIND_PATTERN =
             Pattern.compile("\"target_kind\"\\s*:\\s*\"([^\"]+)\"");
@@ -206,7 +210,7 @@ public class QuarantineReviewListener extends AbstractPgListener {
             // Do NOT echo the raw payload (NewPostListener parity): the
             // unparseable bytes need no payload content to be actionable
             // and must stay out of the operator's log.
-            LOG.error("QuarantineReviewListener: unparseable payload (dropped)", e);
+            SafeLog.error(SAFE_LOG, "QuarantineReviewListener: unparseable payload (dropped)", e);
             return;
         }
         try {
@@ -215,8 +219,8 @@ public class QuarantineReviewListener extends AbstractPgListener {
             // proxy-routed calls (class javadoc).
             self.handleEvent(payload.targetKind(), payload.targetId());
         } catch (SQLException e) {
-            LOG.errorf(e, "QuarantineReviewListener: handler failed for %s/%s",
-                    payload.targetKind(), payload.targetId());
+            SafeLog.error(SAFE_LOG, "QuarantineReviewListener: handler failed for "
+                    + payload.targetKind() + "/" + payload.targetId(), e);
         }
     }
 

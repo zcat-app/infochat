@@ -1,0 +1,51 @@
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java:15:import app.zcat.infochat.provider.messaging.InboundContext;
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java:72:    @Inject InboundContext inboundContext;
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java:94:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java:97:        String adapter = inboundContext.adapterName();
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java:102:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java:108:                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT, inboundContext.effectiveLanguage()),
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java:117:                        bundleLoader.get(BundleKeys.ERROR_AUDIT_UNKNOWN_ACTION, inboundContext.effectiveLanguage()),
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java:122:        // Resolve --actor against (inbound_adapter, contact_id) to get actor_user_id.
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java:161:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java:201:                return reply(scope, bundleLoader.get(BundleKeys.REPLY_AUDIT_EMPTY, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java:210:            sb.append(MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_AUDIT_HEADER, inboundContext.effectiveLanguage()),
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java:229:                                bundleLoader.get(BundleKeys.REPLY_AUDIT_LINE, inboundContext.effectiveLanguage()),
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java:244:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingCommandHandler.java:12:import app.zcat.infochat.provider.messaging.InboundContext;
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingCommandHandler.java:38: * subset is exposed, and it is scoped to the inbound adapter so every id resolves
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingCommandHandler.java:57:    @Inject InboundContext inboundContext;
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingCommandHandler.java:79:        String lang = inboundContext.effectiveLanguage();
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingCommandHandler.java:86:        String adapter = inboundContext.adapterName();
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:13:import app.zcat.infochat.provider.messaging.InboundContext;
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:103:    @Inject InboundContext inboundContext;
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:122:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:125:        String adapter = inboundContext.adapterName();
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:130:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:142:            default -> reply(scope, bundleLoader.get(BundleKeys.ERROR_QUARANTINE_UNKNOWN_SUBCOMMAND, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:151:                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT, inboundContext.effectiveLanguage()),
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:159:            return reply(scope, bundleLoader.get(WINDOW_REQUIRES_ALL_KEY, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:207:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:223:                return reply(scope, bundleLoader.get(BundleKeys.REPLY_QUARANTINE_LIST_EMPTY, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:232:            sb.append(MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_QUARANTINE_LIST_HEADER, inboundContext.effectiveLanguage()),
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:248:                                bundleLoader.get(BundleKeys.REPLY_QUARANTINE_LIST_LINE, inboundContext.effectiveLanguage()),
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:261:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:268:            return reply(scope, bundleLoader.get(RATE_LIMIT_KEY, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:274:                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_MISSING_ID, inboundContext.effectiveLanguage()), "approve"));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:282:                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_INVALID_ID, inboundContext.effectiveLanguage()), idStr));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:300:                    bundleLoader.get(BundleKeys.REPLY_QUARANTINE_APPROVE_SUCCESS, inboundContext.effectiveLanguage()),
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:310:            return reply(scope, bundleLoader.get(RATE_LIMIT_KEY, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:327:                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:336:                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_MISSING_ID, inboundContext.effectiveLanguage()), "reject"));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:344:                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_INVALID_ID, inboundContext.effectiveLanguage()), idStr));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:358:                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_NOT_FOUND, inboundContext.effectiveLanguage()),
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:368:                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_INVALID_STATE, inboundContext.effectiveLanguage()),
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:397:            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:401:                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_QUARANTINE_REJECT, inboundContext.effectiveLanguage()),
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:428:                    bundleLoader.get(BundleKeys.REPLY_QUARANTINE_REJECT_SUCCESS, inboundContext.effectiveLanguage()),
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:460:                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_NOT_FOUND, inboundContext.effectiveLanguage()),
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:465:                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_INVALID_STATE, inboundContext.effectiveLanguage()),
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:469:        return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
+infochat-provider/src/main/java/app/zcat/infochat/provider/outbox/NewPostListener.java:32: * priority ordering guarantees the reconciler's {@code @PostConstruct}
+infochat-provider/src/main/java/app/zcat/infochat/provider/outbox/NewPostListener.java:73:    @PostConstruct
+infochat-provider/src/main/java/app/zcat/infochat/provider/outbox/QuarantineReviewListener.java:60: * {@code @PostConstruct} (priority 250) touching the listener proxy
+infochat-provider/src/main/java/app/zcat/infochat/provider/outbox/QuarantineReviewListener.java:97:    @PostConstruct

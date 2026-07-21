@@ -1,0 +1,101 @@
+RED-TEAM VERDICT: CLEAN
+
+Audit scope: M1-667 ("Route user-content exception catches through SafeLog")
+migrates Throwable-carrying catch sites in 9 files (AuditCommandHandler,
+PendingCommandHandler, PendingUsersDao, QuarantineCommandHandler,
+DigestScheduler, NewPostListener, QuarantineReviewListener,
+SummaryProseGenerator, TranslationPipeline) away from raw
+LOG.errorf(e, ...)/LOG.error(msg, e) calls and through app.zcat.infochat.core.log.SafeLog.
+
+Primary threat-model commitment audited (docs/spec/security.md §Secrets
+handling → "User content in exceptions", lines 1426-1438):
+  "Exception messages and stack traces emitted via the application logger
+   MUST NOT contain user-authored prose (chat-mode message bodies, post
+   bodies, saved-post annotations, command arguments). The application
+   provides a SafeLog utility that drops the exception message body,
+   retains only the exception class name, and truncates the cause chain
+   to class names (depth-capped at 5). The original Throwable is never
+   passed to the underlying SLF4J logger."
+
+Cross-checked against §Secrets handling → "User-content logging"
+(lines 1419-1424) and the stdout API-key catalogue redactor
+(lines 1413-1416).
+
+Verification performed:
+
+1. SafeLog.java (infochat-core/.../core/log/SafeLog.java) delivers every
+   spec property: formatSafe() emits only "msg | exception=<FQN>" plus a
+   depth-capped (MAX_CAUSE_DEPTH=5) cause chain of class names and a
+   width-capped (MAX_SUPPRESSED_WIDTH=5) suppressed list per node; the
+   original Throwable is never handed to the SLF4J logger; the caller
+   msg is run through stripControls(Redactor.redact(msg)) before
+   emission so both API keys and control/ANSI/bidi forgery carriers are
+   scrubbed. Compliant.
+
+2. All 18 fix sites in §Census are migrated to SafeLog.error/warn with
+   the Throwable as the third argument; the migration replaces both the
+   JBoss-Logger errorf(e, ...) (throwable-first) form and the SLF4J-style
+   error(msg, e) (throwable-last) form, matching the ticket's two-signature
+   census enumeration. No remaining catch site in the 9 modified files
+   passes a Throwable to the underlying logger.
+
+3. The remaining non-Throwable LOG.warn("{} ...", val) calls introduced
+   by the migration (DigestScheduler:340 timezone warn,
+   SummaryProseGenerator:128/132 topic-id warns, TranslationPipeline:105
+   scope-language warn) interpolate only system identifiers — UUIDs,
+   language codes, cluster topic ids, adapter names — never any of the
+   four prose classes the threat model enumerates. The stdout console
+   redactor (per spec lines 1413-1416) also runs on these lines as a
+   backstop. No INFO-LEAK.
+
+4. The two listener files' dual-logger design (JBoss LOG retained for
+   AbstractPgListener.log() + new SLF4J SAFE_LOG for SafeLog routing)
+   is correct: their catch sites at NewPostListener:115/121 and
+   QuarantineReviewListener:213/222 route through SafeLog via SAFE_LOG,
+   satisfying the spec for the user-content-bearing payload-parse and
+   handler-failure boundaries.
+
+5. The unmigrated Throwable-carrying sites elsewhere in main src
+   (AbstractPgListener.java:170/186 reconnect/getNotifications catches,
+   AssetSnapshotFetcher.java:147/159/202/219/265/298 asset-tick catches,
+   FetchScheduler.java:273/287 enumeration catches, SignalSubprocess.java:265
+   spawn catch, PartitionCreator.java:111 / PartitionPruner.java:95 DDL
+   catches) all sit on infrastructure/process paths whose exceptions are
+   SQLExceptions/IOExceptions from PG-driver or subprocess layers — they
+   cannot carry chat-mode message bodies, post bodies, saved-post
+   annotations, or command arguments. AssetSnapshotFetcher additionally
+   pre-handles its one untrusted-bytes path (FetchException) at line 274
+   by passing only stripAndTruncate(cause.getMessage()) rather than the
+   Throwable. The threat-model commitment is content-scoped ("user-authored
+   prose"), so these sites are compliant without SafeLog migration; they
+   are out of this ticket's stated scope and out of the threat model's
+   prose-leak commitment.
+
+6. Test change in QuarantineReviewPayloadHygieneTest.java correctly
+   aligns with SafeLog's contract: the new assertion verifies the
+   formatted line carries exception=java.lang.IllegalArgumentException
+   (SafeLog's diagnostic signature) and continues to assert the raw
+   payload marker is absent from the formatted line. The dropped
+   record.getThrown() check is correct: SafeLog never attaches the raw
+   Throwable to the LogRecord, so getThrown() is expected to be null.
+
+No AUTH-BYPASS, INFO-LEAK, INJECTION, DOS, PERM-ESCAL, or AUDIT-EVASION
+gap between the threat model's commitments and what this diff delivers
+was found.
+
+OUT-OF-MODEL:
+  - Census completeness gap (process, not security): the diff's own
+    supplementary grep
+      \.(warn|error|debug|info)\("[^"]*",\s*e\)
+    also matches infochat-collector/.../fetch/FetchScheduler.java:273
+    and :287 (LOG.warn("...", e) on SQLException from source-kind /
+    source-row enumeration), but neither site is listed in the ticket's
+    §Census table. The ticket's acceptance step "Re-run both at start
+    and confirm every returned site has a row before implementing" would
+    therefore have surfaced these two rows as un-catalogued. They are
+    not a security finding: the caught SQLExceptions are PG-layer errors
+    from source enumeration queries and carry none of the four
+    user-prose classes. Flagged only so the implementer can decide
+    whether to add them to §Census as out-of-scope rows for census
+    honesty, or to widen the migration; either choice leaves the
+    threat-model posture unchanged.

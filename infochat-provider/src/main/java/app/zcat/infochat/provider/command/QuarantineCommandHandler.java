@@ -4,6 +4,7 @@ import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
@@ -13,7 +14,8 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.messaging.RateCapBucket;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jboss.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -49,7 +51,7 @@ import java.util.regex.Pattern;
 @ApplicationScoped
 public class QuarantineCommandHandler implements CommandHandler {
 
-    private static final Logger LOG = Logger.getLogger(QuarantineCommandHandler.class);
+    private static final Logger LOG = LoggerFactory.getLogger(QuarantineCommandHandler.class);
 
     private static final String SELECT_USER_SQL =
             "SELECT id, contact_id, is_admin FROM users WHERE adapter = ? AND contact_id = ?";
@@ -201,7 +203,7 @@ public class QuarantineCommandHandler implements CommandHandler {
                 throw e;
             }
         } catch (SQLException e) {
-            LOG.errorf(e, "/quarantine list audit write failed");
+            SafeLog.error(LOG, "/quarantine list audit write failed", e);
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
         }
 
@@ -255,7 +257,7 @@ public class QuarantineCommandHandler implements CommandHandler {
             }
             return reply(scope, sb.toString());
         } catch (SQLException e) {
-            LOG.errorf(e, "/quarantine list failed");
+            SafeLog.error(LOG, "/quarantine list failed", e);
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
         }
     }
@@ -391,7 +393,7 @@ public class QuarantineCommandHandler implements CommandHandler {
                     .build();
             auditLogWriter.write(conn, row);
         } catch (SQLException e) {
-            LOG.errorf(e, "/quarantine reject intent audit failed for id=%s", quarantineId);
+            SafeLog.error(LOG, "/quarantine reject intent audit failed for id=" + quarantineId, e);
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
         }
         confirmStateService.remember(actor.id, scope, new QuarantineRejectConfirm(quarantineId));
@@ -463,7 +465,7 @@ public class QuarantineCommandHandler implements CommandHandler {
                     bundleLoader.get(BundleKeys.ERROR_QUARANTINE_INVALID_STATE, inboundContext.effectiveLanguage()),
                     quarantineId.toString()));
         }
-        LOG.errorf(e, "/quarantine stored procedure failed for id=%s", quarantineId);
+        SafeLog.error(LOG, "/quarantine stored procedure failed for id=" + quarantineId, e);
         return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
     }
 
@@ -485,7 +487,7 @@ public class QuarantineCommandHandler implements CommandHandler {
                         rs.getBoolean("is_admin")));
             }
         } catch (SQLException e) {
-            LOG.errorf(e, "lookupActor failed for adapter=%s", adapter);
+            SafeLog.error(LOG, "lookupActor failed for adapter=" + adapter, e);
             return Optional.empty();
         }
     }

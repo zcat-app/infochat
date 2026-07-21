@@ -1,0 +1,634 @@
+diff --git a/docs/plan/m1/STATUS.md b/docs/plan/m1/STATUS.md
+index 573d8ba1..b81d011c 100644
+--- a/docs/plan/m1/STATUS.md
++++ b/docs/plan/m1/STATUS.md
+@@ -10,8 +10,8 @@
+ 
+ | Status | Count |
+ |---|---|
+-| pending | 1 |
+-| in-progress | 0 |
++| pending | 0 |
++| in-progress | 1 |
+ | in-review | 0 |
+ | escalated | 0 |
+ | done | 682 |
+@@ -25,7 +25,7 @@
+ 
+ Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
+ 
+-- M1-667 — Route user-content exception catches through SafeLog (complexity: medium, risk: low)
++_(none — all pending tickets are blocked)_
+ 
+ ---
+ 
+@@ -33,8 +33,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
+ 
+ | ID | Title | Status | Last review |
+ |---|---|---|---|
+-
+-_(none)_
++| M1-667 | Route user-content exception catches through SafeLog | in-progress | (none) |
+ 
+ ---
+ 
+@@ -902,5 +901,5 @@ M1-664 (done)
+   ├── M1-648 (abandoned) [see above]
+   ├── M1-649 (done) [see above]
+   └── M1-665 (done) [see above]
+-M1-667 (pending) ← runnable
++M1-667 (in-progress)
+ ```
+diff --git a/docs/plan/m1/tickets/M1-667-safelog-bypass-remediation.md b/docs/plan/m1/tickets/M1-667-safelog-bypass-remediation.md
+index 5fd77459..cc024dbd 100644
+--- a/docs/plan/m1/tickets/M1-667-safelog-bypass-remediation.md
++++ b/docs/plan/m1/tickets/M1-667-safelog-bypass-remediation.md
+@@ -44,20 +44,28 @@ acceptance:
+   - >-
+     Every catch in §Census marked "fix" routes its Throwable through
+     app.zcat.infochat.core.log.SafeLog (SafeLog.warn or SafeLog.error), NOT a
+-    raw LOG.warnf(e, ...)/LOG.errorf(e, ...) that passes the Throwable to the
+-    underlying logger. The sites:     SummaryProseGenerator.java:106 and :137,
+-    TranslationPipeline.java:90,
++    raw logger call that passes the Throwable to the underlying logger —
++    whether `LOG.warnf(e, ...)`/`LOG.errorf(e, ...)` (throwable-first,
++    printf-style) or `LOG.error(msg, e)` (throwable-last, SLF4J-style). The
++    sites: SummaryProseGenerator.java:106 and :137, TranslationPipeline.java:90,
+     DigestScheduler.java:203, PendingCommandHandler.java:124 and :159,
+     AuditCommandHandler.java:158, :241, and :279, QuarantineCommandHandler.java:204,
+-    :258, :394, :466, and :488, PendingUsersDao.java:91, NewPostListener.java:117,
+-    and QuarantineReviewListener.java:218.
++    :258, :394, :466, and :488, PendingUsersDao.java:91, NewPostListener.java:111
++    and :117, and QuarantineReviewListener.java:209 and :218.
+   - >-
+     Each migrated file's logger field follows the project convention where the
+     catch passes through SafeLog (org.slf4j.Logger if the file already uses
+     SLF4J; the JBoss Logger interop is fine where SafeLog is invoked with the
+     SLF4J-bound logger — match the established pattern in ChatAgent /
+     CompressCommandHandler / SummaryCommandHandler / M1-642's
+-    CategoryRollupGenerator).
++    CategoryRollupGenerator). NewPostListener and QuarantineReviewListener
++    extend AbstractPgListener, whose `abstract Logger log()` returns the JBoss
++    Logger and whose own `log().errorf(e, ...)` / `log().infof(...)` calls
++    require it; these two subclasses therefore KEEP the JBoss Logger field
++    (for the parent) and route their catch-site calls through SafeLog via a
++    separate static SLF4J Logger (the acceptance's "JBoss Logger interop"
++    clause). The seven non-listener files migrate fully to SLF4J (no parent
++    coupling).
+   - mvn verify is green
+ test_plan:
+   adds: []
+@@ -86,19 +94,29 @@ paths where the caught exception's message/cause chain can carry that prose.
+ 
+ ## Census
+ 
+-Mechanical enumeration of the bypass shape — a JBoss-Logger call passing the
+-Throwable as the first arg (the `SafeLog`-bypass signature). SLF4J-style
+-`log.warn(msg, e)` is already absent from main src (compliant files use
+-`SafeLog`), so the JBoss pattern is the complete census:
++Mechanical enumeration of the bypass shape — JBoss-Logger calls that pass the
++Throwable to the underlying logger. Two signatures appear in main src:
++`LOG.*f(e, ...)` (throwable-first, printf-style — the majority) and
++`LOG.error(msg, e)` (throwable-last, SLF4J-style — exactly two sites, both
++on user-content paths). The primary grep catches the `*f(e, ...)` form; a
++supplementary grep catches the `(msg, e)` form:
+ 
+ ```
++# primary — throwable-first printf-style
+ grep -rnE "\.(warnf|errorf|debugf|infof)\(e[),]" --include="*.java" \
+   infochat-collector/src/main infochat-provider/src/main \
+   infochat-core/src/main infochat-llm-adapter/src/main \
+   infochat-messaging-adapter/src/main infochat-ssrf/src/main
++
++# supplementary — throwable-last SLF4J-style (string-literal msg)
++grep -rnE '\.(warn|error|debug|info)\("[^"]*",\s*e\)' --include="*.java" \
++  infochat-collector/src/main infochat-provider/src/main \
++  infochat-core/src/main infochat-llm-adapter/src/main \
++  infochat-messaging-adapter/src/main infochat-ssrf/src/main
+ ```
+ 
+-Re-run at `start` and confirm every returned site has a row before implementing.
++Re-run both at `start` and confirm every returned site has a row before
++implementing.
+ 
+ | Site | Disposition |
+ |---|---|
+@@ -117,7 +135,9 @@ Re-run at `start` and confirm every returned site has a row before implementing.
+ | `infochat-provider/.../command/QuarantineCommandHandler.java:466` | fix — `/quarantine` stored-procedure catch |
+ | `infochat-provider/.../command/QuarantineCommandHandler.java:488` | fix — `lookupActor` catch |
+ | `infochat-provider/.../command/PendingUsersDao.java:91` | fix — `lookupActor` catch on the command path |
++| `infochat-provider/.../outbox/NewPostListener.java:111` | fix — payload-parse catch (`LOG.error(msg, e)` — SLF4J-style throwable-last); user-content boundary |
+ | `infochat-provider/.../outbox/NewPostListener.java:117` | fix — post handler catch; the handler processes post content |
++| `infochat-provider/.../outbox/QuarantineReviewListener.java:209` | fix — payload-parse catch (`LOG.error(msg, e)` — SLF4J-style throwable-last); user-content boundary |
+ | `infochat-provider/.../outbox/QuarantineReviewListener.java:218` | fix — quarantine-review handler catch on the post path |
+ | `infochat-collector/.../partition/PartitionCreator.java:111` | out-of-scope — partition DDL SQLException over table names (no user prose) |
+ | `infochat-collector/.../partition/PartitionPruner.java:95` | out-of-scope — partition pruning SQLException (table names) |
+@@ -173,3 +193,14 @@ Alternatives considered:
+     the matching citation from acceptance #1, and `DigestWorker.java` from
+     `files_scope`. Mechanical premise correction; the ticket's scope and intent
+     are unchanged.
++
++  - 2026-07-21 implementation refine (user-directed at step 3): the census
++    prose's claim that "SLF4J-style `log.warn(msg, e)` is already absent from
++    main src" was false — a supplementary grep for the `(msg, e)` signature
++    found two more bypass sites at `NewPostListener.java:111` and
++    `QuarantineReviewListener.java:209` (both `LOG.error("...", e)` on
++    user-content payload-parse boundaries). Both are in files already in
++    `files_scope` and already being migrated, so the scope effect is two extra
++    catch-site edits, not two extra files. Added both to §Census and acceptance
++    #1, and added the supplementary grep to the §Census enumeration. No
++    follow-up ticket: the user explicitly directed folding these in now.
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java
+index fa01b20b..669ea033 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java
+@@ -5,6 +5,7 @@ import app.zcat.infochat.core.audit.AuditVerb;
+ import app.zcat.infochat.core.audit.TargetKind;
+ import app.zcat.infochat.core.audit.AuditLogWriter;
+ import app.zcat.infochat.core.audit.RedactionHook;
++import app.zcat.infochat.core.log.SafeLog;
+ import app.zcat.infochat.core.util.JsonEscaper;
+ import app.zcat.infochat.messaging.OutboundMessage;
+ import app.zcat.infochat.messaging.ScopeRef;
+@@ -15,7 +16,8 @@ import app.zcat.infochat.provider.messaging.InboundContext;
+ import jakarta.enterprise.context.ApplicationScoped;
+ import jakarta.inject.Inject;
+ import org.eclipse.microprofile.config.inject.ConfigProperty;
+-import org.jboss.logging.Logger;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
+ import org.jspecify.annotations.Nullable;
+ 
+ import javax.sql.DataSource;
+@@ -52,7 +54,7 @@ import java.util.stream.Collectors;
+ @ApplicationScoped
+ public class AuditCommandHandler implements CommandHandler {
+ 
+-    private static final Logger LOG = Logger.getLogger(AuditCommandHandler.class);
++    private static final Logger LOG = LoggerFactory.getLogger(AuditCommandHandler.class);
+ 
+     private static final String SELECT_USER_SQL =
+             "SELECT id, contact_id, is_admin FROM users WHERE adapter = ? AND contact_id = ?";
+@@ -155,7 +157,7 @@ public class AuditCommandHandler implements CommandHandler {
+                 throw e;
+             }
+         } catch (SQLException e) {
+-            LOG.errorf(e, "/audit audit write failed");
++            SafeLog.error(LOG, "/audit audit write failed", e);
+             return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
+         }
+ 
+@@ -238,7 +240,7 @@ public class AuditCommandHandler implements CommandHandler {
+             }
+             return reply(scope, sb.toString());
+         } catch (SQLException e) {
+-            LOG.errorf(e, "/audit query failed");
++            SafeLog.error(LOG, "/audit query failed", e);
+             return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
+         }
+     }
+@@ -276,7 +278,7 @@ public class AuditCommandHandler implements CommandHandler {
+                         rs.getBoolean("is_admin")));
+             }
+         } catch (SQLException e) {
+-            LOG.errorf(e, "lookupActor failed for adapter=%s", adapter);
++            SafeLog.error(LOG, "lookupActor failed for adapter=" + adapter, e);
+             return Optional.empty();
+         }
+     }
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingCommandHandler.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingCommandHandler.java
+index b513387e..cc318502 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingCommandHandler.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingCommandHandler.java
+@@ -4,6 +4,7 @@ import app.zcat.infochat.core.audit.AuditAction;
+ import app.zcat.infochat.core.audit.AuditLogWriter;
+ import app.zcat.infochat.core.audit.RedactionHook;
+ import app.zcat.infochat.core.audit.TargetKind;
++import app.zcat.infochat.core.log.SafeLog;
+ import app.zcat.infochat.messaging.OutboundMessage;
+ import app.zcat.infochat.messaging.ScopeRef;
+ import app.zcat.infochat.provider.bundle.BundleLoader;
+@@ -12,7 +13,8 @@ import app.zcat.infochat.provider.messaging.InboundContext;
+ import jakarta.enterprise.context.ApplicationScoped;
+ import jakarta.inject.Inject;
+ import org.eclipse.microprofile.config.inject.ConfigProperty;
+-import org.jboss.logging.Logger;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
+ import org.jspecify.annotations.Nullable;
+ 
+ import javax.sql.DataSource;
+@@ -40,7 +42,7 @@ import java.util.UUID;
+ @ApplicationScoped
+ public class PendingCommandHandler implements CommandHandler {
+ 
+-    private static final Logger LOG = Logger.getLogger(PendingCommandHandler.class);
++    private static final Logger LOG = LoggerFactory.getLogger(PendingCommandHandler.class);
+ 
+     private static final String USAGE = "/pending [--page N]";
+ 
+@@ -121,7 +123,7 @@ public class PendingCommandHandler implements CommandHandler {
+                 throw e;
+             }
+         } catch (SQLException e) {
+-            LOG.errorf(e, "/pending audit write failed");
++            SafeLog.error(LOG, "/pending audit write failed", e);
+             return reply(scope, bundleLoader.get("error.internal", lang));
+         }
+ 
+@@ -156,7 +158,7 @@ public class PendingCommandHandler implements CommandHandler {
+             }
+             return reply(scope, sb.toString());
+         } catch (SQLException e) {
+-            LOG.errorf(e, "/pending query failed");
++            SafeLog.error(LOG, "/pending query failed", e);
+             return reply(scope, bundleLoader.get("error.internal", lang));
+         }
+     }
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingUsersDao.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingUsersDao.java
+index ec37b8e7..b57c2df7 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingUsersDao.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingUsersDao.java
+@@ -1,8 +1,10 @@
+ package app.zcat.infochat.provider.command;
+ 
++import app.zcat.infochat.core.log.SafeLog;
+ import jakarta.enterprise.context.ApplicationScoped;
+ import jakarta.inject.Inject;
+-import org.jboss.logging.Logger;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
+ import org.jspecify.annotations.Nullable;
+ 
+ import javax.sql.DataSource;
+@@ -36,7 +38,7 @@ import java.util.UUID;
+ @ApplicationScoped
+ public class PendingUsersDao {
+ 
+-    private static final Logger LOG = Logger.getLogger(PendingUsersDao.class);
++    private static final Logger LOG = LoggerFactory.getLogger(PendingUsersDao.class);
+ 
+     // Shared actionable-set predicate: an un-banned user still inside the
+     // slow-start probation window. The single '?' is the probation cutoff
+@@ -88,7 +90,7 @@ public class PendingUsersDao {
+                         rs.getObject("id", UUID.class), rs.getBoolean("is_admin")));
+             }
+         } catch (SQLException e) {
+-            LOG.errorf(e, "lookupActor failed for adapter=%s", adapter);
++            SafeLog.error(LOG, "lookupActor failed for adapter=" + adapter, e);
+             return Optional.empty();
+         }
+     }
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java
+index a3be31b4..67df6008 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java
+@@ -4,6 +4,7 @@ import app.zcat.infochat.core.audit.AuditAction;
+ import app.zcat.infochat.core.audit.TargetKind;
+ import app.zcat.infochat.core.audit.AuditLogWriter;
+ import app.zcat.infochat.core.audit.RedactionHook;
++import app.zcat.infochat.core.log.SafeLog;
+ import app.zcat.infochat.messaging.OutboundMessage;
+ import app.zcat.infochat.messaging.ScopeRef;
+ import app.zcat.infochat.provider.bundle.BundleKeys;
+@@ -13,7 +14,8 @@ import app.zcat.infochat.provider.messaging.InboundContext;
+ import app.zcat.infochat.provider.messaging.RateCapBucket;
+ import jakarta.enterprise.context.ApplicationScoped;
+ import jakarta.inject.Inject;
+-import org.jboss.logging.Logger;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
+ import org.jspecify.annotations.Nullable;
+ 
+ import javax.sql.DataSource;
+@@ -49,7 +51,7 @@ import java.util.regex.Pattern;
+ @ApplicationScoped
+ public class QuarantineCommandHandler implements CommandHandler {
+ 
+-    private static final Logger LOG = Logger.getLogger(QuarantineCommandHandler.class);
++    private static final Logger LOG = LoggerFactory.getLogger(QuarantineCommandHandler.class);
+ 
+     private static final String SELECT_USER_SQL =
+             "SELECT id, contact_id, is_admin FROM users WHERE adapter = ? AND contact_id = ?";
+@@ -201,7 +203,7 @@ public class QuarantineCommandHandler implements CommandHandler {
+                 throw e;
+             }
+         } catch (SQLException e) {
+-            LOG.errorf(e, "/quarantine list audit write failed");
++            SafeLog.error(LOG, "/quarantine list audit write failed", e);
+             return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
+         }
+ 
+@@ -255,7 +257,7 @@ public class QuarantineCommandHandler implements CommandHandler {
+             }
+             return reply(scope, sb.toString());
+         } catch (SQLException e) {
+-            LOG.errorf(e, "/quarantine list failed");
++            SafeLog.error(LOG, "/quarantine list failed", e);
+             return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
+         }
+     }
+@@ -391,7 +393,7 @@ public class QuarantineCommandHandler implements CommandHandler {
+                     .build();
+             auditLogWriter.write(conn, row);
+         } catch (SQLException e) {
+-            LOG.errorf(e, "/quarantine reject intent audit failed for id=%s", quarantineId);
++            SafeLog.error(LOG, "/quarantine reject intent audit failed for id=" + quarantineId, e);
+             return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
+         }
+         confirmStateService.remember(actor.id, scope, new QuarantineRejectConfirm(quarantineId));
+@@ -463,7 +465,7 @@ public class QuarantineCommandHandler implements CommandHandler {
+                     bundleLoader.get(BundleKeys.ERROR_QUARANTINE_INVALID_STATE, inboundContext.effectiveLanguage()),
+                     quarantineId.toString()));
+         }
+-        LOG.errorf(e, "/quarantine stored procedure failed for id=%s", quarantineId);
++        SafeLog.error(LOG, "/quarantine stored procedure failed for id=" + quarantineId, e);
+         return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
+     }
+ 
+@@ -485,7 +487,7 @@ public class QuarantineCommandHandler implements CommandHandler {
+                         rs.getBoolean("is_admin")));
+             }
+         } catch (SQLException e) {
+-            LOG.errorf(e, "lookupActor failed for adapter=%s", adapter);
++            SafeLog.error(LOG, "lookupActor failed for adapter=" + adapter, e);
+             return Optional.empty();
+         }
+     }
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestScheduler.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestScheduler.java
+index c092e638..a0110693 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestScheduler.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestScheduler.java
+@@ -4,6 +4,7 @@ import app.zcat.infochat.core.audit.AuditAction;
+ import app.zcat.infochat.core.audit.AuditLogWriter;
+ import app.zcat.infochat.core.audit.RedactionHook;
+ import app.zcat.infochat.core.audit.TargetKind;
++import app.zcat.infochat.core.log.SafeLog;
+ import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
+ import io.quarkus.scheduler.Scheduled;
+ import jakarta.annotation.PreDestroy;
+@@ -11,7 +12,8 @@ import jakarta.enterprise.context.ApplicationScoped;
+ import jakarta.enterprise.event.Event;
+ import jakarta.inject.Inject;
+ import org.eclipse.microprofile.config.inject.ConfigProperty;
+-import org.jboss.logging.Logger;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
+ 
+ import javax.sql.DataSource;
+ import java.sql.Connection;
+@@ -58,7 +60,7 @@ import org.jspecify.annotations.Nullable;
+ @ApplicationScoped
+ public class DigestScheduler {
+ 
+-    private static final Logger LOG = Logger.getLogger(DigestScheduler.class);
++    private static final Logger LOG = LoggerFactory.getLogger(DigestScheduler.class);
+ 
+     private static final String SLOT_MORNING = "morning";
+     private static final String SLOT_EVENING = "evening";
+@@ -200,8 +202,8 @@ public class DigestScheduler {
+         try {
+             digestSlotEvent.fire(slot);
+         } catch (RuntimeException e) {
+-            LOG.errorf(e, "Digest slot dispatch failed for group %s slot %s window %s",
+-                    slot.groupId(), slot.slotKind(), slot.windowStart());
++            SafeLog.error(LOG, "Digest slot dispatch failed for group " + slot.groupId()
++                    + " slot " + slot.slotKind() + " window " + slot.windowStart(), e);
+         }
+     }
+ 
+@@ -335,7 +337,7 @@ public class DigestScheduler {
+ 
+     private void warnBadTimezoneOnce(UUID groupId, String timezone) {
+         if (warnedTimezones.add(groupId + ":" + timezone)) {
+-            LOG.warnf("Group %s has invalid timezone '%s' — digest slots skipped until it is fixed",
++            LOG.warn("Group {} has invalid timezone '{}' — digest slots skipped until it is fixed",
+                     groupId, timezone);
+         }
+     }
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/outbox/NewPostListener.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/outbox/NewPostListener.java
+index 64ca9dde..ee79643b 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/outbox/NewPostListener.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/outbox/NewPostListener.java
+@@ -1,5 +1,6 @@
+ package app.zcat.infochat.provider.outbox;
+ 
++import app.zcat.infochat.core.log.SafeLog;
+ import io.quarkus.runtime.Startup;
+ import jakarta.annotation.PostConstruct;
+ import jakarta.annotation.PreDestroy;
+@@ -8,6 +9,7 @@ import jakarta.enterprise.context.ApplicationScoped;
+ import jakarta.inject.Inject;
+ import org.jboss.logging.Logger;
+ import org.postgresql.PGNotification;
++import org.slf4j.LoggerFactory;
+ 
+ import java.sql.SQLException;
+ import java.time.Instant;
+@@ -60,6 +62,8 @@ public class NewPostListener extends AbstractPgListener {
+ 
+     private static final Logger LOG = Logger.getLogger(NewPostListener.class);
+ 
++    private static final org.slf4j.Logger SAFE_LOG = LoggerFactory.getLogger(NewPostListener.class);
++
+     @Inject
+     NewPostHandler newPostHandler;
+ 
+@@ -108,14 +112,13 @@ public class NewPostListener extends AbstractPgListener {
+             // The exception carries a shape-only message (parsePayload no
+             // longer echoes the raw payload); keep the raw NOTIFY bytes out
+             // of the log too — info-leak hygiene on this boundary.
+-            LOG.error("NewPostListener: unparseable new_post payload (dropped)", e);
++            SafeLog.error(SAFE_LOG, "NewPostListener: unparseable new_post payload (dropped)", e);
+             return;
+         }
+         try {
+             newPostHandler.handle(payload.postId(), payload.readyAt());
+         } catch (SQLException e) {
+-            LOG.errorf(e, "NewPostListener: handler failed for post_id=%s",
+-                payload.postId());
++            SafeLog.error(SAFE_LOG, "NewPostListener: handler failed for post_id=" + payload.postId(), e);
+         }
+     }
+ 
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/outbox/QuarantineReviewListener.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/outbox/QuarantineReviewListener.java
+index e7cabf11..6cfb5b61 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/outbox/QuarantineReviewListener.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/outbox/QuarantineReviewListener.java
+@@ -1,5 +1,6 @@
+ package app.zcat.infochat.provider.outbox;
+ 
++import app.zcat.infochat.core.log.SafeLog;
+ import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
+ import io.quarkus.runtime.Startup;
+ import jakarta.annotation.PostConstruct;
+@@ -10,6 +11,7 @@ import jakarta.inject.Inject;
+ import jakarta.transaction.Transactional;
+ import org.jboss.logging.Logger;
+ import org.postgresql.PGNotification;
++import org.slf4j.LoggerFactory;
+ 
+ import java.sql.Connection;
+ import java.sql.PreparedStatement;
+@@ -73,6 +75,8 @@ public class QuarantineReviewListener extends AbstractPgListener {
+ 
+     private static final Logger LOG = Logger.getLogger(QuarantineReviewListener.class);
+ 
++    private static final org.slf4j.Logger SAFE_LOG = LoggerFactory.getLogger(QuarantineReviewListener.class);
++
+     private static final Pattern TARGET_KIND_PATTERN =
+             Pattern.compile("\"target_kind\"\\s*:\\s*\"([^\"]+)\"");
+     private static final Pattern TARGET_ID_PATTERN =
+@@ -206,7 +210,7 @@ public class QuarantineReviewListener extends AbstractPgListener {
+             // Do NOT echo the raw payload (NewPostListener parity): the
+             // unparseable bytes need no payload content to be actionable
+             // and must stay out of the operator's log.
+-            LOG.error("QuarantineReviewListener: unparseable payload (dropped)", e);
++            SafeLog.error(SAFE_LOG, "QuarantineReviewListener: unparseable payload (dropped)", e);
+             return;
+         }
+         try {
+@@ -215,8 +219,8 @@ public class QuarantineReviewListener extends AbstractPgListener {
+             // proxy-routed calls (class javadoc).
+             self.handleEvent(payload.targetKind(), payload.targetId());
+         } catch (SQLException e) {
+-            LOG.errorf(e, "QuarantineReviewListener: handler failed for %s/%s",
+-                    payload.targetKind(), payload.targetId());
++            SafeLog.error(SAFE_LOG, "QuarantineReviewListener: handler failed for "
++                    + payload.targetKind() + "/" + payload.targetId(), e);
+         }
+     }
+ 
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/summary/SummaryProseGenerator.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/summary/SummaryProseGenerator.java
+index 2991088e..16241e65 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/summary/SummaryProseGenerator.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/summary/SummaryProseGenerator.java
+@@ -1,5 +1,6 @@
+ package app.zcat.infochat.provider.summary;
+ 
++import app.zcat.infochat.core.log.SafeLog;
+ import app.zcat.infochat.llm.LlmProvider;
+ import app.zcat.infochat.llm.LlmResponse;
+ import app.zcat.infochat.llm.ModelTask;
+@@ -8,7 +9,8 @@ import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
+ import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
+ import jakarta.enterprise.context.ApplicationScoped;
+ import jakarta.inject.Inject;
+-import org.jboss.logging.Logger;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
+ 
+ import java.util.ArrayList;
+ import java.util.List;
+@@ -32,7 +34,7 @@ import java.util.stream.Collectors;
+ @ApplicationScoped
+ public class SummaryProseGenerator {
+ 
+-    private static final Logger LOG = Logger.getLogger(SummaryProseGenerator.class);
++    private static final Logger LOG = LoggerFactory.getLogger(SummaryProseGenerator.class);
+ 
+     /**
+      * System-role framing for the SUMMARIZER task. Asks the LLM ONLY
+@@ -103,7 +105,7 @@ public class SummaryProseGenerator {
+         try {
+             provider = llmRouter.forTask(ModelTask.SUMMARIZER, scopeLanguage);
+         } catch (RuntimeException e) {
+-            LOG.warnf(e, "SUMMARIZER provider unresolvable; degrading every cluster");
++            SafeLog.warn(LOG, "SUMMARIZER provider unresolvable; degrading every cluster", e);
+             return clusters.stream()
+                     .map(c -> new ClusterProse(c, degradedProseFor(c), true))
+                     .collect(Collectors.toList());
+@@ -123,19 +125,19 @@ public class SummaryProseGenerator {
+                     // outcome on the same per-cluster boundary as empty-text
+                     // and provider-exception cases — never surface the marker
+                     // (or any LLM-authored prose) to the user.
+-                    LOG.warnf("SUMMARIZER returned refusal marker for topic %s; degrading",
++                    LOG.warn("SUMMARIZER returned refusal marker for topic {}; degrading",
+                             cluster.topicId());
+                     out.add(new ClusterProse(cluster, degradedProseFor(cluster), true));
+                 } else if (text.isEmpty()) {
+-                    LOG.warnf("SUMMARIZER returned empty text for topic %s; degrading",
++                    LOG.warn("SUMMARIZER returned empty text for topic {}; degrading",
+                             cluster.topicId());
+                     out.add(new ClusterProse(cluster, degradedProseFor(cluster), true));
+                 } else {
+                     out.add(new ClusterProse(cluster, text, false));
+                 }
+             } catch (RuntimeException e) {
+-                LOG.warnf(e, "SUMMARIZER call failed for topic %s; degrading",
+-                        cluster.topicId());
++                SafeLog.warn(LOG, "SUMMARIZER call failed for topic " + cluster.topicId() + "; degrading",
++                        e);
+                 out.add(new ClusterProse(cluster, degradedProseFor(cluster), true));
+             }
+         }
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/translation/TranslationPipeline.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/translation/TranslationPipeline.java
+index 116455a3..146daac5 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/translation/TranslationPipeline.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/translation/TranslationPipeline.java
+@@ -1,12 +1,14 @@
+ package app.zcat.infochat.provider.translation;
+ 
++import app.zcat.infochat.core.log.SafeLog;
+ import app.zcat.infochat.messaging.TranslationProvider;
+ import app.zcat.infochat.provider.bundle.BundleKeys;
+ import app.zcat.infochat.provider.bundle.BundleLoader;
+ import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
+ import jakarta.enterprise.context.ApplicationScoped;
+ import jakarta.inject.Inject;
+-import org.jboss.logging.Logger;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
+ 
+ import java.util.Locale;
+ 
+@@ -32,7 +34,7 @@ import java.util.Locale;
+ @ApplicationScoped
+ public class TranslationPipeline {
+ 
+-    private static final Logger LOG = Logger.getLogger(TranslationPipeline.class);
++    private static final Logger LOG = LoggerFactory.getLogger(TranslationPipeline.class);
+ 
+     @Inject
+     TranslationCache translationCache;
+@@ -87,8 +89,8 @@ public class TranslationPipeline {
+                     Locale.ENGLISH,
+                     Locale.of(scopeLanguage));
+         } catch (RuntimeException e) {
+-            LOG.warnf(e, "TranslationPipeline: translator failed for target_language=%s; "
+-                    + "falling back to post-sanitizer-1 English text with a note", scopeLanguage);
++            SafeLog.warn(LOG, "TranslationPipeline: translator failed for target_language=" + scopeLanguage
++                    + "; falling back to post-sanitizer-1 English text with a note", e);
+             return fallbackToEnglish(postSanitizer1English, scopeLanguage);
+         }
+ 
+@@ -100,8 +102,8 @@ public class TranslationPipeline {
+         // (zero target-script characters) is unreachable in v1 — cs is the
+         // only non-English language and is Latin-script — so it is not built.
+         if (translated.isBlank() || translated.equals(postSanitizer1English)) {
+-            LOG.warnf("TranslationPipeline: translator returned unusable output for "
+-                    + "target_language=%s (blank or identical to input); falling back "
++            LOG.warn("TranslationPipeline: translator returned unusable output for "
++                    + "target_language={} (blank or identical to input); falling back "
+                     + "to English with a note", scopeLanguage);
+             return fallbackToEnglish(postSanitizer1English, scopeLanguage);
+         }
+diff --git a/infochat-provider/src/test/java/app/zcat/infochat/provider/outbox/QuarantineReviewPayloadHygieneTest.java b/infochat-provider/src/test/java/app/zcat/infochat/provider/outbox/QuarantineReviewPayloadHygieneTest.java
+index 75aa3c82..eea020ec 100644
+--- a/infochat-provider/src/test/java/app/zcat/infochat/provider/outbox/QuarantineReviewPayloadHygieneTest.java
++++ b/infochat-provider/src/test/java/app/zcat/infochat/provider/outbox/QuarantineReviewPayloadHygieneTest.java
+@@ -103,10 +103,9 @@ class QuarantineReviewPayloadHygieneTest {
+         String text = record.getMessage() + " " + Arrays.toString(record.getParameters());
+         assertFalse(text.contains(PAYLOAD_MARKER),
+                 "the ERROR line must not echo the raw NOTIFY payload");
+-        Throwable bound = record.getThrown();
+-        assertNotNull(bound, "the shape exception itself still travels for diagnostics");
+-        assertTrue(bound.getMessage() != null
+-                        && !bound.getMessage().contains(PAYLOAD_MARKER),
+-                "the bound exception's message must not echo the raw payload either");
++        assertTrue(text.contains("exception=java.lang.IllegalArgumentException"),
++                "SafeLog emits the exception class name for diagnostics "
++                        + "(message body and stack trace dropped per §Secrets handling); "
++                        + "the raw Throwable is intentionally NOT attached to the LogRecord");
+     }
+ }

@@ -4,6 +4,7 @@ import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.audit.TargetKind;
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.annotation.PreDestroy;
@@ -11,7 +12,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -58,7 +60,7 @@ import org.jspecify.annotations.Nullable;
 @ApplicationScoped
 public class DigestScheduler {
 
-    private static final Logger LOG = Logger.getLogger(DigestScheduler.class);
+    private static final Logger LOG = LoggerFactory.getLogger(DigestScheduler.class);
 
     private static final String SLOT_MORNING = "morning";
     private static final String SLOT_EVENING = "evening";
@@ -200,8 +202,8 @@ public class DigestScheduler {
         try {
             digestSlotEvent.fire(slot);
         } catch (RuntimeException e) {
-            LOG.errorf(e, "Digest slot dispatch failed for group %s slot %s window %s",
-                    slot.groupId(), slot.slotKind(), slot.windowStart());
+            SafeLog.error(LOG, "Digest slot dispatch failed for group " + slot.groupId()
+                    + " slot " + slot.slotKind() + " window " + slot.windowStart(), e);
         }
     }
 
@@ -335,7 +337,7 @@ public class DigestScheduler {
 
     private void warnBadTimezoneOnce(UUID groupId, String timezone) {
         if (warnedTimezones.add(groupId + ":" + timezone)) {
-            LOG.warnf("Group %s has invalid timezone '%s' — digest slots skipped until it is fixed",
+            LOG.warn("Group {} has invalid timezone '{}' — digest slots skipped until it is fixed",
                     groupId, timezone);
         }
     }

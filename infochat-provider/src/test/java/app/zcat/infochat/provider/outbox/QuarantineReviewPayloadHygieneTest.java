@@ -103,10 +103,9 @@ class QuarantineReviewPayloadHygieneTest {
         String text = record.getMessage() + " " + Arrays.toString(record.getParameters());
         assertFalse(text.contains(PAYLOAD_MARKER),
                 "the ERROR line must not echo the raw NOTIFY payload");
-        Throwable bound = record.getThrown();
-        assertNotNull(bound, "the shape exception itself still travels for diagnostics");
-        assertTrue(bound.getMessage() != null
-                        && !bound.getMessage().contains(PAYLOAD_MARKER),
-                "the bound exception's message must not echo the raw payload either");
+        assertTrue(text.contains("exception=java.lang.IllegalArgumentException"),
+                "SafeLog emits the exception class name for diagnostics "
+                        + "(message body and stack trace dropped per §Secrets handling); "
+                        + "the raw Throwable is intentionally NOT attached to the LogRecord");
     }
 }

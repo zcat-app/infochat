@@ -1,12 +1,14 @@
 package app.zcat.infochat.provider.translation;
 
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.messaging.TranslationProvider;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jboss.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Locale;
 
@@ -32,7 +34,7 @@ import java.util.Locale;
 @ApplicationScoped
 public class TranslationPipeline {
 
-    private static final Logger LOG = Logger.getLogger(TranslationPipeline.class);
+    private static final Logger LOG = LoggerFactory.getLogger(TranslationPipeline.class);
 
     @Inject
     TranslationCache translationCache;
@@ -87,8 +89,8 @@ public class TranslationPipeline {
                     Locale.ENGLISH,
                     Locale.of(scopeLanguage));
         } catch (RuntimeException e) {
-            LOG.warnf(e, "TranslationPipeline: translator failed for target_language=%s; "
-                    + "falling back to post-sanitizer-1 English text with a note", scopeLanguage);
+            SafeLog.warn(LOG, "TranslationPipeline: translator failed for target_language=" + scopeLanguage
+                    + "; falling back to post-sanitizer-1 English text with a note", e);
             return fallbackToEnglish(postSanitizer1English, scopeLanguage);
         }
 
@@ -100,8 +102,8 @@ public class TranslationPipeline {
         // (zero target-script characters) is unreachable in v1 — cs is the
         // only non-English language and is Latin-script — so it is not built.
         if (translated.isBlank() || translated.equals(postSanitizer1English)) {
-            LOG.warnf("TranslationPipeline: translator returned unusable output for "
-                    + "target_language=%s (blank or identical to input); falling back "
+            LOG.warn("TranslationPipeline: translator returned unusable output for "
+                    + "target_language={} (blank or identical to input); falling back "
                     + "to English with a note", scopeLanguage);
             return fallbackToEnglish(postSanitizer1English, scopeLanguage);
         }

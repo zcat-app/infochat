@@ -1,0 +1,14 @@
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java:45: * Bot-admin-only handler for {@code /audit}. Reads {@code audit_log_view}
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java:149:                        .targetId("audit_log")
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java:192:                    "SELECT count(*) FROM audit_log_view" + where)) {
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java:216:                    + "FROM audit_log_view" + where
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:47: * quarantine row, write the audit_log entry, and (for approve) fire
+infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:379:     * users last-admin trigger, not the audit_log insert). Does NOT call
+infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestScheduler.java:215:     * {@code audit_log_view} because the provider role has INSERT-only on
+infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestScheduler.java:216:     * {@code audit_log} itself; {@code created_at}/{@code action}/
+infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestScheduler.java:217:     * {@code target_id} pass through the view unredacted, and audit_log is
+infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestScheduler.java:223:                     "SELECT max(created_at) FROM audit_log_view"
+infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestScheduler.java:239:     * {@code audit_log_view} because the provider role has INSERT-only on
+infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestScheduler.java:240:     * {@code audit_log} itself, and the DIGEST_ENABLE rows the /digest
+infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestScheduler.java:247:                     "SELECT max(created_at) FROM audit_log_view"
+infochat-provider/src/main/java/app/zcat/infochat/provider/translation/TranslationPipeline.java:113:        // audit_log row per the M1-041 per-occurrence durability commitment.

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 682 |
+| done | 683 |
 | deferred | 0 |
 | abandoned | 19 |
 | **total** | **702** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-667 — Route user-content exception catches through SafeLog (complexity: medium, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -61,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-667 | Route user-content exception catches through SafeLog | 2026-07-21 | round 2 APPROVE |
 | M1-666 | Deterministic delivery of conceptual topic answers in chat | 2026-07-21 | round 1 APPROVE |
 | M1-652 | Gap-filling redelivery for per-category digests | 2026-07-21 | round 2 APPROVE |
 | M1-649 | Conceptual topic corpus: curated answers, intent-shaped matching, code-anchored guards (retrieval only) | 2026-07-21 | round 1 APPROVE |
@@ -70,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-664 | Semantic command-intent index: retrieval + registration | 2026-07-19 | round 1 APPROVE |
 | M1-663 | Spec: deterministic-delivery contract for chat help text | 2026-07-19 | round 1 APPROVE |
 | M1-661 | Add an ASSERTION-ADEQUACY check to the reviewer gate | 2026-07-19 | round 1 APPROVE |
-| M1-659 | Stop /add-source success reply reflecting raw --name | 2026-07-19 | round 5 APPROVE |
 
 ---
 
@@ -902,5 +902,5 @@ M1-664 (done)
   ├── M1-648 (abandoned) [see above]
   ├── M1-649 (done) [see above]
   └── M1-665 (done) [see above]
-M1-667 (pending) ← runnable
+M1-667 (done)
 ```

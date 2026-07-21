@@ -4,6 +4,7 @@ import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.audit.TargetKind;
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleLoader;
@@ -12,7 +13,8 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -40,7 +42,7 @@ import java.util.UUID;
 @ApplicationScoped
 public class PendingCommandHandler implements CommandHandler {
 
-    private static final Logger LOG = Logger.getLogger(PendingCommandHandler.class);
+    private static final Logger LOG = LoggerFactory.getLogger(PendingCommandHandler.class);
 
     private static final String USAGE = "/pending [--page N]";
 
@@ -121,7 +123,7 @@ public class PendingCommandHandler implements CommandHandler {
                 throw e;
             }
         } catch (SQLException e) {
-            LOG.errorf(e, "/pending audit write failed");
+            SafeLog.error(LOG, "/pending audit write failed", e);
             return reply(scope, bundleLoader.get("error.internal", lang));
         }
 
@@ -156,7 +158,7 @@ public class PendingCommandHandler implements CommandHandler {
             }
             return reply(scope, sb.toString());
         } catch (SQLException e) {
-            LOG.errorf(e, "/pending query failed");
+            SafeLog.error(LOG, "/pending query failed", e);
             return reply(scope, bundleLoader.get("error.internal", lang));
         }
     }
