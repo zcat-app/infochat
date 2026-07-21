@@ -3,13 +3,12 @@ id: M1-667
 title: Route user-content exception catches through SafeLog
 status: pending
 created: 2026-07-20
-last_updated: 2026-07-20
+last_updated: 2026-07-21
 blocked_by: []
 files_budget: 12
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/summary/SummaryProseGenerator.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/translation/TranslationPipeline.java
-  - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestScheduler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/AuditCommandHandler.java
@@ -22,6 +21,12 @@ risk: low
 round_cap: 2
 security_relevant: true
 migration_touch: false
+clarity_check:
+  date: 2026-07-21
+  verdict: WARN
+  warnings:
+    - "step-1b self-check: DigestWorker.java:145 was a false census row — line 145 is a `return` statement, and the file's catch at :149 is already routed through `SafeLog.error(LOG, ..., e)` at :156 (comment cites §Secrets handling). Removed the false row from §Census, the matching citation from acceptance #1, and DigestWorker.java from files_scope. Pure-mechanical premise fix; scope/intent unchanged (17 real bypass sites remain)."
+  blockers: []
 out_of_scope:
   - >-
     Catches whose exception message/cause chain never carries user-authored
@@ -40,8 +45,8 @@ acceptance:
     Every catch in §Census marked "fix" routes its Throwable through
     app.zcat.infochat.core.log.SafeLog (SafeLog.warn or SafeLog.error), NOT a
     raw LOG.warnf(e, ...)/LOG.errorf(e, ...) that passes the Throwable to the
-    underlying logger. The sites: SummaryProseGenerator.java:106 and :137,
-    TranslationPipeline.java:90, DigestWorker.java:145,
+    underlying logger. The sites:     SummaryProseGenerator.java:106 and :137,
+    TranslationPipeline.java:90,
     DigestScheduler.java:203, PendingCommandHandler.java:124 and :159,
     AuditCommandHandler.java:158, :241, and :279, QuarantineCommandHandler.java:204,
     :258, :394, :466, and :488, PendingUsersDao.java:91, NewPostListener.java:117,
@@ -100,7 +105,6 @@ Re-run at `start` and confirm every returned site has a row before implementing.
 | `infochat-provider/.../summary/SummaryProseGenerator.java:106` | fix — SUMMARIZER provider-resolution catch on the post-prose path |
 | `infochat-provider/.../summary/SummaryProseGenerator.java:137` | fix — SUMMARIZER LLM call catch; prompt interpolates cluster prose (the direct analog of M1-642's finding) |
 | `infochat-provider/.../translation/TranslationPipeline.java:90` | fix — translator LLM call catch; the exception can carry the text being translated |
-| `infochat-provider/.../digest/DigestWorker.java:145` | fix — digest render-path catch; propagates LLM/content exceptions from the render pipeline |
 | `infochat-provider/.../digest/DigestScheduler.java:203` | fix — dispatch catch; propagates render-path exceptions |
 | `infochat-provider/.../command/PendingCommandHandler.java:124` | fix — `/pending` write catch; command-argument path (constraint-violation messages can echo the value) |
 | `infochat-provider/.../command/PendingCommandHandler.java:159` | fix — `/pending` query catch |
@@ -159,3 +163,13 @@ Alternatives considered:
     grep is the enumeration and the reviewer checks the disposed sites against
     the diff. A future `process:` change could add such a lint if the class
     recurs.
+
+  - 2026-07-21 step-1b self-check (start): the original census listed
+    `DigestWorker.java:145` as a fix row, but re-running the enumeration grep
+    at start returned no match. Inspection showed line 145 is a `return`
+    statement and the file's only content-path catch (line 149) is already
+    routed through `SafeLog.error(LOG, ..., e)` at line 156 — the file is
+    already compliant, no bypass exists. The false row was removed from §Census,
+    the matching citation from acceptance #1, and `DigestWorker.java` from
+    `files_scope`. Mechanical premise correction; the ticket's scope and intent
+    are unchanged.
