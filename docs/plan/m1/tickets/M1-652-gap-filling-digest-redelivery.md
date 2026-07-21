@@ -6,7 +6,7 @@ created: 2026-07-18
 last_updated: 2026-07-21
 blocked_by:
   - M1-642
-files_budget: 17
+files_budget: 22
 files_scope:
   - infochat-core/src/main/resources/db/migration/V61__digest_replay_state.sql
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestSectionRepository.java
@@ -14,13 +14,18 @@ files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestDelivery.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRetryService.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/application.properties
+  - infochat-provider/src/main/resources/bundles/en.properties
+  - infochat-provider/src/main/resources/bundles/cs.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestSectionRepositoryIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestCategoryDeliveryRepositoryIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestDeliveryTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRetryServiceTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerClockTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryDigestCommandTest.java
   - docs/spec/commands.md
   - docs/spec/decisions.md
 complexity: high
@@ -150,17 +155,36 @@ acceptance:
     A category message that the adapter accepts records a
     digest_category_delivery row — on scheduled delivery AND on replay
     delivery alike. A failed send records nothing, so the existing
-    per-category TRANSIENT/PERMANENT ladder is unchanged.
+    per-category TRANSIENT/PERMANENT ladder is unchanged. The recording
+    seam is a delegating MessagingAdapter wrapper inside DigestDelivery
+    (record when the wrapped send() returns normally; an exception
+    records nothing): deliverSequenceToGroup already takes the adapter as
+    a parameter and DigestDelivery supplies it (verified 2026-07-21), so
+    OutboundDelivery stays frozen per out_of_scope and no signature
+    changes are needed.
     DigestDeliveryTest.recordsDeliveryOnlyOnAdapterAcceptance passes.
   - >-
     Replay: a /retry --digest for a slot WITH persisted sections replays
     those bytes — no post re-collection, no render, no LLM call — sending
     ONLY the categories with no delivery row, sequentially in stored
     position order, through OutboundDelivery.deliverSequenceToGroup
-    (M1-642's one-aggregate-counter-outcome semantics). It reports how many
-    categories were skipped as already delivered, and never sends zero
-    messages silently: if every category is recorded, the caller is told so
-    explicitly rather than receiving a bare SUCCESS.
+    (M1-642's one-aggregate-counter-outcome semantics). The outcome
+    surface is the existing RetryResult enum extended with TWO new
+    constants — REPLAYED_MISSING (replay path, at least one category
+    sent) and ALL_ALREADY_DELIVERED (replay path, every category already
+    recorded, nothing sent) — and the retryDigest return type does NOT
+    change (a record return would force compile edits in
+    DigestRetryServiceClockIT and DigestRoundtripIT, both out of scope;
+    verified 2026-07-21 that mere enum growth leaves every out-of-scope
+    RetryResult reference compiling and passing). Numeric skip-counts are
+    NOT reported in v1 — the distinct replies carry the honesty. A replay
+    never sends zero messages silently: the ALL_ALREADY_DELIVERED caller
+    is told so explicitly via its own reply, never a bare SUCCESS; and
+    SUCCESS remains the full-re-run (fallback) outcome only.
+    RetryCommandHandler.handleDigestRetry maps both new constants to new
+    bundle-backed replies — keys added to BundleKeys and to BOTH
+    bundles/en.properties and bundles/cs.properties per the D43 bilateral
+    keyset.
     DigestRetryServiceTest.retryFillsOnlyMissingCategories and
     DigestRetryServiceTest.replaySendsPersistedBytesWithoutRerender pass.
   - >-
@@ -184,9 +208,11 @@ acceptance:
     (pre-V61 row, degraded slot, zero-post slot, or a crash-stranded cache
     row) falls back to today's full re-run path (re-collect, re-render or
     degrade per D17). The fallback's render budget is bounded by a sane
-    per-retry budget — the configured digest window width — never by the
-    full replay-retention horizon (a retry must not acquire a
-    many-hours LLM timeout).
+    per-retry budget — the configured digest window width
+    (infochat.digest.window-width-minutes, injected directly into
+    DigestRetryService via its own @ConfigProperty; DigestScheduler is
+    not touched) — never by the full replay-retention horizon (a retry
+    must not acquire a many-hours LLM timeout).
     DigestRetryServiceTest.retryWithoutSectionsFallsBackToRerun passes.
   - >-
     Horizon decoupling: summary_cache.expires_at stops reusing
@@ -201,11 +227,22 @@ acceptance:
     DigestCategoryDeliveryRepositoryIT.deliveryStateSurvivesRepositoryReconstruction
     and DigestSectionRepositoryIT.sectionsSurviveRepositoryReconstruction pass.
   - >-
-    digest_section and digest_category_delivery rows are pruned on the same
-    schedule and by the same retention rule as the summary_cache row for
-    their slot, so the three cannot diverge. The retention comparison reads
-    "now" from the injected java.time.Clock, never an inline Instant.now()
-    or SQL now(), per CLAUDE.md §Injectable time in decision logic.
+    Pruning: summary_cache has NO pruning mechanism today (verified
+    2026-07-21 — no DELETE FROM summary_cache exists anywhere, and the
+    upsert key (group_id, slot_kind, slot_fired_at) is per slot instance,
+    so rows are never overwritten by later slots) and this ticket does
+    not add one for summary_cache. digest_section and
+    digest_category_delivery rows ARE pruned, opportunistically at
+    section-persist time by their own in-scope repositories: when
+    DigestWorker persists a new slot's sections, both tables drop this
+    group's rows whose slot's summary_cache.expires_at has passed
+    (subquery against summary_cache — SELECT is granted; the
+    SummaryCacheRepository class is not touched). The retention instant
+    is thus the slot's own expires_at — the same value replay checks —
+    so replay state never outlives its cache row's horizon and the
+    tables cannot diverge. The expiry comparison reads "now" from the
+    injected java.time.Clock, never an inline Instant.now() or SQL
+    now(), per CLAUDE.md §Injectable time in decision logic.
   - >-
     docs/spec/commands.md is amended, at the "Cached digest message handle"
     paragraph under §Conversation control (commands.md:1122-1128), to state
@@ -255,6 +292,11 @@ test_plan:
       pin — cache-row replacement and degraded-to-full-prose regeneration
       on the re-run path, in-flight skip, per-group serialization — must
       stay pinned: they describe the fallback path this ticket preserves.
+    - >-
+      RetryDigestCommandTest.java — ADDS mapping cases for the two new
+      RetryResult constants (REPLAYED_MISSING and ALL_ALREADY_DELIVERED →
+      their new bundle-backed replies). Existing mapping cases keep
+      passing unmodified.
   preserves:
     - >-
       M1-642's per-category delivery behavior and its DigestDeliveryTest cases.
@@ -491,3 +533,117 @@ EVIDENCE:
   to `files_scope` (and to `test_plan.modifies`, since its setUp line must
   change when the `retryHorizon` field is removed/renamed); (c) bump
   `files_budget` from 16 to 17 to absorb the scope addition.
+
+## OUTLINE FAILED — 2026-07-21 (resolved by refine, same day)
+
+> Plan-writer subagent returned `OUTLINE FAILED` during `/m1-tick start`.
+> SECOND failure — the first (2026-07-20, above) was resolved by refine on
+> 2026-07-21; this is a NEW blocker on the command-handler side the first
+> pass did not audit. Verbatim block below, kept as history; claims about
+> `files_scope`/`files_budget` describe the pre-refine ticket. Central
+> claims independently re-verified in the main session before escalating:
+> `RetryCommandHandler.java:448` is the sole `retryDigest` call site;
+> `:449-458` is an exhaustive switch expression with no `default`;
+> `RetryResult` has exactly the four constants cited.
+>
+> Resolved same day: recommended edits (a)–(c) applied; for (d) the reply
+> surface is TWO new enum constants (REPLAYED_MISSING,
+> ALL_ALREADY_DELIVERED) with the retryDigest return type unchanged —
+> chosen over a count-carrying record because enum growth leaves the
+> out-of-scope DigestRetryServiceClockIT/DigestRoundtripIT compiling,
+> while a record return would drag both into scope; the numeric
+> skip-count was dropped from acceptance (user decision 2026-07-21). The
+> same refine also: blessed the delegating-adapter recording seam the
+> EVIDENCE note below proposed (verified against
+> deliverSequenceToGroup's signature), and rewrote the pruning
+> acceptance item, whose "same schedule as the summary_cache row"
+> premise was false — summary_cache has no pruning mechanism (a
+> main-session sweep finding both plan-writer rounds missed).
+
+REASON: Acceptance items 4 and 5 cannot be implemented within `files_scope`.
+Item 4 requires that a replay "reports how many categories were skipped as
+already delivered" and that when every category is recorded "the caller is
+told so explicitly rather than receiving a bare SUCCESS"; item 5 re-states
+that rule for the empty-list short-circuit. The sole consumer of
+`DigestRetryService.RetryResult` is `RetryCommandHandler.handleDigestRetry`
+(`infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:448-458`),
+which maps the result through an exhaustive switch **expression** over the
+four existing constants with no `default` — so ANY signal distinct from
+`SUCCESS` (a new enum constant, or a changed `retryDigest` return type)
+makes `RetryCommandHandler.java` fail to compile, and the user-visible
+report additionally requires new reply copy in `BundleKeys.java` plus both
+bundle files (D43 bilateral en/cs keyset). None of `RetryCommandHandler.java`,
+`BundleKeys.java`, `bundles/en.properties`, `bundles/cs.properties`, or the
+handler's test `RetryDigestCommandTest.java` is in `files_scope`/`test_plan`.
+No escape exists: mapping the no-op case onto `SUCCESS` is textually barred
+("rather than receiving a bare SUCCESS"), mapping it onto
+`ALREADY_IN_PROGRESS`/`NO_PRIOR_DIGEST`/`RATE_LIMITED` misreports, and a
+log-only "report" still hands the admin a bare SUCCESS. The explicit-reply
+requirement is load-bearing, not droppable — it is what squares gap-filling
+with the `commands.md:1122-1128` "posts a *new* message, never silently
+suppresses" commitment, the exact contradiction the 2026-07-18 clarity-fail
+escalation recorded — so an outline cannot weaken it. This is the same
+failure class the 2026-07-20 OUTLINE FAILED caught for the
+horizon-decoupling tests (compile-forced modification of out-of-scope
+files), surfaced now on the command-handler side the refine did not touch;
+proceeding would force scope-drift at `mvn verify` time. The forced
+additions also push the plan to ~20 paths against `files_budget: 17`.
+
+SUGGESTED ESCALATION: refine
+
+EVIDENCE:
+- Ticket: `docs/plan/m1/tickets/M1-652-gap-filling-digest-redelivery.md`
+  acceptance items 4-5 (skipped-count report; "the caller is told so
+  explicitly rather than receiving a bare SUCCESS"); `files_scope` (15
+  paths — no `RetryCommandHandler.java`, `BundleKeys.java`, bundle
+  properties, or `RetryDigestCommandTest.java`); `files_budget: 17`.
+- Code: `infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:448`
+  (sole `retryDigest` call site, verified by repo-wide grep) and `:449-458`
+  (`return switch (result) { case SUCCESS ... RATE_LIMITED ... }` —
+  exhaustive switch expression, no default; a fifth `RetryResult` constant
+  is a guaranteed compile error in an out-of-scope file).
+- Code: `infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRetryService.java:138-143`
+  (the four-constant `RetryResult` enum).
+- Code: `infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:1491`,
+  `infochat-provider/src/main/resources/bundles/en.properties:638`,
+  `infochat-provider/src/main/resources/bundles/cs.properties:567`
+  (existing `reply.retry.digest_success` chain — the pattern any new
+  replay-report reply must follow, across three out-of-scope files).
+- Test: `infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryDigestCommandTest.java`
+  (pins the handler's result→reply mapping via a stubbed `retryDigest`;
+  new mapping cases needed, file absent from `test_plan`).
+- Recommended refine edits: (a) add `RetryCommandHandler.java`,
+  `BundleKeys.java`, `bundles/en.properties`, `bundles/cs.properties` to
+  `files_scope`; (b) add `RetryDigestCommandTest.java` to `files_scope` and
+  `test_plan.modifies` (ADDS mapping case(s) for the new replay-report
+  result(s); existing cases keep passing unmodified); (c) bump
+  `files_budget` 17 → 22; (d) have acceptance name the new `RetryResult`
+  surface (one constant for all-already-delivered, and where the
+  skipped-count rides) so the linter and reviewer can pin it.
+- All other ticket claims verified clean against ground truth: frontmatter
+  `id: M1-652` matches; spec_ref `§Conversation control` resolves uniquely
+  (`commands.md:857`; the amended paragraph at `:1122-1128`); V61 is next
+  free (max on disk V60); D65 still unclaimed (`decisions.md` rows run
+  D64 → D66 → D67 at lines 81-83); `DigestWorker.retryHorizon` at
+  `DigestWorker.java:99-100` with its single read at `:226`;
+  `DigestWorkerTest.java:46/:73/:182-192` and `:194`
+  (`retryAfterWindowEnd_withinRetryHorizon_rendersFullProse`) and
+  `DigestWorkerClockTest.java:39/:63` all as cited; `DigestRetryServiceTest`
+  has exactly the 4 pre-existing cases; `OutboundDelivery.deliverSequenceToGroup`
+  at `:181-206` confirmed to call `onPermanentGroupFailure` on an empty
+  list (`anyDelivered` stays false). Out-of-scope ITs survive:
+  `DigestRoundtripIT` step (g) retries a degraded (section-less) slot →
+  fallback path unchanged, and step (h) asserts only `ALREADY_IN_PROGRESS`
+  membership, so a non-SUCCESS winner result does not break it;
+  `DigestRetryConcurrencyIT`/`DigestRetryServiceClockIT` seed no sections →
+  fallback path. One design note for the refiner, bordering the same scope
+  wall: `deliverSequenceToGroup` returns `void` with no per-message
+  outcome, and `out_of_scope` freezes `OutboundDelivery` — the only
+  in-scope seam for item 3's record-on-adapter-acceptance is a delegating
+  `MessagingAdapter` wrapper inside `DigestDelivery` (record on normal
+  `send()` return; exception = no record). If the refiner prefers a
+  per-message-outcome return from `deliverSequenceToGroup` instead,
+  `out_of_scope` and `files_scope` must say so explicitly; otherwise the
+  ticket should acknowledge the wrapper seam so the developer is not left
+  choosing between an unauthorized signature change and an
+  apparently-unsanctioned decorator.
