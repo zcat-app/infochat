@@ -1,0 +1,105 @@
+RED-TEAM VERDICT: CLEAN
+
+Audit scope: M1-649 — a retrieval-only conceptual-topic corpus (decision
+D68). The diff adds an in-code corpus (`HelpTopicCorpus`), a startup writer
+(`TopicCorpusBuilder`) that upserts topic rows into `doc_embedding` under
+`doc_kind='topic'`, a read method (`CommandIntentIndex.lookupTopic`), paired
+bundle answer copy (en/cs), spec amendments (commands.md §Chat mode, D68),
+and tests. It does NOT add any delivery path, chat tool, authorization
+change, or user-facing surface — the M1-666 ticket owns delivery.
+
+Each threat-model commitment that bears on this diff was checked:
+
+- §Prompt-injection defenses / tool allowlist ("closed at spec level"):
+  No new chat tool is added. `lookupTopic` is an internal static method,
+  not a tool-registry entry; the spec's tool allowlist table is unchanged.
+  The corpus's existence is recorded as a spec amendment (D68), respecting
+  the closed-list rule.
+
+- D66 match-not-assert (carried to topics): `lookupTopic`
+  (CommandIntentIndex.java:268-309) returns ONLY the matched topic's slug
+  (target_ref) — a pointer. The served answer is composed at delivery time
+  (M1-666, not in this diff) from the in-memory `HelpTopicCorpus.CORPUS`
+  via `byTargetRef`. A stale or attacker-edited `doc_embedding` row can
+  degrade a match but can never produce wrong served text, because the
+  served text never comes from the table.
+
+- D66 tier-filter-before-return: topics are tier-flat by construction.
+  `lookupTopic` binds no `target_ref = ANY(?)` set, but every topic is
+  user-tier (guard-tested by `noTopicReferencesAdminSurface`, which pins
+  against `HelpTier.BOT_ADMIN`). The `doc_kind='topic'` predicate alone
+  scopes the probe; no invisible-topic concept exists.
+
+- D19 determinism: the match is decided entirely by SQL (pgvector cosine
+  distance + threshold + doc_kind filter, ORDER BY distance ASC LIMIT 1).
+  The caller never picks the match.
+
+- M1-660 armed-transaction read shape: `lookupTopic` opens autocommit-off
+  and arms `hnsw.iterative_scan = strict_order` INSIDE the transaction
+  (CommandIntentIndex.java:284, via the shared `enableIterativeScan`
+  helper at line 194), mirroring `lookupCommand`. The arming is load-
+  bearing for exactly the reason M1-660 closed: two corpora now share
+  `idx_doc_embedding_hnsw`, so a non-iterative probe's ef_search window
+  could fill with rows of the OTHER doc_kind. The new read path does not
+  regress this.
+
+- §DB roles / least-privilege (V60 grants): the upsert is DELETE-then-
+  INSERT in one transaction, never UPDATE (TopicCorpusBuilder.java
+  buildCorpus / DocEmbeddingDao). The DELETE is doc_kind-scoped, so a
+  topic prune cannot touch command_intent rows (guard-tested by
+  `topicBuilderDeleteNeverTouchesCommandRows`). doc_id namespace
+  disjointness holds by construction (`topic:<slug>`; no command name
+  contains a colon) and is guard-tested
+  (`topicDocIdsDisjointFromCommandNames`), foreclosing the V60 single-
+  column-PK collision.
+
+- §Failure handling (degrade, don't abort): `TopicCorpusBuilder.onStart`
+  (TopicCorpusBuilder.java:877-896) catches RuntimeException, logs at
+  ERROR, and leaves the corpus empty (cold start) or stale (warm
+  restart). Provider startup continues. This mirrors
+  `CommandIntentIndexBuilder` and binds the LLM-tier failure to a
+  degrade path, never a service-stop, per spec.
+
+- Retrieval-only — no delivery: `lookupTopic` has NO production caller in
+  this diff (grep over src/main/java: the symbol appears only at its
+  definition and in javadoc references). No chat tool, ChatAgent,
+  InboundRouter, HelpLookupTool, or HelpCommandHandler delivery path is
+  modified. The §LLM output sanitizer and its Delivery-ordering contract
+  therefore do not engage on this ticket; they are M1-666's audit
+  surface.
+
+- INFO-LEAK: the read returns a slug only; the slug resolves via
+  `byTargetRef` to either a valid Topic (operator-controlled bundle
+  answer, not delivered here) or empty. No user-specific or other-user
+  data is in the corpus or the table. The startup embedding inputs are
+  operator-controlled reviewed copy (title + intent words), not user
+  content, so a compromised embedding backend cannot exfiltrate or
+  mis-serve user data.
+
+- INJECTION: every SQL path is parameterized
+  (`PreparedStatement.setString/setDouble`, `?::vector` cast); no
+  inbound-derived value is string-concatenated. The embedded texts are
+  operator-controlled, never user input.
+
+- DOS: the corpus is a fixed 10 topics embedded once at startup with a
+  content-hash + model-identity skip on warm restart; the read path is
+  LIMIT 1 with the bounded iterative scan. No unbounded loop, no
+  user-driven cost amplifier.
+
+- PERM-ESCAL / AUDIT-EVASION: no authorization or audit-relevant
+  operation is added; retrieval reads are not auditable intents per the
+  §Authorization model step-8 definition, and no command executes.
+
+- §Secrets handling / User content in exceptions: the `onStart` catch
+  logs `e.toString()` + the throwable directly (not via SafeLog). This
+  is compliant because the exception path originates from
+  `EmbeddingProvider.embed` (operator-controlled texts) or the DAO — no
+  user-authored prose (chat-mode bodies, post bodies, saved-post
+  annotations, command arguments) can reach it at startup, before any
+  inbound message is processed.
+
+No commitment in the threat model is unmet by this diff. The residual
+delivery-safety questions (sanitizer interaction with topic answers that
+name group-admin commands; deterministic post-sanitize append) are
+explicitly scoped to M1-666 and are out of scope for this retrieval-only
+ticket.

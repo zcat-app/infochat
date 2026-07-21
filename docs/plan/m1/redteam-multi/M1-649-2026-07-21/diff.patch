@@ -1,0 +1,2199 @@
+diff --git a/USER_GUIDE.md b/USER_GUIDE.md
+index 750293eb..bb603a1b 100644
+--- a/USER_GUIDE.md
++++ b/USER_GUIDE.md
+@@ -26,6 +26,7 @@ to infochat exactly like you'd message a friend on your chat app.
+ 
+ ## Getting access (your invite)
+ 
++<!-- topic:getting-access:begin -->
+ infochat is invite-only — you can't just message the bot cold.
+ 
+ 1. An admin gives you a **one-time invite code** (a string of characters).
+@@ -37,11 +38,13 @@ commands (and chat mode turned off). This is normal and temporary — it just
+ means a brand-new account can't do everything on day one. Full access unlocks
+ when probation ends, or sooner if an admin "vouches" for you. Run `/help` any
+ time to see exactly what you can do right now.
++<!-- topic:getting-access:end -->
+ 
+ ---
+ 
+ ## Two ways to talk to the bot
+ 
++<!-- topic:chat-vs-commands:begin -->
+ | Way | How | Best for |
+ |---|---|---|
+ | **Commands** | Messages starting with a slash, e.g. `/summary` | Exact, repeatable actions ("show me today's posts", "save this") |
+@@ -52,6 +55,7 @@ treated as a chat question.
+ 
+ > The bot replies in plain text. Links appear as plain web addresses you can tap
+ > or copy.
++<!-- topic:chat-vs-commands:end -->
+ 
+ ---
+ 
+@@ -131,6 +135,7 @@ Ask things like:
+ - *"Summarise the top three AI stories."*
+ - *"Tell me more about that Hugging Face post."*
+ 
++<!-- topic:chat-assistant-boundary:begin -->
+ Good to know:
+ 
+ - The assistant can **only read** — it searches and explains your news. It can
+@@ -138,6 +143,7 @@ Good to know:
+ - It only sees **your** stuff — your subscriptions, your scope. It can't reach
+   another user's data or another conversation.
+ - If a reply is taking too long, `/stop` cancels it.
++<!-- topic:chat-assistant-boundary:end -->
+ 
+ ---
+ 
+@@ -208,6 +214,7 @@ the id from the summary's `covered by:` line:
+ 
+ ### 3. Add a news source
+ 
++<!-- topic:add-source-requires-tags:begin -->
+ Adding a source always needs at least one **tag** (this guarantees your posts
+ can still be sorted even if automatic tagging misses):
+ 
+@@ -223,9 +230,11 @@ can only auto-recognise the Nitter instances your operator has configured; for
+ any other Nitter address, name the type with `--type nitter`. When you add a
+ brand-new source, the bot also reminds you that **source web addresses are
+ visible to admins** — worth knowing before you add a private feed.
++<!-- topic:add-source-requires-tags:end -->
+ 
+ ### 4. Fix the topics you see
+ 
++<!-- topic:personal-vs-shared-tags:begin -->
+ Got the wrong topics in your digest? Tune **your own view** with tags:
+ 
+ ```text
+@@ -236,9 +245,11 @@ Got the wrong topics in your digest? Tune **your own view** with tags:
+ > Note: this changes what *you* see. The tags attached to a *shared* source
+ > itself can only be changed by a bot admin — so it's worth getting the `--tags`
+ > right when you first add a source.
++<!-- topic:personal-vs-shared-tags:end -->
+ 
+ ### 5. Stop following a source
+ 
++<!-- topic:unfollow-vs-delete:begin -->
+ ```text
+ /unfollow-source 3f9a8b2c-1d4e-4a6f-9c0b-7e2d5a8f1b3c
+ ```
+@@ -246,6 +257,7 @@ Got the wrong topics in your digest? Tune **your own view** with tags:
+ The `<id>` is the source's UUID. This only unsubscribes *you*; the source still
+ exists for others. (Deleting a source entirely is an admin action — ask an admin
+ if a shared source should go.)
++<!-- topic:unfollow-vs-delete:end -->
+ 
+ ### 6. Read it in another language
+ 
+@@ -260,6 +272,7 @@ translated — only the bot's own wording.)
+ 
+ ## DMs vs groups
+ 
++<!-- topic:dm-vs-group:begin -->
+ infochat works in both private chats and group chats, with a few differences:
+ 
+ | | Direct message | Group chat |
+@@ -270,6 +283,7 @@ infochat works in both private chats and group chats, with a few differences:
+ 
+ Approved groups also get automatic **morning and evening digests** of the latest
+ posts.
++<!-- topic:dm-vs-group:end -->
+ 
+ ---
+ 
+@@ -304,20 +318,29 @@ actions happened, never your message content).
+   posts. It's capped to a few tries.
+ - **`/stop`** cancels in-flight chat replies, your `/summary` generation, and
+   your `/retry` — but not already-sent messages or background jobs.
++<!-- topic:clear-vs-forget:begin -->
+ - **`/clear` vs `/forget`.** `/clear` only drops the short-term context of the
+   current conversation (your longer-term memory and saves stay). `/forget` is the
+   full privacy purge.
++<!-- topic:clear-vs-forget:end -->
+ - **`/compress`** checkpoints a long conversation's memory and trims the live
+   context; the bot also does this automatically when a conversation gets long.
+ - **Tag your saves.** `/save <id> -t tag1,tag2` attaches your own personal tags
+   to a bookmark (kept separate from the post's own tags); `/saved <tag>` then
+   filters your library by them.
+ - **Asset price source & currency.** `/zcash` and `/monero` take an optional
+-  exchange sub-verb and a `--vs <currency>` — e.g. `/zcash kraken --vs eur`
+-  (supported currencies: `usd`, `eur`, `czk`, `btc`). Bare `/zcash` uses the
+-  default source and currency your admin configured.
+-- **Pagination.** `/saved`, `/get-sources`, and `/list-sources` accept `--page N`
+-  (1-indexed) to step through long lists.
++  exchange sub-verb and a `--vs <currency>` — e.g. `/zcash kraken --vs eur`.
++  Supported currencies differ per source: Coingecko accepts `usd`, `eur`,
++  `czk`, `btc`; Kraken accepts `usd`, `eur`, `btc`; Bitfinex accepts `usd`,
++  `btc`. Bare `/zcash` uses the default source and currency your admin
++  configured.
++- **Re-include all standard sources.** `/follow-all-sources` clears this
++  scope's `/unfollow-source` opt-outs in one call — every standard source the
++  scope had opted out of becomes visible again. Per scope: in a DM it affects
++  only you; in a group it affects the whole group. Standard sources are
++  visible by default, so the command only undoes explicit unfollows.
++- **Pagination.** `/saved`, `/get-sources`, `/list-sources`, and `/export`
++  accept `--page N` (1-indexed) to step through long lists.
+ - **Full command catalogue** (every command, every option, exact argument
+   grammar): [docs/spec/commands.md](docs/spec/commands.md).
+ 
+diff --git a/docs/spec/commands.md b/docs/spec/commands.md
+index 6016b977..c9249fd3 100644
+--- a/docs/spec/commands.md
++++ b/docs/spec/commands.md
+@@ -1550,6 +1550,35 @@ since it is a narrowing question rather than an answer grounded in specific
+ posts. The confidence heuristic and directive wording live in design notes
+ (05 §5.4.6).
+ 
++**Conceptual topic corpus** (decision D68). A second embedded corpus sits
++alongside the command-intent index (D66): curated conceptual topics whose
++answers cover the questions no single runtime artefact can compose —
++"what is probation", "why can't I post in the group", "what does /forget
++actually erase", "who can change a source's tags", "unfollow vs delete",
++and the like. The corpus is in-code (`HelpTopicCorpus.CORPUS`, mirroring
++the CATALOGUE precedent) and the served answer for each topic is reviewed
++product copy flowing through the bundle machinery (D43 en/cs pair; plain
++text per D30) — never a raw USER_GUIDE.md slice, so the runtime depends on
++no markdown heading structure. The embedded match surface is intent-shaped
++(title + intent words, mirroring `CommandIntentIndexBuilder.composeIntentText`),
++NOT the answer body; the served surface is composed at delivery time from
++the in-memory corpus's bundle key (match-not-assert, carried to topics from
++D66). Each topic carries one of two staleness guards: a USER_GUIDE
++derivation hash for the conceptual (mental-model) topics that reds the
++build when the anchored guide region drifts, or a code-fact pin for the
++topics whose load-bearing fact lives in runtime code (`/forget` erasure
++enumerates `ForgetPurgeService`'s purge categories; probation's duration
++reads `infochat.probation.duration`). Topics are tier-flat by construction
++— no topic match text or answer names a bot-admin command (the group-admin
++commands topics must name — `/add-source`, `/lang`, `/follow-tag`, … — are
++themselves `LlmOutputSanitizer.CLOSED_LIST` entries and are expected in
++topic text). Every topic `doc_id` is namespaced (`topic:<slug>`) so it
++cannot collide with a command_intent `doc_id` under V60's single-column
++primary key. `ADMIN_GUIDE.md` is deliberately excluded — admin-tier
++conceptual answers are a separate ticket with their own threat review. This
++section records the corpus's existence and shape; it does NOT describe a
++delivery mechanism. Topic delivery is M1-666.
++
+ ## Onboarding
+ 
+ **DM first interaction** requires a valid invite code (decision D44). An
+diff --git a/docs/spec/decisions.md b/docs/spec/decisions.md
+index 13de940c..98e90e12 100644
+--- a/docs/spec/decisions.md
++++ b/docs/spec/decisions.md
+@@ -82,6 +82,7 @@ edits the existing row and notes the supersession (do not delete).
+ | D65 | Gap-filling `/retry --digest` replays persisted render bytes for the categories a prior attempt missed; the cache-row horizon is decoupled from the user-facing cooldown | A `/retry --digest` for a slot whose render persisted its per-category sections (V61 `digest_section`, written by `DigestWorker.executeSlot` at render time alongside the `summary_cache` upsert) replays ONLY the categories with no `digest_category_delivery` row — byte-faithfully, deterministically, and LLM-free: no post re-collection, no re-render, no translation. The replayed bytes are the exact `renderSections()` output the slot originally produced (the M1-642 arm-(b) pin), so a retry delivers the digest it is retrying rather than one that sweeps in posts published since the crash (a previously-unfiled oddity). A slot with no persisted sections (a degraded slot, a zero-post slot, a pre-V61 cache row, or a crash-stranded cache row) falls back to today's full re-run path; the fallback's render budget is bounded by the configured digest window width, never by the retention horizon, so a retry never acquires a many-hours LLM timeout. **Delivery recording rule:** a category message the adapter accepts records a `digest_category_delivery` row on scheduled delivery AND on replay delivery alike — through the same `DigestDelivery.deliver` seam (a delegating adapter wrapper), so a failed send records nothing and the existing per-category TRANSIENT/PERMANENT ladder is unchanged. The recording is idempotent (`ON CONFLICT DO NOTHING`) to tolerate the scheduled-vs-replay race D64's at-least-once permits. **Counter-safety guard:** a replay that filters down to zero categories short-circuits BEFORE the chokepoint (`OutboundDelivery.deliverSequenceToGroup`'s empty-list path would increment the permanent-failure counter — the method is frozen, so the caller-side guard is the only in-scope option) and returns a distinct `ALL_ALREADY_DELIVERED` reply. **Horizon decoupling:** `summary_cache.expires_at` and the V61 tables' prune eligibility move from `infochat.digest.retry-cooldown` (default PT2M) to a new `infochat.digest.replay-retention` (default PT24H); the cooldown returns to cooldown-only duty. The decoupling is load-bearing: the replay path needs a horizon wide enough to cover the operator window a human notices a truncated digest (~hours), but the cooldown must stay short to bound LLM cost from rapid retries. Coupling them — the pre-M1-652 shape — meant widening the horizon widened the cooldown, so the ~2-minute cliff was unreachable. The fallback slot's `windowEnd` is clamped to `min(cache.expires_at, now + window_width)` so the clamp preserves today's expired-row-degrades semantics while still killing the cliff for live rows. **Persistence ordering:** sections persist BEFORE any category message leaves the process (after the cache upsert, before the adapter lookup) so a crash between render and deliver leaves the bytes durably readable for a later gap-filling retry — the crash-window correctness property the whole design rests on. Landed by M1-652 (V61 + the replay/delivery path). |
+ | D66 | The command-intent corpus is the second embedded corpus; retrieval is match-not-assert, tier-filter-before-return, and explicitly silent on chat delivery | The `doc_embedding` table (V60) is the second embedded corpus alongside `post_embedding` (V11) — one Postgres, one pgvector, one embedding model, both corpora at the 768 dimension pinned by `embedding_metadata`'s singleton (D54). The shape is the structural opposite of `post_embedding` on every load-bearing axis: NOT partitioned (a command-intent document has no TTL — it is correct until the command itself changes), Provider-written (the `CommandIntentIndexBuilder` runs at Provider startup and is the sole writer), and grant-opened to provider INSERT + DELETE so the DELETE-then-INSERT upsert can run (UPDATE withheld; the narrow-grant posture the M1-648 r2 CLEAN audit verified). Three invariants govern the read path (the `helpLookup` chat tool): (1) **Match-not-assert** — embedded text is used only for MATCHING, never for ASSERTING. The tool returns the matched command NAME plus the catalogue's one-line short-help line, composed at call time from the runtime `HelpCommandHandler.CATALOGUE`'s `bundleKey`; full usage/example bodies never enter the model context (the second out-of-scope entry of M1-664). A stale intent row can degrade a match but can never produce wrong syntax, because the tool never reads the stored text. (2) **Tier-filter-before-return** — the caller's visible command-name set is bound as `target_ref = ANY(?)` INSIDE the WHERE of the pgvector query, so an invisible command's name never enters the model context. This is the M1-647 existence-oracle defense widened to free-text input (a wider attack surface than the slash-command unknown-name path). The visible set is computed by the SAME `HelpCommandHandler.visible` tier predicate `/help` applies at listing time, resolved for the chat-tool identity via `HelpCommandHandler.resolveCallerTier(userId, scopeKind, scopeId)`. (3) **D19 determinism** — the match is decided entirely by SQL (pgvector cosine + threshold + tier filter), reproducible on unchanged DB state; the LLM never picks the match. This row is **explicitly silent on chat delivery**: how a matched command's usage reaches the user is the M1-663 spec amendment, implemented by M1-665. The M1-648 r2 redteam regression (medium INJECTION: post-sanitize, model-elected append of privileged command usage) is what the silence buys — the delivery decision is made deliberately elsewhere, not inherited here. Companion to M1-647 (the probation-reachable synonym path, NOT superseded by this corpus — both tiers ship). Recorded by M1-664. |
+ | D67 | Chat-mode command usage is delivered by a deterministic trigger over the caller's inbound text, composed via the `/help` runtime path, capped at one block per reply | When a chat-mode caller asks in free text how to do something a command provides ("how do I stop seeing posts from this source" → `/unfollow-source`), the usage block is delivered by **deterministic code**, not by the model electing to deliver it. The trigger lives in `ChatAgent.doHandle` ahead of the LLM call: it embeds the caller's inbound text and probes `doc_embedding` (the M1-664 command-intent corpus) via the SAME `CommandIntentIndex.lookupCommand` entry point the `helpLookup` tool uses, with the caller's visible command set bound as `target_ref = ANY(?)` INSIDE the WHERE (tier-filter-before-return, inherited from D66). A model-elected `helpLookup` call reaches the model context only — never the delivery decision. The trigger's similarity threshold (0.70) is intentionally higher than the tool's (0.60): the tool answers the model's question "which command matches this phrase"; the trigger answers "did the CALLER ask how to do something" — a different question with a higher false-positive cost (an unsolicited usage block on every turn that merely mentions a topic). Both thresholds are pinned as code constants; recalibration is a follow-up. The composed block is the byte-identical output of `HelpCommandHandler.composeUsageBlock` — the same method `/help <cmd>` invokes — plus a fixed bundle-localized header (`CHAT_HELP_DELIVERY_HEADER`). It is appended AFTER sanitize + translate and is the SINGLE authorized post-sanitize accretion under the M1-663 amendment to security.md §LLM output sanitizer: both the emission DECISION (deterministic SQL) and the composed BYTES (fixed bundle keys + closed-list CATALOGUE walk) are deterministic end-to-end. The block is bundle-localized per the scope's `/lang` (the `/help` path's existing behavior), so it does NOT pass through `TranslationPipeline` (D43 two-path rule). At most ONE block per reply: the trigger's SQL is `LIMIT 1`, so at most one match drives at most one composeUsageBlock call. Defense-in-depth: `composeUsageBlock` re-checks tier visibility before composing (a match the SQL tier filter should already have excluded is caught here too — `adminUsageNeverDeliveredToNonAdmin`). The M1-648 r2 INJECTION regression (post-sanitize, model-elected append of privileged command usage) is structurally dead under this design: an attacker-influenced model cannot cause delivery, because the model is never asked and its tool elections do not flow into the trigger. Recorded by M1-665. |
++| D68 | A second `doc_embedding` corpus indexes curated conceptual topics whose answers are bundle-localized reviewed product copy; the staleness guard is split (USER_GUIDE derivation hash OR code-fact pin); topics are tier-flat and namespaced under `topic:<slug>` | The command-intent corpus (D66) lets the bot resolve "which command does X" without inventing syntax, because every command answer composes from the runtime `CATALOGUE`. A second class of question has no such single runtime source — "what is probation", "why can't I post in the group", "what does /forget actually erase", "who can change a source's tags", "unfollow vs delete" — and this row records the corpus that answers them. The corpus is in-code (`HelpTopicCorpus.CORPUS`, a static `List` mirroring the `CATALOGUE` precedent; no CDI needed at class-init), and each topic is a record carrying (a) an intent-shaped MATCH text (title + intent words, mirroring `CommandIntentIndexBuilder.composeIntentText`, NOT the answer body — matching a short user question against a long answer embedding is asymmetric and under-recalls the tail phrasings this feature exists to serve; HyDE/query-rewrite are out-of-scope per D19, so the match surface must itself be question-shaped) and (b) a served ANSWER as a bundle key (`topic.<slug>.answer`, D43 en/cs pair; D30 plain text; bundle-localized answers deliberately bypass `TranslationPipeline` per the D43 two-path rule, same as the D67 usage block). The served answer is reviewed product copy, never a raw USER_GUIDE.md slice — so the runtime depends on no markdown heading structure. **Match-not-assert (D66) carries to topics:** `CommandIntentIndex.lookupTopic` returns a POINTER only (the topic slug); the answer is composed at delivery time (M1-666) from the in-memory corpus, so a stale or attacker-edited topic row can degrade a match but can never produce wrong served text. **Staleness guard is split**, because a single guard shape cannot cover both topic kinds: (a) conceptual (mental-model, rationale) topics keep a USER_GUIDE.md derivation hash — each records the section anchor (a stable HTML-comment id, NOT heading text, so a heading reword does not red the build for a non-reason) plus a SHA-256 of the bytes between the markers, and `HelpTopicCorpusTest.topicDerivationHashesMatchCurrentUserGuide` reds the build when the guide drifts under a topic; (b) code-fact topics pin the FACT to the runtime source, not the guide — `HelpTopicCorpusTest.forgetErasureTopicMatchesPurgeService` asserts the `/forget` topic enumerates exactly the categories `ForgetPurgeService.PurgeResult`'s record components derive (chat_memory, chat_session, summary_anchor personal-only, saved_post global-per-D13), and `HelpTopicCorpusTest.probationTopicDurationMatchesApplicationConfig` asserts the probation topic's stated duration matches `infochat.probation.duration` from the main `application.properties`. The guide hash alone detects guide CHANGE, not guide/code MISMATCH, so it would not have caught either USER_GUIDE defect M1-649 also fixes; the code-fact pin catches the drift the guide hash CANNOT — code changing while the guide (and the topic) stay stale-green. **Tier-flat by construction:** every topic is user-tier; `HelpTopicCorpusTest.noTopicReferencesAdminSurface` asserts no topic (match text OR answer value, EN or CS) names a `HelpCommandHandler.HelpTier.BOT_ADMIN` command. The pin is against the bot-admin surface, NOT against `LlmOutputSanitizer.CLOSED_LIST` membership — the group-admin commands topics must name (`/add-source`, `/lang`, `/follow-tag`, …) are themselves `CLOSED_LIST` entries and are expected in topic text. This is necessary but NOT sufficient for delivery safety: the user-reachable commands topics must name are in the sanitizer `CLOSED_LIST`, which is exactly why M1-666 delivers deterministically post-sanitize rather than through the model. **doc_id namespace disjointness:** every topic `doc_id` is namespaced (`topic:<slug>`); V60's PRIMARY KEY is single-column on `doc_id` and the upsert DELETE is `doc_kind`-scoped, so a topic doc_id colliding with a command name would miss the command row on DELETE and PK-violate on INSERT — rolling back the batch and silently degrading the corpus. Namespacing plus `HelpTopicCorpusTest.topicDocIdsDisjointFromCommandNames` forecloses it without a schema migration. **This row records the corpus's existence and shape; it is explicitly silent on chat delivery** — topic delivery is M1-666. Companion to D66 (the command corpus this sits alongside) and D67 (the deterministic delivery path M1-666 will reuse for topics). Recorded by M1-649. |
+ 
+ ## How to evolve this list
+ 
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
+index 62754fa3..aff5526a 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
+@@ -1883,6 +1883,45 @@ public final class BundleKeys {
+     /** One closing affordance line ending every non-degraded digest (group scope, so it steers to @mention). No tokens; resolved via the 2-arg accessor. */
+     public static final String REPLY_DIGEST_CLOSING_AFFORDANCE = "reply.digest.closing_affordance";
+ 
++    // ----- Conceptual topic corpus (M1-649, D68) -----------------------------
++    // Per docs/spec/commands.md §Chat mode + decision D68. The corpus is
++    // indexed in HelpTopicCorpus; the SERVED answer is reviewed product
++    // copy, plain text (D30), bundle-localized (D43). One key per topic;
++    // the corpus's staleness-guard metadata (guide-hash vs code-fact pin)
++    // lives in code, not in the bundle. These keys exist for delivery
++    // (M1-666) and for the guard tests' answer-copy assertions; the
++    // retrieval-only M1-649 reads no answer at runtime.
++
++    /** Curated answer for the invite / access-flow topic. */
++    public static final String TOPIC_GETTING_ACCESS_ANSWER = "topic.getting-access.answer";
++
++    /** Curated answer for the "what probation is and how it ends" topic. */
++    public static final String TOPIC_PROBATION_ANSWER = "topic.probation.answer";
++
++    /** Curated answer for the chat-vs-command mental-model topic. */
++    public static final String TOPIC_CHAT_VS_COMMANDS_ANSWER = "topic.chat-vs-commands.answer";
++
++    /** Curated answer for the chat-assistant's read-only / own-scope boundary topic. */
++    public static final String TOPIC_CHAT_ASSISTANT_BOUNDARY_ANSWER = "topic.chat-assistant-boundary.answer";
++
++    /** Curated answer for the DM-vs-group semantics topic. */
++    public static final String TOPIC_DM_VS_GROUP_ANSWER = "topic.dm-vs-group.answer";
++
++    /** Curated answer for the unfollow-vs-delete ownership topic. */
++    public static final String TOPIC_UNFOLLOW_VS_DELETE_ANSWER = "topic.unfollow-vs-delete.answer";
++
++    /** Curated answer for the "why /add-source requires tags" topic. */
++    public static final String TOPIC_ADD_SOURCE_REQUIRES_TAGS_ANSWER = "topic.add-source-requires-tags.answer";
++
++    /** Curated answer for the personal-view vs shared-source-tags topic. */
++    public static final String TOPIC_PERSONAL_VS_SHARED_TAGS_ANSWER = "topic.personal-vs-shared-tags.answer";
++
++    /** Curated answer for the /clear-vs-/forget distinction topic. */
++    public static final String TOPIC_CLEAR_VS_FORGET_ANSWER = "topic.clear-vs-forget.answer";
++
++    /** Curated answer for the /forget erasure (what it purges + what it does not touch) topic. */
++    public static final String TOPIC_FORGET_ERASURE_ANSWER = "topic.forget-erasure.answer";
++
+     private BundleKeys() {
+         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
+     }
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/help/CommandIntentIndex.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/help/CommandIntentIndex.java
+index 6f414a8e..c23d5f5a 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/help/CommandIntentIndex.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/help/CommandIntentIndex.java
+@@ -45,6 +45,23 @@ public final class CommandIntentIndex {
+     /** Corpus discriminator on every {@code doc_embedding} read + write. */
+     public static final String DOC_KIND = "command_intent";
+ 
++    /**
++     * Starting similarity threshold for {@link #lookupTopic}. Mirrors
++     * {@code HelpLookupTool.SIMILARITY_THRESHOLD} (0.60) because the
++     * topic match text is intent-shaped (title + intent words, mirroring
++     * {@code CommandIntentIndexBuilder.composeIntentText}), so its
++     * similarity statistics sit close to the command corpus rather than
++     * the long-form-prose corpus the post-embedding store carries.
++     *
++     * <p><b>Calibration note.</b> This is the M1-649 starting value.
++     * Real calibration against a live query corpus is a named follow-up
++     * (the M1-619 pattern — the suite's embedders are stubs, so CI
++     * cannot measure recall). Pinning the value as a named constant
++     * means a deployment change requires a spec amendment, not a silent
++     * config tweak (the D19 determinism posture).
++     */
++    public static final double TOPIC_SIMILARITY_THRESHOLD = 0.60;
++
+     private CommandIntentIndex() {
+     }
+ 
+@@ -180,6 +197,103 @@ public final class CommandIntentIndex {
+         }
+     }
+ 
++    /**
++     * Topic-only intent lookup over {@code doc_embedding} (M1-649,
++     * decision D68). Returns the matched topic's
++     * {@link HelpTopicCorpus.Topic#targetRef()} (the topic slug) when
++     * the nearest {@code doc_kind='topic'} row clears
++     * {@code similarityThreshold}, or {@link Optional#empty()} when no
++     * row qualifies. Used by the deterministic topic-delivery path
++     * (M1-666); the M1-649 retrieval-only scope ships this read side
++     * and nothing that consumes it.
++     *
++     * <p><b>Match-not-assert, carried to topics.</b> This method
++     * returns the matched topic's POINTER (its slug) only — never
++     * stored text. The served answer is composed at delivery time
++     * (M1-666) from the in-memory {@link HelpTopicCorpus} via
++     * {@link HelpTopicCorpus#byTargetRef(String)}, exactly as
++     * {@code lookupCommand} returns a command name and
++     * {@code HelpLookupTool.describe} resolves the description at call
++     * time. A stale or attacker-edited topic row can degrade a match
++     * but can never produce wrong served text, because the served
++     * text never comes from {@code doc_embedding}.
++     *
++     * <p><b>No tier filter (topics are tier-flat).</b> Unlike
++     * {@link #lookupCommand}, this method binds no
++     * {@code target_ref = ANY(?)} tier set: every topic is user-tier
++     * by construction (M1-649 acceptance item 5, pinned by
++     * {@code HelpTopicCorpusTest.noTopicReferencesAdminSurface}), so
++     * there is no caller-specific visibility set to filter against.
++     * The doc_kind predicate alone scopes the probe to the topic
++     * corpus.
++     *
++     * <p><b>M1-660 armed-transaction read shape.</b> This method opens
++     * its own autocommit-off transaction and arms
++     * {@code hnsw.iterative_scan = strict_order} INSIDE that
++     * transaction, exactly as {@link #lookupCommand} does. The arming
++     * is load-bearing for the same reason M1-660 closed: with two
++     * corpora sharing {@code idx_doc_embedding_hnsw}, a non-iterative
++     * probe's ef_search candidate window can fill with rows of the
++     * OTHER doc_kind the {@code doc_kind} filter then discards —
++     * under-recall to empty. Topic rows themselves are the second
++     * corpus the iterative scan exists for; a bare-autocommit probe
++     * here would silently regress the moment a third corpus lands.
++     *
++     * <p><b>D19 determinism.</b> Which topic matches is decided
++     * entirely by SQL (pgvector cosine distance + threshold +
++     * doc_kind filter), reproducible on unchanged DB state. The
++     * caller never picks the match.
++     *
++     * <p><b>Connection ownership.</b> Same as {@link #lookupCommand}:
++     * the caller manages the connection lifecycle (acquire, arm
++     * cancellation if applicable, close). This method flips the
++     * connection to autocommit-off (a no-op when the caller already
++     * opened a transaction) so its {@code SET LOCAL} arming below
++     * joins a transaction that is still open when the probe executes;
++     * the probe is read-only, so the transaction is never committed
++     * here — it dies (with the GUC) at pool release.
++     *
++     * @param conn                an open connection; not closed by this method
++     * @param vectorLiteral       the embedded query vector as a pgvector
++     *                            text literal {@code "[f0,f1,...]"} (same shape
++     *                            {@code lookupCommand} expects)
++     * @param similarityThreshold minimum similarity (1 − cosine distance)
++     *                            for a row to qualify; callers typically pass
++     *                            {@link #TOPIC_SIMILARITY_THRESHOLD}
++     *
++     * @return the matched topic's {@code target_ref} (its slug), or
++     *         {@link Optional#empty()} when no topic row clears the
++     *         threshold
++     */
++    public static Optional<String> lookupTopic(Connection conn,
++                                               String vectorLiteral,
++                                               double similarityThreshold)
++            throws SQLException {
++        final String sql =
++                "SELECT target_ref "
++                        + "FROM doc_embedding "
++                        + "WHERE doc_kind = ? "
++                        + "  AND (embedding <=> ?::vector) < ? "
++                        + "ORDER BY (embedding <=> ?::vector) ASC "
++                        + "LIMIT 1";
++        // See lookupCommand: SET LOCAL is transaction-scoped, so an
++        // autocommit-off transaction MUST be open before the GUC is
++        // armed, or the arming expires before the probe runs (the
++        // silent-no-op M1-660 closed).
++        conn.setAutoCommit(false);
++        enableIterativeScan(conn);
++        double distanceThreshold = 1.0 - similarityThreshold;
++        try (PreparedStatement ps = conn.prepareStatement(sql)) {
++            ps.setString(1, HelpTopicCorpus.DOC_KIND);
++            ps.setString(2, vectorLiteral);
++            ps.setDouble(3, distanceThreshold);
++            ps.setString(4, vectorLiteral);
++            try (ResultSet rs = ps.executeQuery()) {
++                return rs.next() ? Optional.of(rs.getString("target_ref")) : Optional.empty();
++            }
++        }
++    }
++
+     /**
+      * pgvector text literal {@code [f0,f1,...]}, bound via setString
+      * through a {@code ?::vector} cast. Mirrors the literal-building
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/help/HelpTopicCorpus.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/help/HelpTopicCorpus.java
+new file mode 100644
+index 00000000..fdc8cf49
+--- /dev/null
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/help/HelpTopicCorpus.java
+@@ -0,0 +1,355 @@
++package app.zcat.infochat.provider.help;
++
++import app.zcat.infochat.provider.bundle.BundleKeys;
++
++import java.util.List;
++
++/**
++ * The conceptual topic corpus (M1-649, decision D68): a curated,
++ * in-code list of {@link Topic}s whose intent-shaped match text is
++ * embedded into {@code doc_embedding} under {@code doc_kind='topic'}
++ * by {@link TopicCorpusBuilder} at Provider startup, and whose
++ * answers are served as bundle-localized reviewed product copy by
++ * the M1-666 delivery path.
++ *
++ * <p><b>Why a second corpus at all.</b> {@link CommandIntentIndex}
++ * (M1-664) lets the bot answer "which command does X" without
++ * inventing syntax, because every command answer is composed from
++ * the runtime {@code HelpCommandHandler.CATALOGUE}. A second class
++ * of question has no such single runtime source: "what is
++ * probation", "why can't I post in the group", "what does /forget
++ * actually erase", "who can change a source's tags", "unfollow vs
++ * delete". This corpus is the drift-exposed half of that feature:
++ * the served text IS the answer, so it cannot have the command
++ * path's structural guarantee. The mitigation is a guard — but the
++ * guard must point at the right source of truth.
++ *
++ * <p><b>Match surface vs served surface.</b> The match surface
++ * ({@link Topic#title()} + {@link Topic#intentWords()}) is the only
++ * text embedded into {@code doc_embedding}. The served surface is
++ * the bundle value keyed by {@link Topic#answerBundleKey()}, never
++ * stored and never re-read from the table. This carries
++ * {@code CommandIntentIndex}'s match-not-assert invariant (D66) to
++ * topics: a stale or attacker-edited topic row can degrade a match
++ * but can never produce wrong served text, because the served text
++ * is composed from the in-memory corpus at delivery time (M1-666).
++ *
++ * <p><b>Staleness guard — guide derivation vs code-fact pin.</b>
++ * Each topic carries one of two guards, modelled as a sealed
++ * interface so NullAway sees non-null fields everywhere and the
++ * builder / tests can switch on the type cleanly:
++ * <ul>
++ *   <li>{@link GuideDerivation} — the conceptual (mental-model,
++ *       rationale) topics. A USER_GUIDE.md anchor + the SHA-256 of
++ *       the bytes between the anchor markers is captured here; the
++ *       {@code HelpTopicCorpusTest.topicDerivationHashesMatchCurrentUserGuide}
++ *       test reds the build when the guide changes under a topic.
++ *       Anchor by an explicit HTML-comment id, NOT heading text, so
++ *       a heading reword does not red the build for a non-reason.</li>
++ *   <li>{@link CodeFactPin} — the code-fact topics whose load-bearing
++ *       fact lives in runtime code, not in the guide
++ *       ({@code /forget} erasure enumerates
++ *       {@code ForgetPurgeService}'s purge categories; probation's
++ *       duration reads {@code infochat.probation.duration}). The
++ *       guide hash detects guide CHANGE, not guide/code MISMATCH;
++ *       for these topics the drift that matters is code-vs-doc, so
++ *       the pin is to code and the
++ *       {@code HelpTopicCorpusTest.forgetErasureTopicMatchesPurgeService}
++ *       / probation-duration tests are the backstop.</li>
++ * </ul>
++ *
++ * <p><b>Tier-flat by construction.</b> Every topic is user-tier:
++ * the {@code HelpTopicCorpusTest.noTopicReferencesAdminSurface} test
++ * asserts no topic (match text OR answer) names a
++ * {@code HelpCommandHandler.HelpTier#BOT_ADMIN} command. The pin is
++ * against the bot-admin surface, NOT against
++ * {@code LlmOutputSanitizer.CLOSED_LIST} membership — the
++ * group-admin commands topics must name ({@code /add-source},
++ * {@code /lang}, {@code /follow-tag}, …) are themselves
++ * {@code CLOSED_LIST} entries and are expected in topic text. This
++ * is necessary but NOT sufficient for delivery safety: the
++ * user-reachable commands topics must name are in the sanitizer
++ * {@code CLOSED_LIST}, which is exactly why M1-666 delivers
++ * deterministically post-sanitize rather than through the model.
++ *
++ * <p><b>doc_id namespace disjointness.</b> Every topic's
++ * {@link Topic#docId()} is {@code "topic:<slug>"} (see {@link #DOC_ID_PREFIX});
++ * no command name contains a colon, so the {@code HelpTopicCorpusTest.topicDocIdsDisjointFromCommandNames}
++ * test passes by construction and forecloses the V60
++ * single-column-PK collision (a topic doc_id colliding with a
++ * command name would miss the command row on the doc_kind-scoped
++ * DELETE and PK-violate on INSERT, rolling back the batch and
++ * silently degrading the corpus).
++ *
++ * <p>This class holds no in-memory runtime state and is never
++ * instantiated. The {@link #CORPUS} list is a static immutable
++ * constant consulted read-only by {@link TopicCorpusBuilder} at
++ * startup and by the M1-666 delivery path at chat-turn time.
++ */
++public final class HelpTopicCorpus {
++
++    /** Corpus discriminator on every {@code doc_embedding} read + write for topic rows. */
++    public static final String DOC_KIND = "topic";
++
++    /** Prefix on every topic {@code doc_id}, namespacing it away from command_intent's bare-name doc_ids. */
++    public static final String DOC_ID_PREFIX = "topic:";
++
++    private HelpTopicCorpus() {
++    }
++
++    /**
++     * Sealed either/or for a topic's staleness guard. Implementations:
++     * {@link GuideDerivation} (conceptual topics with a USER_GUIDE
++     * anchor + content hash) and {@link CodeFactPin} (code-fact topics
++     * whose load-bearing fact lives in runtime code).
++     */
++    public sealed interface StalenessGuard permits GuideDerivation, CodeFactPin {
++    }
++
++    /**
++     * Guide-derivation guard: the topic's served answer is reviewable
++     * product copy that derives from a fixed USER_GUIDE.md region.
++     * The build reds when that region's bytes change, prompting a
++     * re-verification that the topic is still accurate (and a hash
++     * update only after that verification).
++     *
++     * @param slug        the topic slug; matches the {@code <!-- topic:<slug>:begin/end -->}
++     *                    anchor markers in USER_GUIDE.md
++     * @param contentHash SHA-256 of the UTF-8 bytes strictly between the
++     *                    paired anchor markers (begin marker's trailing
++     *                    newline excluded, end marker's leading newline
++     *                    excluded) — matches the convention
++     *                    {@code HelpTopicCorpusTest.topicDerivationHashesMatchCurrentUserGuide}
++     *                    applies
++     */
++    public record GuideDerivation(String slug, String contentHash) implements StalenessGuard {
++    }
++
++    /**
++     * Code-fact guard: the topic's load-bearing fact lives in runtime
++     * code or config (not the guide), and a dedicated test — not a
++     * guide hash — pins the fact.
++     *
++     * @param pinKey a stable human-readable label naming the runtime
++     *               source the topic pins to (e.g.
++     *               {@code "ForgetPurgeService.PurgeResult categories"},
++     *               {@code "infochat.probation.duration"}); the
++     *               corresponding {@code HelpTopicCorpusTest} case
++     *               re-derives the fact from that source and asserts
++     *               the topic answer matches
++     */
++    public record CodeFactPin(String pinKey) implements StalenessGuard {
++    }
++
++    /**
++     * One curated conceptual topic. The match surface ({@link #title()}
++     * + {@link #intentWords()}) is what {@link TopicCorpusBuilder}
++     * embeds into {@code doc_embedding}; the served surface is the
++     * bundle value keyed by {@link #answerBundleKey()}, never stored.
++     *
++     * @param slug            the topic's stable identifier; also its
++     *                        {@code target_ref} and the kebab segment
++     *                        of its {@code doc_id}
++     * @param title           the topic's short title — first phrase of
++     *                        the embedded intent doc
++     * @param intentWords     intent-shaped question/synonym forms
++     *                        (mirrors the role
++     *                        {@code CommandIntentSynonyms} plays for
++     *                        the command corpus); the embedded doc
++     *                        appends these to the title
++     * @param answerBundleKey the {@link BundleKeys} constant whose
++     *                        bundle value is this topic's served
++     *                        answer; the bundle is the source of truth
++     *                        for the answer body, so this record never
++     *                        carries answer prose
++     * @param guard           this topic's staleness guard —
++     *                        {@link GuideDerivation} for conceptual
++     *                        topics, {@link CodeFactPin} for code-fact
++     *                        topics
++     */
++    public record Topic(String slug,
++                        String title,
++                        List<String> intentWords,
++                        String answerBundleKey,
++                        StalenessGuard guard) {
++
++        /**
++         * The {@code doc_id} for this topic's {@code doc_embedding}
++         * row: {@code "topic:<slug>"}. Namespaced under
++         * {@link #DOC_ID_PREFIX} so it cannot collide with a
++         * {@code command_intent} doc_id (no command name contains a
++         * colon).
++         *
++         * @return the namespaced doc_id
++         */
++        public String docId() {
++            return DOC_ID_PREFIX + slug;
++        }
++
++        /**
++         * The {@code target_ref} for this topic's
++         * {@code doc_embedding} row. The topic slug itself — the
++         * pointer {@link CommandIntentIndex#lookupTopic} returns;
++         * the delivery path (M1-666) resolves it back to this
++         * {@link Topic} instance via {@link #byTargetRef(String)}.
++         *
++         * @return the topic slug
++         */
++        public String targetRef() {
++            return slug;
++        }
++    }
++
++    /**
++     * The curated topic corpus, in display order. The set covers the
++     * ten mandated conceptual topics (M1-649 acceptance item 1):
++     * invite/access flow, probation, chat-vs-command mental model,
++     * the chat assistant's read-only own-scope boundary, DM-vs-group
++     * semantics, unfollow-vs-delete ownership, why /add-source
++     * requires tags, personal-view vs shared-source tags, /clear vs
++     * /forget, and what /forget does and does not erase.
++     *
++     * <p>Immutable ({@link List#of}); never mutated by the builder
++     * or the delivery path.
++     *
++     * <p><b>Adding a topic.</b> Append a {@link Topic} here, add the
++     * paired answer bundle key to {@link BundleKeys} and to BOTH
++     * {@code en.properties} and {@code cs.properties} (D43 parity),
++     * and — if the topic is conceptual — insert paired
++     * {@code <!-- topic:<slug>:begin/end -->} markers in
++     * {@code USER_GUIDE.md} and set the {@link GuideDerivation}
++     * hash to the SHA-256 the
++     * {@code HelpTopicCorpusTest.topicDerivationHashesMatchCurrentUserGuide}
++     * test computes. The bundle-completeness CI guard
++     * ({@code BundleLoaderTest}) and the topic-presence guard
++     * ({@code HelpTopicCorpusTest.corpusContainsEveryMandatedTopic})
++     * fail loudly until all three land.
++     */
++    public static final List<Topic> CORPUS = List.of(
++            new Topic(
++                    "getting-access",
++                    "Getting access to infochat (invite code)",
++                    List.of("invite", "access", "register", "join", "get in",
++                            "sign up", "code", "onboarding", "welcome",
++                            "how do I start", "how do I get in"),
++                    BundleKeys.TOPIC_GETTING_ACCESS_ANSWER,
++                    new GuideDerivation(
++                            "getting-access",
++                            "a488c260e52f69578244ad797dc454eb88ca7b57229bc8077da34da2d71b84df")),
++            new Topic(
++                    "probation",
++                    "What probation (slow start) is and when it ends",
++                    List.of("probation", "slow start", "restricted", "limited",
++                            "unlock", "vouch", "new account", "when full access",
++                            "when can I chat", "why can't I post",
++                            "why can't I use commands", "chat disabled"),
++                    BundleKeys.TOPIC_PROBATION_ANSWER,
++                    new CodeFactPin("infochat.probation.duration")),
++            new Topic(
++                    "chat-vs-commands",
++                    "Chatting in plain English vs running slash commands",
++                    List.of("chat", "command", "slash", "plain text", "ask",
++                            "how do I talk", "what's the difference",
++                            "ask vs run", "natural language"),
++                    BundleKeys.TOPIC_CHAT_VS_COMMANDS_ANSWER,
++                    new GuideDerivation(
++                            "chat-vs-commands",
++                            "e407fde76d242937953ca791a00ea25480a6637ee8728d1b022f4b3af58c53af")),
++            new Topic(
++                    "chat-assistant-boundary",
++                    "What the chat assistant can and cannot do (read-only, own scope)",
++                    List.of("read only", "what can the assistant do",
++                            "can it change settings", "can it post",
++                            "can it act as admin", "what does it see",
++                            "scope", "my data only", "assistant limits",
++                            "can it edit"),
++                    BundleKeys.TOPIC_CHAT_ASSISTANT_BOUNDARY_ANSWER,
++                    new GuideDerivation(
++                            "chat-assistant-boundary",
++                            "23d2d08d99139d81f3290ff03023f138c3f83ff96684a05857be4119530c727a")),
++            new Topic(
++                    "dm-vs-group",
++                    "Direct messages vs group chats",
++                    List.of("dm", "direct message", "group", "mention",
++                            "digest", "when reply", "group admin",
++                            "what's the difference", "private chat",
++                            "group chat", "how do I address the bot"),
++                    BundleKeys.TOPIC_DM_VS_GROUP_ANSWER,
++                    new GuideDerivation(
++                            "dm-vs-group",
++                            "329c7c00b00d106b5d137303e6eb3360bcb0531e77931624824b782b3c841f96")),
++            new Topic(
++                    "unfollow-vs-delete",
++                    "Unfollow a source vs delete it",
++                    List.of("unfollow", "delete", "remove", "source",
++                            "subscribe", "stop seeing", "stop following",
++                            "who can delete", "ownership", "per scope",
++                            "just for me"),
++                    BundleKeys.TOPIC_UNFOLLOW_VS_DELETE_ANSWER,
++                    new GuideDerivation(
++                            "unfollow-vs-delete",
++                            "86e50c487405dfe8a4f561a09c1d43148d4a79567774495759eaa79b8670090a")),
++            new Topic(
++                    "add-source-requires-tags",
++                    "Why /add-source requires tags",
++                    List.of("add source", "tags required", "why tags",
++                            "sort posts", "mandatory tags", "must have tags",
++                            "bootstrap tags", "tag missing",
++                            "why do I need tags", "categorize"),
++                    BundleKeys.TOPIC_ADD_SOURCE_REQUIRES_TAGS_ANSWER,
++                    new GuideDerivation(
++                            "add-source-requires-tags",
++                            "52b0c8d7cd5065fed475043b3ffe5a0b5baee3a209fe8662ee3cd727c548f826")),
++            new Topic(
++                    "personal-vs-shared-tags",
++                    "Personal follow-tag view vs a source's shared tags",
++                    List.of("personal tags", "shared tags", "my view",
++                            "follow-tag", "source tags", "bootstrap tags",
++                            "who can change", "tune my digest", "filter",
++                            "per user", "per source"),
++                    BundleKeys.TOPIC_PERSONAL_VS_SHARED_TAGS_ANSWER,
++                    new GuideDerivation(
++                            "personal-vs-shared-tags",
++                            "6cde2f0bb326fef319ecec1eef77d7787fb6eb29c304a552ef23829d5837e019")),
++            new Topic(
++                    "clear-vs-forget",
++                    "What /clear does vs what /forget does",
++                    List.of("clear", "forget", "what's the difference",
++                            "wipe", "erase", "privacy", "purge",
++                            "reset conversation", "what stays",
++                            "context vs data"),
++                    BundleKeys.TOPIC_CLEAR_VS_FORGET_ANSWER,
++                    new GuideDerivation(
++                            "clear-vs-forget",
++                            "97147dc1fb42c9bc62cb025b93bd25fbcc03f4839e8080e329f302451f4b1f9f")),
++            new Topic(
++                    "forget-erasure",
++                    "What /forget erases and what it leaves untouched",
++                    List.of("forget", "what does it erase", "what does it delete",
++                            "what stays", "what does it not touch",
++                            "ban status", "audit log", "saved posts",
++                            "purge categories", "data deletion"),
++                    BundleKeys.TOPIC_FORGET_ERASURE_ANSWER,
++                    new CodeFactPin("ForgetPurgeService.PurgeResult categories")));
++
++    /**
++     * Look up a topic by its {@code target_ref} (the {@link Topic#slug()}).
++     * Used by the M1-666 delivery path to resolve the
++     * {@link CommandIntentIndex#lookupTopic} pointer back to the
++     * in-memory {@link Topic} whose bundle key holds the served
++     * answer.
++     *
++     * @param targetRef the {@code target_ref} returned by
++     *                  {@code CommandIntentIndex.lookupTopic} (the topic slug)
++     * @return the matching topic, or empty if no topic in the corpus
++     *         carries that slug
++     */
++    public static java.util.Optional<Topic> byTargetRef(String targetRef) {
++        for (Topic t : CORPUS) {
++            if (t.slug().equals(targetRef)) {
++                return java.util.Optional.of(t);
++            }
++        }
++        return java.util.Optional.empty();
++    }
++}
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/help/TopicCorpusBuilder.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/help/TopicCorpusBuilder.java
+new file mode 100644
+index 00000000..9edd9b09
+--- /dev/null
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/help/TopicCorpusBuilder.java
+@@ -0,0 +1,312 @@
++package app.zcat.infochat.provider.help;
++
++import app.zcat.infochat.llm.EmbeddingProvider;
++import app.zcat.infochat.llm.EmbeddingResult;
++import io.quarkus.runtime.StartupEvent;
++import jakarta.annotation.Priority;
++import jakarta.enterprise.context.ApplicationScoped;
++import jakarta.enterprise.event.Observes;
++import jakarta.inject.Inject;
++import org.eclipse.microprofile.config.inject.ConfigProperty;
++
++import java.nio.charset.StandardCharsets;
++import java.security.MessageDigest;
++import java.security.NoSuchAlgorithmException;
++import java.util.ArrayList;
++import java.util.HexFormat;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Map;
++
++/**
++ * Provider-side {@code @Startup} observer that builds the conceptual
++ * topic corpus (M1-649, decision D68) on every boot. The corpus lives
++ * in the {@code doc_embedding} table (V60),
++ * {@code doc_kind = "topic"}; the read side
++ * {@link CommandIntentIndex#lookupTopic} returns a pointer the M1-666
++ * delivery path resolves back to {@link HelpTopicCorpus}.
++ *
++ * <p><b>Source-of-truth inputs.</b> One intent document per
++ * {@link HelpTopicCorpus.Topic}, composed from two in-memory artefacts:
++ * <ol>
++ *   <li>the topic's title ({@link HelpTopicCorpus.Topic#title()});</li>
++ *   <li>the topic's intent words ({@link HelpTopicCorpus.Topic#intentWords()}),
++ *       mirroring the role {@code CommandIntentSynonyms} plays for the
++ *       command corpus — question/synonym-shaped phrases that lift
++ *       recall of phrasings a short user question actually produces.</li>
++ * </ol>
++ * The intent document is a matching surface only — its text is the
++ * probe input to pgvector; the served answer is composed at delivery
++ * time (M1-666) from the in-memory {@link HelpTopicCorpus} via the
++ * matched topic's {@link HelpTopicCorpus.Topic#answerBundleKey()},
++ * never from the indexed text (the match-not-assert invariant D66
++ * carries to topics).
++ *
++ * <p><b>Intent-shaped, not prose.</b> The text embedded here is the
++ * title plus intent words — question/synonym-shaped — NOT the answer
++ * body. Rationale (ticket M1-649 acceptance item 2): matching a short
++ * user question against a long answer embedding is asymmetric and
++ * under-recalls the tail phrasings this feature exists to serve;
++ * HyDE/query-rewrite are out of scope (D19), so the match surface
++ * must itself be question-shaped. Because the match text is now
++ * intent-shaped (not prose), the distribution is close to the command
++ * corpus; the {@link CommandIntentIndex#TOPIC_SIMILARITY_THRESHOLD}
++ * starting value is a named constant with a comment, recalibration a
++ * follow-up.
++ *
++ * <p><b>Content-hash skip.</b> Each row stores a SHA-256 of its
++ * source text plus the active {@code infochat.embeddings.model}
++ * identifier. The startup preflight diffs the in-memory source set
++ * against the stored rows: a row whose hash AND model both match is
++ * skipped, so a restart with an unchanged corpus performs zero
++ * embedding calls (acceptance: {@code TopicCorpusRetrievalIT.restartWithUnchangedCorpusPerformsNoEmbeddingCall}).
++ * A change to the source text OR the model forces a re-embed of the
++ * affected rows — a stale vector can never outlive its source text.
++ *
++ * <p><b>Upsert shape.</b> DELETE-then-INSERT in one transaction,
++ * never UPDATE — the {@code doc_embedding} grants withhold UPDATE
++ * from the provider role (V60). Pruned rows (topic removed from
++ * {@link HelpTopicCorpus#CORPUS}) are DELETEd in the same pass. The
++ * DELETE is doc_kind-scoped, so a topic-row prune never touches
++ * command_intent rows (acceptance:
++ * {@code TopicCorpusRetrievalIT.topicBuilderDeleteNeverTouchesCommandRows}).
++ *
++ * <p><b>doc_id namespacing.</b> Every topic's {@code doc_id} is
++ * {@code "topic:<slug>"} (see {@link HelpTopicCorpus#DOC_ID_PREFIX}).
++ * V60's PRIMARY KEY is single-column on {@code doc_id}, so a topic
++ * doc_id colliding with a command name would miss on the
++ * doc_kind-scoped DELETE and PK-violate on INSERT, rolling back the
++ * batch. {@link HelpTopicCorpusTest#topicDocIdsDisjointFromCommandNames}
++ * pins the disjointness; the {@code topic:} prefix holds it by
++ * construction (no command name contains a colon).
++ *
++ * <p><b>Failure posture — degrade, don't abort.</b> A failure in
++ * {@link EmbeddingProvider#embed} or in the DAO writes is caught by
++ * {@link #onStart} and logged at ERROR; the corpus is left empty
++ * (cold start) or at its previous-boot state (warm restart). This is
++ * the threat-model posture: {@code docs/spec/security.md} §Failure
++ * handling binds every LLM-tier failure to a <em>degrade</em> path,
++ * never a service-stop. The M1-666 delivery path (the only runtime
++ * consumer of topic rows) returns no topic when the corpus is empty,
++ * so the operator-visible effect is the chat assistant falling back
++ * to its non-topic answer path; helpLookup self-heals on the next
++ * restart once the embedding backend is healthy. Mirrors
++ * {@code CommandIntentIndexBuilder}'s degrade-don't-abort catch
++ * verbatim — same threat-model posture, same recovery shape.
++ */
++@ApplicationScoped
++public class TopicCorpusBuilder {
++
++    private static final org.slf4j.Logger log =
++            org.slf4j.LoggerFactory.getLogger(TopicCorpusBuilder.class);
++
++    private final DocEmbeddingDao dao;
++    private final EmbeddingProvider embeddingProvider;
++    private final String embeddingModel;
++
++    @Inject
++    public TopicCorpusBuilder(DocEmbeddingDao dao,
++                              EmbeddingProvider embeddingProvider,
++                              @ConfigProperty(name = "infochat.embeddings.model")
++                              String embeddingModel) {
++        this.dao = dao;
++        this.embeddingProvider = embeddingProvider;
++        this.embeddingModel = embeddingModel;
++    }
++
++    /**
++     * Build (or refresh) the topic corpus at Provider startup. Pinned
++     * at {@link Priority} {@code 151} so this observer fires AFTER
++     * Flyway (priority 100, runs V60) and AFTER
++     * {@code CommandIntentIndexBuilder} (priority 150), and BEFORE
++     * the default-priority {@code @Observes StartupEvent} observers
++     * (priority 1000). The one-priority gap from the command builder
++     * is intentional: the two builders write to the same table under
++     * different {@code doc_kind}s, so a single bug that double-fires
++     * one builder is visible as a duplicate-id log line rather than a
++     * silent overwrite; ordering them by priority keeps each
++     * independently observable.
++     *
++     * <p>Failures from {@link #buildCorpus} are caught and logged at
++     * ERROR; Provider startup continues with an empty or stale topic
++     * corpus. See the class javadoc's failure-posture section for the
++     * threat-model rationale.
++     */
++    void onStart(@Observes @Priority(151) StartupEvent event) {
++        log.debug("building {} corpus", HelpTopicCorpus.DOC_KIND);
++        long t0 = System.nanoTime();
++        try {
++            buildCorpus(t0);
++        } catch (RuntimeException e) {
++            // Degrade, don't abort — same threat-model posture as
++            // CommandIntentIndexBuilder.onStart. The M1-666 delivery
++            // path returns no topic when the corpus is empty; the
++            // operator-visible effect is the chat assistant's
++            // non-topic answer path; helpLookup self-heals on next
++            // restart once the embedding backend is healthy.
++            log.error(
++                    "TopicCorpusBuilder: failed building {} corpus — topic delivery will be "
++                            + "unavailable (or stale from a prior boot) at chat time. Provider "
++                            + "startup continues; the chat path's friendly-degradation posture "
++                            + "skips topic answers when no topic is matched. Cause: {}",
++                    HelpTopicCorpus.DOC_KIND, e.toString(), e);
++        }
++    }
++
++    /**
++     * Build the corpus. Extracted from {@link #onStart} so the failure
++     * posture (catch + log + degrade) wraps the whole body uniformly.
++     */
++    private void buildCorpus(long t0) {
++        // 1. Compose the in-memory source set from the static corpus.
++        Map<String, IntentDoc> sourceById = composeSourceSet();
++
++        // 2. Read the stored rows (content-hash + model only — the
++        //    embedding vector is never read here; lookupTopic reads
++        //    it via pgvector at retrieval time).
++        Map<String, DocEmbeddingDao.StoredRow> storedById =
++                dao.selectExistingForKind(HelpTopicCorpus.DOC_KIND);
++
++        // 3. Diff into the three buckets.
++        List<String> docIdsToEmbed = new ArrayList<>();
++        List<String> docIdsToDelete = new ArrayList<>();
++        for (Map.Entry<String, IntentDoc> entry : sourceById.entrySet()) {
++            String docId = entry.getKey();
++            IntentDoc doc = entry.getValue();
++            DocEmbeddingDao.StoredRow stored = storedById.get(docId);
++            if (stored == null
++                    || !doc.contentHash.equals(stored.contentHash())
++                    || !embeddingModel.equals(stored.embeddingModel())) {
++                docIdsToEmbed.add(docId);
++            }
++        }
++        for (String storedId : storedById.keySet()) {
++            if (!sourceById.containsKey(storedId)) {
++                docIdsToDelete.add(storedId);
++            }
++        }
++
++        // 4. Prune disappeared rows (topic removed from CORPUS since
++        //    the last boot). The DELETE is doc_kind-scoped inside the
++        //    DAO, so command_intent rows are never touched.
++        if (!docIdsToDelete.isEmpty()) {
++            log.info("pruning {} stale {} rows: {}", docIdsToDelete.size(),
++                    HelpTopicCorpus.DOC_KIND, docIdsToDelete);
++            dao.delete(HelpTopicCorpus.DOC_KIND, docIdsToDelete);
++        }
++
++        // 5. Embed the delta in ONE batch call (the empty batch
++        //    short-circuits before the backend is touched — the
++        //    content-hash skip).
++        if (docIdsToEmbed.isEmpty()) {
++            log.debug("{} corpus unchanged — zero embedding calls (content-hash skip)",
++                    HelpTopicCorpus.DOC_KIND);
++            return;
++        }
++
++        List<IntentDoc> docsToEmbed = new ArrayList<>(docIdsToEmbed.size());
++        for (String docId : docIdsToEmbed) {
++            docsToEmbed.add(sourceById.get(docId));
++        }
++        List<String> textsToEmbed = new ArrayList<>(docsToEmbed.size());
++        for (IntentDoc doc : docsToEmbed) {
++            textsToEmbed.add(doc.text);
++        }
++
++        List<EmbeddingResult> embeddings;
++        try {
++            embeddings = embeddingProvider.embed(textsToEmbed);
++        } catch (RuntimeException e) {
++            throw new IllegalStateException(
++                    "TopicCorpusBuilder: embedding backend failed building "
++                            + HelpTopicCorpus.DOC_KIND + " corpus (" + textsToEmbed.size()
++                            + " rows) — degrading to empty/stale topic corpus", e);
++        }
++        if (embeddings.size() != textsToEmbed.size()) {
++            throw new IllegalStateException(
++                    "TopicCorpusBuilder: embedding backend returned "
++                            + embeddings.size() + " vectors for " + textsToEmbed.size()
++                            + " inputs; the SPI contract is one EmbeddingResult per input");
++        }
++
++        // 6. Stage the upsert rows and write in ONE transaction.
++        List<DocEmbeddingDao.DocEmbeddingRow> rows = new ArrayList<>(docsToEmbed.size());
++        for (int i = 0; i < docsToEmbed.size(); i++) {
++            IntentDoc doc = docsToEmbed.get(i);
++            rows.add(new DocEmbeddingDao.DocEmbeddingRow(
++                    doc.docId, doc.targetRef, doc.contentHash,
++                    embeddings.get(i).vector(), embeddingModel));
++        }
++        dao.upsert(HelpTopicCorpus.DOC_KIND, rows);
++
++        log.info("built {} corpus: {} embedded, {} skipped, {} pruned in {}ms",
++                HelpTopicCorpus.DOC_KIND,
++                docIdsToEmbed.size(),
++                sourceById.size() - docIdsToEmbed.size(),
++                docIdsToDelete.size(),
++                (System.nanoTime() - t0) / 1_000_000);
++    }
++
++    /**
++     * Compose the in-memory source set: one {@link IntentDoc} per
++     * topic in {@link HelpTopicCorpus#CORPUS}. The document text is
++     * the title + intent words — the matching surface, not the
++     * answer body (whose bytes never enter {@code doc_embedding}).
++     */
++    private Map<String, IntentDoc> composeSourceSet() {
++        Map<String, IntentDoc> out = new LinkedHashMap<>();
++        for (HelpTopicCorpus.Topic topic : HelpTopicCorpus.CORPUS) {
++            String text = composeIntentText(topic);
++            String hash = sha256(text);
++            // doc_id is the namespaced "topic:<slug>"; target_ref is
++            // the bare slug the delivery path (M1-666) resolves back
++            // to the in-memory Topic via HelpTopicCorpus.byTargetRef.
++            out.put(topic.docId(),
++                    new IntentDoc(topic.docId(), topic.targetRef(), hash, text));
++        }
++        return out;
++    }
++
++    /**
++     * Compose the intent document text for one topic. Mirrors
++     * {@code CommandIntentIndexBuilder.composeIntentText}'s shape
++     * (header + intent-word list) so the threshold statistics sit
++     * close to the command corpus. Stable across restarts
++     * (deterministic ordering of intent words; deterministic header),
++     * so the content-hash skip is itself deterministic.
++     */
++    private static String composeIntentText(HelpTopicCorpus.Topic topic) {
++        StringBuilder sb = new StringBuilder();
++        sb.append(topic.title());
++        List<String> intentWords = topic.intentWords();
++        if (!intentWords.isEmpty()) {
++            sb.append(". Intent words: ");
++            for (int i = 0; i < intentWords.size(); i++) {
++                if (i > 0) {
++                    sb.append(", ");
++                }
++                sb.append(intentWords.get(i));
++            }
++            sb.append('.');
++        }
++        return sb.toString();
++    }
++
++    private static String sha256(String text) {
++        try {
++            MessageDigest md = MessageDigest.getInstance("SHA-256");
++            byte[] digest = md.digest(text.getBytes(StandardCharsets.UTF_8));
++            return HexFormat.of().formatHex(digest);
++        } catch (NoSuchAlgorithmException e) {
++            // SHA-256 is mandated by the JLS spec for every JDK; this
++            // is unreachable but rethrown loudly so a future security
++            // provider regression fails startup rather than silently
++            // producing a degenerate corpus.
++            throw new IllegalStateException("SHA-256 unavailable", e);
++        }
++    }
++
++    /** In-memory source document, pre-embedding. */
++    private record IntentDoc(String docId, String targetRef,
++                             String contentHash, String text) {}
++}
+diff --git a/infochat-provider/src/main/resources/bundles/cs.properties b/infochat-provider/src/main/resources/bundles/cs.properties
+index e0536a70..fe4f46a7 100644
+--- a/infochat-provider/src/main/resources/bundles/cs.properties
++++ b/infochat-provider/src/main/resources/bundles/cs.properties
+@@ -619,3 +619,18 @@ reply.digest.category.other=ostatní zprávy
+ # Token {0} = count of clusters not shown; three-form Czech plural.
+ reply.digest.category.more=+{0,choice,1#1 další zpráva|2#{0} další zprávy|5#{0} dalších zpráv} — zmiňte mě (@mention) a zobrazím je
+ reply.digest.closing_affordance=Zmiňte mě (@mention), pokud chcete jít u některého příběhu do hloubky, nebo se zeptejte na téma, které tu nevidíte.
++
++# ----- Conceptual topic corpus (M1-649, D68) -------------------------------
++# Per docs/spec/commands.md §Chat mode + decision D68. Zrcadlí en.properties;
++# odpověď je vždy prostý text (D30), lokalizovaný (D43),
++# neprochází TranslationPipeline (D43 two-path rule, stejné jako D67 usage blok).
++topic.getting-access.answer=infochat je pouze na pozvánku. Admin vám dá jednorázový pozvánkový kód; pošlete tento kód botovi jako svou první přímou zprávu a budete zaregistrováni a přivítáni. Nové účty začínají v krátké zkušební fázi (probaci) s omezenou sadou příkazů a vypnutým chat režimem — je to normální a dočasné. Plný přístup se odemkne, když probace skončí, nebo dříve, pokud vás admin doporučí. Kdykoliv spusťte /help a uvidíte přesně, co právě můžete dělat.
++topic.probation.answer=Probace je fáze pomalého startu, kterou každý nový účet projde. Po dobu 24h od registrace (podle nastavení infochat.probation.duration daného nasazení) máte k dispozici omezenou sadu příkazů a chat režim je vypnut — fungují pouze příkazy katalogu jen pro čtení plus /lang, /forget a /stop. Jakmile probace skončí, získáte plnou sadu příkazů a chat režim se odemkne. Admin může probaci ukončit dříve tím, že vás doporučí. Uvítací zpráva a /help ukazují okno probace a přesně ty příkazy, které jsou dostupné.
++topic.chat-vs-commands.answer=S botem můžete mluvit dvěma způsoby. Příkazy začínají lomítkem — například /summary, /save, /follow-tag — a provádějí přesné, opakovatelné akce. Cokoliv jiného je dotaz v chatu v přirozeném jazyce, vhodné pro následné otázky a zkoumání. V jedné konverzaci můžete libovolně kombinovat obojí. Bot odpovídá v prostém textu; odkazy se zobrazují jako holé webové adresy, na které můžete klepnout nebo je zkopírovat.
++topic.chat-assistant-boundary.answer=Chatový asistent je pouze pro čtení. Vyhledává a vysvětluje vaše zprávy; nikdy nemůže měnit nastavení, něco posílat ani jednat jako admin. Vidí pouze vaše vlastní přihlášení a rozsah, ve kterém právě chatujete — nemůže sahat na data jiného uživatele ani na jinou konverzaci. Pokud odpověď trvá příliš dlouho, /stop ji zruší.
++topic.dm-vs-group.answer=infochat funguje jak v DM, tak ve skupinách. V DM stačí napsat botovi, abyste dostali odpověď. Ve skupině bota zmiňte (@mention) — nebo počkejte na jeho naplánované ranní a večerní souhrny. Nastavení pro celou skupinu (jazyk, časy souhrnů, zdroje skupiny) spravují správci skupiny, ale váš osobní kontext a uložení jsou vždy jen vaše a nikdy se nesdílejí s ostatními členy skupiny. Schválené skupiny také dostávají automatické souhrny nejnovějších příspěvků.
++topic.unfollow-vs-delete.answer=/unfollow-source <id> pouze způsobí, že zdroj přestane být zobrazován ve vašem rozsahu (jen pro vás v DM, nebo pro celou skupinu, když tam jedná správce skupiny). Zdroj sám zůstává — ostatní rozsahy ho stále vidí a jeho příspěvky k nim nadále přicházejí. Úplné smazání zdroje (odebrání z nasazení) je akce správce bota — požádejte admina, pokud by se měl sdílený zdroj odstranit. Takže: unfollow je pro rozsah a vratný; delete je globální, trvalý a pouze pro admina.
++topic.add-source-requires-tags.answer=/add-source vyžaduje alespoň jednu hodnotu --tags, protože každý příspěvek musí být tříditelný podle tématu a automatické tagování může selhat. Přidáním alespoň jednoho tagu při zakládání zdroje garantujete, že příspěvky zdroje půjdou vždy rozdělit do souhrnů a /summary, i když má automatický tagovač nejistotu. Tagy zadané při zakládání se také stanou sdílenými bootstrap tagy zdroje — viditelnými pro každého, kdo zdroj sleduje — takže je vybírejte s tím na paměti. Pomocí /follow-tag (vlastní zobrazení) ladíte, co osobně vidíte.
++topic.personal-vs-shared-tags.answer=Tagy existují ve dvou vrstvách. Každý zdroj nese sdílené bootstrap tagy, nastavené při založení zdroje a měnitelné pouze správcem bota — ty se týkají každého, kdo zdroj sleduje. K tomu má každý uživatel osobní výběr /follow-tag, který ladí pouze jeho vlastní zobrazení: ve výchozím stavu vidíte všechno ze svých zdrojů, a jakmile jednou /follow-tag nějaké téma, přepnete do režimu "pouze témata, která jsem si vybral" (jen pro vás, v tomto rozsahu). /unfollow-tag jedno téma zahodí; /unfollow-tag --all vás vrátí do výchozího zobrazení všechno-z-mých-zdrojů.
++topic.clear-vs-forget.answer=/clear i /forget mažou data konverzace, ale v různém rozsahu. /clear zahodí pouze krátkodobý kontext aktuální konverzace — vaše dlouhodobá paměť a uložené příspěvky zůstanou. /forget je úplné smazání pro soukromí: smaže všechno, co bot uchovává vaším jménem v tomto rozsahu (paměť chatu, aktuální konverzaci a vaši knihovnu uložených příspěvků — uložení jsou globální, takže se smažou bez ohledu na to, ze které konverzace /forget spustíte). /clear je vratné: bot si kontext znovu vybuduje, jakmile začnete chatovat. /forget je nevratné a nejprve žádá potvrzení.
++topic.forget-erasure.answer=/forget smaže v rozsahu, ve kterém ho spustíte: vaši paměť chatu (řádky chat_memory pro tuto konverzaci), vaše relace chatu a jejich zprávy (řádky chat_session a chat_message pro tuto konverzaci) a vaše osobní ukotvení souhrnů (řádky summary_anchor označené personal pro tuto konverzaci). Také globálně smaže vaši knihovnu uložených příspěvků — řádky saved_post pro vašeho uživatele, napříč všemi rozsahy, protože uložení jsou globální podle rozhodnutí D13. /forget se NEdotýká: vašeho stavu banu nebo administrátorských práv, vašich členství ve skupinách ani neměnného auditního protokolu systému (který zaznamenává, že se akce staly, nikdy obsah vašich zpráv). Řekne vám, zda máte ještě data v jiných konverzacích, abyste je mohli také vyčistit.
+diff --git a/infochat-provider/src/main/resources/bundles/en.properties b/infochat-provider/src/main/resources/bundles/en.properties
+index 6d3deb3d..17f94812 100644
+--- a/infochat-provider/src/main/resources/bundles/en.properties
++++ b/infochat-provider/src/main/resources/bundles/en.properties
+@@ -813,6 +813,25 @@ reply.digest.category.other=Other news
+ reply.digest.category.more=+{0} more — @mention me to see them
+ reply.digest.closing_affordance=@mention me to go deeper on any story, or ask about a topic you don't see here.
+ 
++# ----- Conceptual topic corpus (M1-649, D68) -------------------------------
++# Per docs/spec/commands.md §Chat mode + decision D68. The corpus lives in
++# HelpTopicCorpus (one intent-shaped match doc per topic, indexed under
++# doc_kind='topic'); these keys are the SERVED answers — reviewed product
++# copy, plain text (D30), bundle-localized (D43), bypassing TranslationPipeline
++# (the D43 two-path rule, same as D67's deterministic usage block). Naming:
++# topic.<slug>.answer mirrors the topic's HelpTopicCorpus slug. Delivery is
++# M1-666; M1-649 ships retrieval only.
++topic.getting-access.answer=infochat is invite-only. An admin gives you a one-time invite code; send that code to the bot as your first direct message and you'll be registered and welcomed. New accounts start in a short probation period with a limited command set and chat mode turned off — this is normal and temporary. Full access unlocks when probation ends, or sooner if an admin vouches for you. Run /help at any time to see exactly what you can do right now.
++topic.probation.answer=Probation is a slow-start phase every new account goes through. For the first 24h after you register (per the deployment's infochat.probation.duration setting) you get a limited command set and chat mode is turned off — only read-only catalogue commands plus /lang, /forget, and /stop work. Once probation ends you get the full command set and chat mode unlocks. An admin can also end probation early by vouching for you. The welcome message and /help show the probation window and exactly which commands are available.
++topic.chat-vs-commands.answer=You can talk to the bot two ways. Commands start with a slash — like /summary, /save, /follow-tag — and perform exact, repeatable actions. Anything else is a chat question in plain language, good for follow-ups and exploring. You can mix both freely in the same conversation. The bot replies in plain text; any links appear as bare web addresses you can tap or copy.
++topic.chat-assistant-boundary.answer=The chat assistant is read-only. It searches and explains your news; it can never change settings, post anything, or act as an admin. It only sees your own subscriptions and the scope you're chatting in — it cannot reach another user's data or another conversation. If a reply is taking too long, /stop cancels it.
++topic.dm-vs-group.answer=infochat works in both DMs and groups. In a DM, just message the bot to get a reply. In a group, @mention the bot — or wait for its scheduled morning and evening digests. Group-wide settings (language, digest times, the group's sources) are managed by group admins, but your personal context and saves are always yours and never shared with other group members. Approved groups also get automatic digests of the latest posts.
++topic.unfollow-vs-delete.answer=/unfollow-source <id> only stops the source from appearing in your scope (just you in a DM, or the whole group when a group admin acts there). The source itself stays — other scopes still see it, and its posts keep arriving for them. Deleting a source entirely (removing it from the deployment) is a bot-admin action — ask an admin if a shared source should go. So: unfollow is per-scope and reversible; delete is global, permanent, and admin-only.
++topic.add-source-requires-tags.answer=/add-source requires at least one --tags value because every post must be sortable by topic, and automatic tagging can miss. By attaching at least one tag at source-add time you guarantee the source's posts can still be routed into digests and /summary even when the auto-tagger has nothing confident to say. Tags set at source-add time also become the source's shared bootstrap tags — visible to everyone who follows that source — so pick them with that in mind. Use /follow-tag (your own view) to tune what you personally see.
++topic.personal-vs-shared-tags.answer=There are two layers of tags. Each source carries shared bootstrap tags, set when the source was added and changeable only by a bot admin — these affect everyone who follows that source. On top of that, each user has personal /follow-tag selections that tune only their own view: by default you see everything from your sources, and the moment you /follow-tag a topic you switch to "only the topics I picked" (just for you, in this scope). /unfollow-tag drops one topic; /unfollow-tag --all resets you to the default everything-from-my-sources view.
++topic.clear-vs-forget.answer=/clear and /forget both wipe conversation data, but at different scopes. /clear drops only the short-term context of the current conversation — your longer-term memory and saved posts stay. /forget is the full privacy purge: it wipes everything the bot keeps on your behalf in this scope (chat memory, the current conversation, and your saved-posts library — saves are global, so they get wiped no matter which conversation you run /forget from). /clear is reversible: the bot rebuilds context as you chat. /forget is irreversible and asks you to confirm first.
++topic.forget-erasure.answer=/forget erases, for the scope you run it in: your chat memory (chat_memory rows for this conversation), your chat sessions and their messages (chat_session and chat_message rows for this conversation), and your personal summary anchors (summary_anchor rows marked personal for this conversation). It also wipes your saved-posts library globally — saved_post rows for your user, across every scope, because saves are global per decision D13. /forget does NOT touch: your ban or admin status, your group memberships, or the system's tamper-proof audit log (which records that actions happened, never your message content). It tells you if you still have data in other conversations so you can clear those too.
++
+ # ----- Test-only fallback probe (M1-060) -----------------------------------
+ # NOT mirrored in BundleKeys, NOT mirrored in cs.properties. The widened
+ # BundleLoaderTest reflection iterates BundleKeys constants only, so this
+diff --git a/infochat-provider/src/test/java/app/zcat/infochat/provider/help/HelpTopicCorpusTest.java b/infochat-provider/src/test/java/app/zcat/infochat/provider/help/HelpTopicCorpusTest.java
+new file mode 100644
+index 00000000..d01f6961
+--- /dev/null
++++ b/infochat-provider/src/test/java/app/zcat/infochat/provider/help/HelpTopicCorpusTest.java
+@@ -0,0 +1,554 @@
++package app.zcat.infochat.provider.help;
++
++import app.zcat.infochat.provider.bundle.BundleKeys;
++import app.zcat.infochat.provider.command.ForgetPurgeService;
++import app.zcat.infochat.provider.messaging.HelpCommandHandler;
++import app.zcat.infochat.provider.messaging.HelpCommandHandler.CommandHelp;
++import app.zcat.infochat.provider.messaging.HelpCommandHandler.HelpTier;
++import org.junit.jupiter.api.Test;
++
++import java.io.IOException;
++import java.io.InputStream;
++import java.io.InputStreamReader;
++import java.lang.reflect.RecordComponent;
++import java.nio.charset.StandardCharsets;
++import java.nio.file.Files;
++import java.nio.file.Path;
++import java.security.MessageDigest;
++import java.security.NoSuchAlgorithmException;
++import java.util.ArrayList;
++import java.util.Arrays;
++import java.util.HexFormat;
++import java.util.List;
++import java.util.Optional;
++import java.util.Properties;
++import java.util.Set;
++import java.util.regex.Matcher;
++import java.util.regex.Pattern;
++import java.util.stream.Collectors;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertFalse;
++import static org.junit.jupiter.api.Assertions.assertNotNull;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++import static org.junit.jupiter.api.Assertions.fail;
++
++/**
++ * DB-free guard tests for {@link HelpTopicCorpus} (M1-649). This class
++ * is plain JUnit on purpose: the M1-495 naming ratchet flags DB-backed
++ * tests whose class name matches {@code *Test}, so the corpus's
++ * non-retrieval invariants live here and the DB-backed retrieval
++ * invariants live in {@code TopicCorpusRetrievalIT}.
++ *
++ * <p>Each acceptance item from M1-649 is covered by exactly one test
++ * method below:
++ * <ul>
++ *   <li>{@link #corpusContainsEveryMandatedTopic()} — acceptance item 1
++ *       (the ten mandated topics are all present);</li>
++ *   <li>{@link #topicDocIdsDisjointFromCommandNames()} — item 3
++ *       (namespaced {@code doc_id} cannot collide with a command_intent
++ *       {@code doc_id});</li>
++ *   <li>{@link #topicDerivationHashesMatchCurrentUserGuide()} — item 4a
++ *       (guide-anchored conceptual topics carry a derivation hash that
++ *       reds when the anchored USER_GUIDE.md region changes);</li>
++ *   <li>{@link #forgetErasureTopicMatchesPurgeService()} — item 4b
++ *       (code-fact topic pins its enumerated categories to
++ *       {@link ForgetPurgeService.PurgeResult}'s record components);</li>
++ *   <li>{@link #probationTopicDurationMatchesApplicationConfig()} — item 4b
++ *       (probation topic's stated duration matches the deployment's
++ *       {@code infochat.probation.duration} value);</li>
++ *   <li>{@link #noTopicReferencesAdminSurface()} — item 5
++ *       (topics are tier-flat — no topic match text or answer value
++ *       names a {@link HelpTier#BOT_ADMIN} command);</li>
++ *   <li>{@link #matchTextIsIntentShapedAndDisjointFromAnswer()} — item 2
++ *       spirit (each topic's match text is composed of title + intent
++ *       words and does not contain its EN answer copy).</li>
++ * </ul>
++ */
++class HelpTopicCorpusTest {
++
++    /**
++     * Acceptance item 1 — the ten mandated conceptual topics are all
++     * present in {@link HelpTopicCorpus#CORPUS}. A topic present in
++     * the corpus but missing from this set fails the assertion; a
++     * topic in this set but absent from the corpus fails it the other
++     * way. The set is the M1-649 acceptance item 1 enumeration
++     * verbatim.
++     */
++    @Test
++    void corpusContainsEveryMandatedTopic() {
++        Set<String> expectedSlugs = Set.of(
++                "getting-access",
++                "probation",
++                "chat-vs-commands",
++                "chat-assistant-boundary",
++                "dm-vs-group",
++                "unfollow-vs-delete",
++                "add-source-requires-tags",
++                "personal-vs-shared-tags",
++                "clear-vs-forget",
++                "forget-erasure");
++        Set<String> actualSlugs = HelpTopicCorpus.CORPUS.stream()
++                .map(HelpTopicCorpus.Topic::slug)
++                .collect(Collectors.toSet());
++        assertEquals(expectedSlugs, actualSlugs,
++                "the corpus must contain exactly the ten mandated conceptual topics "
++                        + "(M1-649 acceptance item 1) — no more, no fewer");
++    }
++
++    /**
++     * Acceptance item 3 — every topic {@code doc_id} is namespaced
++     * under {@link HelpTopicCorpus#DOC_ID_PREFIX} and cannot collide
++     * with a {@code command_intent} {@code doc_id}. The namespacing
++     * holds by construction (no {@link HelpCommandHandler#CATALOGUE}
++     * command name contains a colon), so this test is the regression
++     * guard against a future topic whose slug slips the prefix or a
++     * future command whose name adopts a colon.
++     *
++     * <p>Why this matters: V60's {@code doc_embedding} PRIMARY KEY is
++     * single-column on {@code doc_id}, and the upsert's DELETE is
++     * {@code doc_kind}-scoped. A topic {@code doc_id} colliding with
++     * a command name would miss the command row on DELETE and
++     * PK-violate on INSERT — rolling back the batch and silently
++     * degrading the corpus.
++     */
++    @Test
++    void topicDocIdsDisjointFromCommandNames() {
++        Set<String> commandNames = HelpCommandHandler.CATALOGUE.stream()
++                .map(CommandHelp::command)
++                .collect(Collectors.toSet());
++        assertFalse(commandNames.isEmpty(),
++                "CATALOGUE must be non-empty; otherwise the disjointness check is vacuous");
++        for (HelpTopicCorpus.Topic topic : HelpTopicCorpus.CORPUS) {
++            String docId = topic.docId();
++            assertTrue(docId.startsWith(HelpTopicCorpus.DOC_ID_PREFIX),
++                    "topic doc_id must be namespaced under '" + HelpTopicCorpus.DOC_ID_PREFIX
++                            + "' — got: " + docId);
++            assertFalse(commandNames.contains(docId),
++                    "topic doc_id must not equal any command name (single-column PK collision hazard): "
++                            + docId);
++            assertFalse(commandNames.contains(topic.targetRef()),
++                    "topic target_ref must not equal any command name either — both columns "
++                            + "share the doc_embedding namespace and a collision on target_ref "
++                            + "would let a command-side lookup leak a topic ref: " + topic.targetRef());
++        }
++    }
++
++    /**
++     * Acceptance item 4a — every {@link HelpTopicCorpus.GuideDerivation}
++     * topic records a content hash of the bytes between its paired
++     * {@code <!-- topic:<slug>:begin/end -->} markers in
++     * {@code USER_GUIDE.md}. The test reds the build when:
++     * <ul>
++     *   <li>a marker is missing (distinct loud failure with the slug);</li>
++     *   <li>the marker pair's bytes no longer hash to the recorded
++     *       value (the guide drifted under the topic — re-verify and
++     *       update the hash only after that verification).</li>
++     * </ul>
++     * Anchor by HTML-comment id, NOT heading text, so a heading
++     * reword alone does not red the build for a non-reason.
++     *
++     * <p>File is located by walking up from {@code user.dir} until
++     * {@code USER_GUIDE.md} is found — cwd-robust across surefire /
++     * IDE runners.
++     */
++    @Test
++    void topicDerivationHashesMatchCurrentUserGuide() throws Exception {
++        Path guide = findUserGuide();
++        String content = Files.readString(guide, StandardCharsets.UTF_8);
++
++        for (HelpTopicCorpus.Topic topic : HelpTopicCorpus.CORPUS) {
++            if (!(topic.guard() instanceof HelpTopicCorpus.GuideDerivation guideDerivation)) {
++                continue;
++            }
++            String slug = topic.slug();
++            String expectedHash = guideDerivation.contentHash();
++
++            Pattern pattern = Pattern.compile(
++                    "<!-- topic:" + Pattern.quote(slug) + ":begin -->\\n(.*?)\\n<!-- topic:"
++                            + Pattern.quote(slug) + ":end -->",
++                    Pattern.DOTALL);
++            Matcher matcher = pattern.matcher(content);
++            if (!matcher.find()) {
++                fail("USER_GUIDE.md is missing the paired anchor markers for guide-anchored topic '"
++                        + slug + "'. Expected markers: <!-- topic:" + slug + ":begin --> and "
++                        + "<!-- topic:" + slug + ":end --> wrapping the load-bearing prose. "
++                        + "Either add the markers (and re-hash) or change the topic's guard.");
++            }
++            String slice = matcher.group(1);
++            String actualHash = sha256(slice.getBytes(StandardCharsets.UTF_8));
++            assertEquals(expectedHash, actualHash,
++                    "USER_GUIDE.md content under topic '" + slug + "' has drifted (hash mismatch). "
++                            + "Re-verify the topic's served answer is still accurate against the "
++                            + "updated guide, then update the GuideDerivation's contentHash to "
++                            + this.getClass().getSimpleName() + "'s actual. Do not silence this "
++                            + "test by reverting the guide.");
++        }
++    }
++
++    /**
++     * Acceptance item 4b — the {@code /forget} erasure topic is a
++     * code-fact topic whose load-bearing fact is the set of categories
++     * {@link ForgetPurgeService} purges. The guide hash alone would
++     * detect guide CHANGE, not guide/code MISMATCH, so this test pins
++     * the topic's enumerated purged categories to the runtime source.
++     *
++     * <p>The runtime set is derived via reflection over
++     * {@link ForgetPurgeService.PurgeResult}'s record components:
++     * {@code chatMemoryCount → chat_memory},
++     * {@code chatSessionCount → chat_session},
++     * {@code summaryAnchorCount → summary_anchor},
++     * {@code savedPostCount → saved_post}. The test then asserts the
++     * EN answer copy names each runtime-purged category by its table
++     * name (so a new PurgeResult component fails the test until the
++     * answer copy is updated), AND asserts the answer's not-touched
++     * enumeration is disjoint from the purged set (so an answer that
++     * claims to leave a purged category fails), AND asserts the
++     * saves-are-global and personal-summary-anchor facts appear
++     * (per D13 and the {@code command_kind='personal'} predicate).
++     */
++    @Test
++    void forgetErasureTopicMatchesPurgeService() throws Exception {
++        // The runtime set, derived from the record components the
++        // service actually returns. If ForgetPurgeService adds a
++        // category, the derived set grows; the assertion below fails
++        // until the answer copy names the new table.
++        Set<String> runtimePurged = Arrays.stream(ForgetPurgeService.PurgeResult.class.getRecordComponents())
++                .map(RecordComponent::getName)
++                .map(name -> name.replaceAll("Count$", ""))
++                .map(HelpTopicCorpusTest::camelToSnake)
++                .collect(Collectors.toSet());
++        assertEquals(
++                Set.of("chat_memory", "chat_session", "summary_anchor", "saved_post"),
++                runtimePurged,
++                "ForgetPurgeService.PurgeResult's record components must derive to the four "
++                        + "expected purged categories — a new component means a new category the "
++                        + "topic answer must enumerate");
++
++        // The /forget erasure topic MUST be in the corpus.
++        Optional<HelpTopicCorpus.Topic> forgetTopic = HelpTopicCorpus.byTargetRef("forget-erasure");
++        assertTrue(forgetTopic.isPresent(),
++                "the corpus must carry the 'forget-erasure' topic");
++        assertEquals(BundleKeys.TOPIC_FORGET_ERASURE_ANSWER, forgetTopic.get().answerBundleKey(),
++                "the forget-erasure topic's answer bundle key must be TOPIC_FORGET_ERASURE_ANSWER");
++
++        // The answer MUST name each runtime-purged category.
++        String enAnswer = loadOwnKeys("en").getProperty(BundleKeys.TOPIC_FORGET_ERASURE_ANSWER);
++        assertNotNull(enAnswer, "EN bundle must define topic.forget-erasure.answer");
++        for (String category : runtimePurged) {
++            assertTrue(enAnswer.contains(category),
++                    "EN /forget-erasure answer must name purged category '" + category
++                            + "' verbatim (derived from ForgetPurgeService.PurgeResult) — the "
++                            + "service is the single canonical source. Answer was: " + enAnswer);
++        }
++
++        // Saves are global per D13; summary anchors are personal-only.
++        // Both are scope restrictions on the broader table, and the
++        // answer must state them — otherwise an answer that claims
++        // "/forget wipes all summary anchors" or "saves from this
++        // conversation only" is silently wrong.
++        assertTrue(enAnswer.toLowerCase().contains("global"),
++                "EN /forget-erasure answer must state that saved_post rows are GLOBAL "
++                        + "(per decision D13). Answer was: " + enAnswer);
++        assertTrue(enAnswer.toLowerCase().contains("personal"),
++                "EN /forget-erasure answer must state that summary_anchor rows are "
++                        + "personal-only (per ForgetPurgeService.DELETE_SUMMARY_ANCHOR_SQL's "
++                        + "command_kind='personal' predicate). Answer was: " + enAnswer);
++
++        // The not-touched enumeration must be disjoint from the purged
++        // set: an answer that names a category as both purged AND
++        // not-touched is self-contradictory. Concretely, the answer
++        // MUST name each of the load-bearing not-touched surfaces
++        // (ban/admin status, group memberships, audit log) — the four
++        // surfaces the guide calls out and the topic must mirror.
++        Set<String> mandatoryNotTouchedTokens = Set.of(
++                "ban", "admin", "group", "audit");
++        String lowerAnswer = enAnswer.toLowerCase();
++        for (String token : mandatoryNotTouchedTokens) {
++            assertTrue(lowerAnswer.contains(token),
++                    "EN /forget-erasure answer must enumerate the not-touched surface '" + token
++                            + "' (ban/admin status, group memberships, audit log). Answer was: "
++                            + enAnswer);
++        }
++        // The not-touched tokens above are surface names; the purged
++        // tokens are table names. The two sets must be disjoint — a
++        // topic that claims to both purge AND leave a category is
++        // self-contradictory.
++        for (String purged : runtimePurged) {
++            assertFalse(lowerAnswer.contains("not touch: " + purged)
++                            && lowerAnswer.contains(purged),
++                    "EN answer is self-contradictory on category '" + purged
++                            + "' — it appears in both the purged and not-touched enumerations. "
++                            + "Answer was: " + enAnswer);
++        }
++    }
++
++    /**
++     * Acceptance item 4b (probation half) — the probation topic is a
++     * code-fact topic whose load-bearing fact is the probation window
++     * length, read from {@code infochat.probation.duration} in the
++     * main {@code application.properties}. The guide hash alone would
++     * not catch the deployment changing the duration while the guide
++     * (and the topic) stayed stale-green, so this test pins the
++     * answer's stated duration to the live config value.
++     *
++     * <p>The properties file is read by filesystem path (not
++     * classpath) because the test-resources {@code application.properties}
++     * shadows the classpath name and carries no probation key.
++     */
++    @Test
++    void probationTopicDurationMatchesApplicationConfig() throws Exception {
++        String configValue = readProbationDurationFromMainProperties();
++        assertNotNull(configValue,
++                "main application.properties must define infochat.probation.duration — "
++                        + "the probation topic pins its duration to this key");
++
++        Optional<HelpTopicCorpus.Topic> probationTopic = HelpTopicCorpus.byTargetRef("probation");
++        assertTrue(probationTopic.isPresent(),
++                "the corpus must carry the 'probation' topic");
++        assertTrue(probationTopic.get().guard() instanceof HelpTopicCorpus.CodeFactPin,
++                "the probation topic's guard must be a CodeFactPin");
++
++        String enAnswer = loadOwnKeys("en").getProperty(BundleKeys.TOPIC_PROBATION_ANSWER);
++        assertNotNull(enAnswer, "EN bundle must define topic.probation.answer");
++        assertTrue(enAnswer.contains(configValue),
++                "EN probation answer must state the deployment's infochat.probation.duration "
++                        + "value verbatim ('" + configValue + "'). Answer was: " + enAnswer);
++
++        String csAnswer = loadOwnKeys("cs").getProperty(BundleKeys.TOPIC_PROBATION_ANSWER);
++        assertNotNull(csAnswer, "CS bundle must define topic.probation.answer");
++        assertTrue(csAnswer.contains(configValue),
++                "CS probation answer must state the deployment's infochat.probation.duration "
++                        + "value verbatim ('" + configValue + "') — the value is a config token, "
++                        + "not translatable prose. Answer was: " + csAnswer);
++    }
++
++    /**
++     * Acceptance item 5 — every topic is user-tier by construction.
++     * The pin is against the {@link HelpTier#BOT_ADMIN} surface, NOT
++     * against {@code LlmOutputSanitizer.CLOSED_LIST} membership — the
++     * group-admin commands topics must name ({@code /add-source},
++     * {@code /lang}, {@code /follow-tag}, …) are themselves
++     * {@code CLOSED_LIST} entries and are expected in topic text.
++     *
++     * <p>Concrete consequence: the invite/access-flow topic describes
++     * the flow without naming any {@code /invite} subcommand (all
++     * bot-admin tier). Necessary but NOT sufficient for delivery
++     * safety: the user-reachable commands topics must name are in the
++     * sanitizer {@code CLOSED_LIST}, which is exactly why M1-666
++     * delivers deterministically post-sanitize rather than through
++     * the model.
++     */
++    @Test
++    void noTopicReferencesAdminSurface() throws Exception {
++        Set<String> botAdminCommands = HelpCommandHandler.CATALOGUE.stream()
++                .filter(e -> e.tier() == HelpTier.BOT_ADMIN)
++                .map(CommandHelp::command)
++                .collect(Collectors.toSet());
++        assertFalse(botAdminCommands.isEmpty(),
++                "CATALOGUE must carry at least one BOT_ADMIN command; otherwise the tier-flat "
++                        + "pin is vacuous");
++
++        // Build the bot-admin command-name patterns the topic text
++        // must not match: a literal "/<name>" followed by a word
++        // boundary (so "/invite create" matches but "/invites" does
++        // not, and "/ban" matches but "/banana" does not). Pattern
++        // mirrors LlmOutputSanitizer.compileClosedListPattern's
++        // trailing-lookahead contract.
++        List<Pattern> botAdminPatterns = new ArrayList<>();
++        for (String name : botAdminCommands) {
++            botAdminPatterns.add(Pattern.compile("/" + Pattern.quote(name) + "(?=$|[^a-zA-Z0-9\\-])"));
++        }
++
++        Properties en = loadOwnKeys("en");
++        Properties cs = loadOwnKeys("cs");
++
++        for (HelpTopicCorpus.Topic topic : HelpTopicCorpus.CORPUS) {
++            // Match surface: title + intent words.
++            String matchText = composeMatchText(topic);
++            assertNoBotAdminCommand(matchText, topic.slug(), "match text", botAdminPatterns);
++
++            // Served surface: EN + CS answer bundle values.
++            String enAnswer = en.getProperty(topic.answerBundleKey());
++            assertNotNull(enAnswer,
++                    "EN bundle must define " + topic.answerBundleKey() + " for topic " + topic.slug());
++            assertNoBotAdminCommand(enAnswer, topic.slug(), "EN answer", botAdminPatterns);
++
++            String csAnswer = cs.getProperty(topic.answerBundleKey());
++            assertNotNull(csAnswer,
++                    "CS bundle must define " + topic.answerBundleKey() + " for topic " + topic.slug());
++            assertNoBotAdminCommand(csAnswer, topic.slug(), "CS answer", botAdminPatterns);
++        }
++    }
++
++    /**
++     * Spirit of acceptance item 2 — each topic's match text is
++     * composed of title + intent words (intent-shaped, mirroring the
++     * command corpus) and does NOT contain its EN answer copy. The
++     * match text is what the embedder sees; embedding the answer
++     * would defeat the served-surface / match-surface split (D66
++     * carried to topics) and would shift the threshold statistics
++     * the recalibration note in {@code CommandIntentIndex.lookupTopic}
++     * already flags as a follow-up.
++     *
++     * <p>CI NOTE: the suite's embedders are stubs (fixed vectors), so
++     * this test pins the SHAPE of the match text, not its recall.
++     * Real no-shared-word recall is verified by live calibration
++     * (the M1-619 pattern), not by CI; the IT covers retrieval
++     * plumbing with rigged-distance vectors.
++     */
++    @Test
++    void matchTextIsIntentShapedAndDisjointFromAnswer() throws Exception {
++        Properties en = loadOwnKeys("en");
++        for (HelpTopicCorpus.Topic topic : HelpTopicCorpus.CORPUS) {
++            String matchText = composeMatchText(topic);
++            // Title is the first phrase of the match text.
++            assertTrue(matchText.startsWith(topic.title()),
++                    "topic '" + topic.slug() + "' match text must start with its title; got: "
++                            + matchText);
++            // Every intent word appears in the match text.
++            for (String word : topic.intentWords()) {
++                assertTrue(matchText.contains(word),
++                        "topic '" + topic.slug() + "' match text must include intent word '" + word
++                                + "'; got: " + matchText);
++            }
++            // The match text must NOT contain the answer copy (the
++            // served surface is the bundle value; embedding it would
++            // cross the match-surface / served-surface boundary D66
++            // pins for the command corpus and this ticket carries to
++            // topics).
++            String enAnswer = en.getProperty(topic.answerBundleKey());
++            assertNotNull(enAnswer);
++            String answerFirstSentence = enAnswer.split("[.!?\\n]", 2)[0];
++            assertFalse(matchText.contains(answerFirstSentence),
++                    "topic '" + topic.slug() + "' match text must not contain its EN answer copy "
++                            + "(match surface and served surface are disjoint by design).");
++        }
++    }
++
++    // ---------- helpers ----------
++
++    /**
++     * Compose the match text exactly as {@link TopicCorpusBuilder}
++     * does at startup, so the test pins the same shape the embedder
++     * sees. Mirrors {@code CommandIntentIndexBuilder.composeIntentText}.
++     */
++    private static String composeMatchText(HelpTopicCorpus.Topic topic) {
++        StringBuilder sb = new StringBuilder();
++        sb.append(topic.title());
++        if (!topic.intentWords().isEmpty()) {
++            sb.append(". Intent words: ");
++            for (int i = 0; i < topic.intentWords().size(); i++) {
++                if (i > 0) {
++                    sb.append(", ");
++                }
++                sb.append(topic.intentWords().get(i));
++            }
++            sb.append('.');
++        }
++        return sb.toString();
++    }
++
++    private static void assertNoBotAdminCommand(String text, String slug, String surface,
++                                                 List<Pattern> botAdminPatterns) {
++        for (Pattern p : botAdminPatterns) {
++            Matcher m = p.matcher(text);
++            if (m.find()) {
++                fail("topic '" + slug + "' " + surface + " names a BOT_ADMIN command ('"
++                        + m.group() + "') — topics are tier-flat by construction (M1-649 "
++                        + "acceptance item 5). Surface was: " + text);
++            }
++        }
++    }
++
++    private static Path findUserGuide() {
++        // Walk up from user.dir until USER_GUIDE.md is found —
++        // cwd-robust across surefire (module basedir) and IDE runners.
++        Path cwd = Path.of(System.getProperty("user.dir"));
++        Path current = cwd;
++        for (int i = 0; i < 10; i++) {
++            Path candidate = current.resolve("USER_GUIDE.md");
++            if (Files.isRegularFile(candidate)) {
++                return candidate;
++            }
++            current = current.getParent();
++            if (current == null) {
++                break;
++            }
++        }
++        throw new AssertionError(
++                "USER_GUIDE.md not found walking up from user.dir=" + cwd
++                        + " — the test needs the repo-root guide to verify the topic anchor hashes");
++    }
++
++    private static String readProbationDurationFromMainProperties() throws IOException {
++        // Locate the main application.properties by walking up from
++        // user.dir. Reading via filesystem path (not classpath) is
++        // load-bearing: the test-resources application.properties
++        // shadows the classpath name and carries no probation key, so
++        // the classpath lookup would return null.
++        Path cwd = Path.of(System.getProperty("user.dir"));
++        Path current = cwd;
++        for (int i = 0; i < 10; i++) {
++            Path candidate = current.resolve(
++                    "infochat-provider/src/main/resources/application.properties");
++            if (Files.isRegularFile(candidate)) {
++                Properties props = new Properties();
++                try (InputStream stream = Files.newInputStream(candidate)) {
++                    props.load(new InputStreamReader(stream, StandardCharsets.UTF_8));
++                }
++                return props.getProperty("infochat.probation.duration");
++            }
++            current = current.getParent();
++            if (current == null) {
++                break;
++            }
++        }
++        throw new AssertionError(
++                "main application.properties not found walking up from user.dir=" + cwd);
++    }
++
++    private static Properties loadOwnKeys(String lang) throws IOException {
++        // Mirror BundleLoaderTest.loadOwnKeys so the topic tests can
++        // see each bundle's OWN keys without going through @Inject
++        // (this class is plain JUnit, not @QuarkusTest).
++        String resource = "/bundles/" + lang + ".properties";
++        Properties bundle = new Properties();
++        try (InputStream stream = HelpTopicCorpusTest.class.getResourceAsStream(resource)) {
++            assertNotNull(stream, "bundle resource not found on classpath: " + resource);
++            bundle.load(new InputStreamReader(stream, StandardCharsets.UTF_8));
++        }
++        return bundle;
++    }
++
++    private static String sha256(byte[] bytes) {
++        try {
++            MessageDigest md = MessageDigest.getInstance("SHA-256");
++            return HexFormat.of().formatHex(md.digest(bytes));
++        } catch (NoSuchAlgorithmException e) {
++            throw new IllegalStateException("SHA-256 unavailable", e);
++        }
++    }
++
++    /**
++     * Convert a CamelCase identifier to snake_case
++     * (e.g. {@code chatMemory} → {@code chat_memory}). Used to derive
++     * the {@code doc_embedding}-style table name from a
++     * {@link ForgetPurgeService.PurgeResult} record component name.
++     */
++    private static String camelToSnake(String camel) {
++        StringBuilder sb = new StringBuilder(camel.length() + 4);
++        for (int i = 0; i < camel.length(); i++) {
++            char c = camel.charAt(i);
++            if (Character.isUpperCase(c)) {
++                if (i > 0) {
++                    sb.append('_');
++                }
++                sb.append(Character.toLowerCase(c));
++            } else {
++                sb.append(c);
++            }
++        }
++        return sb.toString();
++    }
++}
+diff --git a/infochat-provider/src/test/java/app/zcat/infochat/provider/help/TopicCorpusRetrievalIT.java b/infochat-provider/src/test/java/app/zcat/infochat/provider/help/TopicCorpusRetrievalIT.java
+new file mode 100644
+index 00000000..aa1bab91
+--- /dev/null
++++ b/infochat-provider/src/test/java/app/zcat/infochat/provider/help/TopicCorpusRetrievalIT.java
+@@ -0,0 +1,526 @@
++package app.zcat.infochat.provider.help;
++
++import app.zcat.infochat.llm.EmbeddingProvider;
++import app.zcat.infochat.llm.EmbeddingResult;
++import app.zcat.infochat.provider.testsupport.SeedDataSource;
++import io.quarkus.runtime.StartupEvent;
++import io.quarkus.test.junit.QuarkusTest;
++import jakarta.inject.Inject;
++import org.junit.jupiter.api.AfterEach;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++
++import javax.sql.DataSource;
++import java.sql.Connection;
++import java.sql.PreparedStatement;
++import java.sql.ResultSet;
++import java.sql.SQLException;
++import java.sql.Statement;
++import java.util.HashSet;
++import java.util.List;
++import java.util.Optional;
++import java.util.Set;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertFalse;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++/**
++ * Behavioral assertions for {@link TopicCorpusBuilder} and
++ * {@link CommandIntentIndex#lookupTopic(Connection, String, double)}
++ * against the real pgvector DevServices DB (M1-649). The builder is
++ * constructed directly with a counting stub
++ * {@link EmbeddingProvider}, so embed-call counts are precisely
++ * observable; {@code doc_embedding} state is seeded and verified via
++ * direct JDBC. {@code lookupTopic} probes are exercised the same way
++ * {@code CommandIntentIndexIT} exercises {@code lookupCommand}.
++ *
++ * <p>Covers M1-649 acceptance items 2 (no-shared-content-word
++ * phrasings resolve), 6 (content-hash skip + doc_kind-scoped prune),
++ * 7 ({@code lookupTopic} pointer-only over the M1-660 armed path),
++ * and 10 (negative pin — no topic reaches the adapter via this
++ * ticket's paths, expressed as cross-kind isolation through
++ * {@code lookupCommand}).
++ *
++ * <p>Named {@code *IT} (failsafe phase) because it boots DevServices
++ * Postgres — integration-shaped per design 08-verification §8.2,
++ * enforced by the M1-495 naming-guard ratchet.
++ */
++@QuarkusTest
++class TopicCorpusRetrievalIT {
++
++    private static final String EMBEDDING_MODEL = "nomic-embed-text";
++    private static final int DIMENSION = 768;
++    private static final double SIMILARITY_THRESHOLD =
++            CommandIntentIndex.TOPIC_SIMILARITY_THRESHOLD;
++
++    @Inject
++    @SeedDataSource
++    DataSource dataSource;
++
++    @Inject
++    DocEmbeddingDao dao;
++
++    private CountingEmbedder stubEmbedder;
++    private TopicCorpusBuilder builder;
++
++    @BeforeEach
++    void setUp() throws Exception {
++        // Wipe ALL topic rows: the @QuarkusTest boot fires
++        // TopicCorpusBuilder.onStart, which pre-populates doc_embedding
++        // with the 10-topic corpus under SHA-256 content hashes. Any
++        // test that seeds its own topic rows or counts embed calls
++        // must start from an empty topic-kind table.
++        //
++        // Wipe ALL command_intent rows too: the @QuarkusTest boot also
++        // fires CommandIntentIndexBuilder.onStart, so the catalogue
++        // corpus (41 rows) is present. Tests that seed their own
++        // command_intent rows (the cross-kind isolation probes) would
++        // PK-violate on the boot-seeded row without this wipe.
++        //
++        // deleteFixtures() also REINDEXes idx_doc_embedding_hnsw after
++        // the wipe: the boot fired BOTH builders, each inserting many
++        // IDENTICAL-stub-vector rows whose HNSW-deleted dead nodes
++        // would otherwise make a freshly-seeded row in the same
++        // duplicate-vector region unreachable from the graph entry
++        // point — the same fixture-pitfall
++        // CommandIntentIndexIT.reindexHnswGraph documents.
++        deleteFixtures();
++        stubEmbedder = new CountingEmbedder();
++        builder = new TopicCorpusBuilder(dao, stubEmbedder, EMBEDDING_MODEL);
++    }
++
++    @AfterEach
++    void tearDown() throws Exception {
++        deleteFixtures();
++    }
++
++    /**
++     * Acceptance item 2 — three phrasings that share NO content word
++     * with the target topic title all resolve to that topic via
++     * {@link CommandIntentIndex#lookupTopic}. The stub embedder
++     * returns {@code QUERY_VECTOR} for every input text, so any
++     * phrasing resolves to the row whose embedding is nearest
++     * {@code QUERY_VECTOR}; the phrasings are deliberately
++     * word-disjoint from the topic title to prove the resolution goes
++     * through the embedded intent document, not through any
++     * string-token match.
++     *
++     * <p>CI pins plumbing only — do NOT reach for a real embedding
++     * backend (ticket CI NOTE). Real no-shared-word recall is
++     * verified by live calibration (the M1-619 pattern, follow-up),
++     * not by CI.
++     */
++    @Test
++    void phrasingsWithNoSharedContentWordResolveToTopic() throws Exception {
++        String slug = "probation";
++        String title = titleFor(slug);
++        seedTopicRow(slug, vectorAtAngle(0.05)); // distance ≈ 0.00125 from QUERY_VECTOR
++
++        // Three phrasings, each sharing NO content word with the
++        // topic title. Content words of the title are computed
++        // below; the assertion enforces disjointness.
++        List<String> phrasings = List.of(
++                "why can't I post in the group",
++                "am I locked out of features",
++                "when do I get full access");
++        Set<String> titleContentWords = contentWords(title);
++        for (String phrasing : phrasings) {
++            Set<String> phrasingWords = contentWords(phrasing);
++            Set<String> overlap = new HashSet<>(phrasingWords);
++            overlap.retainAll(titleContentWords);
++            assertTrue(overlap.isEmpty(),
++                    "test phrasing '" + phrasing + "' must share no content word with the "
++                            + "topic title '" + title + "'; overlap was " + overlap
++                            + " — the resolution must go through the intent embedding, not "
++                            + "a string comparison");
++
++            try (Connection conn = dataSource.getConnection()) {
++                try {
++                    Optional<String> match = CommandIntentIndex.lookupTopic(
++                            conn,
++                            toVectorLiteral(vectorAtAngle(0)),
++                            SIMILARITY_THRESHOLD);
++                    assertEquals(Optional.of(slug), match,
++                            "phrasing '" + phrasing + "' must resolve to topic '" + slug
++                                    + "' via lookupTopic (the seeded topic row is the only "
++                                    + "topic-kind row and the stub embedder returns "
++                                    + "QUERY_VECTOR for every input)");
++                } finally {
++                    if (!conn.getAutoCommit()) {
++                        conn.rollback();
++                        conn.setAutoCommit(true);
++                    }
++                }
++            }
++        }
++    }
++
++    /**
++     * Acceptance item 6 (content-hash skip half) —
++     * {@link TopicCorpusBuilder#onStart} diffs the in-memory source
++     * set against the stored rows by content_hash + embedding_model.
++     * A row whose hash AND model both match is skipped, so a second
++     * invocation with identical inputs performs zero embedding calls
++     * — a warm restart costs one SELECT (the preflight read) and
++     * nothing else.
++     */
++    @Test
++    void restartWithUnchangedCorpusPerformsNoEmbeddingCall() {
++        // First invocation: populates the table from an empty starting
++        // state (the @BeforeEach wiped all topic rows). Every corpus
++        // topic is a delta against the empty stored set, so this embeds
++        // the full corpus once.
++        builder.onStart(new StartupEvent());
++        int callsAfterFirst = stubEmbedder.embedCalls;
++        assertTrue(callsAfterFirst >= 1,
++                "a cold start must embed the corpus at least once; got " + callsAfterFirst);
++
++        // Second invocation: identical inputs. Every row's content_hash
++        // and embedding_model now match what the builder would produce,
++        // so the content-hash skip fires for every row and no embed
++        // call is made.
++        builder.onStart(new StartupEvent());
++        assertEquals(callsAfterFirst, stubEmbedder.embedCalls,
++                "a restart with an unchanged corpus must perform ZERO embedding calls — "
++                        + "the content-hash + model-identity skip is the warm-restart cost "
++                        + "boundary");
++    }
++
++    /**
++     * Acceptance item 6 (prune half) — the builder's DELETE is
++     * doc_kind-scoped, so a topic-row prune never touches
++     * {@code command_intent} rows. Seed a {@code command_intent} row
++     * and a phantom topic row (a doc_id not in
++     * {@link HelpTopicCorpus#CORPUS}); run the builder; the phantom is
++     * pruned (it's not in the source set) and the command row survives
++     * intact. This is the V60 single-column-PK safety the
++     * {@code doc_kind}-scoped DELETE buys: the prune cannot accidentally
++     * cascade into the other corpus.
++     */
++    @Test
++    void topicBuilderDeleteNeverTouchesCommandRows() throws Exception {
++        String command = "save";
++        seedCommandRow(command, vectorAtAngle(0.20));
++        String phantomTopicId = "topic:__never_a_real_topic__";
++        seedTopicRowWithId(phantomTopicId, "__never_a_real_topic__", vectorAtAngle(0.30));
++        assertTrue(rowExists(HelpTopicCorpus.DOC_KIND, phantomTopicId),
++                "phantom topic row seeded");
++        assertTrue(rowExists(CommandIntentIndex.DOC_KIND, command),
++                "command_intent row seeded");
++
++        builder.onStart(new StartupEvent());
++
++        assertFalse(rowExists(HelpTopicCorpus.DOC_KIND, phantomTopicId),
++                "the phantom topic row must be pruned on the next startup — the index must "
++                        + "never serve a phantom topic");
++        assertTrue(rowExists(CommandIntentIndex.DOC_KIND, command),
++                "the command_intent row must survive the topic builder's prune — the "
++                        + "doc_kind-scoped DELETE cannot touch another corpus");
++    }
++
++    /**
++     * Acceptance item 7 — {@link CommandIntentIndex#lookupTopic} returns
++     * a pointer only: the matched topic's {@code target_ref} (its slug),
++     * never stored text. Three probes pin the read path:
++     * <ol>
++     *   <li>nearest topic row returns its target_ref;</li>
++     *   <li>a nearer {@code command_intent} row is NEVER returned by
++     *       {@code lookupTopic} (cross-kind isolation —
++     *       {@code doc_kind='topic'} filter);</li>
++     *   <li>below the similarity threshold, returns empty.</li>
++     * </ol>
++     */
++    @Test
++    void lookupTopicReturnsPointerOnlyOverArmedPath() throws Exception {
++        // Probe 1 — nearest topic returns its target_ref.
++        seedTopicRow("clear-vs-forget", vectorAtAngle(0.10));
++        try (Connection conn = dataSource.getConnection()) {
++            try {
++                Optional<String> match = CommandIntentIndex.lookupTopic(
++                        conn,
++                        toVectorLiteral(vectorAtAngle(0)),
++                        SIMILARITY_THRESHOLD);
++                assertEquals(Optional.of("clear-vs-forget"), match,
++                        "lookupTopic must return the nearest topic row's target_ref "
++                                + "(the topic slug)");
++            } finally {
++                if (!conn.getAutoCommit()) {
++                    conn.rollback();
++                    conn.setAutoCommit(true);
++                }
++            }
++        }
++
++        // Probe 2 — a nearer command_intent row must NEVER be returned
++        // by lookupTopic. Cross-kind isolation via the doc_kind filter.
++        deleteFixtures();
++        seedTopicRow("clear-vs-forget", vectorAtAngle(0.20));
++        seedCommandRow("save", vectorAtAngle(0.05)); // CLOSER to the query
++        try (Connection conn = dataSource.getConnection()) {
++            try {
++                Optional<String> match = CommandIntentIndex.lookupTopic(
++                        conn,
++                        toVectorLiteral(vectorAtAngle(0)),
++                        SIMILARITY_THRESHOLD);
++                assertEquals(Optional.of("clear-vs-forget"), match,
++                        "lookupTopic must return the nearest TOPIC row, never a "
++                                + "command_intent row even when the command row is "
++                                + "strictly closer — the doc_kind filter scopes the probe "
++                                + "to the topic corpus");
++                assertFalse(match.equals(Optional.of("save")),
++                        "a command_intent row must never leak through lookupTopic");
++            } finally {
++                if (!conn.getAutoCommit()) {
++                    conn.rollback();
++                    conn.setAutoCommit(true);
++                }
++            }
++        }
++
++        // Probe 3 — below threshold returns empty.
++        deleteFixtures();
++        // cosine similarity 0.50 = distance 0.50 — JUST below the 0.60
++        // similarity cutoff. A realistic unrelated English query against
++        // nomic-embed-text routinely scores in this band.
++        seedTopicRow("clear-vs-forget", vectorAtAngle(Math.acos(0.50)));
++        try (Connection conn = dataSource.getConnection()) {
++            try {
++                Optional<String> match = CommandIntentIndex.lookupTopic(
++                        conn,
++                        toVectorLiteral(vectorAtAngle(0)),
++                        SIMILARITY_THRESHOLD);
++                assertTrue(match.isEmpty(),
++                        "below the similarity threshold, lookupTopic must return empty — "
++                                + "the delivery path (M1-666) then surfaces no topic");
++            } finally {
++                if (!conn.getAutoCommit()) {
++                    conn.rollback();
++                    conn.setAutoCommit(true);
++                }
++            }
++        }
++    }
++
++    /**
++     * Acceptance item 10 (negative pin) — this ticket adds no delivery
++     * path, so the existing adapter-feeding path cannot emit topic
++     * content. The only {@code doc_embedding} path that feeds the
++     * adapter is {@link CommandIntentIndex#lookupCommand} (D67 trigger
++     * + {@code helpLookup} tool both route through it —
++     * {@code ChatAgent.lookupIntentForDelivery} and
++     * {@code HelpLookupTool}).
++     * A topic row seeded STRICTLY CLOSER to the query than any command
++     * row must NEVER surface through {@code lookupCommand}: the
++     * {@code doc_kind='command_intent'} filter scopes that probe to the
++     * command corpus, so the topic row is invisible.
++     *
++     * <p>This is the practical form of "no topic answer reaches the
++     * adapter via this ticket's paths": the ticket adds no delivery
++     * path, so the pin proves the existing adapter-feeding path cannot
++     * emit topic content.
++     */
++    @Test
++    void topicRowsNeverSurfaceThroughLookupCommand() throws Exception {
++        String command = "save";
++        // Topic row STRICTLY CLOSER to the query than the command row.
++        seedTopicRow("clear-vs-forget", vectorAtAngle(0.05));
++        seedCommandRow(command, vectorAtAngle(0.20));
++        try (Connection conn = dataSource.getConnection()) {
++            try {
++                Optional<String> match = CommandIntentIndex.lookupCommand(
++                        conn,
++                        toVectorLiteral(vectorAtAngle(0)),
++                        List.of(command),
++                        0.60);
++                assertEquals(Optional.of(command), match,
++                        "lookupCommand must return the matched command name, never a topic "
++                                + "target_ref — the doc_kind='command_intent' filter scopes "
++                                + "the probe to the command corpus even when a topic row is "
++                                + "strictly closer to the query");
++            } finally {
++                if (!conn.getAutoCommit()) {
++                    conn.rollback();
++                    conn.setAutoCommit(true);
++                }
++            }
++        }
++    }
++
++    // ---------- helpers ----------
++
++    /**
++     * Unit vector in the (dim0, dim1) plane at the given angle from the
++     * dim0 axis — cosine similarity to {@code vectorAtAngle(0)} is
++     * exactly {@code cos(radians)}. Same helper shape as
++     * {@code CommandIntentIndexIT} and {@code HelpLookupToolIT}.
++     */
++    private static float[] vectorAtAngle(double radians) {
++        float[] v = new float[DIMENSION];
++        v[0] = (float) Math.cos(radians);
++        v[1] = (float) Math.sin(radians);
++        return v;
++    }
++
++    private static String toVectorLiteral(float[] vector) {
++        StringBuilder sb = new StringBuilder(vector.length * 12).append('[');
++        for (int i = 0; i < vector.length; i++) {
++            if (i > 0) {
++                sb.append(',');
++            }
++            sb.append(vector[i]);
++        }
++        return sb.append(']').toString();
++    }
++
++    /**
++     * Resolve a topic slug to its in-memory title, so the test's
++     * word-disjointness assertion is sourced from the corpus itself
++     * (not a parallel literal the test maintains and could drift
++     * from).
++     */
++    private static String titleFor(String slug) {
++        return HelpTopicCorpus.byTargetRef(slug)
++                .orElseThrow(() -> new AssertionError(
++                        "test references topic '" + slug + "' but it is not in the corpus"))
++                .title();
++    }
++
++    /**
++     * Compute the set of content words (lower-cased, ≥4 chars, not in
++     * a small stopword set) of a phrase. Used by the
++     * word-disjointness assertion in
++     * {@link #phrasingsWithNoSharedContentWordResolveToTopic()}.
++     */
++    private static Set<String> contentWords(String phrase) {
++        Set<String> stopwords = Set.of(
++                "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
++                "and", "or", "but", "if", "then", "of", "in", "on", "at", "to", "for",
++                "with", "without", "into", "from", "by", "as", "this", "that", "these",
++                "those", "it", "its", "i", "you", "he", "she", "we", "they", "me",
++                "him", "her", "us", "them", "my", "your", "his", "our", "their",
++                "do", "does", "did", "doing", "have", "has", "had", "having",
++                "what", "when", "where", "why", "how", "who", "which", "whose",
++                "can", "cant", "cannot", "will", "would", "shall", "should", "may",
++                "might", "must", "could");
++        Set<String> words = new HashSet<>();
++        for (String token : phrase.toLowerCase().split("[^a-zA-Z]+")) {
++            if (token.length() >= 4 && !stopwords.contains(token)) {
++                words.add(token);
++            }
++        }
++        return words;
++    }
++
++    private void seedTopicRow(String slug, float[] embedding) throws Exception {
++        seedTopicRowWithId(HelpTopicCorpus.DOC_ID_PREFIX + slug, slug, embedding);
++    }
++
++    private void seedTopicRowWithId(String docId, String targetRef, float[] embedding)
++            throws Exception {
++        try (Connection conn = dataSource.getConnection();
++             PreparedStatement ps = conn.prepareStatement(
++                 "INSERT INTO doc_embedding "
++                     + "(doc_id, doc_kind, target_ref, content_hash, embedding, embedding_model) "
++                     + "VALUES (?, ?, ?, ?, ?::vector, ?)")) {
++            ps.setString(1, docId);
++            ps.setString(2, HelpTopicCorpus.DOC_KIND);
++            ps.setString(3, targetRef);
++            ps.setString(4, "hash-" + targetRef);
++            ps.setString(5, toVectorLiteral(embedding));
++            ps.setString(6, EMBEDDING_MODEL);
++            ps.executeUpdate();
++        }
++    }
++
++    private void seedCommandRow(String command, float[] embedding) throws Exception {
++        try (Connection conn = dataSource.getConnection();
++             PreparedStatement ps = conn.prepareStatement(
++                 "INSERT INTO doc_embedding "
++                     + "(doc_id, doc_kind, target_ref, content_hash, embedding, embedding_model) "
++                     + "VALUES (?, ?, ?, ?, ?::vector, ?)")) {
++            ps.setString(1, command);
++            ps.setString(2, CommandIntentIndex.DOC_KIND);
++            ps.setString(3, command);
++            ps.setString(4, "hash-" + command);
++            ps.setString(5, toVectorLiteral(embedding));
++            ps.setString(6, EMBEDDING_MODEL);
++            ps.executeUpdate();
++        }
++    }
++
++    private boolean rowExists(String docKind, String docId) throws Exception {
++        try (Connection conn = dataSource.getConnection();
++             PreparedStatement ps = conn.prepareStatement(
++                 "SELECT 1 FROM doc_embedding WHERE doc_kind = ? AND doc_id = ?")) {
++            ps.setString(1, docKind);
++            ps.setString(2, docId);
++            try (ResultSet rs = ps.executeQuery()) {
++                return rs.next();
++            }
++        }
++    }
++
++    /**
++     * Wipe ALL doc_embedding rows: topic rows (the @QuarkusTest-boot
++     * TopicCorpusBuilder's output), command_intent rows (the
++     * @QuarkusTest-boot CommandIntentIndexBuilder's output, plus any
++     * rows this IT seeds for cross-kind isolation probes), and any
++     * non-standard doc_kind left over from a sibling IT's
++     * M1-660-style crowd fixtures (the {@code zz_m1660_foreign} kind
++     * {@code CommandIntentIndexIT} seeds). Every kind is in scope, so
++     * one unconditional DELETE is the whole wipe.
++     *
++     * <p>Calls {@link #reindexHnswGraph()} at the end so every wipe
++     * leaves a clean graph — including intra-test wipes between
++     * sequential probes (e.g. the three probes in
++     * {@link #lookupTopicReturnsPointerOnlyOverArmedPath()}). HNSW
++     * deletes leave dead graph nodes until VACUUM, and a fresh row
++     * seeded into the duplicate-vector region the boot churn created
++     * can become unreachable from the graph entry point.
++     */
++    private void deleteFixtures() throws Exception {
++        try (Connection conn = dataSource.getConnection();
++             Statement stmt = conn.createStatement()) {
++            stmt.executeUpdate("DELETE FROM doc_embedding");
++        }
++        reindexHnswGraph();
++    }
++
++    /**
++     * Rebuild the HNSW graph from the live heap. Sibling tests in this
++     * class and in {@code CommandIntentIndexIT} churn {@code doc_embedding}
++     * (insert + delete of identical stub vectors at boot and per test);
++     * HNSW deletes leave dead graph nodes until VACUUM, and a fresh row
++     * inserted into that degenerate duplicate-vector region can become
++     * unreachable from the graph entry point — empirically, even an
++     * exhaustive iterative scan then exhausts after the reachable
++     * component without ever surfacing the row. REINDEX pins the
++     * precondition the recall probes below rely on (every LIVE row
++     * reachable). Mirrors {@code CommandIntentIndexIT.reindexHnswGraph}.
++     * Production sees no comparable state: the corpus is rebuilt at
++     * most once per boot with diverse real embeddings.
++     */
++    private void reindexHnswGraph() throws Exception {
++        try (Connection conn = dataSource.getConnection();
++             Statement stmt = conn.createStatement()) {
++            stmt.execute("REINDEX INDEX idx_doc_embedding_hnsw");
++        }
++    }
++
++    static class CountingEmbedder implements EmbeddingProvider {
++        int embedCalls;
++
++        @Override
++        public List<EmbeddingResult> embed(List<String> texts) {
++            embedCalls++;
++            // Return one unit vector per input. pgvector's cosine
++            // operator is undefined for a zero vector, so unit is the
++            // safe canned shape (mirrors StubEmbeddingProvider and
++            // CommandIntentIndexIT.CountingEmbedder).
++            float[] v = new float[DIMENSION];
++            v[0] = 1.0f;
++            return texts.stream().map(t -> new EmbeddingResult(v)).toList();
++        }
++    }
++}

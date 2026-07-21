@@ -45,6 +45,23 @@ public final class CommandIntentIndex {
     /** Corpus discriminator on every {@code doc_embedding} read + write. */
     public static final String DOC_KIND = "command_intent";
 
+    /**
+     * Starting similarity threshold for {@link #lookupTopic}. Mirrors
+     * {@code HelpLookupTool.SIMILARITY_THRESHOLD} (0.60) because the
+     * topic match text is intent-shaped (title + intent words, mirroring
+     * {@code CommandIntentIndexBuilder.composeIntentText}), so its
+     * similarity statistics sit close to the command corpus rather than
+     * the long-form-prose corpus the post-embedding store carries.
+     *
+     * <p><b>Calibration note.</b> This is the M1-649 starting value.
+     * Real calibration against a live query corpus is a named follow-up
+     * (the M1-619 pattern — the suite's embedders are stubs, so CI
+     * cannot measure recall). Pinning the value as a named constant
+     * means a deployment change requires a spec amendment, not a silent
+     * config tweak (the D19 determinism posture).
+     */
+    public static final double TOPIC_SIMILARITY_THRESHOLD = 0.60;
+
     private CommandIntentIndex() {
     }
 
@@ -177,6 +194,103 @@ public final class CommandIntentIndex {
     private static void enableIterativeScan(Connection conn) throws SQLException {
         try (Statement stmt = conn.createStatement()) {
             stmt.execute("SET LOCAL hnsw.iterative_scan = strict_order");
+        }
+    }
+
+    /**
+     * Topic-only intent lookup over {@code doc_embedding} (M1-649,
+     * decision D68). Returns the matched topic's
+     * {@link HelpTopicCorpus.Topic#targetRef()} (the topic slug) when
+     * the nearest {@code doc_kind='topic'} row clears
+     * {@code similarityThreshold}, or {@link Optional#empty()} when no
+     * row qualifies. Used by the deterministic topic-delivery path
+     * (M1-666); the M1-649 retrieval-only scope ships this read side
+     * and nothing that consumes it.
+     *
+     * <p><b>Match-not-assert, carried to topics.</b> This method
+     * returns the matched topic's POINTER (its slug) only — never
+     * stored text. The served answer is composed at delivery time
+     * (M1-666) from the in-memory {@link HelpTopicCorpus} via
+     * {@link HelpTopicCorpus#byTargetRef(String)}, exactly as
+     * {@code lookupCommand} returns a command name and
+     * {@code HelpLookupTool.describe} resolves the description at call
+     * time. A stale or attacker-edited topic row can degrade a match
+     * but can never produce wrong served text, because the served
+     * text never comes from {@code doc_embedding}.
+     *
+     * <p><b>No tier filter (topics are tier-flat).</b> Unlike
+     * {@link #lookupCommand}, this method binds no
+     * {@code target_ref = ANY(?)} tier set: every topic is user-tier
+     * by construction (M1-649 acceptance item 5, pinned by
+     * {@code HelpTopicCorpusTest.noTopicReferencesAdminSurface}), so
+     * there is no caller-specific visibility set to filter against.
+     * The doc_kind predicate alone scopes the probe to the topic
+     * corpus.
+     *
+     * <p><b>M1-660 armed-transaction read shape.</b> This method opens
+     * its own autocommit-off transaction and arms
+     * {@code hnsw.iterative_scan = strict_order} INSIDE that
+     * transaction, exactly as {@link #lookupCommand} does. The arming
+     * is load-bearing for the same reason M1-660 closed: with two
+     * corpora sharing {@code idx_doc_embedding_hnsw}, a non-iterative
+     * probe's ef_search candidate window can fill with rows of the
+     * OTHER doc_kind the {@code doc_kind} filter then discards —
+     * under-recall to empty. Topic rows themselves are the second
+     * corpus the iterative scan exists for; a bare-autocommit probe
+     * here would silently regress the moment a third corpus lands.
+     *
+     * <p><b>D19 determinism.</b> Which topic matches is decided
+     * entirely by SQL (pgvector cosine distance + threshold +
+     * doc_kind filter), reproducible on unchanged DB state. The
+     * caller never picks the match.
+     *
+     * <p><b>Connection ownership.</b> Same as {@link #lookupCommand}:
+     * the caller manages the connection lifecycle (acquire, arm
+     * cancellation if applicable, close). This method flips the
+     * connection to autocommit-off (a no-op when the caller already
+     * opened a transaction) so its {@code SET LOCAL} arming below
+     * joins a transaction that is still open when the probe executes;
+     * the probe is read-only, so the transaction is never committed
+     * here — it dies (with the GUC) at pool release.
+     *
+     * @param conn                an open connection; not closed by this method
+     * @param vectorLiteral       the embedded query vector as a pgvector
+     *                            text literal {@code "[f0,f1,...]"} (same shape
+     *                            {@code lookupCommand} expects)
+     * @param similarityThreshold minimum similarity (1 − cosine distance)
+     *                            for a row to qualify; callers typically pass
+     *                            {@link #TOPIC_SIMILARITY_THRESHOLD}
+     *
+     * @return the matched topic's {@code target_ref} (its slug), or
+     *         {@link Optional#empty()} when no topic row clears the
+     *         threshold
+     */
+    public static Optional<String> lookupTopic(Connection conn,
+                                               String vectorLiteral,
+                                               double similarityThreshold)
+            throws SQLException {
+        final String sql =
+                "SELECT target_ref "
+                        + "FROM doc_embedding "
+                        + "WHERE doc_kind = ? "
+                        + "  AND (embedding <=> ?::vector) < ? "
+                        + "ORDER BY (embedding <=> ?::vector) ASC "
+                        + "LIMIT 1";
+        // See lookupCommand: SET LOCAL is transaction-scoped, so an
+        // autocommit-off transaction MUST be open before the GUC is
+        // armed, or the arming expires before the probe runs (the
+        // silent-no-op M1-660 closed).
+        conn.setAutoCommit(false);
+        enableIterativeScan(conn);
+        double distanceThreshold = 1.0 - similarityThreshold;
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, HelpTopicCorpus.DOC_KIND);
+            ps.setString(2, vectorLiteral);
+            ps.setDouble(3, distanceThreshold);
+            ps.setString(4, vectorLiteral);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? Optional.of(rs.getString("target_ref")) : Optional.empty();
+            }
         }
     }
 

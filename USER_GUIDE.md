@@ -26,6 +26,7 @@ to infochat exactly like you'd message a friend on your chat app.
 
 ## Getting access (your invite)
 
+<!-- topic:getting-access:begin -->
 infochat is invite-only — you can't just message the bot cold.
 
 1. An admin gives you a **one-time invite code** (a string of characters).
@@ -37,11 +38,13 @@ commands (and chat mode turned off). This is normal and temporary — it just
 means a brand-new account can't do everything on day one. Full access unlocks
 when probation ends, or sooner if an admin "vouches" for you. Run `/help` any
 time to see exactly what you can do right now.
+<!-- topic:getting-access:end -->
 
 ---
 
 ## Two ways to talk to the bot
 
+<!-- topic:chat-vs-commands:begin -->
 | Way | How | Best for |
 |---|---|---|
 | **Commands** | Messages starting with a slash, e.g. `/summary` | Exact, repeatable actions ("show me today's posts", "save this") |
@@ -52,6 +55,7 @@ treated as a chat question.
 
 > The bot replies in plain text. Links appear as plain web addresses you can tap
 > or copy.
+<!-- topic:chat-vs-commands:end -->
 
 ---
 
@@ -131,6 +135,7 @@ Ask things like:
 - *"Summarise the top three AI stories."*
 - *"Tell me more about that Hugging Face post."*
 
+<!-- topic:chat-assistant-boundary:begin -->
 Good to know:
 
 - The assistant can **only read** — it searches and explains your news. It can
@@ -138,6 +143,7 @@ Good to know:
 - It only sees **your** stuff — your subscriptions, your scope. It can't reach
   another user's data or another conversation.
 - If a reply is taking too long, `/stop` cancels it.
+<!-- topic:chat-assistant-boundary:end -->
 
 ---
 
@@ -208,6 +214,7 @@ the id from the summary's `covered by:` line:
 
 ### 3. Add a news source
 
+<!-- topic:add-source-requires-tags:begin -->
 Adding a source always needs at least one **tag** (this guarantees your posts
 can still be sorted even if automatic tagging misses):
 
@@ -223,9 +230,11 @@ can only auto-recognise the Nitter instances your operator has configured; for
 any other Nitter address, name the type with `--type nitter`. When you add a
 brand-new source, the bot also reminds you that **source web addresses are
 visible to admins** — worth knowing before you add a private feed.
+<!-- topic:add-source-requires-tags:end -->
 
 ### 4. Fix the topics you see
 
+<!-- topic:personal-vs-shared-tags:begin -->
 Got the wrong topics in your digest? Tune **your own view** with tags:
 
 ```text
@@ -236,9 +245,11 @@ Got the wrong topics in your digest? Tune **your own view** with tags:
 > Note: this changes what *you* see. The tags attached to a *shared* source
 > itself can only be changed by a bot admin — so it's worth getting the `--tags`
 > right when you first add a source.
+<!-- topic:personal-vs-shared-tags:end -->
 
 ### 5. Stop following a source
 
+<!-- topic:unfollow-vs-delete:begin -->
 ```text
 /unfollow-source 3f9a8b2c-1d4e-4a6f-9c0b-7e2d5a8f1b3c
 ```
@@ -246,6 +257,7 @@ Got the wrong topics in your digest? Tune **your own view** with tags:
 The `<id>` is the source's UUID. This only unsubscribes *you*; the source still
 exists for others. (Deleting a source entirely is an admin action — ask an admin
 if a shared source should go.)
+<!-- topic:unfollow-vs-delete:end -->
 
 ### 6. Read it in another language
 
@@ -260,6 +272,7 @@ translated — only the bot's own wording.)
 
 ## DMs vs groups
 
+<!-- topic:dm-vs-group:begin -->
 infochat works in both private chats and group chats, with a few differences:
 
 | | Direct message | Group chat |
@@ -270,6 +283,7 @@ infochat works in both private chats and group chats, with a few differences:
 
 Approved groups also get automatic **morning and evening digests** of the latest
 posts.
+<!-- topic:dm-vs-group:end -->
 
 ---
 
@@ -304,20 +318,29 @@ actions happened, never your message content).
   posts. It's capped to a few tries.
 - **`/stop`** cancels in-flight chat replies, your `/summary` generation, and
   your `/retry` — but not already-sent messages or background jobs.
+<!-- topic:clear-vs-forget:begin -->
 - **`/clear` vs `/forget`.** `/clear` only drops the short-term context of the
   current conversation (your longer-term memory and saves stay). `/forget` is the
   full privacy purge.
+<!-- topic:clear-vs-forget:end -->
 - **`/compress`** checkpoints a long conversation's memory and trims the live
   context; the bot also does this automatically when a conversation gets long.
 - **Tag your saves.** `/save <id> -t tag1,tag2` attaches your own personal tags
   to a bookmark (kept separate from the post's own tags); `/saved <tag>` then
   filters your library by them.
 - **Asset price source & currency.** `/zcash` and `/monero` take an optional
-  exchange sub-verb and a `--vs <currency>` — e.g. `/zcash kraken --vs eur`
-  (supported currencies: `usd`, `eur`, `czk`, `btc`). Bare `/zcash` uses the
-  default source and currency your admin configured.
-- **Pagination.** `/saved`, `/get-sources`, and `/list-sources` accept `--page N`
-  (1-indexed) to step through long lists.
+  exchange sub-verb and a `--vs <currency>` — e.g. `/zcash kraken --vs eur`.
+  Supported currencies differ per source: Coingecko accepts `usd`, `eur`,
+  `czk`, `btc`; Kraken accepts `usd`, `eur`, `btc`; Bitfinex accepts `usd`,
+  `btc`. Bare `/zcash` uses the default source and currency your admin
+  configured.
+- **Re-include all standard sources.** `/follow-all-sources` clears this
+  scope's `/unfollow-source` opt-outs in one call — every standard source the
+  scope had opted out of becomes visible again. Per scope: in a DM it affects
+  only you; in a group it affects the whole group. Standard sources are
+  visible by default, so the command only undoes explicit unfollows.
+- **Pagination.** `/saved`, `/get-sources`, `/list-sources`, and `/export`
+  accept `--page N` (1-indexed) to step through long lists.
 - **Full command catalogue** (every command, every option, exact argument
   grammar): [docs/spec/commands.md](docs/spec/commands.md).
 

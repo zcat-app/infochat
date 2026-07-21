@@ -1883,6 +1883,45 @@ public final class BundleKeys {
     /** One closing affordance line ending every non-degraded digest (group scope, so it steers to @mention). No tokens; resolved via the 2-arg accessor. */
     public static final String REPLY_DIGEST_CLOSING_AFFORDANCE = "reply.digest.closing_affordance";
 
+    // ----- Conceptual topic corpus (M1-649, D68) -----------------------------
+    // Per docs/spec/commands.md §Chat mode + decision D68. The corpus is
+    // indexed in HelpTopicCorpus; the SERVED answer is reviewed product
+    // copy, plain text (D30), bundle-localized (D43). One key per topic;
+    // the corpus's staleness-guard metadata (guide-hash vs code-fact pin)
+    // lives in code, not in the bundle. These keys exist for delivery
+    // (M1-666) and for the guard tests' answer-copy assertions; the
+    // retrieval-only M1-649 reads no answer at runtime.
+
+    /** Curated answer for the invite / access-flow topic. */
+    public static final String TOPIC_GETTING_ACCESS_ANSWER = "topic.getting-access.answer";
+
+    /** Curated answer for the "what probation is and how it ends" topic. */
+    public static final String TOPIC_PROBATION_ANSWER = "topic.probation.answer";
+
+    /** Curated answer for the chat-vs-command mental-model topic. */
+    public static final String TOPIC_CHAT_VS_COMMANDS_ANSWER = "topic.chat-vs-commands.answer";
+
+    /** Curated answer for the chat-assistant's read-only / own-scope boundary topic. */
+    public static final String TOPIC_CHAT_ASSISTANT_BOUNDARY_ANSWER = "topic.chat-assistant-boundary.answer";
+
+    /** Curated answer for the DM-vs-group semantics topic. */
+    public static final String TOPIC_DM_VS_GROUP_ANSWER = "topic.dm-vs-group.answer";
+
+    /** Curated answer for the unfollow-vs-delete ownership topic. */
+    public static final String TOPIC_UNFOLLOW_VS_DELETE_ANSWER = "topic.unfollow-vs-delete.answer";
+
+    /** Curated answer for the "why /add-source requires tags" topic. */
+    public static final String TOPIC_ADD_SOURCE_REQUIRES_TAGS_ANSWER = "topic.add-source-requires-tags.answer";
+
+    /** Curated answer for the personal-view vs shared-source-tags topic. */
+    public static final String TOPIC_PERSONAL_VS_SHARED_TAGS_ANSWER = "topic.personal-vs-shared-tags.answer";
+
+    /** Curated answer for the /clear-vs-/forget distinction topic. */
+    public static final String TOPIC_CLEAR_VS_FORGET_ANSWER = "topic.clear-vs-forget.answer";
+
+    /** Curated answer for the /forget erasure (what it purges + what it does not touch) topic. */
+    public static final String TOPIC_FORGET_ERASURE_ANSWER = "topic.forget-erasure.answer";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }

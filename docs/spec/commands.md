@@ -1550,6 +1550,35 @@ since it is a narrowing question rather than an answer grounded in specific
 posts. The confidence heuristic and directive wording live in design notes
 (05 §5.4.6).
 
+**Conceptual topic corpus** (decision D68). A second embedded corpus sits
+alongside the command-intent index (D66): curated conceptual topics whose
+answers cover the questions no single runtime artefact can compose —
+"what is probation", "why can't I post in the group", "what does /forget
+actually erase", "who can change a source's tags", "unfollow vs delete",
+and the like. The corpus is in-code (`HelpTopicCorpus.CORPUS`, mirroring
+the CATALOGUE precedent) and the served answer for each topic is reviewed
+product copy flowing through the bundle machinery (D43 en/cs pair; plain
+text per D30) — never a raw USER_GUIDE.md slice, so the runtime depends on
+no markdown heading structure. The embedded match surface is intent-shaped
+(title + intent words, mirroring `CommandIntentIndexBuilder.composeIntentText`),
+NOT the answer body; the served surface is composed at delivery time from
+the in-memory corpus's bundle key (match-not-assert, carried to topics from
+D66). Each topic carries one of two staleness guards: a USER_GUIDE
+derivation hash for the conceptual (mental-model) topics that reds the
+build when the anchored guide region drifts, or a code-fact pin for the
+topics whose load-bearing fact lives in runtime code (`/forget` erasure
+enumerates `ForgetPurgeService`'s purge categories; probation's duration
+reads `infochat.probation.duration`). Topics are tier-flat by construction
+— no topic match text or answer names a bot-admin command (the group-admin
+commands topics must name — `/add-source`, `/lang`, `/follow-tag`, … — are
+themselves `LlmOutputSanitizer.CLOSED_LIST` entries and are expected in
+topic text). Every topic `doc_id` is namespaced (`topic:<slug>`) so it
+cannot collide with a command_intent `doc_id` under V60's single-column
+primary key. `ADMIN_GUIDE.md` is deliberately excluded — admin-tier
+conceptual answers are a separate ticket with their own threat review. This
+section records the corpus's existence and shape; it does NOT describe a
+delivery mechanism. Topic delivery is M1-666.
+
 ## Onboarding
 
 **DM first interaction** requires a valid invite code (decision D44). An

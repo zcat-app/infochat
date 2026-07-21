@@ -1,0 +1,110 @@
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:108:    /** Short-help line for {@code /ban} (bot-admin tier). */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:109:    public static final String HELP_CMD_BAN_SHORT = "help.cmd.ban.short";
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:111:    /** Short-help line for {@code /unban} (bot-admin tier). */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:112:    public static final String HELP_CMD_UNBAN_SHORT = "help.cmd.unban.short";
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:365:    /** {@code /ban} usage detail. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:366:    public static final String HELP_CMD_BAN_USAGE = "help.cmd.ban.usage";
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:368:    /** {@code /ban} examples. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:369:    public static final String HELP_CMD_BAN_EXAMPLES = "help.cmd.ban.examples";
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:371:    /** {@code /unban} usage detail. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:372:    public static final String HELP_CMD_UNBAN_USAGE = "help.cmd.unban.usage";
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:374:    /** {@code /unban} examples. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:375:    public static final String HELP_CMD_UNBAN_EXAMPLES = "help.cmd.unban.examples";
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:501:    /** Caller is banned (handler's own ban check; defense-in-depth — T2-A also gates upstream). */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:502:    public static final String ERROR_ADD_SOURCE_BANNED = "error.add_source.banned";
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:619:    // Per docs/spec/security.md §Authorization model + §User ban +
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:633:     * Fixed reply for the step 4 ban check. Per spec §User ban: "Banned
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:636:     * {@code docs/design/04-security.md} §Banning.
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:638:    public static final String ERROR_BAN_FIXED = "error.ban.fixed";
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:659:    // Per docs/spec/security.md §User ban + §Invite-code registration +
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:661:    // The three handlers (/ban, /unban, /invite create/list/revoke) look
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:672:    /** Required argument missing from a command invocation. {@code {0}} = the command's usage string (e.g. {@code /ban <contact> [--reason "..."]}). Shared across handlers; the usage string is supplied by the caller. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:675:    /** {@code /unban <contact>} against a contact with no {@code users} row at all (unknown-contact rule per {@code commands.md} §Admin). */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:678:    /** {@code /ban <self>}: actor and target are the same {@code users.id}. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:679:    public static final String ERROR_BAN_CANNOT_BAN_SELF = "error.ban.cannot_ban_self";
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:681:    /** {@code /ban} of the only remaining {@code is_admin=TRUE AND is_banned=FALSE} row — caught from the V5 {@code trg_last_admin_protection_update} trigger. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:682:    public static final String ERROR_BAN_LAST_ADMIN = "error.ban.last_admin";
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:684:    /** {@code /unban} success on the preban-deletion path; value MUST contain the literals {@code pre-ban-only row removed} and {@code fresh invite required} per spec §User ban. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:685:    public static final String REPLY_UNBAN_PREBAN_DELETED = "reply.unban.preban_deleted";
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:687:    /** {@code /unban} success on the non-preban path with {@code is_group_admin=TRUE} rows restored; value MUST contain {@code {0}} for the comma-joined group list and the literal {@code /demote} hint. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:688:    public static final String REPLY_UNBAN_GROUP_ADMINS_RESTORED = "reply.unban.group_admins_restored";
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:690:    /** {@code /unban} success on the non-preban path with zero group-admin rows. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:691:    public static final String REPLY_UNBAN_PLAIN = "reply.unban.plain";
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:693:    /** {@code /ban} success reply. {@code {0}} = the redacted target contact id (per {@code ContactIds.redact}). */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:694:    public static final String REPLY_BAN_SUCCESS = "reply.ban.success";
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:723:    /** {@code /invite create --contact <id>} against a {@code is_banned=TRUE} row; points the admin at {@code /unban}. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:815:    // replies for the three confirmable command surfaces (/ban,
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:828:     * cancelled command (e.g. {@code "ban"}).
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:833:     * First-call prompt template for {@code /ban}. Tokens:
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:837:    public static final String REPLY_CONFIRM_PROMPT_BAN = "reply.confirm.prompt.ban";
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:898:     * audit row, matching the M1-036 / {@code /unban} pattern for
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:904:     * {@code /vouch} banned-target reply (M1-045 redteam-fix). Sent
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:906:     * cannot vouch a banned user past probation when intake step 4
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:909:     * banned row's {@code registration_state} and
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:911:     * is the state {@code /unban} restores into.
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:924:    /** {@code /grant-admin <contact>} against a {@code is_banned=TRUE} row — granting admin to a banned user is incoherent. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:1515:    /** {@code /promote <contact>} target is banned — reinstate first. */
+infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:1678:    // via the M1-051 ConfirmStateService pattern, mirroring /ban). The
+infochat-provider/src/main/java/app/zcat/infochat/provider/help/HelpTopicCorpus.java:330:                            "ban status", "audit log", "saved posts",
+infochat-provider/src/main/resources/bundles/cs.properties:42:help.cmd.ban.short=/ban <contact> — zabanuje uživatele (vyžaduje potvrzení)
+infochat-provider/src/main/resources/bundles/cs.properties:43:help.cmd.unban.short=/unban <contact> — zruší ban uživatele
+infochat-provider/src/main/resources/bundles/cs.properties:119:help.cmd.ban.usage=/ban <contact> [--reason "..."]\n\nZabanuje uživatele: jeho zprávy jsou zahazovány už na vstupu. Vyžaduje potvrzení.\n\n  <contact>       kontaktní id uživatele\n  --reason "..."  volitelné — poznámka uložená k banu
+infochat-provider/src/main/resources/bundles/cs.properties:120:help.cmd.ban.examples=\ \ /ban 550e8400-e29b-41d4-a716-446655440000 --reason "spam"\n  /ban confirm
+infochat-provider/src/main/resources/bundles/cs.properties:121:help.cmd.unban.usage=/unban <contact>\n\nZruší ban uživatele.\n\n  <contact>  kontaktní id uživatele
+infochat-provider/src/main/resources/bundles/cs.properties:122:help.cmd.unban.examples=\ \ /unban 550e8400-e29b-41d4-a716-446655440000
+infochat-provider/src/main/resources/bundles/cs.properties:133:help.cmd.audit.usage=/audit [--actor <c>] [--action <a>] [-w <duration>] [--page <n>]\n\nČte záznam auditu. Pouze v DM.\n\n  --actor <c>    filtr podle kontaktního id aktéra\n  --action <a>   filtr podle auditní akce (např. BAN)\n  -w <duration>  časové okno: 1h-168h, 1d-30d, 1w-4w (výchozí 24h)\n  --page <n>     stránkování výsledků (20 na stránku)
+infochat-provider/src/main/resources/bundles/cs.properties:134:help.cmd.audit.examples=\ \ /audit\n  /audit --action BAN -w 7d
+infochat-provider/src/main/resources/bundles/cs.properties:147:help.cmd.pending.usage=/pending [--page <n>]\n\nVypíše uživatele, se kterými může správce právě teď něco udělat: čekají na doporučení nebo jsou stále v pomalé zkušební době. Každý řádek obsahuje kontaktní id, které přijímají /vouch a /ban. Pouze v DM.\n\n  --page <n>  stránkování dlouhých seznamů (20 na stránku)
+infochat-provider/src/main/resources/bundles/cs.properties:168:error.add_source.banned=Nemáte oprávnění přidávat zdroje.
+infochat-provider/src/main/resources/bundles/cs.properties:203:error.ban.fixed=Váš přístup byl zrušen.
+infochat-provider/src/main/resources/bundles/cs.properties:221:error.ban.cannot_ban_self=Sami sebe zabanovat nemůžete.
+infochat-provider/src/main/resources/bundles/cs.properties:222:error.ban.last_admin=Nelze zabanovat posledního zbývajícího správce bota. Nejprve přidělte jiného správce příkazem /grant-admin.
+infochat-provider/src/main/resources/bundles/cs.properties:224:reply.ban.success=Zabanován `{0}`.
+infochat-provider/src/main/resources/bundles/cs.properties:226:# Non-preban /unban path with zero group-admin rows restored.
+infochat-provider/src/main/resources/bundles/cs.properties:227:reply.unban.plain=Uživatel odbanován.
+infochat-provider/src/main/resources/bundles/cs.properties:229:# Preban /unban path.
+infochat-provider/src/main/resources/bundles/cs.properties:230:reply.unban.preban_deleted=Pre-ban záznam odstraněn. Pro DM je nutná nová pozvánka.
+infochat-provider/src/main/resources/bundles/cs.properties:232:# Non-preban /unban path that restored one or more group-admin rows.
+infochat-provider/src/main/resources/bundles/cs.properties:233:reply.unban.group_admins_restored=Uživatel odbanován. Obnoven group-admin v: {0}. Pokud to nebylo úmyslné, použijte /demote <contact> v dotčené skupině (skupinách).
+infochat-provider/src/main/resources/bundles/cs.properties:240:error.invite.banned_target=Tento kontakt je zabanován. Pro obnovení nejprve použijte /unban.
+infochat-provider/src/main/resources/bundles/cs.properties:266:reply.confirm.prompt.ban=Chystá se zabanovat `{1}`. Odpovězte `/ban confirm` během {0}s pro pokračování; jakýkoli jiný vstup ruší.
+infochat-provider/src/main/resources/bundles/cs.properties:277:error.vouch.banned_target=Tento kontakt je zabanován. Pro obnovení nejprve použijte /unban.
+infochat-provider/src/main/resources/bundles/cs.properties:281:error.grant_admin.banned_target=Tento kontakt je zabanován. Pro obnovení nejprve použijte /unban.
+infochat-provider/src/main/resources/bundles/cs.properties:573:error.promote.target_banned=Tento kontakt je zabanován. Pro obnovení nejprve použijte /unban.
+infochat-provider/src/main/resources/bundles/en.properties:34:help.cmd.ban.short=/ban <contact> — ban a user (requires confirm)
+infochat-provider/src/main/resources/bundles/en.properties:35:help.cmd.unban.short=/unban <contact> — lift a user's ban
+infochat-provider/src/main/resources/bundles/en.properties:116:help.cmd.ban.usage=/ban <contact> [--reason "..."]\n\nBans a user: their messages are dropped at intake. Asks for confirmation.\n\n  <contact>       the user's contact id\n  --reason "..."  optional — a note recorded with the ban
+infochat-provider/src/main/resources/bundles/en.properties:117:help.cmd.ban.examples=\ \ /ban 550e8400-e29b-41d4-a716-446655440000 --reason "spam"\n  /ban confirm
+infochat-provider/src/main/resources/bundles/en.properties:118:help.cmd.unban.usage=/unban <contact>\n\nLifts a user's ban.\n\n  <contact>  the user's contact id
+infochat-provider/src/main/resources/bundles/en.properties:119:help.cmd.unban.examples=\ \ /unban 550e8400-e29b-41d4-a716-446655440000
+infochat-provider/src/main/resources/bundles/en.properties:130:help.cmd.audit.usage=/audit [--actor <c>] [--action <a>] [-w <duration>] [--page <n>]\n\nReads the audit log. DM only.\n\n  --actor <c>    filter by actor contact id\n  --action <a>   filter by audit action (e.g. BAN)\n  -w <duration>  time window: 1h-168h, 1d-30d, 1w-4w (default 24h)\n  --page <n>     page through results (20 per page)
+infochat-provider/src/main/resources/bundles/en.properties:131:help.cmd.audit.examples=\ \ /audit\n  /audit --action BAN -w 7d
+infochat-provider/src/main/resources/bundles/en.properties:144:help.cmd.pending.usage=/pending [--page <n>]\n\nLists the users an admin can act on now: awaiting a vouch or still in slow-start probation. Each line carries the contact id /vouch and /ban accept. DM only.\n\n  --page <n>  page through long lists (20 per page)
+infochat-provider/src/main/resources/bundles/en.properties:168:error.add_source.banned=You are not permitted to add sources.
+infochat-provider/src/main/resources/bundles/en.properties:207:# Per docs/spec/security.md §Authorization model + §User ban +
+infochat-provider/src/main/resources/bundles/en.properties:212:error.ban.fixed=Your access has been revoked.
+infochat-provider/src/main/resources/bundles/en.properties:226:# Per docs/spec/security.md §User ban + §Invite-code registration +
+infochat-provider/src/main/resources/bundles/en.properties:233:error.ban.cannot_ban_self=You cannot ban yourself.
+infochat-provider/src/main/resources/bundles/en.properties:234:error.ban.last_admin=Cannot ban the only remaining bot admin. Grant another admin first with /grant-admin.
+infochat-provider/src/main/resources/bundles/en.properties:236:reply.ban.success=Banned `{0}`.
+infochat-provider/src/main/resources/bundles/en.properties:238:# Non-preban /unban path with zero group-admin rows restored.
+infochat-provider/src/main/resources/bundles/en.properties:239:reply.unban.plain=User unbanned.
+infochat-provider/src/main/resources/bundles/en.properties:241:# Preban /unban path. The literals `pre-ban-only row removed` and `fresh invite required`
+infochat-provider/src/main/resources/bundles/en.properties:242:# are asserted by acceptance item 34 + spec §User ban (commands.md §Admin /unban).
+infochat-provider/src/main/resources/bundles/en.properties:243:reply.unban.preban_deleted=The pre-ban-only row removed. A fresh invite required for DM.
+infochat-provider/src/main/resources/bundles/en.properties:245:# Non-preban /unban path that restored one or more group-admin rows.
+infochat-provider/src/main/resources/bundles/en.properties:247:# spec-required override hint (security.md §User ban, commands.md §Admin /unban).
+infochat-provider/src/main/resources/bundles/en.properties:248:reply.unban.group_admins_restored=User unbanned. Restored group-admin in: {0}. If this was unintended, use /demote <contact> in the affected group(s).
+infochat-provider/src/main/resources/bundles/en.properties:255:error.invite.banned_target=That contact is banned. Use /unban first if reinstating.
+infochat-provider/src/main/resources/bundles/en.properties:292:# Token {0} = display name of the cancelled command (e.g. `ban`).
+infochat-provider/src/main/resources/bundles/en.properties:295:reply.confirm.prompt.ban=About to ban `{1}`. Reply `/ban confirm` within {0}s to proceed; any other input cancels.
+infochat-provider/src/main/resources/bundles/en.properties:311:# M1-045 redteam-fix: /vouch refuses to advance a banned user past probation
+infochat-provider/src/main/resources/bundles/en.properties:313:error.vouch.banned_target=That contact is banned. Use /unban first to reinstate.
+infochat-provider/src/main/resources/bundles/en.properties:320:error.grant_admin.banned_target=That contact is banned. Use /unban first if reinstating.
+infochat-provider/src/main/resources/bundles/en.properties:648:error.promote.target_banned=That contact is banned. Use /unban first to reinstate.
+infochat-provider/src/main/resources/bundles/en.properties:707:# usable in /vouch / /ban (D55). Plain text only.
+infochat-provider/src/main/resources/bundles/en.properties:833:topic.forget-erasure.answer=/forget erases, for the scope you run it in: your chat memory (chat_memory rows for this conversation), your chat sessions and their messages (chat_session and chat_message rows for this conversation), and your personal summary anchors (summary_anchor rows marked personal for this conversation). It also wipes your saved-posts library globally — saved_post rows for your user, across every scope, because saves are global per decision D13. /forget does NOT touch: your ban or admin status, your group memberships, or the system's tamper-proof audit log (which records that actions happened, never your message content). It tells you if you still have data in other conversations so you can clear those too.
+infochat-provider/src/test/java/app/zcat/infochat/provider/help/HelpTopicCorpusTest.java:262:        // (ban/admin status, group memberships, audit log) — the four
+infochat-provider/src/test/java/app/zcat/infochat/provider/help/HelpTopicCorpusTest.java:265:                "ban", "admin", "group", "audit");
+infochat-provider/src/test/java/app/zcat/infochat/provider/help/HelpTopicCorpusTest.java:270:                            + "' (ban/admin status, group memberships, audit log). Answer was: "
+infochat-provider/src/test/java/app/zcat/infochat/provider/help/HelpTopicCorpusTest.java:355:        // not, and "/ban" matches but "/banana" does not). Pattern

@@ -1,9 +1,29 @@
 ---
 id: M1-649
 title: "Conceptual topic corpus: curated answers, intent-shaped matching, code-anchored guards (retrieval only)"
-status: pending
+status: done
 created: 2026-07-18
-last_updated: 2026-07-20
+last_updated: 2026-07-21
+reviews:
+  - round: 1
+    date: 2026-07-21
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 13
+      added: 2033
+      removed: 15
+clarity_check:
+  date: 2026-07-21
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-649.md
 blocked_by:
   - M1-660
   - M1-664
@@ -197,6 +217,33 @@ decision_refs:
   - D66
   - D68
 decomposed_from: M1-648
+redteam_findings: []
+redteam_audits:
+  - date: 2026-07-21
+    verdict: CLEAN
+    base: ea8b2768bd4e00d4ab3db855cc58af69948aa4e3
+    head: working-tree (uncommitted M1-649 implementation; branch had 0 commits at the gate)
+    verdict_file: docs/plan/m1/redteam-multi/M1-649-2026-07-21/cross-examination.md
+    out_of_model_count: 3
+    note: |
+      Multi-auditor run (/redteam-multi): claude, opencode, codex all CLEAN
+      (0 findings, 0 clusters). Diff = working-tree vs fork ea8b2768 with
+      docs/plan/m1/* excluded, passed via --diff (the branch-form range
+      resolves empty pre-commit — the known /m1-tick run gate deviation).
+      codex's CLEAN carries no rationale (bare verdict line after a
+      sandbox-mode retry); corroboration rests on claude + opencode's
+      substantive walkthroughs. Out-of-model notes (all from the claude
+      auditor): (1) the pre-existing V60 provider-role INSERT+DELETE grant
+      on doc_embedding would let a hypothetical Provider SQLi foothold
+      steer/deny topic matches across restarts — bounded by
+      match-not-assert, accepted DB-internal posture; (2) tier-flat is
+      test-enforced against BOT_ADMIN /command literals only — a future
+      topic discussing admin-tier CONCEPTS without a slash name would pass
+      the guard; forward-hardening note for M1-666; (3) the probation
+      answer bakes "24h" and its guard pins to the checked-in
+      application.properties, not the runtime-effective config, so an
+      operator override drifts the served copy while the build stays
+      green — M1-666 may prefer composing the duration at delivery time.
 ---
 
 # M1-649: Conceptual topic corpus — curated answers, intent-shaped matching, code-anchored guards (retrieval only)
