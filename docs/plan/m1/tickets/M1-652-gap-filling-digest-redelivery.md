@@ -3,10 +3,10 @@ id: M1-652
 title: "Gap-filling redelivery for per-category digests"
 status: pending
 created: 2026-07-18
-last_updated: 2026-07-20
+last_updated: 2026-07-21
 blocked_by:
   - M1-642
-files_budget: 16
+files_budget: 17
 files_scope:
   - infochat-core/src/main/resources/db/migration/V61__digest_replay_state.sql
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestSectionRepository.java
@@ -20,6 +20,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestDeliveryTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRetryServiceTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerClockTest.java
   - docs/spec/commands.md
   - docs/spec/decisions.md
 complexity: high
@@ -167,7 +168,7 @@ acceptance:
     OutboundDelivery.deliverSequenceToGroup with an empty message list, and a
     no-op retry (every category already delivered) MUST NOT increment the
     per-group consecutive-permanent-failure counter. Today
-    deliverSequenceToGroup (OutboundDelivery.java:988) applies
+    deliverSequenceToGroup (OutboundDelivery.java:181-206) applies
     onPermanentGroupFailure whenever anyDelivered is false — including for an
     empty list — so a replay that filters categories down to zero and still
     calls the method would, after three such retries, silently soft-remove a
@@ -207,7 +208,7 @@ acceptance:
     or SQL now(), per CLAUDE.md §Injectable time in decision logic.
   - >-
     docs/spec/commands.md is amended, at the "Cached digest message handle"
-    paragraph under §Conversation control (commands.md:1018-1024), to state
+    paragraph under §Conversation control (commands.md:1122-1128), to state
     what /retry --digest does for a partially-delivered slot. The existing
     commitment that it posts a NEW message (never edits, never silently
     suppresses) is preserved verbatim — this ticket narrows WHICH categories
@@ -225,15 +226,35 @@ test_plan:
   adds:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestSectionRepositoryIT.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestCategoryDeliveryRepositoryIT.java
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRetryServiceTest.java
   modifies:
     - >-
       DigestDeliveryTest.java — ADDS cases for delivery recording. The
       per-category delivery cases M1-642 authored must keep passing unmodified.
     - >-
       DigestWorkerTest.java — ADDS the persistsSectionsAlongsideCacheRow
-      case (and a degraded/zero-post case proving no sections are written).
-      The cases M1-642 authored must keep passing unmodified.
+      case (and a degraded/zero-post case proving no sections are written);
+      UPDATES the existing retryHorizon-era cases to the replay-retention
+      horizon and re-pins them:
+      execute_cacheExpiryOutlivesWindowEndByRetryHorizon (its
+      windowEnd+retry-cooldown expiry assertion is necessarily false under
+      the horizon-decoupling acceptance item),
+      retryAfterWindowEnd_withinRetryHorizon_rendersFullProse, and the
+      setUp retryHorizon field assignment. The cases M1-642 authored must
+      keep passing unmodified.
+    - >-
+      DigestWorkerClockTest.java — UPDATES its setUp retryHorizon field
+      assignment when the horizon decoupling renames/removes the
+      DigestWorker.retryHorizon field; its clock-pinning behavior is
+      otherwise preserved unmodified.
+    - >-
+      DigestRetryServiceTest.java — pre-existing file (M1-080c/M1-232 era),
+      NOT a new one. ADDS retryFillsOnlyMissingCategories,
+      replaySendsPersistedBytesWithoutRerender and
+      retryWithoutSectionsFallsBackToRerun; UPDATES existing cases for the
+      service's new replay dependencies. The behaviors its existing cases
+      pin — cache-row replacement and degraded-to-full-prose regeneration
+      on the re-run path, in-flight skip, per-group serialization — must
+      stay pinned: they describe the fallback path this ticket preserves.
   preserves:
     - >-
       M1-642's per-category delivery behavior and its DigestDeliveryTest cases.
@@ -385,3 +406,88 @@ M1-653 corrects the outbound *contracts* the withdrawn design rested on — the
 do not provide, and `docs/design/06-messaging.md` §6.3.5's unimplemented
 adapter-dedup SHOULD. It is independent and unblocked; it does not gate this
 ticket, and this ticket does not gate it.
+
+## OUTLINE FAILED — 2026-07-20 (resolved by refine, 2026-07-21)
+
+> Plan-writer subagent returned `OUTLINE FAILED` during `/m1-tick start`.
+> Verbatim block below, kept as history; claims about `files_scope`,
+> `files_budget`, and `test_plan` describe the PRE-refine ticket. The
+> refine applied the recommended edits (a)–(c) below, plus one correction
+> the audit missed: `DigestRetryServiceTest.java` moved from
+> `test_plan.adds` to `test_plan.modifies` — the file pre-exists
+> (M1-080c/M1-232 era), so declaring it an add was false.
+
+REASON: Acceptance item 7 (horizon decoupling — `summary_cache.expires_at`
+moves from `infochat.digest.retry-cooldown` to a new
+`infochat.digest.replay-retention` defaulting to PT24H) cannot be implemented
+within the ticket's stated `files_scope` and `test_plan.modifies`
+authorization. Three existing test artifacts are forced-modification
+dependencies of the change, only one of which is even named in the ticket.
+
+1. `DigestWorkerTest.execute_cacheExpiryOutlivesWindowEndByRetryHorizon`
+   (DigestWorkerTest.java:182-192) hard-asserts
+   `slot.windowEnd().plus(RETRY_HORIZON) == cacheRepository.lastExpiresAt()`;
+   under horizon decoupling this assertion is necessarily false and the method
+   must be modified. `test_plan.modifies` only authorizes "ADDS cases" with the
+   carve-out "M1-642's cases must keep passing unmodified" — it does not name
+   this method (which predates M1-642 and tests the older `retryHorizon`
+   concept).
+2. `DigestWorkerTest.java:73` and `DigestWorkerClockTest.java:63` both assign
+   `worker.retryHorizon = RETRY_HORIZON`; if `DigestWorker.retryHorizon` is
+   removed or renamed (the natural shape of "stops reusing
+   `infochat.digest.retry-cooldown` as its horizon"), both files fail to
+   compile.
+3. `DigestWorkerClockTest.java` is in neither `files_scope` (the 14 listed
+   paths) nor `test_plan.{adds,modifies,preserves}`, so touching it is a
+   negative-space/scope-drift violation per `workflow.md` §"The flow" step 2.
+
+Keeping `retryHorizon` as a dead `DigestWorker` field does NOT escape the
+conflict: it rescues compilation of the two `*ClockTest`/`*WorkerTest` setup
+lines, but `execute_cacheExpiryOutlivesWindowEndByRetryHorizon`'s assertion
+still fails because `expires_at` would be driven by the new `replayRetention`.
+There is no implementation strategy that satisfies acceptance item 7, respects
+`test_plan.modifies`' "unmodified" carve-out, and stays inside `files_scope`.
+The plan-writer.md risk-vs-FAILED bar ("no implementable outline exists within
+files_scope / files_budget / acceptance") is met; surfacing this as risks
+instead would set the developer up for a forced scope-drift or test-integrity
+violation at `mvn verify` time, which is what the OUTLINE FAILED gate exists to
+prevent.
+
+All other ticket claims verified clean: id matches; spec_ref
+`§Conversation control` resolves uniquely to commands.md:857 (the "Cached
+digest message handle" paragraph at :1122-1128 is the one acceptance item 10
+amends); V61 is the next free migration number; files_scope=14 of budget 16;
+M1-642 has landed (`DigestDelivery`, `DigestRenderer.renderSections`,
+`OutboundDelivery.deliverSequenceToGroup` at :181-206 — empty-list
+counter-mutation path verified); D65 is the next free D-number (D64 latest);
+`infochat.digest.retry-cooldown` has no explicit `application.properties` entry
+today; every cited class/method passes the API-surface audit. Stale body
+citations in §"The fork" (`DigestWorker.java:94-95/203/212` → actual
+`:99-100/226/243`) are noted in `clarity_check` and are not load-bearing.
+
+SUGGESTED ESCALATION: refine
+
+EVIDENCE:
+- Ticket: `docs/plan/m1/tickets/M1-652-gap-filling-digest-redelivery.md`
+  acceptance item 7 (horizon decoupling); `test_plan.modifies`
+  (DigestWorkerTest authorization framed as "ADDS" + "M1-642's cases must keep
+  passing unmodified"); `files_scope` (14 paths; DigestWorkerClockTest.java
+  absent).
+- Code: `infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java:46,73,182-192`
+  (RETRY_HORIZON constant; setUp field-assignment;
+  `execute_cacheExpiryOutlivesWindowEndByRetryHorizon` assertion).
+- Code: `infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerClockTest.java:39,63`
+  (same RETRY_HORIZON constant and field-assignment — file not in files_scope).
+- Code: `infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java:99-100,226`
+  (`retryHorizon` field; its single read site driving `expires_at`).
+- Recommended refine edit: (a) add
+  `execute_cacheExpiryOutlivesWindowEndByRetryHorizon` and
+  `retryAfterWindowEnd_withinRetryHorizon_rendersFullProse` to
+  `test_plan.modifies` under DigestWorkerTest.java with explicit authorization
+  (or restate the `test_plan.modifies` framing as "ADDS cases; existing
+  retryHorizon-related cases will be updated to the new replay-retention
+  horizon and re-pinned, M1-642's per-category cases keep passing unmodified");
+  (b) add `infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerClockTest.java`
+  to `files_scope` (and to `test_plan.modifies`, since its setUp line must
+  change when the `retryHorizon` field is removed/renamed); (c) bump
+  `files_budget` from 16 to 17 to absorb the scope addition.
