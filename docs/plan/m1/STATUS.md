@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 688 |
 | deferred | 0 |
 | abandoned | 19 |
-| **total** | **712** |
+| **total** | **713** |
 
 ---
 
@@ -30,6 +30,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-675 — Reject slash-bearing personal tags at the /save boundary (complexity: low, risk: low)
 - M1-676 — Canonicalize before closed-list match in LLM sanitizer (complexity: medium, risk: medium)
 - M1-677 — Validate provider-reported token counts before they reach the metric counters (complexity: low, risk: low)
+- M1-678 — Render the asset 24h delta independently of the 24h spread (complexity: low, risk: low)
 
 ---
 
@@ -917,4 +918,5 @@ M1-674 (pending) ← runnable
 M1-675 (pending) ← runnable
 M1-676 (pending) ← runnable
 M1-677 (pending) ← runnable
+M1-678 (pending) ← runnable
 ```
