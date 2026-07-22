@@ -161,20 +161,30 @@ Each `(asset, source, vs_currency)` triple is one `AssetDataSource`
 fetch per asset-fetch tick. Per                                                                                                                                                                                   
 profile:
 
-| Profile | Refresh interval | Notes |                                                                                                                                                                                                                
-  |---|---|---|                                                                                                                                                                                                                                         
-| `laptop` | 60s | Aggressive enough for dev feel |                                                                                                                                                                                                   
-| `vps` | 90s | Default production cadence |                                                                                                                                                                                                          
-| `pi` | 300s | Lower load, lower polling |                                                                                                                                                                                                           
-| `remote-llm` | 90s | Same as `vps` |                    
+| Profile | Refresh interval | Freshness window | Notes |
+|---|---|---|---|
+| `laptop` | 60s | 120s | Aggressive enough for dev feel |
+| `vps` | 90s | 180s | Default production cadence |
+| `pi` | 300s | 600s | Lower load, lower polling |
+| `remote-llm` | 90s | 180s | Same as `vps` |
+
+The refresh interval is a Collector property keyed per host
+(`infochat.assets.refresh.<host>`); the freshness window is a single
+Provider property (`infochat.assets.freshness-window`). The window
+values were calibrated to 2x the then-current cadence so the effective
+staleness threshold did not move, but the two are independent since
+M1-340: the Provider has no fetch loop and does not read the
+Collector's cadence keys, so overriding one side does not move the
+other. `commands.md` §Asset commands states that contract and
+delegates the value here.
 
 The user-facing reply always reads the **latest** `price_snapshot` row
 for that triple. There is no per-request fetch — `/zcash kraken` is a
 single SQL read. Cache age is computed at reply time as
 `now() - captured_at`.
 
-If the latest snapshot is older than `2 * refresh_interval`, the reply                                                                                                                                                                                
-includes a `stale` marker:
+If the latest snapshot is older than the freshness window for the
+running profile, the reply includes a `stale` marker:
 
   ```                                                                                                                                                                                                                                                   
   Zcash (kraken)  ⚠ stale                                                                                                                                                                                                                               
@@ -186,6 +196,15 @@ includes a `stale` marker:
 
 This is honest about freshness without breaking the command — a                                                                                                                                                                                       
 flapping exchange does not block the user.
+
+Repeated reads of the same `(asset, sub_verb, vs_currency)` are served
+from a short-TTL in-process Caffeine cache in `AssetSnapshotReader`
+(`infochat.assets.snapshot-cache-ttl`, 5s, uniform across profiles —
+no `%profile` override exists), so a burst of identical commands does
+not take a pool connection each. A miss is not cached, so a snapshot
+landing just after one is visible on the next read. The TTL sits well
+below every profile's cadence, so the cached staleness verdict cannot
+drift meaningfully from a live read (M1-365).
 
 ## 10.5 Reply layout
 
