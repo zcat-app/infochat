@@ -123,6 +123,17 @@ can do before you trust it. When you're confident in someone, `/vouch <contact>`
 ends their probation immediately. Otherwise it ends on its own after the
 configured time.
 
+To see who is still inside that window — the set of people you might `/vouch` or
+`/ban` next — use `/pending`:
+
+| Command | What it does |
+|---|---|
+| `/pending [--page N]` | List the users you can act on right now — the ones still in slow-start probation — each with the copy-pasteable `contact id` that `/vouch` and `/ban` accept. Bot-admin only, DM only, scoped to the app you run it from. |
+
+This is the deliberate **narrow complement** to there being no `/list-users`
+roster: it shows only the probation set (the input to the admin-action commands),
+not the full user list.
+
 ### Moderating users
 
 | Command | What it does |
@@ -312,7 +323,8 @@ not a config tweak), because the LLM output sanitizer and the probation
 classifier read from them:
 
 - **Bot-admin only:** `/grant-admin`, `/revoke-admin`, `/ban`, `/unban`,
-  `/promote`, `/demote`, `/vouch`, `/invite create`, `/invite list`,
+  `/promote`, `/demote`, `/vouch`, `/pending`, `/invite create`,
+  `/invite list`,
   `/invite revoke`, `/quarantine list`, `/quarantine approve`,
   `/quarantine reject`, `/audit`, `/remove-source`, `/source-enable`,
   `/source-disable`, `/list-sources --all`, `/list-sources --include-deleted`,

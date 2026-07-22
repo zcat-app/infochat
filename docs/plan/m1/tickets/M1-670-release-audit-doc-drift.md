@@ -1,9 +1,14 @@
 ---
 id: M1-670
 title: Fix release-audit doc drift in guides and spec
-status: pending
+status: done
 created: 2026-07-22
 last_updated: 2026-07-22
+clarity_check:
+  date: 2026-07-22
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 5
 files_scope:
@@ -42,6 +47,20 @@ decision_refs:
   - D54
   - D55
   - D57
+reviews:
+  - round: 1
+    date: 2026-07-22
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 30
+      removed: 12
 ---
 
 # M1-670: Fix release-audit doc drift in guides and spec

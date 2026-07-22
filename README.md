@@ -131,9 +131,9 @@ endpoint.
   message content leaves your machine. Opting into a remote LLM (the
   `remote-llm` profile, or routing any task to a cloud API) is an explicit choice
   that sends the content being processed to that third-party provider — public
-  post bodies for the ingest tasks, and your private chat messages if you route
-  chat — and the setup wizard spells out exactly what each task exposes before
-  you enable it.
+  post bodies for the ingest tasks and the request-time `summarizer`, and your
+  private chat messages if you route chat — and the setup wizard spells out
+  exactly what each task exposes before you enable it.
 - **Hardened egress.** Outbound fetches run behind an SSRF guard
   (IP-range blocklist, DNS-rebind protection, redirect and header scrubbing).
 - **Deterministic authorization.** Admin operations run in plain Java and are

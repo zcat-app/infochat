@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 684 |
+| done | 685 |
 | deferred | 0 |
 | abandoned | 19 |
-| **total** | **704** |
+| **total** | **706** |
 
 ---
 
@@ -26,6 +26,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-669 — /add-source on a removed source must not claim tags replaced (complexity: low, risk: low)
+- M1-671 — Validate --vs against the quote currency each pair actually fetches (complexity: medium, risk: low)
 
 ---
 
@@ -61,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-670 | Fix release-audit doc drift in guides and spec | 2026-07-22 | round 1 APPROVE |
 | M1-668 | Recalibrate command-intent recall for how-do-I phrasings | 2026-07-22 | round 1 APPROVE |
 | M1-667 | Route user-content exception catches through SafeLog | 2026-07-21 | round 2 APPROVE |
 | M1-666 | Deterministic delivery of conceptual topic answers in chat | 2026-07-21 | round 1 APPROVE |
@@ -70,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-642 | Per-category digest delivery + optional roll-up summaries | 2026-07-20 | round 2 APPROVE |
 | M1-665 | Deterministic delivery of matched command usage in chat | 2026-07-19 | round 2 APPROVE |
 | M1-664 | Semantic command-intent index: retrieval + registration | 2026-07-19 | round 1 APPROVE |
-| M1-663 | Spec: deterministic-delivery contract for chat help text | 2026-07-19 | round 1 APPROVE |
 
 ---
 
@@ -905,4 +906,6 @@ M1-664 (done)
 M1-667 (done)
 M1-668 (done)
 M1-669 (pending) ← runnable
+M1-670 (done)
+M1-671 (pending) ← runnable
 ```

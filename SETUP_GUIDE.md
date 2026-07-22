@@ -508,7 +508,7 @@ because changing it would break your stored posts).
 Before writing anything it **backs up** your config and prints a **rollback**
 command, then a **privacy disclosure** naming exactly which tasks now call the
 remote provider and what each one exposes — loudest for **chat** (it sends your
-private messages), versus the ingest tasks (`security`/`tagger`/`entity`), which
+private messages), versus the ingest tasks (`security`/`tagger`/`entity`/`classifier`), which
 only ever see the **public** posts infochat fetches (your topic interests and
 source list, not private data). Finally it prints the one command to apply the
 change, recreating the containers so the new key takes effect. The switcher is
@@ -825,18 +825,24 @@ signal.
 
 | Backend (default model) | Resident RAM | CPU while answering | Prefill | Generation | A chat reply takes | Quality |
 |---|---|---|---|---|---|---|
-| **ollama** (`llama3.2:3b`, 2 GB) | ~3.6 GB | all cores | ~55 tok/s | ~10 tok/s | ~50 s | good, coherent |
+| **ollama** (`llama3.1:8b` shipped chat/summary default) | ~3.6 GB | all cores | ~55 tok/s | ~10 tok/s | ~50 s | good, coherent |
 | **llama.cpp** (pinned gemma, 4.2 GB) | ~5.3 GB | all cores | ~35 tok/s | ~8–10 tok/s | ~75–80 s | good, coherent |
 | **remote** (DeepSeek `deepseek-v4-flash`) | ~0 (offloaded) | ~0 | — | ~55 tok/s | ~10–15 s | best |
+
+> **About the ollama row's figures:** they were captured on the smaller
+> `llama3.2:3b` — the model the **security** task uses, *not* the chat/summary
+> default. The shipped default for chat, summary, tagger, entity, classifier, and
+> translator is the larger `llama3.1:8b`, so on the default expect more RAM and
+> slower replies than shown here; treat this row as a conservative floor.
 
 What this means in practice:
 
 - **On a CPU-only box, almost all the wait is "prefill"** — the model reading the
   ~2,600-token system prompt and tool definitions before it writes a single word.
-  The generation itself is short. So a *smaller* local model (ollama's
-  `llama3.2:3b`) feels noticeably snappier and uses less RAM than the larger
-  default gemma — which is why **ollama is the default and the right pick for
-  most people.**
+  The generation itself is short, so a *smaller* local model feels noticeably
+  snappier and uses less RAM. **Ollama is the default** not because of model size
+  but because it's the simplest local backend to run (it auto-pulls its models) —
+  the right pick for most people; its shipped chat/summary model is `llama3.1:8b`.
 - **llama.cpp** with the pinned gemma is a solid local option too; expect a bit
   more RAM and slower prefill for its larger (4B-class) model on the same CPU.
   Choose it when you want a *specific* local model.

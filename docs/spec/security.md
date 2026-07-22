@@ -1387,7 +1387,7 @@ sources). Application code uses the soft-delete column.
   `secrets.env` through the same dotenv-escaped channel and prints a per-task
   privacy disclosure naming exactly which generative tasks now call a remote
   provider and what each exposes — `chat` (private user messages) flagged loudest,
-  the ingest tasks (`security`/`tagger`/`entity`) as topic-interest exposure over
+  the ingest tasks (`security`/`tagger`/`entity`/`classifier`) as topic-interest exposure over
   public posts — see `SETUP_GUIDE.md` §"Switching your AI backend later".
 - Audit-log writes pass through a redaction hook that masks values
   matching a **closed catalogue of API-key shapes**. The catalogue's
