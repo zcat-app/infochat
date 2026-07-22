@@ -1,0 +1,4 @@
+ M .agents/skills/redteam-multi/SKILL.md
+ M .claude/skills/redteam-multi/SKILL.md
+ M docs/process/harness-mapping.md
+ M scripts/redteam-multi.sh

@@ -1,6 +1,6 @@
 ---
 name: redteam-multi
-description: Multi-auditor red-team — fan the same rendered red-team prompt through several independent coding-agent CLIs (claude, opencode, codex) headlessly and cross-examine their findings. Single-auditor findings are surfaced for falsification. Use for high-stakes security_relevant tickets, milestone boundaries, or pre-release where a single auditor's systematic blind spot is unacceptable. Invoke as `/redteam-multi <ticket-id | milestone <name> | id-range <a..b> | release <tag>>`.
+description: Multi-auditor red-team — fan the same rendered red-team prompt through several independent coding-agent CLIs (claude, opencode, codex, kimi) headlessly and cross-examine their findings. Single-auditor findings are surfaced for falsification. Use for high-stakes security_relevant tickets, milestone boundaries, or pre-release where a single auditor's systematic blind spot is unacceptable. Invoke as `/redteam-multi <ticket-id | milestone <name> | id-range <a..b> | release <tag>>`.
 ---
 
 This is a sibling of `/redteam`, not a flag on it. `/redteam` runs ONE
@@ -26,9 +26,11 @@ threat model):
 - The target resolves to a diff range per
   [`.claude/skills/redteam/SKILL.md`](../../.claude/skills/redteam/SKILL.md)
   §1 (read it; the algorithm is not duplicated here).
-- At least one of claude / opencode / codex is installed and authenticated
-  on this host. `scripts/redteam-multi.sh preflight` is the cheap (no
-  tokens) way to check.
+- At least one of claude / opencode / codex / kimi is installed and
+  authenticated on this host. `scripts/redteam-multi.sh preflight` is the
+  cheap (no tokens) way to check. opencode and kimi may need PATH entries
+  the non-interactive shell lacks (`~/.opencode/bin`, `~/.kimi-code/bin`);
+  a missing one silently drops that auditor.
 
 ## Steps
 
@@ -40,8 +42,9 @@ threat model):
    fork-point diff) and pass the result via `--diff` or `--base`/`--head`.
 
 2. **Preflight.** Run `scripts/redteam-multi.sh preflight`. It probes each
-   auditor: binary on PATH, auth valid, agent definition resolvable, and
-   (for opencode) the resolved `write=true` per harness-mapping §6.1(a).
+   auditor: binary on PATH, auth valid, agent definition resolvable where the
+   harness reads one at all (codex and kimi read none — harness-mapping §6.2,
+   §6.3), and (for opencode) the resolved `write=true` per §6.1(a).
    Costs no model tokens. If fewer than two auditors are AVAILABLE, surface
    that to the user before proceeding — cross-examination is meaningless
    without an independent refuter (the script will still run a single

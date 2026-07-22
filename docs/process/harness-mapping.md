@@ -3,17 +3,18 @@
 This file binds the abstract harness primitives named by
 [`workflow.md`](workflow.md) and the skill procedures under `.claude/skills/`
 to concrete mechanisms per coding agent. Claude Code is the native harness and
-needs none of this; opencode and OpenAI Codex CLI are the two mapped tools;
-the Generic column is the contract any capable agent can satisfy by hand.
+needs none of this; opencode, OpenAI Codex CLI and Kimi Code are the mapped
+tools; the Generic column is the contract any capable agent can satisfy by hand.
 Nothing in this file changes the workflow itself — if a binding here seems to
 require a different procedure, this file is wrong and the procedure wins.
 
-Both tool columns were verified empirically on 2026-07-19 against **opencode
-1.18.3** and **codex-cli 0.144.6** — discovery, agent resolution, config
-loading, and the gotchas in §6.1/§6.2 were measured, not read from docs. Two
-published claims turned out false against the real binaries (noted in place).
-The only step not yet run is a live end-to-end gate (§8), which costs a real
-model call. Versions move: re-check on first use.
+Every tool column was verified empirically against the real binary — **opencode
+1.18.3** and **codex-cli 0.144.6** on 2026-07-19, **kimi-code 0.29.0** on
+2026-07-22. Discovery, agent resolution, config loading, and the gotchas in
+§6.1/§6.2/§6.3 were measured, not read from docs. Two published claims turned
+out false against the real binaries (noted in place). The step not yet run on
+every tool is a live end-to-end gate (§8), which costs a real model call.
+Versions move: re-check on first use.
 
 ## 1. The six primitives
 
@@ -45,6 +46,7 @@ five:
 | Claude Code (native) | `.claude/agents/<name>.md` | the skill spawns the agent with the stub prompt below — status quo |
 | opencode | `.opencode/agent/<name>.md` (**`mode: all`** — see §6.1(c)) | Task-tool routing or `@<name>` mention with the stub prompt, or headless (§3) |
 | Codex CLI | **none — no repo-shippable agent definition exists** (§6.2) | `spawn_agent` with the stub prompt, or headless `codex exec` (§3) |
+| Kimi Code | **none — `.claude/agents/` is not a path it reads** (§6.3) | headless `kimi -p` with the stub prompt (§3) |
 | Generic (any agent) | none needed | any FRESH session/process of a capable model, given the stub prompt |
 
 Codex has no per-agent definition because its spawned agents are deliberately
@@ -81,7 +83,15 @@ opencode:
       "Read <rendered-prompt-path> and follow it exactly. It names every input file and the output path. Write the required artifact to that path and reply only in the format the prompt specifies." \
       > target/<gate>-reply.txt
 
-After either: read the verdict/outline/report file back from disk
+Kimi Code (`-p` is the headless form: it prints the reply on stdout — there is
+no output-file flag — and auto-approves tool calls, so no permission flag is
+passed; `--auto` is in fact REJECTED alongside `-p`. `--skills-dir <empty-dir>`
+switches project skill discovery off, which a gate agent never needs — §6.3):
+
+    kimi -p "Read <rendered-prompt-path> and follow it exactly. It names every input file and the output path. Write the required artifact to that path and reply only in the format the prompt specifies." \
+      --skills-dir <empty-dir> > target/<gate>-reply.txt
+
+After any of these: read the verdict/outline/report file back from disk
 (primitive 3) and run the §6 contamination check. If CI or repeated headless
 use materializes, extract these recipes into `scripts/run-gate.sh`; until
 then this section is their single source.
@@ -181,6 +191,45 @@ cheapest way to confirm any of this.
 - Concurrency: 4 slots by default (the prompt states it), so a fan-out wider
   than 4 queues rather than failing.
 
+## 6.3 Kimi Code: verified discovery facts
+
+Measured against kimi-code 0.29.0 on 2026-07-22. Unlike §6.2, most of these
+cost a (small) model call to establish, because kimi ships no local
+prompt-rendering debug command.
+
+- ❌ **`.claude/agents/` is NOT read.** Agent profiles are discovered from
+  `.agents/agents/` and `~/.kimi-code/agents/` only, and the `--agent` /
+  `--agent-file` flags that would load one are gated behind the experimental v2
+  engine (`KIMI_CODE_EXPERIMENTAL_FLAG=1`; without it both flags are refused
+  outright). No repo-shippable agent definition is therefore written for kimi:
+  as with Codex (§2), the persona travels in the rendered prompt, which carries
+  the full "You are an adversary…" framing on its own.
+- ⚠ **Project skills are discovered from BOTH `.claude/skills/` and
+  `.agents/skills/`** — the same two-tree collision that makes opencode
+  nondeterministic (§6.1(b)). Measured in a scratch repo carrying a same-named
+  skill in each tree: the `.agents/` copy won that run. No kill-switch env var
+  exists, but `--skills-dir <dir>` replaces auto-discovery outright, and
+  pointing it at an EMPTY directory suppresses every project and user skill
+  (verified: 0 of the probe skills survived; only kimi's own built-ins remain).
+  That is the binding the red-team wrapper uses — a gate agent needs no skill,
+  so the safest resolution is none at all.
+- ✅ **Headless writes work with no permission flag.** `kimi -p '<stub>'` runs
+  one prompt non-interactively and auto-approves tool calls; a verified probe
+  wrote its file and replied in the requested format. `--auto` is rejected in
+  combination with `-p` ("Cannot combine --prompt with --auto"), so do not add
+  it by analogy with the other harnesses.
+- ✅ **Exit status is meaningful** — 1 on a failed run, 0 on success (unlike
+  codex, which exits 0 even when its sandbox denies it the prompt file). The
+  verdict-file check still governs, per primitive #3.
+- **Auth probe:** `kimi doctor` validates config file SYNTAX only and reports
+  OK on a host with no provider configured, so it cannot stand in for an auth
+  check. `kimi provider list` can: unconfigured it prints "No providers
+  configured." and nothing else; configured it prints the provider table plus a
+  `Default model:` line. Costs no tokens.
+- Model: kimi uses `default_model` from `~/.kimi-code/config.toml` unless `-m`
+  overrides it. Per the §6 note below, leave it on the configured default and
+  make sure that default is a strong model.
+
 ## 6. Weaker guarantees on non-Claude harnesses (honest notes)
 
 - **No per-path Write restriction, and on Codex no per-agent scoping at all.**
@@ -213,7 +262,7 @@ opencode-boundary note at the end of this section).
 ### What it is
 
 `/redteam-multi <target>` runs the SAME rendered red-team prompt through
-several independent coding-agent CLIs (claude, opencode, codex) and
+several independent coding-agent CLIs (claude, opencode, codex, kimi) and
 cross-examines their verdicts. The point of fanning out is that a single
 auditor's blind spots are systematic: a finding only one model reports is
 either a real gap the others missed or a false positive exposing that
@@ -242,6 +291,9 @@ cross-examination stage makes the difference legible to the user.
    are generic and CAN read `.agents/skills/`, so on Codex the
    `REDTEAM_MULTI_DEPTH` env var is the primary guard: the wrapper sets it
    to 1 on every spawn and refuses to start when it is already non-zero.
+   kimi is generic in the same way, but there the wrapper additionally
+   denies it the skills entirely — `--skills-dir` aimed at an empty
+   directory (§6.3) — leaving `REDTEAM_MULTI_DEPTH` as the backstop.
 4. **The diff-range algorithm is consumed, not reimplemented.** The
    wrapper accepts a resolved range (`--base`/`--head`, `--diff`, or
    `--ticket` for the MERGED form) and does NOT reimplement the four-form
@@ -276,7 +328,9 @@ cross-examination stage makes the difference legible to the user.
   (gitignored, wiped by `mvn clean`). The directory contains: `preflight.txt`,
   `diff.patch`, `inv-{auth,authz,input,ban,audit}.txt`, `prompt-<id>.txt`,
   `reply-<id.txt>`, `verdict-<id>.txt`, `porcelain-<id>.txt`, and
-  `cross-examination.md`. Commit the whole directory alongside
+  `cross-examination.md` (plus an empty `kimi-no-skills/` when the kimi slot
+  ran — the directory §6.3 aims `--skills-dir` at; git tracks no empty
+  directory, so it never reaches the commit). Commit the whole directory alongside
   `docs/plan/m1/redteam/` as the audit record.
 
 ### Cross-examination — v1 (shipped) vs v2 (not yet wired)
@@ -355,6 +409,27 @@ Codex CLI (steps 4–5 VERIFIED on 0.144.6, 2026-07-19):
 6. ⬜ One gate via `spawn_agent` AND one via `codex exec` (§3): the verdict
    lands, and only the verdict path changed. (Not yet run — this host has no
    Codex credentials; `codex doctor` reports the auth state.)
+
+Kimi Code (steps 6a–6d VERIFIED on 0.29.0, 2026-07-22):
+6a. ✅ Auth — `kimi provider list` prints a `Default model:` line. `kimi doctor`
+    is NOT a substitute (§6.3).
+6b. ✅ Skill discovery — a same-named skill planted in both `.claude/skills/`
+    and `.agents/skills/` of a scratch repo was discovered, and
+    `--skills-dir <empty-dir>` suppressed both copies. If a fork wants kimi to
+    RUN the workflow skills (rather than only serve as a red-team auditor),
+    pin `--skills-dir .agents/skills` instead of an empty directory, and treat
+    §6.1(b)'s collision warning as applying here too.
+6c. ✅ Headless write — `kimi -p` created the file it was asked for with no
+    permission flag, and exits non-zero on failure.
+6d. ✅ End-to-end gate RUN and passed (2026-07-22, kimi-k3) through the `kimi`
+    auditor slot of `scripts/redteam-multi.sh`, on the merged M1-668 diff:
+    the auditor read the rendered prompt, the threat model and the diff,
+    wrote a format-conformant `RED-TEAM VERDICT: CLEAN` to the exact
+    prompt-supplied path, and returned the required four-line chat reply;
+    `porcelain-kimi.txt` matched the pre-run state, so no contamination.
+    Evidence: `docs/plan/m1/redteam-multi/M1-668-2026-07-22/`. Wall clock
+    ~4 min for a 12 KB diff at the configured default effort — well inside
+    the wrapper's `timeout 900`, but a large diff will need watching.
 
 Any tool:
 7. Drive `/m1-tick start` (via the `.agents/skills/m1-tick` wrapper) on a

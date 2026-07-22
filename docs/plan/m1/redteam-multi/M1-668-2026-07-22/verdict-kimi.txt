@@ -1,0 +1,21 @@
+RED-TEAM VERDICT: CLEAN
+
+OUT-OF-MODEL:
+  - Process-integrity of the bookkeeping hunks: the diff records its own
+    review/clarity artifacts (STATUS.md transition, ticket frontmatter
+    `reviews: round 1 APPROVE`, `clarity_check: PASS` with self-check
+    warnings). docs/spec/security.md is a runtime threat model for the
+    infochat system; integrity of the gate-driven ticket workflow (who may
+    record a verdict, whether a recorded APPROVE corresponds to a real
+    fresh-context review) is not a commitment it makes. If gate-artifact
+    integrity should be audited, the model needs a workflow-integrity
+    extension.
+  - Acceptance evidence for the recall fix is a recorded manual eval on a
+    live `infochat-test` instance (the ticket's own implementation note
+    states it is NOT a `mvn verify` assertion, because the IT stub embedder
+    cannot score real text-to-vector semantics), and the note flags that
+    the startup corpus rebuild re-embedded 9-10 commands rather than the
+    single `add-source` row predicted. Both are verification-rigor /
+    operational observations outside the documented threat model; noted so
+    the user can decide whether deterministic recall regression coverage or
+    re-embed breadth warrants follow-up.

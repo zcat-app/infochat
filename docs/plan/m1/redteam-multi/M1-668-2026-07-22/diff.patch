@@ -1,0 +1,237 @@
+diff --git a/docs/plan/m1/STATUS.md b/docs/plan/m1/STATUS.md
+index 2bd6cacd..54b9fc5a 100644
+--- a/docs/plan/m1/STATUS.md
++++ b/docs/plan/m1/STATUS.md
+@@ -10,11 +10,11 @@
+ 
+ | Status | Count |
+ |---|---|
+-| pending | 1 |
++| pending | 0 |
+ | in-progress | 0 |
+ | in-review | 0 |
+ | escalated | 0 |
+-| done | 683 |
++| done | 684 |
+ | deferred | 0 |
+ | abandoned | 19 |
+ | **total** | **703** |
+@@ -25,7 +25,7 @@
+ 
+ Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
+ 
+-- M1-668 — Recalibrate command-intent recall for how-do-I phrasings (complexity: low, risk: medium)
++_(none — all pending tickets are blocked)_
+ 
+ ---
+ 
+@@ -61,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
+ 
+ | ID | Title | Done date | Verdict |
+ |---|---|---|---|
++| M1-668 | Recalibrate command-intent recall for how-do-I phrasings | 2026-07-22 | round 1 APPROVE |
+ | M1-667 | Route user-content exception catches through SafeLog | 2026-07-21 | round 2 APPROVE |
+ | M1-666 | Deterministic delivery of conceptual topic answers in chat | 2026-07-21 | round 1 APPROVE |
+ | M1-652 | Gap-filling redelivery for per-category digests | 2026-07-21 | round 2 APPROVE |
+@@ -70,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
+ | M1-665 | Deterministic delivery of matched command usage in chat | 2026-07-19 | round 2 APPROVE |
+ | M1-664 | Semantic command-intent index: retrieval + registration | 2026-07-19 | round 1 APPROVE |
+ | M1-663 | Spec: deterministic-delivery contract for chat help text | 2026-07-19 | round 1 APPROVE |
+-| M1-661 | Add an ASSERTION-ADEQUACY check to the reviewer gate | 2026-07-19 | round 1 APPROVE |
+ 
+ ---
+ 
+@@ -903,5 +903,5 @@ M1-664 (done)
+   ├── M1-649 (done) [see above]
+   └── M1-665 (done) [see above]
+ M1-667 (done)
+-M1-668 (pending) ← runnable
++M1-668 (done)
+ ```
+diff --git a/docs/plan/m1/tickets/M1-668-command-intent-recall-recalibration.md b/docs/plan/m1/tickets/M1-668-command-intent-recall-recalibration.md
+index ff162eaf..82a5071b 100644
+--- a/docs/plan/m1/tickets/M1-668-command-intent-recall-recalibration.md
++++ b/docs/plan/m1/tickets/M1-668-command-intent-recall-recalibration.md
+@@ -1,7 +1,7 @@
+ ---
+ id: M1-668
+ title: "Recalibrate command-intent recall for how-do-I phrasings"
+-status: pending
++status: done
+ created: 2026-07-22
+ last_updated: 2026-07-22
+ blocked_by: []
+@@ -103,12 +103,43 @@ test_plan:
+ decision_refs:
+   - D66
+   - D67
+-reviews: {}
++reviews:
++  - round: 1
++    date: 2026-07-22
++    verdict: APPROVE
++    checks:
++      scope_drift: PASS
++      test_integrity: PASS
++      out_of_scope: PASS
++      negative_space: PASS
++      acceptance: PASS
++    diff_stats:
++      files: 4
++      added: 122
++      removed: 8
+ overrides: []
+ aborted_attempts: []
+ reopens: []
+ redteam_findings: []
+-clarity_check: {}
++clarity_check:
++  date: 2026-07-22
++  verdict: PASS
++  warnings:
++    - "lint: 0 blockers, 0 warnings (clean)"
++    - >-
++      self-check: discriminative-guard acceptance item ('bare source resolves
++      to NEITHER add-source') resolved deterministically — the preserved test
++      bareTokenReachesTheHyphenatedFamilyWholeTokenFirst pins bare 'source' →
++      add-source-first via containment, so the guard asserts 'source' is not
++      EXCLUSIVELY add-source (over-broad-intent-key signature) and 'remove'
++      does not reach add-source. Only reading consistent with byte-for-byte
++      preservation + green suite.
++    - >-
++      self-check: census probe + real-embedding recall evidence (acceptance
++      item 5) require a live ollama backend (currently down); fixing the one
++      CONFIRMED miss (add-source) per the ticket's explicit allowance, broader
++      probe + before/after transcript surfaced to the user at implement time.
++  blockers: []
+ escalation_reason:
+ ---
+ 
+@@ -222,3 +253,32 @@ no other command's vector moves.
+ that lets you add a custom external source or RSS feed to follow…". Companion
+ finding (out of scope here): M1-666/D69 topic delivery shows the model's own
+ general-knowledge answer before the curated block.
++
++## Implementation note — real-embedding evidence (acceptance item 5), 2026-07-22
++
++Enriched `add-source`'s intent words in two passes, both by the ticket's own
++method (embed the caller's phrasing as an intent key; the 0.70 constant was
++never touched):
++- Pass 1 = the six required keys (acceptance item 1). Live-verified on the
++  isolated `infochat-test` instance (real ollama `nomic-embed-text`), this
++  lifted "how do I add a source" above 0.70 (the `/add-source` usage block now
++  delivers) but did NOT lift the longer "how do I add a new source to follow"
++  — the "…to follow" tail kept it below 0.70.
++- Pass 2 = three "…to follow" ADD-verb keys (`add a source to follow`, `add a
++  new source to follow`, `add a feed to follow`). Acceptance item 1 says "at
++  minimum" the six, so these are in-scope additions; acceptance item 5 requires
++  BOTH phrasings to deliver, which these satisfy. The ADD verb keeps them
++  discriminative — live re-check: "how do I unfollow a source" still resolves to
++  `/unfollow-source` (not cannibalized), and "how do I add a source" still
++  delivers after the expansion (no dilution regression).
++
++BEFORE (build f8dc5fcf): both phrasings dropped to the LLM, no deterministic
++block. AFTER (rebuilt provider): both deliver the `/add-source` usage block.
++Full before/after transcript captured via `test-clients/drive.sh` (admin
++profile). This evidence is a recorded manual eval, NOT a `mvn verify` assertion
++(the IT's stub embedder cannot score real text→vector semantics — see §Notes).
++
++Observation (not an acceptance item): the startup corpus rebuild re-embedded
++9–10 commands, not the single `add-source` row the §"Both paths, one map."
++note predicts. Recall acceptance is unaffected; flagged for a possible
++follow-up if the re-embed breadth matters operationally.
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/CommandIntentSynonyms.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/CommandIntentSynonyms.java
+index bb43c654..7fc92b43 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/CommandIntentSynonyms.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/CommandIntentSynonyms.java
+@@ -107,6 +107,27 @@ public final class CommandIntentSynonyms {
+             Map.entry("feed", "add-source"),
+             Map.entry("rss", "add-source"),
+             Map.entry("watch", "add-source"),
++            // Natural "how do I add a source" phrasings. The single-word
++            // synonyms above left add-source's composed intent document too
++            // thin: on real embeddings those phrasings scored below the 0.70
++            // chat-delivery threshold and the model falsely denied the command
++            // exists (M1-668). Each key names the ADD action, so it enriches
++            // add-source's match surface without an over-broad token pulling
++            // the sibling -source commands (remove/unfollow/list) onto it — in
++            // particular the "...to follow" variants keep the "add" verb so
++            // they do not drift onto unfollow-source (verified live 2026-07-22:
++            // the longer "add a new source to follow" phrasing needed these
++            // to cross 0.70, while "unfollow a source" still resolves to
++            // unfollow-source).
++            Map.entry("add a source", "add-source"),
++            Map.entry("add source", "add-source"),
++            Map.entry("add a feed", "add-source"),
++            Map.entry("add a new source", "add-source"),
++            Map.entry("register a source", "add-source"),
++            Map.entry("add a website", "add-source"),
++            Map.entry("add a source to follow", "add-source"),
++            Map.entry("add a new source to follow", "add-source"),
++            Map.entry("add a feed to follow", "add-source"),
+ 
+             Map.entry("feeds", "list-sources"),
+             Map.entry("subscriptions", "list-sources"),
+diff --git a/infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/CommandIntentSynonymsTest.java b/infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/CommandIntentSynonymsTest.java
+index de32009b..0f3e7d9c 100644
+--- a/infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/CommandIntentSynonymsTest.java
++++ b/infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/CommandIntentSynonymsTest.java
+@@ -7,6 +7,8 @@ import java.util.List;
+ import java.util.Map;
+ 
+ import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertFalse;
++import static org.junit.jupiter.api.Assertions.assertNotEquals;
+ import static org.junit.jupiter.api.Assertions.assertTrue;
+ 
+ /**
+@@ -154,4 +156,49 @@ class CommandIntentSynonymsTest {
+         // not resurrect the confidently-irrelevant list.
+         assertEquals(List.of(), CommandIntentSynonyms.suggest("s", FULL_VOCABULARY, MAX));
+     }
++
++    @Test
++    void addSourceNaturalPhrasingsResolve() {
++        // M1-668: the natural phrasings a caller actually types for /add-source.
++        // Each is a whole-query intent-map hit, so suggest() returns add-source
++        // and nothing else. The point is the enriched match surface these give
++        // add-source's composed intent document on the chat-embedding path.
++        for (String phrasing : List.of(
++                "add a source", "add source", "add a feed",
++                "add a new source", "register a source", "add a website",
++                "add a source to follow", "add a new source to follow", "add a feed to follow")) {
++            assertEquals(List.of("add-source"),
++                    CommandIntentSynonyms.suggest(phrasing, FULL_VOCABULARY, MAX),
++                    "natural phrasing '" + phrasing + "' must resolve to /add-source and nothing else");
++        }
++    }
++
++    @Test
++    void siblingSourceQueriesDoNotRegress() {
++        // M1-668 discriminative guard: enriching add-source must not steal
++        // matches from its -source neighbours. The hazard is an over-broad
++        // intent KEY (a bare "source" or "remove") short-circuiting suggest()
++        // straight to add-source.
++
++        // Neighbour intent-map hits are unchanged.
++        assertEquals(List.of("list-sources"),
++                CommandIntentSynonyms.suggest("sources", FULL_VOCABULARY, MAX),
++                "'sources' must still resolve to /list-sources");
++        assertEquals(List.of("unfollow-source"),
++                CommandIntentSynonyms.suggest("mute", FULL_VOCABULARY, MAX),
++                "'mute' must still resolve to /unfollow-source");
++
++        // Bare "source" is deliberately NOT an intent key: it keeps falling
++        // through to the containment path (whole -source family, add-source
++        // first per bareTokenReachesTheHyphenatedFamilyWholeTokenFirst) and
++        // must never become an EXCLUSIVE add-source hit — the signature of an
++        // over-broad intent key that would have swallowed the family.
++        assertNotEquals(List.of("add-source"),
++                CommandIntentSynonyms.suggest("source", FULL_VOCABULARY, MAX),
++                "bare 'source' must not become an exclusive /add-source intent hit");
++
++        // Bare "remove" must not reach add-source at all.
++        assertFalse(CommandIntentSynonyms.suggest("remove", FULL_VOCABULARY, MAX).contains("add-source"),
++                "bare 'remove' must not be pulled onto /add-source");
++    }
+ }

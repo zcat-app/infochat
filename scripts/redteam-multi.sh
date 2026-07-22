@@ -51,7 +51,7 @@ fi
 # Auditor id is <harness>[-<model>] so that running one harness at two model
 # tiers (claude-opus vs claude-haiku) stays expressible without a schema change.
 # These are the harnesses with a verified binding; see docs/process/harness-mapping.md.
-auditors="claude opencode codex"
+auditors="claude opencode codex kimi"
 
 usage() {
     cat >&2 <<'EOF'
@@ -173,6 +173,28 @@ probe_codex() {
     fi
 }
 
+probe_kimi() {
+    if ! command -v kimi >/dev/null 2>&1; then
+        printf 'UNAVAILABLE\tbinary not on PATH\n'
+        return 0
+    fi
+    # `kimi doctor` validates config SYNTAX only and reports OK on a host with
+    # no provider at all, so it cannot stand in for an auth check. `provider
+    # list` is the cheap one that can: unconfigured it prints "No providers
+    # configured." and nothing else, configured it prints the provider table
+    # plus the resolved default-model line. Requiring that line proves both a
+    # credentialed provider and a model alias dispatch can actually use.
+    if ! timeout 30 kimi provider list 2>/dev/null | grep -q '^Default model:'; then
+        printf 'UNAVAILABLE\tno provider/default model (kimi login, or kimi provider add)\n'
+        return 0
+    fi
+    # No agent-definition check: kimi reads no repo-shippable agent definition
+    # (harness-mapping §6.3), so the adversary persona arrives entirely from
+    # the rendered prompt — there is no per-agent file for this slot to depend
+    # on.
+    printf 'AVAILABLE\tkimi %s\n' "$(kimi --version 2>/dev/null | head -1)"
+}
+
 cmd_preflight() {
     local selected="$auditors"
     while [ $# -gt 0 ]; do
@@ -191,6 +213,7 @@ cmd_preflight() {
             claude)   result="$(probe_claude)" ;;
             opencode) result="$(probe_opencode)" ;;
             codex)    result="$(probe_codex)" ;;
+            kimi)     result="$(probe_kimi)" ;;
             *)        result="$(printf 'UNAVAILABLE\tno registry entry for this id')" ;;
         esac
         status="${result%%$'\t'*}"
@@ -338,6 +361,27 @@ dispatch_auditor() {
                     -o "$reply_file" <<<"$stub" >/dev/null 2>&1 || rc=$?
             fi
             ;;
+        kimi)
+            # Same shape as the codex slot: kimi reads no repo-shippable agent
+            # definition (§6.3), so the persona comes wholly from the rendered
+            # prompt. `-p` is the headless form — it prints the reply on stdout
+            # and auto-approves tool calls, which is why no permission flag is
+            # passed (`--auto` is REJECTED alongside `-p`).
+            #
+            # --skills-dir points at an EMPTY directory to switch project skill
+            # discovery off. kimi auto-discovers skills from BOTH .claude/skills/
+            # and .agents/skills/ — the same two-tree collision that makes
+            # opencode nondeterministic (§6.1(b)) — and an auditor needs no skill
+            # at all, so suppressing them closes the recursion path at its source
+            # and leaves REDTEAM_MULTI_DEPTH as the backstop. The directory lives
+            # under the run dir, and git tracks no empty directory, so it reaches
+            # neither the contamination check nor the committed evidence packet.
+            local skills_void
+            skills_void="$(dirname "$verdict_file")/kimi-no-skills"
+            mkdir -p "$skills_void"
+            REDTEAM_MULTI_DEPTH=1 timeout 900 kimi -p "$stub" \
+                --skills-dir "$skills_void" > "$reply_file" 2>&1 || rc=$?
+            ;;
     esac
 
     [ "$rc" -eq 0 ] || { printf 'exit status %d\n' "$rc"; return 1; }
@@ -403,6 +447,7 @@ cmd_run() {
             claude)   probe_claude ;;
             opencode) probe_opencode ;;
             codex)    probe_codex ;;
+            kimi)     probe_kimi ;;
             *)        printf 'UNAVAILABLE\t\n' ;;
         esac | grep -q '^AVAILABLE' && available="$available $id"
     done

@@ -1,6 +1,6 @@
 ---
 name: redteam-multi
-description: Multi-auditor red-team — fan the same rendered red-team prompt through several independent coding-agent CLIs (claude, opencode, codex) headlessly and cross-examine their findings. Single-auditor findings are surfaced for falsification. Use for high-stakes security_relevant tickets, milestone boundaries, or pre-release where a single auditor's systematic blind spot is unacceptable. Invoke as `/redteam-multi <ticket-id | milestone <name> | id-range <a..b> | release <tag>>`.
+description: Multi-auditor red-team — fan the same rendered red-team prompt through several independent coding-agent CLIs (claude, opencode, codex, kimi) headlessly and cross-examine their findings. Single-auditor findings are surfaced for falsification. Use for high-stakes security_relevant tickets, milestone boundaries, or pre-release where a single auditor's systematic blind spot is unacceptable. Invoke as `/redteam-multi <ticket-id | milestone <name> | id-range <a..b> | release <tag>>`.
 ---
 
 # /redteam-multi — multi-auditor adversarial review
@@ -8,7 +8,7 @@ description: Multi-auditor red-team — fan the same rendered red-team prompt th
 This skill is the Claude Code procedure. It is a **sibling of
 [`/redteam`](../redteam/SKILL.md), not a flag on it**: `/redteam` spawns ONE
 in-session threat-actor subagent; `/redteam-multi` spawns N headless auditor
-processes (claude, opencode, codex) and cross-examines their verdicts. The
+processes (claude, opencode, codex, kimi) and cross-examines their verdicts. The
 point of fanning out is that a single auditor's blind spots are systematic — a
 finding only one model reports is either a real gap the others missed or that
 model's false positive, and only a falsification pass tells those apart. The
@@ -33,29 +33,32 @@ template and threat model):
   either is absent.
 - The target resolves to a diff range per [`../redteam/SKILL.md`](../redteam/SKILL.md)
   §1 — that algorithm is single-sourced there and is NOT duplicated here.
-- At least one of claude / opencode / codex is installed and authenticated.
-  `scripts/redteam-multi.sh preflight` is the zero-token check. Fewer than two
-  AVAILABLE means no independent refuter, so cross-examination is degenerate —
-  surface that and let the user opt in before running a single-auditor pass.
+- At least one of claude / opencode / codex / kimi is installed and
+  authenticated. `scripts/redteam-multi.sh preflight` is the zero-token check.
+  Fewer than two AVAILABLE means no independent refuter, so cross-examination is
+  degenerate — surface that and let the user opt in before running a
+  single-auditor pass.
 
-## opencode availability on this host
+## Auditor availability on this host
 
-The script invokes `opencode` by **bare name** and does NOT set the Claude-skills
-kill-switch itself. On this host opencode is installed but not on the
-non-interactive PATH, and the `~/.bashrc` `opencode()` kill-switch function does
-not reach the script's invocation. Set BOTH at the call so the child process
-inherits them:
+The script invokes every auditor by **bare name** and does NOT set the
+opencode Claude-skills kill-switch itself. On this host opencode and kimi are
+both installed but on neither's non-interactive PATH (their `~/.bashrc` lines,
+including the `opencode()` kill-switch function, do not reach the script's
+invocation). Set all of it at the call so the child processes inherit it:
 
 ```
-OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1 PATH="$HOME/.opencode/bin:$PATH"
+OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1 PATH="$HOME/.opencode/bin:$HOME/.kimi-code/bin:$PATH"
 ```
 
 Prefix every `scripts/redteam-multi.sh` call — `preflight` and `run` — with that
-env. Without the PATH you silently drop to two auditors; without the kill-switch
+env. Each missing PATH entry silently drops an auditor; without the kill-switch
 opencode could resolve a `.claude/skills/` skill of the same name and run the
 raw Claude procedure with no harness translation (harness-mapping §6.1(b)).
 `~/.local/bin/wopencode` bakes the env var in, but the script execs `opencode`,
-not `wopencode`, so it is not a substitute.
+not `wopencode`, so it is not a substitute. kimi needs no such variable — the
+script passes it `--skills-dir` aimed at an empty directory, which suppresses
+skill discovery from both trees outright (harness-mapping §6.3).
 
 ## Steps
 
@@ -106,7 +109,8 @@ not `wopencode`, so it is not a substitute.
   pointers, not forks.
 - **No skill recursion.** The script invokes the `threat-actor` GATE AGENT, never
   this skill or `/redteam`. `REDTEAM_MULTI_DEPTH=1` guards codex; the
-  kill-switch above guards opencode; the Claude `threat-actor` agent declares no
-  skill tool, so recursion is structurally impossible there.
+  kill-switch above guards opencode; the empty `--skills-dir` guards kimi; the
+  Claude `threat-actor` agent declares no skill tool, so recursion is
+  structurally impossible there.
 - **Advisory only.** Never modify code from this skill; it produces evidence and
   a report, nothing more.

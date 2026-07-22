@@ -1,0 +1,7 @@
+redteam-multi preflight (repo: /home/infochat/infochat)
+
+AUDITOR      STATUS       DETAIL
+kimi         AVAILABLE    kimi 0.29.0
+
+1 of 1 auditor(s) available.
+Only one auditor: cross-examination will be SKIPPED (no independent refuter).
