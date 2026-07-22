@@ -1,0 +1,20 @@
+RED-TEAM VERDICT: CLEAN
+
+OUT-OF-MODEL:
+  - The same untrusted provider response whose `model` field this diff
+    expels from metric labels is still trusted for its numeric token
+    counts: `MeteredLlmProvider.generate` passes `response.usage()`
+    straight into `metrics.recordLlmCall(...)` (diff hunk at
+    infochat-llm-adapter/.../metrics/MeteredLlmProvider.java, the
+    `recordLlmCall(task, provider, model, Outcome.OK, latency,
+    response.usage())` line), so a hostile or compromised endpoint can
+    report arbitrary per-call token volumes (e.g. near-overflow values)
+    and skew the `llm.tokens.*` counters and any cost/usage alerting
+    built on them. The documented threat model commits to label
+    cardinality (the new llm.md bullet this diff adds) and to
+    content-level distrust of LLM output, but nowhere to the integrity
+    of provider-reported numeric usage values ("Prometheus counter
+    names and recommended alert expressions" live in design notes), so
+    this is flagged for a possible model extension (clamp/validate
+    usage values or treat them as untrusted input), not counted as a
+    finding.

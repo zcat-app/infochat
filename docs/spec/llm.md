@@ -467,6 +467,12 @@ property.
   back-pressure to the eval queue rather than exhausting threads.
 - Every LLM call emits per-task latency and token-count metrics labeled                                                                                                                                                                               
   by task and provider.
+- Metric labels are never wire-derived. The `model` label carries the
+  operator-configured model id for the task, never the model string a
+  provider's response reports. A metric registry retains one meter per
+  distinct label value for the process lifetime, so an endpoint-chosen
+  label value would be an unbounded memory-amplification channel for a
+  hostile or compromised endpoint.
 - Trace ids tie a chat-agent reply back to the tool calls and the eval                                                                                                                                                                                
   artifacts it consulted.
 

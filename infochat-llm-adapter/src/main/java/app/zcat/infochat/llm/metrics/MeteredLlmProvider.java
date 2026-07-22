@@ -5,12 +5,14 @@ import app.zcat.infochat.llm.LlmCallContext;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
+import app.zcat.infochat.llm.routing.LlmRouter;
 import jakarta.annotation.Priority;
 import jakarta.decorator.Decorator;
 import jakarta.decorator.Delegate;
 import jakarta.enterprise.inject.Any;
 import jakarta.inject.Inject;
 import jakarta.interceptor.Interceptor;
+import org.eclipse.microprofile.config.Config;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
@@ -28,11 +30,19 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * <p>Outcome classification here is {@code ok} (delegate returned) vs
  * {@code fail} (delegate threw, exception rethrown unchanged). The
- * {@code model} label comes from the provider-reported
- * {@link LlmResponse#model()}; a failed call has no response, so it is
- * labeled {@code unknown}. The trace-id log line carries ids, labels,
- * and durations only — never prompt or response content (log-hygiene
- * rule, docs/spec/security.md).</p>
+ * {@code model} label reads the operator-configured per-task model id
+ * ({@code infochat.llm.<task>.model}) and deliberately NOT the
+ * provider-reported {@link LlmResponse#model()} it once carried
+ * (M1-673): a Micrometer registry retains one meter per distinct tag
+ * value — the tag string included — for the JVM lifetime, so a
+ * wire-derived label hands a hostile or compromised endpoint a
+ * persistent memory-amplification channel that the providers' bounded
+ * body read does not close (that cap bounds only the transient read).
+ * Operator config is the cardinality-bounded source. A task with no
+ * configured model (the stub-provider test topologies) and a failed
+ * call are both labeled {@code unknown}. The trace-id log line carries
+ * ids, labels, and durations only — never prompt or response content
+ * (log-hygiene rule, docs/spec/security.md).</p>
  */
 @Decorator
 @Priority(Interceptor.Priority.APPLICATION)
@@ -44,11 +54,28 @@ public class MeteredLlmProvider implements LlmProvider {
 
     private final LlmProvider delegate;
     private final LlmMetrics metrics;
+    private final LlmRouter.ConfigReader config;
 
-    @Inject
-    public MeteredLlmProvider(@Delegate @Any LlmProvider delegate, LlmMetrics metrics) {
+    /**
+     * Seam constructor: hand-supplied config reader, for plain-JUnit
+     * tests (map-backed config, no Quarkus boot) — the same two-ctor
+     * shape as {@link LlmRouter} and {@code LlmCircuitBreakerRegistry}.
+     */
+    public MeteredLlmProvider(LlmProvider delegate, LlmMetrics metrics,
+                              LlmRouter.ConfigReader config) {
         this.delegate = delegate;
         this.metrics = metrics;
+        this.config = config;
+    }
+
+    /**
+     * CDI constructor. This is the only {@link Inject} one, so ArC picks
+     * it — and the delegate injection point — for the decorator.
+     */
+    @Inject
+    public MeteredLlmProvider(@Delegate @Any LlmProvider delegate, LlmMetrics metrics,
+                              Config mpConfig) {
+        this(delegate, metrics, key -> mpConfig.getOptionalValue(key, String.class));
     }
 
     @Override
@@ -62,8 +89,7 @@ public class MeteredLlmProvider implements LlmProvider {
             LlmResponse response =
                 LlmCallContext.callWith(context, () -> delegate.generate(task, systemPrompt, userPrompt));
             Duration latency = Duration.ofNanos(System.nanoTime() - startNanos);
-            String reportedModel = response.model();
-            String model = reportedModel != null ? reportedModel : UNKNOWN_MODEL;
+            String model = configuredModel(task);
             metrics.recordLlmCall(task, provider, model, LlmMetrics.Outcome.OK, latency, response.usage());
             LOG.debugf("llm call ok: trace=%s task=%s provider=%s model=%s latencyMs=%d",
                 context.traceId(), task.keySegment(), provider, model, latency.toMillis());
@@ -77,6 +103,23 @@ public class MeteredLlmProvider implements LlmProvider {
         } finally {
             inflight.decrementAndGet();
         }
+    }
+
+    /**
+     * The operator-configured model id for {@code task}, read per call
+     * from {@code infochat.llm.<task>.model} — the same key, spelled the
+     * same way, the concrete providers' {@code configFor} reads. Per-call
+     * rather than cached for the reason those readers state: a map lookup
+     * in microseconds against an LLM call in seconds, and caching would
+     * freeze a value the rest of the config surface treats as
+     * runtime-resolvable. Absent or empty (the stub-provider test
+     * topologies configure no model) degrades to {@code unknown} so the
+     * decorator never fails a call the undecorated bean would survive.
+     */
+    private String configuredModel(ModelTask task) {
+        return config.get(task.configPrefix() + "model")
+            .filter(model -> !model.isEmpty())
+            .orElse(UNKNOWN_MODEL);
     }
 
     @Override

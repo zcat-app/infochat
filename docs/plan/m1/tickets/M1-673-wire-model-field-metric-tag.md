@@ -1,7 +1,7 @@
 ---
 id: M1-673
 title: "Stop wire-controlled model field reaching Micrometer tags"
-status: pending
+status: done
 created: 2026-07-22
 last_updated: 2026-07-22
 blocked_by: []
@@ -62,12 +62,44 @@ test_plan:
 spec_refs:
   - docs/spec/llm.md §Bounded concurrency and observability
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-22
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 29
+      added: 1285
+      removed: 19
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-07-22
+    verdict: CLEAN
+    base: ef4ee45642b50a757f12fb0c83ab4fdba77ca205
+    head: working tree
+    verdict_file: docs/plan/m1/redteam-multi/M1-673-2026-07-22/cross-examination.md
+    out_of_model_count: 3
+    note: |
+      Multi-auditor gate (/redteam-multi): claude, codex, kimi all CLEAN;
+      opencode timed out at 900s (UNAVAILABLE, no data). 0 finding clusters.
+      Out-of-model, not findings: provider-reported token counts still feed
+      llm.tokens.* values and the embedding.dimension gauge (value integrity,
+      not label cardinality — bounded meter set, no memory growth), and the
+      never-wire-derived commitment lives in docs/spec/llm.md rather than
+      docs/spec/security.md where future audits read the threat model.
+clarity_check:
+  date: 2026-07-22
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-673: Stop wire-controlled model field reaching Micrometer tags

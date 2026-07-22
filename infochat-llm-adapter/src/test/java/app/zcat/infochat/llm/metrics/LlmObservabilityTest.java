@@ -8,12 +8,14 @@ import app.zcat.infochat.llm.LlmCallContext;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
+import app.zcat.infochat.llm.routing.LlmRouter;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -46,7 +48,12 @@ class LlmObservabilityTest {
         metrics = new LlmMetrics(registry);
         llmStub = new CapturingLlmProvider();
         embeddingStub = new CapturingEmbeddingProvider();
-        meteredLlm = new MeteredLlmProvider(llmStub, metrics);
+        // The model tag's only legitimate source is operator config, so the
+        // meter assertions below read "stub-model" from this map, never the
+        // deliberately-different model the stub reports on the wire (M1-673).
+        meteredLlm = new MeteredLlmProvider(llmStub, metrics,
+            LlmRouter.ConfigReader.fromMap(Map.of(
+                ModelTask.SECURITY_JUDGE.configPrefix() + "model", "stub-model")));
         meteredEmbedding = new MeteredEmbeddingProvider(embeddingStub, metrics, "stub-embed-model");
     }
 
@@ -117,6 +124,40 @@ class LlmObservabilityTest {
     }
 
     @Test
+    void hostileWireModelValuesDoNotGrowTheMeterRegistry() {
+        // MiB-scale distinct model strings per reply: the shape a hostile or
+        // compromised endpoint uses to mint one permanently-retained meter
+        // (the tag string included) per call until the heap is gone. The
+        // providers' bounded body read caps each string but not their number.
+        for (int call = 0; call < 8; call++) {
+            llmStub.wireModel = ("hostile-" + call).repeat(1 << 17);
+            meteredLlm.generate(ModelTask.SECURITY_JUDGE, "", "prompt");
+        }
+
+        long callMeters = registry.getMeters().stream()
+            .filter(meter -> meter.getId().getName().equals("llm.calls.total"))
+            .count();
+        assertEquals(1L, callMeters);
+        assertEquals(8.0, registry.get("llm.calls.total")
+            .tags("task", "security", "provider", "stub", "model", "stub-model", "outcome", "ok")
+            .counter().count());
+    }
+
+    @Test
+    void modelTagCarriesOperatorConfiguredIdNotTheWireReportedValue() {
+        meteredLlm.generate(ModelTask.SECURITY_JUDGE, "", "prompt");
+
+        assertEquals(1.0, registry.get("llm.calls.total")
+            .tags("task", "security", "provider", "stub", "model", "stub-model", "outcome", "ok")
+            .counter().count());
+        // The constraint is applied at the decorator boundary, so no meter it
+        // emits carries the endpoint-chosen string on any of the three names.
+        assertNull(registry.find("llm.calls.total").tag("model", "wire-reported-model").counter());
+        assertNull(registry.find("llm.latency.ms").tag("model", "wire-reported-model").timer());
+        assertNull(registry.find("llm.tokens.in").tag("model", "wire-reported-model").counter());
+    }
+
+    @Test
     void okEmbeddingCallIncrementsCallsTotalAndSetsDimensionGauge() {
         meteredEmbedding.embed(List.of("text"));
 
@@ -165,6 +206,8 @@ class LlmObservabilityTest {
     private static final class CapturingLlmProvider implements LlmProvider {
         final AtomicReference<LlmCallContext> observed = new AtomicReference<>();
         @Nullable RuntimeException failure;
+        /** The response-body {@code model} field: endpoint-chosen, so never a metric tag. */
+        String wireModel = "wire-reported-model";
 
         @Override
         public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
@@ -172,7 +215,7 @@ class LlmObservabilityTest {
             if (failure != null) {
                 throw failure;
             }
-            return new LlmResponse("reply", "stub-model", new LlmResponse.TokenUsage(10, 5));
+            return new LlmResponse("reply", wireModel, new LlmResponse.TokenUsage(10, 5));
         }
 
         @Override
