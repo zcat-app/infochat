@@ -1,7 +1,7 @@
 ---
 id: M1-668
 title: "Recalibrate command-intent recall for how-do-I phrasings"
-status: pending
+status: done
 created: 2026-07-22
 last_updated: 2026-07-22
 blocked_by: []
@@ -103,12 +103,43 @@ test_plan:
 decision_refs:
   - D66
   - D67
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-22
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 122
+      removed: 8
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-22
+  verdict: PASS
+  warnings:
+    - "lint: 0 blockers, 0 warnings (clean)"
+    - >-
+      self-check: discriminative-guard acceptance item ('bare source resolves
+      to NEITHER add-source') resolved deterministically — the preserved test
+      bareTokenReachesTheHyphenatedFamilyWholeTokenFirst pins bare 'source' →
+      add-source-first via containment, so the guard asserts 'source' is not
+      EXCLUSIVELY add-source (over-broad-intent-key signature) and 'remove'
+      does not reach add-source. Only reading consistent with byte-for-byte
+      preservation + green suite.
+    - >-
+      self-check: census probe + real-embedding recall evidence (acceptance
+      item 5) require a live ollama backend (currently down); fixing the one
+      CONFIRMED miss (add-source) per the ticket's explicit allowance, broader
+      probe + before/after transcript surfaced to the user at implement time.
+  blockers: []
 escalation_reason:
 ---
 
@@ -222,3 +253,32 @@ no other command's vector moves.
 that lets you add a custom external source or RSS feed to follow…". Companion
 finding (out of scope here): M1-666/D69 topic delivery shows the model's own
 general-knowledge answer before the curated block.
+
+## Implementation note — real-embedding evidence (acceptance item 5), 2026-07-22
+
+Enriched `add-source`'s intent words in two passes, both by the ticket's own
+method (embed the caller's phrasing as an intent key; the 0.70 constant was
+never touched):
+- Pass 1 = the six required keys (acceptance item 1). Live-verified on the
+  isolated `infochat-test` instance (real ollama `nomic-embed-text`), this
+  lifted "how do I add a source" above 0.70 (the `/add-source` usage block now
+  delivers) but did NOT lift the longer "how do I add a new source to follow"
+  — the "…to follow" tail kept it below 0.70.
+- Pass 2 = three "…to follow" ADD-verb keys (`add a source to follow`, `add a
+  new source to follow`, `add a feed to follow`). Acceptance item 1 says "at
+  minimum" the six, so these are in-scope additions; acceptance item 5 requires
+  BOTH phrasings to deliver, which these satisfy. The ADD verb keeps them
+  discriminative — live re-check: "how do I unfollow a source" still resolves to
+  `/unfollow-source` (not cannibalized), and "how do I add a source" still
+  delivers after the expansion (no dilution regression).
+
+BEFORE (build f8dc5fcf): both phrasings dropped to the LLM, no deterministic
+block. AFTER (rebuilt provider): both deliver the `/add-source` usage block.
+Full before/after transcript captured via `test-clients/drive.sh` (admin
+profile). This evidence is a recorded manual eval, NOT a `mvn verify` assertion
+(the IT's stub embedder cannot score real text→vector semantics — see §Notes).
+
+Observation (not an acceptance item): the startup corpus rebuild re-embedded
+9–10 commands, not the single `add-source` row the §"Both paths, one map."
+note predicts. Recall acceptance is unaffected; flagged for a possible
+follow-up if the re-embed breadth matters operationally.

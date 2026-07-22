@@ -107,6 +107,27 @@ public final class CommandIntentSynonyms {
             Map.entry("feed", "add-source"),
             Map.entry("rss", "add-source"),
             Map.entry("watch", "add-source"),
+            // Natural "how do I add a source" phrasings. The single-word
+            // synonyms above left add-source's composed intent document too
+            // thin: on real embeddings those phrasings scored below the 0.70
+            // chat-delivery threshold and the model falsely denied the command
+            // exists (M1-668). Each key names the ADD action, so it enriches
+            // add-source's match surface without an over-broad token pulling
+            // the sibling -source commands (remove/unfollow/list) onto it — in
+            // particular the "...to follow" variants keep the "add" verb so
+            // they do not drift onto unfollow-source (verified live 2026-07-22:
+            // the longer "add a new source to follow" phrasing needed these
+            // to cross 0.70, while "unfollow a source" still resolves to
+            // unfollow-source).
+            Map.entry("add a source", "add-source"),
+            Map.entry("add source", "add-source"),
+            Map.entry("add a feed", "add-source"),
+            Map.entry("add a new source", "add-source"),
+            Map.entry("register a source", "add-source"),
+            Map.entry("add a website", "add-source"),
+            Map.entry("add a source to follow", "add-source"),
+            Map.entry("add a new source to follow", "add-source"),
+            Map.entry("add a feed to follow", "add-source"),
 
             Map.entry("feeds", "list-sources"),
             Map.entry("subscriptions", "list-sources"),

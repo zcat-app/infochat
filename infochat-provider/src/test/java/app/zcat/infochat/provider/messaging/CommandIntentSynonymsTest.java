@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -153,5 +155,50 @@ class CommandIntentSynonymsTest {
         // Containment is disabled below three characters precisely so 's' does
         // not resurrect the confidently-irrelevant list.
         assertEquals(List.of(), CommandIntentSynonyms.suggest("s", FULL_VOCABULARY, MAX));
+    }
+
+    @Test
+    void addSourceNaturalPhrasingsResolve() {
+        // M1-668: the natural phrasings a caller actually types for /add-source.
+        // Each is a whole-query intent-map hit, so suggest() returns add-source
+        // and nothing else. The point is the enriched match surface these give
+        // add-source's composed intent document on the chat-embedding path.
+        for (String phrasing : List.of(
+                "add a source", "add source", "add a feed",
+                "add a new source", "register a source", "add a website",
+                "add a source to follow", "add a new source to follow", "add a feed to follow")) {
+            assertEquals(List.of("add-source"),
+                    CommandIntentSynonyms.suggest(phrasing, FULL_VOCABULARY, MAX),
+                    "natural phrasing '" + phrasing + "' must resolve to /add-source and nothing else");
+        }
+    }
+
+    @Test
+    void siblingSourceQueriesDoNotRegress() {
+        // M1-668 discriminative guard: enriching add-source must not steal
+        // matches from its -source neighbours. The hazard is an over-broad
+        // intent KEY (a bare "source" or "remove") short-circuiting suggest()
+        // straight to add-source.
+
+        // Neighbour intent-map hits are unchanged.
+        assertEquals(List.of("list-sources"),
+                CommandIntentSynonyms.suggest("sources", FULL_VOCABULARY, MAX),
+                "'sources' must still resolve to /list-sources");
+        assertEquals(List.of("unfollow-source"),
+                CommandIntentSynonyms.suggest("mute", FULL_VOCABULARY, MAX),
+                "'mute' must still resolve to /unfollow-source");
+
+        // Bare "source" is deliberately NOT an intent key: it keeps falling
+        // through to the containment path (whole -source family, add-source
+        // first per bareTokenReachesTheHyphenatedFamilyWholeTokenFirst) and
+        // must never become an EXCLUSIVE add-source hit — the signature of an
+        // over-broad intent key that would have swallowed the family.
+        assertNotEquals(List.of("add-source"),
+                CommandIntentSynonyms.suggest("source", FULL_VOCABULARY, MAX),
+                "bare 'source' must not become an exclusive /add-source intent hit");
+
+        // Bare "remove" must not reach add-source at all.
+        assertFalse(CommandIntentSynonyms.suggest("remove", FULL_VOCABULARY, MAX).contains("add-source"),
+                "bare 'remove' must not be pulled onto /add-source");
     }
 }
