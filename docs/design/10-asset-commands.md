@@ -178,9 +178,9 @@ includes a `stale` marker:
 
   ```                                                                                                                                                                                                                                                   
   Zcash (kraken)  ⚠ stale                                                                                                                                                                                                                               
-    $42.18  ·  0.000651 BTC                                                                                                                                                                                                                             
+    $42.18                                                                                                                                                                                                                             
     ...                                                                                                                                                                                                                                                 
-    as of 14:32 UTC, cached 412s (refresh interval 90s)                                                                                                                                                                                                 
+    as of 14:32 UTC, cached 412s                                                                                                                                                                                                 
     source: kraken.com/prices/zec-usd-zcash-price-chart 
   ```                                                                                                                                                                                                                                                   
 
@@ -196,16 +196,34 @@ CoinGecko does not expose an intra-day open price so a meaningful
 "today Δ%" is not available there. The renderer uses only what the
 source actually provides — it never invents zeros or estimates.
 
-| Field            | coingecko | kraken | bitfinex |
-|------------------|-----------|--------|----------|
-| price (USD)      | ✅        | ✅     | ✅       |
-| price (BTC)      | ✅        | ❌     | ❌       |
-| high\_24h        | ✅        | ✅     | ✅       |
-| low\_24h         | ✅        | ✅     | ✅       |
-| change\_1h\_pct  | ✅        | ❌     | ❌       |
-| change\_24h\_pct | ✅        | ❌     | ❌       |
-| change\_7d\_pct  | ✅        | ❌     | ❌       |
-| volume\_24h      | ✅        | ✅     | ✅       |
+The table is what each source populates on `PriceSnapshot` for **one
+fetch of one quote currency** — it is not a list of rendered lines (see
+§Rendering rules) and not a claim about which currencies a source can
+quote at all.
+
+| Field            | coingecko | kraken   | bitfinex |
+|------------------|-----------|----------|----------|
+| price (USD)      | ✅        | ✅       | ✅       |
+| price (BTC)      | same call | 2nd call | 2nd call |
+| high\_24h        | ✅        | ✅       | ✅       |
+| low\_24h         | ✅        | ✅       | ✅       |
+| change\_1h\_pct  | ✅        | ❌       | ❌       |
+| change\_24h\_pct | ✅        | ❌       | ✅       |
+| change\_7d\_pct  | ✅        | ❌       | ❌       |
+| volume\_24h      | ✅        | ✅       | ✅       |
+
+All three sources quote in BTC — `btc` is in every impl's
+`SUPPORTED_VS`. They differ in what a BTC quote *costs*: CoinGecko
+returns `market_data.current_price` as a currency-keyed map, so USD and
+BTC arrive in the same response (and the whole body is already kept in
+`price_snapshot.raw_payload`), while Kraken (`Ticker?pair=ZECBTC`) and
+Bitfinex (`v2/ticker/tZECBTC`) quote one pair per call, so each extra
+currency is another request. That cost asymmetry, not availability, is
+what §10.9 defers.
+
+Bitfinex does carry a 24h delta: its position-encoded ticker returns
+`dailyChangeRelative` at index 5, which `BitfinexSnapshotSource` scales
+to a percentage. Only Kraken's public ticker has no delta at all.
 
 ### Default reply examples (plain text, per D30)
 
@@ -213,7 +231,7 @@ source actually provides — it never invents zeros or estimates.
 
   ```
   Zcash (coingecko)
-    $42.18  ·  0.000651 BTC
+    $42.18
     1h:    +0.30%
     24h:   −2.40%
     24h high: $43.91
@@ -222,15 +240,27 @@ source actually provides — it never invents zeros or estimates.
     source: coingecko.com/en/coins/zcash
   ```
 
-**kraken / bitfinex** — no delta available; shows day spread only:
+**kraken** — no delta available; shows the day spread only:
 
   ```
   Zcash (kraken)
-    $42.15  ·  0.000650 BTC
+    $42.15
     24h high: $43.88
     24h low:  $41.02
     as of 14:32 UTC, cached 38s
     source: kraken.com/prices/zec-usd-zcash-price-chart
+  ```
+
+**bitfinex** — 24h delta plus the day spread; no 1h line:
+
+  ```
+  Zcash (bitfinex)
+    $42.11
+    24h:   −2.38%
+    24h high: $43.85
+    24h low:  $41.00
+    as of 14:32 UTC, cached 38s
+    source: bitfinex.com/t/ZEC:USD
   ```
 
 ### Rendering rules
@@ -238,20 +268,30 @@ source actually provides — it never invents zeros or estimates.
 - Header line: `<DisplayName> (<source>)` followed by an optional
   ` ⚠ stale` marker. The data-source name is always lowercase to match
   sub-verb input.
-- Price line: quote-currency price first, then BTC-denominated price
-  for crypto-vs-crypto context (privacy-coin audience anchors on BTC).
-  Skipped if `--vs btc` (would be redundant) or if the source did not
-  return a BTC-denominated price.
-- Delta lines (coingecko only): 1h first, then 24h, each at a fixed 2
-  decimal places (HALF_UP) so every delta reads at the same precision.
-  Sign-bearing U+2212 minus (not ASCII hyphen) for negative values.
-  Omitted entirely for exchange sub-verbs since they do not provide delta.
+- Price line: the snapshot's `price` in its own `vs_currency`, alone on
+  the line. A BTC-denominated companion price for crypto-vs-crypto
+  context is **not rendered in v1** — `reply.asset.price_line` carries
+  a single value, and the handler reads one snapshot row. Unbuilt, not
+  impossible; §10.9 has the cost.
+- Delta lines: 1h then 24h, each at a fixed 2 decimal places (HALF_UP)
+  so every delta reads at the same precision. Sign-bearing U+2212 minus
+  (not ASCII hyphen) for negative values. A line needs its own column
+  non-null (the 24h line carries one further condition — see below), so
+  in practice coingecko shows both, bitfinex shows 24h only, and kraken
+  shows neither.
 - Spread lines: the 24h high and 24h low each print on their own line
   (`24h high: $X` / `24h low: $Y`), so the reply does not wrap
-  mid-parenthetical on a phone. For coingecko they follow the 24h delta
-  line; for exchange sub-verbs they are the only 24h lines.
+  mid-parenthetical on a phone. They follow the 24h delta line where
+  there is one, and are the only 24h lines where there is not.
 - Any field absent from the snapshot row is silently omitted — the
-  renderer never invents zeros.
+  renderer never invents zeros. One coupling: the 24h delta and the
+  spread share a single bundle key, so the delta prints only when
+  `high_24h` and `low_24h` are present too — a snapshot carrying a 24h
+  delta but no spread renders neither line.
+- `change_7d_pct` and `volume_24h` are stored but reach no reply line
+  in v1: `AssetSnapshotReader` selects both into `Snapshot` and the
+  renderer emits neither. The availability table above is per-source
+  *collection*, not a list of rendered lines.
 - Capture/cache line: capture timestamp in UTC, cache age in seconds.
 - Source URL on its own line, bare per D30.
 
@@ -260,16 +300,12 @@ here as intended shape only. No `--verbose` flag is parsed:
 `AssetHandler.parseArgs` recognises `--vs` and silently ignores any other
 `--` token, so `/zcash --verbose` renders the ordinary reply. No
 user-facing surface advertises it.
-- `volume 24h: $XXM` — `volume_24h` IS collected and stored (all three
-  sources populate it per the table above), but the renderer emits no
-  volume line, so this is unbuilt rather than impossible.
-- A side-by-side of the asset's other quote currencies is **not
-  reachable** under the current data model, not merely unbuilt:
-  `asset_config` carries one `default_quote_currency` per
-  `(asset, sub_verb)` and the fetcher requests exactly that value, so a
-  pair never holds a second currency to compare against. This bullet
-  presupposes the multi-currency FETCH that M1-671 placed out of scope;
-  it cannot ship before that does.
+- `volume 24h: $XXM` — unbuilt rather than impossible: `volume_24h` is
+  already collected and stored (see the rendering rules above).
+- A side-by-side of the asset's other quote currencies needs the same
+  second-currency plumbing as the BTC companion price (§10.9): nothing
+  writes a second currency row per pair today, so there is nothing to
+  put side by side yet.
 
 ## 10.6 `bootstrap-assets.json` schema
 
@@ -388,6 +424,21 @@ feeds are operator-curated and the failure surface is small.
   CoinGecko Pro. Needs the operator-secret SPI.
 - **Alerts / thresholds.** "ping me if ZEC drops below $30." Stateful                                                                                                                                                                                 
   per-user, needs a scheduler integration.
+- **Second-currency prices.** A BTC-denominated companion on the price
+  line (`$42.18  ·  0.000651 BTC`) so a privacy-coin audience can
+  anchor on BTC, and the verbose form's side-by-side of an asset's
+  other quote currencies (§10.5). The schema is not the obstacle:
+  `price_snapshot` is keyed by `vs_currency`, so a second row per pair
+  is storable with no migration. What is missing is a writer — the
+  fetch is scheduled off `asset_config`, one `default_quote_currency`
+  per `(asset, sub_verb)`, and `AssetSnapshotFetcher.tickOnePair`
+  fetches exactly that one value — plus the reader and bundle key to
+  render a second price. Cost is asymmetric per source (§10.5): for
+  coingecko the BTC/EUR/CZK figures are already in the response body
+  the fetcher stores in `raw_payload`, so it is near-free; Kraken and
+  Bitfinex need one extra request per currency, against the rate-limit
+  budget `AssetSnapshotFetcher`'s javadoc guards. M1-671 recorded the
+  fetch change as out of scope.
 
 ## 10.10 Rate limiting
 
