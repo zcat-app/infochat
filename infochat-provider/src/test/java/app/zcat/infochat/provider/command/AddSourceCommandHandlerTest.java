@@ -237,6 +237,64 @@ class AddSourceCommandHandlerTest {
     }
 
     @Test
+    void removedSourceReplyNamesTheSourceAndTheSourceEnableRemedy() {
+        // M1-669. A bot admin re-adding a soft-deleted source used to be told
+        // "bootstrap tags replaced" — the reply read as success while the SQL
+        // had skipped the replacement and the feed stayed hidden and inert. The
+        // remedy must be nameable from the reply itself: a removed source does
+        // not appear in /list-sources, so the id printed here is the admin's
+        // only route to /source-enable.
+        dataSource.seedUser("m1-669-admin-removed", /* isAdmin */ true, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-669-removed.xml",
+                ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.ADMIN_EXISTING_REMOVED);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-669-admin-removed"),
+                "/add-source https://example.com/m1-669-removed.xml --tags m1-669-news");
+
+        String body = reply.text();
+        assertFalse(body.contains("bootstrap tags replaced"),
+                "the removed-source reply MUST NOT claim a tag replacement that the "
+                        + "SQL skipped — got: " + body);
+        assertTrue(body.contains("example.com"),
+                "the reply must name the source — got: " + body);
+        assertTrue(body.contains("/source-enable " + sourceUpsertService.lastSourceId()),
+                "the reply must point at the remedy with the source id /source-enable "
+                        + "takes — got: " + body);
+        assertFalse(body.contains("visible to bot admins"),
+                "the URL-visibility disclosure is gated to FRESH_INSERT — got: " + body);
+    }
+
+    @Test
+    void nonAdminRemovedSourceReplyNamesTheAdminRemedyNotACommandTheyCannotRun() {
+        // M1-669, non-admin tier. /source-enable is bot-admin-only
+        // (SourceEnableCommandHandler gates on !isAdmin), so telling this caller
+        // to run it would repeat the very defect the ticket fixes — naming a
+        // remedy the reader cannot reach. The reply says who can.
+        dataSource.seedUser("m1-669-user-removed", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-669-user-removed.xml",
+                ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.SUBSCRIBED_EXISTING_REMOVED);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-669-user-removed"),
+                "/add-source https://example.com/m1-669-user-removed.xml --tags m1-669-news");
+
+        String body = reply.text();
+        assertTrue(body.contains("is removed"),
+                "the reply must say the source is removed rather than reading as a "
+                        + "plain successful subscribe — got: " + body);
+        assertTrue(body.contains("Ask a bot admin"),
+                "a non-admin must be pointed at who can revive the source, not at a "
+                        + "command they cannot run — got: " + body);
+        assertFalse(body.contains("bootstrap tags replaced"),
+                "no tag replacement happened — got: " + body);
+        assertFalse(body.contains("visible to bot admins"),
+                "the URL-visibility disclosure is gated to FRESH_INSERT — got: " + body);
+    }
+
+    @Test
     void addSourceTypeNitterCreatesNitterKindSource() {
         // Explicit --type nitter resolves NITTER and persists kind='nitter'.
         // The host is not a configured nitter-host here, so resolution comes
@@ -523,6 +581,7 @@ class AddSourceCommandHandlerTest {
     private static final class StubSourceUpsertService extends SourceUpsertService {
         private Outcome outcome = Outcome.FRESH_INSERT;
         private KindResolver.SourceKind lastKind;
+        private UUID lastSourceId;
 
         void setOutcome(Outcome outcome) {
             this.outcome = outcome;
@@ -531,6 +590,11 @@ class AddSourceCommandHandlerTest {
         /** The {@code kind} the handler resolved and passed to the upsert. */
         KindResolver.SourceKind lastKind() {
             return lastKind;
+        }
+
+        /** The source id this stub handed back, so a reply can be asserted against it. */
+        UUID lastSourceId() {
+            return lastSourceId;
         }
 
         @Override
@@ -544,7 +608,8 @@ class AddSourceCommandHandlerTest {
                                    String category,
                                    List<String> tags) {
             this.lastKind = kind;
-            return new UpsertResult(outcome, UUID.randomUUID(), displayName);
+            this.lastSourceId = UUID.randomUUID();
+            return new UpsertResult(outcome, lastSourceId, displayName);
         }
     }
 }

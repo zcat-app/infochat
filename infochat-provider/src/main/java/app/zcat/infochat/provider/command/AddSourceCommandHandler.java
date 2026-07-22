@@ -216,6 +216,16 @@ public class AddSourceCommandHandler implements CommandHandler {
                     BundleKeys.REPLY_ADD_SOURCE_SUBSCRIBED_EXISTING, inboundContext.effectiveLanguage());
             case ADMIN_TAGS_REPLACED -> bundleLoader.get(
                     BundleKeys.REPLY_ADD_SOURCE_ADMIN_TAGS_REPLACED, inboundContext.effectiveLanguage());
+            // The source id, not the URL: /source-enable takes the id
+            // /list-sources shows, and a removed source is hidden from
+            // /list-sources — so naming the id here is the only way the
+            // admin can reach the remedy from this reply (M1-669).
+            case ADMIN_EXISTING_REMOVED -> format(
+                    BundleKeys.REPLY_ADD_SOURCE_ADMIN_EXISTING_REMOVED,
+                    result.displayName(), result.sourceId());
+            case SUBSCRIBED_EXISTING_REMOVED -> format(
+                    BundleKeys.REPLY_ADD_SOURCE_SUBSCRIBED_EXISTING_REMOVED,
+                    result.displayName(), result.sourceId());
         };
     }
 

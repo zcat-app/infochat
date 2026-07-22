@@ -1,18 +1,21 @@
 ---
 id: M1-669
 title: "/add-source on a removed source must not claim tags replaced"
-status: pending
+status: done
 created: 2026-07-22
 last_updated: 2026-07-22
 blocked_by: []
-files_budget: 6
+files_budget: 9
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/source/SourceUpsertService.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/AddSourceCommandHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/bundles/cs.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/source/SourceUpsertServiceIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceCommandHandlerTest.java
+  - docs/spec/commands.md
+  - docs/design/03-commands.md
 complexity: low
 risk: low
 round_cap: 2
@@ -44,6 +47,24 @@ out_of_scope:
     This ticket only changes WHETHER the ADD_SOURCE row is written in the
     no-op case, never the enum or the row's columns.
 acceptance:
+  - >-
+    The NON-admin caller against a soft-deleted row is reported distinctly
+    too, resolving to its own outcome (e.g. SUBSCRIBED_EXISTING_REMOVED)
+    rather than SUBSCRIBED_EXISTING. Its reply must not imply a working
+    feed and must name the remedy for THAT tier: /source-enable is
+    bot-admin-only (SourceEnableCommandHandler gates on `!isAdmin` ->
+    ERROR_ADMIN_ONLY), so telling a non-admin to run it would repeat the
+    defect this ticket fixes. Like the admin removed-case, it writes no
+    ADD_SOURCE audit row. SourceUpsertServiceIT and
+    AddSourceCommandHandlerTest each cover it.
+  - >-
+    The two documented outcome enumerations are brought back in step with
+    the code: `docs/spec/commands.md` §Source management (the "reply
+    distinguishes outcomes" list plus its "in all three cases" sentence)
+    and the `docs/design/03-commands.md` "Reply distinguishes outcomes"
+    table both cover the soft-deleted outcomes and no longer state a stale
+    count. These are orphans this diff creates — the enumerations are
+    exhaustive as written and a new outcome makes them an undercount.
   - >-
     SourceUpsertService reports the removed case distinctly: UPSERT_SOURCE_SQL's
     RETURNING clause additionally yields whether the conflicting row is
@@ -94,17 +115,80 @@ spec_refs:
 decision_refs:
   - "D38"
   - "D43"
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-07-22
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 373
+      removed: 36
 escalations: []
-revisions: []
+revisions:
+  - date: 2026-07-22
+    reason: >-
+      Pre-flight self-check refine, user-authorized at /m1-tick run start. The
+      new bundle key acceptance item 4 mandates needs a declaration site:
+      AddSourceCommandHandler reaches all 17 of its keys through BundleKeys, so
+      BundleKeys.java is added to files_scope (budget 6 -> 7). The alternative
+      considered and rejected was a local `private static final` key constant in
+      the handler (the QuarantineCommandHandler:97 / PendingCommandHandler:50
+      precedent), which keeps the 6-file scope but writes a ticket-scope
+      reference into a permanent source comment.
+    prior_values: |
+      files_budget: 6
+      files_scope:
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/source/SourceUpsertService.java
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/command/AddSourceCommandHandler.java
+        - infochat-provider/src/main/resources/bundles/en.properties
+        - infochat-provider/src/main/resources/bundles/cs.properties
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/source/SourceUpsertServiceIT.java
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceCommandHandlerTest.java
+  - date: 2026-07-22
+    reason: >-
+      Second refine, user-authorized mid-implementation after both findings
+      survived falsification. (1) The non-admin-against-a-removed-row reply
+      is the same defect in the other tier — "Subscribed." for a feed that
+      is hidden from /list-sources and delivers nothing — and the tiers need
+      different remedies because /source-enable is bot-admin-only
+      (SourceEnableCommandHandler:156). (2) The spec and design outcome
+      enumerations are exhaustive as written ("in all three cases"), so the
+      new outcomes orphan them; both paths added to files_scope
+      (budget 7 -> 9). Acceptance items added for both.
+    prior_values: |
+      files_budget: 7
+      files_scope:
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/source/SourceUpsertService.java
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/command/AddSourceCommandHandler.java
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
+        - infochat-provider/src/main/resources/bundles/en.properties
+        - infochat-provider/src/main/resources/bundles/cs.properties
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/source/SourceUpsertServiceIT.java
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceCommandHandlerTest.java
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
 clarity_check:
-  date: ""
-  verdict: ""
-  warnings: []
+  date: 2026-07-22
+  verdict: WARN
+  warnings:
+    - >-
+      lint-ticket.py PASS (0 blockers, 0 warnings). Self-check confirmed the
+      ticket's code claims against source: UPSERT_SOURCE_SQL's
+      `WHEN ? AND source.deleted_at IS NULL` guard is at
+      SourceUpsertService.java:108, the unconditional
+      `else if (actorIsBotAdmin)` outcome selector at :165-167, and the
+      `(xmax = 0) AS was_inserted` RETURNING precedent at :111.
+    - >-
+      files_scope omitted BundleKeys.java, the declaration site the new bundle
+      key requires; refined with user authorization (see revisions).
   blockers: []
 ---
 

@@ -542,6 +542,25 @@ public final class BundleKeys {
     public static final String REPLY_ADD_SOURCE_ADMIN_TAGS_REPLACED = "reply.add_source.admin_tags_replaced";
 
     /**
+     * Branch C-removed — bot-admin caller against a SOFT-DELETED source. Nothing
+     * was replaced, so the reply names the source and points at
+     * {@code /source-enable <id>}, the command that actually revives it (M1-669).
+     * Takes {@code {0}} = display name, {@code {1}} = source id.
+     */
+    public static final String REPLY_ADD_SOURCE_ADMIN_EXISTING_REMOVED =
+            "reply.add_source.admin_existing_removed";
+
+    /**
+     * Branch B-removed — non-admin caller against a SOFT-DELETED source. The
+     * subscription is upserted but inert, so the reply must not promise a
+     * working feed; {@code /source-enable} is bot-admin-only, making "ask a bot
+     * admin" this tier's remedy (M1-669). Takes {@code {0}} = display name,
+     * {@code {1}} = source id.
+     */
+    public static final String REPLY_ADD_SOURCE_SUBSCRIBED_EXISTING_REMOVED =
+            "reply.add_source.subscribed_existing_removed";
+
+    /**
      * Branch A appendix — operator-visibility disclosure per
      * {@code docs/spec/security.md} §Source URL visibility. The literal
      * substring {@code visible to bot admins} is asserted by

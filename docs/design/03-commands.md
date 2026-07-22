@@ -700,9 +700,17 @@ Per-scope tag preferences continue to flow through `scope_tag` (`/follow-tag`
 | Fresh insert | `"Added source <name>. First fetch in ~5 minutes. Use /list-sources to confirm."` + URL-visibility disclosure |
 | Bot-admin tag replacement | `"Source already existed; tags updated."` |
 | Non-admin against existing row | `"Subscribed; tags unchanged on existing source."` |
+| Bot admin against soft-deleted row | `"Source <name> already exists but is removed. No action taken — bootstrap tags were not replaced. Run /source-enable <id> to revive it."` |
+| Non-admin against soft-deleted row | `"Subscribed, but source <name> is removed and delivers no posts. Ask a bot admin to revive it with /source-enable <id>."` |
+
+The two soft-deleted rows are the `UPSERT_SOURCE_SQL` `CASE WHEN ? AND
+source.deleted_at IS NULL` guard made visible to the caller: the guard already
+skipped the tag replacement, so neither reply may claim one and neither writes
+an `ADD_SOURCE` audit row. They differ only in the remedy they can name —
+`/source-enable` is bot-admin-only (M1-669).
 
 The caller's `source_subscription` is upserted in the same transaction in
-all three cases.
+every case.
 
 **URL visibility disclosure.** On a fresh insert, the reply must surface
 that source URLs are visible to bot admins

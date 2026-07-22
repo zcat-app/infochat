@@ -24,7 +24,7 @@ import java.util.UUID;
 /**
  * Idempotent {@code source} + {@code source_subscription} + {@code tag}
  * vocab union + {@code audit_log} write in a single transaction.
- * Distinguishes the three spec'd branches from
+ * Distinguishes the spec'd branches from
  * {@code docs/spec/commands.md} §Source management:
  *
  * <ul>
@@ -37,10 +37,24 @@ import java.util.UUID;
  *       unchanged (supplied {@code --tags} are quietly ignored);
  *       subscription upserted.</li>
  *   <li>{@link Outcome#ADMIN_TAGS_REPLACED} — bot-admin caller against
- *       a pre-existing source row; {@code bootstrap_tags} is REPLACED
- *       with the supplied {@code --tags}; subscription upserted; one
- *       {@code audit_log} row written with the {@code ADD_SOURCE} verb
- *       (V5 §2.1.8 closed catalogue).</li>
+ *       a pre-existing, NON-deleted source row; {@code bootstrap_tags}
+ *       is REPLACED with the supplied {@code --tags}; subscription
+ *       upserted; one {@code audit_log} row written with the
+ *       {@code ADD_SOURCE} verb (V5 §2.1.8 closed catalogue).</li>
+ *   <li>{@link Outcome#ADMIN_EXISTING_REMOVED} — bot-admin caller
+ *       against a SOFT-DELETED source row; the SQL leaves
+ *       {@code bootstrap_tags} alone, so this branch writes no audit
+ *       row and the reply must not claim a replacement (M1-669).
+ *       Reviving the row is {@code /source-enable}'s job, behind its
+ *       own confirmation gate.</li>
+ *   <li>{@link Outcome#SUBSCRIBED_EXISTING_REMOVED} — non-admin caller
+ *       against a SOFT-DELETED source row; subscription upserted (inert
+ *       until the row is revived), tags ignored, no audit row. Distinct
+ *       from {@link Outcome#SUBSCRIBED_EXISTING} because a plain
+ *       "subscribed" reply would promise a feed that delivers nothing
+ *       and is hidden from {@code /list-sources}, and because
+ *       {@code /source-enable} is bot-admin-only — this tier's remedy
+ *       is to ask a bot admin, not to run it (M1-669).</li>
  * </ul>
  *
  * <p>The transaction shape uses
@@ -51,7 +65,12 @@ import java.util.UUID;
  * SET on {@code bootstrap_tags} uses {@code CASE WHEN ? AND
  * source.deleted_at IS NULL THEN EXCLUDED.bootstrap_tags ELSE
  * source.bootstrap_tags END} so the UPDATE is a no-op for non-admin
- * callers (Branch B) and for soft-deleted rows.</p>
+ * callers (Branch B) and for soft-deleted rows. BOTH halves of that
+ * condition are returned to the outcome selector — the admin flag is
+ * already in hand, and {@code was_removed} carries the deleted-row
+ * half — so the reported outcome cannot disagree with what the SQL
+ * actually did. Reporting a replacement the CASE had skipped was the
+ * M1-669 defect.</p>
  *
  * <p>The vocab union runs UNCONDITIONALLY on every call: it is an
  * append-only {@code ON CONFLICT (name) DO NOTHING} INSERT against
@@ -108,7 +127,14 @@ public class SourceUpsertService {
                     + "      WHEN ? AND source.deleted_at IS NULL THEN EXCLUDED.bootstrap_tags "
                     + "      ELSE source.bootstrap_tags "
                     + "    END "
-                    + "RETURNING id, display_name, (xmax = 0) AS was_inserted";
+                    // was_removed mirrors the CASE guard above: the DO UPDATE arm
+                    // never writes deleted_at, so on the conflict branch this is
+                    // the pre-existing value and tells the outcome selector whether
+                    // the tag replacement it is about to report actually happened.
+                    // On the INSERT branch the fresh row has deleted_at NULL, so it
+                    // is false — and was_inserted is checked first anyway.
+                    + "RETURNING id, display_name, (xmax = 0) AS was_inserted, "
+                    + "          (source.deleted_at IS NOT NULL) AS was_removed";
 
     private static final String UPSERT_SUBSCRIPTION_SQL =
             "INSERT INTO source_subscription (scope_kind, scope_id, source_id, added_by) "
@@ -162,6 +188,16 @@ public class SourceUpsertService {
                 Outcome outcome;
                 if (row.wasInserted()) {
                     outcome = Outcome.FRESH_INSERT;
+                } else if (row.wasRemoved()) {
+                    // Neither tier gets an audit row here: the CASE guard skipped
+                    // the tag replacement, and audit_log records privileged
+                    // actions that OCCURRED — a row would attribute a replacement
+                    // that never happened (M1-669). The tiers split only on which
+                    // remedy their reply can name, because /source-enable is
+                    // bot-admin-only.
+                    outcome = actorIsBotAdmin
+                            ? Outcome.ADMIN_EXISTING_REMOVED
+                            : Outcome.SUBSCRIBED_EXISTING_REMOVED;
                 } else if (actorIsBotAdmin) {
                     outcome = Outcome.ADMIN_TAGS_REPLACED;
                     insertAuditRow(conn, actorUserId, row.id(), scopeId);
@@ -237,7 +273,8 @@ public class SourceUpsertService {
                 return new SourceUpsertResultRow(
                         (UUID) rs.getObject("id"),
                         rs.getString("display_name"),
-                        rs.getBoolean("was_inserted"));
+                        rs.getBoolean("was_inserted"),
+                        rs.getBoolean("was_removed"));
             }
         }
     }
@@ -270,18 +307,21 @@ public class SourceUpsertService {
         auditLogWriter.write(conn, row);
     }
 
-    /** Closed set: which of the three spec'd branches the upsert took. */
+    /** Closed set: which of the spec'd branches the upsert took. */
     public enum Outcome {
         FRESH_INSERT,
         SUBSCRIBED_EXISTING,
-        ADMIN_TAGS_REPLACED
+        ADMIN_TAGS_REPLACED,
+        ADMIN_EXISTING_REMOVED,
+        SUBSCRIBED_EXISTING_REMOVED
     }
 
     /** Result the handler uses to build the outbound reply. */
     public record UpsertResult(Outcome outcome, UUID sourceId, String displayName) {}
 
     /** Internal row-level result of the {@code source} UPSERT. */
-    private record SourceUpsertResultRow(UUID id, String displayName, boolean wasInserted) {}
+    private record SourceUpsertResultRow(UUID id, String displayName, boolean wasInserted,
+                                         boolean wasRemoved) {}
 
     /**
      * Optional convenience: derive a default display name from the URL host.

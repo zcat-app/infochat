@@ -34,12 +34,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the DevServices Postgres container (Flyway-applied schema, V5
  * users + audit_log, V6 source + tag, V7 source_subscription).
  *
- * <p>The three spec'd branches in
+ * <p>The spec'd branches in
  * {@code docs/spec/commands.md} §Source management for
  * {@code /add-source} get one {@code @Test} each plus an
  * idempotency assertion: a Branch A repeat for the same caller does
  * not insert a second source row, the existing subscription stays,
- * and {@code bootstrap_tags} is not rewritten.</p>
+ * and {@code bootstrap_tags} is not rewritten. The bot-admin-against-a-
+ * soft-deleted-row branch (M1-669) gets two: one pinning the outcome
+ * and the untouched tags, one pinning the absent audit row.</p>
  *
  * <p>Test isolation: each {@code @Test} seeds rows under the
  * {@code 'm1-036-'} contact-id prefix and the
@@ -69,12 +71,15 @@ class SourceUpsertServiceIT {
                             + "VALUES ('inmemory', 'guardian-m1-036-svc-permanent', TRUE, 'vouched') "
                             + "ON CONFLICT (adapter, contact_id) DO UPDATE "
                             + "  SET is_admin = TRUE, is_banned = FALSE");
-            execute(conn,
-                    "DELETE FROM audit_log "
-                            + "WHERE target_kind = 'source' "
-                            + "  AND target_id IN ("
-                            + "    SELECT id::TEXT FROM source "
-                            + "     WHERE identifier LIKE 'https://example.com/m1-036-%')");
+            // audit_log rows are NOT deleted here: V5's trg_audit_log_no_delete
+            // raises on any matching DELETE (Invariant 10, append-only), so the
+            // statement that used to sit here could only ever no-op or abort.
+            // It went unnoticed while the one audit-writing test happened to
+            // sort last in JUnit's method order and no later @BeforeEach saw its
+            // row. Leaving the rows is safe: every assertion here is keyed on a
+            // source id AND an actor id minted fresh by this test, so a prior
+            // test's rows can never match. The users DELETE below skips the
+            // actors those rows pin (audit_log.actor_user_id is NO ACTION).
             execute(conn,
                     "DELETE FROM source_subscription "
                             + "WHERE source_id IN ("
@@ -86,7 +91,10 @@ class SourceUpsertServiceIT {
             execute(conn,
                     "DELETE FROM tag WHERE name IN ('m1-036-tag-a', 'm1-036-tag-b', 'm1-036-tag-c')");
             execute(conn,
-                    "DELETE FROM users WHERE contact_id LIKE 'm1-036-%'");
+                    "DELETE FROM users WHERE contact_id LIKE 'm1-036-%' "
+                            + "  AND id NOT IN ("
+                            + "    SELECT actor_user_id FROM audit_log "
+                            + "     WHERE actor_user_id IS NOT NULL)");
         }
     }
 
@@ -273,6 +281,92 @@ class SourceUpsertServiceIT {
                 "the audit row's action verb must be the V5-closed 'ADD_SOURCE' literal");
     }
 
+    // M1-669: a bot admin re-adding a SOFT-DELETED source. UPSERT_SOURCE_SQL's
+    // CASE guard already refuses to touch bootstrap_tags on a removed row; the
+    // outcome must say so rather than report Branch C's replacement. Reply and
+    // SQL are pinned to the same truth here: the outcome AND the stored tags.
+    @Test
+    void adminReAddOfRemovedSourceDoesNotClaimTagsReplaced() throws Exception {
+        UUID admin = insertUser("m1-036-669-admin-outcome", true);
+        UUID removedId = insertRemovedSource(
+                "https://example.com/m1-036-669-removed-outcome.xml", "m1-036-tag-a");
+
+        UpsertResult result = service.upsert(
+                admin, /* actorIsBotAdmin */ true, "dm", admin, SourceKind.RSS,
+                "https://example.com/m1-036-669-removed-outcome.xml",
+                "Removed Feed", "news",
+                List.of("m1-036-tag-b", "m1-036-tag-c"));
+
+        assertEquals(Outcome.ADMIN_EXISTING_REMOVED, result.outcome(),
+                "a bot admin against a soft-deleted row must NOT report "
+                        + "ADMIN_TAGS_REPLACED — the SQL skipped the replacement");
+        assertEquals(removedId, result.sourceId(),
+                "the conflict must resolve to the existing removed row, not a new one");
+
+        SourceRow row = readSource(removedId);
+        assertEquals(List.of("m1-036-tag-a"), row.bootstrapTags,
+                "bootstrap_tags on a removed row MUST survive the admin re-add — "
+                        + "this is the DB half of the same truth the outcome reports");
+        assertNotNull(row.deletedAt,
+                "/add-source must not revive the row; reviving is /source-enable's "
+                        + "confirmed action");
+    }
+
+    // M1-669: the audit_log is the accountability record, so it must not carry
+    // an ADD_SOURCE row attributing a tag replacement that the SQL skipped.
+    @Test
+    void adminReAddOfRemovedSourceWritesNoTagReplacementAudit() throws Exception {
+        UUID admin = insertUser("m1-036-669-admin-audit", true);
+        UUID removedId = insertRemovedSource(
+                "https://example.com/m1-036-669-removed-audit.xml", "m1-036-tag-a");
+
+        long auditRowsBefore = countAuditRows(removedId, admin);
+        assertEquals(0L, auditRowsBefore,
+                "fixture precondition: the removed row starts with no audit history "
+                        + "for this admin, so the after-count below cannot pass vacuously");
+
+        UpsertResult result = service.upsert(
+                admin, /* actorIsBotAdmin */ true, "dm", admin, SourceKind.RSS,
+                "https://example.com/m1-036-669-removed-audit.xml",
+                "Removed Feed", "news",
+                List.of("m1-036-tag-b"));
+
+        assertEquals(Outcome.ADMIN_EXISTING_REMOVED, result.outcome());
+        assertEquals(auditRowsBefore, countAuditRows(removedId, admin),
+                "the no-op branch must write NO ADD_SOURCE audit row — a false entry "
+                        + "in the accountability record is worse than none");
+    }
+
+    // M1-669: the same defect in the other tier. A non-admin against a removed
+    // row must not collapse into plain SUBSCRIBED_EXISTING — that reply promises
+    // a feed which delivers nothing and is hidden from /list-sources, and this
+    // tier cannot run /source-enable (it is bot-admin-only), so its remedy
+    // differs. Tags stay ignored and no audit row is written either way.
+    @Test
+    void nonAdminReAddOfRemovedSourceIsReportedAsRemovedNotPlainSubscribed() throws Exception {
+        UUID caller = insertUser("m1-036-669-non-admin", false);
+        UUID removedId = insertRemovedSource(
+                "https://example.com/m1-036-669-removed-non-admin.xml", "m1-036-tag-a");
+
+        UpsertResult result = service.upsert(
+                caller, /* actorIsBotAdmin */ false, "dm", caller, SourceKind.RSS,
+                "https://example.com/m1-036-669-removed-non-admin.xml",
+                "Removed Feed", "news",
+                List.of("m1-036-tag-b"));
+
+        assertEquals(Outcome.SUBSCRIBED_EXISTING_REMOVED, result.outcome(),
+                "a non-admin against a soft-deleted row must be distinguishable "
+                        + "from a subscribe against a LIVE existing row");
+        assertEquals(removedId, result.sourceId());
+        assertEquals(List.of("m1-036-tag-a"), readSource(removedId).bootstrapTags,
+                "a non-admin never replaces bootstrap_tags, removed row or not");
+        assertEquals(0L, countAuditRows(removedId, caller),
+                "the non-admin removed branch writes no audit row");
+        assertEquals(1L, countSubscriptions(caller, removedId),
+                "the subscription is still upserted — subscription semantics are "
+                        + "unchanged by M1-669; only the reply stops over-promising");
+    }
+
     // M1-365: the tag-vocab union must be ONE round-trip for N tags, not one
     // executeUpdate per tag. Drives the package-private upsertTagVocab with a
     // Connection proxy that counts executeUpdate on the tag INSERT, then asserts
@@ -347,6 +441,25 @@ class SourceUpsertServiceIT {
             try (ResultSet rs = ps.executeQuery()) {
                 assertTrue(rs.next());
                 return (UUID) rs.getObject(1);
+            }
+        }
+    }
+
+    // Soft-deleted fixture: deleted_at set, status left alone. That mirrors
+    // /remove-source, which is a deleted_at/deleted_by write only — 'removed'
+    // is not one of the V6 status CHECK values.
+    private UUID insertRemovedSource(String identifier, String bootstrapTag) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO source (kind, identifier, display_name, category, "
+                             + "bootstrap_tags, status, source_origin, deleted_at) "
+                             + "VALUES ('rss', ?, 'Removed Feed', 'news', ARRAY[?]::TEXT[], "
+                             + "'active', 'user', now()) RETURNING id")) {
+            ps.setString(1, identifier);
+            ps.setString(2, bootstrapTag);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                return (UUID) rs.getObject("id");
             }
         }
     }

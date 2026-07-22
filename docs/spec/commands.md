@@ -689,8 +689,17 @@ over the whole world (§Per-scope tag preferences).
   reply distinguishes outcomes: "source added" (fresh insert),
   "source already existed, tags updated" (bot-admin tag replacement),
   "subscribed; tags unchanged on existing source" (non-admin against
-  existing row). The caller's `source_subscription` is upserted in
-  the same transaction in all three cases.
+  existing row), and — against a **soft-deleted** row, where the
+  upsert deliberately leaves `bootstrap_tags` untouched — "removed,
+  nothing changed". That last outcome **must not claim a
+  replacement** and **must name the remedy for the caller's own
+  tier**: `/source-enable <id>` for a bot admin, "ask a bot admin"
+  for everyone else, since `/source-enable` is bot-admin-only. It
+  writes **no `ADD_SOURCE` audit row** — the audit log records
+  privileged actions that occurred, and no replacement did. The
+  caller's `source_subscription` is upserted in the same transaction
+  in every case (against a soft-deleted row the subscription is inert
+  until the row is revived).
 
   **URL visibility disclosure.** On a fresh insert (the only outcome
   that adds a URL the bot did not previously hold), the reply **must
