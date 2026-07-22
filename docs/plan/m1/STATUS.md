@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 684 |
 | deferred | 0 |
 | abandoned | 19 |
-| **total** | **703** |
+| **total** | **704** |
 
 ---
 
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-669 — /add-source on a removed source must not claim tags replaced (complexity: low, risk: low)
 
 ---
 
@@ -904,4 +904,5 @@ M1-664 (done)
   └── M1-665 (done) [see above]
 M1-667 (done)
 M1-668 (done)
+M1-669 (pending) ← runnable
 ```
