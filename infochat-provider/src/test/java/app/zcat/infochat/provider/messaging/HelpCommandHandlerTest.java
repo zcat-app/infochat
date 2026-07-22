@@ -251,8 +251,7 @@ class HelpCommandHandlerTest {
                 return List.of(new AssetRegistry.AssetEntry(
                         "zcash", "Zcash",
                         List.of(new AssetRegistry.SubVerbEntry(
-                                "price", true, true, "https://example.com", "usd")),
-                        List.of("usd")));
+                                "price", true, true, "https://example.com", "usd"))));
             }
         };
 
@@ -597,8 +596,7 @@ class HelpCommandHandlerTest {
                 return List.of(new AssetRegistry.AssetEntry(
                         "zcash", "Zcash",
                         List.of(new AssetRegistry.SubVerbEntry(
-                                "price", true, true, "https://example.com", "usd")),
-                        List.of("usd")));
+                                "price", true, true, "https://example.com", "usd"))));
             }
         };
 

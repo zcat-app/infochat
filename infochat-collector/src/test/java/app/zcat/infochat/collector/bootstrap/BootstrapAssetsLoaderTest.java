@@ -203,8 +203,7 @@ class BootstrapAssetsLoaderTest {
                   "default_sub_verb": "coingecko",
                   "sub_verbs": [
                     { "id": "coingecko", "external_id": "zcash" }
-                  ],
-                  "supported_vs": ["usd"]
+                  ]
                 }
               ]
             }

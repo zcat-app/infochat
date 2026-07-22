@@ -329,11 +329,14 @@ actions happened, never your message content).
   to a bookmark (kept separate from the post's own tags); `/saved <tag>` then
   filters your library by them.
 - **Asset price source & currency.** `/zcash` and `/monero` take an optional
-  exchange sub-verb and a `--vs <currency>` — e.g. `/zcash kraken --vs eur`.
-  Supported currencies differ per source: Coingecko accepts `usd`, `eur`,
-  `czk`, `btc`; Kraken accepts `usd`, `eur`, `btc`; Bitfinex accepts `usd`,
-  `btc`. Bare `/zcash` uses the default source and currency your admin
-  configured.
+  exchange sub-verb and a `--vs <currency>` — e.g. `/zcash kraken --vs usd`.
+  Each source is configured with a single quote currency and prices are
+  collected only in that currency, so `--vs` selects it explicitly rather than
+  converting; in the shipped configuration every source quotes `usd`. Asking
+  for any other currency tells you which one that source serves. Bare `/zcash`
+  uses the default source and currency your admin configured. (The exchanges
+  themselves quote further currencies; collecting them is not part of this
+  release.)
 - **Re-include all standard sources.** `/follow-all-sources` clears this
   scope's `/unfollow-source` opt-outs in one call — every standard source the
   scope had opted out of becomes visible again. Per scope: in a DM it affects

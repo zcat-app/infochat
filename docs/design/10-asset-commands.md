@@ -275,8 +275,7 @@ Verbose form (`/zcash --verbose`) adds:
           { "id": "coingecko", "external_id": "zcash" },                                                                                                                                                                                                
           { "id": "kraken",    "external_id": "ZECUSD" },
           { "id": "bitfinex",  "external_id": "tZECUSD" }                                                                                                                                                                                               
-        ],                                              
-        "supported_vs": ["usd", "eur", "czk", "btc"]                                                                                                                                                                                                    
+        ]
       },                                               
       {                                                                                                                                                                                                                                                 
         "id": "monero",                                
@@ -287,8 +286,7 @@ Verbose form (`/zcash --verbose`) adds:
           { "id": "coingecko", "external_id": "monero" },
           { "id": "kraken",    "external_id": "XMRUSD" },                                                                                                                                                                                               
           { "id": "bitfinex",  "external_id": "tXMRUSD" }
-        ],                                              
-        "supported_vs": ["usd", "eur", "czk", "btc"]                                                                                                                                                                                                    
+        ]
       }                                  
     ]                                                                                                                                                                                                                                                   
   }                                                     
@@ -318,25 +316,30 @@ the operator runbook.
 
 Mirrors the tag-argument error shape (commands.md §Friendly errors):
 
-  ```                                                                                                                                                                                                                                                   
-  /zcash krakn                                                                                                                                                                                                                                          
-  Unknown sub-verb krakn for /zcash. Did you mean: kraken?                                                                                                                                                                                              
-  Available: coingecko, kraken, bitfinex.                                                                                                                                                                                                               
-  Usage: /zcash [sub-verb] [--vs <currency>]           
-  ```                                                                                                                                                                                                                                                   
+  ```
+  /zcash krakn
+  Unknown sub-verb for /zcash. Did you mean: kraken?
+  Available: coingecko, kraken, bitfinex
+  Usage: /zcash [sub-verb] [--vs <currency>]
+  ```
 
-  ```                                                                                                                                                                                                                                                   
-  /monero binance                                      
-  Sub-verb binance is not enabled for /monero. (XMR is not listed on
-  Binance.)                                                                                                                                                                                                                                             
-  Available: coingecko, kraken, bitfinex.                                                                                                                                                                                                               
-  ```                                                                                                                                                                                                                                                   
+  ```
+  /monero binance
+  Sub-verb binance is not enabled for /monero.
+  Available: coingecko, kraken, bitfinex
+  ```
 
-  ```                                    
-  /zcash --vs jpy                                      
-  Quote currency jpy is not enabled for /zcash. Did you mean: czk?
-  Available: usd, eur, czk, btc.                                                                                                                                                                                                                        
-  ```                                                   
+  ```
+  /zcash --vs jpy
+  That quote currency is not enabled for /zcash. Did you mean: usd?
+  Available: usd
+  ```
+
+The `--vs` `Available:` list is the SELECTED pair's
+`asset_config.default_quote_currency` — the only currency that pair
+fetches — so it is always exactly one value, and a `--vs` the pair does
+not serve is refused here rather than falling through to the no-data
+reply (M1-671).
 
 ## 10.8b Asset feed recovery (operator-side)
 

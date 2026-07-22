@@ -1,15 +1,32 @@
 ---
 id: M1-671
 title: "Validate --vs against the quote currency each pair actually fetches"
-status: pending
+status: done
 created: 2026-07-22
 last_updated: 2026-07-22
+clarity_check:
+  date: 2026-07-22
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
-files_budget: 5
+files_budget: 16
 files_scope:
+  - infochat-provider/src/test/resources/inbound-reflection-error-baseline.txt
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/asset/AssetHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/command/asset/AssetRegistry.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetPerSourceCurrencyTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetCommandFamilyOracleTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/HelpCommandHandlerTest.java
+  - infochat-provider/src/test/resources/bootstrap-assets-it.json
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/bootstrap/BootstrapAssetsEntry.java
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/bootstrap/BootstrapAssetsParser.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/bootstrap/BootstrapAssetsParserTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/bootstrap/BootstrapAssetsLoaderTest.java
+  - infochat-collector/src/test/resources/bootstrap/bootstrap-assets-fixture.json
+  - prod/config/bootstrap-assets.json
+  - docs/design/10-asset-commands.md
   - USER_GUIDE.md
 complexity: medium
 risk: low
@@ -40,6 +57,12 @@ out_of_scope:
     describe each upstream's capability and stay as-is; they are simply not
     the right source of truth for what a user can ask for today.
   - "The doc-cleanup findings F1-F5 — tracked in M1-670 (doc-only)."
+  - >-
+    Editing `docs/spec/commands.md` §Asset commands. It says the per-source
+    allowlist "lives in design notes" and lists it among the design-delegated
+    details — it delegates rather than asserts a currency set, so this change
+    does not falsify it. The concrete (and now wrong) statement lives in the
+    design note, which IS in scope.
   - "Non-asset commands."
 acceptance:
   - >-
@@ -80,6 +103,57 @@ acceptance:
     deployment actually serves (the configured quote currency per pair, usd in
     the shipped `bootstrap-assets.json`) and may mention the per-source
     capability only as future/out-of-scope context.
+  - >-
+    The now-dead `supported_vs` is removed end-to-end — JSON key, collector
+    record component, collector parse-validation, provider `AssetEntry`
+    component, and doc examples. Validating `--vs` against
+    `asset_config.default_quote_currency` leaves the asset-level list with ZERO
+    readers in either module: the collector parses and validates it but never
+    persists it (`BootstrapAssetsLoader`'s `asset_config` INSERT covers only
+    `default_quote_currency`, `attribution_url`, `is_default`), and
+    `AssetHandler` was the sole provider-side reader. Left in place it is an
+    operator-settable knob that changes nothing while advertising currencies
+    the deployment cannot serve — the same advertised-vs-actual defect this
+    ticket exists to close. Verify: `grep -rn 'supported_vs\|supportedVs'
+    --include=*.java --include=*.json --include=*.md .` excluding
+    `docs/plan/` returns zero matches.
+  - >-
+    `BootstrapAssetsParser` keeps `FAIL_ON_UNKNOWN_PROPERTIES = true`. Because
+    `supported_vs` stops being a known property, EVERY in-repo
+    `bootstrap-assets*.json` (prod config, collector fixture, provider IT
+    fixture) must drop the key or the loader hard-fails at boot — so the key is
+    removed from all three, and from the two JSON string literals in
+    `BootstrapAssetsParserTest`, whose cases keep their original subjects (the
+    unknown-key `surprise` rejection and the missing-`default_sub_verb`
+    rejection).
+  - >-
+    The `assets[N].supported_vs must be a non-empty array` validation and its
+    coverage are removed TOGETHER WITH the field they validate — a deletion of
+    dead behavior, not a weakened test. No test asserting surviving behavior is
+    deleted, disabled, or relaxed.
+  - >-
+    `docs/design/10-asset-commands.md` is brought in line with the shipped
+    bundle text. §10.8's `/zcash --vs jpy` example gets the `Available:` line
+    this change produces (the pair's single configured currency, not
+    `usd, eur, czk, btc`). Its two sibling examples in the same block are
+    corrected in the same pass against `en.properties:540,542`: both still
+    show the raw-token echo M1-656 removed and a trailing period the bundles
+    do not emit. Correcting one example in a block while leaving two
+    known-wrong ones beside it would leave the block no more trustworthy than
+    before. §10.6's `bootstrap-assets.json` example drops `supported_vs`.
+  - >-
+    The M1-658 inbound-reflection baseline is re-recorded for the changed site.
+    `InboundReflectionGuardTest` fingerprints on
+    (file, key, argIndex, argument-expression), so changing WHAT is
+    interpolated deliberately invalidates the old entries and forces a
+    conscious re-record — the guard failing here is it working. Args 0 and 2 of
+    `error.asset.unsupported_quote_currency` are now both `availableCurrency`,
+    whose provenance is `asset_config.default_quote_currency` read through
+    `AssetRegistry.SubVerbEntry` — a DB config value, never inbound text — so
+    both record as `bot-authored`. The superseded `bestMatch` and
+    `String.join(", ", supported)` lines are deleted rather than left, so the
+    baseline cannot rot into an unchecked allowlist (`noDeadBaselineEntries`
+    enforces this).
   - "mvn -pl infochat-provider verify is green"
 test_plan:
   adds:
@@ -89,12 +163,30 @@ test_plan:
     - "infochat-provider/.../command/asset/AssetHandlerTest.java (existing cases)"
     - "infochat-provider/.../command/asset/AssetCommandsRoundtripIT.java"
     - "infochat-provider/.../command/asset/AssetSnapshotReaderTest.java"
+    - "infochat-provider/.../command/asset/AssetCommandFamilyOracleTest.java (all cases; constructor arity only)"
+    - "infochat-provider/.../messaging/HelpCommandHandlerTest.java (all cases; constructor arity only)"
+    - "infochat-collector/.../bootstrap/BootstrapAssetsParserTest.java (unknown-key + missing-default_sub_verb subjects)"
+    - "infochat-collector/.../bootstrap/BootstrapAssetsLoaderTest.java (all cases)"
     - "infochat-collector/.../assets/AssetSnapshotFetcherSupportGateTest.java"
 spec_refs:
   - "docs/spec/commands.md §Asset commands"
 decision_refs:
   - "D33"
   - "D34"
+reviews:
+  - round: 1
+    date: 2026-07-22
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 18
+      added: 349
+      removed: 106
 ---
 
 # M1-671: Validate --vs against the quote currency each pair actually fetches
@@ -184,6 +276,18 @@ change plus a rate-limit budget analysis, and is a feature ticket.
   if the value is not currently surfaced on the record the handler reads, that
   plumbing is in scope). `asset_config` stays read-only on the Provider (V14
   GRANTs) and no Flyway migration is added.
+- **Refine (budget-breach, 2026-07-22).** Implementation surfaced two
+  consequences of the fix that the original 5-file scope could not hold, and
+  which were folded in rather than deferred (user directive): (1) with
+  `AssetHandler` no longer reading `AssetEntry.supportedVsCurrencies()`, the
+  whole `supported_vs` chain has zero readers in either module, so it is
+  removed end-to-end rather than left as an inert knob that still advertises
+  unavailable currencies; (2) `docs/design/10-asset-commands.md` §10.8's error
+  example was already stale (it echoes a raw token M1-656 removed) and this
+  change makes its `Available:` line wrong too, so it is corrected here.
+  `files_budget` 5 → 15, then → 16 when the round-1 suite showed the
+  renamed interpolation arguments invalidate the M1-658 reflection-baseline
+  entries for this site.
 - The `error.asset.unsupported_quote_currency` bundle key already formats a
   suggestion plus an available-list (`en.properties:545`), so no new
   localization key — and therefore no D43 cs-twin work — is required.

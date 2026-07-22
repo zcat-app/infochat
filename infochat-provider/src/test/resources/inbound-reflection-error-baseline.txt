@@ -42,9 +42,9 @@ AssetHandler.java | error.asset.sub_verb_not_enabled | 2 | String.join(", ", ena
 AssetHandler.java | error.asset.unknown_sub_verb | 0 | bestMatch | bot-authored: a fuzzy suggestion drawn from the enabled asset registry (AssetHandler), not the raw token
 AssetHandler.java | error.asset.unknown_sub_verb | 1 | assetName | bot-authored: the asset command's own registry name (e.g. zcash), not inbound-arbitrary text
 AssetHandler.java | error.asset.unknown_sub_verb | 2 | String.join(", ", allSubVerbs) | bot-authored: the enabled/registered asset sub-verb or quote-currency list from the asset registry
-AssetHandler.java | error.asset.unsupported_quote_currency | 0 | bestMatch | bot-authored: a fuzzy suggestion drawn from the enabled asset registry (AssetHandler), not the raw token
+AssetHandler.java | error.asset.unsupported_quote_currency | 0 | availableCurrency | bot-authored: the selected pair's asset_config.default_quote_currency, read via AssetRegistry.SubVerbEntry.defaultQuoteCurrency() (AssetHandler:130-148) — a DB config value, not inbound-arbitrary text
 AssetHandler.java | error.asset.unsupported_quote_currency | 1 | assetName | bot-authored: the asset command's own registry name (e.g. zcash), not inbound-arbitrary text
-AssetHandler.java | error.asset.unsupported_quote_currency | 2 | String.join(", ", supported) | bot-authored: the enabled/registered asset sub-verb or quote-currency list from the asset registry
+AssetHandler.java | error.asset.unsupported_quote_currency | 2 | availableCurrency | bot-authored: the same asset_config.default_quote_currency value as argIndex 0 — with one currency per (asset, sub_verb) pair the suggestion and the available-list are necessarily identical
 AssetHandler.java | error.usage.missing_argument | 0 | "/" + assetName + " [sub-verb] [--vs <currency>]" | bot-authored: the asset command's own registry name (e.g. zcash), not inbound-arbitrary text
 AuditCommandHandler.java | error.audit.unknown_action | 0 | args.action | bot-admin-only: admin gate at AuditCommandHandler:99 precedes the reflect (r2 audit)
 AuditCommandHandler.java | error.audit.unknown_action | 1 | ACCEPTED_ACTIONS | bot-authored: the accepted-action vocabulary constant

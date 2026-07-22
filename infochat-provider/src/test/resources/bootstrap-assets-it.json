@@ -8,8 +8,7 @@
       "default_sub_verb": "coingecko",
       "sub_verbs": [
         { "id": "coingecko", "external_id": "zcash" }
-      ],
-      "supported_vs": ["usd", "eur", "btc"]
+      ]
     },
     {
       "id": "monero",
@@ -18,8 +17,7 @@
       "default_sub_verb": "coingecko",
       "sub_verbs": [
         { "id": "coingecko", "external_id": "monero" }
-      ],
-      "supported_vs": ["usd", "eur", "btc"]
+      ]
     }
   ]
 }

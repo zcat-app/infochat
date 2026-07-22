@@ -115,11 +115,6 @@ public final class BootstrapAssetsParser {
             throw new BootstrapAssetsParseException(
                 "assets[" + index + "].sub_verbs must be a non-empty array");
         }
-        if (raw.supportedVs() == null || raw.supportedVs().isEmpty()) {
-            throw new BootstrapAssetsParseException(
-                "assets[" + index + "].supported_vs must be a non-empty array");
-        }
-
         // sub_verbs[].id must be unique within an entry, and the
         // entry's default_sub_verb must resolve to one of them. The
         // default-sub-verb check is the operator-typo guard: a missed
@@ -151,7 +146,6 @@ public final class BootstrapAssetsParser {
             raw.ticker(),
             raw.defaultSubVerb(),
             List.copyOf(validatedSubVerbs),
-            List.copyOf(raw.supportedVs()),
             defaultVs);
     }
 
@@ -181,8 +175,7 @@ public final class BootstrapAssetsParser {
         @JsonProperty("display_name")     String displayName,
         @JsonProperty("ticker")           String ticker,
         @JsonProperty("default_sub_verb") String defaultSubVerb,
-        @JsonProperty("sub_verbs")        List<SubVerbWrapper> subVerbs,
-        @JsonProperty("supported_vs")     List<String> supportedVs
+        @JsonProperty("sub_verbs")        List<SubVerbWrapper> subVerbs
     ) {
         @JsonCreator
         EntryWrapper {

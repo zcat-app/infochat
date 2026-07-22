@@ -22,10 +22,9 @@ import java.util.List;
  * row the loader writes carries the same value in v1 (per-asset
  * overrides of the document-level quote default are a v2 candidate);
  * threading it onto the entry keeps the loader purely entry-driven.
- *
- * <p>{@code supportedVs} is the closed list of quote-currency strings
- * the operator has enabled for this asset (D33); future per-scope
- * preference (M1-054) does not extend this set.
+ * It is also the ONLY quote currency an asset can serve: the fetcher
+ * requests exactly this value per (asset, sub_verb), so there is no
+ * broader per-asset set to carry (M1-671).
  */
 public record BootstrapAssetsEntry(
     String id,
@@ -33,7 +32,6 @@ public record BootstrapAssetsEntry(
     String ticker,
     String defaultSubVerb,
     List<SubVerb> subVerbs,
-    List<String> supportedVs,
     String defaultQuoteCurrency
 ) {
     /**

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 686 |
+| done | 687 |
 | deferred | 0 |
 | abandoned | 19 |
 | **total** | **712** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-669 — /add-source on a removed source must not claim tags replaced (complexity: low, risk: low)
-- M1-671 — Validate --vs against the quote currency each pair actually fetches (complexity: medium, risk: low)
 - M1-672 — Narrow Provider grants on identity/authz tables (complexity: high, risk: high)
 - M1-674 — Recover SimpleX adapter from peer-closed WebSocket (complexity: medium, risk: medium)
 - M1-675 — Reject slash-bearing personal tags at the /save boundary (complexity: low, risk: low)
@@ -68,6 +67,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-673 | Stop wire-controlled model field reaching Micrometer tags | 2026-07-22 | round 1 APPROVE |
+| M1-671 | Validate --vs against the quote currency each pair actually fetches | 2026-07-22 | round 1 APPROVE |
 | M1-670 | Fix release-audit doc drift in guides and spec | 2026-07-22 | round 1 APPROVE |
 | M1-668 | Recalibrate command-intent recall for how-do-I phrasings | 2026-07-22 | round 1 APPROVE |
 | M1-667 | Route user-content exception catches through SafeLog | 2026-07-21 | round 2 APPROVE |
@@ -76,7 +76,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-649 | Conceptual topic corpus: curated answers, intent-shaped matching, code-anchored guards (retrieval only) | 2026-07-21 | round 1 APPROVE |
 | M1-660 | doc_embedding read path: arm hnsw.iterative_scan under filter-inside-ANN, in a transaction | 2026-07-20 | round 1 APPROVE |
 | M1-642 | Per-category digest delivery + optional roll-up summaries | 2026-07-20 | round 2 APPROVE |
-| M1-665 | Deterministic delivery of matched command usage in chat | 2026-07-19 | round 2 APPROVE |
 
 ---
 
@@ -912,7 +911,7 @@ M1-667 (done)
 M1-668 (done)
 M1-669 (pending) ← runnable
 M1-670 (done)
-M1-671 (pending) ← runnable
+M1-671 (done)
 M1-672 (pending) ← runnable
 M1-673 (done)
 M1-674 (pending) ← runnable

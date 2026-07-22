@@ -55,8 +55,7 @@ public class AssetRegistry {
     public record AssetEntry(
             String name,
             String displayName,
-            List<SubVerbEntry> subVerbs,
-            List<String> supportedVsCurrencies
+            List<SubVerbEntry> subVerbs
     ) {
         public List<String> enabledSubVerbNames() {
             List<String> names = new ArrayList<>();
@@ -175,8 +174,7 @@ public class AssetRegistry {
             String assetName = e.getKey();
             BootstrapMeta bm = meta.get(assetName);
             String displayName = bm != null ? bm.displayName : capitalize(assetName);
-            List<String> supportedVs = bm != null ? bm.supportedVs : List.of("usd");
-            result.put(assetName, new AssetEntry(assetName, displayName, e.getValue(), supportedVs));
+            result.put(assetName, new AssetEntry(assetName, displayName, e.getValue()));
         }
         return result;
     }
@@ -200,9 +198,8 @@ public class AssetRegistry {
             Map<String, BootstrapMeta> result = new HashMap<>();
             if (doc.assets != null) {
                 for (BootstrapAsset a : doc.assets) {
-                    List<String> vs = a.supportedVs != null ? List.copyOf(a.supportedVs) : List.of("usd");
                     result.put(a.id, new BootstrapMeta(
-                            a.displayName != null ? a.displayName : capitalize(a.id), vs));
+                            a.displayName != null ? a.displayName : capitalize(a.id)));
                 }
             }
             return result;
@@ -218,7 +215,7 @@ public class AssetRegistry {
         return Character.toUpperCase(s.charAt(0)) + s.substring(1);
     }
 
-    private record BootstrapMeta(String displayName, List<String> supportedVs) {}
+    private record BootstrapMeta(String displayName) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private static class BootstrapDoc {
@@ -236,7 +233,5 @@ public class AssetRegistry {
         String id;
         @JsonProperty("display_name")
         @Nullable String displayName;
-        @JsonProperty("supported_vs")
-        @Nullable List<String> supportedVs;
     }
 }

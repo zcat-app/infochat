@@ -87,8 +87,11 @@ public class AssetHandler {
         }
         List<String> enabledSubVerbs = asset.enabledSubVerbNames();
 
-        // Resolve sub-verb
+        // Resolve sub-verb. The pair's configured quote currency is carried out
+        // of this block alongside it: it is the only currency the pair can hold
+        // data for, so it doubles as the --vs allowlist below.
         String subVerb;
+        String availableCurrency;
         if (args.subVerb == null) {
             // Bare invocation — resolve default
             AssetRegistry.SubVerbEntry defaultSv = asset.defaultSubVerb();
@@ -103,6 +106,7 @@ public class AssetHandler {
                         assetName, String.join(", ", enabledSubVerbs)));
             }
             subVerb = defaultSv.subVerb();
+            availableCurrency = defaultSv.defaultQuoteCurrency();
         } else {
             // Explicit sub-verb
             AssetRegistry.SubVerbEntry svEntry = asset.findSubVerb(args.subVerb);
@@ -123,22 +127,25 @@ public class AssetHandler {
                         args.subVerb, assetName, String.join(", ", enabledSubVerbs)));
             }
             subVerb = svEntry.subVerb();
+            availableCurrency = svEntry.defaultQuoteCurrency();
         }
 
-        // Resolve vs currency
+        // Resolve vs currency. Validated against AVAILABILITY (what this pair
+        // actually fetches), not against any upstream's CAPABILITY: the
+        // collector fetches exactly asset_config.default_quote_currency per
+        // (asset, sub_verb) and the provider has no on-demand fetch, so no
+        // other currency can ever have a price_snapshot row. Refusing here
+        // keeps the no-data reply honest — it can then only mean a genuine
+        // missing row, never a currency the deployment cannot serve (M1-671).
         String vsCurrency = args.vsCurrency;
         if (vsCurrency == null) {
-            AssetRegistry.SubVerbEntry svEntry = asset.findSubVerb(subVerb);
-            vsCurrency = svEntry != null ? svEntry.defaultQuoteCurrency() : "usd";
-        } else {
-            List<String> supported = asset.supportedVsCurrencies();
-            if (!supported.contains(vsCurrency)) {
-                List<String> suggestions = fuzzySuggest(vsCurrency, supported, FUZZY_SUGGESTION_MAX);
-                String bestMatch = suggestions.isEmpty() ? "" : suggestions.getFirst();
-                return reply(scope, MessageFormat.format(
-                        bundleLoader.get(BundleKeys.ERROR_ASSET_UNSUPPORTED_QUOTE_CURRENCY, language),
-                        bestMatch, assetName, String.join(", ", supported)));
-            }
+            vsCurrency = availableCurrency;
+        } else if (!vsCurrency.equals(availableCurrency)) {
+            // Suggestion and available-list are the same single value by
+            // construction: one pair, one currency.
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_ASSET_UNSUPPORTED_QUOTE_CURRENCY, language),
+                    availableCurrency, assetName, availableCurrency));
         }
 
         // Look up snapshot

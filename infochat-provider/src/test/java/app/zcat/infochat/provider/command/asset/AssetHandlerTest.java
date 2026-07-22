@@ -37,17 +37,20 @@ class AssetHandlerTest {
     void setUp() {
         bundleLoader = initBundleLoader();
 
-        // Zcash: coingecko (default, enabled), kraken (enabled), bitfinex (enabled)
+        // Zcash: coingecko (default, enabled), kraken (enabled), bitfinex (enabled).
+        // M1-671: kraken is configured for eur while its siblings serve usd, so
+        // the --vs cases below pin PER-PAIR resolution — a check against the
+        // asset-level list, or against a hardcoded "usd", would pass if every
+        // pair shared one currency.
         AssetRegistry.SubVerbEntry zcashCg = new AssetRegistry.SubVerbEntry(
                 "coingecko", true, true, "coingecko.com/en/coins/zcash", "usd");
         AssetRegistry.SubVerbEntry zcashKr = new AssetRegistry.SubVerbEntry(
-                "kraken", true, false, "kraken.com/prices/zec-usd", "usd");
+                "kraken", true, false, "kraken.com/prices/zec-eur", "eur");
         AssetRegistry.SubVerbEntry zcashBf = new AssetRegistry.SubVerbEntry(
                 "bitfinex", true, false, "bitfinex.com/t/ZECUSD", "usd");
         AssetRegistry.AssetEntry zcash = new AssetRegistry.AssetEntry(
                 "zcash", "Zcash",
-                List.of(zcashCg, zcashKr, zcashBf),
-                List.of("usd", "eur", "czk", "btc"));
+                List.of(zcashCg, zcashKr, zcashBf));
 
         // Monero: coingecko (default, enabled), kraken (enabled), bitfinex (enabled)
         // binance is NOT in monero's sub-verb set (XMR not listed on Binance)
@@ -59,8 +62,7 @@ class AssetHandlerTest {
                 "bitfinex", true, false, "bitfinex.com/t/XMRUSD", "usd");
         AssetRegistry.AssetEntry monero = new AssetRegistry.AssetEntry(
                 "monero", "Monero",
-                List.of(moneroCg, moneroKr, moneroBf),
-                List.of("usd", "eur", "czk", "btc"));
+                List.of(moneroCg, moneroKr, moneroBf));
 
         registry = new AssetRegistry(Map.of("zcash", zcash, "monero", monero));
         snapshotReader = new StubSnapshotReader();
@@ -84,7 +86,7 @@ class AssetHandlerTest {
                 "coingecko", true, false, "coingecko.com", "usd");
         AssetRegistry noDefault = new AssetRegistry(Map.of(
                 "zcash", new AssetRegistry.AssetEntry("zcash", "Zcash",
-                        List.of(sv), List.of("usd"))));
+                        List.of(sv))));
         AssetHandler h = new AssetHandler(noDefault, snapshotReader, renderer, bundleLoader, new InboundContext());
 
         OutboundMessage reply = h.handle("zcash", SCOPE, "/zcash");
@@ -101,7 +103,7 @@ class AssetHandlerTest {
                 "kraken", true, false, "kraken.com", "usd");
         AssetRegistry withDisabledDefault = new AssetRegistry(Map.of(
                 "zcash", new AssetRegistry.AssetEntry("zcash", "Zcash",
-                        List.of(defaultDisabled, krakenEnabled), List.of("usd"))));
+                        List.of(defaultDisabled, krakenEnabled))));
         AssetHandler h = new AssetHandler(withDisabledDefault, snapshotReader, renderer, bundleLoader, new InboundContext());
 
         OutboundMessage reply = h.handle("zcash", SCOPE, "/zcash");
@@ -148,7 +150,7 @@ class AssetHandlerTest {
                 "binance", false, false, "binance.com", "usd");
         AssetRegistry withBinance = new AssetRegistry(Map.of(
                 "monero", new AssetRegistry.AssetEntry("monero", "Monero",
-                        List.of(moneroCg, moneroBinance), List.of("usd"))));
+                        List.of(moneroCg, moneroBinance))));
         AssetHandler h = new AssetHandler(withBinance, snapshotReader, renderer, bundleLoader, new InboundContext());
 
         OutboundMessage reply = h.handle("monero", SCOPE, "/monero binance");
@@ -172,6 +174,26 @@ class AssetHandlerTest {
                 "fuzzy suggestion for quote currency");
         assertTrue(reply.text().contains("Available:"),
                 "available currencies listed");
+    }
+
+    /**
+     * M1-671: {@code --vs} is validated against the SELECTED pair's configured
+     * quote currency — the only currency that pair can hold data for. {@code czk}
+     * is in the asset-level allowlist this handler used to check, so before the
+     * fix it was accepted and fell through to the generic "the fetcher may not
+     * have run" reply for a currency no pair can ever serve. The stub returns no
+     * snapshot so that a failure to reject surfaces as exactly that reply.
+     */
+    @Test
+    void rejectsUnavailableQuoteCurrency() {
+        snapshotReader.setResult(null);
+        OutboundMessage reply = handler.handle("zcash", SCOPE, "/zcash bitfinex --vs czk");
+        assertFalse(reply.text().contains("No price data"),
+                "a currency mismatch must not reach the no-data reply — got: " + reply.text());
+        assertTrue(reply.text().contains("not enabled"),
+                "unsupported quote currency error; got: " + reply.text());
+        assertTrue(reply.text().contains("Available: usd"),
+                "names the currency the bitfinex pair actually serves; got: " + reply.text());
     }
 
     @Test
@@ -268,7 +290,8 @@ class AssetHandlerTest {
         return new AssetSnapshotReader.SnapshotResult(snap, false, Duration.ofSeconds(90));
     }
 
-    private static BundleLoader initBundleLoader() {
+    /** Package-private so a sibling test in this package can reuse it. */
+    static BundleLoader initBundleLoader() {
         BundleLoader bl = new BundleLoader();
         try {
             var method = BundleLoader.class.getDeclaredMethod("load");

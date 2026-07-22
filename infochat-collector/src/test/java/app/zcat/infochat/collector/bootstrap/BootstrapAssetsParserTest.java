@@ -63,8 +63,7 @@ class BootstrapAssetsParserTest {
             + "\"assets\":[{"
             + "  \"id\":\"zcash\",\"display_name\":\"Zcash\",\"ticker\":\"ZEC\","
             + "  \"default_sub_verb\":\"coingecko\","
-            + "  \"sub_verbs\":[{\"id\":\"coingecko\",\"external_id\":\"zcash\"}],"
-            + "  \"supported_vs\":[\"usd\"]"
+            + "  \"sub_verbs\":[{\"id\":\"coingecko\",\"external_id\":\"zcash\"}]"
             + "}],"
             + "\"surprise\":\"unexpected-key\""
             + "}";
@@ -91,8 +90,7 @@ class BootstrapAssetsParserTest {
             + "  \"sub_verbs\":["
             + "    {\"id\":\"coingecko\",\"external_id\":\"zcash\"},"
             + "    {\"id\":\"bitfinex\",\"external_id\":\"tZECUSD\"}"
-            + "  ],"
-            + "  \"supported_vs\":[\"usd\"]"
+            + "  ]"
             + "}]"
             + "}";
 

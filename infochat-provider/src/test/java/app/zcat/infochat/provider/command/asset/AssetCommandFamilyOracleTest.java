@@ -20,7 +20,7 @@ class AssetCommandFamilyOracleTest {
         AssetRegistry.SubVerbEntry sv = new AssetRegistry.SubVerbEntry(
                 "coingecko", enabled, true, "https://coingecko.com", "usd");
         AssetRegistry.AssetEntry entry = new AssetRegistry.AssetEntry(
-                asset, capitalize(asset), List.of(sv), List.of("usd"));
+                asset, capitalize(asset), List.of(sv));
         return new AssetRegistry(Map.of(asset, entry));
     }
 
@@ -28,12 +28,12 @@ class AssetCommandFamilyOracleTest {
         AssetRegistry.SubVerbEntry zcashSv = new AssetRegistry.SubVerbEntry(
                 "coingecko", true, true, "https://coingecko.com", "usd");
         AssetRegistry.AssetEntry zcash = new AssetRegistry.AssetEntry(
-                "zcash", "Zcash", List.of(zcashSv), List.of("usd"));
+                "zcash", "Zcash", List.of(zcashSv));
 
         AssetRegistry.SubVerbEntry moneroSv = new AssetRegistry.SubVerbEntry(
                 "coingecko", false, true, "https://coingecko.com", "usd");
         AssetRegistry.AssetEntry monero = new AssetRegistry.AssetEntry(
-                "monero", "Monero", List.of(moneroSv), List.of("usd"));
+                "monero", "Monero", List.of(moneroSv));
 
         return new AssetRegistry(Map.of("zcash", zcash, "monero", monero));
     }

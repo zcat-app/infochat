@@ -10,8 +10,7 @@
         { "id": "coingecko", "external_id": "zcash" },
         { "id": "kraken",    "external_id": "ZECUSD" },
         { "id": "bitfinex",  "external_id": "tZECUSD" }
-      ],
-      "supported_vs": ["usd", "eur", "czk", "btc"]
+      ]
     },
     {
       "id": "monero",
@@ -22,8 +21,7 @@
         { "id": "coingecko", "external_id": "monero" },
         { "id": "kraken",    "external_id": "XMRUSD" },
         { "id": "bitfinex",  "external_id": "tXMRUSD" }
-      ],
-      "supported_vs": ["usd", "eur", "czk", "btc"]
+      ]
     }
   ]
 }
