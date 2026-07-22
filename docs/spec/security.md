@@ -93,6 +93,24 @@ notes. The spec-level commitments below cover all of them.
    never a default, and voids the property: any host that reaches the
    port can then run inference against, and read embeddings from, the
    deployment's models with no credential.
+9. **LLM/embeddings provider response → system.** Everything a
+   generative or embeddings endpoint returns is endpoint-chosen input,
+   not a trusted internal value: whatever answers on the configured
+   base-url picks every field of the reply, so a hostile or compromised
+   endpoint is in scope here for the same reason a hostile feed is on
+   the ingest side. Two properties bound what a reply can do. The
+   response body is read under an operator-configurable cap (clamped to
+   1–8 MiB) before parsing, so a pathological multi-GB reply cannot
+   exhaust the JVM. Metric labels are never wire-derived — the `model`
+   label carries the operator-configured model id for the task, never
+   the model string the reply reports, so a distinct-per-call model
+   string cannot mint unbounded retained meters (`llm.md` §Bounded
+   concurrency and observability). Provider-reported **numeric usage**
+   (token counts) is the residual: v1 records it into the token
+   counters as reported, and no v1 decision reads those counters, so a
+   lying endpoint can skew usage observability and nothing else. A
+   future cost-weighted rate cap would have to validate the reported
+   values before charging a bucket against them.
 
 ## Ingest pipeline (security side)
 
