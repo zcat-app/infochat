@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 685 |
 | deferred | 0 |
 | abandoned | 19 |
-| **total** | **706** |
+| **total** | **711** |
 
 ---
 
@@ -27,6 +27,11 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-669 — /add-source on a removed source must not claim tags replaced (complexity: low, risk: low)
 - M1-671 — Validate --vs against the quote currency each pair actually fetches (complexity: medium, risk: low)
+- M1-672 — Narrow Provider grants on identity/authz tables (complexity: high, risk: high)
+- M1-673 — Stop wire-controlled model field reaching Micrometer tags (complexity: low, risk: low)
+- M1-674 — Recover SimpleX adapter from peer-closed WebSocket (complexity: medium, risk: medium)
+- M1-675 — Reject slash-bearing personal tags at the /save boundary (complexity: low, risk: low)
+- M1-676 — Canonicalize before closed-list match in LLM sanitizer (complexity: medium, risk: medium)
 
 ---
 
@@ -908,4 +913,9 @@ M1-668 (done)
 M1-669 (pending) ← runnable
 M1-670 (done)
 M1-671 (pending) ← runnable
+M1-672 (pending) ← runnable
+M1-673 (pending) ← runnable
+M1-674 (pending) ← runnable
+M1-675 (pending) ← runnable
+M1-676 (pending) ← runnable
 ```
