@@ -255,10 +255,21 @@ source actually provides — it never invents zeros or estimates.
 - Capture/cache line: capture timestamp in UTC, cache age in seconds.
 - Source URL on its own line, bare per D30.
 
-Verbose form (`/zcash --verbose`) adds:
-- `volume 24h: $XXM`
-- All other quote-currency snapshots cached for that asset (so a user
-  can compare USD/EUR/CZK in one reply).
+Verbose form (`/zcash --verbose`) — **not implemented in v1**, recorded
+here as intended shape only. No `--verbose` flag is parsed:
+`AssetHandler.parseArgs` recognises `--vs` and silently ignores any other
+`--` token, so `/zcash --verbose` renders the ordinary reply. No
+user-facing surface advertises it.
+- `volume 24h: $XXM` — `volume_24h` IS collected and stored (all three
+  sources populate it per the table above), but the renderer emits no
+  volume line, so this is unbuilt rather than impossible.
+- A side-by-side of the asset's other quote currencies is **not
+  reachable** under the current data model, not merely unbuilt:
+  `asset_config` carries one `default_quote_currency` per
+  `(asset, sub_verb)` and the fetcher requests exactly that value, so a
+  pair never holds a second currency to compare against. This bullet
+  presupposes the multi-currency FETCH that M1-671 placed out of scope;
+  it cannot ship before that does.
 
 ## 10.6 `bootstrap-assets.json` schema
 
