@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 686 |
 | deferred | 0 |
 | abandoned | 19 |
-| **total** | **711** |
+| **total** | **712** |
 
 ---
 
@@ -31,6 +31,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-674 — Recover SimpleX adapter from peer-closed WebSocket (complexity: medium, risk: medium)
 - M1-675 — Reject slash-bearing personal tags at the /save boundary (complexity: low, risk: low)
 - M1-676 — Canonicalize before closed-list match in LLM sanitizer (complexity: medium, risk: medium)
+- M1-677 — Validate provider-reported token counts before they reach the metric counters (complexity: low, risk: low)
 
 ---
 
@@ -917,4 +918,5 @@ M1-673 (done)
 M1-674 (pending) ← runnable
 M1-675 (pending) ← runnable
 M1-676 (pending) ← runnable
+M1-677 (pending) ← runnable
 ```
