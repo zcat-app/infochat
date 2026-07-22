@@ -32,7 +32,7 @@ if [[ "$defaults" -eq 0 ]]; then
   # timeouts), and it also encodes where the LLM runs — local for laptop/vps/pi vs
   # cloud for remote-llm — so an operator does not read it as hardware-only and
   # then collide with the step-4 backend choice. Axes stay coupled per D27; the
-  # orthogonal-axes redesign is a v2 candidate (see flaws.md).
+  # orthogonal-axes redesign is a v2 candidate (see docs/plan/m1/flaws.md).
   echo "Hardware profile — tunes infochat's sizing (AI model size, concurrency, timeouts)"
   echo "to your machine and to where the AI runs:"
   echo "  laptop | vps | pi  — run the AI locally on this machine"

@@ -184,7 +184,8 @@ stays broad, add `source.source_origin` — full write-up in
 ## 9. TODO / owed operational actions
 
 > **Execution plan (recipes + acceptance criteria, for a fresh session):**
-> `docs/plan/v1-release-handoff.md`.
+> `.scratch/v1-release-handoff.md` (session handoff — retired from
+> `docs/plan/` to the untracked scratch area 2026-07-22).
 
 - [x] **Rebuild collector+provider images from current main, restart** — DONE 07-14
   (`39a054cc`, DB v59, all 4 up).

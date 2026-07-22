@@ -132,5 +132,5 @@ touched.
   NOT run: the diff is exclusively shell scripts (covered by the wiring tests),
   operator-facing Markdown, and the `secrets.env` template — no Java/application
   code changed, so the rest of the suite is provably unaffected.
-- The detailed per-finding verdict table and log live in `flaws.md` at the repo
-  root.
+- The detailed per-finding verdict table and log live in
+  `docs/plan/m1/flaws.md` (originally at the repo root; relocated 2026-07-22).

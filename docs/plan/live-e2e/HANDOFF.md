@@ -1902,8 +1902,9 @@ was).
   (its CLI needs the daemon-locked data-dir). Bot has a profile name
   now ("Jarvis Bot"). Stale number-addressed pending-invite ghosts
   remain on the group (harmless). Bot profile/identity ACIs:
-  bot [REDACTED-ACI],
-  user [REDACTED-ACI].
+  bot [ACI redacted 2026-07-22 — live Signal account identifier, kept out
+  of the committed copy], user [ACI redacted 2026-07-22 — ditto; both
+  were scrubbed from the published history].
 - **Dual-adapter live test (user request) — BOTH adapters GREEN on the
   same deployment, same LLM backend:**
   - `/zcash`: Signal admin DM → full price card delivered (~5 s).
