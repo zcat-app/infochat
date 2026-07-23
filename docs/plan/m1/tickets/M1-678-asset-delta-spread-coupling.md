@@ -1,9 +1,9 @@
 ---
 id: M1-678
 title: "Render the asset 24h delta independently of the 24h spread"
-status: pending
+status: done
 created: 2026-07-22
-last_updated: 2026-07-22
+last_updated: 2026-07-23
 blocked_by: []
 files_budget: 6
 files_scope:
@@ -11,7 +11,6 @@ files_scope:
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/bundles/cs.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetReplyRendererTest.java
-  - infochat-provider/src/test/resources/inbound-reflection-error-baseline.txt
   - docs/design/10-asset-commands.md
 complexity: low
 risk: low
@@ -46,6 +45,24 @@ acceptance:
     example replies in design §10.5 must not move.
   - >-
     New AssetReplyRendererTest cases pin all three shapes above.
+  - >-
+    User directive 2026-07-23, folded in during implementation: a fiat
+    price renders at a fixed 2 dp (HALF_UP), so a round 41.00 shows
+    `$41.00` and 961.30 shows `961.30 CZK`. Today `formatPrice` calls only
+    `stripTrailingZeros()`, which emits `$41` and `961.3 CZK` — output no
+    §10.5 example reply shows, every one of which is written at 2 dp.
+    Surfaced by the round-1 verify: a new test fixture using 41.00 failed
+    on exactly this. Pre-existing, not introduced by the delta/spread split.
+  - >-
+    BTC-quoted prices are EXCLUDED from that scale and keep the source's
+    own precision. `formatPrice` serves every vs-currency, and BTC quotes
+    are sub-unit (0.000651), so a blanket 2 dp would round every one of
+    them to `0.00 BTC`.
+  - >-
+    Design §10.5's price-line rendering rule states the fiat-2dp / BTC
+    -full-precision split, so the drift cannot silently recur. The
+    bitfinex example's `24h low:  $41.00` becomes producible and stays
+    byte-identical.
   - mvn -pl infochat-provider -am verify is green
 test_plan:
   adds: []
@@ -56,12 +73,41 @@ test_plan:
 spec_refs:
   - docs/spec/commands.md §Asset commands
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-23
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 217
+      removed: 39
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-23
+  verdict: PASS
+  warnings:
+    - >-
+      lint-ticket.py: 0 blockers, 0 warnings. Self-check confirmed the
+      ticket's code claims verbatim (AssetReplyRenderer.java:82-96 is the
+      quoted branch; en/cs delta_24h and spread key values match §Expected
+      shape).
+    - >-
+      The M1-658 inbound-reflection baseline does NOT need to change:
+      its header scopes it to ERROR templates only, and AssetReplyRenderer
+      appears nowhere in it (only AssetHandler error keys do). Per the
+      ticket body's instruction ("if it does not, drop it from the scope
+      rather than touching it"), the baseline path was removed from
+      files_scope at start. files_budget stays 6 (a ceiling).
+  blockers: []
 ---
 
 # M1-678: Render the asset 24h delta independently of the 24h spread

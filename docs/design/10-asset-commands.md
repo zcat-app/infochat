@@ -288,25 +288,29 @@ to a percentage. Only Kraken's public ticker has no delta at all.
   ` ⚠ stale` marker. The data-source name is always lowercase to match
   sub-verb input.
 - Price line: the snapshot's `price` in its own `vs_currency`, alone on
-  the line. A BTC-denominated companion price for crypto-vs-crypto
+  the line. Fiat amounts (`usd` and the ISO-code-suffix currencies) print
+  at a fixed 2 decimal places (HALF_UP), so a round 41.00 reads `$41.00`
+  and 961.30 reads `961.30 CZK`. `btc` is excluded and keeps the source's
+  own precision: a crypto-vs-crypto quote is sub-unit (`0.000651 BTC`)
+  and a 2-dp scale would round every one of them to zero.
+  A BTC-denominated companion price for crypto-vs-crypto
   context is **not rendered in v1** — `reply.asset.price_line` carries
   a single value, and the handler reads one snapshot row. Unbuilt, not
   impossible; §10.9 has the cost.
 - Delta lines: 1h then 24h, each at a fixed 2 decimal places (HALF_UP)
   so every delta reads at the same precision. Sign-bearing U+2212 minus
   (not ASCII hyphen) for negative values. A line needs its own column
-  non-null (the 24h line carries one further condition — see below), so
-  in practice coingecko shows both, bitfinex shows 24h only, and kraken
-  shows neither.
+  non-null, so in practice coingecko shows both, bitfinex shows 24h
+  only, and kraken shows neither.
 - Spread lines: the 24h high and 24h low each print on their own line
   (`24h high: $X` / `24h low: $Y`), so the reply does not wrap
   mid-parenthetical on a phone. They follow the 24h delta line where
   there is one, and are the only 24h lines where there is not.
 - Any field absent from the snapshot row is silently omitted — the
-  renderer never invents zeros. One coupling: the 24h delta and the
-  spread share a single bundle key, so the delta prints only when
-  `high_24h` and `low_24h` are present too — a snapshot carrying a 24h
-  delta but no spread renders neither line.
+  renderer never invents zeros. This is field-by-field, not in groups:
+  the 24h delta and the spread are gated independently (M1-678), so a
+  snapshot carrying a 24h delta but no `high_24h` / `low_24h` still
+  renders the delta line.
 - `change_7d_pct` and `volume_24h` are stored but reach no reply line
   in v1: `AssetSnapshotReader` selects both into `Snapshot` and the
   renderer emits neither. The availability table above is per-source

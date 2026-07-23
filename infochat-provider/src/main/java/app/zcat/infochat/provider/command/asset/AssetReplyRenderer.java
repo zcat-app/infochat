@@ -79,15 +79,20 @@ public class AssetReplyRenderer {
             sb.append('\n');
         }
 
-        if (snap.change24hPct() != null && snap.high24h() != null && snap.low24h() != null) {
+        // The 24h delta and the 24h spread are independent facts, gated
+        // independently (M1-678). They used to share one bundle key, which made
+        // the delta conditional on the spread: a degraded upstream returning
+        // change_24h_pct without high_24h/low_24h (CoinGecko reads each from its
+        // own JSON path) satisfied neither branch and lost the delta silently.
+        // Emitting delta-then-spread keeps the all-three output byte-identical.
+        if (snap.change24hPct() != null) {
             sb.append(MessageFormat.format(
                     bundleLoader.get(BundleKeys.REPLY_ASSET_DELTA_24H, language),
-                    formatDelta(snap.change24hPct()),
-                    formatPrice(snap.high24h(), snap.vsCurrency()),
-                    formatPrice(snap.low24h(), snap.vsCurrency())));
+                    formatDelta(snap.change24hPct())));
             sb.append('\n');
-        } else if (snap.high24h() != null && snap.low24h() != null) {
-            // Exchange path: spread without delta percentage
+        }
+
+        if (snap.high24h() != null && snap.low24h() != null) {
             sb.append(MessageFormat.format(
                     bundleLoader.get(BundleKeys.REPLY_ASSET_SPREAD, language),
                     formatPrice(snap.high24h(), snap.vsCurrency()),
@@ -114,15 +119,25 @@ public class AssetReplyRenderer {
     }
 
     private static String formatPrice(BigDecimal price, String vsCurrency) {
-        String amount = price.stripTrailingZeros().toPlainString();
         return switch (vsCurrency) {
-            case "usd" -> "$" + amount;
-            case "btc" -> amount + " BTC";
+            case "usd" -> "$" + formatFiatAmount(price);
+            // BTC is carved out of the fiat scale: crypto-vs-crypto quotes are
+            // sub-unit (0.000651), so a 2-dp scale would round every one of them
+            // to 0.00. Crypto quotes keep the source's own precision (M1-678).
+            case "btc" -> price.stripTrailingZeros().toPlainString() + " BTC";
             // No per-currency symbol table: the uppercase ISO-code
             // suffix ("123.45 CZK") is the plain-text-correct form for
             // every other vs-currency in the small closed v1 set.
-            default -> amount + " " + vsCurrency.toUpperCase(Locale.ROOT);
+            default -> formatFiatAmount(price) + " " + vsCurrency.toUpperCase(Locale.ROOT);
         };
+    }
+
+    // Fiat prices read as money at a fixed 2 dp (HALF_UP), matching every design
+    // §10.5 example reply. stripTrailingZeros() alone printed a round 41.00 as
+    // "$41" and 961.30 as "961.3 CZK" — neither a shape the examples ever showed
+    // (M1-678).
+    private static String formatFiatAmount(BigDecimal price) {
+        return price.setScale(2, RoundingMode.HALF_UP).toPlainString();
     }
 
     // U+2212 MINUS SIGN for negative values per design §10.5. Fixed 2-dp scale

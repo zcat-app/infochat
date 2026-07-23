@@ -123,6 +123,102 @@ class AssetReplyRendererTest {
         assertTrue(rendered.contains("kraken.com/prices/zec-usd-zcash-price-chart"), "attribution URL");
     }
 
+    /**
+     * M1-678 shape 1: a degraded upstream can return {@code change_24h_pct}
+     * without {@code high_24h} / {@code low_24h} — CoinGecko reads each from its
+     * own JSON path. Before the split both render branches were unreachable for
+     * this row and the delta was dropped without trace.
+     */
+    @Test
+    void deltaWithoutSpreadStillRendersTheDeltaLine() {
+        AssetSnapshotReader.Snapshot snap = new AssetSnapshotReader.Snapshot(
+                "zcash", "coingecko", "usd",
+                new BigDecimal("42.18"),
+                new BigDecimal("12345678.50"),
+                null,  // degraded: no high_24h
+                null,  // degraded: no low_24h
+                null,
+                new BigDecimal("6.4774"),
+                null,
+                Instant.now().minusSeconds(41),
+                "coingecko.com/en/coins/zcash"
+        );
+        AssetSnapshotReader.SnapshotResult result =
+                new AssetSnapshotReader.SnapshotResult(snap, false, Duration.ofSeconds(90));
+
+        String rendered = renderer.render(result, "Zcash", "coingecko.com/en/coins/zcash", "en");
+
+        assertEveryNonHeaderLineIndented(rendered);
+        assertTrue(rendered.contains("  24h:   +6.48%\n"),
+                "24h delta must render on its own without the spread; got: " + rendered);
+        assertFalse(rendered.contains("24h high:"), "no high line when high_24h is absent");
+        assertFalse(rendered.contains("24h low:"), "no low line when low_24h is absent");
+    }
+
+    /**
+     * M1-678 shape 2: the spread renders alone when no delta arrived — today's
+     * Kraken path. {@link #exchangeAsymmetricFields()} covers the same row for
+     * layout; this case pins the 24h delta line's <em>absence</em>, which the
+     * split must not turn into a spurious emission.
+     */
+    @Test
+    void spreadWithoutDeltaStillRendersTheSpreadAlone() {
+        AssetSnapshotReader.Snapshot snap = new AssetSnapshotReader.Snapshot(
+                "zcash", "kraken", "usd",
+                new BigDecimal("42.15"),
+                new BigDecimal("9876543.20"),
+                new BigDecimal("43.88"),
+                new BigDecimal("41.02"),
+                null,
+                null,  // no change_24h_pct
+                null,
+                Instant.now().minusSeconds(38),
+                "kraken.com/prices/zec-usd-zcash-price-chart"
+        );
+        AssetSnapshotReader.SnapshotResult result =
+                new AssetSnapshotReader.SnapshotResult(snap, false, Duration.ofSeconds(90));
+
+        String rendered = renderer.render(result, "Zcash", "kraken.com/prices/zec-usd-zcash-price-chart", "en");
+
+        assertEveryNonHeaderLineIndented(rendered);
+        assertTrue(rendered.contains("  24h high: $43.88\n  24h low:  $41.02"),
+                "spread renders alone; got: " + rendered);
+        assertFalse(rendered.contains("24h:   "),
+                "no 24h delta line when change_24h_pct is absent; got: " + rendered);
+    }
+
+    /**
+     * M1-678 shape 3: the common row carrying all three fields must render
+     * byte-identically to the pre-split combined key — delta, then high, then
+     * low, in one contiguous block. The design §10.5 coingecko and bitfinex
+     * example replies depend on this.
+     */
+    @Test
+    void allThreeFieldsRenderDeltaThenSpreadContiguously() {
+        AssetSnapshotReader.Snapshot snap = new AssetSnapshotReader.Snapshot(
+                "zcash", "bitfinex", "usd",
+                new BigDecimal("42.11"),
+                new BigDecimal("9876543.20"),
+                new BigDecimal("43.85"),
+                new BigDecimal("41.00"),
+                null,  // bitfinex has no 1h delta
+                new BigDecimal("-2.38"),
+                null,
+                Instant.now().minusSeconds(38),
+                "bitfinex.com/t/ZEC:USD"
+        );
+        AssetSnapshotReader.SnapshotResult result =
+                new AssetSnapshotReader.SnapshotResult(snap, false, Duration.ofSeconds(90));
+
+        String rendered = renderer.render(result, "Zcash", "bitfinex.com/t/ZEC:USD", "en");
+
+        assertEveryNonHeaderLineIndented(rendered);
+        // One contiguous block: the delta line's newline is immediately followed
+        // by the spread's first line, exactly as the single combined key emitted.
+        assertTrue(rendered.contains("  24h:   −2.38%\n  24h high: $43.85\n  24h low:  $41.00\n"),
+                "delta, high, and low must stay one contiguous block; got: " + rendered);
+    }
+
     @Test
     void staleMarker() {
         // Snapshot older than 2 * refresh_interval → stale marker fires
@@ -188,8 +284,8 @@ class AssetReplyRendererTest {
 
         assertTrue(eurRendered.contains("38.74 EUR"), "eur price gets ISO-code suffix");
         assertFalse(eurRendered.contains("$38.74"), "eur price must not have $ prefix");
-        assertTrue(czkRendered.contains("961.3 CZK"), "czk price gets ISO-code suffix");
-        assertFalse(czkRendered.contains("$961.3"), "czk price must not have $ prefix");
+        assertTrue(czkRendered.contains("961.30 CZK"), "czk price gets ISO-code suffix at 2 dp");
+        assertFalse(czkRendered.contains("$961.30"), "czk price must not have $ prefix");
     }
 
     @Test
@@ -213,6 +309,32 @@ class AssetReplyRendererTest {
         // ... and the en rendering stays byte-identical to the prior literal.
         assertTrue(rendered.contains("  source: coingecko.com/en/coins/zcash"),
                 "en source line stays byte-identical; got: " + rendered);
+    }
+
+    /**
+     * M1-678: a fiat price reads as money at a fixed 2 dp, so a round value keeps
+     * its trailing zeros instead of collapsing to "$41" the way a bare
+     * {@code stripTrailingZeros()} rendered it. Every design §10.5 example reply
+     * is written at 2 dp; this pins the renderer to that.
+     */
+    @Test
+    void roundFiatPriceKeepsTwoDecimals() {
+        AssetSnapshotReader.Snapshot snap = new AssetSnapshotReader.Snapshot(
+                "zcash", "coingecko", "usd",
+                new BigDecimal("41.00"),
+                null, null, null, null, null, null,
+                Instant.now().minusSeconds(10),
+                "coingecko.com/en/coins/zcash"
+        );
+        AssetSnapshotReader.SnapshotResult result =
+                new AssetSnapshotReader.SnapshotResult(snap, false, Duration.ofSeconds(90));
+
+        String rendered = renderer.render(result, "Zcash", "coingecko.com/en/coins/zcash", "en");
+
+        assertTrue(rendered.contains("  $41.00\n"),
+                "a round fiat price keeps 2 dp; got: " + rendered);
+        assertFalse(rendered.contains("$41\n"),
+                "the bare stripTrailingZeros form must be gone; got: " + rendered);
     }
 
     @Test
