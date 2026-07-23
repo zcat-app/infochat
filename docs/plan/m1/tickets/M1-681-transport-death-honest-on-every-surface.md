@@ -9,9 +9,11 @@ files_budget: 8
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/health/AdapterReadinessCheck.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/health/AdapterReadinessCheckTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/health/FakeReadinessAdapter.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalAdapter.java
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java
   - docs/spec/messaging.md
 complexity: high
 risk: medium
@@ -105,9 +107,14 @@ test_plan:
   adds: []
   modifies:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/health/AdapterReadinessCheckTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/health/FakeReadinessAdapter.java
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java
   preserves:
-    - all tests currently green on main
+    - all tests currently green on main except the named authorized
+      modifications (SignalReconnectTest.sendDuringOutageFailsTransient
+      updates to the post-latch contract; FakeReadinessAdapter gains an
+      overloaded constructor with unchanged existing-call behavior)
 spec_refs:
   - docs/spec/messaging.md §Failure handling
   - docs/spec/security.md §Trust boundaries
@@ -228,9 +235,39 @@ cases and may need existing cases updated, because folding `connected()`
 into the readiness verdict changes what a started-but-disconnected
 adapter reports. Any existing case that asserts a started adapter reads
 up while its transport is down was asserting the defect; update it to the
-new contract and say so in the commit. No other pre-existing test may be
-weakened — if one fails for a reason not named here, escalate rather than
-edit it.
+new contract and say so in the commit.
+
+Two further authorized modifications (added by the 2026-07-23 outline-fail
+refine — the original scope made the ticket unimplementable without them):
+
+- `SignalReconnectTest.sendDuringOutageFailsTransient` pins the
+  pre-latch contract: it severs the connection via
+  `FakeSignalCli.killClientConnection()`, immediately sends, and asserts
+  the failure is always TRANSIENT on the premise (its own comment) that
+  "no reconnect is coming". Post-latch, both halves of that premise are
+  false: the latch fires `restartHung`, and `attachSubprocess` registers
+  `onRestart` (`SignalAdapter.java:516`), so a supervised
+  respawn+reconnect really does run inside that test's wiring; and the
+  raced send's future can be drained with the closed-before-ack PERMANENT
+  category — an outcome `docs/spec/messaging.md` §Failure handling
+  explicitly blesses ("a send that raced the close can learn permanent").
+  The put-future-then-drain vs drain-then-put interleaving is a genuine
+  coin toss on loopback, so the unmodified test would fail
+  intermittently. Update its raced-send expectation (either category is
+  legal; assert the failure is one of the two, or force one interleaving
+  deterministically) and rewrite its outage-premise comments to the
+  post-latch contract. This is a contract update, not a weakening — the
+  test was asserting the absence of the very detection this ticket adds.
+- `FakeReadinessAdapter` is `final`, does not override `connected()`, and
+  so inherits the interface default `true` (`MessagingAdapter.java:362-364`)
+  — acceptance item 1's DOWN case is untestable with it as-is. Add an
+  overloaded constructor taking a `connected` parameter; the existing
+  3-arg constructor delegates with `connected=true` so the seven existing
+  `AdapterReadinessCheckTest` cases and `ReadinessPayloadShapeTest` are
+  untouched.
+
+No other pre-existing test may be weakened — if one fails for a reason
+not named here, escalate rather than edit it.
 
 ## Notes
 
@@ -256,6 +293,13 @@ edit it.
   with the same remedy; if reusing the hook makes its name misleading,
   prefer renaming nothing and documenting the widened cause at the call
   site over inventing a parallel mechanism.
+- `readerLoop` has a THIRD exit path beyond the two arms the acceptance
+  names: the `return` inside the oversize-line drain when
+  `skipToNewline` hits EOF (`SignalJsonRpcClient.java:799-803`). That is
+  a real transport death that is neither the clean-EOF loop end nor the
+  `IOException` catch, so wire the latch to loop exit generally (e.g. a
+  `finally` around the reader body), not to the two named arms
+  individually.
 - The one out-of-model advisory worth keeping in view from the same audit
   round: a JVM-level `Error` (not `RuntimeException`) escaping a recovery
   thread would still kill it silently. Rated below findings grade in
