@@ -7,6 +7,7 @@ import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
@@ -46,11 +47,6 @@ public class PendingCommandHandler implements CommandHandler {
 
     private static final String USAGE = "/pending [--page N]";
 
-    // Raw-string bundle keys (the QuarantineCommandHandler precedent) so the new
-    // keys do not require a BundleKeys constant change outside this ticket's scope.
-    private static final String REPLY_HEADER = "reply.pending.header";
-    private static final String REPLY_LINE = "reply.pending.line";
-    private static final String REPLY_EMPTY = "reply.pending.empty";
     private static final String NO_PROBATION_PLACEHOLDER = "-";
 
     @Inject BundleLoader bundleLoader;
@@ -80,21 +76,21 @@ public class PendingCommandHandler implements CommandHandler {
         if (!(scope instanceof ScopeRef.Dm dm)) {
             // ScopeRef is sealed to Dm | Group; a non-Dm scope is a Group, which
             // this DM-only admin command rejects (docs/design/03-commands.md §3.2).
-            return reply(scope, bundleLoader.get("error.command_dm_only", lang));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY, lang));
         }
 
         String adapter = inboundContext.adapterName();
         String callerContactId = dm.contactId();
         Optional<PendingUsersDao.ActorRow> actorOpt = pendingUsersDao.lookupActor(adapter, callerContactId);
         if (actorOpt.isEmpty() || !actorOpt.get().isAdmin()) {
-            return reply(scope, bundleLoader.get("error.admin_only", lang));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, lang));
         }
         PendingUsersDao.ActorRow actor = actorOpt.get();
 
         Integer page = parsePage(rawText);
         if (page == null) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get("error.usage.missing_argument", lang), USAGE));
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT, lang), USAGE));
         }
 
         // Audit-before-effect: record the privileged-read intent BEFORE the
@@ -124,14 +120,14 @@ public class PendingCommandHandler implements CommandHandler {
             }
         } catch (SQLException e) {
             SafeLog.error(LOG, "/pending audit write failed", e);
-            return reply(scope, bundleLoader.get("error.internal", lang));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, lang));
         }
 
         Instant now = clock.instant();
         try {
             long total = pendingUsersDao.countActionable(adapter, now);
             if (total == 0) {
-                return reply(scope, bundleLoader.get(REPLY_EMPTY, lang));
+                return reply(scope, bundleLoader.get(BundleKeys.REPLY_PENDING_EMPTY, lang));
             }
             int totalPages = (int) Math.ceil((double) total / pageSize);
             int effectivePage = Math.min(page, totalPages);
@@ -140,11 +136,11 @@ public class PendingCommandHandler implements CommandHandler {
                     adapter, now, pageSize, (effectivePage - 1) * pageSize);
 
             StringBuilder sb = new StringBuilder();
-            sb.append(MessageFormat.format(bundleLoader.get(REPLY_HEADER, lang),
+            sb.append(MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_PENDING_HEADER, lang),
                     String.valueOf(rows.size()),
                     String.valueOf(effectivePage),
                     String.valueOf(totalPages)));
-            String lineTemplate = bundleLoader.get(REPLY_LINE, lang);
+            String lineTemplate = bundleLoader.get(BundleKeys.REPLY_PENDING_LINE, lang);
             for (PendingUsersDao.PendingUser u : rows) {
                 sb.append('\n');
                 sb.append(MessageFormat.format(lineTemplate,
@@ -159,7 +155,7 @@ public class PendingCommandHandler implements CommandHandler {
             return reply(scope, sb.toString());
         } catch (SQLException e) {
             SafeLog.error(LOG, "/pending query failed", e);
-            return reply(scope, bundleLoader.get("error.internal", lang));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, lang));
         }
     }
 

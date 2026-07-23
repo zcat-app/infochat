@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.command;
 
+import app.zcat.infochat.core.ingest.IngestTextNormalizer;
 import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
@@ -20,6 +21,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.text.MessageFormat;
+import java.text.Normalizer;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -195,6 +197,38 @@ public class SaveCommandHandler implements CommandHandler {
                 return reply(scope, MessageFormat.format(
                         bundleLoader.get(BundleKeys.ERROR_SAVE_TAG_TOO_LONG, inboundContext.effectiveLanguage()),
                         personalTagMaxLength));
+            }
+        }
+
+        // Reject rather than rewrite. Personal tags are echoed verbatim into
+        // the group-visible /saved reply (SavedCommandHandler's joinTags ->
+        // REPLY_SAVED_LINE), so a tag shaped like "/grant-admin <uuid>" makes
+        // the bot broadcast a syntactically valid privileged command to every
+        // group member, including any bot admin who copy-pastes it. That is
+        // the deterministic-reply social-engineering class of M1-656 /
+        // M1-659, and it is the channel security.md §LLM output sanitizer
+        // leaves unfiltered by design, so no output-side filter catches it.
+        //
+        // A slash ANYWHERE disqualifies the tag — deliberately absolute
+        // rather than a judgement about whether the slash "opens a word".
+        // M1-659 defeated the boundary form twice, once on each side of the
+        // predicate (U+2800 BRAILLE PATTERN BLANK against an isWhitespace
+        // test, the Hangul fillers U+115F/U+1160/U+3164 against an
+        // isLetterOrDigit test); the lesson is structural, since every
+        // partition of Unicode has blank-rendering members on both sides. D12
+        // makes '/' the only command sigil, so a slash-free tag cannot carry
+        // a command token regardless of what surrounds it.
+        //
+        // Testing the ASCII slash alone suffices because parseTagList already
+        // NFKC-folds each tag, which turns U+FF0F FULLWIDTH SOLIDUS into '/'.
+        // The homoglyphs that do NOT fold (U+2215, U+2044, U+29F8) equally do
+        // not parse as a command when pasted back, so they yield nothing
+        // executable. The check runs after the size caps so an over-long or
+        // over-count tag set keeps reporting its existing error.
+        for (String tag : args.personalTags) {
+            if (tag.indexOf('/') >= 0) {
+                return reply(scope, bundleLoader.get(
+                        BundleKeys.ERROR_SAVE_TAG_INVALID, inboundContext.effectiveLanguage()));
             }
         }
 
@@ -385,12 +419,34 @@ public class SaveCommandHandler implements CommandHandler {
         return new ParsedArgs(uid, personalTags);
     }
 
+    /**
+     * Split the {@code -t} argument and canonicalize each tag.
+     *
+     * <p>Canonicalization happens HERE, at the parse boundary, so that the
+     * size caps, the slash gate in {@link #handle}, and the value actually
+     * stored all measure the same representation the {@code /saved} reply
+     * will echo. Relying on the router's inbound normalization instead would
+     * not be self-sufficient: {@code InboundRouter.normalize} works per line
+     * and appends fenced code-block content verbatim while routing is decided
+     * on the whole body's first character, so a {@code /save} on line 1 can
+     * carry an un-normalized fenced payload on line 3 (M1-659).
+     *
+     * <p>NFKC folds compatibility forms — notably U+FF0F FULLWIDTH SOLIDUS to
+     * a real {@code '/'} — so the gate cannot be slipped by a homoglyph that
+     * renders as a slash once pasted back. {@code stripMetadataField} then
+     * removes bidi overrides, zero-width characters and the Unicode
+     * line/paragraph separators, which would otherwise let a tag forge extra
+     * apparent lines inside the group-visible {@code /saved} listing; it is
+     * the project's single declaration of that strip for single-line metadata
+     * fields, shared with the {@code --name} display-name fix.
+     */
     private static List<String> parseTagList(String csv) {
         List<String> out = new ArrayList<>();
         for (String raw : csv.split(",")) {
-            String trimmed = raw.trim();
-            if (!trimmed.isEmpty()) {
-                out.add(trimmed);
+            String canonical = IngestTextNormalizer.stripMetadataField(
+                    Normalizer.normalize(raw, Normalizer.Form.NFKC)).trim();
+            if (!canonical.isEmpty()) {
+                out.add(canonical);
             }
         }
         return out;

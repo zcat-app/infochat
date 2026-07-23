@@ -530,6 +530,9 @@ public final class BundleKeys {
     public static final String ERROR_ADD_SOURCE_NITTER_HOST_TYPE_CONFLICT =
             "error.add_source.nitter_host_type_conflict";
 
+    /** Caller passed a URL carrying a {@code user:password@} userinfo component (M1-156); credentials in a stored, echoed source URL are refused outright rather than stripped. */
+    public static final String ERROR_ADD_SOURCE_USERINFO_REJECTED = "error.add_source.userinfo_rejected";
+
     // ----- /add-source successful replies (M1-036) ------------------------
 
     /** Branch A — fresh insert. {@code {0}} = source display name. */
@@ -948,6 +951,20 @@ public final class BundleKeys {
      */
     public static final String ERROR_VOUCH_BANNED_TARGET = "error.vouch.banned_target";
 
+    // ----- /pending actionable-user list (M1-575) -------------------------
+    // Bot-admin, DM-only listing of users awaiting a vouch or still in
+    // slow-start probation (D45), each with the copy-pasteable contact_id
+    // /vouch and /ban accept. Deliberately NOT a general roster (D55).
+
+    /** {@code /pending} list header. {@code {0}} = displayed row count, {@code {1}} = current page, {@code {2}} = total pages. */
+    public static final String REPLY_PENDING_HEADER = "reply.pending.header";
+
+    /** {@code /pending} per-row template. {@code {0}} = contact id, {@code {1}} = adapter, {@code {2}} = registration state, {@code {3}} = created-at (ISO), {@code {4}} = probation-until (ISO, or {@code -} when past probation). */
+    public static final String REPLY_PENDING_LINE = "reply.pending.line";
+
+    /** {@code /pending} with zero actionable users — nobody is awaiting a vouch or in probation. */
+    public static final String REPLY_PENDING_EMPTY = "reply.pending.empty";
+
     // ----- /grant-admin + /revoke-admin (M1-046) --------------------------
     // Per docs/spec/security.md §Authorization model
     // (last-admin protection + per-adapter scope) +
@@ -1010,6 +1027,18 @@ public final class BundleKeys {
 
     /** {@code /save -t}: the personal-tag list exceeds the profile-driven per-call count cap; rejected at the parser boundary before any DB work. {@code {0}} = the configured max count. */
     public static final String ERROR_SAVE_TOO_MANY_TAGS = "error.save.too_many_tags";
+
+    /**
+     * {@code /save -t}: a personal tag contains {@code '/'} after NFKC
+     * normalization (M1-675). Personal tags are echoed verbatim into the
+     * group-visible {@code /saved} reply, so a tag shaped like
+     * {@code /grant-admin <uuid>} would put a syntactically valid privileged
+     * command in front of every group member — the deterministic-reply
+     * social-engineering class of M1-656 / M1-659. Carries NO placeholder:
+     * the reply must not reflect the rejected tag back (that would reintroduce
+     * the very echo it exists to prevent).
+     */
+    public static final String ERROR_SAVE_TAG_INVALID = "error.save.tag_invalid";
 
     /** {@code /save} invoked from group scope — v1 short-circuit; T2-F lands the group-actor seam. */
     public static final String ERROR_SAVE_GROUP_NOT_IN_V1 = "error.save.group_not_in_v1";
@@ -1602,6 +1631,12 @@ public final class BundleKeys {
 
     /** Stored procedure raised "expected PENDING or BENIGN_CLOSED" — the quarantine row exists but is in a non-actionable state. Token {@code {0}} = the supplied UUID. */
     public static final String ERROR_QUARANTINE_INVALID_STATE = "error.quarantine.invalid_state";
+
+    /** {@code /quarantine} rate-cap rejection — the admin exceeded the per-window action budget enforced by {@code RateCapBucket}. */
+    public static final String ERROR_QUARANTINE_RATE_LIMIT = "error.quarantine.rate_limit";
+
+    /** {@code /quarantine list -w <window>} without {@code --all} (M1-528). The pending review queue is always shown in full, so a window filter is only meaningful on the forensic view. */
+    public static final String ERROR_QUARANTINE_WINDOW_REQUIRES_ALL = "error.quarantine.window_requires_all";
 
     /**
      * Header line for {@code /quarantine list}. Tokens:

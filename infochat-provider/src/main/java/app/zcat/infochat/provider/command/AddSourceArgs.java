@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.command;
 
 import org.jspecify.annotations.Nullable;
 
+import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.source.KindResolver.SourceKind;
 
 import java.net.URI;
@@ -96,7 +97,7 @@ public record AddSourceArgs(
                 i++;
             } else if (token.equals("--tags")) {
                 if (i + 1 >= tokens.size()) {
-                    return new Failure("error.add_source.tags_required");
+                    return new Failure(BundleKeys.ERROR_ADD_SOURCE_TAGS_REQUIRED);
                 }
                 tags = parseTagList(tokens.get(i + 1));
                 i += 2;
@@ -148,32 +149,32 @@ public record AddSourceArgs(
             } else if (token.startsWith("--")) {
                 // Unknown flag — surface as malformed for MVP (the spec
                 // does not enumerate per-unknown-flag bundle keys).
-                return new Failure("error.add_source.malformed_url");
+                return new Failure(BundleKeys.ERROR_ADD_SOURCE_MALFORMED_URL);
             } else {
                 // First positional token is the URL; reject a second one.
                 if (url != null) {
-                    return new Failure("error.add_source.malformed_url");
+                    return new Failure(BundleKeys.ERROR_ADD_SOURCE_MALFORMED_URL);
                 }
                 url = parseUri(token);
                 if (url == null) {
-                    return new Failure("error.add_source.malformed_url");
+                    return new Failure(BundleKeys.ERROR_ADD_SOURCE_MALFORMED_URL);
                 }
                 if (url.getRawUserInfo() != null) {
                     // Reject embedded credentials at parse time: the fetch
                     // path never sends userinfo, so accepting it would
                     // store un-fetchable (and needlessly retained)
                     // credentials in the source row.
-                    return new Failure("error.add_source.userinfo_rejected");
+                    return new Failure(BundleKeys.ERROR_ADD_SOURCE_USERINFO_REJECTED);
                 }
                 i++;
             }
         }
 
         if (url == null) {
-            return new Failure("error.add_source.malformed_url");
+            return new Failure(BundleKeys.ERROR_ADD_SOURCE_MALFORMED_URL);
         }
         if (tags == null || tags.isEmpty()) {
-            return new Failure("error.add_source.tags_required");
+            return new Failure(BundleKeys.ERROR_ADD_SOURCE_TAGS_REQUIRED);
         }
 
         return new Success(new AddSourceArgs(url, tags, typeOverride, category, displayNameOverride));
@@ -234,13 +235,13 @@ public record AddSourceArgs(
      * valid-value list is bot-authored and carries the message on its own.
      */
     private static Failure unknownKind() {
-        return new Failure("error.add_source.unknown_kind",
+        return new Failure(BundleKeys.ERROR_ADD_SOURCE_UNKNOWN_KIND,
                 List.of(SourceKind.commaList()));
     }
 
     /** See {@link #unknownKind()} — same reasoning for the category token. */
     private static Failure unknownCategory() {
-        return new Failure("error.add_source.unknown_category",
+        return new Failure(BundleKeys.ERROR_ADD_SOURCE_UNKNOWN_CATEGORY,
                 List.of(String.join(", ", ALLOWED_CATEGORIES)));
     }
 }

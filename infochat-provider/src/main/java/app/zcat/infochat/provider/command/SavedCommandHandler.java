@@ -5,6 +5,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -88,6 +89,20 @@ public class SavedCommandHandler implements CommandHandler {
 
     @Inject
     InboundContext inboundContext;
+
+    // M1-675: the /saved reply echoes attacker-influenceable stored values
+    // (the post title and the personal/snapshot tags) and, in an approved
+    // group, is broadcast to every member. A stored value shaped like a
+    // privileged command would put a syntactically valid admin line in
+    // front of every reader, including any bot admin who copy-pastes it —
+    // the deterministic-reply reflection class of M1-656 / M1-659. The
+    // write-side slash reject in SaveCommandHandler stops NEW slash tags,
+    // but the title is upstream-controlled (PostPersister stores it with
+    // no slash gate) and pre-existing rows predate the reject, so the
+    // group-visible echo is redacted here at render via the same
+    // closed-list sanitizer the LLM-output surfaces use.
+    @Inject
+    LlmOutputSanitizer llmOutputSanitizer;
 
     // The /saved -w window cutoff in bindFilters is a decision-gate "now", so
     // it reads from the injected Clock to stay pinnable in tests (M1-454,
@@ -229,7 +244,14 @@ public class SavedCommandHandler implements CommandHandler {
 
     private String buildReply(List<Row> rows, long totalCount, ParsedArgs args) {
         int totalPages = (int) Math.max(1L, (totalCount + PAGE_SIZE - 1) / PAGE_SIZE);
-        String filterClause = args.tag == null ? "" : ", filter: " + args.tag;
+        // The filter echo ({4}) reflects the caller's own /saved <tag>
+        // token, and only renders once it byte-matched a stored personal
+        // tag — so a pre-existing slash-bearing row is the one way it can
+        // carry a command. Sanitize the DISPLAY only; the raw args.tag
+        // still drives the personal_tags @> ? match in bindFilters.
+        String filterClause = args.tag == null
+                ? ""
+                : ", filter: " + llmOutputSanitizer.sanitize(args.tag);
         String header = MessageFormat.format(
                 bundleLoader.get(BundleKeys.REPLY_SAVED_HEADER_GLOBAL, inboundContext.effectiveLanguage()),
                 rows.size(),
@@ -242,11 +264,17 @@ public class SavedCommandHandler implements CommandHandler {
         StringBuilder body = new StringBuilder(header);
         for (Row row : rows) {
             String tagJoined = joinTags(row.personalTags, row.snapshotTags);
+            // Redact the two attacker-influenceable placeholders ({1} title,
+            // {3} tags) before interpolation. sanitize() is a no-op on a
+            // value with no closed-list token (byte-identical passthrough of
+            // a legit-slash title like TCP/IP), and opens no DB connection
+            // unless it actually redacts. The bot-authored {0} uid and {2}
+            // relative age are not sanitized.
             String line = MessageFormat.format(lineTemplate,
                     row.postUid,
-                    row.title == null ? "" : row.title,
+                    llmOutputSanitizer.sanitize(row.title == null ? "" : row.title),
                     relativeAge(row.savedAt),
-                    tagJoined);
+                    llmOutputSanitizer.sanitize(tagJoined));
             body.append('\n').append(line);
         }
         return body.toString();

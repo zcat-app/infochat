@@ -417,6 +417,23 @@ them to the marked region — doing so would red the build.
   `getPost` tool contract, `security.md` §Prompt-injection defenses).
   The `/save` flow
   never lets a user bookmark content they cannot see.
+
+  **Personal tags may not contain a slash.** Each `-t` value is
+  NFKC-normalized and control-stripped at the write boundary, and the
+  whole `/save` is rejected with a friendly error if any resulting tag
+  still contains `/` — nothing is stored. Personal tags are echoed
+  verbatim into the `/saved` reply, and in an approved group that reply
+  is broadcast to every member, so a tag shaped like a command would put
+  a syntactically valid privileged line in front of every reader,
+  including any bot admin who copy-pastes it. Decision D12 makes the
+  slash prefix the only command sigil, so a tag containing no slash
+  cannot carry a command token regardless of what surrounds it. The rule
+  is deliberately absolute rather than boundary-sensitive: every
+  partition of Unicode has blank-rendering members on both sides of any
+  character-category test, so a "slash only counts at a word boundary"
+  form can only move the hole, not close it. The existing per-tag length
+  and per-call count caps are unchanged and continue to report their own
+  errors.
 - `/saved [tag] [-w …] [--page N]` — list saved posts with optional
   filters and pagination. **Saves are per-user-globally** (decision
   D13): the list shows all saves regardless of which scope they were

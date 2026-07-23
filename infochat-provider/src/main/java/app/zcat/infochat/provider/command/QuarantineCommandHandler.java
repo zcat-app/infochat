@@ -92,12 +92,6 @@ public class QuarantineCommandHandler implements CommandHandler {
     private static final String SELECT_QUARANTINE_STATUS_SQL =
             "SELECT status FROM quarantine_review_view WHERE id = ?";
 
-    private static final String RATE_LIMIT_KEY = "error.quarantine.rate_limit";
-
-    // Raw-string bundle key (like RATE_LIMIT_KEY) so the new boundary error does
-    // not require a BundleKeys constant change outside this ticket's scope.
-    private static final String WINDOW_REQUIRES_ALL_KEY = "error.quarantine.window_requires_all";
-
     @Inject BundleLoader bundleLoader;
     @Inject DataSource dataSource;
     @Inject InboundContext inboundContext;
@@ -156,7 +150,7 @@ public class QuarantineCommandHandler implements CommandHandler {
         // invariant (D53 / M1-528). Reject -w without --all at the boundary; the
         // default PENDING queue is NEVER windowed.
         if (args.window != null && !args.showAll) {
-            return reply(scope, bundleLoader.get(WINDOW_REQUIRES_ALL_KEY, inboundContext.effectiveLanguage()));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_QUARANTINE_WINDOW_REQUIRES_ALL, inboundContext.effectiveLanguage()));
         }
 
         // windowCutoff is non-null ONLY on the forensic --all-with-window path;
@@ -265,7 +259,7 @@ public class QuarantineCommandHandler implements CommandHandler {
     private OutboundMessage handleApprove(ScopeRef scope, ActorRow actor,
                                           String adapter, String remainder) {
         if (!rateCapBucket.tryAcquire("quarantine", actor.id.toString())) {
-            return reply(scope, bundleLoader.get(RATE_LIMIT_KEY, inboundContext.effectiveLanguage()));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_QUARANTINE_RATE_LIMIT, inboundContext.effectiveLanguage()));
         }
 
         String idStr = remainder.trim().split("\\s+")[0];
@@ -307,7 +301,7 @@ public class QuarantineCommandHandler implements CommandHandler {
     private OutboundMessage handleReject(ScopeRef scope, ActorRow actor,
                                          String adapter, String remainder) {
         if (!rateCapBucket.tryAcquire("quarantine", actor.id.toString())) {
-            return reply(scope, bundleLoader.get(RATE_LIMIT_KEY, inboundContext.effectiveLanguage()));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_QUARANTINE_RATE_LIMIT, inboundContext.effectiveLanguage()));
         }
 
         // Confirm leg of the forensic (BENIGN_CLOSED) path. The pending is

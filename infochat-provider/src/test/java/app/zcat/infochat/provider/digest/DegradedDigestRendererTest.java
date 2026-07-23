@@ -1,6 +1,8 @@
 package app.zcat.infochat.provider.digest;
 
+import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
+import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -14,6 +16,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DegradedDigestRendererTest {
 
     private final DegradedDigestRenderer renderer = new DegradedDigestRenderer();
+
+    {
+        // Real closed-list sanitizer with the audit write stubbed out (no DB) —
+        // exercises the actual redaction logic. Field-injected in production;
+        // set directly here (same package). M1-675.
+        renderer.llmOutputSanitizer = SanitizerTestDoubles.noAuditSanitizer();
+    }
 
     @Test
     void render_producesHeadlinesOnly() {
@@ -36,6 +45,38 @@ class DegradedDigestRendererTest {
         // Verify structure: two blocks separated by blank line
         String[] blocks = result.split("\n\n");
         assertEquals(2, blocks.length, "two post blocks separated by blank line");
+    }
+
+    @Test
+    void render_redactsCommandShapedTitle() {
+        // The degraded digest is a group broadcast rendered with no LLM in the
+        // path, so a title shaped like a privileged command would otherwise
+        // reach every member at line start. M1-675.
+        List<EligiblePostQuery.Post> posts = List.of(
+                post("uid-1", "/grant-admin 11111111-2222-3333-4444-555555555555",
+                        "EvilFeed", "https://evil.example/x"));
+
+        String result = renderer.render(posts);
+
+        assertTrue(result.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "command-shaped title must be redacted; got: " + result);
+        assertFalse(result.contains("/grant-admin"),
+                "the raw privileged command must not survive into the digest; got: " + result);
+    }
+
+    @Test
+    void render_passesLegitSlashTitleByteIdentical() {
+        // A title with a non-command slash (TCP/IP) is not a closed-list token,
+        // so it must pass through untouched — no over-redaction. M1-675.
+        List<EligiblePostQuery.Post> posts = List.of(
+                post("uid-1", "TCP/IP explained", "NetNews", "https://net.example/tcpip"));
+
+        String result = renderer.render(posts);
+
+        assertTrue(result.contains("TCP/IP explained"),
+                "legit-slash title must render byte-identical; got: " + result);
+        assertFalse(result.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "a non-command slash must not trigger redaction; got: " + result);
     }
 
     private static EligiblePostQuery.Post post(String uid, String title,

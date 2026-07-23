@@ -34,7 +34,13 @@ import java.util.Set;
  * <p>The field labels ("covered by:", "score:", "summary:", ...) are
  * bundle-resolved in the scope's reply language (D43 / design 05 §418: cluster
  * headers and classification labels are Translated). The {@code topic_id}
- * marker and the headline are structural / source-authored and stay verbatim.
+ * marker stays verbatim; the headline is the source-authored post title, so it
+ * is passed through {@link LlmOutputSanitizer} (M1-675) — this cluster block is
+ * group-visible and the headline renders at line start, where a command-shaped
+ * title would otherwise be one copy-paste from dispatch. Sanitizing is a
+ * deterministic pure function, so the byte-identical-replay property (D19/D36)
+ * holds: the same title yields the same redacted bytes at both call sites. A
+ * legit-slash title (TCP/IP) is returned byte-identical.
  * Label prefixes carry no trailing space in the bundle — the renderer appends
  * the single separator space — so the bundle never depends on invisible
  * trailing whitespace surviving an editor round-trip.
@@ -75,8 +81,10 @@ final class ClusterBlockRenderer {
 
         // [topic_id=...] — deterministic; ClusterTraversal computed it.
         out.append("[topic_id=").append(cluster.topicId()).append("]\n");
-        // headline — first post's title.
-        out.append(first.title()).append("\n");
+        // headline — first post's title, closed-list-sanitized (M1-675): a
+        // group-visible line-start title shaped like a privileged command
+        // would otherwise reflect straight into a broadcast reply.
+        out.append(llmOutputSanitizer.sanitize(first.title())).append("\n");
         // covered by: source display name (uid p-...), ...
         out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_CLUSTER_COVERED_BY, scopeLanguage))
            .append(' ');

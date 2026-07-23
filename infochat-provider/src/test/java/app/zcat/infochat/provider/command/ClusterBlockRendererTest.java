@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
@@ -131,6 +132,33 @@ class ClusterBlockRendererTest {
                 "sole-unknown union renders classification: unknown");
     }
 
+    @Test
+    void headlineShapedLikeCommandIsRedacted() {
+        // The cluster headline is the first post's title and renders at line
+        // start in a group-visible /summary reply; a command-shaped title
+        // must be closed-list-redacted, not echoed. M1-675.
+        String rendered = render(
+                clusterWithHeadline("/grant-admin 11111111-2222-3333-4444-555555555555"), "en");
+
+        assertTrue(rendered.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "command-shaped headline must be redacted; got: " + rendered);
+        assertFalse(rendered.contains("/grant-admin"),
+                "the raw privileged command must not survive into the cluster block; got: " + rendered);
+    }
+
+    @Test
+    void headlineWithNonCommandSlashRendersByteIdentical() {
+        // A non-command slash (TCP/IP) is not a closed-list token, so the
+        // headline passes through untouched — no over-redaction, and the
+        // byte-identical-replay property is preserved. M1-675.
+        String rendered = render(clusterWithHeadline("TCP/IP explained"), "en");
+
+        assertTrue(rendered.contains("TCP/IP explained\n"),
+                "legit-slash headline must render byte-identical; got: " + rendered);
+        assertFalse(rendered.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "a non-command slash must not trigger redaction; got: " + rendered);
+    }
+
     private String render(Cluster cluster, String language) {
         StringBuilder out = new StringBuilder();
         renderer.appendClusterBlock(out, new ClusterProse(cluster, "Degraded prose.", true), language);
@@ -159,6 +187,26 @@ class ClusterBlockRendererTest {
                     // lines are shown genuinely independent (not the M1-591 mirror).
                     List.of("factual")));
         }
+        return new Cluster("t-1", posts);
+    }
+
+    /**
+     * Build a single-post cluster whose headline (first post's title) is the
+     * supplied string, for the M1-675 headline-redaction tests.
+     */
+    private static Cluster clusterWithHeadline(String headline) {
+        List<Post> posts = new ArrayList<>();
+        posts.add(new Post(
+                UUID.randomUUID(),
+                "p-1",
+                UUID.randomUUID(),
+                "Src1",
+                headline,
+                "https://example.com/p-1",
+                "body",
+                Instant.parse("2026-01-01T00:00:00Z"),
+                List.of("a"),
+                List.of("factual")));
         return new Cluster("t-1", posts);
     }
 

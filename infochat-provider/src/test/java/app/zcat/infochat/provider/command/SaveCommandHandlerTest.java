@@ -339,6 +339,105 @@ class SaveCommandHandlerTest {
     }
 
     @Test
+    void saveWithSlashBearingPersonalTagIsRejectedAndWritesNoRow() throws Exception {
+        String contactId = PREFIX + "slashtag-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "slashtag-source", new String[] {});
+        seedDmSubscription(userId, sourceId);
+        String uid = PREFIX + "slashtag-uid";
+        // A valid READY, visible post and a short tag well inside both caps:
+        // the ONLY reason nothing may be stored is the slash.
+        seedPost(sourceId, uid, "READY", "Title S", "Body S", null, null, null);
+
+        // The M1-675 attack verbatim. Personal tags are echoed into the
+        // group-visible /saved reply, so storing this would make the bot
+        // broadcast a syntactically valid /grant-admin line to every member.
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId),
+                "/save " + uid + " -t \"/grant-admin 11111111-2222-3333-4444-555555555555\"");
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_SAVE_TAG_INVALID), reply.text(),
+                "a slash-bearing personal tag must surface error.save.tag_invalid");
+        assertEquals(0L, countSavedPosts(contactId),
+                "no saved_post row may be written when a personal tag contains a slash");
+    }
+
+    @Test
+    void saveWithSlashBearingTagRejectsTheWholeCallNotJustThatTag() throws Exception {
+        String contactId = PREFIX + "slashwhole-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "slashwhole-source", new String[] {});
+        seedDmSubscription(userId, sourceId);
+        String uid = PREFIX + "slashwhole-uid";
+        seedPost(sourceId, uid, "READY", "Title W", "Body W", null, null, null);
+
+        // A benign tag FIRST, the payload second. Rejecting only the offending
+        // tag and saving the rest would still leave the caller a stored row;
+        // the rule is that one bad tag fails the whole /save.
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId),
+                "/save " + uid + " -t read-later,/ban 11111111-2222-3333-4444-555555555555");
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_SAVE_TAG_INVALID), reply.text(),
+                "one slash-bearing tag must reject the whole /save");
+        assertEquals(0L, countSavedPosts(contactId),
+                "no saved_post row may be written when any personal tag contains a slash");
+    }
+
+    @Test
+    void saveWithFullwidthSolidusPersonalTagIsRejectedWithoutRouterNormalization() throws Exception {
+        String contactId = PREFIX + "fwsolidus-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "fwsolidus-source", new String[] {});
+        seedDmSubscription(userId, sourceId);
+        String uid = PREFIX + "fwsolidus-uid";
+        seedPost(sourceId, uid, "READY", "Title F", "Body F", null, null, null);
+
+        // U+FF0F FULLWIDTH SOLIDUS. The handler is invoked DIRECTLY here, with
+        // no InboundRouter in the path, which is the point: the router's
+        // normalization pass exempts fenced code blocks while routing reads
+        // only line 1, so a /save on line 1 can carry an un-normalized payload
+        // on line 3. The rejection must therefore be self-sufficient — the
+        // handler NFKC-folds the tag itself, turning U+FF0F into '/' before
+        // the gate sees it (M1-659).
+        String fullwidthSlashTag = "／grant-admin";
+        assertFalse(fullwidthSlashTag.contains("/"),
+                "fixture must carry the un-folded fullwidth solidus, not a plain ASCII slash — "
+                        + "otherwise this test would not exercise the handler's own NFKC pass");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(contactId), "/save " + uid + " -t " + fullwidthSlashTag);
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_SAVE_TAG_INVALID), reply.text(),
+                "a tag whose slash is U+FF0F must be rejected after the handler's own NFKC fold");
+        assertEquals(0L, countSavedPosts(contactId),
+                "no saved_post row may be written for a compatibility-folded slash tag");
+    }
+
+    @Test
+    void saveWithOverLengthSlashBearingTagStillReportsTheLengthError() throws Exception {
+        String contactId = PREFIX + "longslash-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "longslash-source", new String[] {});
+        seedDmSubscription(userId, sourceId);
+        String uid = PREFIX + "longslash-uid";
+        seedPost(sourceId, uid, "READY", "Title LS", "Body LS", null, null, null);
+
+        // A tag that trips BOTH caps. The slash gate runs after the size caps
+        // precisely so the pre-existing errors keep their behavior; this pins
+        // that ordering, which is otherwise invisible and easy to invert.
+        String tag = "/" + "x".repeat(personalTagMaxLength);
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(contactId), "/save " + uid + " -t " + tag);
+
+        assertEquals(MessageFormat.format(
+                        bundleLoader.get(BundleKeys.ERROR_SAVE_TAG_TOO_LONG), personalTagMaxLength),
+                reply.text(),
+                "the length cap runs before the slash gate, so an over-long slash tag "
+                        + "must keep reporting error.save.tag_too_long");
+        assertEquals(0L, countSavedPosts(contactId),
+                "no saved_post row may be written for an over-length slash-bearing tag");
+    }
+
+    @Test
     void saveSnapshotsBodyTitleUrlAuthorPublishedAtAndSourceId() throws Exception {
         String contactId = PREFIX + "snap-actor";
         UUID userId = seedUser(contactId);

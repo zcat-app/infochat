@@ -368,14 +368,39 @@ bot-authored). That is a property the handlers must **maintain**, not
 one the exemption may assume: prior tickets removed the reflecting
 echoes from the friendly-**error** surface and
 `InboundReflectionGuardTest` guards that surface against their
-return. The **reply/success** surface is not yet fully guaranteed: its
-one known live instance — the `/add-source` `--name` display-name echo
-— was closed by constraining the name where the value is
-produced rather than filtering the reply, but that surface has **no
-mechanical guard** (the reflection guard's census is error-scoped) and other
-`reply.*` echoes remain unreviewed. So for now this exemption carries a
-**residual risk** on non-error deterministic output, not a proven-safe
-blanket.
+return. The **reply/success** surface is not yet fully guaranteed. Two
+live instances are known, both now **CLOSED** — but they did **not**
+close the same way, and the difference is the lesson:
+
+- the `/add-source` `--name` display-name echo (M1-659) is closed at
+  the **write boundary alone**: the override is discarded if the
+  NFKC-folded name contains a slash, and because a display name has no
+  legitimate slash, constraining the single produced value covers every
+  surface that later renders it.
+- the `/save -t` personal-tag echo into the group-visible `/saved`
+  reply (M1-675) needed **both** a write-side reject **and** render-side
+  redaction. The whole `/save` is rejected if any NFKC-folded tag
+  contains a slash — but that only bounds NEW tag writes. The *same*
+  reply line interpolates the post **title**, which is upstream-
+  controlled and legitimately contains slashes (`TCP/IP`), so it cannot
+  be rejected; and pre-existing tag rows predate the reject. So the
+  group-visible echo surfaces (`/saved` reply, the `/summary` cluster
+  headline, and the degraded group digest) are additionally passed
+  through the closed-list `LlmOutputSanitizer` at **render**, where a
+  title or tag whose canonical form is a privileged command renders as
+  `[redacted command]`. This instance sits at the **same attacker tier**
+  as `/add-source` in a DM — both are open to any non-banned user
+  (`commands.md` §Source management) — not a lower one; it escaped
+  earlier constraint because the write-side caps were designed for size,
+  not content shape, a reminder that "this field is bounded" is not
+  "this field is safe to echo".
+
+The write-boundary rejects carry no **mechanical guard** (the reflection
+guard's census is error-scoped, and both of these are `reply.*` keys)
+and other `reply.*` echoes remain unreviewed; the M1-675 render-side
+redaction, by contrast, emits the per-occurrence `LLM_OUTPUT_SANITIZED`
+audit row on every hit. So for now this exemption carries a **residual
+risk** on non-error deterministic output, not a proven-safe blanket.
 
 **Delivery-ordering contract.** Command-usage or help text delivered
 into a chat-mode reply must satisfy **one of two** paths: either

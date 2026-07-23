@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 694 |
+| done | 695 |
 | deferred | 0 |
 | abandoned | 19 |
 | **total** | **718** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-672 — Narrow Provider grants on identity/authz tables (complexity: high, risk: high)
-- M1-675 — Reject slash-bearing personal tags at the /save boundary (complexity: low, risk: low)
 - M1-680 — Match closed-list flag entries at any argument position (complexity: medium, risk: medium)
 - M1-682 — Fail the build when a transport adapter inherits connected() (complexity: low, risk: low)
 - M1-683 — Fail the build when a Signal client pairs a real restart hook with no generation supplier (complexity: low, risk: low)
@@ -70,11 +69,11 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-678 | Render the asset 24h delta independently of the 24h spread | 2026-07-23 | round 1 APPROVE |
 | M1-677 | Validate provider-reported token counts before they reach the metric counters | 2026-07-23 | round 1 APPROVE |
 | M1-676 | Canonicalize before closed-list match in LLM sanitizer | 2026-07-23 | round 2 APPROVE |
+| M1-675 | Reject slash-bearing personal tags at the /save boundary | 2026-07-23 | round 1 APPROVE |
 | M1-674 | Recover SimpleX adapter from peer-closed WebSocket | 2026-07-23 | round 2 APPROVE |
 | M1-673 | Stop wire-controlled model field reaching Micrometer tags | 2026-07-22 | round 1 APPROVE |
 | M1-671 | Validate --vs against the quote currency each pair actually fetches | 2026-07-22 | round 1 APPROVE |
 | M1-670 | Fix release-audit doc drift in guides and spec | 2026-07-22 | round 1 APPROVE |
-| M1-669 | /add-source on a removed source must not claim tags replaced | 2026-07-22 | round 1 APPROVE |
 
 ---
 
@@ -917,7 +916,7 @@ M1-674 (done)
   └── M1-681 (done)
         ├── M1-682 (pending) ← runnable
         └── M1-683 (pending) ← runnable
-M1-675 (pending) ← runnable
+M1-675 (done)
 M1-676 (done)
   └── M1-680 (pending) ← runnable
 M1-677 (done)

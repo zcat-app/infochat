@@ -4,6 +4,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -209,6 +210,52 @@ class SavedCommandHandlerTest {
 
         assertTrue(reply.text().contains(PREFIX + "group-uid-1"),
                 "/saved in group scope must list the actor's saved posts");
+    }
+
+    @Test
+    void savedRedactsCommandShapedTitleAndTagInGroupBroadcast() throws Exception {
+        // A pre-existing / upstream-controlled row (seeded via direct SQL,
+        // bypassing the write-side reject) carries a command-shaped title AND
+        // a command-shaped personal tag. /saved in a group broadcasts the
+        // reply to every member, so both echoes must be redacted at render.
+        // M1-675 F1 (title) + F2 (pre-existing tag row).
+        String contactId = PREFIX + "redact-actor";
+        inboundContext.setSenderContactId(contactId);
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "redact-source");
+        seedSavedPost(userId, sourceId, PREFIX + "redact-uid-1",
+                "/grant-admin 11111111-2222-3333-4444-555555555555",
+                new String[] {}, new String[] { "/ban 22222222-3333-4444-5555-666666666666" },
+                Instant.now().minus(1, ChronoUnit.HOURS));
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Group("adapter-group-id"), "/saved");
+
+        assertTrue(reply.text().contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "command-shaped title/tag must be redacted in the broadcast reply; got: " + reply.text());
+        assertFalse(reply.text().contains("/grant-admin"),
+                "raw /grant-admin (title) must not survive into the reply; got: " + reply.text());
+        assertFalse(reply.text().contains("/ban"),
+                "raw /ban (personal tag) must not survive into the reply; got: " + reply.text());
+    }
+
+    @Test
+    void savedPassesLegitSlashTitleByteIdentical() throws Exception {
+        // A non-command slash (TCP/IP) is not a closed-list token, so the
+        // title must render byte-identical — the sanitizer does not
+        // over-redact ordinary content. M1-675.
+        String contactId = PREFIX + "legit-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "legit-source");
+        seedSavedPost(userId, sourceId, PREFIX + "legit-uid-1", "TCP/IP explained",
+                new String[] {}, new String[] {}, Instant.now().minus(1, ChronoUnit.HOURS));
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/saved");
+
+        assertTrue(reply.text().contains("TCP/IP explained"),
+                "legit-slash title must render byte-identical; got: " + reply.text());
+        assertFalse(reply.text().contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "a non-command slash must not trigger redaction; got: " + reply.text());
     }
 
     // ----- helpers --------------------------------------------------------
