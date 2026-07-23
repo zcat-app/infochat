@@ -30,20 +30,15 @@ import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 
 import jakarta.json.JsonNumber;
 import jakarta.json.JsonObject;
@@ -191,6 +186,13 @@ class SignalJsonRpcClient {
     private final SignalMessageCodec codec;
     private final Duration responseTimeout;
     private final Runnable hungRestartHook;
+    // The live SignalSubprocess generation, read at connect() to stamp each
+    // connection and again before firing hungRestartHook to confirm the
+    // child this connection served is still current (M1-681). Defaults to a
+    // constant 0 in the no-subprocess constructors, which makes the gate a
+    // no-op (0 == 0 always) and preserves the fire-on-death behavior those
+    // constructors had. Production wires SignalSubprocess::generation.
+    private final LongSupplier daemonGeneration;
     private final int inboundQueueCapacity;
     // Outbound send pacer (design §6.3.6): one token per outbound wire
     // frame. The client owns the draw so the §6.3.6 "one token per frame"
@@ -209,8 +211,15 @@ class SignalJsonRpcClient {
     // per crossing (see recordTimeout).
     private final AtomicInteger consecutiveTimeouts = new AtomicInteger();
 
-    private final ConcurrentMap<String, CompletableFuture<SignalMessageCodec.JsonRpcMessage>> pending =
-            new ConcurrentHashMap<>();
+    // The live connection, or null between disconnect() and the next
+    // connect(). ONE client instance spans reconnects (unlike SimpleX's
+    // per-rebuild client), so every piece of state a reader may mutate on
+    // its way out lives on the connection it belongs to rather than here —
+    // see SignalConnection for why that is load-bearing and not cosmetic
+    // (M1-681). Threads capture it into a local once and use that local
+    // for the whole operation; re-reading the field mid-operation is what
+    // would let work straddle a reconnect.
+    @Nullable private volatile SignalConnection current;
 
     /**
      * Upper bound on tracked send-handles, mirroring SimpleXAdapter's
@@ -248,23 +257,6 @@ class SignalJsonRpcClient {
     private volatile AdapterMetrics metrics = AdapterMetrics.noop();
     private volatile MessagingAdapter.@Nullable InboundHandler inboundHandler;
     private volatile @Nullable Consumer<JsonObject> groupNotificationHandler;
-    @Nullable private volatile Socket socket;
-    @Nullable private volatile BufferedWriter writer;
-    @Nullable private volatile Thread readerThread;
-    // Per-connection inbound dispatch thread (created by connect, shut
-    // down by disconnect). Notifications hop off the reader thread
-    // here so a blocking InboundHandler/MembershipHandler cannot
-    // deadlock against the reader that delivers its ack; responses
-    // never enter this queue. The backing queue is BOUNDED
-    // (inboundQueueCapacity): a ThreadPoolExecutor with the default
-    // AbortPolicy rejects an execute() once the queue is full, which
-    // dispatchAsync turns into a drop-newest with a counter — the rate
-    // cap downstream of this queue bounds work per dequeued item, never
-    // the queue's own memory (docs/design/06-messaging.md §6.3.7).
-    @Nullable private volatile ExecutorService dispatchExecutor;
-    // Reference to the executor's backing queue, kept so tests can read
-    // its depth; recreated alongside dispatchExecutor in connect().
-    @Nullable private volatile BlockingQueue<Runnable> dispatchQueue;
 
     /**
      * Convenience constructor with no hung-process escalation wired:
@@ -302,9 +294,24 @@ class SignalJsonRpcClient {
                 new OutboundRateLimiter(UNPACED_DEFAULT_CAP, Clock.systemUTC()));
     }
 
-    // Production seam: SignalAdapter.start() injects the capability-derived
-    // pacer (cap 5) so outbound transmits are paced; the Signal fallback
-    // token-charge test injects a counting pacer to pin the per-frame draw.
+    // Test seam: a hook plus a daemon-generation supplier, at the default
+    // capacity and unpaced. Lets a transport-death test advance the
+    // generation across a simulated respawn to prove the restart gate,
+    // without threading an OutboundRateLimiter through the case.
+    SignalJsonRpcClient(InetSocketAddress endpoint,
+                        String account,
+                        SignalMessageCodec codec,
+                        Duration responseTimeout,
+                        Runnable hungRestartHook,
+                        LongSupplier daemonGeneration) {
+        this(endpoint, account, codec, responseTimeout, hungRestartHook, INBOUND_QUEUE_CAPACITY,
+                new OutboundRateLimiter(UNPACED_DEFAULT_CAP, Clock.systemUTC()), daemonGeneration);
+    }
+
+    // No daemon-generation supplier: the transport-death restart gate is a
+    // no-op (every connection stamps generation 0), which is correct for a
+    // client with no supervised subprocess behind it — the same clients that
+    // pass a no-op or counting hungRestartHook.
     SignalJsonRpcClient(InetSocketAddress endpoint,
                         String account,
                         SignalMessageCodec codec,
@@ -312,6 +319,23 @@ class SignalJsonRpcClient {
                         Runnable hungRestartHook,
                         int inboundQueueCapacity,
                         OutboundRateLimiter outboundRate) {
+        this(endpoint, account, codec, responseTimeout, hungRestartHook, inboundQueueCapacity,
+                outboundRate, () -> 0L);
+    }
+
+    // Production seam: SignalAdapter.start() injects the capability-derived
+    // pacer (cap 5) so outbound transmits are paced (the Signal fallback
+    // token-charge test injects a counting pacer to pin the per-frame draw),
+    // AND SignalSubprocess::generation so the shared-subprocess restart is
+    // gated on the child this connection served still being current (M1-681).
+    SignalJsonRpcClient(InetSocketAddress endpoint,
+                        String account,
+                        SignalMessageCodec codec,
+                        Duration responseTimeout,
+                        Runnable hungRestartHook,
+                        int inboundQueueCapacity,
+                        OutboundRateLimiter outboundRate,
+                        LongSupplier daemonGeneration) {
         this.endpoint = endpoint;
         this.account = account;
         this.codec = codec;
@@ -319,6 +343,7 @@ class SignalJsonRpcClient {
         this.hungRestartHook = hungRestartHook;
         this.inboundQueueCapacity = inboundQueueCapacity;
         this.outboundRate = outboundRate;
+        this.daemonGeneration = daemonGeneration;
     }
 
     void setInboundHandler(MessagingAdapter.InboundHandler handler) {
@@ -348,22 +373,23 @@ class SignalJsonRpcClient {
         // A fresh connection talks to a fresh daemon: a timeout streak
         // carried over from before the outage (e.g. 2 of 3) must not
         // combine with one post-reconnect timeout into a spurious
-        // hung-restart kick against the new child.
+        // hung-restart kick against the new child. This counter tracks the
+        // CHILD rather than the socket, so it stays on the client while the
+        // per-socket state moves onto the connection below.
         consecutiveTimeouts.set(0);
-        this.socket = s;
-        this.writer = w;
-        // Fresh dispatcher per connect — disconnect() shuts the prior
-        // one down, and a shut-down executor rejects all tasks. The
-        // backing queue is bounded; on overflow the default AbortPolicy
-        // rejects execute() and dispatchAsync drops the newest notification.
-        BlockingQueue<Runnable> queue = new LinkedBlockingQueue<>(inboundQueueCapacity);
-        this.dispatchQueue = queue;
-        this.dispatchExecutor = new ThreadPoolExecutor(
-                1, 1, 0L, TimeUnit.MILLISECONDS, queue,
-                Thread.ofVirtual().name("signal-inbound-dispatch").factory());
-        Thread t = new Thread(this::readerLoop, "signal-jsonrpc-reader");
+        // Fresh state per connect — nothing carries over. The reader is
+        // handed ITS connection, so everything it can later latch, drain or
+        // tear down belongs to that connection and a successor published by
+        // a later connect() is unreachable from it (M1-681). The connection
+        // also records the daemon generation live NOW, so its reader can
+        // later tell whether the child it served is still current before
+        // asking the supervisor to SIGKILL it.
+        SignalConnection conn = new SignalConnection(
+                s, w, inboundQueueCapacity, daemonGeneration.getAsLong());
+        Thread t = new Thread(() -> readerLoop(conn), "signal-jsonrpc-reader");
         t.setDaemon(true);
-        this.readerThread = t;
+        conn.readerThread = t;
+        this.current = conn;
         t.start();
     }
 
@@ -380,43 +406,37 @@ class SignalJsonRpcClient {
     }
 
     void disconnect() {
-        Socket s = socket;
-        if (s != null) {
+        SignalConnection conn = current;
+        // Retired before the teardown starts, so isConnected() goes false at
+        // once, no new call() can attach to a connection being torn down, and
+        // the reader's latch sees it is no longer current (no restart fires
+        // for a close we initiated).
+        this.current = null;
+        if (conn != null) {
+            // Set BEFORE the socket close (the SimpleX local-close suppression):
+            // closing the socket exits the reader, whose latch then reads this
+            // close as intentional and fires no restart — reconnect()'s
+            // teardown-before-serve and stop() must never restart the child.
+            conn.closed = true;
             try {
-                s.close();
+                conn.socket.close();
             } catch (IOException e) {
                 LOG.debugf("error closing socket: %s", e.getMessage());
             }
-        }
-        Thread t = readerThread;
-        if (t != null) {
-            try {
-                t.join(TimeUnit.SECONDS.toMillis(2));
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+            Thread t = conn.readerThread;
+            if (t != null) {
+                try {
+                    t.join(SignalConnection.READER_JOIN_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
             }
-        }
-        // Wake any awaiting callers so they fail fast rather than time out.
-        // Runs BEFORE the dispatcher shutdown: a dispatch thread blocked in
-        // call() (a handler replying synchronously) is parked on one of
-        // these futures and must be released for the shutdown to complete.
-        // PERMANENT per the FailureCategory classification matrix
-        // (closed-before-ack): the connection that would have acked these
-        // calls is gone, so retrying cannot succeed until the transport is
-        // rebuilt —
-        // the same category SimpleX stamps when close() drains its pending
-        // commands. call() unwraps this exception to preserve the category.
-        pending.forEach((id, f) -> f.completeExceptionally(
-                new MessagingException(FailureCategory.PERMANENT,
-                        "SignalJsonRpcClient disconnected before response (closed-before-ack)")));
-        pending.clear();
-        ExecutorService executor = dispatchExecutor;
-        if (executor != null) {
-            // Queued-but-undelivered notifications are dropped — the
-            // connection is going away, matching at-most-once inbound.
-            executor.shutdownNow();
-            this.dispatchExecutor = null;
-            this.dispatchQueue = null;
+            // Wake any awaiting callers so they fail fast rather than time out.
+            // Runs BEFORE the dispatcher shutdown: a dispatch thread blocked in
+            // call() (a handler replying synchronously) is parked on one of
+            // these futures and must be released for the shutdown to complete.
+            conn.drainPending();
+            conn.shutdownDispatcher();
         }
         // Drop any open per-handle state — a reconnect starts with a
         // fresh registry; stale handles from before the disconnect
@@ -643,23 +663,26 @@ class SignalJsonRpcClient {
      */
     private SignalMessageCodec.JsonRpcMessage.Response call(long rpcId, String request)
             throws MessagingException {
-        String id = String.valueOf(rpcId);
-        CompletableFuture<SignalMessageCodec.JsonRpcMessage> future = new CompletableFuture<>();
-        pending.put(id, future);
-        BufferedWriter w = writer;
-        if (w == null) {
-            pending.remove(id);
+        // Captured ONCE for the whole call: the request line, the pending
+        // future it registers and the response that completes it must all
+        // belong to the same connection. Re-reading the fields per step is
+        // what would let one call straddle a reconnect (M1-681).
+        SignalConnection conn = current;
+        if (conn == null) {
             throw new MessagingException(
                     FailureCategory.TRANSIENT, "SignalJsonRpcClient not connected");
         }
+        String id = String.valueOf(rpcId);
+        CompletableFuture<SignalMessageCodec.JsonRpcMessage> future = new CompletableFuture<>();
+        conn.pending.put(id, future);
         try {
-            synchronized (w) {
-                w.write(request);
-                w.write('\n');
-                w.flush();
+            synchronized (conn.writer) {
+                conn.writer.write(request);
+                conn.writer.write('\n');
+                conn.writer.flush();
             }
         } catch (IOException e) {
-            pending.remove(id);
+            conn.pending.remove(id);
             throw new MessagingException(
                     FailureCategory.TRANSIENT, "JSON-RPC write failed", e);
         }
@@ -667,12 +690,12 @@ class SignalJsonRpcClient {
         try {
             msg = future.get(responseTimeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
-            pending.remove(id);
+            conn.pending.remove(id);
             recordTimeout();
             throw new MessagingException(
                     FailureCategory.TRANSIENT, "JSON-RPC response timed out after " + responseTimeout, e);
         } catch (InterruptedException e) {
-            pending.remove(id);
+            conn.pending.remove(id);
             Thread.currentThread().interrupt();
             // TRANSIENT per the FailureCategory classification matrix
             // (interrupted-awaiting-ack): the interrupt is a local
@@ -681,7 +704,7 @@ class SignalJsonRpcClient {
             throw new MessagingException(
                     FailureCategory.TRANSIENT, "Interrupted awaiting JSON-RPC response", e);
         } catch (ExecutionException e) {
-            // Unwrap MessagingException raised by disconnect()'s pending
+            // Unwrap MessagingException raised by the connection's pending
             // drain so the caller sees its category (closed-before-ack →
             // PERMANENT per the FailureCategory matrix), mirroring
             // SimpleXWebSocketClient.sendCommand's unwrap.
@@ -723,7 +746,20 @@ class SignalJsonRpcClient {
         if (n >= HUNG_TIMEOUT_THRESHOLD && consecutiveTimeouts.compareAndSet(n, 0)) {
             LOG.warnf("signal-cli unresponsive after %d consecutive JSON-RPC timeouts;"
                     + " forcing subprocess restart", HUNG_TIMEOUT_THRESHOLD);
-            hungRestartHook.run();
+            // Fire only against the child the CURRENT connection served and
+            // only while that child is still live (same daemon-generation gate
+            // as the reader-exit latch, RT-M1-681-r2-1): a null connection
+            // means disconnect() already retired it, and a generation mismatch
+            // means the daemon was already respawned, so killing now would take
+            // out a healthy successor. Mark before firing: the restart SIGKILLs
+            // the child, which kills the socket, which exits the reader — whose
+            // latch must then see this death as already handled (its CAS loses)
+            // rather than fire a second restart for the one death (M1-681).
+            SignalConnection conn = current;
+            if (conn != null && daemonGeneration.getAsLong() == conn.daemonGeneration) {
+                conn.restartRequested.set(true);
+                hungRestartHook.run();
+            }
         }
     }
 
@@ -766,13 +802,22 @@ class SignalJsonRpcClient {
         }
     }
 
-    private void readerLoop() {
-        Socket s = socket;
-        if (s == null) {
-            return;
+    private void readerLoop(SignalConnection conn) {
+        try {
+            readAllLines(conn);
+        } finally {
+            // EVERY reader exit is a transport death: the clean-EOF loop end,
+            // the mid-oversize-drain EOF return inside readAllLines, the
+            // IOException arm, and an escaping RuntimeException all mean no
+            // inbound byte will ever arrive again. finally — not per-arm
+            // calls — is what makes that exhaustive (M1-681).
+            latchTransportDeath(conn);
         }
+    }
+
+    private void readAllLines(SignalConnection conn) {
         try (BufferedReader r = new BufferedReader(
-                new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8))) {
+                new InputStreamReader(conn.socket.getInputStream(), StandardCharsets.UTF_8))) {
             // Cap-aware read loop: BufferedReader.readLine() has no
             // length bound, so a peer that never emits a newline would
             // grow the internal buffer until OOM. We accumulate into a
@@ -783,7 +828,7 @@ class SignalJsonRpcClient {
             while ((c = r.read()) != -1) {
                 if (c == '\n') {
                     if (sb.length() > 0) {
-                        handleLine(sb.toString());
+                        handleLine(conn, sb.toString());
                     }
                     sb.setLength(0);
                     continue;
@@ -807,10 +852,85 @@ class SignalJsonRpcClient {
             // Trailing data without a terminator (peer half-closed mid-line)
             // is processed only when under the cap; otherwise dropped.
             if (sb.length() > 0) {
-                handleLine(sb.toString());
+                handleLine(conn, sb.toString());
             }
         } catch (IOException e) {
             LOG.debugf("signal-cli reader loop exited: %s", e.getMessage());
+        }
+    }
+
+    /**
+     * Terminal handler for every reader-loop exit, mirroring
+     * {@code SimpleXWebSocketClient.latchTransportDeath}. A reader that
+     * stops reading means no inbound byte — response or notification —
+     * will ever arrive on this connection again, so the channel is dead
+     * even while signal-cli itself keeps running (the JSON-RPC channel is
+     * a TCP socket, not the child's stdio). Pre-M1-681 this exit set no
+     * flag: {@code isConnected()} stayed true, pending futures hung until
+     * timeout, and — because a dead reader also kills the inbound traffic
+     * whose replies were the only thing {@link #recordTimeout} could count
+     * — nothing ever escalated. The silence was self-sustaining.
+     *
+     * <p>The latch marks the channel dead (honest {@link #isConnected()}),
+     * then drains {@link #pending} with the same closed-before-ack
+     * PERMANENT category {@link #disconnect()} stamps — BEFORE any
+     * dispatcher shutdown, because a dispatch-thread handler blocked in
+     * {@code call()} parks on one of these futures and interrupting it
+     * first would misclassify its failure as interrupted-awaiting-ack
+     * TRANSIENT. On a PEER-initiated death it additionally tears the
+     * dispatcher down — discarding queued-but-undelivered inbound is the
+     * at-most-once stance, but a death is an outage, not a shutdown, so
+     * the depth is counted and logged (count only — no content, no
+     * contact ids, D37) — and fires {@link #hungRestartHook} so the
+     * supervised restart-to-reconnect path rebuilds the channel with no
+     * dependence on outbound traffic. A local {@link #disconnect()} set
+     * {@code closed} before closing the socket, so that exit drains and
+     * returns without firing.</p>
+     *
+     * <p>Never delegates to {@code disconnect()}: it joins this very
+     * reader thread (2 s cap), so the latch is mark + drain + counted
+     * teardown + guarded fire, nothing more. It needs no ownership check
+     * for those three, because everything it touches belongs to
+     * {@code conn} and a reader superseded by a later {@code connect()}
+     * has no reference to the replacement — see {@link SignalConnection}.
+     * The restart hook is the exception: the subprocess is SHARED, so
+     * ownership IS re-checked before firing. The restart-requested CAS
+     * keeps this latch and the consecutive-timeout escalation from
+     * double-firing a restart for one death (the hung restart's SIGKILL
+     * kills the socket, which exits the reader).</p>
+     */
+    private void latchTransportDeath(SignalConnection conn) {
+        boolean peerInitiated = !conn.closed;
+        conn.closed = true;
+        conn.drainPending();
+        if (!peerInitiated) {
+            return;
+        }
+        int discarded = conn.shutdownDispatcher();
+        if (discarded > 0) {
+            long total = droppedInboundCount.addAndGet(discarded);
+            LOG.warnf("transport death discarded %d queued inbound deliveries (total dropped %d)",
+                    discarded, total);
+        }
+        // The one effect a per-connection carrier cannot scope: the hook
+        // SIGKILLs the child that ALL connections share. Gate it on the
+        // daemon GENERATION this connection served still being live — NOT on
+        // `conn == current`, which is insufficient: the supervised restart
+        // respawns the child (generation advances) up to ENDPOINT_PROBE_TIMEOUT
+        // before reconnect() retires the dead connection, so a stale reader's
+        // `conn == current` can still hold while a healthy successor daemon
+        // already runs, and firing then kills IT (RT-M1-681-r2-1). The
+        // generation read is live and monotonic; a respawn that could bump it
+        // is scheduled with a backoff of at least hundreds of ms after the
+        // death that triggers it, so it cannot slip between this check and the
+        // hook on the reader thread. Runs outside any lock: the hook is
+        // caller-injected and kills a child process, so holding a lifecycle
+        // lock across it would put unbounded foreign code in the
+        // connection-publish path (M1-681).
+        if (daemonGeneration.getAsLong() == conn.daemonGeneration
+                && conn.restartRequested.compareAndSet(false, true)) {
+            LOG.warnf("signal-cli JSON-RPC channel died (reader exited); forcing subprocess restart");
+            hungRestartHook.run();
         }
     }
 
@@ -845,7 +965,7 @@ class SignalJsonRpcClient {
         }
     }
 
-    private void handleLine(String line) {
+    private void handleLine(SignalConnection conn, String line) {
         SignalMessageCodec.JsonRpcMessage msg;
         try {
             msg = codec.decode(line);
@@ -864,9 +984,9 @@ class SignalJsonRpcClient {
             return;
         }
         switch (msg) {
-            case SignalMessageCodec.JsonRpcMessage.Response r -> completePending(r.id(), r);
-            case SignalMessageCodec.JsonRpcMessage.ErrorResponse e -> completePending(e.id(), e);
-            case SignalMessageCodec.JsonRpcMessage.Notification n -> dispatchAsync(n);
+            case SignalMessageCodec.JsonRpcMessage.Response r -> completePending(conn, r.id(), r);
+            case SignalMessageCodec.JsonRpcMessage.ErrorResponse e -> completePending(conn, e.id(), e);
+            case SignalMessageCodec.JsonRpcMessage.Notification n -> dispatchAsync(conn, n);
         }
     }
 
@@ -877,17 +997,11 @@ class SignalJsonRpcClient {
      * deadlock this hop exists to break: a handler blocked in the
      * dispatch thread would sit ahead of its own ack.
      */
-    private void dispatchAsync(SignalMessageCodec.JsonRpcMessage.Notification n) {
-        ExecutorService executor = dispatchExecutor;
-        if (executor == null) {
-            // readerLoop only runs after connect() set the field; null
-            // means disconnect() already tore it down mid-read.
-            return;
-        }
+    private void dispatchAsync(SignalConnection conn, SignalMessageCodec.JsonRpcMessage.Notification n) {
         try {
-            executor.execute(() -> dispatchNotification(n));
+            conn.dispatchExecutor.execute(() -> dispatchNotification(n));
         } catch (RejectedExecutionException e) {
-            if (executor.isShutdown()) {
+            if (conn.dispatchExecutor.isShutdown()) {
                 // disconnect() shut the dispatcher down while the reader was
                 // draining its final lines; dropping is correct, the
                 // connection is going away (at-most-once inbound).
@@ -927,20 +1041,30 @@ class SignalJsonRpcClient {
         return droppedInboundCount.get();
     }
 
+    /** Visible for tests: the current connection's reader thread. */
+    @Nullable Thread readerThread() {
+        SignalConnection conn = current;
+        return conn == null ? null : conn.readerThread;
+    }
+
     /** Visible for tests: current depth of the bounded dispatch queue (0 when disconnected). */
     int dispatchQueueDepth() {
-        BlockingQueue<Runnable> queue = dispatchQueue;
-        return queue == null ? 0 : queue.size();
+        SignalConnection conn = current;
+        return conn == null ? 0 : conn.dispatchQueue.size();
     }
 
     /**
-     * Live connection state for {@link SignalAdapter#connected()}: the
-     * dispatch queue exists exactly between {@code connect()} and
+     * Live connection state for {@link SignalAdapter#connected()}: a
+     * connection exists exactly between {@code connect()} and
      * {@code disconnect()} — the same lifecycle as the reader/dispatcher
-     * pair that makes the transport usable.
+     * pair that makes the transport usable — AND its death latch has not
+     * fired: a reader-loop exit means no inbound byte will ever arrive
+     * again, so a latched channel must read disconnected even though the
+     * connection object is still populated (M1-681).
      */
     boolean isConnected() {
-        return dispatchQueue != null;
+        SignalConnection conn = current;
+        return conn != null && !conn.closed;
     }
 
     /** Late-binding from {@link SignalAdapter}; see the {@code metrics} field. */
@@ -1037,8 +1161,9 @@ class SignalJsonRpcClient {
         return sb.toString();
     }
 
-    private void completePending(String id, SignalMessageCodec.JsonRpcMessage msg) {
-        CompletableFuture<SignalMessageCodec.JsonRpcMessage> future = pending.remove(id);
+    private void completePending(SignalConnection conn, String id,
+                                 SignalMessageCodec.JsonRpcMessage msg) {
+        CompletableFuture<SignalMessageCodec.JsonRpcMessage> future = conn.pending.remove(id);
         if (future != null) {
             future.complete(msg);
             return;

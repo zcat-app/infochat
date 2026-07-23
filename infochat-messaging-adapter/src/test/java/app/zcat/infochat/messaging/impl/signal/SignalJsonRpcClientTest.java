@@ -11,13 +11,22 @@ import static org.junit.jupiter.api.Assertions.fail;
 import jakarta.json.Json;
 import jakarta.json.JsonObject;
 
+import java.io.FilterInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.Socket;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 
 import app.zcat.infochat.messaging.FailureCategory;
 import app.zcat.infochat.messaging.InboundMessage;
@@ -32,6 +41,9 @@ class SignalJsonRpcClientTest {
 
     private static final Duration TEST_RESPONSE_TIMEOUT = Duration.ofSeconds(5);
     private static final long QUEUE_WAIT_MS = 2_000;
+    // ASCII '#': a byte the readIoException fault stream throws on. Any byte
+    // works — it is consumed by the faulting read, never decoded as a line.
+    private static final int FAULT_SENTINEL = '#';
 
     @Test
     void inboundMessageDelivered() throws Exception {
@@ -739,6 +751,379 @@ class SignalJsonRpcClientTest {
             } finally {
                 client.disconnect();
             }
+        }
+    }
+
+    // ---- M1-681: reader-exit transport-death latch ----
+
+    /** Poll up to {@link #QUEUE_WAIT_MS} for an asynchronously-latched condition. */
+    private static void awaitTrue(String what, BooleanSupplier condition)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(QUEUE_WAIT_MS);
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertTrue(condition.getAsBoolean(), what);
+    }
+
+    @Test
+    void peerEofLatchesChannelDead() throws Exception {
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), "+15551111111", new SignalMessageCodec(), TEST_RESPONSE_TIMEOUT);
+            client.connect();
+            try {
+                assertTrue(client.isConnected(), "sanity: connected before the kill");
+                // killClientConnection is a plain Socket.close() — a clean FIN,
+                // so the reader's read() returns -1: the EOF arm of the latch.
+                fake.killClientConnection();
+                awaitTrue("clean EOF must latch the channel dead — isConnected() false"
+                                + " while signal-cli keeps running",
+                        () -> !client.isConnected());
+            } finally {
+                client.disconnect();
+            }
+        }
+    }
+
+    @Test
+    void readIoExceptionLatchesChannelDead() throws Exception {
+        // FakeSignalCli can only produce a clean FIN (the EOF arm); the
+        // IOException arm needs a mid-stream read fault, injected through the
+        // newSocket() seam. The fault is keyed to a SENTINEL byte the stream
+        // throws on, NOT a flag the test flips: a flag flip races the reader's
+        // startup — if the reader reaches its first read() after the flip, it
+        // throws before any data arrives, exits, and closes the socket before
+        // pushRawLine can write (SocketException, observed under full-suite
+        // load). Keying to a byte makes the reader always block in the real
+        // read() until the sentinel arrives, so the fault is deterministic.
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), "+15551111111", new SignalMessageCodec(), TEST_RESPONSE_TIMEOUT) {
+                @Override
+                Socket newSocket() {
+                    return new Socket() {
+                        @Override
+                        public InputStream getInputStream() throws IOException {
+                            return new FilterInputStream(super.getInputStream()) {
+                                @Override
+                                public int read() throws IOException {
+                                    int c = super.read();
+                                    if (c == FAULT_SENTINEL) {
+                                        throw new IOException("injected transport fault");
+                                    }
+                                    return c;
+                                }
+
+                                @Override
+                                public int read(byte[] b, int off, int len) throws IOException {
+                                    int n = super.read(b, off, len);
+                                    for (int i = off; i < off + n; i++) {
+                                        if (b[i] == FAULT_SENTINEL) {
+                                            throw new IOException("injected transport fault");
+                                        }
+                                    }
+                                    return n;
+                                }
+                            };
+                        }
+                    };
+                }
+            };
+            client.connect();
+            try {
+                assertTrue(client.isConnected(), "sanity: connected before the fault");
+                // The reader is blocked in read() awaiting bytes; the sentinel
+                // makes the read that consumes it throw, exiting the reader.
+                fake.pushRawLine(String.valueOf((char) FAULT_SENTINEL));
+                awaitTrue("a reader IOException must latch the channel dead — isConnected() false",
+                        () -> !client.isConnected());
+            } finally {
+                client.disconnect();
+            }
+        }
+    }
+
+    @Test
+    void latchDrainsInFlightCallAndFiresRestartHook() throws Exception {
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            AtomicInteger restartCalls = new AtomicInteger();
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), "+15551111111", new SignalMessageCodec(),
+                    TEST_RESPONSE_TIMEOUT, restartCalls::incrementAndGet);
+            client.connect();
+            try {
+                AtomicReference<MessagingException> caught = new AtomicReference<>();
+                Thread sender = new Thread(() -> {
+                    try {
+                        client.send(new OutboundMessage(
+                                new ScopeRef.Dm("aabbccdd-1111-2222-3333-444455556666"),
+                                "msg", Instant.now(), "c-latch"));
+                    } catch (MessagingException e) {
+                        caught.set(e);
+                    }
+                }, "latch-drain-sender");
+                sender.start();
+                // Await the captured request so the send's future is pending
+                // (written, unanswered) before the channel dies.
+                fake.nextOutbound(QUEUE_WAIT_MS);
+                fake.killClientConnection();
+                // The join bound sits far below the 5 s response timeout: only
+                // the latch's drain — never the timeout arm — can release the
+                // sender this fast, and only the drain stamps PERMANENT.
+                sender.join(QUEUE_WAIT_MS);
+                assertFalse(sender.isAlive(),
+                        "latch drain must release the in-flight call well before the response timeout");
+                MessagingException e = caught.get();
+                assertNotNull(e, "the drained in-flight call must fail");
+                assertEquals(FailureCategory.PERMANENT, e.category(),
+                        "a call in flight at channel death drains closed-before-ack PERMANENT");
+                awaitTrue("channel death must fire the supervised-restart hook",
+                        () -> restartCalls.get() == 1);
+            } finally {
+                client.disconnect();
+            }
+        }
+    }
+
+    @Test
+    void channelDeathDetectedWithZeroOutboundTraffic() throws Exception {
+        // The no-outbound-traffic hole (M1-674 audit finding 2): inbound death
+        // removes the traffic whose replies were the only thing the
+        // consecutive-timeout counter could observe, so before the latch this
+        // realistic case was undetectable — the silence sustained itself.
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            AtomicInteger restartCalls = new AtomicInteger();
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), "+15551111111", new SignalMessageCodec(),
+                    TEST_RESPONSE_TIMEOUT, restartCalls::incrementAndGet);
+            client.connect();
+            try {
+                assertTrue(client.isConnected(), "sanity: connected before the kill");
+                fake.killClientConnection();
+                awaitTrue("detection must fire with ZERO call() invocations:"
+                                + " restart hook fired and channel latched dead",
+                        () -> restartCalls.get() == 1 && !client.isConnected());
+            } finally {
+                client.disconnect();
+            }
+        }
+    }
+
+    @Test
+    void timeoutEscalationThenReaderExitFiresOneRestart() throws Exception {
+        // The two detectors observe the SAME death in sequence: the
+        // consecutive-timeout escalation fires the restart, the restart's
+        // SIGKILL severs the socket, the reader exits — and the latch must
+        // not fire a second restart for that one death.
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            AtomicInteger restartCalls = new AtomicInteger();
+            // Short response timeout so three timeouts accrue quickly.
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), "+15551111111", new SignalMessageCodec(),
+                    Duration.ofMillis(150), restartCalls::incrementAndGet);
+            client.connect();
+            try {
+                for (int i = 0; i < 3; i++) {
+                    OutboundMessage out = new OutboundMessage(
+                            new ScopeRef.Dm("aabbccdd-1111-2222-3333-444455556666"),
+                            "msg", Instant.now(), "c" + i);
+                    assertThrows(MessagingException.class, () -> client.send(out));
+                }
+                assertEquals(1, restartCalls.get(),
+                        "sanity: the timeout escalation fired the first restart");
+                // The real hook SIGKILLs the child, which severs this socket;
+                // the fake severs it directly.
+                fake.killClientConnection();
+                awaitTrue("reader exit must still latch the channel dead",
+                        () -> !client.isConnected());
+                assertEquals(1, restartCalls.get(),
+                        "the reader-exit latch must not fire a second restart for the same death");
+            } finally {
+                client.disconnect();
+            }
+        }
+    }
+
+    @Test
+    void staleReaderCannotLatchTheConnectionThatReplacedIt() throws Exception {
+        // One client instance spans reconnects, so a reader that outlived
+        // disconnect()'s bounded 2 s join is the hazard: if the latch's state
+        // lived on the CLIENT, that reader would latch, drain, tear down and
+        // restart whatever connection happened to be current when it finally
+        // woke. Per-connection state makes it structurally unable to reach a
+        // successor, and this pins that — the ordering is deterministic
+        // because the first reader cannot exit until its own socket is
+        // severed, which happens only AFTER the replacement is published.
+        // Each assertion answers one mutation the superseded reader would
+        // otherwise have made.
+        List<Socket> handedOut = new CopyOnWriteArrayList<>();
+        // Advances across the simulated respawn, exactly as
+        // SignalSubprocess.generation() does: connection 1 is stamped 1,
+        // connection 2 is stamped 2.
+        AtomicLong daemonGen = new AtomicLong(1);
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            AtomicInteger restartCalls = new AtomicInteger();
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), "+15551111111", new SignalMessageCodec(),
+                    TEST_RESPONSE_TIMEOUT, restartCalls::incrementAndGet, daemonGen::get) {
+                @Override
+                Socket newSocket() {
+                    Socket s = super.newSocket();
+                    handedOut.add(s);
+                    return s;
+                }
+            };
+            LinkedBlockingQueue<InboundMessage> delivered = new LinkedBlockingQueue<>();
+            client.setInboundHandler(delivered::add);
+            client.connect();
+            try {
+                Thread staleReader = Objects.requireNonNull(
+                        client.readerThread(), "sanity: connect() started a reader thread");
+                // The supervised restart respawns the child (generation
+                // advances) and then the replacement connection is published,
+                // while the first reader is still parked in read() on a live
+                // socket. No disconnect() first — skipping it is exactly what
+                // models the zombie window; the superseded dispatcher is left
+                // to GC.
+                daemonGen.incrementAndGet();
+                client.connect();
+                assertEquals(2, handedOut.size(), "sanity: two sockets were dialed");
+
+                AtomicReference<MessageHandle> sentHandle = new AtomicReference<>();
+                AtomicReference<Exception> sendFailure = new AtomicReference<>();
+                Thread sender = new Thread(() -> {
+                    try {
+                        sentHandle.set(client.send(new OutboundMessage(
+                                new ScopeRef.Dm("aabbccdd-1111-2222-3333-444455556666"),
+                                "on the replacement", Instant.now(), "corr-stale")));
+                    } catch (MessagingException e) {
+                        sendFailure.set(e);
+                    }
+                }, "post-replacement-sender");
+                sender.start();
+                // call() registers the pending future BEFORE writing, so a
+                // captured request line proves the replacement has an
+                // in-flight call for a stale drain to hit.
+                String requestId = fake.nextOutbound(QUEUE_WAIT_MS).getString("id");
+
+                // Sever the FIRST socket from the client side — the fake
+                // tracks only its newest accepted connection, so killing
+                // through it would hit the replacement instead.
+                handedOut.get(0).close();
+                awaitTrue("the superseded reader must reach its latch and exit",
+                        () -> !staleReader.isAlive());
+
+                assertEquals(0, restartCalls.get(),
+                        "a superseded reader must not fire a restart: the subprocess is shared,"
+                                + " so that would SIGKILL the daemon under the live connection");
+                assertTrue(client.isConnected(),
+                        "a superseded reader must not latch the connection that replaced it");
+                // The replacement's dispatcher survived: inbound still routes.
+                fake.pushNotification("receive", Json.createObjectBuilder()
+                        .add("envelope", Json.createObjectBuilder()
+                                .add("sourceUuid", "AABBCCDD-1111-2222-3333-444455556666")
+                                .add("sourceDevice", 1)
+                                .add("timestamp", 1700000003000L)
+                                .add("dataMessage", Json.createObjectBuilder()
+                                        .add("timestamp", 1700000003000L)
+                                        .add("message", "still delivering")))
+                        .build());
+                assertNotNull(delivered.poll(QUEUE_WAIT_MS, TimeUnit.MILLISECONDS),
+                        "a superseded reader must not shut down the replacement's dispatcher");
+                // The replacement's in-flight call was not drained: it still
+                // resolves from the wire rather than closed-before-ack.
+                fake.respondSuccess(requestId, Json.createObjectBuilder()
+                        .add("timestamp", 1700000003500L)
+                        .add("results", Json.createArrayBuilder())
+                        .build());
+                sender.join(QUEUE_WAIT_MS);
+                if (sendFailure.get() != null) {
+                    fail("a superseded reader must not drain the replacement's in-flight call: "
+                            + sendFailure.get());
+                }
+                assertNotNull(sentHandle.get(), "the in-flight call must complete normally");
+            } finally {
+                client.disconnect();
+            }
+        }
+    }
+
+    @Test
+    void staleReaderDoesNotRestartDaemonReplacedDuringReconnectWindow() throws Exception {
+        // RT-M1-681-r2-1: the production window a `conn == current` guard
+        // could NOT catch. The supervised restart spawns the successor child
+        // (generation advances) up to ENDPOINT_PROBE_TIMEOUT before
+        // reconnect() calls disconnect() to retire the dead connection, so for
+        // that whole window the ORIGINAL connection is still `current` while a
+        // healthy new daemon runs. A reader exiting then must NOT fire the
+        // restart — it would SIGKILL the successor. Here `current` is never
+        // advanced (no second connect()), so `conn == current` holds; only the
+        // daemon-generation gate distinguishes the dead child from the live
+        // one.
+        AtomicLong daemonGen = new AtomicLong(1);
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            AtomicInteger restartCalls = new AtomicInteger();
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), "+15551111111", new SignalMessageCodec(),
+                    TEST_RESPONSE_TIMEOUT, restartCalls::incrementAndGet, daemonGen::get);
+            client.connect();
+            try {
+                assertTrue(client.isConnected(), "sanity: connected on generation 1");
+                // The supervisor respawns the child: generation advances, but
+                // reconnect() has not run disconnect() yet, so this connection
+                // stays current.
+                daemonGen.incrementAndGet();
+                fake.killClientConnection();
+                awaitTrue("the reader must reach its latch and exit",
+                        () -> !client.isConnected());
+                assertEquals(0, restartCalls.get(),
+                        "a reader whose child was already replaced must fire no restart,"
+                                + " even though its connection is still current");
+            } finally {
+                client.disconnect();
+            }
+        }
+    }
+
+    @Test
+    void readerExitRestartsWhenItsDaemonGenerationIsStillLive() throws Exception {
+        // The positive complement: when the generation still matches — the
+        // common case, a channel death with no intervening respawn — the
+        // reader-exit latch DOES drive the restart. Proves the gate is not
+        // vacuously off.
+        AtomicLong daemonGen = new AtomicLong(7);
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            AtomicInteger restartCalls = new AtomicInteger();
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), "+15551111111", new SignalMessageCodec(),
+                    TEST_RESPONSE_TIMEOUT, restartCalls::incrementAndGet, daemonGen::get);
+            client.connect();
+            try {
+                fake.killClientConnection();
+                awaitTrue("a channel death on the live generation must fire the restart",
+                        () -> restartCalls.get() == 1 && !client.isConnected());
+            } finally {
+                client.disconnect();
+            }
+        }
+    }
+
+    @Test
+    void intentionalDisconnectDoesNotFireRestartHook() throws Exception {
+        // Every reconnect() teardown and every test's disconnect() routes the
+        // reader through its exit latch; reading that exit as a peer death
+        // would turn each into a spurious subprocess restart.
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            AtomicInteger restartCalls = new AtomicInteger();
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), "+15551111111", new SignalMessageCodec(),
+                    TEST_RESPONSE_TIMEOUT, restartCalls::incrementAndGet);
+            client.connect();
+            client.disconnect();
+            assertFalse(client.isConnected(), "a disconnected client must read disconnected");
+            assertEquals(0, restartCalls.get(),
+                    "a local disconnect must never fire the restart hook");
         }
     }
 }

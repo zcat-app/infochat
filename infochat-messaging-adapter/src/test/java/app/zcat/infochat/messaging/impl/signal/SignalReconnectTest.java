@@ -3,11 +3,13 @@ package app.zcat.infochat.messaging.impl.signal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import jakarta.json.Json;
 import jakarta.json.JsonObject;
 
 import java.io.IOException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -18,6 +20,7 @@ import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
+import app.zcat.infochat.messaging.OutboundRateLimiter;
 import app.zcat.infochat.messaging.ScopeRef;
 
 import org.junit.jupiter.api.Test;
@@ -27,11 +30,14 @@ import org.junit.jupiter.api.condition.OS;
 /**
  * Pins the M1-185 restart→reconnect contract for the Signal transport:
  * after the supervisor restarts the signal-cli subprocess, the adapter
- * reconnects its JSON-RPC client and traffic resumes; a send attempted
- * during the outage gap fails TRANSIENT (recoverable, Provider retries);
- * and an inbound frame pushed after the reconnect is delivered exactly
- * once (the old reader/dispatcher is torn down before the new
- * connection serves).
+ * reconnects its JSON-RPC client and traffic resumes; a send racing the
+ * outage fails with an honest classified category — TRANSIENT for a
+ * write failure or response timeout, closed-before-ack PERMANENT if the
+ * death latch (M1-681) drained it, the raced-send outcome messaging.md
+ * §Failure handling blesses — while the latch itself drives the
+ * supervised reconnect; and an inbound frame pushed after the reconnect
+ * is delivered exactly once (the old reader/dispatcher is torn down
+ * before the new connection serves).
  *
  * <p>Wiring mirrors {@link SignalInboundDispatchTest}: production
  * adapter constructor pointed at {@link FakeSignalCli}, the
@@ -56,7 +62,7 @@ class SignalReconnectTest {
             new SignalSubprocess.BackoffPolicy(/* baseMs */ 10, /* factor */ 2.0, /* capMs */ 200);
 
     @Test
-    void sendDuringOutageFailsTransient() throws Exception {
+    void sendRacingTransportDeathFailsClassifiedAndLatchDrivesReconnect() throws Exception {
         try (FakeSignalCli fake = new FakeSignalCli()) {
             SignalAdapter adapter = new SignalAdapter(
                     "/usr/bin/signal-cli", "/tmp/signal-data", ACCOUNT, fake.endpoint());
@@ -71,9 +77,13 @@ class SignalReconnectTest {
             try {
                 adapter.attachSubprocess(sp);
                 adapter.attachClient(client);
-                // Sever the transport connection WITHOUT a subprocess
-                // restart: the daemon connection is dead and no reconnect
-                // is coming, so the send sits squarely in the outage gap.
+                int generationBeforeKill = fake.connectionGeneration();
+                // Sever the transport connection with NO explicit restart:
+                // pre-M1-681 nothing detected this (no outbound traffic, no
+                // reply, no timeout — the outage was permanent); now the
+                // reader-exit latch fires the supervised restart itself, so
+                // a reconnect IS coming and the send below races the latch's
+                // pending-drain, the dead socket, and the rebuild.
                 fake.killClientConnection();
                 MessagingException failure = null;
                 try {
@@ -81,10 +91,24 @@ class SignalReconnectTest {
                 } catch (MessagingException e) {
                     failure = e;
                 }
-                assertNotNull(failure, "send into a dead transport must fail");
-                assertEquals(FailureCategory.TRANSIENT, failure.category(),
-                        "outage-gap send must classify TRANSIENT so Provider's"
-                                + " retry machinery treats the outage as recoverable");
+                assertNotNull(failure, "send racing a dead transport must fail"
+                        + " (no responder is wired, so even a fully reconnected"
+                        + " send can only time out)");
+                // Which classified failure this run sees is a genuine
+                // interleaving coin toss; what is NOT legal is an unclassified
+                // escape or a PERMANENT from anything but the death-latch /
+                // teardown drain (messaging.md §Failure handling: a send that
+                // raced the close can learn permanent even though recovery
+                // completes moments later).
+                if (failure.category() == FailureCategory.PERMANENT) {
+                    assertTrue(failure.getMessage().contains("closed-before-ack"),
+                            "the only legal PERMANENT outcome for a raced send is the"
+                                    + " closed-before-ack drain, saw: " + failure.getMessage());
+                }
+                // The latch's restart fires the real supervised path: SIGKILL →
+                // onExit → doRestart → restart listener → adapter reconnect
+                // (endpoint probe + JSON-RPC connect = two new connections).
+                fake.awaitConnectionGeneration(generationBeforeKill + 2, 10_000);
             } finally {
                 client.disconnect();
                 sp.stop();
@@ -162,6 +186,56 @@ class SignalReconnectTest {
                 // surface a duplicate within this settle window.
                 assertNull(delivered.poll(400, TimeUnit.MILLISECONDS),
                         "inbound frame must be delivered exactly once across the reconnect");
+            } finally {
+                client.disconnect();
+                sp.stop();
+            }
+        }
+    }
+
+    @Test
+    void supervisedRestartAdvancesDaemonGenerationAndClientReconnects() throws Exception {
+        // The REAL generation counter, end-to-end: the mock-supplier unit
+        // tests in SignalJsonRpcClientTest prove the gate LOGIC, but only the
+        // real SignalSubprocess proves generation() actually advances per
+        // spawn — the premise the whole restart gate rests on. A wrong counter
+        // would pass every mock test and silently reopen RT-M1-681-r2-1. Wire
+        // sp::generation as production does and drive one real supervised
+        // restart.
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            SignalAdapter adapter = new SignalAdapter(
+                    "/usr/bin/signal-cli", "/tmp/signal-data", ACCOUNT, fake.endpoint());
+            SignalSubprocess sp = new SignalSubprocess(
+                    new ProcessBuilder("/bin/sh", "-c", "sleep 30"),
+                    fake.endpoint(), FAST_BACKOFF, /* maxRestarts */ 5);
+            sp.start();
+            long generationAtStart = sp.generation();
+            assertEquals(1, generationAtStart, "the initial spawn is generation 1");
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), ACCOUNT, new SignalMessageCodec(),
+                    TEST_RESPONSE_TIMEOUT, sp::restartHung,
+                    SignalJsonRpcClient.INBOUND_QUEUE_CAPACITY,
+                    new OutboundRateLimiter(1_000_000, Clock.systemUTC()), sp::generation);
+            client.connect();
+            try {
+                adapter.attachSubprocess(sp);
+                adapter.attachClient(client);
+                int generationBeforeKill = fake.connectionGeneration();
+                fake.killClientConnection();
+                sp.restartHung();
+                fake.awaitConnectionGeneration(generationBeforeKill + 2, 10_000);
+                // doRestart() runs spawn() (which increments generation)
+                // BEFORE the restart listener fires the reconnect that
+                // produces those two new connections, so by the time the +2
+                // is observed the counter has already advanced. The
+                // reconnected client now serves the new child, so a
+                // subsequent reader-exit would be gated against generation 2,
+                // not the dead 1.
+                assertTrue(sp.generation() > generationAtStart,
+                        "the supervised restart must advance the daemon generation past "
+                                + generationAtStart + "; saw " + sp.generation());
+                assertTrue(client.isConnected(),
+                        "the client must be reconnected to the respawned daemon");
             } finally {
                 client.disconnect();
                 sp.stop();

@@ -1,0 +1,10 @@
+docs/plan/m1/redteam-multi/M1-681-2026-07-23/prompt-claude.txt:48:- Authentication / invite-code / first-mention registration:
+docs/plan/m1/redteam-multi/M1-681-2026-07-23/prompt-claude.txt:206:| AUTH-BYPASS | Reaching authenticated functionality without satisfying the auth gate. |
+docs/plan/m1/redteam-multi/M1-681-2026-07-23/prompt-codex.txt:48:- Authentication / invite-code / first-mention registration:
+docs/plan/m1/redteam-multi/M1-681-2026-07-23/prompt-codex.txt:206:| AUTH-BYPASS | Reaching authenticated functionality without satisfying the auth gate. |
+docs/plan/m1/redteam-multi/M1-681-2026-07-23/prompt-kimi.txt:48:- Authentication / invite-code / first-mention registration:
+docs/plan/m1/redteam-multi/M1-681-2026-07-23/prompt-kimi.txt:206:| AUTH-BYPASS | Reaching authenticated functionality without satisfying the auth gate. |
+docs/plan/m1/redteam-multi/M1-681-2026-07-23/reply-kimi.txt:48:  - Trust boundary 6: health endpoints unauthenticated, disclose operational topology; default binds loopback. The readiness check change adds more honest data (transport-connected status) to the readiness payload. This is operational-topology disclosure — already acknowledged by trust boundary 6. Not a new leak beyond what boundary 6 permits ("which messaging adapters are enabled and up"). The per-adapter up/down boolean and dropped-inbound counts are topology. OK.
+docs/plan/m1/redteam-multi/M1-681-2026-07-23/reply-kimi.txt:122:  - The change touches NO authentication, authorization, ban, invite, audit, LLM, ingest, SSRF, or DB-role surface (the sensitive-surface inventory confirms: only input-validation/message-intake-adjacent adapter plumbing).
+docs/plan/m1/redteam-multi/M1-681-2026-07-23/reply-kimi.txt:141:  - §Trust boundaries 6 (health): "The health endpoints are unauthenticated in v1 and disclose operational topology" — the readiness fold keeps the same disclosure class. ✓ delivered/no breach.
+docs/plan/m1/redteam-multi/M1-681-2026-07-23/reply-kimi.txt:146:  - No authZ/authN/invite/ban/audit/LLM surface touched. ✓

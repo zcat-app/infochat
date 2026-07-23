@@ -1,0 +1,200 @@
+• Let me read the prompt file first.I need to:
+  1. Read docs/spec/security.md in full.
+  2. Read the diff at /home/infochat/infochat/.claude/worktrees/M1-681/docs/plan/m1/redteam-multi/M1-681-2026-07-23/diff.patch
+  3. Write a verdict to /home/infochat/infochat/.claude/worktrees/M1-681/docs/plan/m1/redteam-multi/M1-681-2026-07-23/verdict-kimi.txt
+  4. Reply with exactly the four lines.
+
+  Let me start by reading the security spec and the diff. Both could be large. Let me read them.   796 /home/infochat/infochat/.claude/worktrees/M1-681/docs/plan/m1/redteam-multi/M1-681-2026-07-23/diff.patch
+  1601 /home/infochat/infochat/.claude/worktrees/M1-681/docs/spec/security.md
+  2397 total
+The security.md is 1602 lines. I read the first 1000 lines (but the output was truncated to a preview — actually the Read tool returned the full content to a file and showed a preview; the preview shows lines 1-26 and says 1000 lines read). Wait, the tool output exceeded 50000 characters, so it was written to a file at output_path. I need to page through it using Read with output_path... Actually the message says "Use Read with output_path to page through the full output." So I can read the file at that path.
+
+  Let me read the saved output file in pages, and also continue reading security.md from line 1001.The nesting is getting awkward. The original file is docs/spec/security.md with 1602 lines. Instead of reading the tool-output copies, let me read the original security.md directly with line offsets — the issue was only the 50000-char output cap. Let me read it in slices with fewer lines each so each stays under the cap. Lines average ~46 chars, so 700 lines ≈ 32k chars — fine. But line 327 is very long (truncated). Let me read in slices of ~600 lines.
+
+• Reading the security spec in slices directly.
+
+• I've now read the full security.md. Now let me read the diff. It's 796 lines.
+
+• Threat model read in full. Now reading the diff.
+
+• Now I have the full threat model and the full diff. Let me analyze.
+
+  **What the diff does (M1-681):**
+
+  1. `docs/spec/messaging.md` — spec amendment: Signal's restart now fires from either of two detectors: reader-side death latch (JSON-RPC channel died while signal-cli keeps running) or consecutive-response-timeout escalation. "at most once per death".
+
+  2. `SignalAdapter.java` — comment-only change describing the widened wiring.
+
+  3. `SignalJsonRpcClient.java` — the core change:
+     - New `volatile boolean closed` — latched on `disconnect()` (before socket close) or by `latchTransportDeath` on reader exit. Reset in `connect()` AFTER socket published.
+     - New `AtomicBoolean restartRequested` — at most one subprocess restart per connection death; the timeout escalation sets it before firing `hungRestartHook`; `latchTransportDeath` fires only when it wins the CAS. Reset in `connect()`.
+     - `readLoop(Socket s)` now wraps `readAllLines(s)` in try/finally calling `latchTransportDeath(s)`.
+     - `latchTransportDeath(Socket readerSocket)`:
+       - Guard `readerSocket != socket` → return (zombie-reader guard).
+       - `peerInitiated = !closed`; `closed = true`.
+       - Drain pending futures with PERMANENT closed-before-ack, clear.
+       - If not peerInitiated → return.
+       - Else: `dispatchExecutor.shutdownNow()`, count discarded, log (count only).
+       - If `restartRequested.compareAndSet(false, true)` → log + `hungRestartHook.run()`.
+     - `isConnected()` → `dispatchQueue != null && !closed`.
+     - `recordTimeout` sets `restartRequested.set(true)` before firing hook.
+
+  4. `AdapterReadinessCheck.java` — folds `adapter.connected()` into readiness: `up = entry.getValue() && !terminallyFailed && transportConnected`.
+
+  5. Tests.
+
+  **Threat model commitments relevant here:**
+
+  - Trust boundary 6: health endpoints unauthenticated, disclose operational topology; default binds loopback. The readiness check change adds more honest data (transport-connected status) to the readiness payload. This is operational-topology disclosure — already acknowledged by trust boundary 6. Not a new leak beyond what boundary 6 permits ("which messaging adapters are enabled and up"). The per-adapter up/down boolean and dropped-inbound counts are topology. OK.
+
+  - D37: user content never in logs. The latch's logs: "transport death discarded %d queued inbound deliveries (total dropped %d)" — count only, no content, no contact ids. Comment claims D37 compliance. The other new log: "signal-cli JSON-RPC channel died (reader exited); forcing subprocess restart" — no user data. OK.
+
+  - The diff touches inbound dispatch: `shutdownNow()` on the dispatch executor discarding queued inbound. At-most-once inbound is the documented stance (messaging.md). The threat model's DOS category — the change doesn't create new unbounded resource use; the queue is already bounded (INBOUND_QUEUE_CAPACITY = 1000).
+
+  Now, adversarial analysis — is there a gap between promise and delivery?
+
+  **Promise (messaging.md diff):** "Signal's restart fires from either of two detectors, at most once per death: the reader-side death latch ... or the consecutive-response-timeout escalation". "The outage stays operator-visible for as long as it lasts (connected() / adapter.connection.status report the dead transport — no false green)".
+
+  **Potential issues to examine:**
+
+  1. **Race between `connect()` resetting `closed`/`restartRequested` and a zombie reader / in-flight latch.** The comment in `connect()` says: reset happens AFTER socket publish, so a zombie reader from the previous connection fails the `readerSocket == socket` guard "from this point on". But wait — there's a subtle TOCTOU: a zombie reader that already PASSED the guard (checked `readerSocket == socket` while the old socket was still current) and is about to execute `closed = true` / drain pending / fire hook. Timeline: old reader exits, enters `latchTransportDeath(oldSocket)`. Suppose scheduling: reader checks `readerSocket != socket` — at that moment `socket` is still oldSocket (connect not yet done) → passes guard. Then the supervisor restarts, adapter calls `disconnect()` then `connect()`: `connect()` publishes newSocket, resets `closed=false`, `restartRequested=false`, creates new dispatcher, clears pending? Actually does connect clear `pending`? Not shown in diff. Then the zombie continues: `peerInitiated = !closed` — closed was reset to false → peerInitiated=true; sets `closed = true` — latching the NEW connection dead! Then drains pending (the NEW connection's pending futures!), shuts down the NEW dispatchExecutor, and fires the restart hook again (CAS false→true since connect reset it). That's a second restart and a falsely-dead new channel.
+
+     How plausible is this interleaving? The guard `readerSocket != socket` is evaluated once at latch entry. The window between guard check and `closed = true` is tiny but nonzero. But also — how does a zombie reader exist at all? `disconnect()` does a bounded join (2s cap per the javadoc comment "joins this very reader thread (2 s cap)"). A reader that outlived the bounded join is a zombie — the comment acknowledges zombies exist. The connect() comment claims the guard protects "from this point on" — i.e., after socket publish, a zombie calling `latchTransportDeath` will fail the guard. That's true for a zombie that ENTERS the latch after the publish. But a zombie that entered BEFORE the publish and got descheduled between the guard and the mutation can still corrupt the new connection. That's a classic TOCTOU. However — is this attacker-reachable? An attacker would need to influence the timing of a reader exit vs. a reconnect. The attacker can cause the peer-death (kill the TCP connection — well, can an attacker do that? The signal-cli daemon is on loopback; an external adversary can't sever the socket. The adversary in the threat model sends messages. Hmm — can an attacker trigger a reader exit? The oversize-line path: feeding an oversize line makes the reader drain the rest of the line then CONTINUE (the test says "dropped inbound JSON-RPC line exceeding cap" and the reader survives). Malformed lines are skipped. So attacker-controlled inbound can't directly kill the reader. The death would come from the local signal-cli daemon closing the connection — not attacker-controlled. So the TOCTOU is a reliability bug (double-restart, false dead channel that then... wait, what happens if the new connection gets latched dead wrongly? `isConnected()` false → readiness down, and restart fired again → supervised restart again → reconnect again → resets closed=false again. So it self-heals on the next reconnect. Actually the latch fired the hook, so a restart happens, reconnect resets. Self-correcting, at the cost of one spurious restart cycle. DOS-ish? Not attacker-triggerable within the threat model (adversaries can send arbitrary text on the adapters; the signal-cli daemon is co-located and trusted-ish). Is it in-model? DOS = "Resource exhaustion, unbounded loops, unbounded LLM calls, blocking-the-event-loop". The double-restart is bounded (one extra restart), self-healing. Also is it even a real gap vs the promise "at most once per death"? The promise is per-death; the TOCTOU would produce two restarts for one death. Hmm.
+
+     But wait — is the window actually reachable? For the zombie to be between guard and mutation while `disconnect()`+`connect()` completes: `disconnect()` joins the reader up to 2s. If the reader is a zombie (outlived join), it's stuck somewhere — but if it's stuck INSIDE the latch between guard and `closed=true` for >2s plus the entire endpoint-probe + socket connect time of `connect()`... extremely unlikely scheduling. Actually more plausible: the reader thread is blocked in a kernel read? No — then it hasn't exited, hasn't entered the latch. The zombie scenario per the comment: "a zombie reader from the previous connection (one that outlived disconnect()'s bounded join)". The latch is entered only after readAllLines returns or throws. If the reader outlived the join, it was stuck in read() — socket closed by disconnect → read returns -1 or throws SocketException → enters latch AFTER disconnect's join already returned. At that point `socket` field is still oldSocket (connect hasn't run yet — disconnect happens before connect). It checks `readerSocket != socket` → passes (equal). Then suppose the thread gets descheduled right there (OS preemption — arbitrary length). Meanwhile the adapter thread runs connect(): publishes newSocket, resets closed=false, restartRequested=false. Zombie resumes: peerInitiated = !closed = true; closed=true (latches NEW connection); drains pending (new connection's futures — possibly none yet); shutdownNow on dispatchExecutor — the NEW executor! discarded=0; CAS restartRequested false→true → fires hungRestartHook → spurious second restart.
+
+     So yes, the TOCTOU exists in principle. The mitigation would be to do the guard and the mutations atomically (synchronized on a lock, or compare-and-set the socket reference). But — impact: one spurious restart, which then reconnects and resets everything. Self-healing. Availability blip. Not attacker-steerable within the model (requires local scheduling preemption at exactly the wrong instruction across a multi-hundred-ms window... actually the window is guard→closed=true, a few nanoseconds of bytecode; the preemption must happen exactly there AND last through the whole reconnect (endpoint probe timeout, etc.). Probability astronomically low, and the trigger (daemon-initiated socket death during a supervisor restart) isn't adversary-controlled. I'd classify this as low-severity DOS / hardening, or arguably out-of-model. Hmm. Let me think about whether the threat model commits to anything here. messaging.md isn't the threat model — security.md is. Does security.md promise anything about adapter restart robustness? Not directly. The DOS category is about adversary-induced resource exhaustion. An adversary can't reach this path: the socket is between the Provider process and the co-located signal-cli daemon on loopback. Out of scope: "TLS/MITM assumed handled"; local daemon is trusted operator infrastructure. So this TOCTOU, if real, is an OUT-OF-MODEL note or a low finding. I could list it as OUT-OF-MODEL. Hmm, but wait — the audit instruction says treat the threat model as commitments; security.md doesn't commit to restart-once semantics. The messaging.md spec change says "at most once per death" — but messaging.md is the diff under audit, not the threat model. The prompt says "Stay inside the documented threat model" where threat model = docs/spec/security.md. So a violation of messaging.md's new promise that security.md doesn't back... The mindset says "Any commitment the diff fails to deliver is a finding" where commitments = threat model = security.md. I'll note the TOCTOU under OUT-OF-MODEL since security.md has no commitment about signal-cli restart semantics, and the daemon socket isn't attacker-reachable.
+
+  2. **`isConnected()` fold into readiness — information disclosure?** Trust boundary 6 explicitly says health endpoints disclose "which messaging adapters are enabled and up" — the change makes "up" more accurate (transport-level). No new disclosure category. The dropped-inbound counter was pre-existing (diff shows it in context lines? Actually the sensitive-surface inventory shows AdapterReadinessCheck lines 38-40, 52, 98-100 about dropped-inbound — but the diff hunk for AdapterReadinessCheck only shows the connected() fold; the droppedInboundCount lines appear in the file but not added by this diff... Let me check the diff hunk: `@@ -82,7 +87,11 @@` shows `terminallyFailed`, `transportConnected`, `up` lines, then context `anyUp = anyUp || up; response.withData(name, up); if (adapter != null) {`. The dropped-inbound block (lines 98-100 in inventory) is pre-existing code below the fold — not part of this diff. OK.
+
+  3. **Pending-future drain with PERMANENT closed-before-ack — does this break the "Provider retries" contract in a way that loses user messages?** messaging.md §Failure handling (per the SignalReconnectTest comment) blesses "the raced-send outcome" — a send that raced the close can learn PERMANENT even though recovery completes. The test was updated from blanket-TRANSIENT to accepting PERMANENT-if-closed-before-ack. Is there a threat-model commitment violated by classifying raced sends as PERMANENT? security.md doesn't speak to send classification. Reliability, not security. Out of model.
+
+  4. **The `closed` reset in `connect()` — reconnect while reader alive?** `connect()` sets `closed=false` after publishing socket. If connect() is called without a prior disconnect (double connect?), old reader... not in diff scope. The adapter presumably always disconnects before connect (comment: "reconnect()'s teardown-before-serve").
+
+  5. **A critical one to check: `latchTransportDeath` drains pending BEFORE the dispatcher shutdown — comment says to avoid misclassifying a dispatch-thread handler blocked in `call()` as TRANSIENT interrupted.** Fine.
+
+  6. **Does the latch create a NEW DoS: reader exit → `shutdownNow()` on dispatchExecutor → interrupts a handler thread mid-processing.** Virtual threads, interruptible. Inbound at-most-once is documented. Discarded count logged without content (D37 ok). No security issue.
+
+  7. **Can an attacker force the reader to exit and thereby trigger repeated subprocess restarts (restart-loop DoS) — e.g., by sending a malformed or oversize line?** Look at readAllLines: oversize line → dropped, reader SURVIVES (test `oversizeInboundLineIsDroppedAndReaderSurvives`). Malformed line → skipped, reader survives. The reader exits only on EOF/IOException/RuntimeException. Can attacker text cause a RuntimeException in the reader loop? The dispatchNotification catches handler exceptions (A10). The parse failures are caught ("ignoring malformed inbound JSON-RPC line"). The inbound byte-cap check (exceedsInboundByteCap) — drops, no throw. So no attacker-reachable reader-exit path shown in the diff... but the diff doesn't show all of readAllLines. Per the audit mindset, "if the diff doesn't show it and the threat model demands it, that's a finding" — but what does the threat model demand here? Security.md rate limiting section commits to per-(adapter, contact_id) transport rate caps etc. — those live in the Provider intake, not the adapter. The adapter-level restart-on-death isn't a security.md commitment. Restart-loop DoS via attacker-killable reader would be a DOS finding IF the diff showed an attacker path to kill the reader. It doesn't show one; the inbound paths shown (oversize, malformed, queue-full) all survive. The reader death requires the daemon side to close/error — co-located trusted subprocess. So no attacker-reachable restart-loop in evidence. I should not invent "they probably handle X elsewhere" — but the burden runs the other way for findings: I need the gap between a security.md commitment and the diff. There's no commitment that signal-cli restarts are bounded against local daemon misbehavior (the supervisor has a restart cap — `supervisorTerminallyFailed()` — pre-existing, visible in context as the readiness fold's other leg).
+
+     Actually wait — one thing: `restartRequested` is reset on every `connect()`. Suppose the signal-cli daemon gets into a state where it accepts TCP then immediately closes it (crash-looping daemon). Then: connect → reader exits quickly → latch → CAS true → hook → restart → reconnect → reader exits → latch → CAS (reset by connect) true → hook → restart → ... an unbounded restart loop? The supervisor's backoff + restart cap (`supervisorTerminallyFailed`, BackoffPolicy base 10ms factor 2 cap 200ms in test) bounds it — the restart goes through `sp::restartHung`, the supervised path with backoff and a terminal cap. So bounded by pre-existing machinery (visible in diff context: SignalSubprocess.BackoffPolicy, supervisorTerminallyFailed). Not a finding. And again, daemon misbehavior is local/trusted.
+
+  8. **Readiness flap → does anything security-relevant consume readiness?** Kubernetes probes etc. — operational. Trust boundary 6 covers it.
+
+  9. **`AdapterReadinessCheck.evaluate(state.snapshot(), adapters)` with `adapter == null || adapter.connected()`** — absent adapter keeps snapshot value. If an adapter is absent from the map (e.g., failed to construct), readiness trusts the stale snapshot — documented pre-existing contract ("absent-adapter contract above" — context, not this diff). Fine.
+
+  10. **D37 compliance of the drain:** `new MessagingException(FailureCategory.PERMANENT, "SignalJsonRpcClient disconnected before response (closed-before-ack)")` — static string, no user content. The drained futures complete exceptionally; the exception message is static. Where does this MessagingException propagate? To senders — Provider's send path. Does the message text reach users? "closed-before-ack" is a static internal string; send failures surface as friendly localized errors per D43. No content. OK.
+
+  11. **Log injection via the new log lines:** both use %d counts and static strings. No wire-derived values. `redactSender(n)` used in pre-existing queue-full log (context). OK.
+
+  12. **Does the change to `isConnected()` (`&& !closed`) break the `connected()` contract in a way that hides a DIFFERENT outage?** `closed` is set by disconnect() and the latch, reset by connect(). If disconnect() is called as part of supervised restart teardown and connect() follows, closed goes true→false. Between them, isConnected() false — honest. Fine.
+
+  13. **The spec amendment in messaging.md:** "at most once per death" — as analyzed, the CAS + reset ordering delivers this except under the zombie-reader TOCTOU (item 1). Also: the timeout-escalation path sets `restartRequested.set(true)` BEFORE `hungRestartHook.run()` — good (mark-before-fire). And the latch fires only on CAS win. One more subtlety: `recordTimeout`'s CAS on `consecutiveTimeouts` (n→0) gates the escalation; if the latch fired first (peer death), the reader is gone, no responses arrive, pending futures were drained PERMANENT — so `call()` futures complete exceptionally with PERMANENT, not timeouts; consecutiveTimeouts won't climb post-latch. OK.
+
+  14. **Race: `latchTransportDeath` reads `dispatchExecutor` field; `connect()` creates a new dispatcher.** Covered by zombie analysis — the zombie's `ExecutorService executor = dispatchExecutor;` read could pick the NEW executor. Same TOCTOU as item 1.
+
+  15. **`peerInitiated = !closed; closed = true;` — two-step on a volatile, not atomic.** Two readers (can there be two readers for one socket? No — one reader per connect). But disconnect() racing the reader: disconnect sets closed=true then closes socket; reader exits; latch: readerSocket==socket (socket field — disconnect doesn't null it in the shown diff... disconnect() sets closed=true, closes socket; does it null `socket`? Not shown. If not nulled, guard passes; peerInitiated = !closed = false → drains pending, returns without firing. Good — intentional close doesn't fire. And the drain on intentional disconnect is desired ("disconnect()'s closed-before-ack PERMANENT drain (:409-412)" per the ticket clarity check — wait, that references disconnect()'s own drain at :409-412. The latch also drains — double drain is harmless, futures already completed/cleared).
+
+  16. **Anything about the readiness check being used as an authZ/authN gate?** No — it's health.
+
+  17. **INFO-LEAK through readiness data?** Boundary 6 explicitly accepts topology disclosure ("which messaging adapters are enabled and up"). The `connected()` fold changes accuracy, not category. dropped-inbound counts — pre-existing. OK.
+
+  18. **Does the diff weaken the existing oversize-line cap or any input validation?** No — it refactors readLoop into readAllLines with a finally; the cap logic is untouched (context shows the same lines).
+
+  19. **`restartRequested` never reset except in connect() — if the hook (`sp::restartHung`) fails to actually restart/reconnect (supervisor at terminal cap), restartRequested stays true, so a subsequent reader death won't fire again.** That's the desired "at most once per death" and the terminal-failure path is covered by supervisorTerminallyFailed → readiness DOWN. Honest. OK.
+
+  20. **Reconnect-test comment mentions "endpoint probe + JSON-RPC connect = two new connections" — `awaitConnectionGeneration(generationBeforeKill + 2, 10_000)`** — test-only.
+
+  21. **The ticket file change — `clarity_check` WARN, status in-progress. STATUS.md. Process metadata, not security.**
+
+  22. One more angle — **the latch fires `hungRestartHook` from the reader thread.** `sp::restartHung` — does it block? If it blocks the reader thread, the reader is already dead (it exited), so no inbound loss beyond the death itself. Not security.
+
+  23. **Audit-evasion?** The threat model's audit commitments concern user commands and admin actions. Adapter restarts aren't audit-log events; they're operational logs. No commitment breached. The spec's "the outage stays operator-visible" — delivered via connected()/readiness + WARN logs. OK.
+
+  24. Hmm, let me reconsider the pending-drain classification change more carefully — **could the PERMANENT classification be leveraged by an attacker to suppress a victim's outbound reply?** An attacker can't kill the loopback socket. Out of model.
+
+  25. **What about `closed` being `volatile boolean` vs. the compound check-set in the latch** — two reader threads? Only one reader per connection; the zombie + new reader pair operate on different sockets — the guard handles it except the TOCTOU window. Same item 1.
+
+  26. **Does `isConnected()`'s new `!closed` term make `connect()` failure handling lie?** If connect() throws after publishing socket but before... connect() sets closed=false last? Order shown: consecutiveTimeouts.set(0); this.socket = s; this.writer = w; closed = false; restartRequested.set(false); then dispatcher creation. If dispatcher creation throws (RejectedExecution? ThreadPoolExecutor constructor doesn't reject), closed=false with a half-built connection — pre-existing connect-failure semantics; the endpoint probe and socket creation are the failure points, before these assignments. Minor, not a security gap.
+
+  So: within the documented threat model (security.md), I find no commitment this diff fails to deliver:
+
+  - The change touches NO authentication, authorization, ban, invite, audit, LLM, ingest, SSRF, or DB-role surface (the sensitive-surface inventory confirms: only input-validation/message-intake-adjacent adapter plumbing).
+  - The surfaces it does touch (readiness disclosure, log lines, exception messages) honor boundary 6 (topology disclosure accepted, loopback default), D37 (counts-only logs, static exception strings, no contact ids — the one new log line with potentially-attacker-influenced data has none).
+  - The inbound byte-cap and line-char cap are untouched; reader survives attacker input (oversize/malformed both handled pre-existing, and the finally-latch only converts reader DEATH into a restart — attacker text shown in the diff can't kill the reader).
+  - No new LLM path, no new tool, no new command.
+
+  Candidate findings review — should the zombie-reader TOCTOU be a FINDING (DOS, low) or OUT-OF-MODEL? The prompt's DOS category: "Resource exhaustion, unbounded loops, unbounded LLM calls, blocking-the-event-loop in the messaging adapter." The TOCTOU yields at most one spurious restart cycle per occurrence and self-heals; not unbounded; not attacker-reachable within the model (requires the co-located daemon's socket behavior plus a nanosecond-scale preemption). security.md makes no commitment the diff breaches here. I'll list it under OUT-OF-MODEL as a reliability observation for the user to consider, since OUT-OF-MODEL is for "attacks that look juicy but fall outside the documented threat model". The trigger channel (sever the adapter↔daemon socket on the host) is local-access territory → out of model (the threat model's adversary sends arbitrary text via messaging adapters; the DB/host are internal; TLS/MITM and local transport are out of scope per boundary 7 analog — signal-cli is a co-located subprocess like simplex's).
+
+  Hmm, wait. Let me double-check one thing before settling on CLEAN: the `readAllLines` refactor — does the `finally` change the oversize-line behavior in a way that kills the reader where it previously survived? The inventory shows the test `oversizeInboundLineIsDroppedAndReaderSurvives` still exists (context lines in the diff? The test file diff doesn't touch it). The latch fires on EVERY reader exit including "the mid-oversize-drain EOF return inside readAllLines" (comment). "Mid-oversize-drain EOF return" — that's when the line is oversize AND the stream hits EOF during the drain — that's a genuine death (EOF). The normal oversize case continues the loop. OK.
+
+  And one more: **the latch's pending-drain completes futures with MessagingException PERMANENT — but some of those pending futures might belong to OUTBOUND sends whose reply eventually arrives on a NEW connection?** No — pending is per-connection correlation; a new connection doesn't carry the old request ids' responses (daemon restarted). At-most-once. Fine.
+
+  **Check `disconnect()` ordering:** closed=true set BEFORE socket close — so the reader exit from a local close reads as intentional. But: `disconnect()` sets closed=true even if the SAME client instance is later reconnected — connect() resets. Covered.
+
+  **One subtle promise check — messaging.md new text:** "the reader-side death latch (the JSON-RPC channel died while signal-cli keeps running — detected from the channel's own read side, with no dependence on outbound traffic)". Delivered: readLoop finally → latch. "or the consecutive-response-timeout escalation (a daemon that is alive but not answering, which a live reader cannot detect)". Delivered (pre-existing + mark-before-fire). "at most once per death" — CAS, except zombie TOCTOU. "The outage stays operator-visible ... no false green" — isConnected() && !closed + readiness fold. Delivered.
+
+  But messaging.md isn't the threat model per the prompt — the prompt says the threat model = security.md. The mindset says "Treat the threat model as the system's commitments." So strictly, I audit against security.md. The diff amends messaging.md (a spec file) — its own new commitments, if undelivered... the prompt says "Treat the threat model as the system's *commitments*. Any commitment the diff fails to deliver is a finding." and "Stay inside the documented threat model." So the zombie TOCTOU violating messaging.md's "at most once per death" is arguably inside scope if I read "commitment" broadly to include the diff's own spec edits... but the prompt explicitly bounds: "Read docs/spec/security.md IN FULL... That file is the threat model — the system's commitments you audit against." And OUT-OF-MODEL is exactly the bucket for "looks juicy but outside the documented threat model". I'll put the TOCTOU there with a crisp description. Given severity scale applies to findings; out-of-model has no severity.
+
+  Actually, let me reconsider once more whether there's ANY security.md commitment engaged:
+
+  - §Trust boundaries 6 (health): "The health endpoints are unauthenticated in v1 and disclose operational topology" — the readiness fold keeps the same disclosure class. ✓ delivered/no breach.
+  - §Failure handling / rate limiting: nothing adapter-transport-level except... "Chat-mode message rate (transport-level)" — untouched.
+  - D37 user-content logging: new logs are counts/static. ✓
+  - §User content in exceptions: new MessagingException is a static string; SafeLog discipline unaffected. ✓
+  - DOS (category): no new unbounded resource; restart path bounded by pre-existing supervisor cap; queue discard bounded by queue capacity. ✓
+  - No authZ/authN/invite/ban/audit/LLM surface touched. ✓
+
+  Verdict: CLEAN, with one OUT-OF-MODEL note (the zombie-reader guard-to-mutation TOCTOU — a reliability race, triggerable only by local socket behavior + scheduler preemption, self-healing; mention so the user can decide).
+
+  Should I also mention the attacker-can't-kill-the-reader reasoning? That's analysis, not an out-of-model attack. Maybe add a second out-of-model note: "local daemon crash-loop → restart churn" — bounded by supervisor cap, visible in context (BackoffPolicy, supervisorTerminallyFailed). Not worth listing; the cap handles it. I'll keep just the TOCTOU.
+
+  Hmm, actually — one more careful look at the `connect()` reset ordering vs. `recordTimeout`. `restartRequested.set(false)` in connect; but a zombie latch that already won the CAS before... no, covered.
+
+  And `SignalAdapter.connected()` → delegates to client.isConnected()? The diff shows SignalAdapter comment changes only; `connected()` interface default true (ticket mentions MessagingAdapter.connected() interface default true at :362-364). Does SignalAdapter override connected() to consult the client? The inventory line "isConnected()" in SignalJsonRpcClient has the javadoc "Live connection state for {@link SignalAdapter#connected()}" — so yes, SignalAdapter.connected() delegates. Pre-existing wiring, not in this diff but evidenced by the javadoc context. Fine.
+
+  Also the readiness fold uses `adapter.connected()` for ALL adapters (SimpleX included) — SimpleX's connected() presumably reflects its own latch (per-rebuild client). No regression: SimpleX already had the latch ("v1 implements the latch itself for the SimpleX bot WebSocket only" — the old text; new text removes that sentence but SimpleX's latch presumably remains). Wait — the messaging.md edit REMOVES "**v1 implements the latch itself for the SimpleX bot WebSocket only.**" Does that mean SimpleX lost its latch? No — it means the statement is no longer true because Signal now has one too; the sentence's "only" is what's stale. The diff shows no SimpleX code removal. And readiness folding connected() for SimpleX: if SimpleX's connected() reports the latch state, readiness now reflects SimpleX channel death too — improvement, consistent with "no false green".
+
+  Edge: `MessagingAdapter.connected()` interface default is `true` — any adapter not overriding it always reports connected, silently keeping readiness green on transport death. Which production adapters exist? SimpleX and Signal (both v1 production adapters). SimpleX overrides (has latch), Signal delegates to client. Default-true only affects future/test adapters. Hardening note at most; and it's interface design from before this diff (the default exists in MessagingAdapter, not changed here). The readiness fold now silently trusts `connected()` for adapters that never override it — a future-adapter footgun, but not a current breach. Could add as a second out-of-model/hardening line. Eh — the two production adapters both report honestly per available evidence; I'll fold a mention into the same OUT-OF-MODEL note or add a separate one. I'll add it as a second OUT-OF-MODEL bullet for the user to decide (flagging that the fold's honesty depends on each adapter overriding connected(), with a default-true interface).
+
+  Wait, actually — is that in-model? Boundary 6 promises the health surface discloses "which messaging adapters are enabled and up" — and the messaging.md promise under audit says "connected() / adapter.connection.status report the dead transport — no false green". For the two v1 adapters, delivered. The default-true is a latent footgun for future adapters, not a current breach. Out-of-model/hardening. Fine.
+
+  Now write the verdict file.
+
+  Format:
+
+  RED-TEAM VERDICT: CLEAN
+
+  OUT-OF-MODEL:
+    - <note 1>
+    - <note 2>
+
+  The chat reply:
+
+  RED-TEAM VERDICT: CLEAN
+  Verdict file: /home/infochat/infochat/.claude/worktrees/M1-681/docs/plan/m1/redteam-multi/M1-681-2026-07-23/verdict-kimi.txt
+  Findings: critical=0 high=0 medium=0 low=0
+  Out-of-model: 2
+
+  On CLEAN the FINDINGS section is omitted. Good.
+
+  Let me draft the out-of-model notes concisely:
+
+  1. Zombie-reader TOCTOU in `SignalJsonRpcClient.latchTransportDeath`: the `readerSocket != socket` guard is checked once at entry, but the subsequent mutations (`closed = true`, pending-drain, `dispatchExecutor.shutdownNow()`, the `restartRequested` CAS + hook fire) are not atomic with it. A reader that outlived `disconnect()`'s bounded join, passed the guard while the old socket was still published, and is then preempted before `closed = true` can resume after `connect()` has published the new socket and reset both latches — latching the NEW connection dead, draining its pending futures, shutting down its fresh dispatcher, and firing a second restart for the same death. Trigger requires the co-located signal-cli's socket behavior plus a nanosecond-scale preemption spanning an entire reconnect; the adversary's only handle on this socket is local to the host (outside the documented model, which treats the adapter↔daemon channel as operator infrastructure and bounds adversaries to arbitrary text over the messaging protocols). Self-healing on the fired restart's reconnect. Fix-class if adopted: make guard + mutation atomic (synchronize the latch, or CAS a connection-generation token) — a reliability hardening, not a threat-model breach.
+
+  2. `AdapterReadinessCheck` now folds `MessagingAdapter.connected()` into readiness, but the SPI declares `connected()` with a default of `true`. Any present-or-future adapter that does not override it reports transport-up forever, so the "no false green" property holds only for adapters that override (both v1 production adapters — SimpleX with its pre-existing latch and Signal via this diff — do, per the diff's javadoc cross-references). A future adapter added without a `connected()` override would silently reintroduce the false-green outage this ticket removes. Out of model because boundary 6 already accepts topology disclosure and no current adapter breaches it; flagging as an SPI-hardening candidate (drop the default, or make readiness fail-closed on adapters that don't override).
+
+  Both are honest observations. Keep them tight.
+
+  Write the file, then the four-line reply.
+
+• I've read the threat model in full and the complete diff. Analysis done; writing the verdict file.
+
+• Now the reply — exactly four lines, no preamble.
+
+• RED-TEAM VERDICT: CLEAN
+  Verdict file: /home/infochat/infochat/.claude/worktrees/M1-681/docs/plan/m1/redteam-multi/M1-681-2026-07-23/verdict-kimi.txt
+  Findings: critical=0 high=0 medium=0 low=0
+  Out-of-model: 2
+
+To resume this session: kimi -r session_3cc5c39b-a9ef-4bc7-9042-b3c1149b1eb4

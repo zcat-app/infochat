@@ -18,15 +18,20 @@ import org.eclipse.microprofile.health.Readiness;
  * enabled adapter is connected (the Provider can serve traffic via
  * that adapter); not-ready when zero adapters are connected.
  *
- * <p>Two signals are folded per adapter. The startup outcome comes from
+ * <p>Three signals are folded per adapter. The startup outcome comes from
  * {@link AdapterConnectionState} (did the adapter's transport
- * {@code start()} return?). The <em>live</em> outcome comes from the
+ * {@code start()} return?). The <em>live</em> outcomes come from the
  * adapter itself: {@link MessagingAdapter#supervisorTerminallyFailed()}
  * reports a subprocess supervisor that exhausted its restart cap
- * <em>after</em> a clean start. An adapter counts as connected only when
- * it both started and has not since terminally failed — otherwise a
- * deployment could read "ready" with a permanently dead adapter, since
- * the startup snapshot alone never observes the later failure.</p>
+ * <em>after</em> a clean start, and {@link MessagingAdapter#connected()}
+ * reports the transport channel itself — a channel can die (peer close,
+ * severed socket) while the supervisor still counts its child as running,
+ * which is precisely the outage the recovery machinery exists to bridge
+ * (M1-681). An adapter counts as connected only when it started, has not
+ * since terminally failed, and its transport reports connected —
+ * otherwise a deployment could read "ready" with a permanently dead (or
+ * currently dead-and-recovering) adapter, since the startup snapshot
+ * alone never observes the later failure.</p>
  *
  * <p>The per-adapter {@code data} entries carry the operational detail:
  * each adapter name maps to its effective up/down boolean, and an
@@ -82,7 +87,11 @@ public class AdapterReadinessCheck implements HealthCheck {
             String name = entry.getKey();
             MessagingAdapter adapter = adaptersByName.get(name);
             boolean terminallyFailed = adapter != null && adapter.supervisorTerminallyFailed();
-            boolean up = entry.getValue() && !terminallyFailed;
+            // Transport truth is only consultable on a live instance; an
+            // absent adapter keeps its snapshot value (the documented
+            // absent-adapter contract above).
+            boolean transportConnected = adapter == null || adapter.connected();
+            boolean up = entry.getValue() && !terminallyFailed && transportConnected;
             anyUp = anyUp || up;
             response.withData(name, up);
             if (adapter != null) {

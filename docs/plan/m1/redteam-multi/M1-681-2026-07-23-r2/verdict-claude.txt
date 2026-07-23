@@ -1,0 +1,186 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: DOS
+    SEVERITY: medium
+    PROMISE: security.md §Trust boundaries item 6 — "Health/management HTTP
+              surface → network. The health endpoints are unauthenticated in
+              v1 and disclose operational topology: which messaging adapters
+              are enabled and up, and whether the DB is reachable." The
+              readiness surface this diff wires MessagingAdapter.connected()
+              into is the operator's only honest view of adapter
+              availability; the recovery machinery it reports on must not
+              itself destroy a healthy daemon and burn the supervisor's
+              restart budget toward the terminal FAILED state that surface
+              then reports.
+    GAP: The new transport-death latch guards the shared-subprocess SIGKILL
+         with a CONNECTION-generation check, but the daemon generation
+         advances strictly EARLIER than the connection generation, so the
+         guard does not cover the case its own comment claims ("a reader
+         whose connection has already been retired must not fire it — that
+         would kill the daemon out from under the live connection").
+         - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:875
+           `if (conn == current && conn.restartRequested.compareAndSet(false, true))`
+           then `hungRestartHook.run()` (:877) = SignalSubprocess.restartHung
+           → `p.destroyForcibly()` on whatever child is CURRENT at that
+           instant (SignalSubprocess.java:372-383).
+         - The successor child is alive before `current` is retired:
+           SignalSubprocess.doRestart() calls `spawn()` (SignalSubprocess.java:263)
+           BEFORE `restartListener.run()` (:285); the listener hops to a
+           virtual thread (SignalAdapter.java:529-533) and `reconnect()` waits
+           on `awaitEndpoint(..., ENDPOINT_PROBE_TIMEOUT)` — up to 15 s
+           (SignalAdapter.java:92, :547) — before `c.disconnect()`
+           (SignalAdapter.java:562), which is the only place `current` becomes
+           null (SignalJsonRpcClient.java:369).
+         - Therefore a window of up to ~15 s exists in which the NEW child is
+           running while `current` still points at the DEAD connection; any
+           reader exit inside it satisfies `conn == current`, wins the CAS,
+           and SIGKILLs the healthy new daemon.
+         - The same unguarded fire exists on the adjacent site this diff
+           touches: SignalJsonRpcClient.java:695-714 (`recordTimeout`) sets
+           `conn.restartRequested` but calls `hungRestartHook.run()` with no
+           ownership/generation check at all, and post-latch `current` is
+           deliberately left pointing at the dead connection
+           (SignalJsonRpcClient.java:854-879 never nulls it), so sends issued
+           during the outage still register pending futures on the dead
+           connection (`call()` checks only `conn == null`,
+           SignalJsonRpcClient.java:621-627) and time out into that path.
+    REPRO: 1. Provider runs with the Signal adapter; signal-cli child C1 is
+              RUNNING and connection conn1 is current.
+           2. C1 dies (crash/OOM-kill) or the JSON-RPC channel dies; conn1's
+              reader is delayed on its way out — realistic under an inbound
+              flood, because once the bounded dispatch queue is full every
+              subsequent line takes the reject path on the READER thread and
+              emits a WARN (SignalJsonRpcClient.java:944-967), so a stalled
+              or slow log sink stretches the drain; a GC pause or thread
+              starvation does the same.
+           3. The supervisor meanwhile respawns: attempt N backoff elapses,
+              `spawn()` starts child C2, the restart listener fires,
+              `reconnect()` enters `awaitEndpoint` and blocks for as long as
+              C2's JVM takes to bind its TCP port (seconds).
+           4. conn1's reader now reaches `latchTransportDeath`: `conn1 ==
+              current` (disconnect() has not run yet), CAS succeeds,
+              `restartHung()` runs → `destroyForcibly()` kills the HEALTHY C2.
+           5. C2's exit is counted as another supervised restart (it lived
+              < DEFAULT_HEALTHY_UPTIME_MILLIS = 30 s, SignalSubprocess.java:73,
+              :236-239, so the streak is NOT reset). Repeat past
+              SUBPROCESS_MAX_RESTARTS = 5 (SignalAdapter.java:95) and the
+              supervisor latches FAILED; the adapter is permanently down until
+              an operator restarts the Provider, and in a single-adapter
+              deployment the whole bot is offline. The system should not be
+              able to kill the daemon it has just successfully rebuilt.
+    SUGGESTED-FIX-CLASS: other
+
+  - CATEGORY: DOS
+    SEVERITY: low
+    PROMISE: security.md §Trust boundaries item 6 — "The health endpoints are
+              unauthenticated in v1 and disclose operational topology: which
+              messaging adapters are enabled and up, and whether the DB is
+              reachable."
+    GAP: The diff makes readiness honest for exactly one death shape — the
+         reader exits. It leaves the complementary shape reporting a false
+         green: a signal-cli child that is alive and holds the socket open
+         but has stopped delivering inbound (wedged receive loop) never
+         produces a reader exit, so nothing latches.
+         - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1009-1012
+           `isConnected()` = `conn != null && !conn.closed`; `closed` is set
+           only by disconnect() (:375) or the reader's latch (:856).
+         - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalAdapter.java:408-413
+           `connected()` = subprocess RUNNING && client.isConnected() → true
+           for a wedged-but-alive daemon.
+         - infochat-provider/src/main/java/app/zcat/infochat/provider/health/AdapterReadinessCheck.java:93-96
+           folds exactly that value, so the unauthenticated readiness payload
+           reports the adapter up.
+         - No liveness signal exists on that channel to contradict it:
+           `connect()` sets no SO_KEEPALIVE and no read timeout
+           (SignalJsonRpcClient.java:322-349), and there is no periodic
+           ping/heartbeat RPC anywhere in the signal package. The only other
+           detector, `recordTimeout` (:695-714), needs OUTBOUND traffic — the
+           precise dependency the diff's own messaging.md edit says the latch
+           removes ("no dependence on outbound traffic"), which holds for the
+           reader-exit shape only.
+    REPRO: 1. signal-cli is alive but its receive path is wedged (deadlock,
+              stalled account session); the TCP socket stays open, so the
+              reader stays parked in read() forever.
+           2. No outbound traffic occurs (quiet group, no digest due, or a
+              deployment where Signal is the low-traffic adapter), so the
+              consecutive-response-timeout escalation never accrues a single
+              timeout.
+           3. GET /q/health/ready reports `"signal": true` and status UP for
+              the entire outage; `adapter.connection.status` agrees. Users on
+              that adapter get no replies and the operator's only
+              spec-sanctioned availability disclosure says everything is fine.
+              This is a residual the diff narrows rather than a regression,
+              but the surface it hardens still can lie in this shape.
+    SUGGESTED-FIX-CLASS: other
+
+  - CATEGORY: DOS
+    SEVERITY: low
+    PROMISE: security.md §Trust boundaries item 6 — "...disclose operational
+              topology: which messaging adapters are enabled and up..."
+              (the deployment's availability signal), read together with the
+              threat model's framing that "The Provider is exposed to the
+              internet through every enabled messaging adapter... Adversaries
+              can send arbitrary text on any of them" — a transport-recovery
+              path that can loop indefinitely is unbounded work in the only
+              user-facing service.
+    GAP: The latch escalates EVERY peer-initiated reader exit to a SIGKILL of
+         the shared daemon with no dampening: no minimum interval between
+         latch-driven restarts, no per-connection or per-window cap, and no
+         cheaper in-place reconnect tier (SimpleX, by contrast, rebuilds its
+         WebSocket in place against the still-running daemon — messaging.md
+         §Failure handling, unchanged by this diff).
+         - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:875-878
+           unconditional `hungRestartHook.run()` once ownership + CAS pass;
+           `restartRequested` is per-connection (SignalConnection.java:2719 of
+           the diff / SignalConnection.java field `restartRequested`), so it
+           resets with every new connection.
+         - The supervisor's terminal cap cannot bound the cycle when the
+           deaths are spaced out: SignalSubprocess.java:236-239 resets
+           `restartAttempts` to 0 whenever the child lived ≥
+           DEFAULT_HEALTHY_UPTIME_MILLIS = 30 s (:73).
+    REPRO: 1. Any recurring benign channel close on the loopback JSON-RPC
+              socket spaced more than 30 s apart (daemon idle-connection
+              reaping, resource pressure, a peer that closes after N frames).
+           2. Each close exits the reader → latch → SIGKILL signal-cli →
+              supervised respawn (JVM start, endpoint probe up to 15 s) →
+              reconnect → next close.
+           3. Because each child lives past the 30 s healthy-uptime
+              threshold, the consecutive-restart streak resets every cycle,
+              so the supervisor NEVER reaches FAILED and no terminal signal is
+              raised. The deployment sits in a permanent kill/respawn cycle:
+              inbound queued at each death is discarded and counted
+              (SignalJsonRpcClient.java:861-866), the adapter is down for the
+              respawn window of every cycle, and readiness flaps UP/DOWN
+              indefinitely rather than converging to either a healthy or a
+              terminal state.
+    SUGGESTED-FIX-CLASS: rate-limit
+
+OUT-OF-MODEL:
+  - security.md documents a trust boundary for the SimpleX local transport
+    (item 7, the unauthenticated loopback ws-port) and for local LLM backends
+    (item 8), but has NO equivalent entry for the signal-cli JSON-RPC
+    loopback TCP port that this diff's recovery machinery hangs off. The
+    property is the same shape as boundary 7 — no session, no token, "any
+    local-loopback process can connect" (acknowledged only in a code comment,
+    SignalSubprocess.java:50-58) — and after this diff that channel's death
+    additionally drives daemon SIGKILLs. Worth deciding whether to extend the
+    documented boundary list rather than leaving the commitment in a comment.
+  - The readiness fold now flips the Provider to DOWN for the whole
+    supervised reconnect window (seconds per cycle, AdapterReadinessCheck.java:93-96).
+    Deployments that wire an orchestrator restart/rollback action to the
+    unauthenticated readiness probe (or that expose it beyond loopback, the
+    explicit operator action boundary 6 contemplates) turn a routine
+    self-healing reconnect into a container kill. This is operator-side
+    configuration, outside the documented model, but the diff changes the
+    probe's semantics from "started and not terminally failed" to
+    "instantaneously connected", so existing probe wiring may need review.
+  - Not a finding, recorded for completeness: the reader-thread crash path is
+    still well guarded against hostile inbound content — codec.decode is
+    wrapped in `catch (RuntimeException)` (SignalJsonRpcClient.java:912-929)
+    and SignalMessageCodec.extractDm is total over arbitrary frame shapes
+    (SignalMessageCodec.java:223-268) — so an attacker cannot use crafted
+    message content to force the reader exit that now triggers a daemon
+    SIGKILL. The new logging added by this diff is count-only and carries no
+    contact ids or message bodies (SignalJsonRpcClient.java:864-865, :876),
+    so D37 / §Secrets handling is respected.

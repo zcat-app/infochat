@@ -15,6 +15,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -88,6 +89,16 @@ final class SignalSubprocess {
     // healthy-uptime reset). Written on the spawn path, read on the scheduler
     // thread, so volatile.
     private volatile long lastSpawnNanos;
+    // Monotonic per-spawn counter: 0 before the first spawn, incremented on
+    // every spawn() (initial start AND each supervised restart). It names
+    // "which child" the current daemon is, so a transport connection can
+    // record the generation it was built for and later tell whether the
+    // child it talked to is still the live one (M1-681). SignalJsonRpcClient
+    // reads it at connect() and gates the shared-subprocess restart on the
+    // stamp still matching — a stale reader whose child has already been
+    // replaced must not SIGKILL the healthy successor. Written on the spawn
+    // path, read from the client's reader/dispatch threads, so volatile.
+    private final AtomicLong generation = new AtomicLong();
     @Nullable private volatile Process current;
     @Nullable private volatile ScheduledFuture<?> nextRestart;
     // Seeded to a no-op (like SignalJsonRpcClient's hungRestartHook) so the
@@ -174,7 +185,14 @@ final class SignalSubprocess {
 
     private void spawn() throws IOException {
         Process p = processBuilder.start();
+        // Advance the generation as the child is published: the pair
+        // (current, generation) names this specific child. A client that
+        // connected against an earlier generation reads a higher value here
+        // and declines to restart THIS one (M1-681). Monotonic and volatile;
+        // no lock needed because the client only compares for equality and
+        // the counter never goes backwards.
         current = p;
+        generation.incrementAndGet();
         // Stamp the spawn time so onProcessExit() can measure the child's
         // uptime for the healthy-uptime reset (design §6.4.6).
         lastSpawnNanos = System.nanoTime();
@@ -385,6 +403,18 @@ final class SignalSubprocess {
     boolean isAlive() {
         Process p = current;
         return p != null && p.isAlive();
+    }
+
+    /**
+     * The current daemon generation — 0 before the first spawn, then
+     * incremented once per {@link #spawn()} (initial start and each
+     * supervised restart). A transport client stamps this at connect time
+     * and compares it before firing {@code restartHung}, so it never
+     * SIGKILLs a child newer than the one its dead connection served
+     * (M1-681).
+     */
+    long generation() {
+        return generation.get();
     }
 
     State state() {

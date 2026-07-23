@@ -1,0 +1,35 @@
+RED-TEAM VERDICT: CLEAN
+
+OUT-OF-MODEL:
+  - Restart-budget exhaustion via transport-death latch is not adversary-reachable.
+    The reader-exit latch (SignalJsonRpcClient.latchTransportDeath, diff
+    infochat-messaging-adapter/.../SignalJsonRpcClient.java new lines ~1143-1176)
+    fires hungRestartHook.run() → SIGKILL of the signal-cli child; each spurious
+    kill counts toward SUBPROCESS_MAX_RESTARTS and can drive the supervisor to
+    terminal FAILED (adapter permanently down). However, the JSON-RPC channel is a
+    co-located LOOPBACK TCP socket between SignalJsonRpcClient and the child
+    signal-cli subprocess. Per the threat model (§Threat model; §Trust boundaries
+    7/8, loopback default), an internet adversary sending Signal messages controls
+    only the PARSED CONTENT of inbound notifications (malformed/oversize lines are
+    dropped and the reader continues — no exit), never the liveness of that socket.
+    So the adversary cannot steer transport death and cannot amplify restarts. This
+    is the same class the round-2 audit filed as RT-M1-681-r2-1 and classified
+    out-of-model; that finding (the `conn == current` guard being insufficient
+    across the ~15s respawn-before-retire window) is FIXED in this very diff via the
+    daemon-generation guard in latchTransportDeath and in the consecutive-timeout
+    escalation (recordTimeout, `daemonGeneration.getAsLong() == conn.daemonGeneration`),
+    plus SignalSubprocess.generation() monotonic counter. Flagged only so the user
+    can decide whether adapter-availability-under-local-fault is worth promoting into
+    the model; it is not a security.md commitment today.
+
+  - Future-adapter false-green readiness via MessagingAdapter.connected() default.
+    AdapterReadinessCheck now folds connected() (diff .../AdapterReadinessCheck.java
+    ~line 90-98: `up = started && !terminallyFailed && transportConnected`). The fold
+    is strictly MORE restrictive and cannot create a false-green on the current tree —
+    both v1 transport adapters (SimpleXAdapter, SignalAdapter) override connected().
+    The residual is that MessagingAdapter.connected() carries an interface default of
+    `true`, so a hypothetical FUTURE transport adapter that forgot to override it would
+    read connected-when-dead. This is an implementation-authoring gap in an internal
+    SPI, not an attacker-controlled path, and it is already tracked in ticket M1-682
+    (created in this diff). No security.md promise (trust boundary 6 governs bind
+    scope and topology disclosure, not readiness-truth) is violated on the shipped tree.

@@ -1,0 +1,5 @@
+docs/plan/m1/redteam-multi/M1-681-2026-07-23/prompt-claude.txt:192:- Ban handling / fixed-response-only paths:
+docs/plan/m1/redteam-multi/M1-681-2026-07-23/prompt-codex.txt:192:- Ban handling / fixed-response-only paths:
+docs/plan/m1/redteam-multi/M1-681-2026-07-23/prompt-kimi.txt:192:- Ban handling / fixed-response-only paths:
+docs/plan/m1/redteam-multi/M1-681-2026-07-23/reply-kimi.txt:122:  - The change touches NO authentication, authorization, ban, invite, audit, LLM, ingest, SSRF, or DB-role surface (the sensitive-surface inventory confirms: only input-validation/message-intake-adjacent adapter plumbing).
+docs/plan/m1/redteam-multi/M1-681-2026-07-23/reply-kimi.txt:146:  - No authZ/authN/invite/ban/audit/LLM surface touched. ✓

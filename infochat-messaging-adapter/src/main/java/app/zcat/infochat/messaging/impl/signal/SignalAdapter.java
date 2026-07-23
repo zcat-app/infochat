@@ -264,13 +264,22 @@ public final class SignalAdapter implements MessagingAdapter {
                     "signal-cli daemon endpoint " + daemonEndpoint + " not reachable within "
                             + ENDPOINT_PROBE_TIMEOUT);
         }
-        // Wire the hung-process escalation: when the JSON-RPC client sees a
-        // run of consecutive response timeouts (a daemon that is alive but
-        // deadlocked, so SignalSubprocess.onExit never fires), it kicks the
-        // supervisor to force-restart the subprocess.
+        // Wire the supervised-restart escalation. Two client-side detectors
+        // fire this same hook, one per failure shape SignalSubprocess.onExit
+        // cannot see: a run of consecutive response timeouts (a daemon that
+        // is alive but deadlocked) and the reader-exit transport-death latch
+        // (the TCP channel died while the daemon keeps running — no outbound
+        // traffic needed to notice, M1-681). The client guards against both
+        // firing for one death; the hook name keeps its original hung-daemon
+        // framing, the widened cause is documented here at the wiring site.
+        // sp::generation lets the client gate that restart on the child a
+        // dying connection actually served still being the live one, so a
+        // reader delayed across a supervised respawn cannot SIGKILL the
+        // healthy successor (RT-M1-681-r2-1).
         SignalJsonRpcClient c = new SignalJsonRpcClient(
                 daemonEndpoint, account, new SignalMessageCodec(), JSONRPC_RESPONSE_TIMEOUT,
-                sp::restartHung, SignalJsonRpcClient.INBOUND_QUEUE_CAPACITY, outboundRate);
+                sp::restartHung, SignalJsonRpcClient.INBOUND_QUEUE_CAPACITY, outboundRate,
+                sp::generation);
         // Attach BEFORE connect: connect() starts the reader thread, and
         // signal-cli can flush queued envelopes the moment the connection
         // opens — a handler wired only after connect loses those envelopes

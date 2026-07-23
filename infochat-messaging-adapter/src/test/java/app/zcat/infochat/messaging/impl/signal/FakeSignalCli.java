@@ -116,12 +116,19 @@ public final class FakeSignalCli implements AutoCloseable {
      * available (the supervisor respawns a daemon on the same endpoint).
      * The accept loop keeps running, so a reconnecting client re-wires
      * {@code clientConn}/{@code clientWriter} on its next connect.
+     *
+     * <p>Awaits the accept rather than racing it (M1-681). On loopback
+     * {@code Socket.connect()} returns as soon as the kernel completes the
+     * handshake into the listen backlog, which can be well before
+     * {@code server.accept()} returns and assigns {@code clientConn}. A
+     * test that connects and immediately kills would then find the field
+     * still null and close NOTHING — no FIN, the client's reader stays
+     * parked in {@code read()}, and the failure surfaces much later as the
+     * test's own await expiring. Same bounded-wait shape as
+     * {@link #awaitWriter()}.</p>
      */
-    void killClientConnection() throws IOException {
-        Socket c = clientConn;
-        if (c != null) {
-            c.close();
-        }
+    void killClientConnection() throws IOException, InterruptedException {
+        awaitClientConn().close();
     }
 
     /** Count of connections accepted so far (TCP probes included). */
@@ -213,6 +220,18 @@ public final class FakeSignalCli implements AutoCloseable {
             w.write('\n');
             w.flush();
         }
+    }
+
+    private Socket awaitClientConn() throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (clientConn == null && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        Socket c = clientConn;
+        if (c == null) {
+            throw new AssertionError("FakeSignalCli has no client connection");
+        }
+        return c;
     }
 
     private BufferedWriter awaitWriter() throws InterruptedException {

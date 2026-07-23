@@ -1,0 +1,295 @@
+• The user wants me to read a specific prompt file and follow it exactly. Let me read it first.The task: I'm an adversary auditing a diff against a threat model. Steps:
+
+  1. Read `docs/spec/security.md` in full.
+  2. Read the diff at `/home/infochat/infochat/.claude/worktrees/M1-681/docs/plan/m1/redteam-multi/M1-681-2026-07-23-r3/diff.patch`.
+  3. Write a verdict file to `/home/infochat/infochat/.claude/worktrees/M1-681/docs/plan/m1/redteam-multi/M1-681-2026-07-23-r3/verdict-kimi.txt`.
+  4. Reply with only the 4 lines.
+
+  Let me start by reading the security spec and the diff. First, check sizes. Let me read security.md in full — it may be large, so I'll page through it. Let me first check the file size with wc.
+
+• I'll read the threat model in full, then the diff, then write the verdict.  1601 /home/infochat/infochat/.claude/worktrees/M1-681/docs/spec/security.md
+  2115 /home/infochat/infochat/.claude/worktrees/M1-681/docs/plan/m1/redteam-multi/M1-681-2026-07-23-r3/diff.patch
+  3716 total
+
+
+• security.md is 1601 lines — I need to read it in two slices (1000-line cap, but also 100KB cap). diff.patch is 2115 lines — three slices. Let me read them.The Read output was truncated because it exceeded 50000 chars. The full output is at the output_path. I need to read the whole file. Let me page through using the output_path or just read security.md in smaller slices directly. Let me read it in ~400-line slices to stay under the char cap.
+
+• The file is large; I'll read it in smaller slices.
+
+• Line 327 got truncated (it's a huge table row). Let me continue reading from 401. Also I should check line 327's full content later if needed — it's the `semanticSearch` row, probably not critical for this diff which is about Signal adapter inbound dispatch. Let me continue.I've read the threat model in full (1601 lines, line 1602 is likely empty or the last line). Line 327 was truncated in display but it's the semanticSearch tool row — I got the gist. Also there's a truncated portion in line 3 area but those are formatting artifacts (trailing spaces).
+
+  Now let me read the diff (2115 lines). I'll read it in slices.
+
+• Threat model read in full. Now the diff.
+
+• I'm mid-audit. I've read the threat model (security.md, 1601 lines) in full and the diff up to line 1650 of 2115. Let me continue reading the diff to the end. The task is straightforward enough — read diff, write verdict, reply. I'll keep reading.I've now read the entire diff (2115 lines). Let me analyze it against the threat model.
+
+  ## What the diff does (M1-681 round 3)
+
+  1. **STATUS.md / ticket bookkeeping** — status flips, redteam history. Not security-relevant code.
+
+  2. **M1-682 new ticket file** — a follow-up guard ticket. Not code.
+
+  3. **docs/spec/messaging.md** — spec edit: Signal restart now fires from two detectors (reader-side death latch + consecutive-response-timeout escalation); latch defers to the escalation's restart for the same death. This is a spec amendment to the failure-handling section.
+
+  4. **SignalAdapter.java** — wires `sp::generation` into the client constructor (one new arg).
+
+  5. **SignalConnection.java (new)** — per-connection carrier: socket, writer, daemonGeneration stamp, dispatchExecutor, dispatchQueue, pending map, closed flag, restartRequested CAS, readerThread. `drainPending()` completes all pending futures exceptionally with PERMANENT closed-before-ack. `shutdownDispatcher()` returns count of discarded tasks.
+
+  6. **SignalJsonRpcClient.java** — moves per-connection state onto SignalConnection; `current` volatile field swapped by connect(); disconnect() nulls current first, sets closed before socket close, joins reader (2s), drains pending, shuts down dispatcher; call() captures `current` once; recordTimeout() escalation now gated on `conn != null && daemonGeneration.getAsLong() == conn.daemonGeneration` and sets restartRequested before firing; readerLoop(conn) with finally → latchTransportDeath(conn); latchTransportDeath marks closed, drains pending, if peer-initiated shuts down dispatcher (counting discards), and fires hungRestartHook gated on daemon generation match + restartRequested CAS; isConnected() now `conn != null && !conn.closed`.
+
+  7. **SignalSubprocess.java** — adds AtomicLong generation, incremented in spawn(), accessor generation().
+
+  8. **Tests** — FakeSignalCli.killClientConnection awaits accept; SignalJsonRpcClientTest gains 8 new tests; SignalReconnectTest modifies sendDuringOutageFailsTransient → sendRacingTransportDeathFailsClassifiedAndLatchDrivesReconnect (now allows PERMANENT closed-before-ack outcome), adds supervisedRestartAdvancesDaemonGenerationAndClientReconnects.
+
+  9. **AdapterReadinessCheck.java** — folds `adapter.connected()` into readiness: `up = started && !terminallyFailed && transportConnected`. Absent adapter keeps snapshot value.
+
+  10. **AdapterReadinessCheckTest / FakeReadinessAdapter** — tests for the new fold.
+
+  ## Threat model surfaces to check against
+
+  Relevant commitments:
+
+  - **Trust boundary 6 (health/management HTTP surface)**: "The health endpoints are unauthenticated in v1 and disclose operational topology: which messaging adapters are enabled and up, and whether the DB is reachable. The shipped default binds them to loopback; exposing them beyond the host is an explicit operator action." The readiness change makes the payload *more* honest (transport death → not ready). It discloses "adapter transport dead" — which is within the already-documented disclosure ("which messaging adapters are enabled and up"). No new disclosure class. The per-adapter data entries carry adapter names and up/down booleans — already there. The dropped-inbound counter — already there (M1-674? pre-existing in this diff's context — actually the DROPPED_INBOUND_SUFFIX is pre-existing per the diff context lines).
+
+  - **DOS category / rate limiting**: The diff touches inbound dispatch queue (bounded, drop-newest with counter) — unchanged semantics, just relocated. The reader loop cap-aware read (MAX_INBOUND_LINE_CHARS) — unchanged. 
+
+  - **D37 (user content in logs)**: latchTransportDeath logs "transport death discarded %d queued inbound deliveries (total dropped %d)" — counts only, no content, no contact ids. Comment says "count only — no content, no contact ids, D37". The LOG.warnf in dispatchAsync queue-full path uses redactSender(n) — pre-existing. The new warn "signal-cli JSON-RPC channel died (reader exited); forcing subprocess restart" — no user content. Fine.
+
+  - **Messaging.md §Failure handling spec change**: the spec now says Signal restart fires from either of two detectors, and the latch defers to the escalation. Consistent with code: escalation sets restartRequested before firing; latch CAS loses. One-directional. The code matches the spec text.
+
+  - **Step 1.5 transport-level rate cap**: not touched.
+
+  - **Health readiness flap**: readiness now reflects connected() — a crash-looping daemon makes readiness flap. That was already adjudicated in the ticket's redteam history as intended behavior (truthful reporting). Out of model anyway (health surface is loopback-bound; flapping is operator-visible truth, not a falsehood).
+
+  ## Adversarial review of the new code — hunting for real gaps
+
+  Let me think hard about the concurrency design and whether any threat-model commitment is violated.
+
+  ### 1. The generation gate TOCTOU
+
+  `latchTransportDeath`:
+  ```java
+  if (daemonGeneration.getAsLong() == conn.daemonGeneration
+          && conn.restartRequested.compareAndSet(false, true)) {
+      hungRestartHook.run();
+  }
+  ```
+
+  The comment claims: "The generation read is live and monotonic; a respawn that could bump it is scheduled with a backoff of at least hundreds of ms after the death that triggers it, so it cannot slip between this check and the hook on the reader thread."
+
+  Is that sound? The respawn is triggered by... what? The subprocess onExit → supervisor schedules restart with backoff. The reader's death is the socket death, not necessarily the child's death. Hmm — actually consider: child dies (generation still N), supervisor schedules respawn with backoff (250ms base). Socket dies because child died. Reader exits, enters latch. If the reader is delayed (scheduling pause) more than the backoff, the respawn could already have happened → generation N+1 → gate correctly declines. The comment says the respawn "cannot slip between this check and the hook" — i.e., between `getAsLong()` returning N (match) and `hungRestartHook.run()` executing. Within that tiny window, could spawn() increment the generation? spawn happens on the supervisor scheduler thread after backoff ≥ 250ms (base) — but the backoff starts at the child's exit, which happened BEFORE the reader exit (the reader exits because the socket died, which happens because the child died... wait, no — actually in the RT-M1-681-r2-1 scenario, the sequence was: channel dies while daemon keeps running; latch fires restartHung → doRestart spawns successor BEFORE reconnect retires old connection).
+
+  Actually the dangerous interleaving: generation check passes (N == N), then before hook.run(), a concurrent supervised restart (scheduled from an earlier child exit) spawns child N+1 and — no wait, the hook is restartHung which itself triggers the kill. If between the check and the hook call, a respawn occurs (generation → N+1) and the old child is already dead, then restartHung's destroyForcibly would target... the current child (N+1, the healthy successor). That's exactly RT-M1-681-r2-1's shape but in the tiny check→fire window instead of the 15s window.
+
+  Is this reachable? For the generation to advance between check and hook, a spawn must occur in that window. Spawns happen: (a) initial start, (b) supervised restart after child exit + backoff. For (b) to land in the window, the child must have exited earlier — but if the child already exited and respawned, then... the reader's connection served child N. The respawn to N+1 requires child N's exit to have been observed and backoff elapsed. The reader exits at time T. Check at T+ε. For the race, spawn(N+1) must land in (T+ε, T+ε+δ). Child N exited at T-bounded... hmm, but wait: in this scenario the socket died because the reader detected channel death — if the channel death was caused by the child's death, then onExit fired at roughly the same time; the backoff is ≥250ms (base; the test uses 10ms). So if the reader thread is descheduled for >250ms between entering latch and the generation check... then the generation has already advanced → gate declines → safe. The dangerous window is only between `getAsLong()` and `hook.run()` — a few nanoseconds to microseconds of bytecode. For a spawn to land exactly there, the backoff would have to expire exactly then. The comment's argument: the respawn is scheduled ≥ hundreds of ms after the death that triggers it, and the reader's check happens at most ~ms after the death (reader exit → finally → latch immediately). So the check happens well before the respawn could be scheduled... unless the reader thread is descheduled between the socket-death and the latch check for longer than the backoff. In that case generation has advanced BEFORE getAsLong() reads it → gate declines → safe. The only unsafe interleaving is: getAsLong() reads N (respawn not yet happened), then respawn happens, then hook.run() kills the new child. For that, spawn must occur in the nanoseconds between the read and the run. Given the spawn is scheduled via a ScheduledExecutor with ≥250ms backoff from child-exit, and the read happens ≤ reader-exit + tiny, the spawn can only land in the window if the reader was descheduled for almost exactly the backoff duration between reading the socket EOF and calling getAsLong()... but then the spawn would have already happened before getAsLong() → gate declines. Hmm, actually there's still a sliver: reader exits at T0 (socket death). Suppose child died at T0 too (that's why socket died). Backoff 250ms → spawn at T0+250ms. Reader is descheduled from T0 to T0+249.999ms, wakes, reads generation — still N if spawn hasn't run yet (scheduler granularity) — then gets descheduled again for a microsecond during which spawn runs — then calls hook.run() → restartHung → destroys the NEW child N+1. This is theoretically possible but requires the reader to wake at T0+250ms−ε and the supervisor thread to fire at exactly T0+250ms. It's a race of measure-zero probability and NOT adversary-steerable (local thread scheduling on a loopback channel — the same classification the prior rounds gave the whole zombie-reader cluster: out of model, reliability not security). Also, what does restartHung actually do? Per the r2 finding description: restartHung → doRestart → destroyForcibly on the child. If it kills the new child N+1, the supervisor would then restart it (another spawn) — burning restart budget (SUBPROCESS_MAX_RESTARTS=5 without healthy-uptime reset if victim lived <30s). That's the same self-DoS impact as RT-M1-681-r2-1 but in a much narrower window. Prior audit classified this class as out-of-model (local thread scheduling, not adversary-reachable) but fixed in-band because the ticket created it. This residual sliver is orders of magnitude narrower and inherent to any check-then-act on a monotonic counter without locking the spawn path. I'd note it as out-of-model at most. Actually — hmm, is it worth a finding? The threat model's commitments here are about adversary-reachable behavior. A non-adversary-steerable local scheduling race with nanosecond window doesn't violate any spec commitment. The spec (messaging.md §Failure handling) says "The outage stays operator-visible" and recovery routes through supervised backoff. A measure-zero race that burns one restart budget unit doesn't breach a documented commitment. I'll note it OUT-OF-MODEL or not at all. Actually let me keep analyzing; I can decide later.
+
+  ### 2. recordTimeout() escalation gate — is the gate correct?
+
+  ```java
+  SignalConnection conn = current;
+  if (conn != null && daemonGeneration.getAsLong() == conn.daemonGeneration) {
+      conn.restartRequested.set(true);
+      hungRestartHook.run();
+  }
+  ```
+
+  Note: `restartRequested.set(true)` — plain set, not CAS. Two concurrent timeout threads could both pass `consecutiveTimeouts.compareAndSet(n, 0)`? No — the outer CAS `compareAndSet(n, 0)` ensures only one thread fires per crossing. But could the escalation fire twice across reconnects for the same death? The counter is reset in connect(). Fine.
+
+  Wait — there's a subtle issue: the escalation gates on `conn != null && generation match`. But the timeout streak was recorded against the connection the calls were made on. `current` is read at fire time. If between the timeouts and the fire, a reconnect happened... consecutiveTimeouts.set(0) in connect() resets the streak, so n would be from the new connection. OK.
+
+  Another subtle thing: `conn.restartRequested.set(true)` marks the CURRENT connection. If the current connection is generation N (matches daemon), the restart kills child N, which kills conn's socket, reader exits, latch sees restartRequested already true → defers. Correct — matches spec text ("the latch defers to the restart the escalation already requested").
+
+  But: what if the generation check FAILS (mismatch) in recordTimeout? Then no restart fires — and consecutiveTimeouts was already CAS'd to 0. The daemon is unresponsive but no restart. Hmm — when can the daemon generation differ from the current connection's stamp while timeouts accrue? If the daemon was respawned (gen N+1) but the client hasn't reconnected yet (conn stamped N). The timeouts accrued on calls to... the dead child's socket (the connection still points at the old socket — reconnect hasn't happened). The new daemon N+1 is healthy; the restart hook would kill N+1. So declining is correct. The streak reset to 0 — but the latch on the old connection's reader will fire... wait, if child N died, its socket died, reader exited, latch fired (gated, declined due to generation mismatch). Recovery proceeds via the already-scheduled supervised restart → reconnect. So no restart needed from the escalation. Correct.
+
+  And what if generation mismatch but NO respawn is actually scheduled? Generation mismatch implies a spawn happened — spawn only happens in start() and doRestart(). Every spawn except the initial one is a supervised restart which fires the restart listener → reconnect. So mismatch ⟹ recovery already in flight. Sound.
+
+  ### 3. latchTransportDeath on the local-disconnect path
+
+  disconnect(): current = null; conn.closed = true; socket.close(); join reader. Reader exits → latch: peerInitiated = !closed = false → drain, return. No restart. Good. But note: disconnect() sets current = null BEFORE closed = true. isConnected() reads current == null → false immediately. Fine.
+
+  Race: peer death and local disconnect concurrently. disconnect sets closed=true then closes socket. Reader exits, latch reads closed — could read either value depending on timing. If peer closed first (reader woke from EOF) and disconnect() runs concurrently: disconnect sets closed=true; latch reads closed... The read `boolean peerInitiated = !conn.closed;` then `conn.closed = true;`. If disconnect already set it, peerInitiated=false → no restart — but it WAS a peer death and no restart fires! Wait: if disconnect() is running, that means the operator/reconnect path initiated teardown, so not firing a restart is correct (recovery is already being driven by whoever called disconnect — reconnect() or stop()). OK.
+
+  Reverse: latch reads closed=false (peerInitiated=true), sets closed=true, then disconnect() runs, sets closed=true (already), closes socket, joins reader (reader is in latch, will finish), drains (already drained — drainPending is idempotent: pending.forEach + clear; second drain finds empty map), shutdownDispatcher — disconnect calls conn.shutdownDispatcher() too. shutdownNow() on an already-shutdown executor returns empty list. Idempotent. Fine.
+
+  ### 4. The `closed` flag and isConnected() — the false-green hole?
+
+  Pre-latch, isConnected() = dispatchQueue != null. Now = conn != null && !conn.closed. The latch sets closed on EVERY reader exit (finally). So a dead channel reads disconnected. 
+
+  Race window: reader exits (socket EOF), but before the latch runs (finally), isConnected() still true. Millisecond-scale truth delay — unavoidable and benign (readiness is polled).
+
+  What about a connection that dies WITHOUT the reader noticing — e.g., half-open TCP (peer gone, no FIN)? The reader stays parked in read(); no EOF; latch never fires; isConnected() stays true. Detection then relies on the consecutive-timeout escalation — which needs outbound traffic. The M1-674 finding-2 hole was "no outbound traffic → no detection". This ticket fixes detection only for channel-death-with-FIN/RST (EOF or IOException). A half-open connection (silent peer, e.g., daemon hung but socket alive) still needs the timeout escalation, which needs outbound sends. Hmm — but wait: is that a spec violation? messaging.md §Failure handling per the NEW spec text: "Signal's restart fires from either of two detectors: the reader-side death latch (the JSON-RPC channel died while signal-cli keeps running — detected from the channel's own read side, with no dependence on outbound traffic) or the consecutive-response-timeout escalation (a daemon that is alive but not answering, which a live reader cannot detect)."
+
+  So the spec text this diff lands EXPLICITLY assigns the hung-alive case to the timeout escalation. The escalation requires outbound traffic to observe timeouts. With zero outbound traffic, a hung-but-alive daemon is still undetected — the reader is alive (socket fine), no timeouts accrue. Pre-existing? The old spec text had the carve-out: "Signal detects a dead channel solely through those consecutive response timeouts... with no outbound traffic on that adapter the escalation never fires at all." The new text REMOVES that sentence and replaces it with the two-detector description. Does the new text overclaim? "the consecutive-response-timeout escalation (a daemon that is alive but not answering, which a live reader cannot detect)" — it doesn't explicitly say "requires outbound traffic". The removed sentence said the escalation never fires with no outbound traffic. The new text is silent on the no-outbound-traffic case for the hung-alive daemon.
+
+  Hmm, is this a finding? Let me think about what the threat model commits. security.md itself doesn't commit to transport liveness detection — that's messaging.md §Failure handling, which is the spec being amended in this diff. The threat-model audit is against security.md ("Read docs/spec/security.md IN FULL... That file is the threat model"). The commitments in security.md that touch this area:
+
+  - Trust boundary 6: health endpoints disclose which adapters are "enabled and up" — the readiness fold makes "up" honest for the dead-channel case. For the hung-alive case, "up" may still be reported while the daemon is hung — but with a live reader and no outbound traffic. Is the readiness payload then false-green? connected() returns true (channel alive, reader parked). The daemon is hung (not answering). Adapter reports connected=true. Readiness green. This is the "wedged-but-alive daemon holding the socket open reads false-green" item from the r2 out_of_model_note — explicitly falsified as out-of-scope (the keepalive/ping bullet; the timeout escalation is the sanctioned detector; "a residual the diff narrows rather than a regression"). Prior rounds already adjudicated this exact item as out-of-model/residual. I should not re-file it as a finding; at most note in OUT-OF-MODEL that it persists... but the r2 note already recorded the adjudication. Repeating it has marginal value but the prompt says flag out-of-model items so the user can decide. Since it's already tracked/adjudicated in the ticket's own redteam_findings, I'll mention it briefly in OUT-OF-MODEL at most — or maybe not at all, since it's pre-existing and already adjudicated. Hmm. The prompt says "Treat the diff as the only evidence of behavior" and stay inside the threat model. The hung-alive-no-outbound case is unchanged by this diff (it was undetectable before, still undetectable), and the new spec text acknowledges the escalation's role. Not a finding.
+
+  ### 5. AdapterReadinessCheck — absent adapter
+
+  `boolean transportConnected = adapter == null || adapter.connected();`
+
+  If adapter == null (not in the live map), keeps snapshot value. Pre-existing contract ("an absent adapter keeps its snapshot value"). Fine.
+
+  ### 6. The spec amendment itself (messaging.md)
+
+  "Signal's restart fires from either of two detectors... The escalation's restart kills the daemon, which kills the channel, which exits the reader — so for that one death the latch defers to the restart the escalation already requested rather than forcing a second one."
+
+  Code check: escalation sets restartRequested BEFORE firing (recordTimeout: `conn.restartRequested.set(true); hungRestartHook.run();`). Latch: `conn.restartRequested.compareAndSet(false, true)` — loses if escalation already set. But: the latch sets restartRequested only in the CAS at the END of the latch, AFTER drain and dispatcher shutdown. So a latch in progress (draining) and a concurrent escalation: escalation sets restartRequested and fires; latch later CAS fails → doesn't fire. One restart. Good.
+
+  Reverse: latch CAS wins, fires restart; escalation later: recordTimeout's outer guard is `consecutiveTimeouts.compareAndSet(n, 0)` — the timeout streak. It doesn't check restartRequested! Could the escalation fire a SECOND restart after the latch fired one? Sequence: channel dies (peer close). Latch fires restart → child killed → respawn. Before reconnect, some call() on the dead connection... wait, conn drained; new calls: current is still the dead conn (reconnect hasn't run disconnect/connect yet). call() writes to dead socket → IOException → TRANSIENT, no timeout recorded (recordTimeout only on TimeoutException). TimeoutException requires the write to succeed and the future to time out. On a dead conn after drain: call() puts a new future in conn.pending, writes... if the socket is dead, write throws. If the socket is half-alive... write succeeds, no response ever, times out → recordTimeout. Three consecutive → escalation: conn = current (the dead conn, generation matches? The latch fired a restart → respawn happened → generation advanced → conn.daemonGeneration (N) != daemonGeneration (N+1) → gate declines. 
+
+  But between the latch's fire and the actual respawn (backoff ≥ 250ms... actually restartHung → what exactly? per r2: restartHung forces destroyForcibly then onExit → doRestart with backoff), the generation hasn't advanced yet. In that window, could the escalation fire a second restart? It needs 3 consecutive timeouts AFTER the latch (consecutiveTimeouts was NOT reset by the latch — only connect() resets it). Hmm: suppose 2 timeouts accrued before the channel death (counter = 2). Channel dies; latch fires restart (respawn pending with backoff 250ms–30s). A send races: write succeeds on the not-yet-killed socket (the child is still alive — the latch fired restartHung which does destroyForcibly... does restartHung kill synchronously? Per r2 finding: "restartHung → destroyForcibly on the successor" — it kills the child. If restartHung synchronously destroys the child, the socket dies promptly, subsequent writes fail with IOException not timeouts. If restartHung just schedules... the name "restartHung" and SignalSubprocess.restartHung() — from the r2 test: `sp.restartHung()` is called directly and it triggers doRestart → spawn. Likely synchronous destroy + schedule. I don't have restartHung's body in the diff. Hmm.
+
+  But even IF a racing send times out in that window and the counter hits 3: escalation gate `daemonGeneration.getAsLong() == conn.daemonGeneration` — generation not yet advanced (respawn pending) → match → `conn.restartRequested.set(true); hungRestartHook.run();` → SECOND restartHung call for the same death! The latch already fired it once. restartRequested doesn't gate the escalation path — it only marks so the latch defers. The escalation itself doesn't check whether the latch already fired.
+
+  Wait, but is a second restartHung harmful? It's the supervised path: SignalSubprocess presumably has its own guards (State CAS — NEW/RUNNING/RESTARTING/FAILED). If restartHung while a restart is already scheduled is a no-op (state machine CAS), no harm. If it force-kills again and schedules again, it could double-count budget. I don't have SignalSubprocess.restartHung() in the diff — only the generation counter addition. The r2 finding text says "Each spurious kill counts toward SUBPROCESS_MAX_RESTARTS = 5 without resetting the streak (victim lived < 30 s healthy-uptime)". That's about spurious kills of the successor. A second restartHung for the same death — SignalSubprocess likely dedups via its State machine (restart already scheduled → no-op or re-kill of the same dying child). I can't verify from the diff. But note the outer guard: `consecutiveTimeouts.compareAndSet(n, 0)` — one fire per crossing; after firing, counter is 0; needs 3 more timeouts for another fire. Within the pre-respawn window (backoff ≥ hundreds of ms, response timeout is seconds — TEST uses 150ms, production JSONRPC_RESPONSE_TIMEOUT is presumably seconds), 3 consecutive timeouts take 3×responseTimeout ≥ several seconds — longer than the backoff window in the common case (base 250ms ×2 cap 30s — hmm, could exceed 3×responseTimeout on later backoff steps, but consecutiveTimeouts is reset by connect() on reconnect, and the reconnect happens after the respawn + endpoint probe...).
+
+  Honestly: for the escalation to double-fire after the latch fired, you need 3 fresh timeouts on the dead connection within the window before the generation advances, where each timeout requires a successful write + full response-timeout await on a socket whose daemon is being killed. The window between latch-fire and generation-advance is the supervised-restart latency (destroy + backoff + spawn). Writes to a socket whose child was destroyForcibly'd fail fast. Marginal, non-adversary-steerable, and gated downstream by SignalSubprocess's own state machine (State CAS visible in the diff context: "The AtomicReference is seeded non-null (State.NEW) and only ever CAS'd"). Also: is any of this adversary-reachable AT ALL? The adversary is a Signal user sending DMs. Can an adversary cause the signal-cli channel to die? They can send messages; the channel death is a local transport event. An adversary flooding inbound could cause... inbound drops (bounded queue), not channel death. The restart-loop self-DoS scenarios are all local-scheduling/daemon-behavior dependent — the same class prior rounds ruled out-of-model (local thread scheduling on a loopback channel).
+
+  ### 7. Inbound path security surfaces
+
+  The sensitive-surface inventory flags lots of inbound lines, but the diff doesn't change decode/dispatch semantics: same MAX_INBOUND_LINE_CHARS cap, same exceedsInboundByteCap drop, same redactSender logging, same queue-full drop-newest + counter + metric. The dispatch move from a client-field executor to a per-connection executor preserves the bound (inboundQueueCapacity passed through). No change to what's logged (counts only). The `dispatchAsync` null-executor drop path is gone (executor is now never null on a live conn — created in constructor). On a stale conn (post-disconnect), dispatchExecutor is shut down → RejectedExecutionException → isShutdown() true → debug log drop. Same behavior.
+
+  One subtlety: `staleReaderCannotLatchTheConnectionThatReplacedIt` notes "the superseded dispatcher is left to GC" — connect() publishes a new conn WITHOUT shutting down the old dispatcher (in production, connect() is always preceded by disconnect() which shuts it down; the zombie scenario where disconnect's join times out leaves the old reader alive holding its conn — its dispatcher stays up until... the old reader's exit latch fires shutdownDispatcher on ITS conn. OK, self-healing).
+
+  ### 8. Security-relevant behavior changes to classify
+
+  The biggest user-visible behavior change: **a send racing a transport death can now fail PERMANENT (closed-before-ack)** instead of TRANSIENT. messaging.md §Failure handling (per the diff context) blesses this: "a send that raced the close can learn permanent even though recovery completes moments later". How does the Provider treat PERMANENT vs TRANSIENT? TRANSIENT → Provider retries. PERMANENT → no retry, the message fails. Security impact: availability of user messages — a racing outbound reply is dropped (user sees failure) rather than retried. Is that a threat-model issue? The FailureCategory matrix is a design commitment; closed-before-ack PERMANENT is the same category SimpleX stamps (pre-existing semantics). A peer who can close the adapter's local JSON-RPC socket is... the local signal-cli daemon or loopback actor — not the threat model's adversary (internet-facing message senders). An adversary cannot force PERMANENT classifications of other users' messages through this path. Not a finding.
+
+  ### 9. Readiness fold — any info-leak?
+
+  Boundary 6 says health endpoints disclose "which messaging adapters are enabled and up". The fold changes the semantics of "up" to include transport truth. Adapter names already disclosed. The drop counter already disclosed. No new disclosure class. And the endpoints are loopback-bound by default. Not a finding.
+
+  ### 10. Audit-evasion / perm-escal / auth / injection categories
+
+  The diff touches nothing in: identity resolution, ban check, invite path, command parsing, LLM tool surface, audit log, DB roles, SSRF. Nothing.
+
+  ### 11. Generation supplier default `() -> 0L`
+
+  Convenience/test constructors default daemonGeneration to constant 0 → gate always passes → restart fires on death. In production, SignalAdapter wires sp::generation (diff line 545-549). Any production path constructing the client without the generation supplier? The diff shows only one production construction site (SignalAdapter.start). Tests use both. If a future production path used a no-generation constructor with a real supervised subprocess, the RT-M1-681-r2-1 protection would silently vanish (gate no-op). Hardening opportunity at most; today the only production caller wires it. Not a finding.
+
+  ### 12. One more careful look at the escalation gate change
+
+  Before: `hungRestartHook.run()` unconditionally on 3 timeouts.
+  After: gated on conn != null && generation match.
+
+  Gap: conn == null at fire time. When? current is null between disconnect() and connect(). Timeouts accrue only from call(), which requires conn != null to write. After disconnect(), no new timeouts. But a timeout recorded BEFORE disconnect could... recordTimeout is called synchronously from call() on the calling thread. If disconnect() runs between the timeout and recordTimeout... recordTimeout reads current → null → gate declines → NO restart fired, and the streak counter was CAS'd to 0. But disconnect() means teardown is intentional (reconnect or stop) — recovery is driven by the caller. Fine.
+
+  Gap: generation mismatch at fire time → no restart, streak reset. Mismatch means respawn already happened (recovery in flight) → reconnect imminent. Fine.
+
+  ### 13. restartRequested.set(true) in recordTimeout before the hook
+
+  If hungRestartHook.run() throws (caller-injected runnable), restartRequested stays true with no restart fired, and the latch will later defer (CAS fails) → NO restart ever for that death → the outage persists undetected-until-next-timeout-cycle. But the hook is sp::restartHung in production — does it throw? Unlikely. And consecutiveTimeouts was reset to 0, so 3 more timeouts would re-fire the escalation... on a dead daemon, sends would keep timing out, so the escalation re-fires after 3 more. Self-healing. Marginal. Also hook throwing from the latch path (latchTransportDeath → hungRestartHook.run()) would propagate out of the reader thread's finally — a RuntimeException escaping latchTransportDeath... it's called in the finally of readerLoop; an exception there propagates off the thread (thread dies silently, daemon thread). But the latch already marked closed and drained before firing, so the honesty properties hold. Restart might be lost — again a local reliability sliver, not adversary-reachable.
+
+  ### 14. Check: drainPending completes futures exceptionally but doesn't remove before completing?
+
+  ```java
+  void drainPending() {
+      pending.forEach((id, f) -> f.completeExceptionally(...));
+      pending.clear();
+  }
+  ```
+  Concurrent completePending racing: removes then completes — idempotent (CompletableFuture.complete after completeExceptionally is a no-op). A new call() putting into pending between forEach and clear: the future gets cleared from the map WITHOUT being completed → the caller hangs until responseTimeout. Wait — can a new call() attach to a conn being drained? call() reads current → conn (still current during latch — latch doesn't null current; only disconnect does). So yes: thread A calls call(), reads current = conn (dead, not yet latched... or being latched), puts future, then latch's clear removes it without completing → caller waits full responseTimeout → TRANSIENT timeout. Hmm, is that a problem? The send fails TRANSIENT after the timeout instead of PERMANENT immediately. Behavior: honest failure either way, just slower. The racy window is tiny. messaging.md blesses raced sends learning either outcome... it blesses PERMANENT closed-before-ack and TRANSIENT. So a TRANSIENT timeout outcome is within the blessed set. Not a finding. (Also pre-existing: disconnect() had the same forEach/clear shape.)
+
+  Actually wait, one more: after the latch, current still points at the dead conn (until reconnect's disconnect()). So call() after latch: reads current = conn (closed), puts pending, WRITES to the dead socket. If the socket is closed (peer EOF — our side may still allow writes? after peer FIN, writes can succeed until RST...). If write succeeds: future awaits → but the latch already drained; this future was added after → waits full timeout → TRANSIENT. So sends into a latched-dead-but-not-yet-replaced connection can block for the full response timeout (5s? production value) before failing TRANSIENT, instead of failing fast. Pre-M1-681 the same sends would also hang (no latch at all). Post-M1-681: isConnected() is false immediately, so SignalAdapter.send would check connected() first? Hmm — SignalAdapter.send presumably checks isConnected() and fails fast TRANSIENT when not connected (notConnectedSendIsPermanentForEveryTransportAdapter — wait, the contract test name says not-connected send is PERMANENT for every transport adapter). So the adapter layer checks connected() and refuses with PERMANENT not-connected before reaching client.call(). After the latch, connected() = false → adapter fails fast. Only the narrow race (read current before latch, write after) hits the hang. Fine — honest, bounded, blessed.
+
+  ### 15. Readiness: "at-least-one" rule
+
+  up = started && !terminallyFailed && transportConnected; anyUp overall. A single-adapter deployment reads DOWN during any transport blip — including the reconnect window of a routine supervised restart. Readiness flapping during recovery — adjudicated already (round-1 out-of-model item 3: "Readiness may flap while a daemon crash-loops — truthful reporting is this ticket's explicit intent"). Not a finding.
+
+  ### 16. Docs/spec/messaging.md — does the new text overclaim vs. the code?
+
+  "The escalation's restart kills the daemon, which kills the channel, which exits the reader — so for that one death the latch defers to the restart the escalation already requested rather than forcing a second one."
+
+  Code: escalation marks restartRequested on the CURRENT conn before firing. The restart kills the daemon → socket dies → reader exits → latch on THAT conn → CAS fails → defers. ✓. But what if the escalation fired when current = conn A, then before the kill lands, a reconnect publishes conn B (generation advanced first?). Escalation gate requires generation match — conn A stamped N, daemon gen N. For a reconnect to publish conn B, a respawn (gen N+1) must have happened — meaning a restart already ran. The escalation's own hook would then... confusing, but the deference claim holds per-connection: the latch on conn A defers (marked); a latch on conn B is a different death. OK.
+
+  Also the spec sentence "Signal's restart fires from either of two detectors" — accurate.
+
+  ### 17. Now, the crucial adversarial question: does this diff create any NEW adversary-reachable gap per the security.md commitments?
+
+  The threat model's adversary classes: internet message senders, feed publishers, hostile relays, hostile LLM endpoints, banned users, probation users, group non-admins, etc. The attack surface changed by this diff: (a) readiness payload semantics (loopback surface, honest-making direction); (b) Signal transport death handling (local loopback channel, daemon lifecycle); (c) failure classification of raced sends (PERMANENT closed-before-ack — design-blessed, matches SimpleX precedent).
+
+  An internet adversary CAN indirectly influence inbound traffic volume (bounded queue, drop-newest — unchanged) and can trigger outbound sends (replies). Can an adversary cause the JSON-RPC channel to die? Only via signal-cli behavior (e.g., malformed frames? signal-cli is the local daemon parsing Signal protocol traffic). Out of the diff's evidence and out of the documented model (the adapter↔daemon channel is loopback; the daemon itself is trusted local infrastructure... though its REMOTE traffic is adversary-influenced. A Signal protocol message that crashes signal-cli would be a signal-cli vulnerability, not infochat's). If the channel dies, the latch now fires a supervised restart — an adversary who could repeatedly kill the channel would drive restart budget exhaustion → terminal FAILED → bot offline. But that capability requires crashing signal-cli — out of model (the daemon is operator infrastructure; the threat model doesn't cover compromising local trusted processes... and "signal-cli dies repeatedly" is precisely what the supervisor cap exists for, pre-existing). Not a finding against this diff.
+
+  ### 18. D37 sweep of new log lines
+
+  - LOG.warnf("transport death discarded %d queued inbound deliveries (total dropped %d)") — counts. ✓
+  - LOG.warnf("signal-cli JSON-RPC channel died (reader exited); forcing subprocess restart") — no content. ✓
+  - LOG.warnf("signal-cli unresponsive after %d consecutive JSON-RPC timeouts; forcing subprocess restart") — pre-existing, count only. ✓
+  - debug lines: "inbound notification dropped — dispatcher shut down" — pre-existing. ✓
+  - SignalConnection javadoc mentions inbound handler — no logging.
+
+  ### Conclusion
+
+  I find no threat-model commitment the diff fails to deliver. The diff's changes are in the reliability/observability plane, and every security-adjacent property I probed (D37 logging, health-surface disclosure class, failure-category honesty, bounded queues, restart deference) holds or is explicitly adjudicated residual. Prior rounds' findings (zombie-reader, generation gate) are addressed by exactly this diff; the remaining races I identified are narrower, non-adversary-steerable local scheduling slivers — the class this audit's own history consistently rules out-of-model.
+
+  Wait — before finalizing CLEAN, let me reconsider two candidate findings more rigorously, because "CLEAN" from all three auditors twice already puts pressure toward conformity; my job is adversarial.
+
+  **Candidate A: readiness now folds connected() → a single transport blip reads DOWN → monitoring-driven DoS amplification?** The health surface is loopback-bound by default (boundary 6); the payload is honest; flapping is truth. The spec's commitment is that it discloses "which messaging adapters are enabled and up" — an adapter mid-reconnect is NOT up. Not a violation. No.
+
+  **Candidate B: the escalation gate's `conn != null` + generation check silently SWALLOWS the escalation when they fail, resetting the streak — could a dead-daemon state now evade ALL detection?** Enumerate the failure shapes: (1) channel dead, daemon alive → latch fires (new). (2) daemon dead → supervisor onExit handles (pre-existing). (3) daemon alive but hung, channel alive → escalation on outbound timeouts (pre-existing); with zero outbound → undetected (pre-existing, spec-text acknowledged, prior adjudication). (4) daemon hung AND the escalation gate declines — only when conn==null (intentional teardown, recovery driven by caller) or generation mismatch (respawn in flight, recovery driven by supervisor). In every decline path, recovery is already owned elsewhere. No silent-loss hole created. No.
+
+  **Candidate C: per-connection `pending` map — a response arriving on conn B for a request issued on conn A (rpcId collision across reconnects)?** rpcIds come from an AtomicLong on the client (presumably, unchanged). completePending looks up in conn.pending — responses route to the conn they arrived on; a request written to conn A's socket can only be answered on conn A. Cross-connection id collision can't misroute because pending is per-conn and the response arrives on the same socket. Actually this is IMPROVED isolation. No.
+
+  **Candidate D: The new test modifies sendDuringOutageFailsTransient to accept PERMANENT — weakening a Provider-retry contract?** The Provider retry machinery treats TRANSIENT as recoverable. Broadening the allowed classification means some sends that used to be retried now fail permanently to the user. Is that a SECURITY (availability) regression the threat model covers? The threat model's DOS category covers resource exhaustion, not message-delivery semantics during a local transport outage; and messaging.md §Failure handling (the spec, amended here) explicitly blesses the raced-PERMANENT outcome. The auditor's frame: "Treat the threat model as the commitments; stay inside it." security.md doesn't commit to retry-everything-on-transport-death. No finding.
+
+  **Candidate E: log injection via adapter name or drop counts?** Counts are numeric; adapter name is operator config (trusted). No.
+
+  **Candidate F: The `() -> 0L` default generation supplier in the 7-arg constructor** — if ANY production wiring used it with a supervised subprocess, RT-M1-681-r2-1 silently reopens. The diff's only production call site passes sp::generation. This is a hardening opportunity (make the gated constructor the only one accepting a real hook), not a live gap. Low-severity at best, and it's a code-shape observation rather than a threat-model violation. I could file it as low DOS... but honestly: the threat-model frame says "Any commitment the diff fails to deliver is a finding." There's no commitment about constructor shapes. Out-of-model note? The class of "future misuse hazard" was handled for connected() via M1-682; a similar guard for the generation wiring could be suggested. I'll put it in OUT-OF-MODEL as a one-liner. Hmm, the OUT-OF-MODEL section is for "attacks that look juicy but fall outside the documented threat model". A future-misuse hazard isn't an attack. I'll mention it anyway briefly — the user can decide. Actually, keep the OUT-OF-MODEL tight: I'll list (1) the check-then-fire nanosecond race on the generation gate, (2) the hung-alive-daemon-with-zero-outbound residual (already adjudicated, noted for completeness), (3) the 0-default supplier future-misuse hazard.
+
+  Let me double check (1) once more to phrase it accurately: latchTransportDeath reads generation, then CAS, then hook. The respawn that would advance the generation is scheduled with backoff after a child exit. If the reader's death-detection path stalls for almost exactly the backoff interval between socket death and the generation read, and the supervisor thread's scheduled spawn lands between the read and the hook, the hook kills the successor. The comment in the diff claims this "cannot slip between this check and the hook" — the claim rests on the backoff being orders of magnitude longer than the check-to-fire path, which is true but is a probabilistic argument about thread scheduling, not a happens-before guarantee. The window is unsteerable and measure-zero; the impact is one burned restart-budget unit, self-limiting. Out of model (local scheduling), noted.
+
+  Actually hold on, let me re-examine whether the check-to-fire race is even real given restartHung's implementation. restartHung is SignalSubprocess.restartHung — not in the diff. If restartHung itself re-validates (e.g., only kills if the child is the same one / only if state is RUNNING), the race evaporates. From the r2 finding: "a stale reader's conn still equals current while a healthy successor daemon is already running — firing then SIGKILLs it" — so restartHung SIGKILLs whatever child is current. The r2 fix moved the guard to the generation gate. The residual sliver: generation read at T, respawn at T+ε, kill at T+2ε. For that, a respawn must be scheduled to fire within ~µs of the read. Respawns are scheduled (a) by onProcessExit with backoff ≥ 250ms after the child's death. The reader fires its latch within ms of ITS channel's death. The channel death and the child death that scheduled the respawn are different events — the child could have died 249.999ms ago (respawn imminent), while the reader's socket died just now (why? if the child died 250ms ago, the socket died ~250ms ago too, and the reader would have latched ~250ms ago unless descheduled). So the race needs the reader descheduled ~backoff-length, then to wake and read in the exact µs before the spawn. Astronomically unlikely, unsteerable, self-limiting impact. Also the test fake uses 10ms base backoff (FAST_BACKOFF) — production 250ms. Fine. OUT-OF-MODEL it goes.
+
+  One more sweep: **the diff's spec amendment and security.md's boundary 6 interplay** — readiness now includes transport truth; boundary 6 says the payload discloses "which messaging adapters are enabled and up" — the amended meaning of "up" still falls under the same disclosure class. ✓.
+
+  And **the ticket file itself** reveals redteam history — docs only, no code impact. The M1-682 ticket file is docs. Fine.
+
+  **Verdict: CLEAN.** Findings: 0. Out-of-model: 3 items.
+
+  Hmm, let me reconsider whether any of the three out-of-model items deserves promotion to a low finding. The bar: "Any commitment the diff fails to deliver is a finding," staying inside security.md's commitments. 
+
+  - Item 1 (check→fire sliver): no commitment covers local scheduling races; the class was explicitly ruled out-of-model in this ticket's own prior rounds. Keep OOM.
+  - Item 2 (hung-alive, zero-outbound): explicitly adjudicated as documented residual/out-of-scope in r2 (the keepalive/ping bullet is out_of_scope in the ticket). The new spec text assigns that shape to the escalation detector; it doesn't claim zero-outbound detection for it. Keep OOM, note prior adjudication.
+  - Item 3 (0-default supplier): future-misuse hazard, no commitment covers it; M1-682-style guard ticket is the project's established pattern for these. Keep OOM.
+
+  So: RED-TEAM VERDICT: CLEAN, findings none, out-of-model 3.
+
+  Now write the verdict file in the exact format, then reply with exactly the four lines.
+
+  Verdict file format:
+
+  RED-TEAM VERDICT: CLEAN
+
+  (omit FINDINGS on CLEAN)
+
+  OUT-OF-MODEL:
+    - item 1
+    - item 2
+    - item 3
+
+  Then chat reply exactly:
+
+  RED-TEAM VERDICT: CLEAN
+  Verdict file: /home/infochat/infochat/.claude/worktrees/M1-681/docs/plan/m1/redteam-multi/M1-681-2026-07-23-r3/verdict-kimi.txt
+  Findings: critical=0 high=0 medium=0 low=0
+  Out-of-model: 3
+
+• I've read the full threat model and the complete diff. Now I'll analyze and write the verdict.
+
+  Audit summary of what I checked against `security.md`'s commitments:
+
+  - **Health surface (trust boundary 6):** the readiness fold (`AdapterReadinessCheck.java:1996-1997`) makes the payload *more* honest — a dead transport now reads down. Disclosure class unchanged (adapter names, up/down booleans, drop counters), loopback-bound default intact.
+  - **D37 user-content logging:** every new log line carries counts or fixed strings only (`transport death discarded %d`, `signal-cli JSON-RPC channel died... forcing subprocess restart`) — no bodies, no contact ids.
+  - **Failure-category honesty:** raced sends learning closed-before-ack PERMANENT matches the amended `messaging.md` §Failure handling and SimpleX precedent; the modified reconnect test pins that PERMANENT is legal only from the drain.
+  - **DOS surface:** bounded inbound queue, drop-newest + counter, line-char cap — all semantics preserved under the per-connection move. Restart deference (generation gate + `restartRequested` CAS) closes the r2 self-DoS; every path where the gate declines (`conn == null`, generation mismatch) is one where recovery is already owned by the caller or the supervisor — no silent-loss hole created.
+  - **No touch** to identity resolution, ban/invite gates, command parsing, LLM tool surface, audit log, DB roles, or SSRF.
+
+• RED-TEAM VERDICT: CLEAN
+  Verdict file: /home/infochat/infochat/.claude/worktrees/M1-681/docs/plan/m1/redteam-multi/M1-681-2026-07-23-r3/verdict-kimi.txt
+  Findings: critical=0 high=0 medium=0 low=0
+  Out-of-model: 3
+
+To resume this session: kimi -r session_c5c4de95-8ea4-4f28-96a6-10ae2db2d644

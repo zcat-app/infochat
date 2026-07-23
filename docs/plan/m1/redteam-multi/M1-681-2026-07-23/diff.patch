@@ -1,0 +1,796 @@
+diff --git a/docs/plan/m1/STATUS.md b/docs/plan/m1/STATUS.md
+index c6864c3e..2d83c270 100644
+--- a/docs/plan/m1/STATUS.md
++++ b/docs/plan/m1/STATUS.md
+@@ -10,8 +10,8 @@
+ 
+ | Status | Count |
+ |---|---|
+-| pending | 4 |
+-| in-progress | 0 |
++| pending | 3 |
++| in-progress | 1 |
+ | in-review | 0 |
+ | escalated | 0 |
+ | done | 692 |
+@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
+ - M1-672 — Narrow Provider grants on identity/authz tables (complexity: high, risk: high)
+ - M1-675 — Reject slash-bearing personal tags at the /save boundary (complexity: low, risk: low)
+ - M1-676 — Canonicalize before closed-list match in LLM sanitizer (complexity: medium, risk: medium)
+-- M1-681 — Make a dead transport honest on readiness and on Signal (complexity: high, risk: medium)
+ 
+ ---
+ 
+@@ -36,8 +35,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
+ 
+ | ID | Title | Status | Last review |
+ |---|---|---|---|
+-
+-_(none)_
++| M1-681 | Make a dead transport honest on readiness and on Signal | in-progress | (none) |
+ 
+ ---
+ 
+@@ -913,7 +911,7 @@ M1-671 (done)
+ M1-672 (pending) ← runnable
+ M1-673 (done)
+ M1-674 (done)
+-  └── M1-681 (pending) ← runnable
++  └── M1-681 (in-progress)
+ M1-675 (pending) ← runnable
+ M1-676 (pending) ← runnable
+ M1-677 (done)
+diff --git a/docs/plan/m1/tickets/M1-681-transport-death-honest-on-every-surface.md b/docs/plan/m1/tickets/M1-681-transport-death-honest-on-every-surface.md
+index 5d95ef3b..daf8d9d7 100644
+--- a/docs/plan/m1/tickets/M1-681-transport-death-honest-on-every-surface.md
++++ b/docs/plan/m1/tickets/M1-681-transport-death-honest-on-every-surface.md
+@@ -1,7 +1,7 @@
+ ---
+ id: M1-681
+ title: "Make a dead transport honest on readiness and on Signal"
+-status: pending
++status: in-progress
+ created: 2026-07-23
+ last_updated: 2026-07-23
+ blocked_by: [M1-674]
+@@ -125,8 +125,26 @@ overrides: []
+ aborted_attempts: []
+ reopens: []
+ redteam_findings: []
+-clarity_check: {}
++clarity_check:
++  date: 2026-07-23
++  verdict: WARN
++  warnings:
++    - >-
++      SPEC-REFS-RESOLVABLE: spec_ref 'docs/spec/security.md §Trust
++      boundaries' is AMBIGUOUS (matches lines 38 and 233); anchor
++      resolution picks one by the depth heuristic.
++    - >-
++      Self-check (post outline-fail refine): all code claims re-verified
++      against the working tree, including the refine's new ones —
++      SignalReconnectTest.sendDuringOutageFailsTransient blanket
++      TRANSIENT assertion and outage-premise comment (:58-93),
++      FakeReadinessAdapter final with no connected() override,
++      MessagingAdapter.connected() interface default true (:362-364),
++      attachSubprocess registering onRestart (SignalAdapter.java:516),
++      disconnect()'s closed-before-ack PERMANENT drain (:409-412).
++  blockers: []
+ escalation_reason:
++outline_file: target/m1-tick-outline-M1-681.md
+ ---
+ 
+ # M1-681: Make a dead transport honest on readiness and on Signal
+diff --git a/docs/spec/messaging.md b/docs/spec/messaging.md
+index 5bff6521..f8058b8b 100644
+--- a/docs/spec/messaging.md
++++ b/docs/spec/messaging.md
+@@ -347,15 +347,14 @@ Provider produces plain text per decision D30. The adapter:
+   in-flight command futures on the dead connection. The recovery route
+   is adapter-specific and each adapter states its own: SimpleX rebuilds
+   the WebSocket in place against the still-running daemon, while Signal
+-  escalates — consecutive JSON-RPC response timeouts force a restart of
+-  the daemon, which routes recovery through the same supervised
+-  backoff path a crash takes (design notes §6.5.8). **v1 implements the
+-  latch itself for the SimpleX bot WebSocket only.** Signal detects a
+-  dead channel solely through those consecutive response timeouts, so a
+-  JSON-RPC channel that dies while signal-cli keeps running is not
+-  latched: `connected()` reports it up until an outbound send times
+-  out, and with no outbound traffic on that adapter the escalation
+-  never fires at all. Where the latch exists the outage stays
++  restarts the daemon, routing recovery through the same supervised
++  backoff path a crash takes (design notes §6.5.8). Signal's restart
++  fires from either of two detectors, at most once per death: the
++  reader-side death latch (the JSON-RPC channel died while signal-cli
++  keeps running — detected from the channel's own read side, with no
++  dependence on outbound traffic) or the consecutive-response-timeout
++  escalation (a daemon that is alive but not answering, which a live
++  reader cannot detect). The outage stays
+   operator-visible for as long as it lasts (`connected()` /
+   `adapter.connection.status` report the dead transport — no false
+   green), and sends attempted after the latch, while recovery is
+diff --git a/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalAdapter.java b/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalAdapter.java
+index 81ac4f98..3c4dac9b 100644
+--- a/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalAdapter.java
++++ b/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalAdapter.java
+@@ -264,10 +264,14 @@ public final class SignalAdapter implements MessagingAdapter {
+                     "signal-cli daemon endpoint " + daemonEndpoint + " not reachable within "
+                             + ENDPOINT_PROBE_TIMEOUT);
+         }
+-        // Wire the hung-process escalation: when the JSON-RPC client sees a
+-        // run of consecutive response timeouts (a daemon that is alive but
+-        // deadlocked, so SignalSubprocess.onExit never fires), it kicks the
+-        // supervisor to force-restart the subprocess.
++        // Wire the supervised-restart escalation. Two client-side detectors
++        // fire this same hook, one per failure shape SignalSubprocess.onExit
++        // cannot see: a run of consecutive response timeouts (a daemon that
++        // is alive but deadlocked) and the reader-exit transport-death latch
++        // (the TCP channel died while the daemon keeps running — no outbound
++        // traffic needed to notice, M1-681). The client guards against both
++        // firing for one death; the hook name keeps its original hung-daemon
++        // framing, the widened cause is documented here at the wiring site.
+         SignalJsonRpcClient c = new SignalJsonRpcClient(
+                 daemonEndpoint, account, new SignalMessageCodec(), JSONRPC_RESPONSE_TIMEOUT,
+                 sp::restartHung, SignalJsonRpcClient.INBOUND_QUEUE_CAPACITY, outboundRate);
+diff --git a/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java b/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java
+index a89bae80..3feab760 100644
+--- a/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java
++++ b/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java
+@@ -41,6 +41,7 @@ import java.util.concurrent.RejectedExecutionException;
+ import java.util.concurrent.ThreadPoolExecutor;
+ import java.util.concurrent.TimeUnit;
+ import java.util.concurrent.TimeoutException;
++import java.util.concurrent.atomic.AtomicBoolean;
+ import java.util.concurrent.atomic.AtomicInteger;
+ import java.util.concurrent.atomic.AtomicLong;
+ import java.util.function.Consumer;
+@@ -209,6 +210,24 @@ class SignalJsonRpcClient {
+     // per crossing (see recordTimeout).
+     private final AtomicInteger consecutiveTimeouts = new AtomicInteger();
+ 
++    // Latched true when the transport is torn down — locally by disconnect()
++    // (set BEFORE the socket close, so the reader's exit reads as intentional
++    // and fires no restart) or by latchTransportDeath on a peer-initiated
++    // death. Folded into isConnected() so a dead JSON-RPC channel never
++    // reports healthy while signal-cli keeps running (M1-681). Unlike
++    // SimpleX's per-rebuild client, ONE instance spans reconnects, so
++    // connect() resets it.
++    private volatile boolean closed;
++
++    // At most one subprocess restart per connection death, whichever detector
++    // observes it first. The consecutive-timeout escalation sets this before
++    // firing (its restart SIGKILLs the child, which kills the socket, which
++    // exits the reader — whose latch must treat the death as already
++    // handled); latchTransportDeath fires only when it wins the CAS.
++    // One-directional on purpose: the latch defers to the timeout path,
++    // never the reverse, so recordTimeout's counter logic stays intact.
++    private final AtomicBoolean restartRequested = new AtomicBoolean();
++
+     private final ConcurrentMap<String, CompletableFuture<SignalMessageCodec.JsonRpcMessage>> pending =
+             new ConcurrentHashMap<>();
+ 
+@@ -352,6 +371,14 @@ class SignalJsonRpcClient {
+         consecutiveTimeouts.set(0);
+         this.socket = s;
+         this.writer = w;
++        // Reset the death latch only AFTER the new socket is published: a
++        // zombie reader from the previous connection (one that outlived
++        // disconnect()'s bounded join) fails latchTransportDeath's
++        // readerSocket == socket guard from this point on, so it cannot
++        // re-latch the fresh connection's state. Same one-client-across-
++        // reconnects reason as the timeout reset above.
++        closed = false;
++        restartRequested.set(false);
+         // Fresh dispatcher per connect — disconnect() shuts the prior
+         // one down, and a shut-down executor rejects all tasks. The
+         // backing queue is bounded; on overflow the default AbortPolicy
+@@ -380,6 +407,11 @@ class SignalJsonRpcClient {
+     }
+ 
+     void disconnect() {
++        // Set BEFORE the socket close (the SimpleX local-close suppression):
++        // closing the socket exits the reader, whose latch then reads this
++        // close as intentional and fires no restart — reconnect()'s
++        // teardown-before-serve and stop() must never restart the child.
++        closed = true;
+         Socket s = socket;
+         if (s != null) {
+             try {
+@@ -723,6 +755,11 @@ class SignalJsonRpcClient {
+         if (n >= HUNG_TIMEOUT_THRESHOLD && consecutiveTimeouts.compareAndSet(n, 0)) {
+             LOG.warnf("signal-cli unresponsive after %d consecutive JSON-RPC timeouts;"
+                     + " forcing subprocess restart", HUNG_TIMEOUT_THRESHOLD);
++            // Mark before firing: the restart SIGKILLs the child, which kills
++            // the socket, which exits the reader — whose latch must see this
++            // death as already handled rather than fire a second restart
++            // (M1-681).
++            restartRequested.set(true);
+             hungRestartHook.run();
+         }
+     }
+@@ -771,6 +808,19 @@ class SignalJsonRpcClient {
+         if (s == null) {
+             return;
+         }
++        try {
++            readAllLines(s);
++        } finally {
++            // EVERY reader exit is a transport death: the clean-EOF loop end,
++            // the mid-oversize-drain EOF return inside readAllLines, the
++            // IOException arm, and an escaping RuntimeException all mean no
++            // inbound byte will ever arrive again. finally — not per-arm
++            // calls — is what makes that exhaustive (M1-681).
++            latchTransportDeath(s);
++        }
++    }
++
++    private void readAllLines(Socket s) {
+         try (BufferedReader r = new BufferedReader(
+                 new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8))) {
+             // Cap-aware read loop: BufferedReader.readLine() has no
+@@ -814,6 +864,71 @@ class SignalJsonRpcClient {
+         }
+     }
+ 
++    /**
++     * Terminal handler for every reader-loop exit, mirroring
++     * {@code SimpleXWebSocketClient.latchTransportDeath}. A reader that
++     * stops reading means no inbound byte — response or notification —
++     * will ever arrive on this connection again, so the channel is dead
++     * even while signal-cli itself keeps running (the JSON-RPC channel is
++     * a TCP socket, not the child's stdio). Pre-M1-681 this exit set no
++     * flag: {@code isConnected()} stayed true, pending futures hung until
++     * timeout, and — because a dead reader also kills the inbound traffic
++     * whose replies were the only thing {@link #recordTimeout} could count
++     * — nothing ever escalated. The silence was self-sustaining.
++     *
++     * <p>The latch marks the channel dead (honest {@link #isConnected()}),
++     * then drains {@link #pending} with the same closed-before-ack
++     * PERMANENT category {@link #disconnect()} stamps — BEFORE any
++     * dispatcher shutdown, because a dispatch-thread handler blocked in
++     * {@code call()} parks on one of these futures and interrupting it
++     * first would misclassify its failure as interrupted-awaiting-ack
++     * TRANSIENT. On a PEER-initiated death it additionally tears the
++     * dispatcher down — discarding queued-but-undelivered inbound is the
++     * at-most-once stance, but a death is an outage, not a shutdown, so
++     * the depth is counted and logged (count only — no content, no
++     * contact ids, D37) — and fires {@link #hungRestartHook} so the
++     * supervised restart-to-reconnect path rebuilds the channel with no
++     * dependence on outbound traffic. A local {@link #disconnect()} set
++     * {@code closed} before closing the socket, so that exit drains and
++     * returns without firing.</p>
++     *
++     * <p>Never delegates to {@code disconnect()}: it joins this very
++     * reader thread (2 s cap), so the latch is mark + drain + counted
++     * teardown + guarded fire, nothing more. The {@code readerSocket}
++     * guard rejects a zombie reader that outlived the bounded join and
++     * would otherwise latch a NEWER connection's state. The
++     * restart-requested CAS keeps this latch and the consecutive-timeout
++     * escalation from double-firing a restart for one death (the hung
++     * restart's SIGKILL kills the socket, which exits the reader).</p>
++     */
++    private void latchTransportDeath(Socket readerSocket) {
++        if (readerSocket != socket) {
++            return;
++        }
++        boolean peerInitiated = !closed;
++        closed = true;
++        pending.forEach((id, f) -> f.completeExceptionally(
++                new MessagingException(FailureCategory.PERMANENT,
++                        "SignalJsonRpcClient disconnected before response (closed-before-ack)")));
++        pending.clear();
++        if (!peerInitiated) {
++            return;
++        }
++        ExecutorService executor = dispatchExecutor;
++        if (executor != null) {
++            int discarded = executor.shutdownNow().size();
++            if (discarded > 0) {
++                long total = droppedInboundCount.addAndGet(discarded);
++                LOG.warnf("transport death discarded %d queued inbound deliveries (total dropped %d)",
++                        discarded, total);
++            }
++        }
++        if (restartRequested.compareAndSet(false, true)) {
++            LOG.warnf("signal-cli JSON-RPC channel died (reader exited); forcing subprocess restart");
++            hungRestartHook.run();
++        }
++    }
++
+     /**
+      * Bulk-skip the remainder of an oversize line: read in chunks and
+      * scan for the terminator instead of issuing one locked
+@@ -937,10 +1052,13 @@ class SignalJsonRpcClient {
+      * Live connection state for {@link SignalAdapter#connected()}: the
+      * dispatch queue exists exactly between {@code connect()} and
+      * {@code disconnect()} — the same lifecycle as the reader/dispatcher
+-     * pair that makes the transport usable.
++     * pair that makes the transport usable — AND the death latch has not
++     * fired: a reader-loop exit means no inbound byte will ever arrive
++     * again, so a latched channel must read disconnected even though the
++     * teardown fields are still populated (M1-681).
+      */
+     boolean isConnected() {
+-        return dispatchQueue != null;
++        return dispatchQueue != null && !closed;
+     }
+ 
+     /** Late-binding from {@link SignalAdapter}; see the {@code metrics} field. */
+diff --git a/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java b/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java
+index 7b9afbe6..43d9be44 100644
+--- a/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java
++++ b/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java
+@@ -11,6 +11,10 @@ import static org.junit.jupiter.api.Assertions.fail;
+ import jakarta.json.Json;
+ import jakarta.json.JsonObject;
+ 
++import java.io.FilterInputStream;
++import java.io.IOException;
++import java.io.InputStream;
++import java.net.Socket;
+ import java.time.Duration;
+ import java.time.Instant;
+ import java.util.concurrent.LinkedBlockingQueue;
+@@ -18,6 +22,7 @@ import java.util.concurrent.TimeUnit;
+ import java.util.concurrent.atomic.AtomicBoolean;
+ import java.util.concurrent.atomic.AtomicInteger;
+ import java.util.concurrent.atomic.AtomicReference;
++import java.util.function.BooleanSupplier;
+ 
+ import app.zcat.infochat.messaging.FailureCategory;
+ import app.zcat.infochat.messaging.InboundMessage;
+@@ -741,4 +746,208 @@ class SignalJsonRpcClientTest {
+             }
+         }
+     }
++
++    // ---- M1-681: reader-exit transport-death latch ----
++
++    /** Poll up to {@link #QUEUE_WAIT_MS} for an asynchronously-latched condition. */
++    private static void awaitTrue(String what, BooleanSupplier condition)
++            throws InterruptedException {
++        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(QUEUE_WAIT_MS);
++        while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
++            Thread.sleep(10);
++        }
++        assertTrue(condition.getAsBoolean(), what);
++    }
++
++    @Test
++    void peerEofLatchesChannelDead() throws Exception {
++        try (FakeSignalCli fake = new FakeSignalCli()) {
++            SignalJsonRpcClient client = new SignalJsonRpcClient(
++                    fake.endpoint(), "+15551111111", new SignalMessageCodec(), TEST_RESPONSE_TIMEOUT);
++            client.connect();
++            try {
++                assertTrue(client.isConnected(), "sanity: connected before the kill");
++                // killClientConnection is a plain Socket.close() — a clean FIN,
++                // so the reader's read() returns -1: the EOF arm of the latch.
++                fake.killClientConnection();
++                awaitTrue("clean EOF must latch the channel dead — isConnected() false"
++                                + " while signal-cli keeps running",
++                        () -> !client.isConnected());
++            } finally {
++                client.disconnect();
++            }
++        }
++    }
++
++    @Test
++    void readIoExceptionLatchesChannelDead() throws Exception {
++        // FakeSignalCli can only produce a clean FIN (the EOF arm); the
++        // IOException arm needs a mid-stream read fault, injected through the
++        // newSocket() seam: a socket whose input stream throws once the
++        // switch flips.
++        AtomicBoolean faulty = new AtomicBoolean(false);
++        try (FakeSignalCli fake = new FakeSignalCli()) {
++            SignalJsonRpcClient client = new SignalJsonRpcClient(
++                    fake.endpoint(), "+15551111111", new SignalMessageCodec(), TEST_RESPONSE_TIMEOUT) {
++                @Override
++                Socket newSocket() {
++                    return new Socket() {
++                        @Override
++                        public InputStream getInputStream() throws IOException {
++                            return new FilterInputStream(super.getInputStream()) {
++                                @Override
++                                public int read() throws IOException {
++                                    if (faulty.get()) {
++                                        throw new IOException("injected transport fault");
++                                    }
++                                    return super.read();
++                                }
++
++                                @Override
++                                public int read(byte[] b, int off, int len) throws IOException {
++                                    if (faulty.get()) {
++                                        throw new IOException("injected transport fault");
++                                    }
++                                    return super.read(b, off, len);
++                                }
++                            };
++                        }
++                    };
++                }
++            };
++            client.connect();
++            try {
++                assertTrue(client.isConnected(), "sanity: connected before the fault");
++                faulty.set(true);
++                // Unblock the reader's in-progress read: the junk line is
++                // consumed by the pre-flip call already blocked in read(), and
++                // the NEXT read call hits the flipped switch and throws. The
++                // junk itself falls to the malformed-line guard.
++                fake.pushRawLine("x");
++                awaitTrue("a reader IOException must latch the channel dead — isConnected() false",
++                        () -> !client.isConnected());
++            } finally {
++                client.disconnect();
++            }
++        }
++    }
++
++    @Test
++    void latchDrainsInFlightCallAndFiresRestartHook() throws Exception {
++        try (FakeSignalCli fake = new FakeSignalCli()) {
++            AtomicInteger restartCalls = new AtomicInteger();
++            SignalJsonRpcClient client = new SignalJsonRpcClient(
++                    fake.endpoint(), "+15551111111", new SignalMessageCodec(),
++                    TEST_RESPONSE_TIMEOUT, restartCalls::incrementAndGet);
++            client.connect();
++            try {
++                AtomicReference<MessagingException> caught = new AtomicReference<>();
++                Thread sender = new Thread(() -> {
++                    try {
++                        client.send(new OutboundMessage(
++                                new ScopeRef.Dm("aabbccdd-1111-2222-3333-444455556666"),
++                                "msg", Instant.now(), "c-latch"));
++                    } catch (MessagingException e) {
++                        caught.set(e);
++                    }
++                }, "latch-drain-sender");
++                sender.start();
++                // Await the captured request so the send's future is pending
++                // (written, unanswered) before the channel dies.
++                fake.nextOutbound(QUEUE_WAIT_MS);
++                fake.killClientConnection();
++                // The join bound sits far below the 5 s response timeout: only
++                // the latch's drain — never the timeout arm — can release the
++                // sender this fast, and only the drain stamps PERMANENT.
++                sender.join(QUEUE_WAIT_MS);
++                assertFalse(sender.isAlive(),
++                        "latch drain must release the in-flight call well before the response timeout");
++                MessagingException e = caught.get();
++                assertNotNull(e, "the drained in-flight call must fail");
++                assertEquals(FailureCategory.PERMANENT, e.category(),
++                        "a call in flight at channel death drains closed-before-ack PERMANENT");
++                awaitTrue("channel death must fire the supervised-restart hook",
++                        () -> restartCalls.get() == 1);
++            } finally {
++                client.disconnect();
++            }
++        }
++    }
++
++    @Test
++    void channelDeathDetectedWithZeroOutboundTraffic() throws Exception {
++        // The no-outbound-traffic hole (M1-674 audit finding 2): inbound death
++        // removes the traffic whose replies were the only thing the
++        // consecutive-timeout counter could observe, so before the latch this
++        // realistic case was undetectable — the silence sustained itself.
++        try (FakeSignalCli fake = new FakeSignalCli()) {
++            AtomicInteger restartCalls = new AtomicInteger();
++            SignalJsonRpcClient client = new SignalJsonRpcClient(
++                    fake.endpoint(), "+15551111111", new SignalMessageCodec(),
++                    TEST_RESPONSE_TIMEOUT, restartCalls::incrementAndGet);
++            client.connect();
++            try {
++                assertTrue(client.isConnected(), "sanity: connected before the kill");
++                fake.killClientConnection();
++                awaitTrue("detection must fire with ZERO call() invocations:"
++                                + " restart hook fired and channel latched dead",
++                        () -> restartCalls.get() == 1 && !client.isConnected());
++            } finally {
++                client.disconnect();
++            }
++        }
++    }
++
++    @Test
++    void timeoutEscalationThenReaderExitFiresOneRestart() throws Exception {
++        // The two detectors observe the SAME death in sequence: the
++        // consecutive-timeout escalation fires the restart, the restart's
++        // SIGKILL severs the socket, the reader exits — and the latch must
++        // not fire a second restart for that one death.
++        try (FakeSignalCli fake = new FakeSignalCli()) {
++            AtomicInteger restartCalls = new AtomicInteger();
++            // Short response timeout so three timeouts accrue quickly.
++            SignalJsonRpcClient client = new SignalJsonRpcClient(
++                    fake.endpoint(), "+15551111111", new SignalMessageCodec(),
++                    Duration.ofMillis(150), restartCalls::incrementAndGet);
++            client.connect();
++            try {
++                for (int i = 0; i < 3; i++) {
++                    OutboundMessage out = new OutboundMessage(
++                            new ScopeRef.Dm("aabbccdd-1111-2222-3333-444455556666"),
++                            "msg", Instant.now(), "c" + i);
++                    assertThrows(MessagingException.class, () -> client.send(out));
++                }
++                assertEquals(1, restartCalls.get(),
++                        "sanity: the timeout escalation fired the first restart");
++                // The real hook SIGKILLs the child, which severs this socket;
++                // the fake severs it directly.
++                fake.killClientConnection();
++                awaitTrue("reader exit must still latch the channel dead",
++                        () -> !client.isConnected());
++                assertEquals(1, restartCalls.get(),
++                        "the reader-exit latch must not fire a second restart for the same death");
++            } finally {
++                client.disconnect();
++            }
++        }
++    }
++
++    @Test
++    void intentionalDisconnectDoesNotFireRestartHook() throws Exception {
++        // Every reconnect() teardown and every test's disconnect() routes the
++        // reader through its exit latch; reading that exit as a peer death
++        // would turn each into a spurious subprocess restart.
++        try (FakeSignalCli fake = new FakeSignalCli()) {
++            AtomicInteger restartCalls = new AtomicInteger();
++            SignalJsonRpcClient client = new SignalJsonRpcClient(
++                    fake.endpoint(), "+15551111111", new SignalMessageCodec(),
++                    TEST_RESPONSE_TIMEOUT, restartCalls::incrementAndGet);
++            client.connect();
++            client.disconnect();
++            assertFalse(client.isConnected(), "a disconnected client must read disconnected");
++            assertEquals(0, restartCalls.get(),
++                    "a local disconnect must never fire the restart hook");
++        }
++    }
+ }
+diff --git a/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java b/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java
+index b4d722a2..3da08df2 100644
+--- a/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java
++++ b/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java
+@@ -3,6 +3,7 @@ package app.zcat.infochat.messaging.impl.signal;
+ import static org.junit.jupiter.api.Assertions.assertEquals;
+ import static org.junit.jupiter.api.Assertions.assertNotNull;
+ import static org.junit.jupiter.api.Assertions.assertNull;
++import static org.junit.jupiter.api.Assertions.assertTrue;
+ 
+ import jakarta.json.Json;
+ import jakarta.json.JsonObject;
+@@ -27,11 +28,14 @@ import org.junit.jupiter.api.condition.OS;
+ /**
+  * Pins the M1-185 restart→reconnect contract for the Signal transport:
+  * after the supervisor restarts the signal-cli subprocess, the adapter
+- * reconnects its JSON-RPC client and traffic resumes; a send attempted
+- * during the outage gap fails TRANSIENT (recoverable, Provider retries);
+- * and an inbound frame pushed after the reconnect is delivered exactly
+- * once (the old reader/dispatcher is torn down before the new
+- * connection serves).
++ * reconnects its JSON-RPC client and traffic resumes; a send racing the
++ * outage fails with an honest classified category — TRANSIENT for a
++ * write failure or response timeout, closed-before-ack PERMANENT if the
++ * death latch (M1-681) drained it, the raced-send outcome messaging.md
++ * §Failure handling blesses — while the latch itself drives the
++ * supervised reconnect; and an inbound frame pushed after the reconnect
++ * is delivered exactly once (the old reader/dispatcher is torn down
++ * before the new connection serves).
+  *
+  * <p>Wiring mirrors {@link SignalInboundDispatchTest}: production
+  * adapter constructor pointed at {@link FakeSignalCli}, the
+@@ -56,7 +60,7 @@ class SignalReconnectTest {
+             new SignalSubprocess.BackoffPolicy(/* baseMs */ 10, /* factor */ 2.0, /* capMs */ 200);
+ 
+     @Test
+-    void sendDuringOutageFailsTransient() throws Exception {
++    void sendRacingTransportDeathFailsClassifiedAndLatchDrivesReconnect() throws Exception {
+         try (FakeSignalCli fake = new FakeSignalCli()) {
+             SignalAdapter adapter = new SignalAdapter(
+                     "/usr/bin/signal-cli", "/tmp/signal-data", ACCOUNT, fake.endpoint());
+@@ -71,9 +75,13 @@ class SignalReconnectTest {
+             try {
+                 adapter.attachSubprocess(sp);
+                 adapter.attachClient(client);
+-                // Sever the transport connection WITHOUT a subprocess
+-                // restart: the daemon connection is dead and no reconnect
+-                // is coming, so the send sits squarely in the outage gap.
++                int generationBeforeKill = fake.connectionGeneration();
++                // Sever the transport connection with NO explicit restart:
++                // pre-M1-681 nothing detected this (no outbound traffic, no
++                // reply, no timeout — the outage was permanent); now the
++                // reader-exit latch fires the supervised restart itself, so
++                // a reconnect IS coming and the send below races the latch's
++                // pending-drain, the dead socket, and the rebuild.
+                 fake.killClientConnection();
+                 MessagingException failure = null;
+                 try {
+@@ -81,10 +89,24 @@ class SignalReconnectTest {
+                 } catch (MessagingException e) {
+                     failure = e;
+                 }
+-                assertNotNull(failure, "send into a dead transport must fail");
+-                assertEquals(FailureCategory.TRANSIENT, failure.category(),
+-                        "outage-gap send must classify TRANSIENT so Provider's"
+-                                + " retry machinery treats the outage as recoverable");
++                assertNotNull(failure, "send racing a dead transport must fail"
++                        + " (no responder is wired, so even a fully reconnected"
++                        + " send can only time out)");
++                // Which classified failure this run sees is a genuine
++                // interleaving coin toss; what is NOT legal is an unclassified
++                // escape or a PERMANENT from anything but the death-latch /
++                // teardown drain (messaging.md §Failure handling: a send that
++                // raced the close can learn permanent even though recovery
++                // completes moments later).
++                if (failure.category() == FailureCategory.PERMANENT) {
++                    assertTrue(failure.getMessage().contains("closed-before-ack"),
++                            "the only legal PERMANENT outcome for a raced send is the"
++                                    + " closed-before-ack drain, saw: " + failure.getMessage());
++                }
++                // The latch's restart fires the real supervised path: SIGKILL →
++                // onExit → doRestart → restart listener → adapter reconnect
++                // (endpoint probe + JSON-RPC connect = two new connections).
++                fake.awaitConnectionGeneration(generationBeforeKill + 2, 10_000);
+             } finally {
+                 client.disconnect();
+                 sp.stop();
+diff --git a/infochat-provider/src/main/java/app/zcat/infochat/provider/health/AdapterReadinessCheck.java b/infochat-provider/src/main/java/app/zcat/infochat/provider/health/AdapterReadinessCheck.java
+index a21cf2bf..53e8cdd8 100644
+--- a/infochat-provider/src/main/java/app/zcat/infochat/provider/health/AdapterReadinessCheck.java
++++ b/infochat-provider/src/main/java/app/zcat/infochat/provider/health/AdapterReadinessCheck.java
+@@ -18,15 +18,20 @@ import org.eclipse.microprofile.health.Readiness;
+  * enabled adapter is connected (the Provider can serve traffic via
+  * that adapter); not-ready when zero adapters are connected.
+  *
+- * <p>Two signals are folded per adapter. The startup outcome comes from
++ * <p>Three signals are folded per adapter. The startup outcome comes from
+  * {@link AdapterConnectionState} (did the adapter's transport
+- * {@code start()} return?). The <em>live</em> outcome comes from the
++ * {@code start()} return?). The <em>live</em> outcomes come from the
+  * adapter itself: {@link MessagingAdapter#supervisorTerminallyFailed()}
+  * reports a subprocess supervisor that exhausted its restart cap
+- * <em>after</em> a clean start. An adapter counts as connected only when
+- * it both started and has not since terminally failed — otherwise a
+- * deployment could read "ready" with a permanently dead adapter, since
+- * the startup snapshot alone never observes the later failure.</p>
++ * <em>after</em> a clean start, and {@link MessagingAdapter#connected()}
++ * reports the transport channel itself — a channel can die (peer close,
++ * severed socket) while the supervisor still counts its child as running,
++ * which is precisely the outage the recovery machinery exists to bridge
++ * (M1-681). An adapter counts as connected only when it started, has not
++ * since terminally failed, and its transport reports connected —
++ * otherwise a deployment could read "ready" with a permanently dead (or
++ * currently dead-and-recovering) adapter, since the startup snapshot
++ * alone never observes the later failure.</p>
+  *
+  * <p>The per-adapter {@code data} entries carry the operational detail:
+  * each adapter name maps to its effective up/down boolean, and an
+@@ -82,7 +87,11 @@ public class AdapterReadinessCheck implements HealthCheck {
+             String name = entry.getKey();
+             MessagingAdapter adapter = adaptersByName.get(name);
+             boolean terminallyFailed = adapter != null && adapter.supervisorTerminallyFailed();
+-            boolean up = entry.getValue() && !terminallyFailed;
++            // Transport truth is only consultable on a live instance; an
++            // absent adapter keeps its snapshot value (the documented
++            // absent-adapter contract above).
++            boolean transportConnected = adapter == null || adapter.connected();
++            boolean up = entry.getValue() && !terminallyFailed && transportConnected;
+             anyUp = anyUp || up;
+             response.withData(name, up);
+             if (adapter != null) {
+diff --git a/infochat-provider/src/test/java/app/zcat/infochat/provider/health/AdapterReadinessCheckTest.java b/infochat-provider/src/test/java/app/zcat/infochat/provider/health/AdapterReadinessCheckTest.java
+index f517d26d..122f5da9 100644
+--- a/infochat-provider/src/test/java/app/zcat/infochat/provider/health/AdapterReadinessCheckTest.java
++++ b/infochat-provider/src/test/java/app/zcat/infochat/provider/health/AdapterReadinessCheckTest.java
+@@ -16,8 +16,8 @@ import org.junit.jupiter.api.Test;
+  * {@code ProviderReadinessEndpointIT}; the DOWN states cannot be produced
+  * in a booted container (the startup gates require a working adapter), so
+  * they live here. The startup snapshot leg passes an empty adapter map
+- * (no live supervisor to consult); the terminal-failure and drop-counter
+- * legs pass a {@link FakeReadinessAdapter}.
++ * (no live supervisor to consult); the terminal-failure, transport-death
++ * and drop-counter legs pass a {@link FakeReadinessAdapter}.
+  */
+ class AdapterReadinessCheckTest {
+ 
+@@ -89,6 +89,51 @@ class AdapterReadinessCheckTest {
+                 "the failed adapter's per-adapter datum must read down");
+     }
+ 
++    @Test
++    void readinessIsDownWhenStartedAdapterTransportDisconnected() {
++        AdapterConnectionState state = new AdapterConnectionState();
++        state.reportStarted("signal");
++        // The adapter started cleanly and its supervisor still counts the
++        // child as running — but the transport channel itself is dead (peer
++        // close, severed socket): the M1-674 audit finding 1 gap, where the
++        // readiness payload stayed green for the whole outage because it
++        // never consulted connected().
++        Map<String, MessagingAdapter> adapters = Map.of(
++                "signal", new FakeReadinessAdapter(
++                        "signal", /* terminallyFailed */ false, /* connected */ false, 0));
++
++        HealthCheckResponse response =
++                AdapterReadinessCheck.evaluate(state.snapshot(), adapters);
++
++        assertEquals(Boolean.FALSE, response.getData().orElseThrow().get("signal"),
++                "a started adapter with a dead transport must read down in the payload");
++        assertEquals(HealthCheckResponse.Status.DOWN, response.getStatus(),
++                "overall status must be DOWN when the only adapter's transport is dead");
++    }
++
++    @Test
++    void readinessIsUpWhenOneTransportDeadButAnotherConnected() {
++        AdapterConnectionState state = new AdapterConnectionState();
++        state.reportStarted("signal");
++        state.reportStarted("simplex");
++        Map<String, MessagingAdapter> adapters = Map.of(
++                "signal", new FakeReadinessAdapter(
++                        "signal", /* terminallyFailed */ false, /* connected */ false, 0),
++                "simplex", new FakeReadinessAdapter(
++                        "simplex", /* terminallyFailed */ false, /* connected */ true, 0));
++
++        HealthCheckResponse response =
++                AdapterReadinessCheck.evaluate(state.snapshot(), adapters);
++
++        assertEquals(HealthCheckResponse.Status.UP, response.getStatus(),
++                "the at-least-one rule must survive the transport fold: one live"
++                        + " adapter keeps the Provider ready");
++        assertEquals(Boolean.FALSE, response.getData().orElseThrow().get("signal"),
++                "the dead-transport adapter still reads down individually");
++        assertEquals(Boolean.TRUE, response.getData().orElseThrow().get("simplex"),
++                "the connected adapter reads up");
++    }
++
+     @Test
+     void readinessSurfacesDropCounterWhenInboundDropped() {
+         AdapterConnectionState state = new AdapterConnectionState();
+diff --git a/infochat-provider/src/test/java/app/zcat/infochat/provider/health/FakeReadinessAdapter.java b/infochat-provider/src/test/java/app/zcat/infochat/provider/health/FakeReadinessAdapter.java
+index d8714d0e..7758ac75 100644
+--- a/infochat-provider/src/test/java/app/zcat/infochat/provider/health/FakeReadinessAdapter.java
++++ b/infochat-provider/src/test/java/app/zcat/infochat/provider/health/FakeReadinessAdapter.java
+@@ -10,20 +10,27 @@ import app.zcat.infochat.messaging.ScopeRef;
+ /**
+  * Configurable {@link MessagingAdapter} double for
+  * {@link AdapterReadinessCheck#evaluate} tests: only {@link #name()},
+- * {@link #supervisorTerminallyFailed()}, and {@link #droppedInboundCount()}
+- * are consulted by readiness evaluation — every other SPI method throws so
+- * an accidental call surfaces loudly rather than returning a misleading
+- * default.
++ * {@link #supervisorTerminallyFailed()}, {@link #connected()}, and
++ * {@link #droppedInboundCount()} are consulted by readiness evaluation —
++ * every other SPI method throws so an accidental call surfaces loudly
++ * rather than returning a misleading default.
+  */
+ final class FakeReadinessAdapter implements MessagingAdapter {
+ 
+     private final String name;
+     private final boolean terminallyFailed;
++    private final boolean connected;
+     private final long droppedInbound;
+ 
+     FakeReadinessAdapter(String name, boolean terminallyFailed, long droppedInbound) {
++        this(name, terminallyFailed, /* connected */ true, droppedInbound);
++    }
++
++    FakeReadinessAdapter(String name, boolean terminallyFailed, boolean connected,
++                         long droppedInbound) {
+         this.name = name;
+         this.terminallyFailed = terminallyFailed;
++        this.connected = connected;
+         this.droppedInbound = droppedInbound;
+     }
+ 
+@@ -37,6 +44,11 @@ final class FakeReadinessAdapter implements MessagingAdapter {
+         return terminallyFailed;
+     }
+ 
++    @Override
++    public boolean connected() {
++        return connected;
++    }
++
+     @Override
+     public long droppedInboundCount() {
+         return droppedInbound;

@@ -10,20 +10,27 @@ import app.zcat.infochat.messaging.ScopeRef;
 /**
  * Configurable {@link MessagingAdapter} double for
  * {@link AdapterReadinessCheck#evaluate} tests: only {@link #name()},
- * {@link #supervisorTerminallyFailed()}, and {@link #droppedInboundCount()}
- * are consulted by readiness evaluation — every other SPI method throws so
- * an accidental call surfaces loudly rather than returning a misleading
- * default.
+ * {@link #supervisorTerminallyFailed()}, {@link #connected()}, and
+ * {@link #droppedInboundCount()} are consulted by readiness evaluation —
+ * every other SPI method throws so an accidental call surfaces loudly
+ * rather than returning a misleading default.
  */
 final class FakeReadinessAdapter implements MessagingAdapter {
 
     private final String name;
     private final boolean terminallyFailed;
+    private final boolean connected;
     private final long droppedInbound;
 
     FakeReadinessAdapter(String name, boolean terminallyFailed, long droppedInbound) {
+        this(name, terminallyFailed, /* connected */ true, droppedInbound);
+    }
+
+    FakeReadinessAdapter(String name, boolean terminallyFailed, boolean connected,
+                         long droppedInbound) {
         this.name = name;
         this.terminallyFailed = terminallyFailed;
+        this.connected = connected;
         this.droppedInbound = droppedInbound;
     }
 
@@ -35,6 +42,11 @@ final class FakeReadinessAdapter implements MessagingAdapter {
     @Override
     public boolean supervisorTerminallyFailed() {
         return terminallyFailed;
+    }
+
+    @Override
+    public boolean connected() {
+        return connected;
     }
 
     @Override

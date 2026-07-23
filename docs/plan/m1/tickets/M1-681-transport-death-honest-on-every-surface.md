@@ -1,19 +1,22 @@
 ---
 id: M1-681
 title: "Make a dead transport honest on readiness and on Signal"
-status: pending
+status: done
 created: 2026-07-23
 last_updated: 2026-07-23
 blocked_by: [M1-674]
-files_budget: 8
+files_budget: 11
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/health/AdapterReadinessCheck.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/health/AdapterReadinessCheckTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/health/FakeReadinessAdapter.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java
+  - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalConnection.java
+  - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalSubprocess.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalAdapter.java
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/FakeSignalCli.java
   - docs/spec/messaging.md
 complexity: high
 risk: medium
@@ -95,6 +98,79 @@ acceptance:
     death.
   - mvn verify is green from the repo root
   - >-
+    A superseded reader cannot damage the connection that replaced it — by
+    construction, not by lock discipline. Per-connection transport state
+    (socket, writer, pending-request map, inbound dispatcher, the death
+    latch flag and the restart-request flag) moves onto one carrier object,
+    `SignalConnection`, which `connect()` swaps as a unit. A reader that
+    outlived `disconnect()`'s bounded 2 s join then holds a reference to
+    its OWN connection only and has no path to a later one: it cannot latch
+    it closed, drain its in-flight calls closed-before-ack, or shut down its
+    dispatcher. This replaces the shared-mutable-field arrangement the first
+    implementation copied from `SimpleXWebSocketClient` — the shape SimpleX
+    gets free from building a fresh client per rebuild, and the one thing
+    Signal's reuse-one-client-across-reconnects lifecycle does not.
+  - >-
+    The supervised-restart hook is the one effect a per-connection carrier
+    cannot scope, because the subprocess is SHARED: a superseded reader
+    firing it would SIGKILL the child out from under the live connection.
+    It is gated on the daemon GENERATION the dying connection was built for
+    still being the live generation, not merely on the connection still
+    being current. `SignalSubprocess` exposes a monotonic per-spawn
+    generation; `connect()` stamps the live generation onto the connection;
+    the reader-exit latch and the consecutive-timeout escalation each fire
+    the restart only when that stamp still equals the subprocess's current
+    generation. The hook runs outside any lock (it is caller-injected and
+    kills a child process, so holding a lifecycle lock across it is a
+    deadlock hazard). A `conn == current` check is NOT sufficient on its
+    own: the supervised restart respawns the child (generation advances)
+    up to 15 s before `reconnect()` retires the dead connection, so for
+    that whole window a stale reader's `conn` still equals `current` while
+    a healthy successor daemon is already running — firing then SIGKILLs
+    it and burns the supervisor's restart budget toward the terminal
+    FAILED state the readiness surface reports. A test drives that window
+    deterministically: with the daemon generation advanced but the dead
+    connection still current, a reader exit must fire no restart; and with
+    the generation matching, it must.
+  - >-
+    `SignalJsonRpcClientTest.readIoExceptionLatchesChannelDead` — one of
+    this ticket's own reader-exit tests — is hardened against a
+    reader-startup race it carried since the first implementation. It
+    injected the IOException by flipping an `AtomicBoolean` and then
+    pushing a byte; if the reader thread reached its first `read()` AFTER
+    the flip, it threw before any data arrived, exited, and closed the
+    socket before the push could write (SocketException, surfaced under
+    sustained full-suite load, ~1 run in 3 on this host). The fault is now
+    keyed to a SENTINEL byte the stream throws on, so the reader always
+    blocks in the real `read()` until the byte arrives — deterministic, no
+    startup race. This is the ONE detection test that changes and it is a
+    timing fix, not a contract change: it still proves an IOException on
+    the read side latches the channel dead. The other five reader-exit
+    tests are unmodified.
+  - >-
+    A new test drives the stale-reader case deterministically and with no
+    test seam in production code: connect, publish a REPLACEMENT connection
+    while the first reader is still parked in read(), then sever the first
+    socket from the client side through the existing `newSocket()` seam.
+    The replacement must survive intact — connected, its in-flight call
+    resolving from the wire rather than closed-before-ack, its dispatcher
+    still delivering inbound, and no restart fired. Five of the six
+    reader-exit detection tests pass UNMODIFIED (the sixth,
+    `readIoExceptionLatchesChannelDead`, gets a timing-only hardening — see
+    the dedicated item below); the detection contract is unchanged, so any
+    contract-level edit to them would signal a regression, not an update.
+  - >-
+    `FakeSignalCli.killClientConnection()` stops silently no-opping when it
+    races the accept. On loopback `Socket.connect()` returns from the
+    kernel's accept backlog before `server.accept()` returns, so a test that
+    connects and immediately kills can arrive while `clientConn` is still
+    null — the close is skipped, no FIN is sent, and the client's reader
+    stays parked in `read()` until the test's own await expires. It awaits
+    the accepted connection on the same bounded pattern `awaitWriter()`
+    already uses. The no-op is pre-existing; the flake is not — only the
+    connect-then-immediately-kill shape THIS ticket introduces reaches it
+    (observed failing `peerEofLatchesChannelDead` during implementation).
+  - >-
     docs/spec/messaging.md §Failure handling withdraws the v1 carve-out
     M1-674 added — the sentence stating that the latch is implemented
     for the SimpleX bot WebSocket only, that Signal detects a dead
@@ -110,6 +186,7 @@ test_plan:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/health/FakeReadinessAdapter.java
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/FakeSignalCli.java
   preserves:
     - all tests currently green on main except the named authorized
       modifications (SignalReconnectTest.sendDuringOutageFailsTransient
@@ -120,13 +197,190 @@ spec_refs:
   - docs/spec/security.md §Trust boundaries
   - docs/spec/deployment.md §Health and observability
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-23
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 15
+      added: 1582
+      removed: 179
+  - round: 2
+    date: 2026-07-23
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 13
+      added: 1310
+      removed: 178
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - id: RT-M1-681-r2-1
+    date: 2026-07-23
+    audit: docs/plan/m1/redteam-multi/M1-681-2026-07-23-r2/
+    reporter: claude
+    category: DOS
+    severity: medium
+    status: fixed-in-band
+    summary: |
+      The per-connection restart guard used `conn == current`, which is
+      insufficient in production. The supervised restart respawns the
+      signal-cli child (a healthy successor is alive) up to 15 s BEFORE
+      reconnect() retires the dead connection — doRestart() spawns the new
+      child before firing restartListener, and reconnect() blocks on
+      awaitEndpoint (ENDPOINT_PROBE_TIMEOUT = 15 s) before c.disconnect()
+      nulls `current`. For that whole window a stale reader's `conn` still
+      equals `current` while a healthy new daemon runs, so its exit fires
+      restartHung → destroyForcibly on the successor. Each spurious kill
+      counts toward SUBPROCESS_MAX_RESTARTS = 5 without resetting the
+      streak (victim lived < 30 s healthy-uptime), so a repeat drives the
+      supervisor to terminal FAILED — the adapter is permanently down, and
+      in a single-adapter deployment the whole bot is offline. All premises
+      verified against source (SignalSubprocess.java:263/285/372-383,
+      SignalAdapter.java:547/562, backoff base 250 ms). NEW in this diff:
+      pre-M1-681 a reader exit fired nothing. Out of the threat model
+      (local thread scheduling on a loopback channel) but an orphan this
+      ticket's own change created, so fixed in-band — the 2026-07-23
+      round-2 refine replaced the `conn == current` guard with a daemon-
+      generation guard.
+    out_of_model_note: |
+      Two further claude-only findings were falsified and NOT filed.
+      (low, DOS, SignalJsonRpcClient:1009-1012) "wedged-but-alive daemon
+      holding the socket open reads false-green" — explicitly out_of_scope
+      (the keepalive/ping bullet); the timeout escalation is the sanctioned
+      detector for a hung-alive daemon; the auditor concedes it is "a
+      residual the diff narrows rather than a regression." (low, DOS,
+      :875-878) "no dampening on latch restarts" — inaccurate: the
+      SignalSubprocess backoff (250 ms x2, cap 30 s, max 5) plus the
+      per-connection restartRequested CAS already dampen; its only real
+      content is "spurious kills burn budget", which IS the medium finding
+      above. codex and kimi both returned CLEAN.
+redteam_audits:
+  - date: 2026-07-23
+    verdict: CLEAN
+    auditors: [claude, codex, kimi]
+    base: main
+    head: m1/M1-681-make-a-dead-transport-honest-o
+    verdict_file: docs/plan/m1/redteam-multi/M1-681-2026-07-23-r3/cross-examination.md
+    findings_count: 0
+    out_of_model_count: 3
+    note: |
+      Round-3 re-audit of the daemon-generation guard (round-2 FINDINGS was
+      remediated by it, so that audit was invalidated). All three auditors
+      CLEAN, zero finding clusters. Three out-of-model items, each
+      dispositioned:
+        - Restart-budget exhaustion is not adversary-reachable (claude):
+          confirmatory — explicitly notes RT-M1-681-r2-1 is FIXED in this
+          diff by the daemon-generation guard. No action.
+        - Future-adapter false-green via MessagingAdapter.connected()
+          default (claude): already tracked as M1-682. No action.
+        - The gate's check-then-act nanosecond window (kimi): the residual
+          TOCTOU documented in latchTransportDeath's own comment. Not
+          adversary-steerable, self-limiting to one restart-budget unit,
+          and for the reader-exit path the respawn that could bump the
+          generation is triggered BY the death firing now, so it is a
+          backoff (>= hundreds of ms) in the future and cannot slip into
+          the gap. Closing it needs a lock held across the SIGKILL hook —
+          the exact deadlock hazard the design avoids. Out-of-model across
+          all four rounds; no ticket.
+        - Wedged-but-alive daemon residual (kimi): explicitly out_of_scope
+          (the keepalive/ping bullet); previously adjudicated in r2. No
+          ticket.
+        - The 7-arg constructor's `() -> 0L` generation default silently
+          disables the RT-M1-681-r2-1 gate if a future wiring pairs it with
+          a real restart hook (kimi): real future-misuse footgun, zero
+          current breach (the sole production call site wires
+          SignalSubprocess::generation). Same class as M1-682, filed the
+          same way as M1-683 rather than folded.
+  - date: 2026-07-23
+    verdict: FINDINGS
+    auditors: [claude, codex, kimi]
+    base: main
+    head: m1/M1-681-make-a-dead-transport-honest-o
+    verdict_file: docs/plan/m1/redteam-multi/M1-681-2026-07-23-r2/cross-examination.md
+    findings_count: 1
+    out_of_model_count: 3
+    note: |
+      Round-2 re-audit of the per-connection redesign (round-1 CLEAN was
+      invalidated by the src/ change). claude FINDINGS (3 clusters, all
+      claude-only), codex CLEAN, kimi CLEAN. Falsification: cluster 1
+      (medium) survived as RT-M1-681-r2-1 above — the `conn == current`
+      guard was insufficient against the 15 s respawn-before-retire window;
+      fixed in-band via a daemon-generation guard. Clusters 2 and 3 (both
+      low) were falsified as a documented out-of-scope residual and an
+      inaccurate no-dampening claim respectively (see the finding's
+      out_of_model_note). kimi restated the round-1 MessagingAdapter
+      .connected() default-true hazard already tracked as M1-682.
+  - date: 2026-07-23
+    verdict: CLEAN
+    auditors: [claude, codex, kimi]
+    base: main
+    head: m1/M1-681-make-a-dead-transport-honest-o
+    verdict_file: docs/plan/m1/redteam-multi/M1-681-2026-07-23/cross-examination.md
+    findings_count: 0
+    out_of_model_count: 3
+    note: |
+      3-auditor redteam-multi (opencode excluded at the user's direction).
+      All three returned CLEAN with zero finding clusters, so there was
+      nothing to cross-examine. Three out-of-model items were raised and
+      each was put through an independent falsification pass:
+        - Zombie-reader TOCTOU in the new latch (claude AND kimi,
+          independently). Survived falsification as a real — and NEW —
+          reliability defect: disconnect() never nulls `socket`, so the
+          latch's identity guard can pass on stale state and then mutate a
+          fresh connection. Out of the threat model (local thread
+          scheduling on a loopback channel, not adversary-steerable), but
+          it is an orphan THIS ticket's own change created, so it is fixed
+          in-band here rather than deferred: the 2026-07-23 round-1 refine
+          added the atomic-ownership acceptance item for it.
+        - MessagingAdapter.connected()'s interface default of true (kimi).
+          Survived: the default is deliberate and correct for
+          transportless adapters, but this ticket widened its blast radius
+          from a wrong metric to a false-green readiness payload, with no
+          compile-time or test signal for a transport adapter that
+          inherits it. Filed as M1-682.
+        - Readiness may flap while a daemon crash-loops (claude). Did NOT
+          survive as a defect: truthful reporting is this ticket's explicit
+          intent (acceptance item 1) and the flap is a direct corollary of
+          the messaging.md text this ticket already lands. No ticket filed.
+      One in-band correction came out of the audit: claude observed that
+      the spec sentence this ticket added claimed the restart fires "at
+      most once per death, whichever detector observes it first", which
+      overstates a guard that is one-directional by design. The sentence
+      was rewritten to describe the actual deference direction.
+clarity_check:
+  date: 2026-07-23
+  verdict: WARN
+  warnings:
+    - >-
+      SPEC-REFS-RESOLVABLE: spec_ref 'docs/spec/security.md §Trust
+      boundaries' is AMBIGUOUS (matches lines 38 and 233); anchor
+      resolution picks one by the depth heuristic.
+    - >-
+      Self-check (post outline-fail refine): all code claims re-verified
+      against the working tree, including the refine's new ones —
+      SignalReconnectTest.sendDuringOutageFailsTransient blanket
+      TRANSIENT assertion and outage-premise comment (:58-93),
+      FakeReadinessAdapter final with no connected() override,
+      MessagingAdapter.connected() interface default true (:362-364),
+      attachSubprocess registering onRestart (SignalAdapter.java:516),
+      disconnect()'s closed-before-ack PERMANENT drain (:409-412).
+  blockers: []
 escalation_reason:
+outline_file: target/m1-tick-outline-M1-681.md
 ---
 
 # M1-681: Make a dead transport honest on readiness and on Signal
@@ -219,8 +473,10 @@ See the frontmatter. In short: the readiness payload folds
 latches the channel dead on both its EOF and IOException arms, drains
 pending futures and fires the existing restart hook so recovery runs
 without depending on outbound traffic; the existing timeout escalation is
-preserved for the hung-but-alive daemon it was written for; and the spec
-withdraws the v1 Signal carve-out M1-674 had to add.
+preserved for the hung-but-alive daemon it was written for; the latch's
+ownership check is atomic with the state it gates, so a stale reader
+cannot latch a later connection; and the spec withdraws the v1 Signal
+carve-out M1-674 had to add.
 
 ## Out-of-scope
 
@@ -269,15 +525,35 @@ refine — the original scope made the ticket unimplementable without them):
 No other pre-existing test may be weakened — if one fails for a reason
 not named here, escalate rather than edit it.
 
+## Round 1 rework
+
+Reviewer round 1: REWORK, one item (SCOPE-DRIFT). Every code/test/spec
+check PASSED. The FAIL is commit hygiene: the follow-up ticket files
+`M1-682-*` and `M1-683-*` are committed on this branch and outside
+`files_scope`, so the M1-681 squash would carry two other tickets'
+definitions. Fix: remove both from this branch; they land on `main` as a
+separate `process:` commit (CLAUDE.md commit-prefix rule: pure-doc
+follow-up tickets bypass the ticket flow). No change to the fix or tests.
+
 ## Notes
 
 - Adjacent code / the pattern to match: `SimpleXWebSocketClient.latchTransportDeath`
   (post-M1-674) is the reference shape for the Signal latch — latch the
   closed flag, drain pending futures with the closed-before-ack category,
   tear the dispatcher down counting what it discards, then fire the
-  death hook. Signal's variant is simpler: it routes recovery through the
-  existing supervised restart instead of an in-place rebuild campaign, so
-  it needs no backoff ladder of its own.
+  death hook. Signal's variant is simpler in its RECOVERY ROUTE: it goes
+  through the existing supervised restart instead of an in-place rebuild
+  campaign, so it needs no backoff ladder of its own. It is HARDER in
+  state ownership, and the 2026-07-23 round-1 refine exists because this
+  note originally said only the first half. `SimpleXAdapter` builds a
+  fresh `SimpleXWebSocketClient` per rebuild (`SimpleXAdapter.java:394`),
+  so every SimpleX latch mutation is scoped to one connection for free.
+  Signal reuses ONE client across reconnects, so latch state copied
+  field-for-field from SimpleX becomes shared across connections, and a
+  reader that outlived `disconnect()`'s bounded join can reach a
+  connection it does not own. Mirror the SHAPE of SimpleX's latch; do not
+  mirror its state layout — give Signal the per-connection carrier
+  SimpleX gets from its lifecycle.
 - Order the two legs so neither lands half-honest: making readiness fold
   `connected()` while Signal's `connected()` still lies would leave the
   Signal readiness leg false-green with the *appearance* of a fix. If the

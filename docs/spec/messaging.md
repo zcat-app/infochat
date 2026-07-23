@@ -347,15 +347,17 @@ Provider produces plain text per decision D30. The adapter:
   in-flight command futures on the dead connection. The recovery route
   is adapter-specific and each adapter states its own: SimpleX rebuilds
   the WebSocket in place against the still-running daemon, while Signal
-  escalates — consecutive JSON-RPC response timeouts force a restart of
-  the daemon, which routes recovery through the same supervised
-  backoff path a crash takes (design notes §6.5.8). **v1 implements the
-  latch itself for the SimpleX bot WebSocket only.** Signal detects a
-  dead channel solely through those consecutive response timeouts, so a
-  JSON-RPC channel that dies while signal-cli keeps running is not
-  latched: `connected()` reports it up until an outbound send times
-  out, and with no outbound traffic on that adapter the escalation
-  never fires at all. Where the latch exists the outage stays
+  restarts the daemon, routing recovery through the same supervised
+  backoff path a crash takes (design notes §6.5.8). Signal's restart
+  fires from either of two detectors: the
+  reader-side death latch (the JSON-RPC channel died while signal-cli
+  keeps running — detected from the channel's own read side, with no
+  dependence on outbound traffic) or the consecutive-response-timeout
+  escalation (a daemon that is alive but not answering, which a live
+  reader cannot detect). The escalation's restart kills the daemon,
+  which kills the channel, which exits the reader — so for that one
+  death the latch defers to the restart the escalation already
+  requested rather than forcing a second one. The outage stays
   operator-visible for as long as it lasts (`connected()` /
   `adapter.connection.status` report the dead transport — no false
   green), and sends attempted after the latch, while recovery is
