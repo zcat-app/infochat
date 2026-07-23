@@ -408,6 +408,85 @@ the sanitizer closes the social-engineering surface where a small LLM
 emits plausible-looking admin commands across any of the surfaces above.
 Every match is audit-logged (per-occurrence, not throttled).
 
+**Canonical-form matching.** The closed-list pass matches against the
+**canonical** form of the candidate output — NFKC normalization
+followed by the bidi-control and zero-width strip — which is the same
+representation the deterministic command parser consumes (§Message
+intake step 1.7). Matching the raw bytes instead left a representation
+asymmetry the sanitizer was blind to: `／grant-admin` (fullwidth
+solidus), an all-fullwidth token, a token split by a zero-width space
+or wrapped in bidi isolates, and a multi-word entry joined by U+3000
+each survived sanitization verbatim, yet each parses as a privileged
+command the moment a reader copy-pastes the bot's line back in. When
+the canonical form carries no closed-list token the **original bytes**
+are returned unchanged, so legitimate Unicode prose is never reflowed;
+only a match may change the output's representation, and a match means
+the text carried a token that canonicalizes into a real command.
+**Case is decided per token, mirroring the parser token by token** —
+it is a property of how each token is *parsed*, not of the
+representation, so a blanket rule in either direction is wrong. The
+**command name** is matched exactly, because dispatch resolves it by
+exact comparison: `/Grant-Admin` and `/Invite create` are not commands,
+and redacting them would corrupt prose for no security gain. A
+**subcommand** token is matched case-insensitively, because the
+handlers lower-case it before switching on it: `/invite CREATE` *does*
+dispatch, so matching it exactly would leave every multi-word
+subcommand entry evadable by changing one word's case — silently, since
+a non-match emits neither the WARN nor the audit row. A **flag** token
+follows whatever its own handler does, derived per entry rather than
+asserted globally — for every flag-bearing entry in today's closed list
+the handler compares exactly, so the flag is matched exactly and `--ALL`
+never dispatches. That derivation is deliberate, not incidental: flag
+parsing is *not* uniform across the codebase (some handlers lower-case
+flag tokens before comparing), so a rule stated as a blanket property of
+flags would be the same over-broad claim as a blanket rule on case, and
+a future closed-list entry pairing a flag with a flag-folding parser
+would silently inherit an evasion.
+
+**Markdown flattening survives canonicalization.** The link-flatten
+pass runs on the raw output first, and again on the canonical form
+inside the closed-list pass. NFKC folds fullwidth brackets into real
+`[...](...)` syntax, so canonicalization can *synthesize* link syntax
+the raw-byte pass never saw; without the second flatten a closed-list
+hit would deliver exactly the label-hiding markdown the first pass
+exists to remove. Flattening runs before the replacement, so the
+redaction marker's own brackets are never consumed as link text; and
+because no flatten runs *after* the replacement, the marker is kept
+from landing directly against a following `(` — the match's
+word-boundary rule admits one, so a token written as `/ban(url)` would
+otherwise leave the sanitizer emitting link syntax it manufactured
+itself.
+
+**Sanitizer output never contains `](`.** The guarantee is scoped to what
+the sanitizer emits, not to every byte of every delivered message: the
+deterministic render paths that deliberately bypass it — notably the
+degraded per-cluster prose branch, which ships feed-derived headlines
+without sanitizing or translating — are outside it, and the residual
+risk §Failure handling already records for degraded output covers them.
+Flattening alone cannot carry
+that guarantee, because flattening means *parsing*, and the parser is a
+regular expression: CommonMark permits balanced brackets inside a link
+label, which no regular expression can track, so `[Read [the]
+report](url)` is a genuine link the pass will never match. The
+guarantee is therefore carried by a second, weaker-but-total mechanism —
+any `](` the flatten could not consume has its **adjacency broken**
+(`](` → `] (`). No character is lost, so the label and the bare URL both
+stay readable; the link simply stops being one, because a renderer
+resolves a link only on the adjacent pair. The property is about two
+characters rather than about markdown, which is precisely why it can be
+stated absolutely without inheriting the parser's limits.
+
+This matters most on the canonicalized path, where it prevents the
+sanitizer *creating* a link that never existed. Text arriving as `[Read
+[the] report ］（url）` carries a fullwidth `］` that no client renders as
+link syntax; NFKC folds it to the `]` that completes a real link, and
+the nested label keeps the flatten from parsing the result. Without the
+adjacency break, a closed-list hit would deliver a working link
+manufactured from text that was not one. Note the two passes stay
+independent throughout: the closed-list match's word-boundary rule
+admits `)`, so a privileged token inside a link target is stripped,
+audit-logged and WARNed whether or not any flattening succeeded.
+
 **Match-set derivation.** The sanitizer's match set is **derived
 from the closed privileged-tier list at spec level**
 (`commands.md` §Permission model — "Closed list of privileged-tier

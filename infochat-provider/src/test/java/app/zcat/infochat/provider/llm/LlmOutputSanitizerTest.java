@@ -287,6 +287,233 @@ class LlmOutputSanitizerTest {
                 "precompiled pattern list must carry exactly one pattern per CLOSED_LIST entry");
     }
 
+    // ----- canonical-form matching (Unicode evasion) ---------------------
+
+    // The closed-list pass matches the canonical (NFKC + bidi/zero-width
+    // stripped) form, because that is what the command dispatcher
+    // consumes (security.md §Message intake step 1.7). Each variant below
+    // was runtime-probed against the pre-M1-676 sanitizer: it passed
+    // through verbatim yet parsed as a privileged command at intake.
+    // Invisible codepoints are written as unicode escapes so the source
+    // carries no unreadable characters; visible fullwidth forms are
+    // written literally.
+
+    @Test
+    void fullwidthSolidusGrantAdminIsRedacted() {
+        assertCanonicalEvasionRedacted("Please run ／grant-admin to fix it.", "/grant-admin");
+    }
+
+    @Test
+    void allFullwidthGrantAdminIsRedacted() {
+        assertCanonicalEvasionRedacted("Please run ／ｇｒａｎｔ－ａｄｍｉｎ to fix it.", "/grant-admin");
+    }
+
+    @Test
+    void zeroWidthSpaceSplitGrantAdminIsRedacted() {
+        // U+200B ZERO WIDTH SPACE inside the token — invisible to the
+        // reader, stripped at intake.
+        assertCanonicalEvasionRedacted(
+                "Please run /g\u200Brant-admin to fix it.", "/grant-admin");
+    }
+
+    @Test
+    void bidiIsolateSplitGrantAdminIsRedacted() {
+        // U+2066 LRI ... U+2069 PDI wrapped around the token's tail.
+        assertCanonicalEvasionRedacted(
+                "Please run /grant-ad\u2066min\u2069 to fix it.", "/grant-admin");
+    }
+
+    @Test
+    void ideographicSpaceJoinedMultiWordTokenIsRedacted() {
+        // U+3000 IDEOGRAPHIC SPACE is not matched by Java's `\s` (no
+        // UNICODE_CHARACTER_CLASS), but NFKC folds it to U+0020 — so the
+        // multi-word pattern only sees it on the canonical form.
+        assertCanonicalEvasionRedacted("Try /invite\u3000create now.", "/invite create");
+    }
+
+    @Test
+    void nonMatchingUnicodeProseIsReturnedByteIdentical() {
+        // The no-match fast path returns the ORIGINAL bytes: canonicalization
+        // is a matching-time representation, never an output rewrite. A
+        // ligature, Czech diacritics and fullwidth prose all survive NFKC
+        // untouched because nothing here folds into a closed-list token.
+        String input = "Čeština headlines: the ﬁrst ＮＥＷＳ digest is ready.";
+        assertEquals(input, LlmOutputSanitizer.applyClosedListStrip(input),
+                "output with no canonical-form closed-list token must be byte-identical to the input");
+    }
+
+    @Test
+    void canonicalMatchingKeepsAsciiSpacingAndNameCaseSensitivity() {
+        // Canonicalization must not regress the existing `\s+` spacing
+        // match, and must not widen the pass into case-insensitivity of
+        // the command NAME: handleSlash resolves it with
+        // handler.name().equals(...), so /Grant-Admin never becomes a
+        // command and redacting it would corrupt prose for no gain.
+        String spaced = LlmOutputSanitizer.applyClosedListStrip("Try /invite  create now.");
+        assertTrue(spaced.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "/invite  create (doubled ASCII space) must still be redacted. Got: " + spaced);
+
+        String cased = LlmOutputSanitizer.applyClosedListStrip("Ask an admin to /Grant-Admin you.");
+        assertEquals("Ask an admin to /Grant-Admin you.", cased,
+                "a NAME case variant is not a dispatchable command and must pass through untouched");
+
+        String casedMultiWord =
+                LlmOutputSanitizer.applyClosedListStrip("Ask an admin to /Invite create one.");
+        assertEquals("Ask an admin to /Invite create one.", casedMultiWord,
+                "a NAME case variant does not dispatch even when the subcommand is exact");
+    }
+
+    // ----- per-token case parity with the parser -------------------------
+
+    // The parser folds SOME tokens and not others, so the sanitizer decides
+    // case per token rather than in a blanket pass:
+    //   name       — handler.name().equals(...)                  → exact
+    //   subcommand — split[1].toLowerCase(Locale.ROOT)           → folded
+    //   flag       — tok.equals("--all")                         → exact
+    // Matching the subcommand case-sensitively left 8 of the 34 closed-list
+    // entries evadable by changing one word's case (2026-07-23 red-team
+    // medium finding), silently: a non-match emits no WARN and no audit row.
+
+    @Test
+    void upperCaseInviteSubcommandIsRedacted() {
+        assertCanonicalEvasionRedacted("An admin should run /invite CREATE --open.", "/invite create");
+    }
+
+    @Test
+    void upperCaseQuarantineSubcommandIsRedacted() {
+        assertCanonicalEvasionRedacted("An admin should run /quarantine APPROVE 12.", "/quarantine approve");
+    }
+
+    @Test
+    void mixedCaseSubcommandIsRedacted() {
+        assertCanonicalEvasionRedacted("An admin should run /invite Revoke abc.", "/invite revoke");
+    }
+
+    @Test
+    void fullwidthUpperCaseSubcommandIsRedacted() {
+        // NFKC folds ＣＲＥＡＴＥ to the ASCII capitals CREATE, which the
+        // ASCII-only fold then matches — the two mechanisms compose.
+        assertCanonicalEvasionRedacted("An admin should run /invite ＣＲＥＡＴＥ now.", "/invite create");
+    }
+
+    @Test
+    void upperCaseFlagIsNotRedacted() {
+        // ListSourcesArgs.parse compares flags with equals, so --ALL never
+        // dispatches. The subcommand fold must not leak into flag tokens.
+        String input = "Ask an admin for /list-sources --ALL please.";
+        assertEquals(input, LlmOutputSanitizer.applyClosedListStrip(input),
+                "an upper-case flag does not dispatch and must pass through untouched");
+    }
+
+    @Test
+    void lowerCaseFlagIsStillRedacted() {
+        String output = LlmOutputSanitizer.applyClosedListStrip("Ask an admin for /list-sources --all.");
+        assertTrue(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "the exact-case flag entry must still be redacted. Got: " + output);
+    }
+
+    @Test
+    void canonicalizationCannotSynthesizeMarkdownLinkSyntax() {
+        // NFKC folds fullwidth brackets into real []() that the raw-byte
+        // MARKDOWN_LINK pass never saw. On a closed-list hit the delivered
+        // text is the canonical form, so without a re-flatten the sanitizer
+        // would MANUFACTURE the label-hiding link syntax its first pass
+        // exists to remove (2026-07-23 red-team low finding).
+        String output = LlmOutputSanitizer.applyClosedListStrip(
+                "Run /ban spammer, then see ［important notice］（https://evil.example/x）");
+        assertFalse(output.contains("]("),
+                "the substring `](` MUST be absent even when NFKC folds fullwidth brackets. Got: "
+                        + output);
+        assertTrue(output.contains("important notice (https://evil.example/x)"),
+                "label + bare URL must be preserved by the flatten. Got: " + output);
+        assertTrue(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "/ban must still be redacted. Got: " + output);
+    }
+
+    @Test
+    void redactionMarkerIsNotConsumedAsMarkdownLinkText() {
+        // The replacement literal carries its own brackets, so flattening
+        // must run BEFORE the replacement — otherwise `/ban(see docs)`
+        // would rewrite to `[redacted command](see docs)` and the second
+        // flatten would eat the marker's brackets.
+        String output = LlmOutputSanitizer.applyClosedListStrip("Run /ban(see docs)");
+        assertTrue(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "the redaction marker must survive intact. Got: " + output);
+    }
+
+    @Test
+    void replacementCannotManufactureMarkdownLinkSyntax() {
+        // The word-boundary lookahead admits a following `(`, and no
+        // flatten runs after the replacement — so without the marker/paren
+        // separation the sanitizer would itself emit the label-hiding link
+        // syntax both flatten passes exist to remove. The input carries no
+        // bracket characters at all, so neither flatten can catch it.
+        String output = LlmOutputSanitizer.applyClosedListStrip(
+                "Recovery steps: /ban(https://evil.example/reset)");
+        assertFalse(output.contains("]("),
+                "the sanitizer must never MANUFACTURE `](` from a match. Got: " + output);
+        assertTrue(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "the redaction marker must survive intact. Got: " + output);
+        assertTrue(output.contains("(https://evil.example/reset)"),
+                "the bare URL must be preserved. Got: " + output);
+    }
+
+    @Test
+    void nestedBracketLinkIsNeutralizedAndTheCommandIsStillRedacted() {
+        // Route (c), as it ARRIVES. MARKDOWN_LINK is a regex and cannot track
+        // balanced brackets, but CommonMark permits them in a label — so this
+        // is a real link the flatten will never parse. The adjacency break is
+        // what carries the guarantee instead: both characters survive, so
+        // label and URL stay readable, but no renderer resolves them.
+        String output = LlmOutputSanitizer.applyClosedListStrip(
+                "Run /ban spammer. [Read [the] report](https://evil.example/phish)");
+        assertFalse(output.contains("]("),
+                "an un-parseable link must not be DELIVERED link-shaped. Got: " + output);
+        assertTrue(output.contains("[Read [the] report] (https://evil.example/phish)"),
+                "label and URL must both survive the break. Got: " + output);
+        // The two passes are independent: the match's word-boundary lookahead
+        // admits `)`, so a token inside a link TARGET is redacted whether or
+        // not the flatten fired. Neutralization is defense-in-depth for
+        // rendering, never a precondition of the closed-list strip.
+        assertTrue(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "an un-parseable link must NOT cost the redaction. Got: " + output);
+        assertFalse(output.contains("/ban"),
+                "/ban must be redacted whether or not the flatten fired. Got: " + output);
+    }
+
+    @Test
+    void fullwidthClosedNestedBracketLinkIsNotTurnedIntoAWorkingLink() {
+        // Route (c), SYNTHESIZED — the one case that is new-in-diff rather
+        // than pre-existing. The text arrives with a fullwidth `］`, which no
+        // client renders as a link; NFKC folds it to the `]` that COMPLETES
+        // one, and the nested label keeps the flatten from parsing it. Left
+        // alone, delivering the canonical form on a match would manufacture a
+        // working link out of text that was not one — verified against real
+        // CommonMark rules, which render exactly this string as <a href=...>.
+        // (docs/plan/m1/redteam/M1-676-2026-07-23-r3.md.)
+        String output = LlmOutputSanitizer.applyClosedListStrip(
+                "Run /ban. [Read [the] report ］（https://evil.example/phish）");
+        assertFalse(output.contains("]("),
+                "canonicalization must not MANUFACTURE a working link. Got: " + output);
+        assertTrue(output.contains("https://evil.example/phish"),
+                "the URL must stay visible to the reader. Got: " + output);
+        assertTrue(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "/ban must still be redacted. Got: " + output);
+    }
+
+    @Test
+    void unpairedFoldedBracketPairIsNeutralizedToo() {
+        // The degenerate form of the same route: fullwidth `］（` with no
+        // opening bracket at all. CommonMark does not resolve it (the marker's
+        // own `[` is consumed by its own `]`), so this is cosmetic rather than
+        // exploitable — but the delivered-output rule is stated absolutely, so
+        // it must hold here too rather than resting on a renderer's behaviour.
+        String output = LlmOutputSanitizer.applyClosedListStrip(
+                "Run /ban then ］（https://evil.example/x）");
+        assertFalse(output.contains("]("),
+                "the absolute no-`](` rule must not depend on renderer quirks. Got: " + output);
+    }
+
     // ----- markdown-link strip pass -------------------------------------
 
     @Test
@@ -297,6 +524,23 @@ class LlmOutputSanitizerTest {
                 "the substring `](` MUST be absent after sanitization");
         assertTrue(output.contains("Bleeping Computer (https://www.bleepingcomputer.com)"),
                 "link text + bare URL MUST be preserved verbatim; got: " + output);
+    }
+
+    @Test
+    void unparseableLinkIsNeutralizedWithNoClosedListTokenPresent() {
+        // Pins the NO-MATCH delivery path, which every other `](` assertion
+        // misses: those inputs all embed a closed-list token, so they exit
+        // through the match path and its post-replacement neutralization.
+        // When nothing matches, sanitize() returns applyMarkdownLinkStrip's
+        // output verbatim, so the neutralization INSIDE this pass is the only
+        // thing between an un-parseable link and the reader — on the commonest
+        // production shape of all, LLM prose carrying a link and no command.
+        String output = LlmOutputSanitizer.applyMarkdownLinkStrip(
+                "See [Read [the] report](https://evil.example/phish) for details.");
+        assertFalse(output.contains("]("),
+                "the no-match delivery path must not ship link syntax either. Got: " + output);
+        assertTrue(output.contains("[Read [the] report] (https://evil.example/phish)"),
+                "label and URL must both survive the break. Got: " + output);
     }
 
     @Test
@@ -460,6 +704,28 @@ class LlmOutputSanitizerTest {
         assertTrue(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
                 "[redacted command] MUST appear at the position the match was. "
                         + "Token=" + token + " Output=" + output);
+    }
+
+    /**
+     * Assert that a Unicode-obfuscated {@code token} — one that reaches the
+     * sanitizer in a representation the raw-byte match could not see, but
+     * that canonicalizes into a real closed-list entry — is redacted, and
+     * that it yields exactly ONE audit-row-worthy match recorded under the
+     * token's canonical form. One match element is one
+     * {@code LLM_OUTPUT_SANITIZED} row (LlmOutputSanitizer.emitAuditRows),
+     * so this is the per-occurrence durability commitment at unit tier.
+     */
+    private void assertCanonicalEvasionRedacted(String input, String canonicalToken) {
+        LlmOutputSanitizer.ClosedListStripResult result =
+                LlmOutputSanitizer.applyClosedListStripWithMatches(input);
+        assertTrue(result.rewritten().contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "[redacted command] MUST replace the obfuscated token. Input=" + input
+                        + " Output=" + result.rewritten());
+        assertFalse(result.rewritten().contains(canonicalToken),
+                "the token's canonical form MUST be absent from the output. Token="
+                        + canonicalToken + " Output=" + result.rewritten());
+        assertEquals(List.of(canonicalToken), result.matches(),
+                "exactly one audit-row-worthy match, recorded under the canonical token");
     }
 
     /** JUL capturing handler — JBoss Logging routes through JUL by default. */

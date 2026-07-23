@@ -2,8 +2,12 @@ package app.zcat.infochat.core.ingest;
 
 /**
  * Deterministic obfuscation-codepoint stripping shared across the
- * ingest path. Two related operations live here so the bidi/zero-width
- * codepoint list has exactly one declaration:
+ * ingest path and by the Provider's LLM output sanitizer
+ * ({@code LlmOutputSanitizer.canonicalizeForMatching}, which composes
+ * NFKC with {@link #stripBidiAndZeroWidth} to match the closed list on
+ * the same representation the command parser consumes). Two related
+ * operations live here so the bidi/zero-width codepoint list has
+ * exactly one declaration:
  *
  * <ul>
  *   <li>{@link #stripBidiAndZeroWidth} — strips the bidi-control and
@@ -26,10 +30,12 @@ package app.zcat.infochat.core.ingest;
  *
  * <p>The codepoint set mirrors Stage 1's body strip
  * ({@code Stage1Pipeline.unicodeNormalize}); NFKC is intentionally not
- * applied here — it stays scoped to the body path. Codepoints are
- * compared as {@code int} hex literals (a {@code char} widens to
- * {@code int}) to keep the source free of invisible bidi/zero-width
- * characters. See {@code docs/spec/security.md} §Ingest pipeline
+ * applied here — each caller composes it where its own path needs it
+ * (the body strip and the sanitizer do; {@link #stripMetadataField}
+ * does not). Codepoints are compared as {@code int} hex literals (a
+ * {@code char} widens to {@code int}) to keep the source free of
+ * invisible bidi/zero-width characters.
+ * See {@code docs/spec/security.md} §Ingest pipeline
  * (security side) and the 2026-06-23 deep-review finding
  * {@code 06-module-infochat-collector.md#F1}.
  */
