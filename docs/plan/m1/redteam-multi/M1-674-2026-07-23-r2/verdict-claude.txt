@@ -1,0 +1,20 @@
+RED-TEAM VERDICT: CLEAN
+
+OUT-OF-MODEL:
+  - Campaign death by JVM Error (not RuntimeException): the recovery loop catches
+    MessagingException and RuntimeException (SimpleXAdapter.java, recoverFromTransportDeath
+    catch arms) but a JVM-level Error (StackOverflowError, OOM) would still kill the
+    campaign thread with the one-shot death notifier spent, leaving the transport dead
+    permanently. The finally clears `reconnecting`/`reconnectInFlight`, so post-death sends
+    classify TRANSIENT via the ws.isClosed() branch while nothing rebuilds. This is NOT a
+    findings-grade gap: connected() stays honest-false (no false green, SimpleXAdapter.java:750),
+    each Provider send fails within its bounded retry budget, and JVM-level resource failure
+    is outside the documented threat model (same class as the excluded operator-infrastructure
+    failures). Flagged in case the user wants the catch widened to Throwable-minus-InterruptedException.
+  - Peer-controlled close `reason` string embedded in the drain exception message
+    ("WebSocket closed by peer: <status> <reason>", SimpleXWebSocketClient.java Listener.onClose —
+    pre-existing line, unchanged by this diff). While the ws-port stays loopback-bound the
+    "peer" is the operator-spawned simplex-chat daemon inside trust boundary 7, so the string
+    is not adversary-reachable; an operator who voids that boundary by exposing the port has
+    already conceded full bot-identity control per the threat model's own §Trust boundaries
+    item 7, and SafeLog strips exception message bodies from the application logger anyway.

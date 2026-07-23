@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 691 |
+| done | 692 |
 | deferred | 0 |
 | abandoned | 19 |
 | **total** | **715** |
@@ -26,9 +26,9 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-672 — Narrow Provider grants on identity/authz tables (complexity: high, risk: high)
-- M1-674 — Recover SimpleX adapter from peer-closed WebSocket (complexity: medium, risk: medium)
 - M1-675 — Reject slash-bearing personal tags at the /save boundary (complexity: low, risk: low)
 - M1-676 — Canonicalize before closed-list match in LLM sanitizer (complexity: medium, risk: medium)
+- M1-681 — Make a dead transport honest on readiness and on Signal (complexity: high, risk: medium)
 
 ---
 
@@ -45,7 +45,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-681 — blocked_by: M1-674 (pending)
+_(none)_
 
 ---
 
@@ -67,13 +67,13 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-679 | DevTerminalHarnessRoundtripIT fails on any repeat verify: the startup poll eats the previous run's input file | 2026-07-23 | round 1 APPROVE |
 | M1-678 | Render the asset 24h delta independently of the 24h spread | 2026-07-23 | round 1 APPROVE |
 | M1-677 | Validate provider-reported token counts before they reach the metric counters | 2026-07-23 | round 1 APPROVE |
+| M1-674 | Recover SimpleX adapter from peer-closed WebSocket | 2026-07-23 | round 2 APPROVE |
 | M1-673 | Stop wire-controlled model field reaching Micrometer tags | 2026-07-22 | round 1 APPROVE |
 | M1-671 | Validate --vs against the quote currency each pair actually fetches | 2026-07-22 | round 1 APPROVE |
 | M1-670 | Fix release-audit doc drift in guides and spec | 2026-07-22 | round 1 APPROVE |
 | M1-669 | /add-source on a removed source must not claim tags replaced | 2026-07-22 | round 1 APPROVE |
 | M1-668 | Recalibrate command-intent recall for how-do-I phrasings | 2026-07-22 | round 1 APPROVE |
 | M1-667 | Route user-content exception catches through SafeLog | 2026-07-21 | round 2 APPROVE |
-| M1-666 | Deterministic delivery of conceptual topic answers in chat | 2026-07-21 | round 1 APPROVE |
 
 ---
 
@@ -912,8 +912,8 @@ M1-670 (done)
 M1-671 (done)
 M1-672 (pending) ← runnable
 M1-673 (done)
-M1-674 (pending) ← runnable
-  └── M1-681 (pending)
+M1-674 (done)
+  └── M1-681 (pending) ← runnable
 M1-675 (pending) ← runnable
 M1-676 (pending) ← runnable
 M1-677 (done)

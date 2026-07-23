@@ -1,0 +1,115 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: DOS
+    SEVERITY: medium
+    PROMISE: docs/spec/messaging.md §Failure handling (the commitment this
+             diff itself lands): "A peer-initiated connection close is a
+             transport-death event. ... the adapter MUST latch that
+             connection as dead and drive recovery of the transport, paced
+             per the design-tier reconnect cadence ... and sends attempted
+             before recovery completes classify transient — unless the
+             supervising component has terminally failed, which classifies
+             permanent per the default above." Paired with the adjacent
+             pre-existing bullet: "An adapter cannot silently drop
+             messages. Either delivery succeeds, the caller learns it
+             didn't (after the bounded retry budget), or the failure is
+             permanent and surfaced immediately." And security.md §Threat
+             model: "The Provider is exposed to the internet through every
+             enabled messaging adapter" — the SimpleX adapter is the only
+             user-facing surface, so its availability is what these
+             recovery commitments protect.
+    GAP: Lost-wakeup race: the one-shot death notification can be
+         permanently swallowed while a recovery campaign is finishing,
+         leaving a dead transport that nothing will ever rebuild while
+         sends keep classifying TRANSIENT "recovery pending".
+         Mechanics, all in the diff:
+         - SimpleXWebSocketClient.java:547-553 (latchTransportDeath): the
+           transport-death notifier fires AT MOST ONCE per client instance
+           (`peerInitiated = !closed` latch). There is no re-fire, and
+           nothing in the adapter polls `isClosed()` to re-arm recovery.
+         - SimpleXAdapter.java:516-520 (recoverFromTransportDeath): a
+           notification thread that loses the `reconnectInFlight` CAS
+           returns silently — the death event is consumed with no recovery
+           scheduled ("The exit arm (or an earlier campaign) is already
+           recovering" — but a campaign on its success tail is FINISHING,
+           not recovering the new death).
+         - SimpleXAdapter.java:563-583 + 599-601: the winning campaign
+           holds `reconnectInFlight` across `rebuildWebSocket()` (fresh
+           client live and able to die from `ws.start()` at
+           SimpleXAdapter.java:391 onward), `buildGroupHandler()`, the
+           teardown guard, the LOG.info, and the return — the flag is
+           released only in the finally at line 600. A peer close of the
+           fresh WebSocket landing anywhere in that window fires the fresh
+           client's only notification into a failing CAS.
+         - The exit arm has the same tail window: reconnect()
+           (SimpleXAdapter.java:426-478) holds the flag from line 426
+           until the finally at line 477, with the fresh client live from
+           line 446.
+         End state after the race: `webSocket.isClosed()` true, subprocess
+         RUNNING, `closedForGood` false, `reconnecting` false. No thread,
+         timer, or event remains that can rebuild the transport (the
+         notifier for the dead client is spent; the process-exit arm only
+         fires on subprocess respawn, which never happens because the
+         process is healthy). requireConnected's new arm
+         (SimpleXAdapter.java:1090-1103) then throws TRANSIENT "SimpleX
+         WebSocket was closed by the peer; recovery pending" on every send,
+         indefinitely — the caller is told the failure is recoverable and
+         retries forever against an outage only a subprocess death or a
+         full Provider restart can end. That contradicts both halves of the
+         promise: recovery is NOT being driven, and the failure is
+         effectively permanent while being surfaced as transient.
+    REPRO: 1. Run the SimpleX adapter against a simplex-chat daemon whose
+              bot-WS endpoint is flapping — the exact motivating scenario
+              the diff's own WS_RECONNECT_BACKOFF comment names ("a daemon
+              that kills every fresh WebSocket", SimpleXAdapter.java:164-171).
+           2. First peer close → notifier fires → campaign wins the CAS,
+              sleeps a rung, rebuilds. Handshake completes (ws.start()
+              returns inside rebuildWebSocket at line 391).
+           3. The daemon closes the fresh WebSocket within the tail window
+              (during buildGroupHandler / guard / LOG.info / return /
+              finally — milliseconds, but sampled once per ~1 s cycle
+              because a completed handshake resets the ladder, so a
+              sustained flap episode hits it with near-certainty).
+           4. latchTransportDeath fires the fresh client's single
+              notification; the spawned recovery thread loses the CAS at
+              line 517 and exits; the finishing campaign releases the flag
+              and exits.
+           5. From then on: adapter.connection.status reads 0 and every
+              Provider send gets TRANSIENT "recovery pending" forever,
+              while no recovery exists. The SimpleX adapter — the
+              deployment's recommended high-assurance admin surface — is
+              down until an operator restarts the Provider or the healthy
+              daemon happens to die. The diff shipped specifically to close
+              this "dead transport, nothing rebuilds it" state (audit
+              finding MSG-1) and reintroduces it through the handoff race.
+    SUGGESTED-FIX-CLASS: other
+
+OUT-OF-MODEL:
+  - Loopback port squat during the dead-transport window. The recovery
+    campaign re-dials the unauthenticated ws://127.0.0.1:<ws-port>
+    (SimpleXAdapter.java:380, via rebuildWebSocket) after verifying only
+    `sub.state() == RUNNING` — it never verifies the listener on the port
+    is the supervised child. The M1-430 off-loopback bind guard runs only
+    at child launch (start(), SimpleXAdapter.java:305), and the MSG-1 shape
+    is precisely "process alive, its WS listener dead", so the port can be
+    free while the state check passes. A hostile LOCAL process that binds
+    the freed port during the outage inherits the bot's credential-free
+    command channel and can forge inbound frames asserting arbitrary
+    contact ids (identity is transport-asserted per trust boundary 1),
+    including the admin's. Trust boundary 7 declares the loopback channel
+    sound by assumption and a hostile co-located process is effectively
+    host compromise, so this is outside the documented model — flagged in
+    case the user wants the rebuild path to re-assert child ownership of
+    the port.
+  - Unbounded-duration ~1 Hz rebuild loop under an accept-then-close
+    daemon. Every completed handshake counts as a "successful reconnect"
+    and resets the §6.4.6 counter (SimpleXAdapter.java:164-174), so a
+    daemon that accepts then immediately closes each connection keeps the
+    campaign cycling at the first rung (~1 s) forever; the 60 s steady
+    state never engages. This matches the documented cadence
+    ("counter reset on successful reconnect") and the peer is the trusted
+    co-located daemon, so it is design-compliant and out of model; noted
+    because "success" here requires only a handshake, not any useful
+    lifetime, which may be worth a minimum-uptime qualifier in the design
+    tier.

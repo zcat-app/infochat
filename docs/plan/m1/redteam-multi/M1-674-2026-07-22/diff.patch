@@ -1,0 +1,762 @@
+diff --git a/docs/plan/m1/STATUS.md b/docs/plan/m1/STATUS.md
+index 50c363a1..1c4464f8 100644
+--- a/docs/plan/m1/STATUS.md
++++ b/docs/plan/m1/STATUS.md
+@@ -10,8 +10,8 @@
+ 
+ | Status | Count |
+ |---|---|
+-| pending | 7 |
+-| in-progress | 0 |
++| pending | 6 |
++| in-progress | 1 |
+ | in-review | 0 |
+ | escalated | 0 |
+ | done | 685 |
+@@ -29,7 +29,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
+ - M1-671 — Validate --vs against the quote currency each pair actually fetches (complexity: medium, risk: low)
+ - M1-672 — Narrow Provider grants on identity/authz tables (complexity: high, risk: high)
+ - M1-673 — Stop wire-controlled model field reaching Micrometer tags (complexity: low, risk: low)
+-- M1-674 — Recover SimpleX adapter from peer-closed WebSocket (complexity: medium, risk: medium)
+ - M1-675 — Reject slash-bearing personal tags at the /save boundary (complexity: low, risk: low)
+ - M1-676 — Canonicalize before closed-list match in LLM sanitizer (complexity: medium, risk: medium)
+ 
+@@ -39,8 +38,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
+ 
+ | ID | Title | Status | Last review |
+ |---|---|---|---|
+-
+-_(none)_
++| M1-674 | Recover SimpleX adapter from peer-closed WebSocket | in-progress | (none) |
+ 
+ ---
+ 
+@@ -915,7 +913,7 @@ M1-670 (done)
+ M1-671 (pending) ← runnable
+ M1-672 (pending) ← runnable
+ M1-673 (pending) ← runnable
+-M1-674 (pending) ← runnable
++M1-674 (in-progress)
+ M1-675 (pending) ← runnable
+ M1-676 (pending) ← runnable
+ ```
+diff --git a/docs/plan/m1/tickets/M1-674-simplex-peer-close-recovery.md b/docs/plan/m1/tickets/M1-674-simplex-peer-close-recovery.md
+index 0df77042..7f4a104a 100644
+--- a/docs/plan/m1/tickets/M1-674-simplex-peer-close-recovery.md
++++ b/docs/plan/m1/tickets/M1-674-simplex-peer-close-recovery.md
+@@ -1,7 +1,7 @@
+ ---
+ id: M1-674
+ title: "Recover SimpleX adapter from peer-closed WebSocket"
+-status: pending
++status: in-progress
+ created: 2026-07-22
+ last_updated: 2026-07-22
+ blocked_by: []
+@@ -11,7 +11,7 @@ files_scope:
+   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java
+   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXSubprocess.java
+   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClientTest.java
+-  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXSubprocessTest.java
++  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXReconnectTest.java
+   - docs/spec/messaging.md
+ complexity: medium
+ risk: medium
+@@ -49,6 +49,14 @@ acceptance:
+     and state it in the commit. After the simulated peer close, a
+     subsequent send is exercised against a live transport again without
+     any process exit having occurred.
++  - >-
++    Peer-close-triggered rebuild attempts are paced by the §6.4.6
++    network-failure backoff ladder (docs/design/06-messaging.md §6.4.6:
++    exponential toward the 60 s steady state, counter reset on successful
++    reconnect), never an immediate hot retry; a new test pins the pacing,
++    with the backoff base injectable (package-private seam, the
++    SimpleXSubprocess constructor precedent) so the test runs at
++    millisecond scale.
+   - >-
+     A new test proves the failure window is operator-visible while it
+     lasts: the adapter.connection.status gauge / readiness reflects the
+@@ -58,12 +66,13 @@ acceptance:
+   - >-
+     docs/spec/messaging.md §Failure handling records that a peer-initiated
+     WebSocket close is a transport-death event that drives recovery, not
+-    just pending-future drainage.
++    just pending-future drainage, and that recovery attempts follow the
++    design-tier §6.4.6 network-failure backoff cadence.
+ test_plan:
+   adds: []
+   modifies:
+     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClientTest.java
+-    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXSubprocessTest.java
++    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXReconnectTest.java
+   preserves:
+     - all tests currently green on main
+ spec_refs:
+@@ -74,7 +83,20 @@ overrides: []
+ aborted_attempts: []
+ reopens: []
+ redteam_findings: []
+-clarity_check: {}
++clarity_check:
++  date: 2026-07-22
++  verdict: PASS
++  warnings:
++    - >-
++      Self-check: acceptance item 2's no-process-exit clause forces the
++      adapter-side rebuild route, which never touches
++      SimpleXSubprocessTest.java while needing SimpleXReconnectTest.java
++      (the adapter-level recovery/readiness harness); user-approved scope
++      swap applied, plus a backoff-pacing acceptance item per design
++      §6.4.6 — an unpaced rebuild would contradict the documented
++      reconnect cadence and hot-loop against a repeat-closing daemon.
++      User declined follow-up tickets.
++  blockers: []
+ ---
+ 
+ # M1-674: Recover SimpleX adapter from peer-closed WebSocket
+@@ -125,3 +147,14 @@ restart path. See the frontmatter.
+ - Finding detail, falsification history, and the Signal comparison: the
+   audit report (`kimi-audit.md` under `.scratch/`) §MSG-1 (module 4),
+   plus the module-6 MSG-1-watchdog thread resolution.
++- Refined 2026-07-22 at start (user decision via the pre-flight
++  self-check): recovery route pinned to the adapter-side WS rebuild
++  (item 2's no-process-exit clause rules the supervisor route out);
++  files_scope swaps SimpleXSubprocessTest.java for
++  SimpleXReconnectTest.java; rebuild pacing follows the documented
++  §6.4.6 network-failure ladder (new acceptance item) — recovery with
++  no pacing would contradict the design doc and spin hot against a
++  daemon that re-closes every fresh WebSocket. SimpleXSubprocess.java
++  stays in files_scope (the recovery arm reads its state() so the
++  process-exit arm keeps ownership of process-death recoveries) but is
++  expected unmodified. No follow-up tickets (user decision).
+diff --git a/docs/spec/messaging.md b/docs/spec/messaging.md
+index 51b7dd3c..a711ae91 100644
+--- a/docs/spec/messaging.md
++++ b/docs/spec/messaging.md
+@@ -338,6 +338,18 @@ Provider produces plain text per decision D30. The adapter:
+ - An adapter cannot silently drop messages. Either delivery succeeds,
+   the caller learns it didn't (after the bounded retry budget), or
+   the failure is permanent and surfaced immediately.
++- **A peer-initiated connection close is a transport-death event.**
++  When the peer closes (or a transport error kills) the connection an
++  adapter depends on — the SimpleX bot WebSocket, the Signal JSON-RPC
++  channel — the adapter MUST latch that connection as dead and drive
++  recovery of the transport, paced per the design-tier reconnect
++  cadence (design notes §6.4.6 / §6.5.8), not merely drain the
++  in-flight command futures on the dead connection. The outage stays
++  operator-visible for as long as it lasts (`connected()` /
++  `adapter.connection.status` report the dead transport — no false
++  green), and sends attempted before recovery completes classify
++  transient — unless the supervising component has terminally failed,
++  which classifies permanent per the default above.
+ - **Outbound delivery is at-least-once.** A retry after an *ambiguous*
+   send failure — the transport accepted the frame but the ack timed
+   out — MAY deliver the message twice, and **no component suppresses
+diff --git a/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java b/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java
+index fb6ff696..84818180 100644
+--- a/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java
++++ b/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java
+@@ -90,9 +90,24 @@ public final class SimpleXAdapter implements MessagingAdapter {
+     static final Duration WS_READY_TIMEOUT = Duration.ofSeconds(10);
+     static final Duration ACK_TIMEOUT = Duration.ofSeconds(30);
+ 
++    // §6.4.6 network-failure reconnect ladder (docs/design/06-messaging.md):
++    // delay BEFORE each peer-close-triggered rebuild attempt, advancing one
++    // rung per consecutive failure and holding at the 60 s steady state.
++    // Even the first attempt waits the 1 s rung — never an immediate retry —
++    // so a daemon that kills every fresh WebSocket paces the rebuild loop
++    // instead of spinning it hot. A successful reconnect ends the campaign,
++    // so the next death starts back at 1 s (§6.4.6: "a successful reconnect
++    // resets the network-failure counter"). (M1-674)
++    static final List<Duration> WS_RECONNECT_BACKOFF = List.of(
++            Duration.ofSeconds(1), Duration.ofSeconds(2), Duration.ofSeconds(5),
++            Duration.ofSeconds(15), Duration.ofSeconds(60));
++
+     private final @Nullable SimpleXConfig config;
+     private final @Nullable HttpClient httpClient;
+     private final @Nullable Consumer<String> adminNotifier;
++    // Peer-close rebuild pacing (M1-674); WS_RECONNECT_BACKOFF except in
++    // tests, whose millisecond rungs keep the recovery tests fast.
++    private final List<Duration> wsReconnectBackoff;
+ 
+     /**
+      * Upper bound on tracked send-handles. Pre-M1-148 the handle and
+@@ -180,6 +195,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
+         this.config = null;
+         this.httpClient = null;
+         this.adminNotifier = null;
++        this.wsReconnectBackoff = WS_RECONNECT_BACKOFF;
+     }
+ 
+     /**
+@@ -194,9 +210,21 @@ public final class SimpleXAdapter implements MessagingAdapter {
+     public SimpleXAdapter(SimpleXConfig config,
+                           HttpClient httpClient,
+                           Consumer<String> adminNotifier) {
++        this(config, httpClient, adminNotifier, WS_RECONNECT_BACKOFF);
++    }
++
++    // Test seam: a millisecond-scale ladder keeps the peer-close recovery
++    // tests wall-clock fast (the SimpleXSubprocess injectable-backoff
++    // precedent). Production wiring always takes the public constructor
++    // above and with it the §6.4.6 ladder.
++    SimpleXAdapter(SimpleXConfig config,
++                   HttpClient httpClient,
++                   Consumer<String> adminNotifier,
++                   List<Duration> wsReconnectBackoff) {
+         this.config = config;
+         this.httpClient = httpClient;
+         this.adminNotifier = adminNotifier;
++        this.wsReconnectBackoff = List.copyOf(wsReconnectBackoff);
+     }
+ 
+     @Override
+@@ -356,6 +384,10 @@ public final class SimpleXAdapter implements MessagingAdapter {
+         // frame is counted; bindMetrics() below re-binds a live ws if metrics
+         // arrive after the transport is already up.
+         ws.bindMetrics(metrics);
++        // Registered BEFORE start() so a peer close arriving the instant the
++        // handshake completes can never slip past the notifier (M1-674) —
++        // the listener only runs once start()'s handshake is done.
++        ws.onTransportDeath(this::onWsTransportDeath);
+         ws.start();
+         this.webSocket = ws;
+     }
+@@ -446,6 +478,129 @@ public final class SimpleXAdapter implements MessagingAdapter {
+         }
+     }
+ 
++    /**
++     * Transport-death notification entry point handed to every
++     * {@link SimpleXWebSocketClient} (M1-674). Fires on the WS listener
++     * thread — the recovery campaign sleeps on the backoff ladder and
++     * blocks in the ready probe, so it must hop to its own thread,
++     * mirroring {@link #onSubprocessRestart}.
++     */
++    private void onWsTransportDeath() {
++        Thread.ofVirtual()
++                .name("simplex-adapter-ws-recovery")
++                .start(this::recoverFromTransportDeath);
++    }
++
++    /**
++     * Peer-close recovery arm (M1-674, audit finding MSG-1): the
++     * simplex-chat process is still alive but its WebSocket died — a
++     * server-side idle close or a daemon-internal connection error — so no
++     * supervised restart will ever fire and, pre-M1-674, nothing rebuilt
++     * the transport. Rebuild it here, paced by the §6.4.6 network-failure
++     * ladder ({@link #WS_RECONNECT_BACKOFF}).
++     *
++     * <p><b>Ownership split with the process-exit arm.</b> A dying process
++     * also fires the WS terminal event, and two arms rebuilding
++     * concurrently would tear down each other's fresh client. Whenever the
++     * subprocess is not {@code RUNNING}, this campaign exits — the exit
++     * arm ({@link #reconnect}) owns process-death recovery, and it raises
++     * {@code reconnecting} itself when it runs (until then sends classify
++     * through {@link #requireConnected}'s latched-client arm). Single-flight
++     * with the exit arm via {@link #reconnectInFlight}, held across the
++     * whole campaign: a restart notification landing mid-campaign no-ops,
++     * and the campaign's next paced attempt picks the respawned child up
++     * at the cost of at most one ladder rung of extra delay. If some other
++     * party already revived the transport while this campaign slept, the
++     * live client is left untouched.</p>
++     */
++    private void recoverFromTransportDeath() {
++        if (!reconnectInFlight.compareAndSet(false, true)) {
++            // The exit arm (or an earlier campaign) is already recovering.
++            return;
++        }
++        try {
++            // Raised before the first ladder sleep so gap sends classify
++            // TRANSIENT for the whole window; cleared on every exit path —
++            // unlike the exit arm, this campaign never parks the flag for a
++            // later event to resolve.
++            reconnecting = true;
++            int failedAttempts = 0;
++            while (true) {
++                Duration rung = wsReconnectBackoff.get(
++                        Math.min(failedAttempts, wsReconnectBackoff.size() - 1));
++                try {
++                    Thread.sleep(rung.toMillis());
++                } catch (InterruptedException e) {
++                    Thread.currentThread().interrupt();
++                    reconnecting = false;
++                    return;
++                }
++                if (closedForGood) {
++                    reconnecting = false;
++                    return;
++                }
++                SimpleXConfig cfg = config;
++                SimpleXSubprocess sub = subprocess;
++                if (cfg == null || sub == null
++                        || sub.state() != SimpleXSubprocess.State.RUNNING) {
++                    // Torn down, or the process itself is dead / restarting /
++                    // terminally failed — the exit arm or requireConnected's
++                    // supervisor-failed classification owns what happens next.
++                    reconnecting = false;
++                    return;
++                }
++                SimpleXWebSocketClient current = webSocket;
++                if (current != null && !current.isClosed()) {
++                    // The exit arm revived the transport while this campaign
++                    // slept between attempts; do not tear a live client down
++                    // to rebuild it. (A latched-dead client needs no close():
++                    // the terminal-event latch already drained its futures
++                    // and shut its dispatcher, so the rebuild below orphans
++                    // an inert object.)
++                    reconnecting = false;
++                    return;
++                }
++                try {
++                    waitForWebSocketReady(cfg.wsPort());
++                    rebuildWebSocket();
++                    buildGroupHandler();
++                    if (subprocess == null || closedForGood) {
++                        // close() won the race while we were rebuilding — do
++                        // not resurrect the transport after teardown (the
++                        // same guard as reconnect()).
++                        SimpleXWebSocketClient fresh = webSocket;
++                        if (fresh != null) {
++                            fresh.close();
++                            webSocket = null;
++                        }
++                        reconnecting = false;
++                        return;
++                    }
++                    reconnecting = false;
++                    LOG.info("SimpleX adapter rebuilt its WebSocket after a"
++                                    + " peer-initiated close ({} failed attempts)",
++                            failedAttempts);
++                    return;
++                } catch (MessagingException e) {
++                    failedAttempts++;
++                    // §6.4.6: first reconnect failure at WARN, subsequent at
++                    // INFO. Category only — no transport bytes (D37).
++                    if (failedAttempts == 1) {
++                        LOG.warn("SimpleX WebSocket rebuild after peer close"
++                                        + " failed ({}); retrying on the §6.4.6 ladder",
++                                e.category());
++                    } else {
++                        LOG.info("SimpleX WebSocket rebuild after peer close"
++                                        + " failed ({}); attempt {} will retry",
++                                e.category(), failedAttempts);
++                    }
++                }
++            }
++        } finally {
++            reconnectInFlight.set(false);
++        }
++    }
++
+     /**
+      * Disconnect the WebSocket and terminate the simplex-chat subprocess
+      * (SIGTERM, grace, SIGKILL via {@link SimpleXSubprocess#stop}).
+@@ -932,6 +1087,23 @@ public final class SimpleXAdapter implements MessagingAdapter {
+             throw new MessagingException(FailureCategory.PERMANENT,
+                     "SimpleXAdapter is not started; call start() first");
+         }
++        // A latched-dead client (peer-closed WebSocket, M1-674) is a
++        // recoverable outage while the supervised process can still serve a
++        // rebuild — TRANSIENT, like the reconnecting window above, covering
++        // the gap before the recovery campaign raises the flag and the
++        // campaign-abandoned states the exit arm will resolve. Once the
++        // supervisor has terminally FAILED nothing will ever rebuild the
++        // transport, and TRANSIENT would loop Provider's retry forever —
++        // that arm is PERMANENT.
++        if (ws.isClosed()) {
++            if (supervisorTerminallyFailed()) {
++                throw new MessagingException(FailureCategory.PERMANENT,
++                        "SimpleX transport is dead and its subprocess supervisor"
++                                + " has terminally failed");
++            }
++            throw new MessagingException(FailureCategory.TRANSIENT,
++                    "SimpleX WebSocket was closed by the peer; recovery pending");
++        }
+         return ws;
+     }
+ 
+diff --git a/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClient.java b/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClient.java
+index aa1e619d..bb2a0397 100644
+--- a/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClient.java
++++ b/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClient.java
+@@ -42,7 +42,11 @@ import java.util.concurrent.atomic.AtomicLong;
+  * restarts the process on crash, and the adapter then re-runs
+  * {@link #start} from scratch. Tearing the WS down independently of the
+  * process would leave the adapter in a half-state nobody can recover; the
+- * supervisor manages the whole pair.</p>
++ * supervisor manages the whole pair. What this class does own (M1-674) is
++ * the death signal: a peer-initiated close or transport error latches
++ * {@code closed} and fires the transport-death notifier, so the adapter
++ * can pace a rebuild while the process is still alive — see
++ * {@link #onTransportDeath}.</p>
+  *
+  * <p>Trust boundary: the WebSocket is an EXTERNAL system boundary, so
+  * frames are validated by {@link SimpleXMessageCodec#decode}. A malformed
+@@ -162,6 +166,11 @@ final class SimpleXWebSocketClient {
+     // IllegalStateException rejection, which silently drops the frame.
+     private final Object sendLock = new Object();
+     private volatile boolean closed = false;
++    // Fired at most once, from the WS listener thread, when the PEER (or a
++    // transport error) kills the connection — never for a local close();
++    // see latchTransportDeath. Seeded to a no-op so clients the adapter has
++    // not wired (unit tests) need no null check, mirroring the metrics field.
++    private volatile Runnable transportDeathNotifier = () -> { };
+ 
+     // A client built without an invitation consumer ignores group invitations:
+     // the inbound / group-candidate / transport tests do not exercise the
+@@ -441,7 +450,24 @@ final class SimpleXWebSocketClient {
+         this.metrics = metrics;
+     }
+ 
+-    private final class Listener implements WebSocket.Listener {
++    /**
++     * Register the adapter's transport-death notifier (M1-674). MUST be
++     * called before {@link #start()}: the listener only runs once the
++     * handshake completes, so a pre-start registration can never miss the
++     * death event (a post-start registration could — the peer may close
++     * the socket the instant the handshake finishes). Fires on the WS
++     * listener thread; implementations must hop to their own thread
++     * before blocking. Last registration wins.
++     */
++    void onTransportDeath(Runnable notifier) {
++        this.transportDeathNotifier = notifier;
++    }
++
++    // Package-private (not private): the peer-close latch tests drive
++    // onClose/onError directly — the RFC-6455 test fake cannot emit a
++    // server-side close frame — while production construction stays
++    // inside start().
++    final class Listener implements WebSocket.Listener {
+ 
+         private final StringBuilder buffer = new StringBuilder();
+         private boolean skipUntilLast = false;
+@@ -484,20 +510,50 @@ final class SimpleXWebSocketClient {
+         public java.util.concurrent.@Nullable CompletionStage<?> onClose(WebSocket webSocket,
+                                                                int statusCode,
+                                                                String reason) {
+-            // The supervisor (SimpleXSubprocess) sees the process exit and
+-            // restarts the pair; this listener just drains pending futures.
+-            failAllPending(new MessagingException(FailureCategory.PERMANENT,
++            latchTransportDeath(new MessagingException(FailureCategory.PERMANENT,
+                     "WebSocket closed by peer: " + statusCode + " " + reason));
+             return null;
+         }
+ 
+         @Override
+         public void onError(WebSocket webSocket, Throwable error) {
+-            failAllPending(new MessagingException(FailureCategory.TRANSIENT,
++            latchTransportDeath(new MessagingException(FailureCategory.TRANSIENT,
+                     "WebSocket error: " + error.getClass().getSimpleName(), error));
+         }
+     }
+ 
++    /**
++     * Terminal-event handler shared by {@code Listener.onClose} and
++     * {@code onError}. Pre-M1-674 these only drained pending futures, so a
++     * peer-initiated close left {@code closed} false and the adapter kept
++     * reporting a dead transport as healthy with nothing ever rebuilding
++     * it (audit finding MSG-1). Now the death latches {@code closed}
++     * (honest {@link #isClosed()}), tears the dispatcher down (the
++     * connection is gone; dropping queued-but-undelivered inbound matches
++     * the local-close path and at-most-once inbound), and fires the
++     * transport-death notifier so the adapter drives a paced rebuild.
++     * Pending futures drain first — a dispatch-thread consumer blocked in
++     * sendCommand parks on one of them and must be released before its
++     * executor is shut down, the same ordering {@link #close()} documents.
++     *
++     * <p>A local {@link #close()} sets {@code closed} before aborting the
++     * socket, so a terminal event the abort may provoke is suppressed here
++     * (not a peer death). The unsynchronized check-then-act race — close()
++     * and a genuine peer event latching concurrently, double-firing the
++     * notifier — is benign: the adapter's closed-for-good guard makes the
++     * extra notification a no-op, and the JDK delivers at most one
++     * terminal event per connection.</p>
++     */
++    private void latchTransportDeath(MessagingException drainCause) {
++        boolean peerInitiated = !closed;
++        closed = true;
++        failAllPending(drainCause);
++        if (peerInitiated) {
++            dispatchExecutor.shutdownNow();
++            transportDeathNotifier.run();
++        }
++    }
++
+     private void dispatch(String frame) {
+         SimpleXMessageCodec.DecodedFrame decoded;
+         try {
+diff --git a/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXReconnectTest.java b/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXReconnectTest.java
+index 087ca36d..e35d14dc 100644
+--- a/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXReconnectTest.java
++++ b/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXReconnectTest.java
+@@ -1,19 +1,24 @@
+ package app.zcat.infochat.messaging.impl.simplex;
+ 
+ import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertFalse;
+ import static org.junit.jupiter.api.Assertions.assertNotNull;
+ import static org.junit.jupiter.api.Assertions.assertNull;
+ import static org.junit.jupiter.api.Assertions.assertThrows;
++import static org.junit.jupiter.api.Assertions.assertTrue;
+ 
+ import com.fasterxml.jackson.databind.JsonNode;
+ import com.fasterxml.jackson.databind.ObjectMapper;
+ 
++import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
++
+ import app.zcat.infochat.messaging.FailureCategory;
+ import app.zcat.infochat.messaging.InboundMessage;
+ import app.zcat.infochat.messaging.MessageHandle;
+ import app.zcat.infochat.messaging.MessagingException;
+ import app.zcat.infochat.messaging.OutboundMessage;
+ import app.zcat.infochat.messaging.ScopeRef;
++import app.zcat.infochat.messaging.metrics.AdapterMetrics;
+ 
+ import java.net.http.HttpClient;
+ import java.nio.file.Path;
+@@ -208,8 +213,156 @@ class SimpleXReconnectTest {
+         }
+     }
+ 
++    @Test
++    void peerCloseRecoversWithoutProcessExit() throws Exception {
++        // M1-674 acceptance item 2: simplex-chat stays alive but its bot
++        // WebSocket dies (the audit's MSG-1 gap) — the adapter must rebuild
++        // the WS against the still-alive subprocess, and a subsequent send
++        // must run against a live transport with NO process exit involved.
++        // Route recorded per the ticket: adapter-side rebuild, not the
++        // supervisor restart path (which would exit the process).
++        try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
++            fake.start();
++            SimpleXAdapter adapter = newAdapter(fake, MS_SCALE_BACKOFF);
++            SimpleXSubprocess sub = newStayAliveSubprocess();
++            sub.start();
++            Thread responder = startSendResponder(fake);
++            try {
++                adapter.attachSubprocess(sub);
++                adapter.rebuildWebSocket();
++                fake.awaitClient(WAIT);
++                int generationBeforeKill = fake.clientGeneration();
++                // Peer-initiated death: the connection is severed while the
++                // process (and its server socket) stay up.
++                fake.killClientConnection();
++                fake.awaitClientGeneration(generationBeforeKill + 1, Duration.ofSeconds(10));
++                MessageHandle handle = sendUntilSuccess(adapter, 10_000);
++                assertNotNull(handle,
++                        "send must succeed once the WebSocket was rebuilt against"
++                                + " the still-alive subprocess");
++                assertEquals(0, sub.restartCount(),
++                        "peer-close recovery must not involve a process restart");
++                assertEquals(SimpleXSubprocess.State.RUNNING, sub.state(),
++                        "the subprocess must have stayed alive across the recovery");
++            } finally {
++                responder.interrupt();
++                adapter.close();
++            }
++        }
++    }
++
++    @Test
++    void peerCloseRebuildWaitsTheFirstBackoffRungBeforeReconnecting() throws Exception {
++        // M1-674 pacing acceptance item: the FIRST rebuild attempt already
++        // waits the ladder's first rung — never an immediate hot retry — so
++        // a daemon that re-closes every fresh WebSocket is paced by at least
++        // one rung per rebuild. Lower-bound-only assertion: a timing upper
++        // bound flakes, and the pacing property IS the lower bound.
++        try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
++            fake.start();
++            Duration firstRung = Duration.ofMillis(400);
++            SimpleXAdapter adapter = newAdapter(fake, List.of(firstRung));
++            SimpleXSubprocess sub = newStayAliveSubprocess();
++            sub.start();
++            try {
++                adapter.attachSubprocess(sub);
++                adapter.rebuildWebSocket();
++                fake.awaitClient(WAIT);
++                int generationBeforeKill = fake.clientGeneration();
++                long killedAtNanos = System.nanoTime();
++                fake.killClientConnection();
++                fake.awaitClientGeneration(generationBeforeKill + 1, Duration.ofSeconds(10));
++                long elapsedMs = (System.nanoTime() - killedAtNanos) / 1_000_000;
++                assertTrue(elapsedMs >= firstRung.toMillis(),
++                        "rebuild handshake landed " + elapsedMs + " ms after the peer"
++                                + " close; the campaign must wait the first backoff rung"
++                                + " (" + firstRung.toMillis() + " ms) before its first"
++                                + " attempt");
++            } finally {
++                adapter.close();
++            }
++        }
++    }
++
++    @Test
++    void peerCloseWindowIsVisibleOnConnectionStatusGauge() throws Exception {
++        // M1-674 acceptance item 3: between the peer close and the completed
++        // recovery the adapter.connection.status gauge reads 0 — the outage
++        // is operator-visible, no false-green interval. The ladder's only
++        // rung is far longer than the test, so recovery cannot complete and
++        // the dead window is held open deterministically.
++        try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
++            fake.start();
++            SimpleXAdapter adapter = newAdapter(fake, List.of(Duration.ofSeconds(30)));
++            SimpleXSubprocess sub = newStayAliveSubprocess();
++            sub.start();
++            SimpleMeterRegistry registry = new SimpleMeterRegistry();
++            new AdapterMetrics(registry).bindAdapter(adapter);
++            try {
++                adapter.attachSubprocess(sub);
++                adapter.rebuildWebSocket();
++                fake.awaitClient(WAIT);
++                assertEquals(1.0, connectionStatus(registry),
++                        "precondition: a live transport reads 1 on the gauge");
++                fake.killClientConnection();
++                awaitDisconnectedGauge(registry, WAIT);
++                assertFalse(adapter.connected(),
++                        "connected() must report the dead transport");
++            } finally {
++                adapter.close();
++            }
++        }
++    }
++
+     // -- choreography helpers ------------------------------------------------
+ 
++    /** Ladder for the recovery tests: a single fast rung (steady 50 ms). */
++    private static final List<Duration> MS_SCALE_BACKOFF = List.of(Duration.ofMillis(50));
++
++    private SimpleXAdapter newAdapter(FakeSimpleXProcess fake, List<Duration> wsReconnectBackoff) {
++        SimpleXConfig cfg = new SimpleXConfig(
++                "/usr/bin/simplex-chat", tempDir.toString(), fake.port());
++        return new SimpleXAdapter(
++                cfg,
++                HttpClient.newHttpClient(),
++                msg -> { /* admin notifications unused here */ },
++                wsReconnectBackoff);
++    }
++
++    /**
++     * Supervised child that stays alive for the whole test ({@code exec
++     * sleep 30}): the peer-close tests need the process healthy while its
++     * WebSocket dies — the exact MSG-1 shape — and a dying stand-in would
++     * make the supervisor churn mid-test (the M1-655 lesson).
++     */
++    private SimpleXSubprocess newStayAliveSubprocess() {
++        return new SimpleXSubprocess(
++                List.of(SH, "-c", "exec sleep 30"),
++                Duration.ofMillis(10),
++                Duration.ofMillis(50),
++                /* crashCap */ 5,
++                msg -> { /* unused */ },
++                new Random(0L));
++    }
++
++    private static double connectionStatus(SimpleMeterRegistry registry) {
++        return registry.get("adapter.connection.status")
++                .tags("adapter", "simplex").gauge().value();
++    }
++
++    private static void awaitDisconnectedGauge(SimpleMeterRegistry registry, Duration timeout)
++            throws InterruptedException {
++        long deadline = System.nanoTime() + timeout.toNanos();
++        while (System.nanoTime() < deadline) {
++            if (connectionStatus(registry) == 0.0) {
++                return;
++            }
++            TimeUnit.MILLISECONDS.sleep(5);
++        }
++        throw new AssertionError("adapter.connection.status stayed "
++                + connectionStatus(registry) + " after the peer close; expected 0");
++    }
++
+     private SimpleXAdapter newAdapter(FakeSimpleXProcess fake) {
+         // The binary/dataDir are never exercised: start() is not called
+         // (cfg.validate() lives there) and the subprocess command is the
+diff --git a/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClientTest.java b/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClientTest.java
+index af9584ee..3236365d 100644
+--- a/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClientTest.java
++++ b/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClientTest.java
+@@ -14,11 +14,13 @@ import app.zcat.infochat.messaging.InboundMessage;
+ import app.zcat.infochat.messaging.MessagingException;
+ import app.zcat.infochat.messaging.ScopeRef;
+ 
++import java.io.IOException;
+ import java.lang.reflect.Field;
+ import java.net.URI;
+ import java.net.http.HttpClient;
+ import java.time.Duration;
+ import java.util.List;
++import java.util.concurrent.CountDownLatch;
+ import java.util.concurrent.LinkedBlockingQueue;
+ import java.util.concurrent.TimeUnit;
+ 
+@@ -278,6 +280,68 @@ class SimpleXWebSocketClientTest {
+                 "a send that races close() must surface as PERMANENT, not a raw RuntimeException");
+     }
+ 
++    @Test
++    void peerInitiatedCloseLatchesClientAndFiresDeathNotifier() {
++        // M1-674 acceptance item 1 (onClose arm): a peer-initiated close
++        // latches the client closed — isClosed() true, so
++        // SimpleXAdapter.connected() stops reporting the dead transport as
++        // healthy — and fires the transport-death notifier. The listener is
++        // driven directly (package-private seam): the RFC-6455 test fake
++        // cannot emit a server-side close frame, and the JDK plumbing from
++        // wire close frame to onClose is not ours to test.
++        SimpleXWebSocketClient client = newUnstartedClient();
++        CountDownLatch died = new CountDownLatch(1);
++        client.onTransportDeath(died::countDown);
++        client.new Listener().onClose(new ThrowingWebSocket(), 1000, "server going away");
++        assertTrue(client.isClosed(),
++                "a peer-initiated close must latch the client closed");
++        assertEquals(0, died.getCount(),
++                "a peer-initiated close must fire the transport-death notifier");
++    }
++
++    @Test
++    void onErrorLatchesClientAndFiresDeathNotifier() {
++        // M1-674 acceptance item 1 (onError arm): a transport-error terminal
++        // event latches and notifies exactly like a peer close.
++        SimpleXWebSocketClient client = newUnstartedClient();
++        CountDownLatch died = new CountDownLatch(1);
++        client.onTransportDeath(died::countDown);
++        client.new Listener().onError(new ThrowingWebSocket(),
++                new IOException("connection reset"));
++        assertTrue(client.isClosed(), "onError must latch the client closed");
++        assertEquals(0, died.getCount(),
++                "onError must fire the transport-death notifier");
++    }
++
++    @Test
++    void localCloseDoesNotFireDeathNotifier() {
++        // M1-674: the recovery arm must fire only for PEER-initiated death.
++        // A local close() latches `closed` before aborting the socket, so a
++        // terminal event the abort provokes is suppressed — otherwise every
++        // deliberate teardown (adapter close, reconnect rebuild) would spawn
++        // a rebuild campaign against a transport closed on purpose.
++        SimpleXWebSocketClient client = newUnstartedClient();
++        CountDownLatch died = new CountDownLatch(1);
++        client.onTransportDeath(died::countDown);
++        client.close();
++        client.new Listener().onError(new ThrowingWebSocket(),
++                new IOException("socket aborted by local close"));
++        assertTrue(client.isClosed());
++        assertEquals(1, died.getCount(),
++                "a terminal event after a local close() is not a peer death;"
++                        + " the notifier must not fire");
++    }
++
++    private static SimpleXWebSocketClient newUnstartedClient() {
++        // Never started: the latch tests drive the listener directly, so no
++        // socket is needed (the URI is never dialed).
++        return new SimpleXWebSocketClient(
++                URI.create("ws://127.0.0.1:1"),
++                HttpClient.newHttpClient(),
++                msg -> { /* unused */ },
++                gc -> { /* unused */ });
++    }
++
+     private static void awaitLogContains(CapturingLogHandler capture,
+                                          String needle,
+                                          Duration timeout) throws InterruptedException {

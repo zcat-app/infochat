@@ -90,9 +90,30 @@ public final class SimpleXAdapter implements MessagingAdapter {
     static final Duration WS_READY_TIMEOUT = Duration.ofSeconds(10);
     static final Duration ACK_TIMEOUT = Duration.ofSeconds(30);
 
+    // §6.4.6 network-failure reconnect ladder (docs/design/06-messaging.md):
+    // delay BEFORE each peer-close-triggered rebuild attempt, advancing one
+    // rung per consecutive failure and holding at the 60 s steady state.
+    // Even the first attempt waits the 1 s rung — never an immediate retry —
+    // so a daemon that kills every fresh WebSocket paces the rebuild loop
+    // instead of spinning it hot. A successful reconnect ends the campaign,
+    // so the next death starts back at 1 s (§6.4.6: "a successful reconnect
+    // resets the network-failure counter"). (M1-674)
+    static final List<Duration> WS_RECONNECT_BACKOFF = List.of(
+            Duration.ofSeconds(1), Duration.ofSeconds(2), Duration.ofSeconds(5),
+            Duration.ofSeconds(15), Duration.ofSeconds(60));
+
+    // How often a transport-death notification re-tries the single-flight flag
+    // while another recovery holds it (M1-674). Short relative to the ladder's
+    // shortest rung, so a waiter picks the campaign up promptly once the
+    // holder exits; the waiters are virtual threads doing one CAS per tick.
+    private static final Duration RECOVERY_FLAG_POLL = Duration.ofMillis(50);
+
     private final @Nullable SimpleXConfig config;
     private final @Nullable HttpClient httpClient;
     private final @Nullable Consumer<String> adminNotifier;
+    // Peer-close rebuild pacing (M1-674); WS_RECONNECT_BACKOFF except in
+    // tests, whose millisecond rungs keep the recovery tests fast.
+    private final List<Duration> wsReconnectBackoff;
 
     /**
      * Upper bound on tracked send-handles. Pre-M1-148 the handle and
@@ -180,6 +201,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
         this.config = null;
         this.httpClient = null;
         this.adminNotifier = null;
+        this.wsReconnectBackoff = WS_RECONNECT_BACKOFF;
     }
 
     /**
@@ -194,9 +216,28 @@ public final class SimpleXAdapter implements MessagingAdapter {
     public SimpleXAdapter(SimpleXConfig config,
                           HttpClient httpClient,
                           Consumer<String> adminNotifier) {
+        this(config, httpClient, adminNotifier, WS_RECONNECT_BACKOFF);
+    }
+
+    // Test seam: a millisecond-scale ladder keeps the peer-close recovery
+    // tests wall-clock fast (the SimpleXSubprocess injectable-backoff
+    // precedent). Production wiring always takes the public constructor
+    // above and with it the §6.4.6 ladder.
+    SimpleXAdapter(SimpleXConfig config,
+                   HttpClient httpClient,
+                   Consumer<String> adminNotifier,
+                   List<Duration> wsReconnectBackoff) {
+        if (wsReconnectBackoff.isEmpty()) {
+            // An empty ladder would make the recovery campaign's rung lookup
+            // throw IndexOutOfBounds on its first attempt, killing the campaign
+            // thread and wedging recovery. Rejected here, where a mis-wired
+            // test fails loudly, rather than there (redteam-multi 2026-07-22).
+            throw new IllegalArgumentException("wsReconnectBackoff must be non-empty");
+        }
         this.config = config;
         this.httpClient = httpClient;
         this.adminNotifier = adminNotifier;
+        this.wsReconnectBackoff = List.copyOf(wsReconnectBackoff);
     }
 
     @Override
@@ -356,6 +397,10 @@ public final class SimpleXAdapter implements MessagingAdapter {
         // frame is counted; bindMetrics() below re-binds a live ws if metrics
         // arrive after the transport is already up.
         ws.bindMetrics(metrics);
+        // Registered BEFORE start() so a peer close arriving the instant the
+        // handshake completes can never slip past the notifier (M1-674) —
+        // the listener only runs once start()'s handshake is done.
+        ws.onTransportDeath(this::onWsTransportDeath);
         ws.start();
         this.webSocket = ws;
     }
@@ -447,6 +492,193 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     /**
+     * Transport-death notification entry point handed to every
+     * {@link SimpleXWebSocketClient} (M1-674). Fires on the WS listener
+     * thread — the recovery campaign sleeps on the backoff ladder and
+     * blocks in the ready probe, so it must hop to its own thread,
+     * mirroring {@link #onSubprocessRestart}.
+     */
+    private void onWsTransportDeath() {
+        Thread.ofVirtual()
+                .name("simplex-adapter-ws-recovery")
+                .start(this::recoverFromTransportDeath);
+    }
+
+    /**
+     * Peer-close recovery arm (M1-674, audit finding MSG-1): the
+     * simplex-chat process is still alive but its WebSocket died — a
+     * server-side idle close or a daemon-internal connection error — so no
+     * supervised restart will ever fire and, pre-M1-674, nothing rebuilt
+     * the transport. Rebuild it here, paced by the §6.4.6 network-failure
+     * ladder ({@link #WS_RECONNECT_BACKOFF}).
+     *
+     * <p><b>Ownership split with the process-exit arm.</b> A dying process
+     * also fires the WS terminal event, and two arms rebuilding
+     * concurrently would tear down each other's fresh client — so the two
+     * are single-flight via {@link #reconnectInFlight}, held across the
+     * whole campaign. Whichever arm holds the flag does the rebuilding: a
+     * restart notification landing mid-campaign no-ops in {@link #reconnect}
+     * (it drops the notification on a lost CAS), and this campaign is what
+     * makes that drop harmless — it keeps its paced watch across the
+     * subprocess's not-{@code RUNNING} window rather than abandoning, so it
+     * is the arm that picks the respawned child up, at the cost of at most
+     * one ladder rung of extra delay. A campaign that abandoned mid-restart
+     * would leave the respawned child with a latched-dead transport and
+     * nothing rebuilding it (redteam-multi 2026-07-22). The campaign returns
+     * only on teardown or a terminally {@code FAILED} supervisor, where no
+     * rebuild can succeed and {@link #requireConnected} classifies sends
+     * permanent. If some other party already revived the transport while
+     * this campaign slept, the live client is left untouched.</p>
+     *
+     * <p><b>A notification never gives the flag up.</b> The transport-death
+     * notifier fires at most once per client, so an entry that found the flag
+     * held and returned would consume that one wakeup without scheduling
+     * anything — and a holder on its success tail, having already made its
+     * liveness checks, will not answer the death that just happened either.
+     * The result is the MSG-1 end state this arm exists to close: client
+     * latched dead, subprocess RUNNING, no thread left to rebuild. So entry
+     * waits for the flag instead, and re-checks liveness once it holds it —
+     * that also covers the exit arm's identical tail without reaching into
+     * {@link #reconnect}. Waiters cost one CAS per {@link
+     * #RECOVERY_FLAG_POLL} tick on a virtual thread, and the ladder paces
+     * fresh clients — hence fresh deaths — to at most one per rung, so the
+     * queue stays short and drains through the stale-notification exit below.
+     * (redteam-multi 2026-07-22.)</p>
+     */
+    private void recoverFromTransportDeath() {
+        while (!reconnectInFlight.compareAndSet(false, true)) {
+            // The exit arm (or an earlier campaign) is already recovering;
+            // wait it out rather than dropping this death — see the javadoc.
+            if (closedForGood) {
+                return;
+            }
+            try {
+                Thread.sleep(RECOVERY_FLAG_POLL.toMillis());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        try {
+            if (closedForGood) {
+                return;
+            }
+            SimpleXWebSocketClient live = webSocket;
+            if (live != null && !live.isClosed()) {
+                // Stale notification: the holder this thread waited for already
+                // answered the death (or a later one) with a live client. Exit
+                // without raising `reconnecting` — a healthy transport must not
+                // be reported as an outage, and it must not be torn down and
+                // rebuilt just because a spent notification arrived late.
+                return;
+            }
+            // Raised before the first ladder sleep so gap sends classify
+            // TRANSIENT for the whole window; the finally clears it on every
+            // exit path, unchecked throws included — unlike the exit arm, this
+            // campaign never parks the flag for a later event to resolve.
+            reconnecting = true;
+            int failedAttempts = 0;
+            while (true) {
+                Duration rung = wsReconnectBackoff.get(
+                        Math.min(failedAttempts, wsReconnectBackoff.size() - 1));
+                try {
+                    Thread.sleep(rung.toMillis());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                if (closedForGood) {
+                    return;
+                }
+                SimpleXConfig cfg = config;
+                SimpleXSubprocess sub = subprocess;
+                if (cfg == null || sub == null
+                        || sub.state() == SimpleXSubprocess.State.FAILED) {
+                    // Torn down, or the supervisor has given up for good — no
+                    // rebuild can ever succeed from here, and requireConnected
+                    // classifies sends PERMANENT.
+                    return;
+                }
+                if (sub.state() != SimpleXSubprocess.State.RUNNING) {
+                    // Between processes (starting or restarting). Keep the paced
+                    // watch instead of returning: the exit arm drops its restart
+                    // notification whenever it loses the CAS to this campaign,
+                    // so a campaign that abandoned here would leave the
+                    // respawned child with a latched-dead transport and nothing
+                    // rebuilding it. Staying is what makes that dropped
+                    // notification harmless. Not counted against the ladder —
+                    // waiting for a process is not a failed rebuild attempt.
+                    // (redteam-multi 2026-07-22.)
+                    continue;
+                }
+                SimpleXWebSocketClient current = webSocket;
+                if (current != null && !current.isClosed()) {
+                    // The exit arm revived the transport while this campaign
+                    // slept between attempts; do not tear a live client down
+                    // to rebuild it. (A latched-dead client needs no close():
+                    // the terminal-event latch already drained its futures
+                    // and shut its dispatcher, so the rebuild below orphans
+                    // an inert object.)
+                    return;
+                }
+                try {
+                    waitForWebSocketReady(cfg.wsPort());
+                    rebuildWebSocket();
+                    buildGroupHandler();
+                    if (subprocess == null || closedForGood) {
+                        // close() won the race while we were rebuilding — do
+                        // not resurrect the transport after teardown (the
+                        // same guard as reconnect()).
+                        SimpleXWebSocketClient fresh = webSocket;
+                        if (fresh != null) {
+                            fresh.close();
+                            webSocket = null;
+                        }
+                        return;
+                    }
+                    LOG.info("SimpleX adapter rebuilt its WebSocket after a"
+                                    + " peer-initiated close ({} failed attempts)",
+                            failedAttempts);
+                    return;
+                } catch (MessagingException e) {
+                    failedAttempts++;
+                    // §6.4.6: first reconnect failure at WARN, subsequent at
+                    // INFO. Category only — no transport bytes (D37).
+                    if (failedAttempts == 1) {
+                        LOG.warn("SimpleX WebSocket rebuild after peer close"
+                                        + " failed ({}); retrying on the §6.4.6 ladder",
+                                e.category());
+                    } else {
+                        LOG.info("SimpleX WebSocket rebuild after peer close"
+                                        + " failed ({}); attempt {} will retry",
+                                e.category(), failedAttempts);
+                    }
+                } catch (RuntimeException e) {
+                    // An unchecked escape must not kill this thread: the death
+                    // notifier is spent, the current client is already latched
+                    // dead, and no further terminal event can fire while the
+                    // process stays alive — so a dead campaign is a permanent
+                    // outage, the exact MSG-1 shape (redteam-multi 2026-07-22).
+                    // Count it against the ladder and keep pacing. Class name
+                    // only, never the message (D37), and via the application
+                    // logger rather than the JVM's stderr default handler.
+                    failedAttempts++;
+                    LOG.warn("SimpleX WebSocket rebuild after peer close threw {};"
+                                    + " attempt {} will retry on the §6.4.6 ladder",
+                            e.getClass().getSimpleName(), failedAttempts);
+                }
+            }
+        } finally {
+            // One clear for every exit — including an unchecked throw from
+            // outside the attempt's own catch arms. A campaign thread that
+            // died with this flag latched true would leave every send
+            // classifying TRANSIENT against a transport nothing is rebuilding.
+            reconnecting = false;
+            reconnectInFlight.set(false);
+        }
+    }
+
+    /**
      * Disconnect the WebSocket and terminate the simplex-chat subprocess
      * (SIGTERM, grace, SIGKILL via {@link SimpleXSubprocess#stop}).
      * Idempotent — safe to call on a never-started adapter or after a
@@ -494,8 +726,9 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     /**
-     * Inbound deliveries dropped on dispatch-queue overflow, read through
-     * the live WebSocket client. Zero before the transport is wired.
+     * Inbound deliveries dropped on dispatch-queue overflow or discarded by a
+     * peer-initiated transport death, read through the live WebSocket client.
+     * Zero before the transport is wired.
      */
     @Override
     public long droppedInboundCount() {
@@ -918,6 +1151,19 @@ public final class SimpleXAdapter implements MessagingAdapter {
             throw new MessagingException(FailureCategory.PERMANENT,
                     "SimpleXAdapter is closed");
         }
+        // Terminal supervisor failure outranks every recoverable-outage arm
+        // below, so it is classified ahead of them: once the supervisor has
+        // FAILED nothing will ever rebuild the transport, and TRANSIENT would
+        // loop the Provider's retry forever. It must precede the `reconnecting`
+        // branch in particular — a failed exit-arm rebuild parks that flag true
+        // (see reconnect()'s catch) and no path clears it on the FAILED
+        // transition, so a permanent outage would otherwise classify transient
+        // for good. (redteam-multi 2026-07-22.)
+        if (supervisorTerminallyFailed()) {
+            throw new MessagingException(FailureCategory.PERMANENT,
+                    "SimpleX transport is dead and its subprocess supervisor"
+                            + " has terminally failed");
+        }
         // Checked BEFORE the null→PERMANENT branch: a send during the
         // restart→rebuild gap is a recoverable outage the Provider's retry
         // machinery should ride out, while an un-started adapter stays
@@ -931,6 +1177,15 @@ public final class SimpleXAdapter implements MessagingAdapter {
         if (ws == null) {
             throw new MessagingException(FailureCategory.PERMANENT,
                     "SimpleXAdapter is not started; call start() first");
+        }
+        // A latched-dead client (peer-closed WebSocket, M1-674) is a
+        // recoverable outage while the supervised process can still serve a
+        // rebuild — TRANSIENT, like the reconnecting window above, covering
+        // the gap before the recovery campaign raises the flag. The
+        // terminally-failed case is PERMANENT and already returned above.
+        if (ws.isClosed()) {
+            throw new MessagingException(FailureCategory.TRANSIENT,
+                    "SimpleX WebSocket was closed by the peer; recovery pending");
         }
         return ws;
     }

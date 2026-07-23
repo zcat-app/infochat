@@ -1,12 +1,16 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import app.zcat.infochat.messaging.FailureCategory;
 import app.zcat.infochat.messaging.InboundMessage;
@@ -14,6 +18,7 @@ import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 import java.net.http.HttpClient;
 import java.nio.file.Path;
@@ -208,7 +213,256 @@ class SimpleXReconnectTest {
         }
     }
 
+    @Test
+    void peerCloseRecoversWithoutProcessExit() throws Exception {
+        // M1-674 acceptance item 2: simplex-chat stays alive but its bot
+        // WebSocket dies (the audit's MSG-1 gap) — the adapter must rebuild
+        // the WS against the still-alive subprocess, and a subsequent send
+        // must run against a live transport with NO process exit involved.
+        // Route recorded per the ticket: adapter-side rebuild, not the
+        // supervisor restart path (which would exit the process).
+        try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
+            fake.start();
+            SimpleXAdapter adapter = newAdapter(fake, MS_SCALE_BACKOFF);
+            SimpleXSubprocess sub = newStayAliveSubprocess();
+            sub.start();
+            Thread responder = startSendResponder(fake);
+            try {
+                adapter.attachSubprocess(sub);
+                adapter.rebuildWebSocket();
+                fake.awaitClient(WAIT);
+                int generationBeforeKill = fake.clientGeneration();
+                // Peer-initiated death: the connection is severed while the
+                // process (and its server socket) stay up.
+                fake.killClientConnection();
+                fake.awaitClientGeneration(generationBeforeKill + 1, Duration.ofSeconds(10));
+                MessageHandle handle = sendUntilSuccess(adapter, 10_000);
+                assertNotNull(handle,
+                        "send must succeed once the WebSocket was rebuilt against"
+                                + " the still-alive subprocess");
+                assertEquals(0, sub.restartCount(),
+                        "peer-close recovery must not involve a process restart");
+                assertEquals(SimpleXSubprocess.State.RUNNING, sub.state(),
+                        "the subprocess must have stayed alive across the recovery");
+            } finally {
+                responder.interrupt();
+                adapter.close();
+            }
+        }
+    }
+
+    @Test
+    void peerCloseRebuildWaitsTheFirstBackoffRungBeforeReconnecting() throws Exception {
+        // M1-674 pacing acceptance item: the FIRST rebuild attempt already
+        // waits the ladder's first rung — never an immediate hot retry — so
+        // a daemon that re-closes every fresh WebSocket is paced by at least
+        // one rung per rebuild. Lower-bound-only assertion: a timing upper
+        // bound flakes, and the pacing property IS the lower bound.
+        try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
+            fake.start();
+            Duration firstRung = Duration.ofMillis(400);
+            SimpleXAdapter adapter = newAdapter(fake, List.of(firstRung));
+            SimpleXSubprocess sub = newStayAliveSubprocess();
+            sub.start();
+            try {
+                adapter.attachSubprocess(sub);
+                adapter.rebuildWebSocket();
+                fake.awaitClient(WAIT);
+                int generationBeforeKill = fake.clientGeneration();
+                long killedAtNanos = System.nanoTime();
+                fake.killClientConnection();
+                fake.awaitClientGeneration(generationBeforeKill + 1, Duration.ofSeconds(10));
+                long elapsedMs = (System.nanoTime() - killedAtNanos) / 1_000_000;
+                assertTrue(elapsedMs >= firstRung.toMillis(),
+                        "rebuild handshake landed " + elapsedMs + " ms after the peer"
+                                + " close; the campaign must wait the first backoff rung"
+                                + " (" + firstRung.toMillis() + " ms) before its first"
+                                + " attempt");
+            } finally {
+                adapter.close();
+            }
+        }
+    }
+
+    @Test
+    void peerCloseWindowIsVisibleOnConnectionStatusGauge() throws Exception {
+        // M1-674 acceptance item 3: between the peer close and the completed
+        // recovery the adapter.connection.status gauge reads 0 — the outage
+        // is operator-visible, no false-green interval. The ladder's only
+        // rung is far longer than the test, so recovery cannot complete and
+        // the dead window is held open deterministically.
+        try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
+            fake.start();
+            SimpleXAdapter adapter = newAdapter(fake, List.of(Duration.ofSeconds(30)));
+            SimpleXSubprocess sub = newStayAliveSubprocess();
+            sub.start();
+            SimpleMeterRegistry registry = new SimpleMeterRegistry();
+            new AdapterMetrics(registry).bindAdapter(adapter);
+            try {
+                adapter.attachSubprocess(sub);
+                adapter.rebuildWebSocket();
+                fake.awaitClient(WAIT);
+                assertEquals(1.0, connectionStatus(registry),
+                        "precondition: a live transport reads 1 on the gauge");
+                fake.killClientConnection();
+                awaitDisconnectedGauge(registry, WAIT);
+                assertFalse(adapter.connected(),
+                        "connected() must report the dead transport");
+            } finally {
+                adapter.close();
+            }
+        }
+    }
+
+    @Test
+    void emptyReconnectBackoffLadderIsRejectedAtConstruction() {
+        // M1-674: the recovery campaign indexes the ladder on every attempt,
+        // so an empty one throws IndexOutOfBounds on the recovery thread —
+        // and a campaign thread that dies is unrecoverable: the death
+        // notifier is one-shot per client, the current client is already
+        // latched dead, and no further terminal event can fire while the
+        // simplex-chat process stays alive. Rejecting the ladder at
+        // construction keeps a mis-wired seam a loud wiring failure instead
+        // of a silent permanent outage (redteam-multi 2026-07-22).
+        SimpleXConfig cfg = new SimpleXConfig(
+                "/usr/bin/simplex-chat", tempDir.toString(), 5225);
+        HttpClient http = HttpClient.newHttpClient();
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class,
+                () -> new SimpleXAdapter(cfg, http, msg -> { /* unused */ }, List.of()));
+        assertTrue(failure.getMessage().contains("non-empty"),
+                "the rejection must name the empty ladder; got: " + failure.getMessage());
+    }
+
+    @Test
+    void terminalSupervisorFailureOutranksTheParkedReconnectingFlag() throws Exception {
+        // M1-674 acceptance item 9: `reconnecting` is parked true by a failed
+        // rebuild and no path clears it on the supervisor's FAILED transition,
+        // so a terminal-failure arm classified BEHIND that flag would answer
+        // every send TRANSIENT forever — the Provider retrying against a
+        // transport that can never come back. The terminal arm must therefore
+        // be classified ahead of it (redteam-multi 2026-07-22).
+        try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
+            fake.start();
+            // A single 30 s rung: the campaign raises `reconnecting` and then
+            // sleeps past the end of the test, so the flag is deterministically
+            // still set when the supervisor reaches FAILED.
+            SimpleXAdapter adapter = newAdapter(fake, List.of(Duration.ofSeconds(30)));
+            SimpleXSubprocess sub = newCrashLoopingSubprocess();
+            sub.start();
+            try {
+                adapter.attachSubprocess(sub);
+                adapter.rebuildWebSocket();
+                fake.awaitClient(WAIT);
+                fake.killClientConnection();
+                awaitReconnectingClassification(adapter, Duration.ofSeconds(5));
+                // Every incarnation now exits immediately, so the supervisor
+                // burns its crash cap and gives up terminally.
+                touchDieFlag();
+                awaitSubprocessState(sub, SimpleXSubprocess.State.FAILED, Duration.ofSeconds(10));
+                MessagingException afterFailure = assertThrows(MessagingException.class,
+                        () -> adapter.send(outbound("post-failure")));
+                assertEquals(FailureCategory.PERMANENT, afterFailure.category(),
+                        "a terminally-failed supervisor must classify sends PERMANENT even"
+                                + " while the parked `reconnecting` flag is still set");
+            } finally {
+                adapter.close();
+            }
+        }
+    }
+
+    @Test
+    void campaignAloneCarriesRecoveryAcrossASubprocessRestartWindow() throws Exception {
+        // M1-674 acceptance item 10: the exit arm drops its restart
+        // notification whenever it loses the single-flight CAS to a running
+        // campaign, so a campaign that abandoned the moment it observed a
+        // not-RUNNING subprocess would leave the respawned child with a
+        // latched-dead transport and nothing rebuilding it. Unhooking the
+        // restart listener models that dropped notification exactly: here the
+        // campaign is the only arm that can recover, and it must carry the
+        // transport across the whole restart window (redteam-multi
+        // 2026-07-22).
+        try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
+            fake.start();
+            SimpleXAdapter adapter = newAdapter(fake, List.of(Duration.ofMillis(100)));
+            // Restart backoff far wider than the ladder rung, so the campaign
+            // is guaranteed to observe the not-RUNNING window rather than
+            // sleeping through it.
+            SimpleXSubprocess sub = newOneShotSubprocess(
+                    Duration.ofMillis(1_500), Duration.ofMillis(1_500));
+            sub.start();
+            try {
+                adapter.attachSubprocess(sub);
+                adapter.rebuildWebSocket();
+                fake.awaitClient(WAIT);
+                // Last registration wins: the adapter's exit arm is unhooked,
+                // standing in for the notification it would have dropped.
+                sub.onRestart(() -> { /* the dropped restart notification */ });
+                int generationBeforeKill = fake.clientGeneration();
+                // Process first, transport second: the campaign then starts
+                // inside the restart window and its first attempt necessarily
+                // observes a not-RUNNING subprocess.
+                touchDieFlag();
+                awaitSubprocessState(sub, SimpleXSubprocess.State.RESTARTING,
+                        Duration.ofSeconds(5));
+                fake.killClientConnection();
+                fake.awaitClientGeneration(generationBeforeKill + 1, Duration.ofSeconds(20));
+                assertEquals(1, sub.restartCount(),
+                        "the recovery must have spanned a real supervised restart");
+            } finally {
+                adapter.close();
+            }
+        }
+    }
+
     // -- choreography helpers ------------------------------------------------
+
+    /** Ladder for the recovery tests: a single fast rung (steady 50 ms). */
+    private static final List<Duration> MS_SCALE_BACKOFF = List.of(Duration.ofMillis(50));
+
+    private SimpleXAdapter newAdapter(FakeSimpleXProcess fake, List<Duration> wsReconnectBackoff) {
+        SimpleXConfig cfg = new SimpleXConfig(
+                "/usr/bin/simplex-chat", tempDir.toString(), fake.port());
+        return new SimpleXAdapter(
+                cfg,
+                HttpClient.newHttpClient(),
+                msg -> { /* admin notifications unused here */ },
+                wsReconnectBackoff);
+    }
+
+    /**
+     * Supervised child that stays alive for the whole test ({@code exec
+     * sleep 30}): the peer-close tests need the process healthy while its
+     * WebSocket dies — the exact MSG-1 shape — and a dying stand-in would
+     * make the supervisor churn mid-test (the M1-655 lesson).
+     */
+    private SimpleXSubprocess newStayAliveSubprocess() {
+        return new SimpleXSubprocess(
+                List.of(SH, "-c", "exec sleep 30"),
+                Duration.ofMillis(10),
+                Duration.ofMillis(50),
+                /* crashCap */ 5,
+                msg -> { /* unused */ },
+                new Random(0L));
+    }
+
+    private static double connectionStatus(SimpleMeterRegistry registry) {
+        return registry.get("adapter.connection.status")
+                .tags("adapter", "simplex").gauge().value();
+    }
+
+    private static void awaitDisconnectedGauge(SimpleMeterRegistry registry, Duration timeout)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            if (connectionStatus(registry) == 0.0) {
+                return;
+            }
+            TimeUnit.MILLISECONDS.sleep(5);
+        }
+        throw new AssertionError("adapter.connection.status stayed "
+                + connectionStatus(registry) + " after the peer close; expected 0");
+    }
 
     private SimpleXAdapter newAdapter(FakeSimpleXProcess fake) {
         // The binary/dataDir are never exercised: start() is not called
@@ -228,6 +482,15 @@ class SimpleXReconnectTest {
      * child sees the RESTARTED flag and {@code exec sleep 30}s (stable).
      */
     private SimpleXSubprocess newOneShotSubprocess() {
+        return newOneShotSubprocess(Duration.ofMillis(10), Duration.ofMillis(50));
+    }
+
+    /**
+     * Backoff-parameterised variant: the campaign-carries-the-restart test
+     * needs the RESTARTING window held open across several ladder rungs, so
+     * the campaign observes it rather than sleeping through it.
+     */
+    private SimpleXSubprocess newOneShotSubprocess(Duration backoffBase, Duration backoffMax) {
         Path die = tempDir.resolve("die-flag");
         Path restarted = tempDir.resolve("restarted-flag");
         String script = "if [ -f " + restarted + " ]; then exec sleep 30; fi; "
@@ -235,11 +498,80 @@ class SimpleXReconnectTest {
                 + "touch " + restarted + "; exit 0";
         return new SimpleXSubprocess(
                 List.of(SH, "-c", script),
-                Duration.ofMillis(10),
-                Duration.ofMillis(50),
+                backoffBase,
+                backoffMax,
                 /* crashCap */ 5,
                 msg -> { /* unused */ },
                 new Random(0L));
+    }
+
+    /**
+     * Supervised child that crashes on the test's signal and keeps crashing:
+     * once the DIE flag exists every incarnation exits immediately, so the
+     * supervisor burns its (deliberately small) crash cap and latches FAILED.
+     */
+    private SimpleXSubprocess newCrashLoopingSubprocess() {
+        Path die = tempDir.resolve("die-flag");
+        String script = "while [ ! -f " + die + " ]; do sleep 0.05; done; exit 1";
+        return new SimpleXSubprocess(
+                List.of(SH, "-c", script),
+                Duration.ofMillis(10),
+                Duration.ofMillis(50),
+                /* crashCap */ 2,
+                msg -> { /* unused */ },
+                new Random(0L));
+    }
+
+    private static void awaitSubprocessState(SimpleXSubprocess sub,
+                                             SimpleXSubprocess.State target,
+                                             Duration timeout) throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            if (sub.state() == target) {
+                return;
+            }
+            TimeUnit.MILLISECONDS.sleep(5);
+        }
+        throw new AssertionError("subprocess stayed " + sub.state()
+                + " within " + timeout.toMillis() + " ms; expected " + target);
+    }
+
+    /**
+     * Barrier that waits for the recovery campaign to raise {@code
+     * reconnecting}, recognised through the classification message because the
+     * flag itself is private. Until it is raised the latched-dead-client arm
+     * answers with its own TRANSIENT, so both readings are asserted transient
+     * and only the message distinguishes them.
+     */
+    private static void awaitReconnectingClassification(SimpleXAdapter adapter, Duration timeout)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        // Latch barrier first. A send issued before the transport-death latch
+        // is visible reaches the dying socket and is categorised by the client
+        // rather than by requireConnected, so no classification assertion below
+        // is meaningful until connected() has flipped.
+        while (adapter.connected()) {
+            if (System.nanoTime() >= deadline) {
+                throw new AssertionError("the peer close never latched the transport dead;"
+                        + " connected() still reports the adapter up");
+            }
+            TimeUnit.MILLISECONDS.sleep(5);
+        }
+        String last = "<no send attempted>";
+        while (System.nanoTime() < deadline) {
+            MessagingException failure = assertThrows(MessagingException.class,
+                    () -> adapter.send(outbound("await-reconnecting")));
+            assertEquals(FailureCategory.TRANSIENT, failure.category(),
+                    "with the transport latched dead and the supervisor still alive,"
+                            + " a gap send is TRANSIENT");
+            last = failure.getMessage();
+            if (last.contains("reconnecting")) {
+                return;
+            }
+            TimeUnit.MILLISECONDS.sleep(10);
+        }
+        throw new AssertionError("the recovery campaign never raised `reconnecting`;"
+                + " last send failure was: " + last);
     }
 
     private void touchDieFlag() throws Exception {

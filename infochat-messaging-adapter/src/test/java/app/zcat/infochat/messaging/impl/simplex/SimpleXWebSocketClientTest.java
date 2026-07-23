@@ -14,11 +14,14 @@ import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.ScopeRef;
 
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -276,6 +279,176 @@ class SimpleXWebSocketClientTest {
                         WAIT));
         assertEquals(FailureCategory.PERMANENT, ex.category(),
                 "a send that races close() must surface as PERMANENT, not a raw RuntimeException");
+    }
+
+    @Test
+    void peerInitiatedCloseLatchesClientAndFiresDeathNotifier() {
+        // M1-674 acceptance item 1 (onClose arm): a peer-initiated close
+        // latches the client closed — isClosed() true, so
+        // SimpleXAdapter.connected() stops reporting the dead transport as
+        // healthy — and fires the transport-death notifier. The listener is
+        // driven directly (package-private seam): the RFC-6455 test fake
+        // cannot emit a server-side close frame, and the JDK plumbing from
+        // wire close frame to onClose is not ours to test.
+        SimpleXWebSocketClient client = newUnstartedClient();
+        CountDownLatch died = new CountDownLatch(1);
+        client.onTransportDeath(died::countDown);
+        client.new Listener().onClose(new ThrowingWebSocket(), 1000, "server going away");
+        assertTrue(client.isClosed(),
+                "a peer-initiated close must latch the client closed");
+        assertEquals(0, died.getCount(),
+                "a peer-initiated close must fire the transport-death notifier");
+    }
+
+    @Test
+    void onErrorLatchesClientAndFiresDeathNotifier() {
+        // M1-674 acceptance item 1 (onError arm): a transport-error terminal
+        // event latches and notifies exactly like a peer close.
+        SimpleXWebSocketClient client = newUnstartedClient();
+        CountDownLatch died = new CountDownLatch(1);
+        client.onTransportDeath(died::countDown);
+        client.new Listener().onError(new ThrowingWebSocket(),
+                new IOException("connection reset"));
+        assertTrue(client.isClosed(), "onError must latch the client closed");
+        assertEquals(0, died.getCount(),
+                "onError must fire the transport-death notifier");
+    }
+
+    @Test
+    void localCloseDoesNotFireDeathNotifier() {
+        // M1-674: the recovery arm must fire only for PEER-initiated death.
+        // A local close() latches `closed` before aborting the socket, so a
+        // terminal event the abort provokes is suppressed — otherwise every
+        // deliberate teardown (adapter close, reconnect rebuild) would spawn
+        // a rebuild campaign against a transport closed on purpose.
+        SimpleXWebSocketClient client = newUnstartedClient();
+        CountDownLatch died = new CountDownLatch(1);
+        client.onTransportDeath(died::countDown);
+        client.close();
+        client.new Listener().onError(new ThrowingWebSocket(),
+                new IOException("socket aborted by local close"));
+        assertTrue(client.isClosed());
+        assertEquals(1, died.getCount(),
+                "a terminal event after a local close() is not a peer death;"
+                        + " the notifier must not fire");
+    }
+
+    @Test
+    void transportDeathCountsAndLogsDiscardedQueuedInbound() throws Exception {
+        // M1-674 acceptance item 11 (round-3 redteam rework): the dispatcher
+        // teardown on a peer-initiated death discards queued-but-undelivered
+        // inbound, and that drop must be observable — added to the counter
+        // the readiness payload exposes as dropped-inbound, plus one WARN
+        // with the depth — unlike the deliberate local-close teardown, which
+        // stays uncounted. Park the single dispatch thread in the consumer,
+        // queue three more deliveries behind it, then drive the peer close
+        // through the listener seam (the RFC-6455 test fake cannot emit a
+        // server-side close frame).
+        CountDownLatch consumerEntered = new CountDownLatch(1);
+        CountDownLatch holdConsumer = new CountDownLatch(1);
+        CapturingLogHandler logCapture =
+                CapturingLogHandler.attach(SimpleXWebSocketClient.class);
+        try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
+            fake.start();
+            SimpleXWebSocketClient client = new SimpleXWebSocketClient(
+                    fake.wsUri(),
+                    HttpClient.newHttpClient(),
+                    msg -> {
+                        consumerEntered.countDown();
+                        try {
+                            holdConsumer.await();
+                        } catch (InterruptedException e) {
+                            // shutdownNow() interrupts the in-flight
+                            // delivery; unblocking is all this consumer does.
+                            Thread.currentThread().interrupt();
+                        }
+                    },
+                    gc -> { /* unused */ });
+            client.start();
+            try {
+                fake.awaitClient(WAIT);
+                fake.sendFrame(inboundFrame("blocker"));
+                assertTrue(consumerEntered.await(WAIT.toMillis(), TimeUnit.MILLISECONDS),
+                        "first delivery must reach the parked consumer");
+                for (int i = 0; i < 3; i++) {
+                    fake.sendFrame(inboundFrame("queued-" + i));
+                }
+                awaitDispatchQueueDepth(client, 3);
+                client.new Listener().onClose(new ThrowingWebSocket(), 1006, "peer died");
+                assertEquals(3, client.droppedInboundCount(),
+                        "the teardown must count exactly the queued-but-undelivered deliveries");
+                String captured = logCapture.formatted();
+                assertTrue(captured.contains(
+                                "transport death discarded 3 queued inbound deliveries"),
+                        "the bulk drop must be WARN-logged with its depth; captured: "
+                                + captured);
+            } finally {
+                holdConsumer.countDown();
+                client.close();
+            }
+        } finally {
+            logCapture.detach();
+        }
+    }
+
+    private static String inboundFrame(String itemId) {
+        return """
+                {
+                  "resp": {
+                    "type": "newChatItem",
+                    "chatItem": {
+                      "chatInfo": {
+                        "type": "direct",
+                        "contact": {
+                          "contactId": "flood-queue-addr",
+                          "localDisplayName": "Flood"
+                        }
+                      },
+                      "chatItem": {
+                        "meta": {"itemId": "%s"},
+                        "content": {
+                          "msgContent": {
+                            "type": "text",
+                            "text": "queued while parked"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                """.formatted(itemId);
+    }
+
+    // The queue has no depth accessor (production code has no reader), so the
+    // test peeks via reflection — the same seam idiom as the webSocket field
+    // above. Awaiting the exact depth before firing the close is what makes
+    // the counted-drop assertion deterministic: frames traverse the real
+    // socket asynchronously.
+    @SuppressWarnings("unchecked")
+    private static void awaitDispatchQueueDepth(SimpleXWebSocketClient client,
+                                                int depth) throws Exception {
+        Field queueField = SimpleXWebSocketClient.class.getDeclaredField("dispatchQueue");
+        queueField.setAccessible(true);
+        BlockingQueue<Runnable> queue = (BlockingQueue<Runnable>) queueField.get(client);
+        long deadline = System.nanoTime() + WAIT.toNanos();
+        while (System.nanoTime() < deadline) {
+            if (queue.size() == depth) {
+                return;
+            }
+            TimeUnit.MILLISECONDS.sleep(5);
+        }
+        throw new AssertionError("dispatch queue never reached depth " + depth
+                + "; current depth " + queue.size());
+    }
+
+    private static SimpleXWebSocketClient newUnstartedClient() {
+        // Never started: the latch tests drive the listener directly, so no
+        // socket is needed (the URI is never dialed).
+        return new SimpleXWebSocketClient(
+                URI.create("ws://127.0.0.1:1"),
+                HttpClient.newHttpClient(),
+                msg -> { /* unused */ },
+                gc -> { /* unused */ });
     }
 
     private static void awaitLogContains(CapturingLogHandler capture,

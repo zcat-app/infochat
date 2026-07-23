@@ -42,7 +42,11 @@ import java.util.concurrent.atomic.AtomicLong;
  * restarts the process on crash, and the adapter then re-runs
  * {@link #start} from scratch. Tearing the WS down independently of the
  * process would leave the adapter in a half-state nobody can recover; the
- * supervisor manages the whole pair.</p>
+ * supervisor manages the whole pair. What this class does own (M1-674) is
+ * the death signal: a peer-initiated close or transport error latches
+ * {@code closed} and fires the transport-death notifier, so the adapter
+ * can pace a rebuild while the process is still alive — see
+ * {@link #onTransportDeath}.</p>
  *
  * <p>Trust boundary: the WebSocket is an EXTERNAL system boundary, so
  * frames are validated by {@link SimpleXMessageCodec#decode}. A malformed
@@ -144,8 +148,9 @@ final class SimpleXWebSocketClient {
     private final int inboundQueueCapacity;
     private final BlockingQueue<Runnable> dispatchQueue;
     private final ExecutorService dispatchExecutor;
-    // Cumulative count of inbound deliveries dropped on queue overflow
-    // (distinct from the benign shutdown-time drops in dispatchAsync).
+    // Cumulative count of inbound deliveries dropped on queue overflow or
+    // discarded queued-but-undelivered by a peer-initiated transport death
+    // (distinct from the benign local-close shutdown drops in dispatchAsync).
     private final AtomicLong droppedInboundCount = new AtomicLong();
     // Late-bound by SimpleXAdapter (rebuildWebSocket / bindMetrics) from
     // AdapterMetrics.bindAdapter at registration; the noop() initializer keeps
@@ -162,6 +167,11 @@ final class SimpleXWebSocketClient {
     // IllegalStateException rejection, which silently drops the frame.
     private final Object sendLock = new Object();
     private volatile boolean closed = false;
+    // Fired at most once, from the WS listener thread, when the PEER (or a
+    // transport error) kills the connection — never for a local close();
+    // see latchTransportDeath. Seeded to a no-op so clients the adapter has
+    // not wired (unit tests) need no null check, mirroring the metrics field.
+    private volatile Runnable transportDeathNotifier = () -> { };
 
     // A client built without an invitation consumer ignores group invitations:
     // the inbound / group-candidate / transport tests do not exercise the
@@ -426,7 +436,7 @@ final class SimpleXWebSocketClient {
         return closed;
     }
 
-    /** Visible for tests: count of inbound deliveries dropped on queue overflow. */
+    /** Visible for tests: inbound deliveries dropped on queue overflow or transport death. */
     long droppedInboundCount() {
         return droppedInboundCount.get();
     }
@@ -441,7 +451,24 @@ final class SimpleXWebSocketClient {
         this.metrics = metrics;
     }
 
-    private final class Listener implements WebSocket.Listener {
+    /**
+     * Register the adapter's transport-death notifier (M1-674). MUST be
+     * called before {@link #start()}: the listener only runs once the
+     * handshake completes, so a pre-start registration can never miss the
+     * death event (a post-start registration could — the peer may close
+     * the socket the instant the handshake finishes). Fires on the WS
+     * listener thread; implementations must hop to their own thread
+     * before blocking. Last registration wins.
+     */
+    void onTransportDeath(Runnable notifier) {
+        this.transportDeathNotifier = notifier;
+    }
+
+    // Package-private (not private): the peer-close latch tests drive
+    // onClose/onError directly — the RFC-6455 test fake cannot emit a
+    // server-side close frame — while production construction stays
+    // inside start().
+    final class Listener implements WebSocket.Listener {
 
         private final StringBuilder buffer = new StringBuilder();
         private boolean skipUntilLast = false;
@@ -484,17 +511,60 @@ final class SimpleXWebSocketClient {
         public java.util.concurrent.@Nullable CompletionStage<?> onClose(WebSocket webSocket,
                                                                int statusCode,
                                                                String reason) {
-            // The supervisor (SimpleXSubprocess) sees the process exit and
-            // restarts the pair; this listener just drains pending futures.
-            failAllPending(new MessagingException(FailureCategory.PERMANENT,
+            latchTransportDeath(new MessagingException(FailureCategory.PERMANENT,
                     "WebSocket closed by peer: " + statusCode + " " + reason));
             return null;
         }
 
         @Override
         public void onError(WebSocket webSocket, Throwable error) {
-            failAllPending(new MessagingException(FailureCategory.TRANSIENT,
+            latchTransportDeath(new MessagingException(FailureCategory.TRANSIENT,
                     "WebSocket error: " + error.getClass().getSimpleName(), error));
+        }
+    }
+
+    /**
+     * Terminal-event handler shared by {@code Listener.onClose} and
+     * {@code onError}. Pre-M1-674 these only drained pending futures, so a
+     * peer-initiated close left {@code closed} false and the adapter kept
+     * reporting a dead transport as healthy with nothing ever rebuilding
+     * it (audit finding MSG-1). Now the death latches {@code closed}
+     * (honest {@link #isClosed()}), tears the dispatcher down (the
+     * connection is gone; dropping queued-but-undelivered inbound keeps
+     * at-most-once inbound, but unlike the deliberate local-close teardown
+     * the discarded depth is counted and logged), and fires the
+     * transport-death notifier so the adapter drives a paced rebuild.
+     * Pending futures drain first — a dispatch-thread consumer blocked in
+     * sendCommand parks on one of them and must be released before its
+     * executor is shut down, the same ordering {@link #close()} documents.
+     *
+     * <p>A local {@link #close()} sets {@code closed} before aborting the
+     * socket, so a terminal event the abort may provoke is suppressed here
+     * (not a peer death). The unsynchronized check-then-act race — close()
+     * and a genuine peer event latching concurrently, double-firing the
+     * notifier — is benign: the adapter's closed-for-good guard makes the
+     * extra notification a no-op, and the JDK delivers at most one
+     * terminal event per connection.</p>
+     */
+    private void latchTransportDeath(MessagingException drainCause) {
+        boolean peerInitiated = !closed;
+        closed = true;
+        failAllPending(drainCause);
+        if (peerInitiated) {
+            // The returned runnables are the queued-but-undelivered inbound
+            // deliveries. Dropping them is the at-most-once stance, but a
+            // transport death is an outage, not a shutdown, so the drop is
+            // counted (the readiness payload's dropped-inbound field reads
+            // this counter) and logged: an operator can tell "the death
+            // erased accepted work" from "nobody sent anything". Count only —
+            // no message content, no contact ids (D37).
+            int discarded = dispatchExecutor.shutdownNow().size();
+            if (discarded > 0) {
+                long total = droppedInboundCount.addAndGet(discarded);
+                LOG.warn("transport death discarded {} queued inbound deliveries (total dropped {})",
+                        discarded, total);
+            }
+            transportDeathNotifier.run();
         }
     }
 
@@ -565,9 +635,9 @@ final class SimpleXWebSocketClient {
             dispatchExecutor.execute(delivery);
         } catch (RejectedExecutionException e) {
             if (dispatchExecutor.isShutdown()) {
-                // close() shut the dispatcher down while the listener was
-                // delivering its final frames; dropping is correct, the
-                // connection is going away (at-most-once inbound).
+                // close() or a transport death shut the dispatcher down while
+                // the listener was delivering its final frames; dropping is
+                // correct, the connection is going away (at-most-once inbound).
                 LOG.debug("inbound frame dropped — dispatcher shut down");
                 return;
             }

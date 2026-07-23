@@ -338,6 +338,40 @@ Provider produces plain text per decision D30. The adapter:
 - An adapter cannot silently drop messages. Either delivery succeeds,
   the caller learns it didn't (after the bounded retry budget), or
   the failure is permanent and surfaced immediately.
+- **A peer-initiated connection close is a transport-death event.**
+  When the peer closes (or a transport error kills) the connection an
+  adapter depends on — the SimpleX bot WebSocket, the Signal JSON-RPC
+  channel — the adapter MUST latch that connection as dead and drive
+  recovery of the transport, paced per the design-tier reconnect
+  cadence (design notes §6.4.6 / §6.5.8), not merely drain the
+  in-flight command futures on the dead connection. The recovery route
+  is adapter-specific and each adapter states its own: SimpleX rebuilds
+  the WebSocket in place against the still-running daemon, while Signal
+  escalates — consecutive JSON-RPC response timeouts force a restart of
+  the daemon, which routes recovery through the same supervised
+  backoff path a crash takes (design notes §6.5.8). **v1 implements the
+  latch itself for the SimpleX bot WebSocket only.** Signal detects a
+  dead channel solely through those consecutive response timeouts, so a
+  JSON-RPC channel that dies while signal-cli keeps running is not
+  latched: `connected()` reports it up until an outbound send times
+  out, and with no outbound traffic on that adapter the escalation
+  never fires at all. Where the latch exists the outage stays
+  operator-visible for as long as it lasts (`connected()` /
+  `adapter.connection.status` report the dead transport — no false
+  green), and sends attempted after the latch, while recovery is
+  pending, classify transient — unless the supervising component has
+  terminally failed, which classifies permanent per the default above.
+  That transient classification covers only sends *attempted after*
+  the death is latched. Commands already in flight when the connection
+  dies are outside it: their futures drain with the closed-before-ack
+  PERMANENT both adapters stamp — retrying an unacked command against
+  the dead socket cannot succeed, and whether the transport later
+  recovers is unknowable at drain time — so a send that raced the
+  close can learn permanent even though recovery completes moments
+  later. Queued-but-undelivered *inbound* is likewise dropped at the
+  latch (at-most-once inbound), but never silently: the discarded
+  depth is added to the adapter's dropped-inbound readiness field and
+  logged.
 - **Outbound delivery is at-least-once.** A retry after an *ambiguous*
   send failure — the transport accepted the frame but the ack timed
   out — MAY deliver the message twice, and **no component suppresses
@@ -377,12 +411,16 @@ Provider produces plain text per decision D30. The adapter:
   that stops the sequence early attributes nothing.** This is not
   optional hardening: the counter's documented "always > 1"
   invariant (below) was calibrated for one message per slot, and
-  SimpleX classifies a send on a closed or not-yet-started
-  WebSocket as an IMMEDIATE PERMANENT (`SimpleXWebSocketClient.sendCommand`;
-  `onClose` fails every pending future the same way), so naive
-  per-category `deliverToGroup` calls would let one routine
-  simplex-chat subprocess restart during the sequential loop yield
-  ≥3 instant PERMANENTs in milliseconds — soft-removing a healthy
+  SimpleX still stamps instant PERMANENTs faster than one per slot:
+  a command in flight when the WebSocket dies drains
+  closed-before-ack PERMANENT (`onClose` fails every pending future
+  that way; `SimpleXWebSocketClient.sendCommand` on a closed or
+  not-yet-started client the same — new sends during peer-close
+  recovery classify transient per the transport-death bullet above,
+  but a terminally failed supervisor classifies every send
+  PERMANENT), so naive per-category `deliverToGroup` calls would
+  let one simplex-chat outage during the sequential loop yield ≥3
+  instant PERMANENTs in milliseconds — soft-removing a healthy
   group with no admin notification, where the same blip today costs
   a single increment. Per-message failure classification, backoff,
   max-attempts, and the threshold value are untouched; single-

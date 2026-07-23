@@ -1,0 +1,34 @@
+RED-TEAM VERDICT: CLEAN
+
+OUT-OF-MODEL:
+  - Ambiguous in-flight sends on a peer close are drained as PERMANENT
+    (SimpleXWebSocketClient latchTransportDeath, onClose arm:
+    "WebSocket closed by peer" carries FailureCategory.PERMANENT, so the
+    Provider's bounded retry machinery never retries them). A message the
+    simplex-chat daemon may never have processed is surfaced as permanently
+    failed rather than redelivered-possibly-twice. The at-least-once
+    commitment lives in messaging.md (which this diff amends, and whose new
+    bullet only commits to the classification of sends *attempted before
+    recovery completes*, not in-flight futures on the dying connection), not
+    in the audited threat model (security.md); the classification itself is
+    pre-existing and deliberately retained. Flagged so the user can decide
+    whether at-least-once for ambiguous peer-close sends should become a
+    documented commitment.
+  - Trust boundary 7 (security.md) makes the unauthenticated bot WebSocket
+    sound only while loopback-bound; a compromised or hostile co-located
+    daemon (or anything else that can reach the loopback ws-port) can force
+    rolling transport-death → paced-rebuild cycles indefinitely. The new
+    campaign bounds the cost (one rebuild attempt per ladder rung, 60 s
+    steady state, loopback TCP probe + handshake each, virtual threads
+    only), and security.md explicitly scopes out supply-chain/operator-
+    infrastructure compromise, so this is noted for the record rather than
+    counted: the residual is a rolling availability degradation with correct
+    gauge/connected() visibility, not an unbounded resource sink.
+  - The diff's own messaging.md amendment retains a Signal false-green
+    window by declaration: a dead Signal JSON-RPC channel is not latched,
+    `connected()` reports it up until an outbound send times out, and with
+    no outbound traffic the escalation never fires. This is a self-declared
+    v1 non-commitment in the amended spec text (so no promise-vs-delivery
+    gap), and security.md documents no transport-liveness-honesty
+    commitment for adapters — recorded here in case the user wants the
+    threat model to take a position on Signal liveness.

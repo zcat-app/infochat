@@ -1,0 +1,362 @@
+• Let me read the prompt file first.I need to:
+  1. Read `docs/spec/security.md` IN FULL (the threat model).
+  2. Read the diff at `/home/infochat/infochat/.claude/worktrees/M1-674/docs/plan/m1/redteam-multi/M1-674-2026-07-22/diff.patch`.
+  3. Write a structured verdict to `verdict-kimi.txt`.
+  4. Reply with exactly the 4-line format.
+
+  Let me start by checking the sizes of both files, then read them in full.
+
+• I'll read the threat model and the diff under audit.  1566 docs/spec/security.md
+   762 docs/plan/m1/redteam-multi/M1-674-2026-07-22/diff.patch
+  2328 total
+
+
+• The read was truncated. I need to read the full file. It's 1566 lines. The tool read 1000 lines but the output was truncated at 50000 chars. Let me page through it using the output_path, or read in slices with line_offset and n_lines. Let me read in slices. The file is 1567 lines total (1566 + maybe trailing). Let me read slices of ~400 lines each.
+
+• The threat model is large; I'll read it in slices.
+
+• I've now read the full security.md (1567 lines, all of it). Now I need to read the diff at `/home/infochat/infochat/.claude/worktrees/M1-674/docs/plan/m1/redteam-multi/M1-674-2026-07-22/diff.patch` (762 lines).
+
+• Threat model read in full. Now the diff under audit.
+
+• Let me analyze the diff against the threat model.
+
+  The diff is for M1-674: "Recover SimpleX adapter from peer-closed WebSocket". Changes:
+
+  1. `docs/plan/m1/STATUS.md` — bookkeeping, no security relevance.
+  2. `docs/plan/m1/tickets/M1-674-...md` — ticket status/acceptance edits, no security relevance.
+  3. `docs/spec/messaging.md` — adds a spec bullet: peer-initiated connection close is a transport-death event; adapter MUST latch dead and drive recovery paced per design-tier reconnect cadence; outage stays operator-visible (no false green); sends attempted before recovery classify transient unless supervisor terminally failed → permanent.
+  4. `SimpleXAdapter.java`:
+     - Adds `WS_RECONNECT_BACKOFF` ladder: 1s, 2s, 5s, 15s, 60s.
+     - Adds `wsReconnectBackoff` field with package-private test-seam constructor.
+     - Registers `ws.onTransportDeath(this::onWsTransportDeath)` before `ws.start()`.
+     - `onWsTransportDeath()` spawns a virtual thread running `recoverFromTransportDeath`.
+     - `recoverFromTransportDeath()`: single-flight via `reconnectInFlight` CAS; raises `reconnecting = true`; loop: sleep rung, check closedForGood, check config/subprocess RUNNING, check current webSocket not closed → exit, else `waitForWebSocketReady`, `rebuildWebSocket()`, `buildGroupHandler()`, then re-check subprocess/closedForGood race (close fresh client and null out), set reconnecting=false, log, return. On MessagingException: failedAttempts++, log warn/info, loop again.
+     - `requireConnected`: if `ws.isClosed()` → if supervisorTerminallyFailed → PERMANENT, else TRANSIENT.
+  5. `SimpleXWebSocketClient.java`:
+     - `transportDeathNotifier` volatile field, default no-op; `onTransportDeath(Runnable)` setter, must be called before start().
+     - `Listener` made package-private (was private) — test seam.
+     - `onClose`/`onError` now call `latchTransportDeath(...)` instead of just `failAllPending`.
+     - `latchTransportDeath`: `boolean peerInitiated = !closed; closed = true; failAllPending(drainCause); if (peerInitiated) { dispatchExecutor.shutdownNow(); transportDeathNotifier.run(); }`.
+  6. Tests: `SimpleXReconnectTest` (3 new tests), `SimpleXWebSocketClientTest` (3 new tests).
+
+  Now, adversarial audit against security.md commitments. The threat model sections most relevant:
+
+  - Trust boundary 7: SimpleX local transport → network. Unauthenticated WebSocket bot API to co-located subprocess; sound only while loopback.
+  - D37: user content logging — bodies of inbound chat-mode messages never in non-audit logs. Exception messages must not contain user-authored prose; SafeLog.
+  - Authorization evaluation order — not touched.
+  - Rate limiting — transport-level rate cap; DoS bounding.
+  - Failure handling.
+  - messaging.md failure handling: "An adapter cannot silently drop messages..." The diff adds the transport-death bullet.
+
+  Security-relevant behaviors in the diff:
+
+  1. **Recovery campaign loop**: `recoverFromTransportDeath` loops forever with backoff until success/closedForGood/subprocess not RUNNING/another party revived. Bounded by virtual thread per death event. Single-flight via `reconnectInFlight` CAS prevents stacking multiple campaigns. But note: if the campaign returns because another campaign/exit arm is in flight (`!reconnectInFlight.compareAndSet(false, true)`), and that in-flight arm belongs to... Actually wait — if a peer close fires while `reconnectInFlight` is held by the exit arm (`reconnect()`), the new campaign no-ops. That's the documented design: the exit arm owns recovery. OK.
+
+     DoS angle: each peer death spawns one virtual thread; if one is already in flight, no new thread campaign runs. But wait — a death event while a campaign is running: the CAS fails, return. Fine. But consider: campaign fails all attempts? No — the campaign loops indefinitely (while(true) with backoff capped at 60s) until success or teardown. So a persistently re-closing daemon causes one virtual thread sleeping 60s between attempts — paced, bounded. That's fine, that's the point.
+
+     However: `transportDeathNotifier.run()` is invoked on the WS listener thread, and `onWsTransportDeath` starts a new virtual thread each time. Since `latchTransportDeath` only fires the notifier once per client (`peerInitiated` check), and each rebuild creates a new client with the notifier registered... a daemon that kills every fresh WebSocket → each new client dies once → each death spawns one campaign; campaigns single-flight. So at most one campaign thread exists at a time... actually, consider timing: campaign A is sleeping on rung. Fresh client rebuilt by campaign A. That fresh client gets killed by daemon → notifier fires → campaign B spawned → CAS fails (A in flight) → B returns. Then A wakes, sees `current != null && !current.isClosed()`? The fresh client IS closed (killed), so A proceeds to rebuild again. OK so the loop handles serial kills. Fine.
+
+  2. **`latchTransportDeath` drains pending futures with `MessagingException`** — onClose reason string: `"WebSocket closed by peer: " + statusCode + " " + reason`. The `reason` is peer-controlled text from the close frame! This exception message goes into `failAllPending` — pending futures complete exceptionally with this MessagingException whose message includes the peer-supplied close reason. Who consumes those exceptions? The adapter's `sendCommand` callers — Provider send paths. Does the exception message get logged? The diff comment says at SimpleXAdapter: "LOG.warn("inbound handler threw, message suppressed per D37..." — that's pre-existing. For the drained futures: MessagingException with peer-controlled `reason` string may propagate to Provider's send failure handling and potentially be logged. The close-reason is peer-controlled (the simplex-chat daemon is the peer — the threat model treats the subprocess as trusted-ish, co-located; trust boundary 7 says the adapter speaks to a co-located subprocess it spawns; the "peer" here is the local daemon, not a remote attacker. But the daemon itself relays remote content... could a remote SimpleX contact influence the close reason the daemon sends? Unlikely — close frames come from the local daemon. Threat model: the SimpleX subprocess is spawned by the adapter; it's a local component. The remote attacker can't speak to the WS directly (loopback bound). So the peer controlling the close reason is the local simplex-chat process. Not an adversary-controlled surface per the threat model — the daemon is trusted operator software. Hmm, but wait: is the close reason bounded? RFC 6455 close reason max 123 bytes. It could contain arbitrary bytes from a buggy/compromised daemon. The threat model's trust boundary 7 assumes the subprocess is co-located and the channel loopback; it doesn't explicitly declare the daemon trusted against malicious output... Actually "Operator-set config is trusted" and the subprocess is operator-installed software. The MSG-1 framing treats the daemon as a component that can fail, not as an adversary. A compromised local daemon is arguably out of model (it could drive the bot's SimpleX identity directly anyway — "any host that reaches the port can then drive the bot's SimpleX identity with no credential"). So including the close reason in the exception message is not an in-model finding worth raising, except maybe as INFO-LEAK/log-injection low: a close reason with newlines could inject into logs if the exception message is logged raw. But wait — D37/User content in exceptions: exception messages MUST NOT contain user-authored prose. Is a daemon close-reason "user-authored prose"? It's not chat bodies. And SafeLog drops exception message bodies anyway when logging via that utility. The MessagingException propagating to Provider: Provider's send path may log it via SafeLog (class names only) — per spec. So this is likely fine per spec. Not a finding, or at most low. Let me think about whether the diff violates the spec: the spec says exception messages emitted via application logger must not contain user-authored prose; the adapter passes the reason into the exception message but the logging discipline (SafeLog) handles that. The exception is also returned to the caller (Provider), which classifies failure category. The message could in principle surface to a user? Send failures surface as friendly fixed errors per messaging.md, not raw exception text. Not a finding.
+
+  3. **`requireConnected` change**: latched-dead client → TRANSIENT unless supervisor terminally failed → PERMANENT. This affects outbound retry behavior: TRANSIENT causes Provider retry with bounded budget per messaging.md. This is aligned with the new spec bullet. OK.
+
+  4. **Race conditions / TOCTOU**: 
+     - `latchTransportDeath`: check-then-act on `closed` — documented benign (JDK delivers at most one terminal event; double-fire benign due to closedForGood guard).
+     - Recovery campaign: after `rebuildWebSocket()` and `buildGroupHandler()`, checks `subprocess == null || closedForGood` and closes the fresh client. But there's a subtle window: between the check `if (subprocess == null || closedForGood)` and `reconnecting = false; return;` — a `close()` could happen right after the check, leaving the fresh webSocket set while adapter is closed? The exit arm `reconnect()` has "the same guard" per comments. Presumably close() itself tears down `webSocket`. Not a security finding — availability at most, and benign.
+
+     - `buildGroupHandler()` — let me look: `this.groupHandler = new SimpleXGroupHandler(this::onInbound)` from the earlier context in the diff inventory (line 410 of SimpleXAdapter per the grep inventory). Not in the diff body though. The diff shows the campaign calls `buildGroupHandler()` after `rebuildWebSocket()`. OK.
+
+  5. **`reconnecting` flag**: set true before first sleep, cleared on every exit path... except — look carefully: in the `catch (InterruptedException e)` path it clears and returns; closedForGood path clears; non-RUNNING path clears; revived-by-other path clears; success path clears (with the close-race path clearing too). The `finally` only resets `reconnectInFlight`. What if `waitForWebSocketReady` or `rebuildWebSocket` throws something other than MessagingException — e.g., RuntimeException? Then the catch (MessagingException) doesn't catch it, the while loop exits via exception, `reconnecting` stays `true` forever, `reconnectInFlight` reset by finally. Result: adapter stuck with `reconnecting = true` permanently → all sends classify TRANSIENT forever → Provider retries forever → availability degradation, and the transport never recovers (no campaign in flight, flag set, future campaigns... wait, future death events won't fire because the client is dead and no new client built; CAS is free again, but nothing triggers a new campaign). Actually can a RuntimeException occur? `Thread.sleep` throws InterruptedException (handled). `waitForWebSocketReady` — signature unknown; likely throws MessagingException on timeout. `rebuildWebSocket()` — throws MessagingException per the catch. Could throw unchecked too (e.g., from ws.start() internals, NPE, etc.). The exit arm `reconnect()` — does it handle RuntimeException? Not shown in diff. The comment claims "cleared on every exit path" — but an unchecked exception path leaves `reconnecting = true` set. That's a genuine robustness gap: one RuntimeException in the campaign wedges the adapter in the reconnecting state permanently (until process death), with sends classifying TRANSIENT forever — a self-DoS on the availability surface. Is this in the threat model? DOS category covers "Resource exhaustion, unbounded loops... blocking-the-event-loop". The spec commitment (new messaging.md bullet in the diff itself): "the adapter MUST latch that connection as dead and drive recovery of the transport" and "The outage stays operator-visible for as long as it lasts". A wedged `reconnecting` flag means recovery stops driving (no campaign running, no future trigger) while sends stay TRANSIENT forever — violating messaging.md's own failure-handling commitment ("Either delivery succeeds, the caller learns it didn't (after the bounded retry budget), or the failure is permanent and surfaced immediately"). TRANSIENT forever = the caller never learns permanently. Severity: requires an unchecked exception in rebuild — unusual conditions; medium. Hmm, but is this speculative? The diff doesn't show `waitForWebSocketReady`/`rebuildWebSocket` bodies. The red-team prompt says: treat the diff as the only evidence; don't infer handling elsewhere. The campaign's own comment claims "cleared on every exit path" and the code shows a catch limited to MessagingException. Any unchecked throwable (including `Error`) escapes, leaving `reconnecting = true` and no recovery driver. That's a legit medium/low finding under DOS (availability). I'd rate it medium: requires an unexpected runtime exception; impact is adapter wedged until restart; operator-visible though (gauge reads 0, reconnecting flag... actually the gauge — is `connected()` false during this? Yes since ws is closed/latched. So operator-visible, but never auto-recovers).
+
+     Actually wait — also `buildGroupHandler()` could throw unchecked. Same path.
+
+     Let me also double check: does anything else re-trigger recovery later? `onWsTransportDeath` fires only on client death. The wedged state has a dead latched client, no live client, no campaign. A subsequent process exit would fire the exit arm (`onSubprocessRestart` → `reconnect()`), which does CAS on reconnectInFlight — free now — and recovers. So recovery needs a process death or adapter restart. Still a wedge for the MSG-1 scenario (process alive, WS dead). Medium seems right; arguably low. I'll go medium since the entire point of the ticket is this recovery path and the code's own comment asserts "cleared on every exit path" while one exit path (unchecked throw) isn't. Hmm, actually, let me reconsider: is this within the documented threat model? The threat model defends availability against adversaries. This wedge is triggered by internal failure, not directly adversary-reachable. But an adversary who can induce repeated peer closes (e.g., via whatever makes the daemon close connections) combined with... no, the RuntimeException is the trigger and that's not adversary-controlled. It reduces defense-in-depth of a recovery mechanism. I'd call it medium-to-low. Let me settle: medium? The severity scale: medium = "requires unusual conditions or chained weaknesses; reduces defense-in-depth". Yes, medium fits. Actually low = "hardening opportunity; not currently exploitable". Since trigger is an unchecked exception (unusual but not adversary-controlled), I'd say medium is a bit strong... but the consequence is total loss of self-recovery with indefinite TRANSIENT classification (Provider-side unbounded retry budget consumption? messaging.md says bounded retry budget — after budget the caller learns). I'll call it medium, DOS.
+
+  6. **Notifier registration & `Listener` visibility**: `Listener` changed from private to package-private "for tests". This widens the class surface within the package — not a security issue per se.
+
+  7. **`onTransportDeath` "Last registration wins"** — must be called before start(); not enforced. If called after start, could miss death events → false green? No — isClosed() is still latched by latchTransportDeath regardless of notifier; connected() reads isClosed. Missed notifier only means no rebuild campaign → the exact MSG-1 gap. But production wiring registers before start() (shown in diff at line 219-222 of patch: registered BEFORE start()). OK.
+
+  8. **Backoff ladder values**: 1,2,5,15,60 s. Spec says paced per design-tier §6.4.6. Diff's spec amendment states recovery attempts follow the documented cadence. Fine.
+
+  9. **`dispatchExecutor.shutdownNow()` on peer death**: drops queued-but-undelivered inbound. At-most-once inbound is documented. The inbound-drop counter — spec §Failure handling/Nostr... the inbound queue drop on local close: "matching at-most-once inbound". DoS relevance: none new.
+
+  10. **Inbound during the recovery window**: after latch, `dispatchExecutor` shut down; new client built on rebuild; inbound delivered via new client. During the gap, inbound frames from the daemon are not received (connection dead). At-most-once semantics; fine.
+
+  11. **`webSocket` field access races**: `recoverFromTransportDeath` reads `webSocket`, rebuilds, etc. `webSocket` presumably volatile (not shown). Pre-existing pattern. The check `SimpleXWebSocketClient current = webSocket; if (current != null && !current.isClosed())` — if the exit arm revived the transport. Fine.
+
+  12. **Multiple adapters / cross-adapter**: untouched.
+
+  13. **Logging in the campaign**: `LOG.warn(... e.category())` — logs only the FailureCategory, "no transport bytes (D37)". Good — no peer-controlled content logged. The `LOG.info("SimpleX adapter rebuilt its WebSocket after a peer-initiated close ({} failed attempts)")` — count only. Fine per D37.
+
+  14. **`requireConnected` PERMANENT arm message**: "SimpleX transport is dead and its subprocess supervisor has terminally failed" — static string. TRANSIENT arm: "SimpleX WebSocket was closed by the peer; recovery pending" — static. Good (note: onClose's peer-controlled reason is NOT propagated into requireConnected — good).
+
+  15. **The drained pending futures carry the peer close reason** — as discussed in #2. Let me think harder about whether that's an INFO-LEAK or INJECTION finding. The MessagingException message "WebSocket closed by peer: 1000 server going away" — peer = local daemon. Under threat model, the daemon is on the trusted side of boundary 7 (loopback channel; exposing it voids the property but that's operator action). A remote SimpleX user cannot set the daemon's close reason. So not attacker-controlled. Not a finding. If the daemon is buggy and emits weird bytes → log injection risk only if message logged raw; SafeLog discipline drops message bodies. Pre-existing `failAllPending` paths did the same before the diff (the old onClose also built MessagingException with statusCode + reason — the diff didn't change that string construction; old code: `"WebSocket closed by peer: " + statusCode + " " + reason` — identical). Not a new gap. Skip.
+
+  16. **Virtual thread per death event**: `Thread.ofVirtual().name(...).start(...)` — unbounded? Each death → one thread; threads exit quickly when CAS fails. A flapping daemon could spawn many short-lived virtual threads — bounded by death event rate, which is bounded by rebuild cadence (each new death requires a new client, which requires a campaign attempt, paced ≥1s... after the first, rungs grow to 60s). Fine. Actually wait — is that true? Death events require fresh clients. Fresh clients only come from the campaign (paced) or exit arm. So death-event rate is self-limiting. OK.
+
+  17. **`reconnectInFlight` shared between exit arm and campaign**: a restart notification landing mid-campaign no-ops ("the campaign's next paced attempt picks the respawned child up"). But consider the reverse: campaign checks `sub.state() != RUNNING` → exits, clearing reconnecting. If the process is restarting (supervisor backoff), exit arm will run `reconnect()`... will it? `onSubprocessRestart` fires when supervisor restarts the process. If the process died and supervisor is in its own backoff, state != RUNNING; campaign exits; later supervisor restarts → onSubprocessRestart → exit arm reconnects. Covered.
+
+  18. **`closedForGood` check after sleep, before rebuild, and after rebuild** — the after-rebuild guard closes the fresh client. Good teardown discipline.
+
+  19. **Gauge/false-green**: `connected()` reads isClosed presumably; latch sets closed → gauge 0. Test pins it. Good — delivers the "no false green" promise.
+
+  20. **Sends during the gap classify TRANSIENT** — matches the new spec bullet. But note the ordering gap: peer death latches closed on the WS listener thread; the campaign starts and raises `reconnecting`. Between latch and flag-raise, `requireConnected`'s new `ws.isClosed()` arm covers classification (TRANSIENT). Good — that was the stated purpose.
+
+  21. Now, a deeper adversarial look at `latchTransportDeath` ordering: `closed = true` THEN `failAllPending` THEN shutdownNow THEN notifier. A `sendCommand` racing: checks closed? sendLock discipline pre-existing. Not in diff.
+
+  22. **onError drain cause is TRANSIENT** ("WebSocket error: ..." TRANSIENT) while onClose is PERMANENT. Both latch closed and fire recovery. Pending futures on peer-close get PERMANENT — meaning in-flight sends during a recoverable outage classify PERMANENT (no retry) while later sends get TRANSIENT (retry). Slightly odd asymmetry but it's a delivery-semantics choice, pre-existing (old code also used PERMANENT for onClose). At-least-once outbound: PERMANENT surfaces immediately; acceptable per spec ("the failure is permanent and surfaced immediately"). Not a security gap.
+
+  23. **Test-seam constructor takes arbitrary backoff list** — package-private; production uses public ctor. `List.copyOf` defensive copy. If a test... irrelevant to security.
+
+  24. **`WS_RECONNECT_BACKOFF` mutability**: `List.of` immutable. Fine.
+
+  25. Anything about the admin-token / invite path? The diff touches none of it. The grep inventory mentioned group invitation lines but those are context lines only (SimpleXAdapter.java:869, 928 — comments about invitations), not changes. The diff itself doesn't touch invitation handling. OK.
+
+  26. **Spec amendment in messaging.md**: "sends attempted before recovery completes classify transient — unless the supervising component has terminally failed, which classifies permanent per the default above." Implemented faithfully in requireConnected.
+
+  Potential finding candidates:
+
+  A. **Unchecked-exception wedge in recoverFromTransportDeath** (discussed, #5): `reconnecting` left true forever; campaign dead; no further trigger; adapter never recovers from a peer close despite the spec commitment (the diff's own messaging.md bullet: "the adapter MUST ... drive recovery of the transport"; and messaging.md failure handling: adapter cannot silently drop / outage must stay operator-visible... it does stay visible). Category: DOS. Severity: medium (unusual trigger, chains with the fact that nothing re-arms recovery). Suggested fix class: other (wrap campaign body to clear `reconnecting` in finally / catch Throwable).
+
+  Wait — actually, let me re-examine. Is `reconnecting` truly left set? Path: exception other than MessagingException thrown inside the while loop (from waitForWebSocketReady, rebuildWebSocket, buildGroupHandler, or even `wsReconnectBackoff.get(...)` — no). `Thread.sleep` only throws InterruptedException (caught). `sub.state()` — could throw? Not shown. The try/finally: `finally { reconnectInFlight.set(false); }` — so the unchecked exception propagates out of recoverFromTransportDeath, killing the virtual thread, with `reconnecting == true` stale. And requireConnected: `ws.isClosed()` arm → supervisorTerminallyFailed()? No (process alive) → TRANSIENT forever. The `reconnecting` flag's role: sends classify TRANSIENT "like the reconnecting window above" — with stale flag or latched-closed ws, same TRANSIENT outcome. So user-visible effect: adapter permanently down for sends (TRANSIENT retries exhaust and surface? "the caller learns it didn't (after the bounded retry budget)" — Provider's bounded retry then gives up per-message, but the transport never comes back). Recovery only via process exit or restart. Yes — a real availability gap in the new recovery arm. Medium feels right, arguably low. I'll present as medium DOS... Let me settle on medium — no wait. Severity scale: high = "exploitable gap that requires non-trivial conditions but is reachable in normal operation". Not adversary-reachable; medium = "requires unusual conditions or chained weaknesses; reduces defense-in-depth". The unchecked-throw is an unusual condition. Medium.
+
+  B. **The `peerInitiated` check-then-act race in latchTransportDeath**: two concurrent terminal events? JDK guarantees one terminal event. close() racing genuine peer event: double notifier fire possible → spawns extra campaign → CAS dedups. Documented benign. Not a finding.
+
+  C. **Missed window: death fires notifier, campaign spawned; before CAS, exit arm grabs reconnectInFlight** → campaign returns; exit arm owns. Fine.
+
+  D. **Campaign exits when `sub.state() != RUNNING` and clears `reconnecting`** — but if the exit arm never fires (e.g., supervisor already terminally FAILED, or process dead but supervisor wedges without firing restart), the latched-dead client arm in requireConnected handles classification (PERMANENT if supervisorTerminallyFailed, else TRANSIENT). If supervisor is dead-but-not-terminal (mid-backoff), sends stay TRANSIENT until exit arm runs. OK by design.
+
+  E. **`buildGroupHandler()` after rebuild** — does it re-register handlers on the fresh ws? Presumably rebuildWebSocket does (the earlier hunk at line 384 shows the registration inside some method — likely `rebuildWebSocket()` itself includes `ws.onTransportDeath(this::onWsTransportDeath)` before `ws.start()`). Wait, look at hunk @@ -356,6 +384,10: that's inside a method that creates ws, binds metrics, registers notifier, starts. That IS `rebuildWebSocket()` presumably. So every rebuilt client gets the notifier. Good — campaigns chain.
+
+  F. **The 30-second test with `List.of(Duration.ofSeconds(30))`** — irrelevant.
+
+  G. **Spec-bullet coverage**: "paced per the design-tier reconnect cadence (design notes §6.4.6 / §6.5.8), not merely drain the in-flight command futures" — delivered. "The outage stays operator-visible" — delivered via latch + gauge test. "sends attempted before recovery completes classify transient — unless the supervising component has terminally failed" — delivered in requireConnected.
+
+  H. **DOS via inbound flood during rebuild?** dispatchExecutor shutdownNow on death; new executor on rebuild. Not new.
+
+  I. **`onWsTransportDeath` thread name and virtual threads** — fine.
+
+  J. **What about the case where `webSocket` is null in requireConnected?** Pre-existing handling ("SimpleXAdapter is not started"). Not diff.
+
+  K. **Anything about secrets/redaction**: no new logging of contact ids or content. The campaign logs categories and counts only. requireConnected messages static. Clean.
+
+  L. **AUDIT-EVASION**: Does the threat model demand an audit trail for transport death/recovery? Audit log is for command intents and security events (admin actions, invite, bans). Transport recovery is an operational event → admin notification channel? The spec failure-handling: "Admin notifications are coalesced per (channel, error_class)" — that's for pipeline failures. For messaging: supervisor restarts presumably notify admin (adminNotifier exists). Does the peer-close campaign notify the operator? The diff logs WARN/INFO and the gauge reflects it, but I don't see an adminNotifier call on transport death or on repeated rebuild failure. Is operator notification promised? The new spec bullet says "The outage stays operator-visible for as long as it lasts (`connected()` / `adapter.connection.status` report the dead transport — no false green)". It commits to gauge/readiness visibility, not admin message. So no promise broken. A sustained re-close loop generates a WARN then INFO logs — operator visibility via logs/metrics. Not a finding per the documented commitments.
+
+  M. **Recovery campaign and `closedForGood`**: on adapter.close() mid-campaign, the campaign wakes from sleep, sees closedForGood, clears reconnecting, exits. Good.
+
+  N. One more: **the campaign's live-client check can abandon recovery when it shouldn't?** `if (current != null && !current.isClosed())` → exit. Suppose the exit arm revived the transport but the fresh client is broken-but-not-closed... speculative. Skip.
+
+  O. **Backoff runs BEFORE first attempt even when the death was a clean fast-flap** — by design.
+
+  P. **`SimpleXAdapter` no-arg constructor sets wsReconnectBackoff = WS_RECONNECT_BACKOFF** — fine.
+
+  Q. **Race: two sequential deaths of the same client** — notifier fires once per client. Fine.
+
+  R. **`waitForWebSocketReady(cfg.wsPort())` before rebuildWebSocket** — probes the port; a hostile local process could squat the port after the daemon dies? Local threat, out of model (loopback boundary; local host trusted).
+
+  S. **The spec amendment wording**: "A peer-initiated connection close is a transport-death event... the adapter MUST latch that connection as dead and drive recovery of the transport, paced per the design-tier reconnect cadence" — implementation delivers for SimpleX; Signal mentioned in the bullet ("the Signal JSON-RPC channel") — the diff only implements SimpleX. The bullet is phrased as a general adapter commitment with SimpleX and Signal as examples. Does the diff fail to deliver for Signal? The bullet says "the adapter MUST latch ... and drive recovery" — as a spec-level commitment applying to any adapter. Signal's pre-existing behavior: SignalAdapter presumably dies on process death and recovers via supervisor (the ticket's MSG-1 gap was SimpleX-specific: SimpleX process survives WS death; Signal's channel is tied to the process? If Signal's JSON-RPC channel can die while the process lives, the same gap exists and the new spec bullet now demands recovery — but the diff delivers no Signal implementation. Hmm. The ticket scope is SimpleX-only ("Recover SimpleX adapter..."). The spec bullet is written generically. Whether Signal has the gap: the audit context (ticket body) says the Signal comparison exists in the audit report — Signal channel death presumably == process death for signal-cli? Not certain. The red-team prompt: treat the diff as the only evidence. The diff's spec bullet names "the Signal JSON-RPC channel" as an instance of the commitment, but delivers no Signal-side latching/recovery. If Signal's channel can peer-close independently, the commitment is undelivered for Signal. But is that a security finding? It's availability (DOS), not confidentiality. And arguably the ticket is scoped to SimpleX; the spec line describes the general principle. I could note it as low/OUT-OF-MODEL-ish. Hmm. The threat model commitments: messaging.md §Failure handling is referenced BY security.md? The threat model proper (security.md) doesn't contain the transport-death commitment — the diff ADDS it to messaging.md. Auditing against security.md strictly: availability of the adapter is within "DOS — blocking-the-event-loop in the messaging adapter" category loosely. The Signal point is weak — I'd rather mention it under OUT-OF-MODEL or as a low finding. Actually, since the diff itself writes the commitment generically ("the adapter MUST"), and the diff delivers only SimpleX, the gap between the (newly stated) promise and delivery is in-scope for the audit method ("Treat the threat model as the system's commitments" — the threat model is security.md; messaging.md's failure handling is spec but the audit's PROMISE field should quote the threat model). security.md doesn't commit to Signal channel recovery specifically. I'll mention the Signal generality point as OUT-OF-MODEL or low. Let me think about whether it deserves FINDINGS at all... The prompt says stay inside the documented threat model (security.md). The unchecked-exception wedge (A) — does it map to a security.md commitment? security.md §Failure handling: "A complete LLM outage degrades quality, not safety" — not this. messaging.md §Failure handling is quoted in security.md §Authorization model? Actually security.md references messaging.md's "User left group" failure handling. The diff's own spec addition is part of the diff, so the promise can be quoted from the diff's spec amendment — the audit method says "the threat model the system claims to enforce" = security.md, but the diff adds to the spec corpus; the PROMISE field can quote the new messaging.md bullet since it IS a commitment the diff makes. I think that's legitimate: the diff's spec amendment is part of the delivery, and the code failing to fully deliver it is exactly "the gap between the promise and the delivery."
+
+  Let me now also scrutinize the `latchTransportDeath` + `requireConnected` interplay for a worse issue:
+
+  - After latch, `dispatchExecutor.shutdownNow()`. The recovery campaign rebuilds with a NEW SimpleXWebSocketClient — new executor. Old client's inbound consumer blocked in onInbound (e.g., DB read)? shutdownNow interrupts the dispatch thread — "Pending futures drain first — a dispatch-thread consumer blocked in sendCommand parks on one of them and must be released before its executor is shut down". If the consumer is blocked on an interruptible DB read, it gets interrupted mid-DB-op — could that corrupt anything? onInbound has misbehaving-handler protection (catch + suppress). Pre-existing design. Skip.
+
+  - **Inbound loss window**: messages the daemon sends between the actual close and the rebuild are lost. At-most-once inbound — documented. But is it? For SimpleX, inbound delivery at-most-once is stated in the diff comments. security.md doesn't demand inbound durability. Skip.
+
+  - **`sendCommand` after latch but before rebuild**: requireConnected covers via isClosed. What about sendCommand on the OLD client directly (adapter caches ws)? requireConnected returns latched check. OK.
+
+  Another candidate: **the campaign holds `reconnectInFlight` for the entire campaign, blocking the exit arm**. "a restart notification landing mid-campaign no-ops, and the campaign's next paced attempt picks the respawned child up at the cost of at most one ladder rung of extra delay." Consider: process dies mid-campaign; campaign's next iteration sees state != RUNNING → exits, frees the flag. But between process-death and the campaign noticing, the supervisor's restart notification no-ops (flag held). After the campaign exits (on its next paced attempt — could be up to 60s later), who re-triggers the exit arm? The notification already fired and no-opped! If the campaign exits because state != RUNNING at its check, and the restart notification was consumed as a no-op while the flag was held... then when the process comes back up, does another restart notification fire? `onSubprocessRestart` fires on process restart — the supervisor restarts the process and fires the notification at restart time. Sequence: process dies at T; supervisor restarts at T+5, fires notification → CAS fails (campaign holds flag) → no-op. Campaign wakes at T+rung, checks state: if process now RUNNING (restarted at T+5), proceeds to rebuild. Good. But if supervisor is still in crash-backoff (state != RUNNING) when the campaign checks → campaign exits, flag freed. Later, supervisor restarts process → fires notification → exit arm runs. Good. But the race: campaign checks state == RUNNING (restarted), rebuilds... fine. What if the campaign checks state != RUNNING and exits at T+60, but the supervisor had already fired its (only) restart notification at T+5 which no-opped, and the process has been RUNNING since T+5? Then the campaign at its NEXT iteration... wait, if the process has been RUNNING since T+5, the campaign's check sees RUNNING and rebuilds. The bad interleaving needs: notification no-ops (flag held), then campaign sees !RUNNING and exits, and no further notification ever fires. If supervisor restarted the process at T+5, state is RUNNING at any later check — campaign wouldn't exit on that arm. The exit arm's notification no-opped, but the campaign itself does the rebuild. So the only loss case: notification no-ops while process mid-restart (state != RUNNING) AND campaign checks state != RUNNING and exits AND supervisor never fires another notification. But supervisor fires the notification when it restarts the process — if the process is mid-restart (backoff), the notification hasn't fired yet or fired at the restart moment. Supervisor restart sequence: process exits → supervisor waits backoff → respawns → fires notification. If notification fires only after respawn, then at notification time state == RUNNING; campaign holds flag → no-op; campaign's next check sees RUNNING → rebuild. Covered. If notification fires at process-exit time (before respawn): campaign holds flag → no-op; campaign checks state: not RUNNING (mid-backoff) → exits, frees flag; respawn happens later → does respawn fire ANOTHER notification? Unknown — diff doesn't show. The comment says "the campaign's next paced attempt picks the respawned child up" — implying the campaign is expected to still be alive. But the campaign EXITS when state != RUNNING. Contradiction? The comment: "a restart notification landing mid-campaign no-ops, and the campaign's next paced attempt picks the respawned child up at the cost of at most one ladder rung of extra delay" — this assumes the campaign is still looping. But the campaign exits on !RUNNING. Unless the respawn completes before the campaign's next check (typical: supervisor backoff short vs campaign rung). Edge: supervisor crash-backoff longer than the campaign's current rung → campaign exits with !RUNNING → if the restart notification already no-opped and no new notification fires on respawn, nothing ever rebuilds. This is speculative about SimpleXSubprocess notification semantics (not in diff). The diff does show `onSubprocessRestart` exists (mirroring reference). Without evidence of the supervisor's notification contract, I can't pin this as a finding — "don't infer they probably handle X elsewhere" cuts both ways; the concern relies on unknown supervisor behavior. I could note it as a low/defense-in-depth: the campaign abandons on !RUNNING and relies on the exit arm, but a restart notification consumed as a no-op during flag contention is not re-armed by the campaign — the comment's claim ("next paced attempt picks the respawned child up") contradicts the code's exit-on-!RUNNING. Actually re-read: the comment's scenario is the restart notification arriving mid-campaign; the campaign's next attempt: sleep rung, check closedForGood, check state — if by then the child was respawned (RUNNING), rebuild. That's consistent: notification no-ops, campaign handles it. The only hole is state still !RUNNING at check time → campaign exits → relies on a FUTURE notification from the exit arm. If the supervisor fires its notification per restart event and one already no-opped... but the no-op'd notification corresponds to THIS restart; if the restart completes after the campaign exits, was the notification fired before or after respawn? Ugh, unknowable from the diff. I'll fold this into the same availability finding? No — keep findings crisp. The unchecked-exception wedge (A) is crisp and code-evident. The notification-race is speculative; skip or mention as low. I'll skip it — red-team should report what's demonstrable from the diff.
+
+  Now, finding A's exact code reference: diff.patch lines ~265-350; in-file: SimpleXAdapter.java recoverFromTransportDeath (the new method). In new-file line numbers: the method starts after line 478ish of the new file. From the hunk header @@ -446,6 +478,129 @@ — new method occupies new-file lines ~481-600. Let me compute: hunk starts at new line 478. The context line `}` at 478 region... The method `recoverFromTransportDeath()` begins around new-file line 497 (`private void recoverFromTransportDeath() {`). Let me count from the hunk: lines in the hunk in order (new-file numbering starts at 478):
+
+  - 478: (context) `        }` — end of previous method... wait the hunk header @@ -446,6 +478,129 @@ means new start 478, 129 lines: 6 context + 123 added. The context lines: `}` (end of something), blank, then `    /**` starts the javadoc. Let me number from the patch body: patch line 226 = `@@ -446,6 +478,129 @@`. Patch line 227: `         }` → new line 478. 228: blank → 479. 229: `+    /**` → 480. The javadoc spans patch 230-264 → new 480-514. 265: `+    private void recoverFromTransportDeath() {` → new 515. 266: CAS → 516. 270: `try {` → 520. 275: `reconnecting = true;` → 525. 281: Thread.sleep → 531. 287: closedForGood check → 537. 293-299: cfg/sub checks → 543-549 (`reconnecting = false; return;` at 548-549). 301: current check → 551. 302-310: live-client exit → 552-560. 312: try { → 562. 313: waitForWebSocketReady → 563. 314: rebuildWebSocket → 564. 315: buildGroupHandler → 565. 316-327: close-race guard → 566-577. 328: reconnecting=false → 578. 329-332: LOG.info + return → 579-582. 333: catch MessagingException → 583. 348: `} finally {` → 598. 349: reconnectInFlight.set(false) → 599. 351: `}` end method → 601.
+
+  Good enough: cite SimpleXAdapter.java:515-601 (recoverFromTransportDeath), specifically catch at :583 and finally at :598-600. And requireConnected new arm: hunk @@ -932,6 +1087,23 → new lines 1087-1109; ws.isClosed() arm ≈ 1099-1108.
+
+  For the verdict file locations, I should reference actual file:line as best determinable from the diff. I'll cite SimpleXAdapter.java:515-601 and :583, :598.
+
+  Any other candidate findings?
+
+  T. **`onTransportDeath` "Last registration wins" / not-before-start enforcement**: a post-start registration could miss the death event → MSG-1 gap returns silently. Production code registers before start (shown). The API contract is documented but unenforced — low hardening note at most. Also the notifier can be overwritten post-start by any package code. Low/skip. I'll skip — production wiring shown correct.
+
+  U. **Test-only seams**: package-private constructor with custom backoff; package-private Listener. These widen package surface but not runtime attack surface. Skip.
+
+  V. **`sendUntilSuccess(adapter, 10_000)` test helper** — tests only.
+
+  W. **The spec bullet says recovery "paced per the design-tier reconnect cadence (design notes §6.4.6 / §6.5.8)"** — implemented ladder 1/2/5/15/60. Can't verify design note values from the diff; the ticket acceptance states the same. Fine.
+
+  X. **Logging category at WARN once then INFO**: sustained attack that kills the WS every 60s generates one INFO per attempt — log volume bounded by the ladder. Fine.
+
+  Y. **Does the recovery campaign respect `closedForGood` before sleeping?** It sleeps first, then checks. A close during the sleep delays teardown by up to one rung (60s worst). Virtual thread lingers — negligible.
+
+  Z. **D37 compliance of `LOG.warn("... failed ({})", e.category())`** — category enum only. Fine.
+
+  AA. **`requireConnected` PERMANENT message discloses supervisor state** — internal error to Provider, not user-facing raw. Fine.
+
+  BB. Now, is there anything about **inbound handling during the campaign** that violates "Adapter cannot silently drop messages"? The latch drops queued inbound with shutdownNow — documented at-most-once. Outbound during gap: TRANSIENT surfaced. OK.
+
+  CC. **Gauge binding**: `ws.bindMetrics(metrics)` pre-existing; rebuilt ws rebinds. The connection.status gauge reads 0 when latched. Test pins. OK.
+
+  So my findings list:
+
+  1. DOS / medium — unchecked exception in `recoverFromTransportDeath` wedges `reconnecting=true` and kills the only recovery driver; adapter never self-recovers from the peer-close (the exact MSG-1 scenario) until process death/restart; sends classify TRANSIENT indefinitely, contradicting the diff's own messaging.md commitment ("MUST ... drive recovery of the transport", "no false green" is kept, but "the caller learns it didn't ... or the failure is permanent and surfaced immediately" is not — permanent TRANSIENT means the caller retries forever per attempt... actually bounded retry budget per message means each send eventually fails as TRANSIENT — the caller does learn per-message. The core broken commitment is the MUST-drive-recovery one). Fix class: other (clear `reconnecting` in a finally; catch Throwable around the attempt body).
+
+  Wait, actually let me reconsider whether `reconnecting=false` clearing is the issue or if it's deeper: even if `reconnecting` were cleared, the campaign thread is dead and no future event re-triggers recovery (client latched dead; no new client). requireConnected's latched arm keeps TRANSIENT. So the fix must also re-arm or not die. The finding stands regardless: one unchecked throwable permanently disables MSG-1 recovery. Good.
+
+  Severity medium vs low: "requires unusual conditions (unchecked throw) — reduces defense-in-depth" → medium per the scale's letter, though "not currently exploitable" (by an adversary) argues low. The scale's low says "hardening opportunity; not currently exploitable but reduces resilience". Hmm. An unchecked exception in a network-rebuild path (e.g., OOME, NPE from a race with close(), RejectedExecutionException) is not that exotic... The impact: total loss of the feature this diff ships, silent (gauge shows 0 honestly, so operator-visible). I'll go medium — the recovery feature is the diff's entire purpose and the failure is silent at the code level (no log on the unchecked path either — the virtual thread's uncaught exception goes to the default handler → stderr, not the app log; actually Thread.ofVirtual().start with no uncaught handler → prints stack trace to stderr! Wait — uncaught exception in a virtual thread → the thread's uncaught exception handler prints to System.err. A stack trace on stderr could contain... the exception's message — e.g., from MessagingException? No, MessagingException is caught. Unchecked ones: NPE no message, etc. Stack traces to stderr bypass SafeLog — but spec §User content in exceptions governs "emitted via the application logger"; JVM-default stderr printing is outside the application logger. Framework-level risk documented. Not a separate finding.)
+
+  2. Anything else? Let me scan once more for adversarial angles I might have missed...
+
+  - **The `reason` string in the onClose drain MessagingException**: pre-existing construction, peer is the local daemon. Out of model (trusted local subprocess) — but hmm, could a REMOTE SimpleX contact cause the daemon to close the bot WS connection at will (e.g., malformed frames triggering daemon-internal connection errors)? If yes, a remote adversary gets a DoS lever: repeatedly kill the bot's WS → paced rebuilds (1s→60s) → inbound gaps + outbound TRANSIENT windows. Is that a finding? The defense (pacing) is exactly what the diff adds; the underlying daemon behavior is out of the codebase's control and out of model ("TLS/MITM assumed handled", daemon is trusted software). The residual exposure: during each campaign's sleep rungs, sends classify TRANSIENT (bounded per-message retry then surfaced) — working as intended. Not a finding.
+
+  - **`latchTransportDeath` fires notifier on WS listener thread; `onWsTransportDeath` starts a virtual thread — could a hostile peer... the peer is local. Skip.
+
+  - **Single-flight across arms means a malicious flap can't stack campaigns** — good.
+
+  - **The new spec bullet's "unless the supervising component has terminally failed, which classifies permanent"** — implemented via `supervisorTerminallyFailed()`. OK.
+
+  - **STATUS.md / ticket md** — no security content.
+
+  - **Test fakes** — no.
+
+  One more pass on `latchTransportDeath` ordering: `failAllPending(drainCause)` runs BEFORE `dispatchExecutor.shutdownNow()` — documented reasoning. And `transportDeathNotifier.run()` last, on listener thread — if the notifier itself throws (adapter's onWsTransportDeath → Thread.ofVirtual().start could throw if... unlikely), latch already set; fine.
+
+  And `Listener.onClose` returns null — fine.
+
+  What about **`onError` being called WITHOUT a following onClose**: latch handles; JDK calls onError as terminal. Fine.
+
+  **Group invitation / group candidate consumers on rebuilt client**: buildGroupHandler() re-creates; the fresh client presumably wired with consumers inside rebuildWebSocket (hunk shows the registration + start in the same builder method — line 382 of old file: `uri, http, this::onInbound, this::onGroupCandidate, this::onGroupInvitation` from the grep inventory). So rebuilt client keeps invitation consumer. OK.
+
+  I also want to double-check finding 1's premise that no code path re-clears `reconnecting` or re-triggers recovery after the campaign thread dies with the flag set: 
+  - Future peer-death events: none possible (no live client).
+  - Process exit → onSubprocessRestart → exit arm `reconnect()`: CAS on reconnectInFlight — it was cleared by finally! So the exit arm CAN run later. But process exit requires the process to actually die — in the MSG-1 scenario it stays alive. So the wedge persists until an unrelated process event. Confirmed.
+  - `reconnecting` stale true: affects... the exit arm sets it itself when it runs. `connected()` presumably returns false while ws latched. Stale flag's independent harm: none beyond classification, which the latched-ws arm already drives. The PRIMARY harm is the dead campaign + no re-trigger. Fix: wrap attempt body in catch(Throwable) → count as failed attempt and continue; and/or clear reconnecting in finally and re-notify. Fine.
+
+  Also should I flag that the campaign's `catch (MessagingException e)` loop is unbounded (infinite retries at 60s steady state) — by design (§6.4.6 steady state). Spec-endorsed. Fine.
+
+  Second possible finding — the Signal generality of the spec bullet: The new messaging.md bullet explicitly names "the Signal JSON-RPC channel" as a connection whose peer-close MUST drive recovery, but the diff implements recovery only for SimpleX. If Signal's channel can die while its process lives, the commitment is undelivered. From the diff alone I can't confirm Signal's pre-existing behavior — the ticket notes say the Signal comparison lives in the audit report. Per "don't infer they probably handle X elsewhere": the bullet's promise names Signal; the diff delivers SimpleX only. Category DOS, severity low (conditional on Signal's architecture; the bullet itself says Signal channel — and SignalAdapter pre-dates; maybe it already latches). Honestly this is weak; I'll put it as low with clear conditionality, or OUT-OF-MODEL. The prompt says findings = commitments the diff fails to deliver. The bullet is a commitment the diff itself writes; delivering it for one of the two named channels is a genuine promise-gap. I'll include it as low DOS, clearly stating the conditional.
+
+  Hmm — but wait. Is it fair? The bullet says "the adapter MUST latch that connection as dead and drive recovery" — as a general rule. The M1-674 ticket is SimpleX-scoped; the Signal side may already comply (signal-cli JSON-RPC over stdio: if the channel dies the process died, so the supervisor path covers it — that's the "transport death == process death" shape, which the existing exit arm handles; the bullet's examples are illustrative). The ticket's notes mention "the Signal comparison" resolved in the audit thread — suggesting Signal's channel death coincides with process death. Given uncertainty, OUT-OF-MODEL-ish... but it's not out of the threat model; it's a potentially-undelivered promise. I'll list it as low, explicitly flagged conditional. Actually — you know, let me reconsider once more. The red-team instructions: "Treat the diff as the only evidence of behavior. Don't infer that 'they probably handle X elsewhere' — if the diff doesn't show it and the threat model demands it, that's a finding." The diff's spec bullet names the Signal JSON-RPC channel; the diff shows no Signal-side handling. By the letter of the instructions → finding (low). Include.
+
+  Third candidate: **the `peerInitiated` race allowing a double notifier fire** — documented benign, deduped by CAS. Not a finding.
+
+  Fourth: **unbounded virtual-thread creation on flapping** — bounded as analyzed. Not a finding.
+
+  Fifth: **`wsReconnectBackoff.get(min(failedAttempts, size-1))`** — if a test passes an empty list → get(0) throws IndexOutOfBounds → unchecked → wedged (ties into finding 1). Production uses fixed non-empty. Package-private seam; no validation (e.g., List.copyOf of empty). Minor; fold into finding 1's mention? Not necessary.
+
+  Sixth: **`adminNotifier` not used in the campaign** — spec's coalesced admin notifications are for pipeline failures; the new bullet requires gauge/readiness visibility only. Not a finding. Though — hmm, "The outage stays operator-visible for as long as it lasts" — gauge + readiness; delivered per test 3. OK.
+
+  Seventh: Let me reconsider the INFO-LEAK angle on the onClose reason one final time. The drained MessagingException message embeds peer close reason. Where do send-failure exceptions go? Provider outbound path → classified, counted, and friendly fixed error to user. Exception messages logged via SafeLog (class-name only) per spec. The diff doesn't show logging of the exception message. Pre-existing construction anyway (old code identical). → OUT-OF-MODEL? Not even — it's unchanged behavior; the diff didn't introduce it. Skip entirely.
+
+  Eighth: **cross-adapter / authz surfaces untouched** — correct, nothing to audit there.
+
+  So final: 2 findings (1 medium DOS, 1 low DOS). Plus maybe an OUT-OF-MODEL note: remote SimpleX contacts potentially inducing daemon-side WS closes (availability lever) — out of model because the daemon is a trusted co-located component and the pacing is the documented mitigation. And the stderr stack-trace-on-uncaught note folds into finding 1.
+
+  Wait, also double-check finding 1 categorization: DOS — "Resource exhaustion, unbounded loops... blocking-the-event-loop" — it's an availability gap (loss of recovery), fits DOS loosely as "availability that the spec promised". The spec category table is what it is; DOS is the best fit. SUGGESTED-FIX-CLASS: other.
+
+  Also severity re-check for finding 1 per scale: medium = "requires unusual conditions or chained weaknesses; reduces defense-in-depth". Unchecked throw from rebuild internals = unusual condition. Permanent loss of self-healing = real availability impact but operator-visible and recoverable by restart. Medium. Yes.
+
+  Finding 2 severity: low (conditional, may already be satisfied by Signal's process-coupled channel; reduces clarity of the spec commitment).
+
+  Now write the verdict file in EXACTLY the specified format:
+
+  ```
+  RED-TEAM VERDICT: FINDINGS
+
+  FINDINGS:
+    - CATEGORY: DOS
+      SEVERITY: medium
+      PROMISE: ...
+      GAP: ...
+      REPRO: ...
+      SUGGESTED-FIX-CLASS: other
+    - CATEGORY: DOS
+      SEVERITY: low
+      ...
+
+  OUT-OF-MODEL:
+    - ...
+  ```
+
+  PROMISE quotes threat-model bullets. For finding 1, quote the diff's messaging.md addition (it is the commitment the code must deliver): "the adapter MUST latch that connection as dead and drive recovery of the transport, paced per the design-tier reconnect cadence (design notes §6.4.6 / §6.5.8), not merely drain the in-flight command futures on the dead connection." Also security.md-adjacent: messaging.md failure handling "An adapter cannot silently drop messages. Either delivery succeeds, the caller learns it didn't (after the bounded retry budget), or the failure is permanent and surfaced immediately." — that's messaging.md, quoted in the diff context (line 138-140 of the patch). Good.
+
+  REPRO for finding 1: it's not an adversary-driven repro but a fault sequence: peer closes WS → campaign starts → during waitForWebSocketReady/rebuildWebSocket/buildGroupHandler an unchecked exception escapes (e.g., NPE racing adapter.close() mid-rebuild — wait, close race IS guarded... an unchecked throw from IllegalStateException inside HttpClient/WS builder, or `wsReconnectBackoff` empty-list seam in tests) → thread dies, stack trace to stderr bypassing app logger, `reconnecting` stays true, `reconnectInFlight` freed by finally but no death event can ever fire again (the only client is latched dead; no new client exists) → transport never rebuilds while the process stays alive; requireConnected throws TRANSIENT forever; only a process death (exit arm) or operator restart recovers. The adversary angle: an attacker able to nudge the daemon into re-closing (or pure bad luck) converts a recoverable blip into a permanent adapter outage — the exact MSG-1 failure mode the ticket set out to fix, re-armed by one unexpected throwable.
+
+  GAP specifics: SimpleXAdapter.java: recoverFromTransportDeath — try/finally only resets reconnectInFlight (new-file ~lines 515-601); catch covers MessagingException only (:583-596); `reconnecting = false` appears only on the five enumerated happy/lifecycle exits (:534-535, :538-539, :548-549, :559-560, :578/576-577) — any unchecked throwable skips them all and the finally doesn't clear it; and nothing re-arms the campaign since the death notifier is a one-shot per client and the current client is already latched.
+
+  Let me nail line numbers more carefully using the hunk @@ -446,6 +478,129 @@:
+
+  Patch line 226 header; following lines map: new-file line = 478 + (offset among the 129 lines). Enumerate the hunk's lines (patch lines 227→355):
+
+  227: ` }` → 478
+  228: `` → 479
+  229: +    /** → 480
+  230-264: javadoc → 481-495? Wait, count: 230,231,...,264 = 35 lines → 481..515? Let me recount: 229→480, 230→481, 231→482, 232→483, 233→484, 234→485, 235→486, 236→487, 237→488, 238→489, 239→490, 240→491, 241→492, 242→493, 243→494, 244→495, 245→496, 246→497, 247→498, 248→499, 249→500, 250→501, 251→502, 252→503, 253→504, 254→505, 255→506, 256→507, 257→508, 258→509, 259→510, 260→511, 261→512, 262→513, 263→514, 264→515 (` * recoverFromTransportDeath...` end of javadoc `*/`? patch line 264 is `+     */` → 515? Hmm let me recount patch lines 229-264: 229 `+    /**`, 230 `+     * Transport-death notification entry point...` — wait no. Look at the patch text: lines 230-241 are the FIRST javadoc (onWsTransportDeath), then `+    private void onWsTransportDeath()` at 237... I'm misreading. Let me recount from the actual patch content:
+
+  Patch line 229: `+    /**`
+  230: `+     * Transport-death notification entry point handed to every`
+  231: `+     * {@link SimpleXWebSocketClient} (M1-674). Fires on the WS listener`
+  232: `+     * thread — the recovery campaign sleeps on the backoff ladder and`
+  233: `+     * blocks in the ready probe, so it must hop to its own thread,`
+  234: `+     * mirroring {@link #onSubprocessRestart}.`
+  235: `+     */`
+  236: `+    private void onWsTransportDeath() {`
+  237: `+        Thread.ofVirtual()`
+  238: `+                .name("simplex-adapter-ws-recovery")`
+  239: `+                .start(this::recoverFromTransportDeath);`
+  240: `+    }`
+  241: `+`
+  242: `+    /**`
+  243: `+     * Peer-close recovery arm (M1-674, audit finding MSG-1): ...`
+  244-262: javadoc continues
+  263: `+     */`
+  264: `+    private void recoverFromTransportDeath() {`
+  265: `+        if (!reconnectInFlight.compareAndSet(false, true)) {`
+
+  So new-file: 229→480 ... 264→480+(264-229)=515. recoverFromTransportDeath() at new line 515. CAS at 516. try at 520. reconnecting=true at 525. while(true) at 527. rung at 528-529. sleep at 531. InterruptedException catch 532-536 (reconnecting=false at 534). closedForGood at 537-540 (reconnecting=false 538). cfg/sub null & state check 541-545 (reconnecting=false 547-548?). Eh — close enough; I'll cite ranges: method spans new-file lines 515-601; catch (MessagingException e) at patch line 333 → 480+(333-229)=584; finally at patch 348 → 599. requireConnected arm: hunk @@ -932,6 +1087,23 at patch line 356; added lines 360-376 → new lines 1087+... patch 357 context ` }` → 1087, 358 blank → 1088, 359 ` }` → 1089? Hmm: header says new start 1087. patch 357 `             throw new MessagingException(FailureCategory.PERMANENT,` → 1087; 358 → 1088; 359 `         }` → 1089; 360-376 additions → 1090-1106. `if (ws.isClosed()) {` at patch 368 → 1098. PERMANENT throw 369-372 → 1099-1102; TRANSIENT 374-375 → 1104-1105. Good: cite SimpleXAdapter.java:1098-1106.
+
+  For latchTransportDeath in SimpleXWebSocketClient: hunk @@ -484,20 +510,50 → new start 510. latchTransportDeath method: patch 477 `+    private void latchTransportDeath(MessagingException drainCause) {` → new line = 510 + (477-435)? The hunk body starts at patch line 436 (`         public java.util.concurrent...onClose(` → new 510). patch 477 → 510+(477-436)=551. So latchTransportDeath at SimpleXWebSocketClient.java:551-559ish. onClose at :510-518, onError :520-525. Good enough.
+
+  Now also confirm finding 2's framing and cite docs/spec/messaging.md addition (patch lines 141-152) and absence of any signal-side diff. File: docs/spec/messaging.md §Failure handling (new bullet, ~line 341-352 in new file: hunk @@ -338,6 +338,18 → new lines 341-352).
+
+  OUT-OF-MODEL candidates:
+  - A remote SimpleX peer inducing the local simplex-chat daemon to close/error the bot WS repeatedly → availability lever; the daemon is a trusted co-located component (security.md §Trust boundaries 7) and its internals are outside this threat model; the ladder paces the cost but inbound gaps still occur. Flag for model-extension decision.
+  - Uncaught exception from the recovery virtual thread prints a raw stack trace to stderr via the default uncaught-exception handler, bypassing the SafeLog discipline (security.md §User content in exceptions) — exception messages on that path are unchecked throwables (not user prose by construction), so noted as hygiene rather than a finding; if the model is extended to treat framework/JVM-default logging as in-scope, this path warrants an uncaughtExceptionHandler. Hmm — actually this is tied to finding 1; include as part of finding 1's GAP or as out-of-model note. I'll add it as an out-of-model note (secondary).
+
+  Counts: critical=0 high=0 medium=1 low=1. Out-of-model: 2.
+
+  Chat reply format — exactly four lines:
+
+  ```
+  RED-TEAM VERDICT: FINDINGS
+  Verdict file: /home/infochat/infochat/.claude/worktrees/M1-674/docs/plan/m1/redteam-multi/M1-674-2026-07-22/verdict-kimi.txt
+  Findings: critical=0 high=0 medium=1 low=1
+  Out-of-model: 2
+  ```
+
+  Now write the verdict file. Format per spec:
+
+  ```
+  RED-TEAM VERDICT: FINDINGS
+
+  FINDINGS:
+    - CATEGORY: DOS
+      SEVERITY: medium
+      PROMISE: <quote>
+      GAP: <...>
+      REPRO: <...>
+      SUGGESTED-FIX-CLASS: other
+  ```
+
+  Keep each field on its own line (the template shows single-line fields; long text can wrap but the parser reads literally — safer to keep each field as a single logical line with continuation indented? The template shows PROMISE wrapped across lines with indentation in the description: "PROMISE: <what the spec says...quote the\n              relevant threat-model bullet>". I'll keep continuation lines indented to match that shape.
+
+  Write it now.
+
+• Both inputs are read in full. Writing the verdict file now.
+
+• RED-TEAM VERDICT: FINDINGS
+  Verdict file: /home/infochat/infochat/.claude/worktrees/M1-674/docs/plan/m1/redteam-multi/M1-674-2026-07-22/verdict-kimi.txt
+  Findings: critical=0 high=0 medium=1 low=1
+  Out-of-model: 2
+
+To resume this session: kimi -r session_3573992f-7314-4583-a33c-03d56705b5b2
