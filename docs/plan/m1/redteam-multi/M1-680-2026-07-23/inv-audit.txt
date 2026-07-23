@@ -1,0 +1,5 @@
+infochat-provider/src/main/java/app/zcat/infochat/provider/llm/LlmOutputSanitizer.java:50: * one {@code audit_log} row with action {@code LLM_OUTPUT_SANITIZED} —
+infochat-provider/src/main/java/app/zcat/infochat/provider/llm/LlmOutputSanitizer.java:409:     * closed-list match emits one {@code audit_log} row with action
+infochat-provider/src/main/java/app/zcat/infochat/provider/llm/LlmOutputSanitizer.java:503:     * {@code audit_log} row per element of {@link #matches()} —
+infochat-provider/src/main/java/app/zcat/infochat/provider/llm/LlmOutputSanitizer.java:599:     * Write one {@code audit_log} row per matched token via
+infochat-provider/src/main/java/app/zcat/infochat/provider/llm/LlmOutputSanitizer.java:637:            // partial-write case leaves audit_log unchanged.

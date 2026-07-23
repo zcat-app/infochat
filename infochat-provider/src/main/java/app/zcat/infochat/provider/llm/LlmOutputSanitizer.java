@@ -145,6 +145,24 @@ public class LlmOutputSanitizer {
     );
 
     /**
+     * Sentinel occupying the {@link #CLOSED_LIST_PATTERNS} slot of a
+     * flag-bearing entry. It is compared by identity, never used as a
+     * matcher — {@link #applyClosedListStripWithMatches} routes those
+     * entries to {@link #redactFlagEntry}. It keeps the pattern list
+     * index-aligned and null-free (the codebase's NullAway does not model
+     * {@code List<@Nullable Pattern>}, so a real non-null marker is used
+     * rather than a null slot). Its body never matches, so the identity
+     * check is the only thing that ever distinguishes it.
+     *
+     * <p>Declared BEFORE {@link #CLOSED_LIST_PATTERNS} on purpose: static
+     * fields initialize in textual order, and the pattern list's
+     * initializer calls {@link #compileClosedListPattern}, which returns
+     * this sentinel for flag entries — so it must already be non-null when
+     * the list is built, or every flag slot would capture a {@code null}.
+     */
+    private static final Pattern FLAG_ENTRY_TOKENIZED = Pattern.compile("(?!)");
+
+    /**
      * Precompiled match patterns for {@link #CLOSED_LIST}, index-aligned
      * (pattern {@code i} matches entry {@code i}). Compiled once at class
      * load so the closed-list pass does not re-compile every entry's
@@ -153,8 +171,19 @@ public class LlmOutputSanitizer {
      * literally; in multi-word entries the separating space matches as
      * {@code \s+} so extra internal whitespace ({@code /invite  create})
      * cannot evade the strip. The trailing lookahead is the word-boundary
-     * contract: a match must end the string or be followed by a
-     * non-token character.
+     * contract: a match must end the string or be followed by a non-token
+     * character.
+     *
+     * <p>The entry at index {@code i} is the {@link #FLAG_ENTRY_TOKENIZED}
+     * sentinel exactly when that entry is <b>flag-bearing</b> (a later
+     * word starts with {@code --}). A flag can appear at any position in
+     * the command's argument run, and no regex matches that in linear time
+     * without re-opening an evasion — see {@link #compileClosedListPattern}
+     * — so flag entries are matched by the {@linkplain #redactFlagEntry
+     * parser-mirroring tokenizer} instead. The list stays index-
+     * aligned (and every element non-null) so
+     * {@code CLOSED_LIST_PATTERNS.get(i)} still selects the mechanism for
+     * entry {@code i}.
      */
     static final List<Pattern> CLOSED_LIST_PATTERNS = CLOSED_LIST.stream()
             .map(LlmOutputSanitizer::compileClosedListPattern)
@@ -182,24 +211,192 @@ public class LlmOutputSanitizer {
      *       by changing one word's case — silently, since a non-match
      *       emits no WARN and no audit row. (M1-676 red-team finding,
      *       docs/plan/m1/redteam/M1-676-2026-07-23.md.)</li>
-     *   <li><b>Flag (a later word starting with {@code --}) — exact.</b>
-     *       {@code ListSourcesArgs.parse} compares flags with
-     *       {@code equals}, so {@code --ALL} never dispatches.</li>
+     *   <li><b>Flag (a later word starting with {@code --}) — not a
+     *       regex at all; returns {@link #FLAG_ENTRY_TOKENIZED}.</b> A
+     *       flag can appear at ANY position in the command's argument run:
+     *       {@code ListSourcesArgs.parse} loops over every token from
+     *       index 1 and ignores unknown ones, so {@code /list-sources
+     *       --page 1 --all} dispatches the admin-only global listing
+     *       identically to the adjacent form. Matching that with a regex
+     *       has no good shape — a bounded run re-opens an evasion for a
+     *       flag placed past the bound (which the parser still
+     *       dispatches), and an unbounded lazy run is super-linear under
+     *       {@link Matcher#find()} because it re-anchors at every command
+     *       occurrence and rescans to end-of-input (a DoS on
+     *       attacker-influenced output). A single left-to-right token
+     *       scan ({@link #redactFlagEntry}) is both linear and
+     *       evasion-free, so flag entries are handled there and this
+     *       method returns the {@link #FLAG_ENTRY_TOKENIZED} sentinel
+     *       instead of compiling a pattern. (M1-680 red-team rounds 1–2,
+     *       docs/plan/m1/redteam/M1-680-2026-07-23-r2.md.)</li>
      * </ul>
      *
      * <p>ASCII-only folding is deliberate and sufficient: the pattern is
      * matched against the canonical form, where NFKC has already folded
      * fullwidth letters ({@code ＣＲＥＡＴＥ}) down to ASCII.
+     *
+     * @return the entry's pattern, or {@link #FLAG_ENTRY_TOKENIZED} for a
+     *         flag-bearing entry (matched by {@link #redactFlagEntry})
      */
     private static Pattern compileClosedListPattern(String token) {
         String[] words = token.split(" ");
+        for (int i = 1; i < words.length; i++) {
+            if (words[i].startsWith("--")) {
+                return FLAG_ENTRY_TOKENIZED;
+            }
+        }
         StringBuilder pattern = new StringBuilder(Pattern.quote(words[0]));
         for (int i = 1; i < words.length; i++) {
-            pattern.append("\\s+").append(words[i].startsWith("--")
-                    ? Pattern.quote(words[i])
-                    : "(?i:" + Pattern.quote(words[i]) + ")");
+            pattern.append("\\s+(?i:").append(Pattern.quote(words[i])).append(")");
         }
         return Pattern.compile(pattern.append("(?=$|[^a-zA-Z0-9\\-])").toString());
+    }
+
+    /**
+     * Redact every occurrence of a flag-bearing closed-list entry
+     * ({@code token} = {@code "<command> <flag>"}, e.g.
+     * {@code "/list-sources --all"}) from {@code input}, mirroring exactly
+     * what {@code ListSourcesArgs.parse} dispatches: the command word,
+     * followed anywhere later in the message by the flag as a
+     * whitespace-delimited token. Each redaction spans the command word
+     * through the flag and is replaced with
+     * {@value #REDACTED_COMMAND_REPLACEMENT}; one WARN and one
+     * {@code matches} entry are emitted per occurrence, matching the
+     * regex path's per-occurrence audit semantics.
+     *
+     * <p><b>Why code and not a regex.</b> See
+     * {@link #compileClosedListPattern}: no regex matches a flag at any
+     * argument position both linearly and without an evasion. This scan is
+     * a single left-to-right pass over the whole input — the
+     * command-search and flag-search cursors only advance — so a reply of
+     * P command-words is O(input length), not the O(P × input length)
+     * that {@link Matcher#find()} re-anchoring costs. A hostile
+     * endpoint's in-cap reply therefore cannot pin a worker thread.
+     * (M1-680 red-team DOS finding,
+     * docs/plan/m1/redteam/M1-680-2026-07-23-r2.md.)
+     *
+     * <p><b>Why it mirrors the parser exactly.</b> The router passes the
+     * whole, possibly multi-line, message to the handler, and the parser
+     * tokenizes it with {@code split("\\s+")} — and Java {@code \s}
+     * includes {@code \n} — so the argument run spans every line, not
+     * just the command word's own. The separator set here is therefore
+     * exactly the ASCII {@code \s} set: the command word must be followed
+     * by a separator; the flag must be a separator-delimited token equal
+     * to the flag, with a trailing boundary admitting following
+     * punctuation (so a copy-paste that drops a sentence-final {@code .}
+     * still dispatches and is still redacted). No leading boundary is
+     * required on the command word because {@code /} is the natural
+     * copy-paste start, so {@code foo/list-sources --all} is redacted
+     * while {@code /list-sourcesX --all} (no separator after the command
+     * word) is not. (M1-680 red-team rounds 1–2; the round-3 high finding
+     * was the cross-line evasion this paragraph pins.)
+     */
+    private static String redactFlagEntry(String input, String token, List<String> matches) {
+        int space = token.indexOf(' ');
+        String commandWord = token.substring(0, space);
+        String flag = token.substring(space + 1);
+        int commandLength = commandWord.length();
+        int flagLength = flag.length();
+        int length = input.length();
+        StringBuilder out = new StringBuilder(length);
+        int appended = 0;              // next unappended index (monotonic)
+        int commandSearch = 0;         // monotonic over the whole input
+        int flagSearch = 0;            // monotonic over the whole input
+        while (true) {
+            int command = findCommandToken(input, commandWord, commandLength, commandSearch);
+            if (command < 0) {
+                break;
+            }
+            int afterCommand = command + commandLength;
+            if (flagSearch < afterCommand) {
+                flagSearch = afterCommand;
+            }
+            int flagEnd = findFlagToken(input, flag, flagLength, flagSearch);
+            if (flagEnd < 0) {
+                // No flag token later in the message: this command
+                // occurrence does not dispatch the flag. The search
+                // reached end-of-input, so later command occurrences
+                // short-circuit rather than rescan.
+                flagSearch = length;
+                commandSearch = afterCommand;
+                continue;
+            }
+            out.append(input, appended, command).append(REDACTED_COMMAND_REPLACEMENT);
+            LOG.warnf("LLM_OUTPUT_SANITIZED token=%s position=%d", token, command);
+            matches.add(token);
+            appended = flagEnd;
+            commandSearch = flagEnd;
+            flagSearch = flagEnd;
+        }
+        out.append(input, appended, length);
+        return out.toString();
+    }
+
+    /**
+     * First index {@code >= from} where {@code commandWord} occurs
+     * followed by a token separator, or {@code -1}. The
+     * following-separator requirement is the command word's trailing
+     * token boundary ({@code /list-sourcesX} does not dispatch); no
+     * leading boundary is checked, because {@code /} is the copy-paste
+     * start.
+     */
+    private static int findCommandToken(String input, String commandWord, int commandLength,
+            int from) {
+        int candidate = from;
+        while (true) {
+            candidate = input.indexOf(commandWord, candidate);
+            if (candidate < 0 || candidate + commandLength >= input.length()) {
+                return -1;
+            }
+            if (isTokenSeparator(input.charAt(candidate + commandLength))) {
+                return candidate;
+            }
+            candidate++;
+        }
+    }
+
+    /**
+     * Exclusive end index of the first {@code flag} occurring as a
+     * separator-delimited token at or after {@code from}, or {@code -1}.
+     * The token must be preceded by a separator (leading boundary) and
+     * followed by the end of input or a non-{@code [A-Za-z0-9-]}
+     * character (trailing boundary, matching the regex path's
+     * {@code (?=$|[^a-zA-Z0-9\-])} so {@code --all.} still matches but
+     * {@code --allx} does not).
+     */
+    private static int findFlagToken(String input, String flag, int flagLength,
+            int from) {
+        int candidate = from;
+        while (true) {
+            candidate = input.indexOf(flag, candidate);
+            if (candidate < 0) {
+                return -1;
+            }
+            boolean leadingBoundary = candidate > 0
+                    && isTokenSeparator(input.charAt(candidate - 1));
+            int after = candidate + flagLength;
+            boolean trailingBoundary = after >= input.length() || !isFlagBodyCharacter(input.charAt(after));
+            if (leadingBoundary && trailingBoundary) {
+                return after;
+            }
+            candidate++;
+        }
+    }
+
+    /**
+     * The ASCII {@code \s} set — the token separators the parser's
+     * {@code split("\\s+")} sees. {@code \n} is a separator like any
+     * other: the router preserves internal newlines in the body it hands
+     * the handler, so the parser's argument run spans lines.
+     */
+    private static boolean isTokenSeparator(char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\u000B';
+    }
+
+    /** A character that extends a flag token: {@code [A-Za-z0-9-]}. */
+    private static boolean isFlagBodyCharacter(char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                || (c >= '0' && c <= '9') || c == '-';
     }
 
     /** {@code [text](url)} → {@code text (url)} per acceptance item 14. */
@@ -284,12 +481,14 @@ public class LlmOutputSanitizer {
     }
 
     /**
-     * Closed-list strip pass. Each {@link #CLOSED_LIST} entry is
-     * matched via its precompiled {@link #CLOSED_LIST_PATTERNS} pattern
-     * (literal words, internal whitespace as {@code \s+}) and every
-     * occurrence is replaced with {@value #REDACTED_COMMAND_REPLACEMENT}. Emits one
-     * WARN log line per match. Used by tests that want the rewrite
-     * without driving the audit emission; the production path is
+     * Closed-list strip pass. Each {@link #CLOSED_LIST} entry is matched
+     * via its precompiled {@link #CLOSED_LIST_PATTERNS} pattern (literal
+     * words, internal whitespace as {@code \s+}), or, for a flag-bearing
+     * entry whose pattern slot is the {@link #FLAG_ENTRY_TOKENIZED}
+     * sentinel, via {@link #redactFlagEntry}; every occurrence is replaced with
+     * {@value #REDACTED_COMMAND_REPLACEMENT}. Emits one WARN log line per
+     * match. Used by tests that want the rewrite without driving the
+     * audit emission; the production path is
      * {@link #applyClosedListStripWithMatches(String)} which also
      * captures the match list for per-occurrence audit rows.
      */
@@ -337,7 +536,14 @@ public class LlmOutputSanitizer {
         List<String> matches = new ArrayList<>();
         for (int i = 0; i < CLOSED_LIST.size(); i++) {
             String token = CLOSED_LIST.get(i);
-            Matcher m = CLOSED_LIST_PATTERNS.get(i).matcher(current);
+            Pattern pattern = CLOSED_LIST_PATTERNS.get(i);
+            if (pattern == FLAG_ENTRY_TOKENIZED) {
+                // Flag-bearing entry: matched by the parser-mirroring
+                // tokenizer, which emits its own WARN + matches entries.
+                current = redactFlagEntry(current, token, matches);
+                continue;
+            }
+            Matcher m = pattern.matcher(current);
             StringBuilder rewritten = null;
             while (m.find()) {
                 if (rewritten == null) {

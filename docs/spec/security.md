@@ -468,6 +468,47 @@ flags would be the same over-broad claim as a blanket rule on case, and
 a future closed-list entry pairing a flag with a flag-folding parser
 would silently inherit an evasion.
 
+**Flag position mirrors the parser's own scan.** A flag-bearing
+closed-list entry matches its flag at **any position in the command's
+argument run**, not only immediately after the command word. The rule is
+the same match-what-the-parser-dispatches derivation as the case rule
+above: the flag-parsing handlers loop over *every* argument token, so
+`/list-sources --page 1 --all` dispatches the admin-only global
+listing identically to `/list-sources --all`, and a fixed
+adjacent-token match let that line ship verbatim — with no redaction
+marker, no WARN and no audit row, disclosing the deployment-wide
+source catalogue the entry exists to keep out of LLM output (§Source
+URL visibility). The argument run spans the **whole message, across
+newlines**: the router hands the handler the entire, possibly
+multi-line, body, and `ListSourcesArgs.parse` tokenizes it with
+`split("\s+")` — Java `\s` includes `\n` — so a `--all` on any line
+after `/list-sources` dispatches `all=true`, and the scan matches it
+there. It deliberately does **not** stop at a sentence terminator or an
+intervening `/`, because the parser does not either —
+`ListSourcesArgs.parse` ignores any token it does not recognize rather
+than rejecting it, so a punctuation- or slash-bearing token
+(`/list-sources --filter rss/news --all`, `/list-sources why? --all`)
+is still a real argument that dispatches `all=true`. A sentence-scoped
+or line-scoped bound would leave exactly those forms dispatching while
+evading the match — and the line bound also regressed the adjacent
+`/list-sources\n--all` case the earlier `\s+` regex used to catch.
+Whitespace is read the way the parser's `split("\s+")` reads it — every
+ASCII `\s` character is a token separator, so `/list-sources` and
+`--all` separated by a bare `\r` or by newlines match, mirroring the
+dispatch. The cost of the whole-message bound is that a genuine mention
+of the command and a later, unrelated admin flag in the bot's own
+explanatory prose collapse into one redacted span; that is bot-authored
+text, and the same span copy-pasted from the `/` does dispatch, so the
+redaction is defensible. Flag entries are matched by a **whitespace
+tokenizer**, not a regex, implemented as a single left-to-right scan
+(the command- and flag-search cursors only advance) that is linear in
+the reply length. A regex was rejected because matching a flag at any
+position is either bounded — re-opening an evasion for a flag placed
+past the bound, which the parser still dispatches — or super-linear
+under backtracking / `find()` re-anchoring on an attacker-influenced
+reply (§Trust boundaries item 9 puts a hostile endpoint's reply in
+scope, so an in-cap reply must not be convertible into unbounded CPU).
+
 **Markdown flattening survives canonicalization.** The link-flatten
 pass runs on the raw output first, and again on the canonical form
 inside the closed-list pass. NFKC folds fullwidth brackets into real

@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -23,6 +24,7 @@ import java.util.regex.Pattern;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -410,6 +412,163 @@ class LlmOutputSanitizerTest {
         String output = LlmOutputSanitizer.applyClosedListStrip("Ask an admin for /list-sources --all.");
         assertTrue(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
                 "the exact-case flag entry must still be redacted. Got: " + output);
+    }
+
+    // ----- flag entries match at any argument position -------------------
+
+    // ListSourcesArgs.parse loops over EVERY token from index 1, so a flag
+    // sitting behind --page dispatches the admin-only listing identically
+    // to the adjacent form. Matching only the adjacent form shipped that
+    // line verbatim — no marker, no WARN, no audit row (M1-680).
+
+    @Test
+    void allFlagBehindAnotherArgumentIsRedacted() {
+        LlmOutputSanitizer.ClosedListStripResult result =
+                LlmOutputSanitizer.applyClosedListStripWithMatches("Run /list-sources --page 1 --all now.");
+        assertTrue(result.rewritten().contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "--all behind --page still dispatches and must be redacted. Got: " + result.rewritten());
+        assertFalse(result.rewritten().contains("--all"),
+                "the dispatching flag must be absent from output. Got: " + result.rewritten());
+        assertEquals(List.of("/list-sources --all"), result.matches(),
+                "one audit-row-worthy match per occurrence");
+    }
+
+    @Test
+    void includeDeletedFlagBehindAnotherArgumentIsRedacted() {
+        LlmOutputSanitizer.ClosedListStripResult result =
+                LlmOutputSanitizer.applyClosedListStripWithMatches("Run /list-sources --page 2 --include-deleted now.");
+        assertTrue(result.rewritten().contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "--include-deleted behind --page must be redacted. Got: " + result.rewritten());
+        assertFalse(result.rewritten().contains("--include-deleted"),
+                "the dispatching flag must be absent from output. Got: " + result.rewritten());
+        assertEquals(List.of("/list-sources --include-deleted"), result.matches(),
+                "one audit-row-worthy match per occurrence");
+    }
+
+    @Test
+    void bareListSourcesIsNotRedacted() {
+        // The closed list privileges the FLAG forms, not the command word:
+        // /list-sources without an admin flag is a non-privileged command
+        // any caller may run, so redacting it would strip it from
+        // legitimate prose.
+        String bare = "Run /list-sources to see what you follow.";
+        assertEquals(bare, LlmOutputSanitizer.applyClosedListStrip(bare),
+                "the bare command is not privileged and must pass through untouched");
+        String paged = "Run /list-sources --page 2 to see the next page.";
+        assertEquals(paged, LlmOutputSanitizer.applyClosedListStrip(paged),
+                "a non-admin flag does not make the command privileged");
+    }
+
+    @Test
+    void punctuationBearingSameLineArgumentIsRedacted() {
+        // The parser has no else branch: ListSourcesArgs.parse ignores
+        // unknown tokens, so a token carrying . ! ? or / is still a real
+        // argument and --all still dispatches all=true. The match spans
+        // the parser's whole argument run, not a sentence, so these
+        // forms ARE redacted
+        // (M1-680 red-team high finding; the earlier sentence-boundary
+        // shape shipped them verbatim, no marker/WARN/audit row).
+        for (String input : new String[]{
+                "To audit every feed run: /list-sources --filter rss/news --all",
+                "/list-sources why? --all",
+                "/list-sources --page 1. --all"}) {
+            String output = LlmOutputSanitizer.applyClosedListStrip(input);
+            assertTrue(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                    "a punctuation-bearing same-line argument must not evade the match. Got: " + output);
+            assertFalse(output.contains("--all"),
+                    "the dispatching flag must be absent from output. Got: " + output);
+        }
+    }
+
+    @Test
+    void flagOnFollowingLineIsMatched() {
+        // The router hands the handler the WHOLE multi-line body and the
+        // parser tokenizes it with split("\\s+"), where \n is whitespace
+        // — so a --all on ANY line after /list-sources dispatches
+        // all=true. The argument run spans lines, and the scan mirrors it
+        // (M1-680 red-team round-3 high finding: the line-bounded scan
+        // let these dispatch while evading the match — and regressed the
+        // adjacent \n case the pre-M1-680 \s+ regex used to catch).
+        LlmOutputSanitizer.ClosedListStripResult adjacent =
+                LlmOutputSanitizer.applyClosedListStripWithMatches("/list-sources\n--all");
+        assertTrue(adjacent.rewritten().contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "a flag on the following line dispatches and must be redacted. Got: " + adjacent.rewritten());
+        assertFalse(adjacent.rewritten().contains("--all"),
+                "the dispatching flag must be absent from output. Got: " + adjacent.rewritten());
+        assertEquals(List.of("/list-sources --all"), adjacent.matches());
+        String prose = "Run /list-sources --page 1\nThen --all is separate.";
+        String output = LlmOutputSanitizer.applyClosedListStrip(prose);
+        assertTrue(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "the argument run spans the whole message, not a line. Got: " + output);
+        assertFalse(output.contains("--all"),
+                "the dispatching flag must be absent from output. Got: " + output);
+    }
+
+    @Test
+    void carriageReturnSeparatedFlagIsRedacted() {
+        // The parser tokenizes with split("\\s+"), where \r is whitespace,
+        // and the router splits lines on \n only — so \r is an intra-line
+        // token SEPARATOR and /list-sources\r--all dispatches all=true. The
+        // scan treats \r as a separator (not a line boundary) to match it,
+        // closing the same evasion class as the punctuation case via \r
+        // (M1-680 red-team low finding, docs/plan/m1/redteam/M1-680-2026-07-23-r2.md).
+        String output = LlmOutputSanitizer.applyClosedListStrip("/list-sources\r--all");
+        assertTrue(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "a CR-separated flag dispatches and must be redacted. Got: " + output);
+        assertFalse(output.contains("--all"),
+                "the dispatching flag must be absent. Got: " + output);
+    }
+
+    @Test
+    void flagCommandTokenBoundariesMirrorTheParser() {
+        // No leading boundary on the command word — `/` is the copy-paste
+        // start, so a command glued to a preceding word still dispatches
+        // and is redacted; but a command word glued to a following
+        // non-whitespace char is a different token that resolves to no
+        // handler, so it is not redacted.
+        LlmOutputSanitizer.ClosedListStripResult glued =
+                LlmOutputSanitizer.applyClosedListStripWithMatches("see foo/list-sources --all here");
+        assertTrue(glued.rewritten().contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "a command glued to a preceding word still dispatches. Got: " + glued.rewritten());
+        assertEquals(List.of("/list-sources --all"), glued.matches());
+        assertEquals("/list-sourcesX --all",
+                LlmOutputSanitizer.applyClosedListStrip("/list-sourcesX --all"),
+                "the command word must be followed by whitespace to be a command token");
+        // Two dispatching occurrences on one line yield two audit-worthy matches.
+        assertEquals(List.of("/list-sources --all", "/list-sources --all"),
+                LlmOutputSanitizer.applyClosedListStripWithMatches(
+                        "/list-sources --all and /list-sources --all").matches(),
+                "one match per occurrence");
+    }
+
+    @Test
+    void adversarialFlagScanIsLinearNotQuadratic() {
+        // Flag entries are matched by a single left-to-right token scan,
+        // not a regex, because no regex matches a flag at any argument
+        // position both linearly and without an evasion. Two adversarial
+        // shapes were live DOS findings on regex attempts:
+        //   round 1 — a long whitespace run (a lazy run then greedy \s+ is
+        //             quadratic on it);
+        //   round 2 — many command-word occurrences (an unbounded lazy run
+        //             re-anchors at each occurrence and rescans to
+        //             end-of-input, O(P x L));
+        // plus the cross-line variant of round 2, since the argument run
+        // spans newlines. All must complete near-instantly. The 3s bound
+        // clears the linear scan (~100ms through the full pass at these
+        // sizes) by ~20x and fails only if a super-linear matcher is
+        // reintroduced. (M1-680 red-team DOS findings,
+        // docs/plan/m1/redteam/M1-680-2026-07-23-r2.md.)
+        String whitespaceRun = "/list-sources" + " ".repeat(100_000);
+        String manyAnchors = "/list-sources ".repeat(100_000);   // ~1.4 MB, no flag
+        String crossLineAnchors = "/list-sources\n".repeat(100_000);  // ~1.3 MB, no flag
+        assertTimeoutPreemptively(Duration.ofSeconds(3), () -> {
+            assertEquals(whitespaceRun, LlmOutputSanitizer.applyClosedListStrip(whitespaceRun),
+                    "a whitespace-only run carrying no flag must not match");
+            assertEquals(manyAnchors, LlmOutputSanitizer.applyClosedListStrip(manyAnchors),
+                    "many command-word occurrences with no flag must not match");
+            assertEquals(crossLineAnchors, LlmOutputSanitizer.applyClosedListStrip(crossLineAnchors),
+                    "many newline-separated command occurrences with no flag must not match");
+        });
     }
 
     @Test

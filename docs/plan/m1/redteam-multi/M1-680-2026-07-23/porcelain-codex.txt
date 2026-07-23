@@ -1,0 +1,7 @@
+M  docs/plan/m1/STATUS.md
+ A docs/plan/m1/redteam/M1-680-2026-07-23-r3.md
+ A docs/plan/m1/redteam/M1-680-2026-07-23.md
+MM docs/plan/m1/tickets/M1-680-sanitizer-flag-position.md
+MM docs/spec/security.md
+MM infochat-provider/src/main/java/app/zcat/infochat/provider/llm/LlmOutputSanitizer.java
+MM infochat-provider/src/test/java/app/zcat/infochat/provider/llm/LlmOutputSanitizerTest.java
