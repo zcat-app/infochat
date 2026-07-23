@@ -1,0 +1,103 @@
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:8:import app.zcat.infochat.messaging.InboundMessage;
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:49: * responses and inbound notifications, request-response correlation
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:62: * {@link InboundMessage} and delivered to the registered
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:63: * {@link MessagingAdapter.InboundHandler}. The split is load-bearing:
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:112:     * NOT the {@code maxInboundMessageBytes} capability. That capability
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:114:     * in {@link SignalMessageCodec#exceedsInboundByteCap} on both the DM
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:120:     * just under) the byte budget could reach {@code exceedsInboundByteCap},
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:127:    static final int MAX_INBOUND_LINE_CHARS = 4 * SignalMessageCodec.MAX_INBOUND_TEXT_BYTES;
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:143:     * Default bound on the inbound-dispatch executor's work queue. A
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:154:    static final int INBOUND_QUEUE_CAPACITY = 1_000;
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:213:    private final int inboundQueueCapacity;
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:220:    // Cumulative count of inbound notifications dropped on queue overflow
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:223:    private final AtomicLong droppedInboundCount = new AtomicLong();
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:275:    private volatile MessagingAdapter.@Nullable InboundHandler inboundHandler;
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:304:        this(endpoint, account, codec, responseTimeout, hungRestartHook, INBOUND_QUEUE_CAPACITY,
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:318:                        int inboundQueueCapacity,
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:320:        this(endpoint, account, codec, responseTimeout, hungRestartHook, inboundQueueCapacity,
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:334:                        int inboundQueueCapacity,
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:342:        this.inboundQueueCapacity = inboundQueueCapacity;
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:347:    void setInboundHandler(MessagingAdapter.InboundHandler handler) {
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:348:        this.inboundHandler = handler;
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:386:                s, w, inboundQueueCapacity, daemonGeneration.getAsLong());
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:810:            // inbound byte will ever arrive again. finally — not per-arm
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:834:                if (sb.length() >= MAX_INBOUND_LINE_CHARS) {
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:837:                    LOG.warnf("dropped inbound JSON-RPC line exceeding %d-char cap",
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:838:                            MAX_INBOUND_LINE_CHARS);
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:863:     * stops reading means no inbound byte — response or notification —
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:868:     * timeout, and — because a dead reader also kills the inbound traffic
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:879:     * dispatcher down — discarding queued-but-undelivered inbound is the
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:909:            long total = droppedInboundCount.addAndGet(discarded);
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:910:            LOG.warnf("transport death discarded %d queued inbound deliveries (total dropped %d)",
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:980:            LOG.warnf("ignoring malformed inbound JSON-RPC line (parse failure: %s)",
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1005:                // connection is going away (at-most-once inbound).
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1006:                LOG.debugf("inbound notification dropped — dispatcher shut down");
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1009:            // The bounded dispatch queue is full: inbound is arriving faster
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1014:            long dropped = droppedInboundCount.incrementAndGet();
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1018:            metrics.inboundDropped(ADAPTER_NAME, null, AdapterMetrics.DropReason.QUEUE_FULL);
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1019:            LOG.warnf("inbound dispatch queue full (cap %d); dropped newest from %s (total dropped %d)",
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1020:                    inboundQueueCapacity, redactSender(n), dropped);
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1037:    /** Visible for tests: count of inbound notifications dropped on queue overflow. */
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1038:    long droppedInboundCount() {
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1039:        return droppedInboundCount.get();
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1059:     * fired: a reader-loop exit means no inbound byte will ever arrive
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1122:     * {@code toString()} may carry inbound chat-mode body bytes (D37), but
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1123:     * {@link StackTraceElement} and class names never do. Lets an inbound
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1186:                metrics.inboundDropped(ADAPTER_NAME,
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1188:                LOG.warnf("inbound dropped — exceeds %d-byte size cap; from %s adapterMessageId %s",
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1189:                        SignalMessageCodec.MAX_INBOUND_TEXT_BYTES,
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1197:    /** Deliver a decoded DM to the registered inbound handler on the dispatch thread. */
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1199:        MessagingAdapter.InboundHandler handler = inboundHandler;
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1201:            LOG.debugf("inbound Signal DM dropped — no InboundHandler set");
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1206:        InboundMessage inbound = new InboundMessage(
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1213:            handler.onMessage(inbound);
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1215:            // Mirror SimpleXAdapter.onInbound: a Provider-side handler that
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1219:            // inbound chat-mode body bytes, so it stays suppressed — the class
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1221:            LOG.warnf("inbound Signal handler threw, message suppressed per D37; "
+infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java:1237:            // message may carry inbound group bytes, so it stays suppressed
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalEditFallbackTest.java:198:                    () -> { }, SignalJsonRpcClient.INBOUND_QUEUE_CAPACITY, limiter,
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalInboundQueueBoundTest.java:22: * Pins the M1-224 DoS bound for the Signal transport: the inbound
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalInboundQueueBoundTest.java:29:class SignalInboundQueueBoundTest {
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalInboundQueueBoundTest.java:52:            client.setInboundHandler(msg -> {
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalInboundQueueBoundTest.java:71:                assertEquals(expectedDropped, client.droppedInboundCount(),
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalInboundQueueBoundTest.java:72:                        "every inbound past (worker + queue capacity) must be dropped and counted");
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalInboundQueueBoundTest.java:87:                assertEquals(expectedDropped, client.droppedInboundCount(),
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalInboundQueueBoundTest.java:89:                // §6.3.7 overflow drops route through the shared inbound-drop
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalInboundQueueBoundTest.java:92:                assertEquals((double) expectedDropped, registry.get("adapter.inbound.dropped")
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalInboundQueueBoundTest.java:95:                        "every queue-overflow drop must increment adapter.inbound.dropped{reason=queue_full}");
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalInboundQueueBoundTest.java:106:        while (client.droppedInboundCount() < target && System.nanoTime() < deadline) {
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:32:import app.zcat.infochat.messaging.InboundMessage;
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:49:    void inboundMessageDelivered() throws Exception {
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:53:            LinkedBlockingQueue<InboundMessage> delivered = new LinkedBlockingQueue<>();
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:54:            client.setInboundHandler(delivered::add);
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:70:                InboundMessage msg = delivered.poll(QUEUE_WAIT_MS, TimeUnit.MILLISECONDS);
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:71:                assertNotNull(msg, "InboundHandler must receive the DM within " + QUEUE_WAIT_MS + " ms");
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:352:    void oversizeInboundLineIsDroppedAndReaderSurvives() throws Exception {
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:354:        // SignalAdapter capability declares maxInboundMessageBytes=16384,
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:362:            LinkedBlockingQueue<InboundMessage> delivered = new LinkedBlockingQueue<>();
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:363:            client.setInboundHandler(delivered::add);
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:366:                // Feed an oversize line (well over MAX_INBOUND_LINE_CHARS). The
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:371:                int oversizeChars = SignalJsonRpcClient.MAX_INBOUND_LINE_CHARS + 4_096;
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:395:                InboundMessage msg = delivered.poll(QUEUE_WAIT_MS, TimeUnit.MILLISECONDS);
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:546:        // A10: a RuntimeException thrown by the InboundHandler must be caught
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:547:        // in dispatchNotification (mirroring SimpleXAdapter.onInbound) so the
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:548:        // signal-jsonrpc-reader thread survives and keeps delivering inbound
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:554:            LinkedBlockingQueue<InboundMessage> delivered = new LinkedBlockingQueue<>();
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:556:            client.setInboundHandler(msg -> {
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:567:                InboundMessage msg = delivered.poll(QUEUE_WAIT_MS, TimeUnit.MILLISECONDS);
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:893:        // The no-outbound-traffic hole (M1-674 audit finding 2): inbound death
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:981:            LinkedBlockingQueue<InboundMessage> delivered = new LinkedBlockingQueue<>();
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:982:            client.setInboundHandler(delivered::add);
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java:1026:                // The replacement's dispatcher survived: inbound still routes.
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java:19:import app.zcat.infochat.messaging.InboundMessage;
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java:38: * supervised reconnect; and an inbound frame pushed after the reconnect
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java:42: * <p>Wiring mirrors {@link SignalInboundDispatchTest}: production
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java:160:    void inboundDeliveredExactlyOnceAfterReconnect() throws Exception {
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java:164:            LinkedBlockingQueue<InboundMessage> delivered = new LinkedBlockingQueue<>();
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java:165:            adapter.setInboundHandler(delivered::add);
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java:184:                InboundMessage first = delivered.poll(5_000, TimeUnit.MILLISECONDS);
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java:186:                        "inbound pushed after the reconnect must reach the handler");
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java:191:                        "inbound frame must be delivered exactly once across the reconnect");
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java:220:                    SignalJsonRpcClient.INBOUND_QUEUE_CAPACITY,
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java:275:     * Retry the inbound push until the fake's write succeeds or the
+infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java:302:        throw new AssertionError("inbound push did not succeed within " + timeoutMs

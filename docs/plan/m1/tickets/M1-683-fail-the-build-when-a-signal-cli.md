@@ -1,14 +1,17 @@
 ---
 id: M1-683
 title: "Fail the build when a Signal client pairs a real restart hook with no generation supplier"
-status: pending
+status: done
 created: 2026-07-23
 last_updated: 2026-07-23
 blocked_by: [M1-681]
-files_budget: 2
+files_budget: 5
 files_scope:
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalEditFallbackTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalInboundQueueBoundTest.java
 complexity: low
 risk: low
 round_cap: 2
@@ -57,17 +60,37 @@ test_plan:
   adds: []
   modifies:
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalEditFallbackTest.java
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalInboundQueueBoundTest.java
   preserves:
     - all tests currently green on main
 spec_refs:
   - docs/spec/messaging.md §Failure handling
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-23
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 19
+      added: 801
+      removed: 54
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-23
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 
@@ -129,6 +152,19 @@ frontmatter for the full list and reasoning.
 
 ## Notes
 
+- **Scope widened at start (developer self-check).** The original
+  `files_scope` (2 files) assumed the hazard was confined to
+  `SignalJsonRpcClient.java` and its direct unit test. A pre-implementation
+  grep of every constructor call site in the package (package-private
+  class, so this is exhaustive) found the identical pattern already live in
+  `SignalReconnectTest.java` (real `sp::restartHung` hook, no generation
+  supplier, 3 sites) — a real `SignalSubprocess`, not a mock. Closing the
+  hole per acceptance item 1 (including the 7-arg "looks complete" case
+  this ticket calls out as worst) requires collapsing all three risky
+  overloads, which also forces a 1-line call-site update in
+  `SignalEditFallbackTest.java` and `SignalInboundQueueBoundTest.java`
+  (currently-safe no-op-hook callers of the overloads being reshaped).
+  `files_budget`/`files_scope` widened 2→5 to cover all five files.
 - The two obvious mechanisms, either acceptable: (a) collapse the
   hook-bearing constructors so a real hook cannot be supplied without a
   supplier — the two travel as one — which the tests opt out of with an

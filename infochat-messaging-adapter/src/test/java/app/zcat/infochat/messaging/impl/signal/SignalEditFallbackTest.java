@@ -195,7 +195,8 @@ class SignalEditFallbackTest {
             OutboundRateLimiter limiter = new OutboundRateLimiter(1_000_000, Clock.systemUTC());
             SignalJsonRpcClient client = new SignalJsonRpcClient(
                     fake.endpoint(), "+15551111111", new SignalMessageCodec(), TEST_RESPONSE_TIMEOUT,
-                    () -> { }, SignalJsonRpcClient.INBOUND_QUEUE_CAPACITY, limiter);
+                    () -> { }, SignalJsonRpcClient.INBOUND_QUEUE_CAPACITY, limiter,
+                    SignalJsonRpcClient.ALWAYS_MATCHING_GENERATION);
             client.connect();
             try {
                 MessageHandle handle = sendAndAck(client, fake,

@@ -72,7 +72,8 @@ class SignalReconnectTest {
             sp.start();
             SignalJsonRpcClient client = new SignalJsonRpcClient(
                     fake.endpoint(), ACCOUNT, new SignalMessageCodec(),
-                    TEST_RESPONSE_TIMEOUT, sp::restartHung);
+                    TEST_RESPONSE_TIMEOUT, sp::restartHung,
+                    SignalJsonRpcClient.ALWAYS_MATCHING_GENERATION);
             client.connect();
             try {
                 adapter.attachSubprocess(sp);
@@ -127,7 +128,8 @@ class SignalReconnectTest {
             sp.start();
             SignalJsonRpcClient client = new SignalJsonRpcClient(
                     fake.endpoint(), ACCOUNT, new SignalMessageCodec(),
-                    TEST_RESPONSE_TIMEOUT, sp::restartHung);
+                    TEST_RESPONSE_TIMEOUT, sp::restartHung,
+                    SignalJsonRpcClient.ALWAYS_MATCHING_GENERATION);
             client.connect();
             Thread responder = startSendResponder(fake);
             try {
@@ -167,7 +169,8 @@ class SignalReconnectTest {
             sp.start();
             SignalJsonRpcClient client = new SignalJsonRpcClient(
                     fake.endpoint(), ACCOUNT, new SignalMessageCodec(),
-                    TEST_RESPONSE_TIMEOUT, sp::restartHung);
+                    TEST_RESPONSE_TIMEOUT, sp::restartHung,
+                    SignalJsonRpcClient.ALWAYS_MATCHING_GENERATION);
             client.connect();
             try {
                 adapter.attachSubprocess(sp);

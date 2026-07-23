@@ -44,7 +44,8 @@ class SignalInboundQueueBoundTest {
         try (FakeSignalCli fake = new FakeSignalCli()) {
             SignalJsonRpcClient client = new SignalJsonRpcClient(
                     fake.endpoint(), "+15551111111", new SignalMessageCodec(),
-                    TEST_RESPONSE_TIMEOUT, () -> { }, capacity);
+                    TEST_RESPONSE_TIMEOUT, () -> { }, capacity,
+                    SignalJsonRpcClient.ALWAYS_MATCHING_GENERATION);
             client.bindMetrics(new AdapterMetrics(registry));
             CountDownLatch release = new CountDownLatch(1);
             LinkedBlockingQueue<String> delivered = new LinkedBlockingQueue<>();

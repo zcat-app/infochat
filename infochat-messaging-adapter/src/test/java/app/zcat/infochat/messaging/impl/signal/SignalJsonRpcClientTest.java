@@ -587,7 +587,8 @@ class SignalJsonRpcClientTest {
             // Short response timeout so three timeouts accrue quickly.
             SignalJsonRpcClient client = new SignalJsonRpcClient(
                     fake.endpoint(), "+15551111111", new SignalMessageCodec(),
-                    Duration.ofMillis(150), restartCalls::incrementAndGet);
+                    Duration.ofMillis(150), restartCalls::incrementAndGet,
+                    SignalJsonRpcClient.ALWAYS_MATCHING_GENERATION);
             client.connect();
             try {
                 for (int i = 0; i < 3; i++) {
@@ -850,7 +851,8 @@ class SignalJsonRpcClientTest {
             AtomicInteger restartCalls = new AtomicInteger();
             SignalJsonRpcClient client = new SignalJsonRpcClient(
                     fake.endpoint(), "+15551111111", new SignalMessageCodec(),
-                    TEST_RESPONSE_TIMEOUT, restartCalls::incrementAndGet);
+                    TEST_RESPONSE_TIMEOUT, restartCalls::incrementAndGet,
+                    SignalJsonRpcClient.ALWAYS_MATCHING_GENERATION);
             client.connect();
             try {
                 AtomicReference<MessagingException> caught = new AtomicReference<>();
@@ -896,7 +898,8 @@ class SignalJsonRpcClientTest {
             AtomicInteger restartCalls = new AtomicInteger();
             SignalJsonRpcClient client = new SignalJsonRpcClient(
                     fake.endpoint(), "+15551111111", new SignalMessageCodec(),
-                    TEST_RESPONSE_TIMEOUT, restartCalls::incrementAndGet);
+                    TEST_RESPONSE_TIMEOUT, restartCalls::incrementAndGet,
+                    SignalJsonRpcClient.ALWAYS_MATCHING_GENERATION);
             client.connect();
             try {
                 assertTrue(client.isConnected(), "sanity: connected before the kill");
@@ -921,7 +924,8 @@ class SignalJsonRpcClientTest {
             // Short response timeout so three timeouts accrue quickly.
             SignalJsonRpcClient client = new SignalJsonRpcClient(
                     fake.endpoint(), "+15551111111", new SignalMessageCodec(),
-                    Duration.ofMillis(150), restartCalls::incrementAndGet);
+                    Duration.ofMillis(150), restartCalls::incrementAndGet,
+                    SignalJsonRpcClient.ALWAYS_MATCHING_GENERATION);
             client.connect();
             try {
                 for (int i = 0; i < 3; i++) {
@@ -1118,7 +1122,8 @@ class SignalJsonRpcClientTest {
             AtomicInteger restartCalls = new AtomicInteger();
             SignalJsonRpcClient client = new SignalJsonRpcClient(
                     fake.endpoint(), "+15551111111", new SignalMessageCodec(),
-                    TEST_RESPONSE_TIMEOUT, restartCalls::incrementAndGet);
+                    TEST_RESPONSE_TIMEOUT, restartCalls::incrementAndGet,
+                    SignalJsonRpcClient.ALWAYS_MATCHING_GENERATION);
             client.connect();
             client.disconnect();
             assertFalse(client.isConnected(), "a disconnected client must read disconnected");

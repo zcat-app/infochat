@@ -181,6 +181,22 @@ class SignalJsonRpcClient {
      */
     private static final int UNPACED_DEFAULT_CAP = 1_000_000;
 
+    /**
+     * Explicit stand-in for "no daemon-generation gating": every connection
+     * stamps this same constant at {@link #connect()} and the fire-time
+     * check reads it again, so {@code stamp == daemonGeneration.getAsLong()}
+     * always holds and {@link #hungRestartHook} fires unconditionally. Every
+     * constructor that accepts a {@code hungRestartHook} requires a
+     * {@link LongSupplier} explicitly — none may silently fall back to this
+     * behavior — so a future production wiring that omitted the generation
+     * argument fails to compile instead of quietly reopening
+     * RT-M1-681-r2-1 (M1-683). Tests that deliberately want an ungated
+     * restart — the transport-death tests, which assert the restart fires
+     * and have no supervised subprocess behind the hook — pass this
+     * constant explicitly instead of relying on an implicit default.
+     */
+    static final LongSupplier ALWAYS_MATCHING_GENERATION = () -> 0L;
+
     private final InetSocketAddress endpoint;
     private final String account;
     private final SignalMessageCodec codec;
@@ -188,10 +204,11 @@ class SignalJsonRpcClient {
     private final Runnable hungRestartHook;
     // The live SignalSubprocess generation, read at connect() to stamp each
     // connection and again before firing hungRestartHook to confirm the
-    // child this connection served is still current (M1-681). Defaults to a
-    // constant 0 in the no-subprocess constructors, which makes the gate a
-    // no-op (0 == 0 always) and preserves the fire-on-death behavior those
-    // constructors had. Production wires SignalSubprocess::generation.
+    // child this connection served is still current (M1-681). Every
+    // constructor requires this explicitly — ALWAYS_MATCHING_GENERATION is
+    // the supported opt-out for a deliberately ungated restart (M1-683);
+    // there is no implicit default a hook can silently inherit. Production
+    // wires SignalSubprocess::generation.
     private final LongSupplier daemonGeneration;
     private final int inboundQueueCapacity;
     // Outbound send pacer (design §6.3.6): one token per outbound wire
@@ -262,42 +279,22 @@ class SignalJsonRpcClient {
      * Convenience constructor with no hung-process escalation wired:
      * consecutive request timeouts are still counted but never restart the
      * subprocess. Production wiring ({@link SignalAdapter#start()}) uses the
-     * five-arg form so the supervisor ({@link SignalSubprocess}) can be
+     * full constructor so the supervisor ({@link SignalSubprocess}) can be
      * kicked when the daemon wedges.
      */
     SignalJsonRpcClient(InetSocketAddress endpoint,
                         String account,
                         SignalMessageCodec codec,
                         Duration responseTimeout) {
-        this(endpoint, account, codec, responseTimeout, () -> { });
-    }
-
-    SignalJsonRpcClient(InetSocketAddress endpoint,
-                        String account,
-                        SignalMessageCodec codec,
-                        Duration responseTimeout,
-                        Runnable hungRestartHook) {
-        this(endpoint, account, codec, responseTimeout, hungRestartHook, INBOUND_QUEUE_CAPACITY);
-    }
-
-    // Test seam: a small capacity drives the overflow path deterministically
-    // without flooding the production-default 1000-deep queue. The pacer
-    // defaults to UNPACED_DEFAULT_CAP — direct-client tests are not the
-    // pacing surface, so they run unthrottled.
-    SignalJsonRpcClient(InetSocketAddress endpoint,
-                        String account,
-                        SignalMessageCodec codec,
-                        Duration responseTimeout,
-                        Runnable hungRestartHook,
-                        int inboundQueueCapacity) {
-        this(endpoint, account, codec, responseTimeout, hungRestartHook, inboundQueueCapacity,
-                new OutboundRateLimiter(UNPACED_DEFAULT_CAP, Clock.systemUTC()));
+        this(endpoint, account, codec, responseTimeout, () -> { }, ALWAYS_MATCHING_GENERATION);
     }
 
     // Test seam: a hook plus a daemon-generation supplier, at the default
     // capacity and unpaced. Lets a transport-death test advance the
     // generation across a simulated respawn to prove the restart gate,
-    // without threading an OutboundRateLimiter through the case.
+    // without threading an OutboundRateLimiter through the case. The
+    // generation supplier is required, not defaulted (M1-683) — pass
+    // ALWAYS_MATCHING_GENERATION explicitly for a deliberately ungated hook.
     SignalJsonRpcClient(InetSocketAddress endpoint,
                         String account,
                         SignalMessageCodec codec,
@@ -308,19 +305,20 @@ class SignalJsonRpcClient {
                 new OutboundRateLimiter(UNPACED_DEFAULT_CAP, Clock.systemUTC()), daemonGeneration);
     }
 
-    // No daemon-generation supplier: the transport-death restart gate is a
-    // no-op (every connection stamps generation 0), which is correct for a
-    // client with no supervised subprocess behind it — the same clients that
-    // pass a no-op or counting hungRestartHook.
+    // Test seam: a small capacity drives the overflow path deterministically
+    // without flooding the production-default 1000-deep queue, at the
+    // default (unpaced) pacer. Same required-generation rule as the seam
+    // above (M1-683) — no arity here may pair a hook with an implicit
+    // default.
     SignalJsonRpcClient(InetSocketAddress endpoint,
                         String account,
                         SignalMessageCodec codec,
                         Duration responseTimeout,
                         Runnable hungRestartHook,
                         int inboundQueueCapacity,
-                        OutboundRateLimiter outboundRate) {
+                        LongSupplier daemonGeneration) {
         this(endpoint, account, codec, responseTimeout, hungRestartHook, inboundQueueCapacity,
-                outboundRate, () -> 0L);
+                new OutboundRateLimiter(UNPACED_DEFAULT_CAP, Clock.systemUTC()), daemonGeneration);
     }
 
     // Production seam: SignalAdapter.start() injects the capability-derived
