@@ -473,6 +473,34 @@ property.
   distinct label value for the process lifetime, so an endpoint-chosen
   label value would be an unbounded memory-amplification channel for a
   hostile or compromised endpoint.
+- Recorded token counts are untrusted input too — the provider reports
+  them, the system does not measure them — and are checked at that same
+  single boundary before any counter moves. A report is impossible, and
+  so discarded, when a count is negative, when the output count exceeds
+  the generation cap the request carried, or when the input count
+  exceeds a ceiling derived from the size of the prompt that was sent
+  plus a small fixed allowance for the provider's own chat-template
+  overhead. The cap is the effective one, including the default applied
+  when no per-task `max-tokens` is configured — an absent key does not
+  mean uncapped, because the request carries the default either way.
+  The input ceiling is deliberately above any real tokenization of that
+  prompt, so it never discards an honest reply; it rejects magnitudes
+  no tokenization of it could produce.
+- A discarded report is dropped whole rather than clamped, and the call
+  counts as reporting no usage — the state a provider that reports
+  nothing already produces. A lying endpoint therefore leaves a visible
+  gap between the call counter and the token counters instead of a
+  plausible figure. No counter ever moves backwards (a decrement reads
+  downstream as a counter reset, silently mis-reporting every rate over
+  the series) and none can be inflated to a magnitude that swamps later
+  honest increments for the lifetime of the process.
+- The checks are one-sided: they reject the impossible, not the merely
+  wrong. A reply that understates its usage, or overstates it anywhere
+  below those ceilings — including inside the template-overhead
+  allowance on the input side, which is bounded but not zero — is
+  indistinguishable from an honest one and is recorded as reported. Any
+  future consumer that turns these counters into a decision input must
+  weigh that residual rather than assume the recorded figure is true.
 - Trace ids tie a chat-agent reply back to the tool calls and the eval                                                                                                                                                                                
   artifacts it consulted.
 

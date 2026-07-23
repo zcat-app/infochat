@@ -53,7 +53,14 @@ class LlmObservabilityTest {
         // deliberately-different model the stub reports on the wire (M1-673).
         meteredLlm = new MeteredLlmProvider(llmStub, metrics,
             LlmRouter.ConfigReader.fromMap(Map.of(
-                ModelTask.SECURITY_JUDGE.configPrefix() + "model", "stub-model")));
+                ModelTask.SECURITY_JUDGE.configPrefix() + "model", "stub-model",
+                // The generation cap the request would carry, so it is also the
+                // most output tokens an honest reply for this task can report
+                // (M1-677). Only SECURITY_JUDGE configures one explicitly; the
+                // other tasks exercise the absent-key path, which is bounded by
+                // the same 1024 default their requests would carry, not
+                // unbounded.
+                ModelTask.SECURITY_JUDGE.configPrefix() + "max-tokens", "256")));
         meteredEmbedding = new MeteredEmbeddingProvider(embeddingStub, metrics, "stub-embed-model");
     }
 
@@ -158,6 +165,128 @@ class LlmObservabilityTest {
     }
 
     @Test
+    void negativeReportedTokenCountsNeverMoveTheTokenCountersBackwards() {
+        meteredLlm.generate(ModelTask.SECURITY_JUDGE, "", "prompt");
+        llmStub.wireUsage = new LlmResponse.TokenUsage(-40, -25);
+
+        meteredLlm.generate(ModelTask.SECURITY_JUDGE, "", "prompt");
+
+        // A Prometheus counter that moves backwards reads downstream as a
+        // counter reset, so every rate() over the series silently mis-reports
+        // instead of showing an obvious anomaly. The second call must leave
+        // the first call's honest totals exactly where they were.
+        assertEquals(10.0, registry.get("llm.tokens.in")
+            .tags("task", "security", "provider", "stub", "model", "stub-model")
+            .counter().count());
+        assertEquals(5.0, registry.get("llm.tokens.out")
+            .tags("task", "security", "provider", "stub", "model", "stub-model")
+            .counter().count());
+        // Both calls are still counted: calls.total outrunning the token
+        // counters is exactly how a discarded report stays visible.
+        assertEquals(2.0, registry.get("llm.calls.total")
+            .tags("task", "security", "provider", "stub", "model", "stub-model", "outcome", "ok")
+            .counter().count());
+    }
+
+    @Test
+    void outputTokenCountAboveTheConfiguredMaxTokensIsNotRecorded() {
+        // 50k output tokens under a 256-token generation cap the request itself
+        // carried: impossible for a server that obeyed the cap.
+        llmStub.wireUsage = new LlmResponse.TokenUsage(10, 50_000);
+
+        meteredLlm.generate(ModelTask.SECURITY_JUDGE, "", "prompt");
+
+        // Discarded whole rather than clamped to the bound, and the honest-looking
+        // input count goes with it: a clamped figure would be indistinguishable
+        // from an honest max-length completion, hiding that anything happened.
+        assertNull(registry.find("llm.tokens.out").counter());
+        assertNull(registry.find("llm.tokens.in").counter());
+        assertEquals(1.0, registry.get("llm.calls.total")
+            .tags("task", "security", "provider", "stub", "model", "stub-model", "outcome", "ok")
+            .counter().count());
+    }
+
+    @Test
+    void taskWithNoConfiguredMaxTokensIsStillBoundedByTheDefaultTheRequestCarries() {
+        // TAGGER configures no max-tokens — the shipped state for every task
+        // except chat and summarizer, since no properties file sets the key.
+        // Its request still carries the 1024 default OpenAiCompatibleProvider
+        // sends, so 4_000 output tokens is as impossible here as an over-cap
+        // count is for a task with an explicit key. Reading an absent key as
+        // "unbounded" would leave the check dead in every real deployment.
+        llmStub.wireUsage = new LlmResponse.TokenUsage(10, 4_000);
+
+        meteredLlm.generate(ModelTask.TAGGER, "", "prompt");
+
+        assertNull(registry.find("llm.tokens.out").counter());
+        assertNull(registry.find("llm.tokens.in").counter());
+        assertEquals(1.0, registry.get("llm.calls.total")
+            .tags("task", "tagger", "provider", "stub", "model", "unknown", "outcome", "ok")
+            .counter().count());
+    }
+
+    @Test
+    void outputCountWithinTheDefaultCapIsRecordedForATaskWithNoConfiguredMaxTokens() {
+        // The complement of the test above: the default bounds the count, it
+        // does not suppress reporting. Without this, discarding every TAGGER
+        // record would pass the test above just as well.
+        llmStub.wireUsage = new LlmResponse.TokenUsage(10, 1_024);
+
+        meteredLlm.generate(ModelTask.TAGGER, "", "prompt");
+
+        assertEquals(1024.0, registry.get("llm.tokens.out")
+            .tags("task", "tagger", "provider", "stub", "model", "unknown")
+            .counter().count());
+    }
+
+    @Test
+    void inputCountFarAboveWhatThePromptCouldTokenizeToIsNotRecorded() {
+        // Counters are monotonic, so one such report makes every later honest
+        // increment invisible for the JVM lifetime — the "poisoned for the
+        // process lifetime" shape M1-673 closed for the model tag. The bound
+        // comes from the prompt the decorator itself was handed, so it needs
+        // no config and holds in both services.
+        llmStub.wireUsage = new LlmResponse.TokenUsage(Long.MAX_VALUE, 5);
+
+        meteredLlm.generate(ModelTask.SECURITY_JUDGE, "", "prompt");
+
+        assertNull(registry.find("llm.tokens.in").counter());
+        assertNull(registry.find("llm.tokens.out").counter());
+        assertEquals(1.0, registry.get("llm.calls.total")
+            .tags("task", "security", "provider", "stub", "model", "stub-model", "outcome", "ok")
+            .counter().count());
+    }
+
+    @Test
+    void inputCountAboveTheRawPromptLengthButWithinTemplateOverheadIsStillRecorded() {
+        // The bound must never discard an honest record just because the
+        // provider's own chat-template markers pushed the count past what the
+        // visible prompt alone tokenizes to. 1_000 exceeds 3 x 6 prompt chars
+        // by orders of magnitude and is still kept; the allowance stays small
+        // enough that it cannot hide sustained phantom usage.
+        llmStub.wireUsage = new LlmResponse.TokenUsage(1_000, 5);
+
+        meteredLlm.generate(ModelTask.SECURITY_JUDGE, "", "prompt");
+
+        assertEquals(1000.0, registry.get("llm.tokens.in")
+            .tags("task", "security", "provider", "stub", "model", "stub-model")
+            .counter().count());
+    }
+
+    @Test
+    void inputCountJustAboveTheOverheadAllowanceIsNotRecorded() {
+        // Pins the allowance as bounded rather than a blanket admission: with a
+        // 6-char prompt the ceiling is 3 x 6 + 1024, so 2_000 is rejected even
+        // though it is nowhere near the counter-destroying magnitudes. Without
+        // this, widening the slack would silently pass the whole suite.
+        llmStub.wireUsage = new LlmResponse.TokenUsage(2_000, 5);
+
+        meteredLlm.generate(ModelTask.SECURITY_JUDGE, "", "prompt");
+
+        assertNull(registry.find("llm.tokens.in").counter());
+    }
+
+    @Test
     void okEmbeddingCallIncrementsCallsTotalAndSetsDimensionGauge() {
         meteredEmbedding.embed(List.of("text"));
 
@@ -209,13 +338,16 @@ class LlmObservabilityTest {
         /** The response-body {@code model} field: endpoint-chosen, so never a metric tag. */
         String wireModel = "wire-reported-model";
 
+        /** The reported token counts: endpoint-chosen, so equally never trusted. */
+        LlmResponse.TokenUsage wireUsage = new LlmResponse.TokenUsage(10, 5);
+
         @Override
         public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
             observed.set(LlmCallContext.current());
             if (failure != null) {
                 throw failure;
             }
-            return new LlmResponse("reply", wireModel, new LlmResponse.TokenUsage(10, 5));
+            return new LlmResponse("reply", wireModel, wireUsage);
         }
 
         @Override

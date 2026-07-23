@@ -106,11 +106,28 @@ notes. The spec-level commitments below cover all of them.
    the model string the reply reports, so a distinct-per-call model
    string cannot mint unbounded retained meters (`llm.md` §Bounded
    concurrency and observability). Provider-reported **numeric usage**
-   (token counts) is the residual: v1 records it into the token
-   counters as reported, and no v1 decision reads those counters, so a
-   lying endpoint can skew usage observability and nothing else. A
-   future cost-weighted rate cap would have to validate the reported
-   values before charging a bucket against them.
+   (token counts) is checked at that same boundary before it reaches
+   the counters: a count is impossible, and the report discarded whole
+   rather than clamped, when it is negative, when the output count
+   exceeds the generation cap the request carried (the effective cap,
+   default included — an absent per-task `max-tokens` does not mean
+   uncapped), or when the input count exceeds a ceiling derived from
+   the size of the prompt sent plus a small fixed allowance for the
+   provider's own chat-template overhead. The call then counts as
+   reporting no usage, so
+   tampering shows up as a gap between the call counter and the token
+   counters rather than as a plausible figure, and no counter can be
+   driven backwards or inflated to a magnitude that swamps later
+   honest increments for the process lifetime. The residual is the
+   in-range lie: a reply reporting any count below those ceilings —
+   including one inside the input side's bounded template-overhead
+   allowance, and including an Anthropic reply choosing three
+   cache/input fields whose 64-bit sum wraps, since the boundary sees
+   only the wrapped total — is indistinguishable from an honest one. No v1 decision reads these
+   counters, so its blast radius stays inside usage observability. A
+   future cost-weighted rate cap would promote them to a decision
+   input and has to weigh that residual before charging a bucket
+   against them.
 
 ## Ingest pipeline (security side)
 
