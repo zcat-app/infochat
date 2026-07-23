@@ -2,6 +2,7 @@ package app.zcat.infochat.messaging;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -78,6 +79,26 @@ class AdapterCapabilityContractTest {
                     adapter.name() + ": unstarted finalize must throw MessagingException");
             assertEquals(FailureCategory.PERMANENT, finalizeEx.category(),
                     adapter.name() + ": unstarted finalize must classify PERMANENT");
+        }
+    }
+
+    /**
+     * {@link MessagingAdapter#connected()} defaults to {@code true} so
+     * transportless adapters read connected without writing a
+     * meaningless override. A transport adapter that forgets to
+     * override it silently inherits that default instead — no compile
+     * error, since the method is optional — and reports connected
+     * regardless of the actual wire state. Reflection is the only way
+     * to observe "did this class declare the method itself": asserting
+     * on the runtime return value can't distinguish an honest {@code
+     * true} from an inherited one.
+     */
+    @Test
+    void transportAdaptersOverrideConnected() throws NoSuchMethodException {
+        for (MessagingAdapter adapter : List.of(new SimpleXAdapter(), new SignalAdapter())) {
+            Class<?> declaringClass = adapter.getClass().getMethod("connected").getDeclaringClass();
+            assertNotEquals(MessagingAdapter.class, declaringClass,
+                    adapter.name() + ": transport adapter must override connected()");
         }
     }
 

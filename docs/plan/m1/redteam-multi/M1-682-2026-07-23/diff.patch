@@ -1,0 +1,123 @@
+diff --git a/docs/plan/m1/STATUS.md b/docs/plan/m1/STATUS.md
+index 444047b8..a644ff02 100644
+--- a/docs/plan/m1/STATUS.md
++++ b/docs/plan/m1/STATUS.md
+@@ -10,8 +10,8 @@
+ 
+ | Status | Count |
+ |---|---|
+-| pending | 4 |
+-| in-progress | 0 |
++| pending | 3 |
++| in-progress | 1 |
+ | in-review | 0 |
+ | escalated | 0 |
+ | done | 695 |
+@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
+ 
+ - M1-672 — Narrow Provider grants on identity/authz tables (complexity: high, risk: high)
+ - M1-680 — Match closed-list flag entries at any argument position (complexity: medium, risk: medium)
+-- M1-682 — Fail the build when a transport adapter inherits connected() (complexity: low, risk: low)
+ - M1-683 — Fail the build when a Signal client pairs a real restart hook with no generation supplier (complexity: low, risk: low)
+ 
+ ---
+@@ -36,8 +35,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
+ 
+ | ID | Title | Status | Last review |
+ |---|---|---|---|
+-
+-_(none)_
++| M1-682 | Fail the build when a transport adapter inherits connected() | in-progress | (none) |
+ 
+ ---
+ 
+@@ -914,7 +912,7 @@ M1-672 (pending) ← runnable
+ M1-673 (done)
+ M1-674 (done)
+   └── M1-681 (done)
+-        ├── M1-682 (pending) ← runnable
++        ├── M1-682 (in-progress)
+         └── M1-683 (pending) ← runnable
+ M1-675 (done)
+ M1-676 (done)
+diff --git a/docs/plan/m1/tickets/M1-682-fail-the-build-when-a-transpor.md b/docs/plan/m1/tickets/M1-682-fail-the-build-when-a-transpor.md
+index 99871952..7c4f47ba 100644
+--- a/docs/plan/m1/tickets/M1-682-fail-the-build-when-a-transpor.md
++++ b/docs/plan/m1/tickets/M1-682-fail-the-build-when-a-transpor.md
+@@ -1,7 +1,7 @@
+ ---
+ id: M1-682
+ title: "Fail the build when a transport adapter inherits connected()"
+-status: pending
++status: in-progress
+ created: 2026-07-23
+ last_updated: 2026-07-23
+ blocked_by: [M1-681]
+@@ -68,7 +68,11 @@ overrides: []
+ aborted_attempts: []
+ reopens: []
+ redteam_findings: []
+-clarity_check: {}
++clarity_check:
++  date: 2026-07-23
++  verdict: PASS
++  warnings: []
++  blockers: []
+ escalation_reason:
+ ---
+ 
+diff --git a/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/MessagingAdapter.java b/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/MessagingAdapter.java
+index 7335e92e..00d5cfdf 100644
+--- a/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/MessagingAdapter.java
++++ b/infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/MessagingAdapter.java
+@@ -355,7 +355,10 @@ public interface MessagingAdapter {
+      * gave-up latch), this reflects transient outages too: an adapter
+      * mid-reconnect reports false. Default true so transportless
+      * adapters (the in-memory test double) — which have no wire to lose
+-     * — always read connected.
++     * — always read connected. The default applies to transportless
++     * adapters only: a transport adapter MUST override this method, or
++     * a real disconnect silently reads as a false-green readiness
++     * payload once this signal feeds the readiness check.
+      *
+      * @return true iff the transport is up and able to carry messages.
+      */
+diff --git a/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/AdapterCapabilityContractTest.java b/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/AdapterCapabilityContractTest.java
+index a210dd22..eb323d9b 100644
+--- a/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/AdapterCapabilityContractTest.java
++++ b/infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/AdapterCapabilityContractTest.java
+@@ -2,6 +2,7 @@ package app.zcat.infochat.messaging;
+ 
+ import static org.junit.jupiter.api.Assertions.assertEquals;
+ import static org.junit.jupiter.api.Assertions.assertFalse;
++import static org.junit.jupiter.api.Assertions.assertNotEquals;
+ import static org.junit.jupiter.api.Assertions.assertThrows;
+ import static org.junit.jupiter.api.Assertions.assertTrue;
+ 
+@@ -81,6 +82,26 @@ class AdapterCapabilityContractTest {
+         }
+     }
+ 
++    /**
++     * {@link MessagingAdapter#connected()} defaults to {@code true} so
++     * transportless adapters read connected without writing a
++     * meaningless override. A transport adapter that forgets to
++     * override it silently inherits that default instead — no compile
++     * error, since the method is optional — and reports connected
++     * regardless of the actual wire state. Reflection is the only way
++     * to observe "did this class declare the method itself": asserting
++     * on the runtime return value can't distinguish an honest {@code
++     * true} from an inherited one.
++     */
++    @Test
++    void transportAdaptersOverrideConnected() throws NoSuchMethodException {
++        for (MessagingAdapter adapter : List.of(new SimpleXAdapter(), new SignalAdapter())) {
++            Class<?> declaringClass = adapter.getClass().getMethod("connected").getDeclaringClass();
++            assertNotEquals(MessagingAdapter.class, declaringClass,
++                    adapter.name() + ": transport adapter must override connected()");
++        }
++    }
++
+     /**
+      * Each reconciled flag matches its design fact, and the two anchors
+      * that were already correct stay put — locking the full cross-adapter

@@ -355,7 +355,10 @@ public interface MessagingAdapter {
      * gave-up latch), this reflects transient outages too: an adapter
      * mid-reconnect reports false. Default true so transportless
      * adapters (the in-memory test double) — which have no wire to lose
-     * — always read connected.
+     * — always read connected. The default applies to transportless
+     * adapters only: a transport adapter MUST override this method, or
+     * a real disconnect silently reads as a false-green readiness
+     * payload once this signal feeds the readiness check.
      *
      * @return true iff the transport is up and able to carry messages.
      */

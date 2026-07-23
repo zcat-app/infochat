@@ -1,7 +1,7 @@
 ---
 id: M1-682
 title: "Fail the build when a transport adapter inherits connected()"
-status: pending
+status: done
 created: 2026-07-23
 last_updated: 2026-07-23
 blocked_by: [M1-681]
@@ -63,12 +63,29 @@ spec_refs:
   - docs/spec/messaging.md §Failure handling
   - docs/spec/deployment.md §Health and observability
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-23
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 35
+      removed: 9
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-23
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 
