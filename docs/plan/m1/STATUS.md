@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 690 |
+| done | 691 |
 | deferred | 0 |
 | abandoned | 19 |
 | **total** | **714** |
@@ -29,7 +29,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-674 — Recover SimpleX adapter from peer-closed WebSocket (complexity: medium, risk: medium)
 - M1-675 — Reject slash-bearing personal tags at the /save boundary (complexity: low, risk: low)
 - M1-676 — Canonicalize before closed-list match in LLM sanitizer (complexity: medium, risk: medium)
-- M1-679 — DevTerminalHarnessRoundtripIT fails on any repeat verify: the startup poll eats the previous run's input file (complexity: low, risk: low)
 
 ---
 
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-679 | DevTerminalHarnessRoundtripIT fails on any repeat verify: the startup poll eats the previous run's input file | 2026-07-23 | round 1 APPROVE |
 | M1-678 | Render the asset 24h delta independently of the 24h spread | 2026-07-23 | round 1 APPROVE |
 | M1-677 | Validate provider-reported token counts before they reach the metric counters | 2026-07-23 | round 1 APPROVE |
 | M1-673 | Stop wire-controlled model field reaching Micrometer tags | 2026-07-22 | round 1 APPROVE |
@@ -74,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-668 | Recalibrate command-intent recall for how-do-I phrasings | 2026-07-22 | round 1 APPROVE |
 | M1-667 | Route user-content exception catches through SafeLog | 2026-07-21 | round 2 APPROVE |
 | M1-666 | Deterministic delivery of conceptual topic answers in chat | 2026-07-21 | round 1 APPROVE |
-| M1-652 | Gap-filling redelivery for per-category digests | 2026-07-21 | round 2 APPROVE |
 
 ---
 
@@ -918,5 +917,5 @@ M1-675 (pending) ← runnable
 M1-676 (pending) ← runnable
 M1-677 (done)
 M1-678 (done)
-M1-679 (pending) ← runnable
+M1-679 (done)
 ```

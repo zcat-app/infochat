@@ -33,8 +33,14 @@ import org.junit.jupiter.api.Test;
  * M1-414 round-trip IT: drives the dev harness's real file transport end to end.
  *
  * <p>Two directives are written to the harness input file and the poll cycle is
- * invoked directly (the {@code @Scheduled} timer is set to 24h under test so it
- * never races):
+ * invoked directly. The 24h {@code @Scheduled} interval does NOT stop the timer:
+ * Quarkus builds an {@code IntervalTrigger}, which still fires once at app
+ * startup — long before {@code @BeforeEach} runs. An input file left behind by an
+ * earlier verify in an uncleaned {@code target/} is therefore eaten by that
+ * startup firing, advancing the harness read cursor past the byte-identical
+ * directives this test writes moments later. The files are consequently cleared
+ * in {@link HarnessProfile#getConfigOverrides()}, the last hook that precedes
+ * boot (M1-679). The directives are:
  * <ol>
  *   <li>a fresh contact redeems a PENDING invite → the welcome reply proves the
  *       register-via-invite round-trip through the file transport;</li>
@@ -72,8 +78,7 @@ class DevTerminalHarnessRoundtripIT {
         adapter.reset();
         mockLlm.reset();
         mockLlm.setResponseText("Seeded summary prose.");
-        Files.deleteIfExists(Path.of(INPUT_FILE));
-        Files.deleteIfExists(Path.of(OUTPUT_FILE));
+        clearHarnessFiles();
         applySeedFixture();
     }
 
@@ -110,6 +115,15 @@ class DevTerminalHarnessRoundtripIT {
     }
 
     // ----- helpers ---------------------------------------------------------
+
+    private static void clearHarnessFiles() {
+        try {
+            Files.deleteIfExists(Path.of(INPUT_FILE));
+            Files.deleteIfExists(Path.of(OUTPUT_FILE));
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to clear dev harness files", e);
+        }
+    }
 
     private void applySeedFixture() {
         String sql = readFixtureSql();
@@ -150,6 +164,12 @@ class DevTerminalHarnessRoundtripIT {
     public static final class HarnessProfile implements QuarkusTestProfile {
         @Override
         public Map<String, String> getConfigOverrides() {
+            // Quarkus calls this to build the app, so it is the last hook that
+            // runs before boot — and therefore before the @Scheduled poll's
+            // startup firing. @BeforeEach performs the identical cleanup, but it
+            // runs after boot, which is exactly why it cannot keep a leftover
+            // input file away from that firing (see the class javadoc, M1-679).
+            clearHarnessFiles();
             return Map.of(
                     "infochat.adapters", "inmemory",
                     "infochat.adapters.inmemory.allow-low-trust", "true",

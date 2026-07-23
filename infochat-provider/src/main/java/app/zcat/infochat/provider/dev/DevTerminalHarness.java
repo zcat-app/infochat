@@ -86,7 +86,10 @@ public class DevTerminalHarness {
     /**
      * Tail the input file and process every newly-appended complete line. The
      * interactive trigger; an integration test invokes this directly rather than
-     * waiting on the timer (poll-interval is set arbitrarily large under test).
+     * waiting on the timer, setting an arbitrarily large poll-interval to keep it
+     * out of the way. That suppresses the periodic firings but NOT the one
+     * Quarkus's {@code IntervalTrigger} performs at startup, so this method still
+     * runs once before a test has written any directive (M1-679).
      */
     @Scheduled(every = "{infochat.dev.harness.poll-interval:1s}")
     void poll() {
