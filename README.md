@@ -94,7 +94,7 @@ Start with the abstract above, then jump to the guide for your role:
 | **Understanding the architecture** | [OVERVIEW.md](OVERVIEW.md) | A high-level 5-minute map — the two services, the modules, and how data flows; links into the spec for depth |
 | **The technical reference** | [docs/SPEC.md](docs/SPEC.md) | The technical map — architecture, data model, command catalogue, security model, and design notes |
 
-> The four guides above are written for a general audience and stay
+> The guides above are written for their stated audience and stay
 > deliberately practical. The deep technical reference lives under
 > [`docs/`](docs/) — [`docs/spec/`](docs/spec/) (what & why) and
 > [`docs/design/`](docs/design/) (how). The guides link into those docs rather
