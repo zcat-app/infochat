@@ -255,8 +255,8 @@ prompt-rendering debug command.
 This section single-sources primitive #6. The wrapper script is
 `scripts/redteam-multi.sh`; the cross-examination parser is
 `scripts/redteam-multi-cross.py`. The skill wrapper that exposes it as a
-command is `.agents/skills/redteam-multi/SKILL.md` (and, on Claude Code,
-`.claude/skills/redteam-multi/SKILL.md` — not yet authored; see the
+command is `.agents/skills/redteam-multi/SKILL.md` and, on Claude Code,
+`.claude/skills/redteam-multi/SKILL.md` (authored 2026-07-20 — see the
 opencode-boundary note at the end of this section).
 
 ### What it is
@@ -381,14 +381,14 @@ verification).
 redteam-multi/SKILL.md`); resolves the diff range per
 `.claude/skills/redteam/SKILL.md` §1 and dispatches `scripts/redteam-multi.sh`.
 
-### opencode-boundary note (authoring deferred)
+### opencode-boundary note
 
 This section was added by an opencode session. opencode cannot edit
 `.claude/**` per `AGENTS.md`, so the parallel `.claude/skills/redteam-
-multi/SKILL.md` wrapper is NOT yet authored — when Claude Code next
-resumes, it should add that file mirroring the `.agents/skills/redteam-
-multi/SKILL.md` wrapper that points back here. Until then, `/redteam-
-multi` is invocable only on non-Claude harnesses (and directly via
+multi/SKILL.md` wrapper was authored later by a Claude Code session
+(2026-07-20), mirroring the `.agents/skills/redteam-multi/SKILL.md`
+wrapper that points back here. `/redteam-multi` is now invocable on
+Claude Code as well as non-Claude harnesses (and directly via
 `scripts/redteam-multi.sh` on any host).
 
 ## 8. Fork-side smoke checklist
