@@ -34,11 +34,13 @@ model](docs/spec/security.md) before exposing it to untrusted users.
 
 ---
 
-## Try it end to end (about 30 minutes)
+## Try it end to end
 
-Three commands, then a few chat messages. Most of that half hour is the
-computer downloading and building while you wait — no Maven, no Java, no
-programming.
+Three commands, then a few chat messages — no Maven, no Java, no programming.
+Usually **10–15 minutes**, nearly all of it the computer downloading and
+building while you wait. The one thing that stretches it is your connection:
+the first run fetches the AI models, the container images, and the build
+dependencies, which is why setup asks for 15 GB free.
 
 **1 · Get it and run the wizard.** Press **Enter** through the prompts:
 

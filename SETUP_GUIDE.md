@@ -5,8 +5,11 @@ need to be a programmer.** If you can install a game that needs a launcher, you
 can do this. A guided wizard does the hard parts — it asks you a handful of
 plain questions and sets everything up for you.
 
-Plan for about **30 minutes** the first time (most of it is the computer
-downloading and building things while you wait).
+Budget **10–15 minutes** the first time — most of it the computer downloading
+and building while you wait. A slow connection is what stretches it: the first
+run fetches the AI models, the container images and the build dependencies
+(hence the 15 GB free-space check), and on a fast line that is a few minutes
+rather than most of the half hour.
 
 > **New to all this?** Read the [main sections](#before-you-start) top to
 > bottom and ignore the [Advanced](#advanced-technical-details) section at the
