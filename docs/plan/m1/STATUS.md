@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 699 |
 | deferred | 0 |
 | abandoned | 19 |
-| **total** | **718** |
+| **total** | **719** |
 
 ---
 
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-684 — Stop committing regenerable redteam-multi evidence bulk (complexity: low, risk: low)
 
 ---
 
@@ -919,4 +919,5 @@ M1-676 (done)
 M1-677 (done)
 M1-678 (done)
 M1-679 (done)
+M1-684 (pending) ← runnable
 ```
