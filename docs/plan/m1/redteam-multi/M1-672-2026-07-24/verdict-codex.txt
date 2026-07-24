@@ -1,0 +1,9 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: PERM-ESCAL
+    SEVERITY: high
+    PROMISE: "the privilege columns ... are not directly writable by the role, so a SQL-injection foothold in the Provider cannot mint a bot admin"
+    GAP: V62__provider_identity_grants.sql:117-134 exposes bootstrap_ensure_admin as SECURITY DEFINER with wholly caller-controlled adapter and contact arguments; it inserts or promotes that contact to is_admin=TRUE without an actor or bootstrap-context check. V62__provider_identity_grants.sql:534 grants EXECUTE on that function to infochat_provider, the very role an in-model Provider SQL-injection foothold controls.
+    REPRO: From any Provider SQL-injection primitive that can issue SELECT, the adversary calls SELECT bootstrap_ensure_admin('<enabled-adapter>', '<their cryptographically anchored contact id>'). The definer routine inserts that identity as a vouched bot admin (or upgrades its existing non-admin row) and returns its id. The adversary's next normal message is resolved as bot-admin, without presenting a bootstrap credential or using the AdminBootstrap path.
+    SUGGESTED-FIX-CLASS: trust-boundary-tightening

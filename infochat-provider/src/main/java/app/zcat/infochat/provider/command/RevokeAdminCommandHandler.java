@@ -114,7 +114,8 @@ import java.util.UUID;
  *       <li>Audit-before-effect: pre-write the REVOKE_ADMIN audit
  *           row BEFORE the UPDATE. If the V5 trigger raises, the
  *           audit INSERT rolls back too.</li>
- *       <li>{@code UPDATE users SET is_admin = FALSE WHERE id = ?}.
+ *       <li>Clear {@code is_admin} via the V62 SECURITY DEFINER
+ *           routine {@code revoke_bot_admin}.
  *           The V5 {@code trg_last_admin_protection_update} trigger
  *           raises {@code last_admin_protection: ...} on UPDATEs
  *           that would leave the deployment with zero
@@ -160,8 +161,16 @@ public class RevokeAdminCommandHandler implements CommandHandler {
     private static final String SELECT_TARGET_SQL =
             "SELECT id, contact_id, is_admin, is_banned FROM users WHERE adapter = ? AND contact_id = ?";
 
+    // Lives in the V62 SECURITY DEFINER routine revoke_bot_admin:
+    // infochat_provider no longer holds UPDATE on users.is_admin. The
+    // routine re-checks the actor against the infochat.actor_id GUC this
+    // transaction already sets, and gates on is_admin ALONE — not the V50
+    // live-admin conjunction — so a banned admin still reaches the UPDATE
+    // and the V40 last-admin trigger still raises IC001 for the catch
+    // below. Refusals from the routine's own actor check surface as
+    // P0001, never IC001 (M1-672).
     private static final String UPDATE_REVOKE_ADMIN_SQL =
-            "UPDATE users SET is_admin = FALSE WHERE id = ?";
+            "SELECT revoke_bot_admin(?)";
 
     @Inject
     BundleLoader bundleLoader;
@@ -330,10 +339,10 @@ public class RevokeAdminCommandHandler implements CommandHandler {
                         target.id.toString(), target.contactId, actor,
                         adapter, requestId, revokeAdminDetailsJson(adapter));
 
-                // Step 6f — UPDATE users SET is_admin = FALSE WHERE id = ?
+                // Step 6f — set is_admin = FALSE via the V62 routine
                 try (PreparedStatement ps = conn.prepareStatement(UPDATE_REVOKE_ADMIN_SQL)) {
                     ps.setObject(1, target.id);
-                    ps.executeUpdate();
+                    ps.execute();
                 }
 
                 conn.commit();

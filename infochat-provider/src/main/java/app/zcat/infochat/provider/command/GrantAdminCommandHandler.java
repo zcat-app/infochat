@@ -110,8 +110,8 @@ import java.util.UUID;
  *           BEFORE the UPDATE per Invariant 7. If the UPDATE raises
  *           (e.g., a future trigger), the audit row's INSERT rolls
  *           back too.</li>
- *       <li>{@code UPDATE users SET is_admin = TRUE WHERE id = ?},
- *           then COMMIT.</li>
+ *       <li>Set {@code is_admin} via the V62 SECURITY DEFINER routine
+ *           {@code grant_bot_admin}, then COMMIT.</li>
  *     </ol>
  *   </li>
  *   <li>Reply {@code reply.grant_admin.success} with the redacted
@@ -157,8 +157,14 @@ public class GrantAdminCommandHandler implements CommandHandler {
     private static final String SELECT_TARGET_SQL =
             "SELECT id, contact_id, is_admin, is_banned FROM users WHERE adapter = ? AND contact_id = ?";
 
+    // Lives in the V62 SECURITY DEFINER routine grant_bot_admin:
+    // infochat_provider no longer holds UPDATE on users.is_admin. The
+    // routine re-checks the actor against the infochat.actor_id GUC this
+    // transaction already sets for the V24/V40 triggers, writes no audit
+    // row and owns no transaction, so the audit-before-effect ordering
+    // here is unchanged (M1-672).
     private static final String UPDATE_GRANT_ADMIN_SQL =
-            "UPDATE users SET is_admin = TRUE WHERE id = ?";
+            "SELECT grant_bot_admin(?)";
 
     @Inject
     BundleLoader bundleLoader;
@@ -323,10 +329,10 @@ public class GrantAdminCommandHandler implements CommandHandler {
                         target.id.toString(), target.contactId, actor,
                         adapter, requestId, grantAdminDetailsJson(adapter));
 
-                // Step 5g — UPDATE users SET is_admin = TRUE WHERE id = ?
+                // Step 5g — set is_admin = TRUE via the V62 routine
                 try (PreparedStatement ps = conn.prepareStatement(UPDATE_GRANT_ADMIN_SQL)) {
                     ps.setObject(1, target.id);
-                    ps.executeUpdate();
+                    ps.execute();
                 }
 
                 conn.commit();

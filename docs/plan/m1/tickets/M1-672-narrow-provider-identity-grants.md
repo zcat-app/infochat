@@ -1,9 +1,9 @@
 ---
 id: M1-672
 title: "Narrow Provider grants on identity/authz tables"
-status: pending
+status: done
 created: 2026-07-22
-last_updated: 2026-07-23
+last_updated: 2026-07-24
 blocked_by: []
 files_budget: 26
 files_scope:
@@ -247,12 +247,42 @@ spec_refs:
   - docs/spec/security.md §DB roles
 decision_refs:
   - D34
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-24
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 41
+      added: 8629
+      removed: 167
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-23
+  verdict: PASS
+  warnings:
+    - >-
+      lint-ticket.py clean (0 blockers, 0 warnings). Self-check re-ran the
+      census grep live — 18 files, exactly the disposition table. Spot-checks
+      of the cited path:line claims all held. Fixed inline (prose, no scope
+      change): §Notes claimed the groups.approval_status site "must add"
+      set_config, but ApproveGroupCommandHandler:164 and
+      RejectGroupCommandHandler:217 already set the GUC — Promote/Demote/Invite
+      are the only sites that must add it. Also confirmed /promote and /demote
+      gate on BOT admin (PromoteCommandHandler:119, DemoteCommandHandler:101),
+      so the acceptance-item-5 is_admin=TRUE proc gate matches today's
+      behaviour, and that all 128 provider test files carrying raw
+      identity-table write SQL inject @SeedDataSource (acceptance item 10's
+      closed-list premise holds).
+outline_file: target/m1-tick-outline-M1-672.md
 escalation_reason:
 ---
 
@@ -351,8 +381,10 @@ does not.
 - Every caller of an admin-gated proc must issue
   `SELECT set_config('infochat.actor_id', ?, true)` in the same
   transaction first: the handlers that already set the GUC for the V24
-  triggers (Ban/Unban/GrantAdmin/RevokeAdmin/Vouch) reuse theirs, while
-  Promote/Demote/Invite and the `groups.approval_status` site must add
+  triggers reuse theirs — Ban (:297), Unban (:229, :314), GrantAdmin
+  (:279), RevokeAdmin (:298), Vouch (:227), and BOTH
+  `groups.approval_status` callers, ApproveGroup (:164) and RejectGroup
+  (:217) — while Promote/Demote/Invite are the only sites that must add
   it. The four system-actor sites (AdminBootstrap, SimpleXAdminClaim,
   InviteCodeConsumer, GroupAutoPromoteService) do not set it and their
   procs must not require it — acceptance item 4 names them and points at

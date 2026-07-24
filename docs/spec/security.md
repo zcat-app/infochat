@@ -1500,7 +1500,59 @@ Three Postgres roles, least-privilege (decision D34):
   (snapshots are immutable once written, `schema.md` §Operational —
   no `UPDATE`); `SELECT` on the rest; `INSERT`-only on `audit_log`;
   `LISTEN/NOTIFY`.
-- **Provider role** — write access on user-state tables; `SELECT` on
+- **Provider role** — write access on user-state tables, but **not on
+  the privilege columns of the identity/authz tables**: per V62 the
+  Provider holds `SELECT` on `users`, `groups`, `group_membership` and
+  `invite_code` plus a **column-scoped** `UPDATE` (`users.probation_until`,
+  `users.save_count`; `groups.timezone`, `groups.digest_enabled`,
+  `groups.removed_at`; `group_membership.removed_at`) and a
+  **column-scoped** `INSERT` (`groups (adapter, upstream_group_id,
+  activated_by)`; `group_membership (group_id, user_id)`), and nothing
+  else — no `INSERT` on `users`, and no `INSERT` or `UPDATE` at all on
+  `invite_code`. This is the same reasoning V31 applied to `source`,
+  carried to the tables where a foothold's payoff is full compromise:
+  `users.is_admin`, `users.is_banned` and its ban metadata,
+  `users.registration_state`, `groups.approval_status` and
+  `group_membership.is_group_admin` are not **directly** writable by the
+  role — the raw `UPDATE`/`INSERT` a SQL-injection foothold would reach
+  for fails with `insufficient_privilege` — and every legitimate
+  transition on those columns runs through a narrow, single-purpose
+  `SECURITY DEFINER` routine the Provider holds `EXECUTE` on (V62). This
+  is defense in depth *behind* the control that actually prevents the
+  injection: all Provider SQL is parameterized, and the module-6 audit
+  found no injectable statement in the codebase. What the column
+  revocation buys, and what it does **not**, stated without overstatement
+  (the residuals are deliberate):
+  - **Genuinely closed.** The *arbitrary* privilege write is gone, and
+    ban, unban, `groups.approval_status`, and forcing
+    `registration_state = 'vouched'` now require a caller that names a bot
+    admin through the `infochat.actor_id` GUC. These **admin-gated**
+    routines resolve their actor from that GUC and check `is_admin` only,
+    so against an attacker who already controls Provider SQL the gate
+    raises the bar — they must name some admin's id, read via the retained
+    `SELECT` on `users` — without being a true boundary. The control that
+    bites is the column revocation, not the actor check.
+  - **Not closed — three ungated conduits remain callable by the role.**
+    The **system-actor** routines carry no DB-side actor gate, because
+    each runs on a path with no human actor to name, and three of them
+    each re-open exactly one transition the surrounding Java otherwise
+    gates: `bootstrap_ensure_admin` mints or promotes a bot admin for any
+    `(adapter, contact)` **at any time** — not first-admin-only, and with
+    no `BOOTSTRAP_ADMIN` audit row (that row is written by
+    `AdminBootstrap`, not the routine); `auto_promote_group_admin` grants
+    group-admin on any group whose admin slot is free, skipping the D47
+    eligibility rules that live in `GroupAutoPromoteService`; and
+    `insert_invited_user` creates a registered `invited` row with no
+    invite code presented. (`claim_simplex_admin` is the exception — it
+    self-gates on `WHERE NOT EXISTS (… is_admin = TRUE)`.) So for the
+    admin-mint and group-admin-grant goals V62 is a **narrowing** — the
+    only remaining paths are these named, single-purpose routines rather
+    than an arbitrary `UPDATE` — not an elimination. Removing these grants
+    is not possible without breaking the bootstrap path the weak Provider
+    role must reach at every start; fully closing them would require
+    running admin bootstrap under a higher-privilege connection, a
+    separate architectural change the Provider's "never hold owner
+    credentials" rule currently precludes. Also: `SELECT` on
   collector-owned tables (including **`SELECT`-only on
   `price_snapshot`** and **`SELECT`-only on `asset_config`**: the
   Provider reads the latest snapshot per `(asset, sub_verb)` for

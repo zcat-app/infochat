@@ -48,9 +48,15 @@ public class GroupRepository {
     // recorded on the winning row. ON CONFLICT DO NOTHING means a
     // concurrent loser sees no rows returned and falls back to the
     // SELECT path below.
+    //
+    // approval_status is deliberately absent from the column list: V26
+    // declares it NOT NULL DEFAULT 'pending', so omitting it inserts the
+    // same value the explicit literal did, and it keeps the column out of
+    // the Provider's column-scoped INSERT grant — approval_status is
+    // writable only through set_group_approval_status (M1-672).
     private static final String INSERT_PENDING_RETURNING =
-            "INSERT INTO groups (adapter, upstream_group_id, approval_status, activated_by) "
-          + "VALUES (?, ?, 'pending', ?) "
+            "INSERT INTO groups (adapter, upstream_group_id, activated_by) "
+          + "VALUES (?, ?, ?) "
           + "ON CONFLICT (adapter, upstream_group_id) DO NOTHING "
           + "RETURNING id";
 
@@ -84,16 +90,18 @@ public class GroupRepository {
           + "       activated_by, removed_at "
           + "  FROM groups WHERE id = ?";
 
-    // Status transition for /approve-group + /reject-group. Returns the
-    // pre-update status via RETURNING so the handler can detect the no-op
-    // (same-status) path without a separate SELECT — single round-trip.
-    // OLD.approval_status is referenced via the standard "RETURNING old"
-    // shape isn't supported by PostgreSQL; instead we filter the UPDATE
-    // to fire only when the status would actually change, and detect the
-    // no-op via getUpdateCount() == 0.
+    // Status transition for /approve-group + /reject-group. Lives in the
+    // V62 SECURITY DEFINER routine set_group_approval_status:
+    // infochat_provider no longer holds UPDATE on groups.approval_status,
+    // the column that gates D47 group admission. The routine keeps the
+    // "fire only when the status would actually change" filter and
+    // returns whether one row moved, so callers still distinguish a real
+    // transition from a no-op in a single round-trip. It re-checks the
+    // actor against the infochat.actor_id GUC, which both callers
+    // (/approve-group, /reject-group) already set for the V24 triggers
+    // (M1-672).
     private static final String UPDATE_APPROVAL_STATUS =
-            "UPDATE groups SET approval_status = ? "
-          + "WHERE id = ? AND approval_status <> ?";
+            "SELECT set_group_approval_status(?, ?)";
 
     // /list-groups paginated read. JOINs users for the activated_by
     // contact id (LEFT JOIN — pre-V26 groups have NULL activated_by, and
@@ -467,10 +475,12 @@ public class GroupRepository {
                                      UUID groupId,
                                      String newStatus) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(UPDATE_APPROVAL_STATUS)) {
-            ps.setString(1, newStatus);
-            ps.setObject(2, groupId);
-            ps.setString(3, newStatus);
-            return ps.executeUpdate() == 1;
+            ps.setObject(1, groupId);
+            ps.setString(2, newStatus);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getBoolean(1);
+            }
         }
     }
 

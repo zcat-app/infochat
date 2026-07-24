@@ -105,9 +105,14 @@ public class UnbanCommandHandler implements CommandHandler {
                     + "WHERE gm.user_id = ? AND gm.is_group_admin = TRUE "
                     + "ORDER BY g.display_name";
 
+    // Lives in the V62 SECURITY DEFINER routine unban_user:
+    // infochat_provider no longer holds UPDATE on the users ban columns.
+    // The routine re-checks the actor against the infochat.actor_id GUC
+    // this transaction already sets for the V24/V40 triggers, writes no
+    // audit row and owns no transaction, so the audit-before-effect
+    // ordering here is unchanged (M1-672).
     private static final String UPDATE_UNBAN_NON_PREBAN_SQL =
-            "UPDATE users SET is_banned = FALSE, banned_at = NULL, "
-                    + "banned_by = NULL, ban_reason = NULL WHERE id = ?";
+            "SELECT unban_user(?)";
 
     // Use a plain prepareStatement with the literal CALL form. JDBC's
     // {@code prepareCall("{ CALL ... }")} delegates to the Postgres
@@ -437,7 +442,7 @@ public class UnbanCommandHandler implements CommandHandler {
     private void updateUserUnbanned(Connection conn, UUID targetId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(UPDATE_UNBAN_NON_PREBAN_SQL)) {
             ps.setObject(1, targetId);
-            ps.executeUpdate();
+            ps.execute();
         }
     }
 

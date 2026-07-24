@@ -48,13 +48,17 @@ public class GroupAutoPromoteService {
     //    race-guard leg for concurrent promotions that both passed the
     //    hasActiveAdmin pre-check (steady-state occupied-slot calls
     //    return false at the pre-check and never run this statement).
+    // The statement lives in the V62 SECURITY DEFINER routine
+    // auto_promote_group_admin: infochat_provider can no longer write
+    // group_membership.is_group_admin directly. The routine carries no
+    // actor gate — this promotion's actor is BY DEFINITION a non-admin
+    // (D47 first-mention auto-promote writes the promoted user as the
+    // actor below), so an admin gate here would break group activation
+    // outright. It returns the affected row count so both control-flow
+    // signals below survive: the != 1 rollback leg, and the 23505 from
+    // one_admin_per_group propagating untouched to the catch (M1-672).
     private static final String AUTO_PROMOTE_SQL =
-            "INSERT INTO group_membership (group_id, user_id, is_group_admin) "
-                    + "VALUES (?, ?, true) "
-                    + "ON CONFLICT (group_id, user_id) DO UPDATE "
-                    + "SET is_group_admin = true "
-                    + "WHERE group_membership.removed_at IS NULL "
-                    + "AND group_membership.is_group_admin = false";
+            "SELECT auto_promote_group_admin(?, ?)";
 
     private static final String HAS_ACTIVE_ADMIN_SQL =
             "SELECT 1 FROM group_membership "
@@ -112,9 +116,12 @@ public class GroupAutoPromoteService {
                 try (PreparedStatement ps = conn.prepareStatement(AUTO_PROMOTE_SQL)) {
                     ps.setObject(1, groupId);
                     ps.setObject(2, userId);
-                    if (ps.executeUpdate() != 1) {
-                        conn.rollback();
-                        return false;
+                    try (ResultSet rs = ps.executeQuery()) {
+                        rs.next();
+                        if (rs.getInt(1) != 1) {
+                            conn.rollback();
+                            return false;
+                        }
                     }
                 }
                 RedactionHook.AuditRow auditRow = RedactionHook.AuditRow.builder()

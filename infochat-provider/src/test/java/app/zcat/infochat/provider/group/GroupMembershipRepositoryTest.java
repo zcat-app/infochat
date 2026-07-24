@@ -29,10 +29,12 @@ class GroupMembershipRepositoryTest {
     @Inject GroupMembershipRepository repository;
 
     private UUID groupId;
+    private UUID botAdminId;
 
     @BeforeEach
     void setup() throws Exception {
         try (Connection conn = dataSource.getConnection()) {
+            botAdminId = resolveBotAdmin(conn);
             // Clean up prior test membership and group rows
             try (PreparedStatement ps = conn.prepareStatement(
                     "DELETE FROM group_membership WHERE group_id IN "
@@ -50,6 +52,67 @@ class GroupMembershipRepositoryTest {
             seedUser(conn, USER_ID_2, "mem-" + USER_ID_2);
         }
         groupId = groupRepository.findOrCreateByAdapterAndUpstreamId(TEST_ADAPTER, TEST_UPSTREAM_ID);
+    }
+
+    /**
+     * Resolve any live bot admin to act as the fixture's actor. The V62
+     * routines behind {@code promoteToAdmin} / {@code demoteAdmin} gate on
+     * {@code infochat.actor_id} naming an {@code is_admin} row, so these
+     * fixtures need one — but they deliberately reuse an existing admin
+     * rather than seeding another: an extra unbanned admin row would be a
+     * permanent fixture leak that breaks the last-admin-protection tests,
+     * whose premise is that exactly one such row remains. The
+     * {@code AdminBootstrap} startup bean seeds one for the {@code %test}
+     * inmemory contact at every boot.
+     */
+    private UUID resolveBotAdmin(Connection conn) throws Exception {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT id FROM users WHERE is_admin = TRUE AND is_banned = FALSE LIMIT 1");
+             ResultSet rs = ps.executeQuery()) {
+            assertTrue(rs.next(),
+                    "fixture precondition: the %test cluster must carry at least one "
+                          + "live bot admin (AdminBootstrap seeds one at boot)");
+            return rs.getObject(1, UUID.class);
+        }
+    }
+
+    /**
+     * Drive {@link GroupMembershipRepository#promoteToAdmin} the way
+     * production drives a routine-mediated write: one transaction, actor
+     * GUC bound first. {@code set_config(..., true)} is transaction-local,
+     * so the bind and the call must share a connection. A rejected promote
+     * leaves the transaction in Postgres's failed state, so only the
+     * successful path has anything to commit.
+     */
+    private boolean promoteToAdmin(UUID gId, UUID uId) throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            bindActor(conn);
+            boolean promoted = repository.promoteToAdmin(conn, gId, uId);
+            if (promoted) {
+                conn.commit();
+            } else {
+                conn.rollback();
+            }
+            return promoted;
+        }
+    }
+
+    private void demoteAdmin(UUID gId, UUID uId) throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            bindActor(conn);
+            repository.demoteAdmin(conn, gId, uId);
+            conn.commit();
+        }
+    }
+
+    private void bindActor(Connection conn) throws Exception {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT set_config('infochat.actor_id', ?, true)")) {
+            ps.setString(1, botAdminId.toString());
+            ps.execute();
+        }
     }
 
     private void seedUser(Connection conn, UUID userId, String contactId) throws Exception {
@@ -79,9 +142,9 @@ class GroupMembershipRepositoryTest {
     }
 
     @Test
-    void isGroupAdmin_returnsTrueForAdminRow() {
+    void isGroupAdmin_returnsTrueForAdminRow() throws Exception {
         repository.addMember(groupId, USER_ID);
-        repository.promoteToAdmin(groupId, USER_ID);
+        promoteToAdmin(groupId, USER_ID);
         assertTrue(repository.isGroupAdmin(groupId, USER_ID));
     }
 
@@ -95,7 +158,7 @@ class GroupMembershipRepositoryTest {
     @Test
     void promoteToAdmin_setsFlag() throws Exception {
         repository.addMember(groupId, USER_ID);
-        boolean promoted = repository.promoteToAdmin(groupId, USER_ID);
+        boolean promoted = promoteToAdmin(groupId, USER_ID);
         assertTrue(promoted);
         assertTrue(readAdminFlag(groupId, USER_ID));
     }
@@ -103,24 +166,24 @@ class GroupMembershipRepositoryTest {
     @Test
     void demoteAdmin_clearsFlag() throws Exception {
         repository.addMember(groupId, USER_ID);
-        repository.promoteToAdmin(groupId, USER_ID);
-        repository.demoteAdmin(groupId, USER_ID);
+        promoteToAdmin(groupId, USER_ID);
+        demoteAdmin(groupId, USER_ID);
         assertFalse(readAdminFlag(groupId, USER_ID));
     }
 
     @Test
-    void partialUniqueIndex_rejectsSecondAdmin() {
+    void partialUniqueIndex_rejectsSecondAdmin() throws Exception {
         repository.addMember(groupId, USER_ID);
         repository.addMember(groupId, USER_ID_2);
-        assertTrue(repository.promoteToAdmin(groupId, USER_ID));
-        assertFalse(repository.promoteToAdmin(groupId, USER_ID_2));
+        assertTrue(promoteToAdmin(groupId, USER_ID));
+        assertFalse(promoteToAdmin(groupId, USER_ID_2));
     }
 
     // Verifies the V5 trigger clears is_group_admin when removed_at is set.
     @Test
     void markMemberRemoved_triggersAdminFlagClear() throws Exception {
         repository.addMember(groupId, USER_ID);
-        repository.promoteToAdmin(groupId, USER_ID);
+        promoteToAdmin(groupId, USER_ID);
         assertTrue(readAdminFlag(groupId, USER_ID));
 
         repository.markMemberRemoved(groupId, USER_ID);

@@ -58,9 +58,13 @@ public class DemoteCommandHandler implements CommandHandler {
             "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ? "
                     + "AND removed_at IS NULL";
 
+    // Lives in the V62 SECURITY DEFINER routine demote_group_admin:
+    // infochat_provider no longer holds UPDATE on
+    // group_membership.is_group_admin. The routine resolves its actor
+    // from the infochat.actor_id GUC set in the transaction below
+    // (M1-672).
     private static final String DEMOTE_SQL =
-            "UPDATE group_membership SET is_group_admin = false "
-                    + "WHERE group_id = ? AND user_id = ? AND removed_at IS NULL";
+            "SELECT demote_group_admin(?, ?)";
 
     @Inject DataSource dataSource;
     @Inject BundleLoader bundleLoader;
@@ -120,6 +124,20 @@ public class DemoteCommandHandler implements CommandHandler {
                 if (actorId == null) {
                     conn.rollback();
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
+                }
+                // The V62 demote_group_admin routine resolves its actor
+                // from this GUC, so it must be set after the locking
+                // admin gate above and before the mutation below. The
+                // bound value is the same users.id the audit row claims
+                // as actor_user_id — V24's trg_audit_log_actor_check
+                // compares the two and rejects a mismatch. set_config's
+                // third argument makes it transaction-local, so it
+                // cannot leak to the next borrower of this pooled
+                // connection (M1-672).
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT set_config('infochat.actor_id', ?, true)")) {
+                    ps.setString(1, actorId.toString());
+                    ps.execute();
                 }
 
                 // Resolve target
@@ -230,7 +248,7 @@ public class DemoteCommandHandler implements CommandHandler {
         try (PreparedStatement ps = conn.prepareStatement(DEMOTE_SQL)) {
             ps.setObject(1, groupId);
             ps.setObject(2, userId);
-            ps.executeUpdate();
+            ps.execute();
         }
     }
 

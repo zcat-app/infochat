@@ -1,0 +1,87 @@
+RED-TEAM VERDICT: CLEAN
+
+FINDINGS:
+  (none)
+
+AUDIT SCOPE / WHY CLEAN:
+  M1-672 introduces V62, which narrows infochat_provider's grants on the
+  four identity/authz tables (users, groups, group_membership, invite_code)
+  and moves every privilege-column transition into SECURITY DEFINER
+  routines. The diff also amends the threat model itself (docs/spec/security.md
+  §DB roles) to describe the new posture and its residuals, so the delivery
+  was audited against the amended spec. Checks performed and passed:
+
+  - Privilege columns unwritable directly. The REVOKE/GRANT block
+    (V62 :1343-1372) revokes table-level INSERT,UPDATE on all four tables
+    and re-grants only column-scoped writes: users(probation_until,
+    save_count); groups(timezone,digest_enabled,removed_at) + INSERT
+    (adapter,upstream_group_id,activated_by); group_membership(removed_at) +
+    INSERT(group_id,user_id); invite_code nothing. is_admin, is_banned +
+    ban metadata, registration_state, approval_status and is_group_admin are
+    all excluded, matching the spec promise. REVOKE-before-column-GRANT and
+    routines-first ordering are correct, so no column grant is silently
+    wiped.
+
+  - Every legitimate transition has a routine and Provider holds EXECUTE.
+    All 14 admin-gated routines open with PERFORM require_bot_admin_actor();
+    all 5 system-actor routines match the exact residual set the spec
+    blesses (bootstrap_ensure_admin, auto_promote_group_admin,
+    insert_invited_user ungated; claim_simplex_admin self-gates on
+    WHERE NOT EXISTS is_admin). REVOKE ALL ... FROM PUBLIC + GRANT EXECUTE
+    ... TO infochat_provider is applied per routine; Collector holds no
+    EXECUTE (pinned by ProviderIdentityGrantsIT).
+
+  - No un-converted raw privilege write remains. Grep of provider main
+    source shows every surviving raw UPDATE/INSERT on the four tables
+    targets a retained column (probation_until, removed_at, timezone,
+    digest_enabled, groups/group_membership INSERT columns) or a different
+    table (invite_code_attempt). /vouch writes probation_until only
+    (VouchCommandHandler:122) — no registration_state='vouched' transition
+    exists, so the spec's "every transition runs through a routine" claim
+    holds with nothing missing. GroupRepository.INSERT_PENDING_RETURNING was
+    correctly stripped of approval_status (relies on DEFAULT 'pending') so
+    it stays inside the column-scoped INSERT grant.
+
+  - Routine correctness. Each routine is a faithful 1:1 replacement of the
+    statement it replaced (verified param-by-param for consume_invite_code,
+    ban_known_user, mint_invite_code, set_group_approval_status,
+    auto_promote_group_admin, claim_simplex_admin, bootstrap_ensure_admin).
+    search_path is pinned (pg_catalog, public) on every routine; no dynamic
+    SQL, so SECURITY DEFINER carries no injection amplification. The V40
+    last-admin trigger still fires through revoke_bot_admin and its IC001
+    propagates to the handler's typed catch; require_bot_admin_actor never
+    raises IC001 (uses P0001), so last-admin handler tests cannot pass for
+    the wrong reason.
+
+  - Audit + actor integrity. Routines write no audit rows; handlers still
+    pre-write theirs in the same transaction (audit-before-effect / Invariant
+    7 unchanged). infochat.actor_id is bound transaction-locally
+    (set_config(...,true)) in the same transaction as each admin-gated call
+    (Promote/Demote/Invite add it; Ban/Unban/Grant/Revoke/Approve/Reject
+    already set it), so it cannot leak across pooled connections. A missing
+    GUC bind fails CLOSED (P0001 → rollback, no partial mutation, no silent
+    success), so the refactor introduces no fail-open path.
+
+  The residual limitations (a SQL-injection foothold can still mint an admin
+  via bootstrap_ensure_admin, grant group-admin via auto_promote_group_admin,
+  or register via insert_invited_user, some with no routine-side audit row)
+  are exactly what the amended spec §DB roles documents and explicitly
+  accepts as a narrowing, not an elimination — a defense-in-depth measure
+  behind the parameterized-SQL control that actually prevents the injection.
+  None of these conduits is reachable via user input through any legitimate
+  code path (only via a foothold that already controls Provider SQL). They
+  are accepted design residuals, not gaps between promise and delivery, so
+  they are not findings.
+
+OUT-OF-MODEL:
+  - SQL-injection-foothold escalation via the three ungated system-actor
+    routines (admin mint / group-admin grant / invited-user registration,
+    partly un-audited): reviewed and deliberately NOT flagged. It is inside
+    the documented threat model AND explicitly accepted in the diff's own
+    spec amendment (§DB roles, "Not closed — three ungated conduits remain
+    callable by the role"). Recorded here only so the user knows the
+    auditor examined and consciously did not escalate it; no action implied
+    unless the operator wants to revisit that accepted residual (closing it
+    would require running admin bootstrap under a higher-privilege
+    connection, which the Provider's "never hold owner credentials" rule
+    currently precludes).

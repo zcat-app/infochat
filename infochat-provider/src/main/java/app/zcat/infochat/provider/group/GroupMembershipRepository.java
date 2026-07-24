@@ -27,13 +27,23 @@ public class GroupMembershipRepository {
             "SELECT is_group_admin FROM group_membership "
           + "WHERE group_id = ? AND user_id = ? AND removed_at IS NULL";
 
+    // Both privilege writes live in V62 SECURITY DEFINER routines:
+    // infochat_provider no longer holds UPDATE on
+    // group_membership.is_group_admin. Each routine is a 1:1 replacement
+    // of the statement it replaces, so promoteToAdmin still sees the
+    // 23505 from one_admin_per_group and still reports it as false
+    // (M1-672).
+    //
+    // The routines resolve their actor from the infochat.actor_id GUC,
+    // which set_config makes transaction-local. That is why the two
+    // methods below take a Connection: the GUC has to be bound on the
+    // SAME connection, and the no-arg forms these replaced opened their
+    // own in autocommit, where nothing could bind it.
     private static final String PROMOTE =
-            "UPDATE group_membership SET is_group_admin = true "
-          + "WHERE group_id = ? AND user_id = ? AND removed_at IS NULL";
+            "SELECT promote_group_admin(?, ?)";
 
     private static final String DEMOTE =
-            "UPDATE group_membership SET is_group_admin = false "
-          + "WHERE group_id = ? AND user_id = ? AND removed_at IS NULL";
+            "SELECT demote_group_admin(?, ?)";
 
     private static final String MARK_REMOVED =
             "UPDATE group_membership SET removed_at = now() "
@@ -114,30 +124,33 @@ public class GroupMembershipRepository {
         }
     }
 
-    // Returns false if the partial unique index rejects a second active admin.
-    public boolean promoteToAdmin(UUID groupId, UUID userId) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(PROMOTE)) {
+    // Returns false if the partial unique index rejects a second active
+    // admin. Runs on the caller's connection: the V62 routine resolves
+    // its actor from the transaction-local infochat.actor_id GUC, so the
+    // caller must have bound it on this same connection.
+    public boolean promoteToAdmin(Connection conn, UUID groupId, UUID userId)
+            throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(PROMOTE)) {
             ps.setObject(1, groupId);
             ps.setObject(2, userId);
-            ps.executeUpdate();
+            ps.execute();
             return true;
         } catch (SQLException e) {
             if ("23505".equals(e.getSQLState())) {
                 return false;
             }
-            throw new IllegalStateException("promoteToAdmin failed", e);
+            throw e;
         }
     }
 
-    public void demoteAdmin(UUID groupId, UUID userId) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(DEMOTE)) {
+    // Runs on the caller's connection, for the same GUC reason as
+    // promoteToAdmin.
+    public void demoteAdmin(Connection conn, UUID groupId, UUID userId)
+            throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(DEMOTE)) {
             ps.setObject(1, groupId);
             ps.setObject(2, userId);
-            ps.executeUpdate();
-        } catch (SQLException e) {
-            throw new IllegalStateException("demoteAdmin failed", e);
+            ps.execute();
         }
     }
 

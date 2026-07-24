@@ -75,13 +75,14 @@ import java.util.UUID;
  *       with the failed mutation), and surfaces
  *       {@code error.ban.last_admin}.</li>
  *   <li>Mutation — for an unknown target contact, MINT a {@code preban}
- *       row via {@code INSERT INTO users (...) VALUES (..., 'preban',
- *       NOW(), <actor.id>, <reason>)}. For a known target, UPDATE the
- *       existing row to {@code is_banned=TRUE} with the same metadata.</li>
+ *       row via the V62 SECURITY DEFINER routine
+ *       {@code insert_preban_user}. For a known target,
+ *       {@code ban_known_user} sets {@code is_banned=TRUE} with the same
+ *       metadata on the existing row.</li>
  *   <li>Revoke contact-bound pending invites — in the SAME transaction,
- *       {@code UPDATE invite_code SET status = 'REVOKED' WHERE adapter
- *       = ? AND invite_type = 'CONTACT_BOUND' AND expected_contact_id =
- *       ? AND status = 'PENDING'}. Open invites (OPEN_ADAPTER) are NOT
+ *       via the V62 routine {@code revoke_contact_bound_invites}, which
+ *       flips every PENDING CONTACT_BOUND invite for the target to
+ *       {@code REVOKED}. Open invites (OPEN_ADAPTER) are NOT
  *       revoked on the ban per the spec interpretation: {@code --open}
  *       invites are not bound to any contact at creation time, so the
  *       spec's "open-but-bound-on-consume targeting that contact" phrase
@@ -103,27 +104,33 @@ public class BanCommandHandler implements CommandHandler {
     // (V35: RAISE ... USING ERRCODE = 'IC001').
     private static final String LAST_ADMIN_SQLSTATE = "IC001";
 
+    // Every statement below lives in a V62 SECURITY DEFINER routine:
+    // infochat_provider no longer holds INSERT on users, UPDATE on the
+    // users ban columns, or any INSERT/UPDATE on invite_code. Each
+    // routine re-checks the actor against the infochat.actor_id GUC the
+    // transaction sets below, and none of them writes an audit row or
+    // touches the transaction — the audit-before-effect ordering in
+    // executeBan is unchanged (M1-672).
+    //
+    // The invite lock stays a SEPARATE routine from the revoke because
+    // the locked ids feed one pre-written INVITE_REVOKE audit row each.
+    // Folding the lock into the revoke would put the effect before the
+    // audit (Invariant 7). Revoking the table-level UPDATE also revokes
+    // plain FOR UPDATE reads on invite_code, which is why the lock had
+    // to move at all.
     private static final String SELECT_PENDING_CONTACT_BOUND_INVITES_SQL =
-            "SELECT id FROM invite_code "
-                    + "WHERE adapter = ? AND invite_type = 'CONTACT_BOUND' "
-                    + "  AND expected_contact_id = ? AND status = 'PENDING' "
-                    + "FOR UPDATE";
+            "SELECT * FROM lock_pending_contact_bound_invites(?, ?)";
 
-    // The preban INSERT supplies its own UUID for `id` so the audit row's
-    // target_id (pre-written before this INSERT) can reference it.
+    // The preban insert supplies its own UUID for `id` so the audit row's
+    // target_id (pre-written before this call) can reference it.
     private static final String INSERT_PREBAN_USER_SQL =
-            "INSERT INTO users (id, adapter, contact_id, is_admin, is_banned, "
-                    + "registration_state, banned_at, banned_by, ban_reason) "
-                    + "VALUES (?, ?, ?, FALSE, TRUE, 'preban', NOW(), ?, ?)";
+            "SELECT insert_preban_user(?, ?, ?, ?, ?)";
 
     private static final String UPDATE_BANNED_KNOWN_USER_SQL =
-            "UPDATE users SET is_banned = TRUE, banned_at = NOW(), "
-                    + "banned_by = ?, ban_reason = ? WHERE id = ?";
+            "SELECT ban_known_user(?, ?, ?)";
 
     private static final String UPDATE_INVITE_CODE_REVOKE_ON_BAN_SQL =
-            "UPDATE invite_code SET status = 'REVOKED' "
-                    + "WHERE adapter = ? AND invite_type = 'CONTACT_BOUND' "
-                    + "  AND expected_contact_id = ? AND status = 'PENDING'";
+            "SELECT revoke_contact_bound_invites(?, ?)";
 
     @Inject
     BundleLoader bundleLoader;
@@ -420,8 +427,10 @@ public class BanCommandHandler implements CommandHandler {
             ps.setString(1, adapter);
             ps.setString(2, targetContactId);
             try (ResultSet rs = ps.executeQuery()) {
+                // Positional read: a set-returning function labels its
+                // output column after the function, not "id".
                 while (rs.next()) {
-                    ids.add((UUID) rs.getObject("id"));
+                    ids.add((UUID) rs.getObject(1));
                 }
             }
         }
@@ -467,7 +476,7 @@ public class BanCommandHandler implements CommandHandler {
             } else {
                 ps.setString(5, reason);
             }
-            ps.executeUpdate();
+            ps.execute();
         }
     }
 
@@ -476,14 +485,14 @@ public class BanCommandHandler implements CommandHandler {
                                     UUID actorId,
                                     @Nullable String reason) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(UPDATE_BANNED_KNOWN_USER_SQL)) {
-            ps.setObject(1, actorId);
+            ps.setObject(1, targetId);
+            ps.setObject(2, actorId);
             if (reason == null) {
-                ps.setNull(2, Types.VARCHAR);
+                ps.setNull(3, Types.VARCHAR);
             } else {
-                ps.setString(2, reason);
+                ps.setString(3, reason);
             }
-            ps.setObject(3, targetId);
-            ps.executeUpdate();
+            ps.execute();
         }
     }
 
@@ -494,7 +503,7 @@ public class BanCommandHandler implements CommandHandler {
                 UPDATE_INVITE_CODE_REVOKE_ON_BAN_SQL)) {
             ps.setString(1, adapter);
             ps.setString(2, targetContactId);
-            ps.executeUpdate();
+            ps.execute();
         }
     }
 

@@ -95,19 +95,18 @@ public class InviteCodeConsumer {
             "SELECT count(*) FROM invite_code_attempt "
                     + "WHERE adapter = ? AND contact_id = ? AND attempted_at > ?";
 
+    // Both statements live in V62 SECURITY DEFINER routines:
+    // infochat_provider holds no INSERT/UPDATE on invite_code and no
+    // INSERT on users, because the consume writes invite_code status and
+    // the insert sets registration_state. Neither routine carries an
+    // actor gate — the presented invite code is the proof of authority,
+    // and the contact registering has no admin identity to name
+    // (M1-672).
     private static final String CONSUME_INVITE_SQL =
-            "UPDATE invite_code SET status = 'USED', used_at = NOW(), used_by_contact_id = ? "
-                    + "WHERE code = ? AND status = 'PENDING' "
-                    + "AND (expires_at IS NULL OR expires_at > NOW()) "
-                    + "AND adapter = ? "
-                    + "AND (invite_type = 'OPEN_ADAPTER' OR expected_contact_id = ?) "
-                    + "RETURNING id";
+            "SELECT consume_invite_code(?, ?, ?)";
 
     private static final String INSERT_USER_SQL =
-            "INSERT INTO users (adapter, contact_id, is_admin, registration_state, probation_until) "
-                    + "VALUES (?, ?, FALSE, 'invited', ?) "
-                    + "ON CONFLICT (adapter, contact_id) DO NOTHING "
-                    + "RETURNING id";
+            "SELECT insert_invited_user(?, ?, ?)";
 
     private static final String SELECT_USER_ID_SQL =
             "SELECT id FROM users WHERE adapter = ? AND contact_id = ?";
@@ -349,12 +348,9 @@ public class InviteCodeConsumer {
             ps.setString(1, contactId);
             ps.setObject(2, candidateCode);
             ps.setString(3, adapter);
-            ps.setString(4, contactId);
             try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getObject(1, UUID.class);
-                }
-                return null;
+                rs.next();
+                return rs.getObject(1, UUID.class);
             }
         }
     }
@@ -366,8 +362,10 @@ public class InviteCodeConsumer {
             ps.setString(2, contactId);
             ps.setObject(3, OffsetDateTime.ofInstant(now, ZoneOffset.UTC).plus(probationDuration));
             try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getObject(1, UUID.class);
+                rs.next();
+                UUID inserted = rs.getObject(1, UUID.class);
+                if (inserted != null) {
+                    return inserted;
                 }
             }
         }

@@ -97,17 +97,20 @@ public class AdminBootstrap {
      * (the creation shape applies to rows this bean creates, not to
      * pre-existing users the operator points the config at). The
      * {@code WHERE} filter makes the already-admin case a no-op, so
-     * {@code RETURNING} yields a row exactly when something changed —
+     * the returned id is non-null exactly when something changed —
      * that is the audit gate: re-running startup with unchanged
      * configuration writes no duplicate audit rows.
+     *
+     * <p>The statement itself lives in the V62 SECURITY DEFINER routine
+     * {@code bootstrap_ensure_admin}: {@code infochat_provider} no
+     * longer holds INSERT on {@code users}, and every column this row
+     * sets at insert time is a privilege column. The routine carries no
+     * actor gate — it runs at every boot, before any admin need exist,
+     * so a refuse-on-unset gate would fail Provider startup outright
+     * (M1-672).</p>
      */
     private static final String ENSURE_ADMIN_SQL =
-            "INSERT INTO users (adapter, contact_id, is_admin, is_banned,"
-                    + " registration_state, probation_until)"
-                    + " VALUES (?, ?, TRUE, FALSE, 'vouched', NULL)"
-                    + " ON CONFLICT (adapter, contact_id)"
-                    + " DO UPDATE SET is_admin = TRUE WHERE users.is_admin = FALSE"
-                    + " RETURNING id";
+            "SELECT bootstrap_ensure_admin(?, ?)";
 
     @Inject
     DataSource dataSource;
@@ -232,12 +235,15 @@ public class AdminBootstrap {
             ps.setString(1, adapterName);
             ps.setString(2, contactId);
             try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
+                rs.next();
+                UUID userId = rs.getObject(1, UUID.class);
+                if (userId == null) {
                     // Already is_admin = true at (adapter, contact_id):
-                    // idempotent no-op, no audit row.
+                    // idempotent no-op, no audit row. A function SELECT
+                    // always yields one row, so the no-op signal is a
+                    // NULL value rather than an absent row.
                     return;
                 }
-                UUID userId = rs.getObject(1, UUID.class);
                 // System-actor row: actor columns stay null per the
                 // RedactionHook.AuditRow contract for bootstrap /
                 // startup-bean writers.

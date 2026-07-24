@@ -126,15 +126,16 @@ public class SimpleXAdminClaim {
      * why a durable marker (which would make single-use survive a
      * {@code /revoke-admin}) is out of scope here, and the operator-side
      * mitigation that closes the residual gap.</p>
+     *
+     * <p>The statement itself lives in the V62 SECURITY DEFINER routine
+     * {@code claim_simplex_admin}: {@code infochat_provider} no longer
+     * holds INSERT on {@code users}. The routine carries no actor gate —
+     * the claim token is the proof of authority, and there is no admin
+     * to name because this path is how the first SimpleX admin comes
+     * into existence (M1-672).</p>
      */
     private static final String CLAIM_ADMIN_SQL =
-            "INSERT INTO users (adapter, contact_id, is_admin, is_banned,"
-                    + " registration_state, probation_until)"
-                    + " SELECT ?, ?, TRUE, FALSE, 'vouched', NULL"
-                    + " WHERE NOT EXISTS ("
-                    + "   SELECT 1 FROM users WHERE adapter = ? AND is_admin = TRUE)"
-                    + " ON CONFLICT (adapter, contact_id) DO NOTHING"
-                    + " RETURNING id";
+            "SELECT claim_simplex_admin(?, ?)";
 
     @ConfigProperty(name = "infochat.adapters.simplex.admin-token")
     Optional<String> adminToken;
@@ -254,12 +255,9 @@ public class SimpleXAdminClaim {
         try (PreparedStatement ps = conn.prepareStatement(CLAIM_ADMIN_SQL)) {
             ps.setString(1, adapter);
             ps.setString(2, contactId);
-            ps.setString(3, adapter);
             try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getObject(1, UUID.class);
-                }
-                return null;
+                rs.next();
+                return rs.getObject(1, UUID.class);
             }
         }
     }

@@ -63,13 +63,19 @@ public class PromoteCommandHandler implements CommandHandler {
             "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ? "
                     + "AND removed_at IS NULL";
 
+    // Both statements live in V62 SECURITY DEFINER routines:
+    // infochat_provider no longer holds UPDATE on
+    // group_membership.is_group_admin. They stay two routines, mirroring
+    // the two statements they replace, because promote_group_admin must
+    // keep raising 23505 from the one_admin_per_group partial index when
+    // the slot is occupied — merging the pair would mask that. Both
+    // resolve their actor from the infochat.actor_id GUC set in the
+    // transaction below (M1-672).
     private static final String DEMOTE_EXISTING_SQL =
-            "UPDATE group_membership SET is_group_admin = false "
-                    + "WHERE group_id = ? AND is_group_admin = true AND removed_at IS NULL";
+            "SELECT demote_group_admins(?)";
 
     private static final String PROMOTE_TARGET_SQL =
-            "UPDATE group_membership SET is_group_admin = true "
-                    + "WHERE group_id = ? AND user_id = ? AND removed_at IS NULL";
+            "SELECT promote_group_admin(?, ?)";
 
     @Inject DataSource dataSource;
     @Inject BundleLoader bundleLoader;
@@ -139,6 +145,20 @@ public class PromoteCommandHandler implements CommandHandler {
                 if (actorId == null) {
                     conn.rollback();
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
+                }
+                // The V62 promote_group_admin routine resolves its actor
+                // from this GUC, so it must be set after the locking
+                // admin gate above and before the mutation below. The
+                // bound value is the same users.id the audit row claims
+                // as actor_user_id — V24's trg_audit_log_actor_check
+                // compares the two and rejects a mismatch. set_config's
+                // third argument makes it transaction-local, so it
+                // cannot leak to the next borrower of this pooled
+                // connection (M1-672).
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT set_config('infochat.actor_id', ?, true)")) {
+                    ps.setString(1, actorId.toString());
+                    ps.execute();
                 }
 
                 // Resolve target
@@ -263,7 +283,7 @@ public class PromoteCommandHandler implements CommandHandler {
     private void demoteExisting(Connection conn, UUID groupId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(DEMOTE_EXISTING_SQL)) {
             ps.setObject(1, groupId);
-            ps.executeUpdate();
+            ps.execute();
         }
     }
 
@@ -272,7 +292,7 @@ public class PromoteCommandHandler implements CommandHandler {
         try (PreparedStatement ps = conn.prepareStatement(PROMOTE_TARGET_SQL)) {
             ps.setObject(1, groupId);
             ps.setObject(2, userId);
-            ps.executeUpdate();
+            ps.execute();
         }
     }
 

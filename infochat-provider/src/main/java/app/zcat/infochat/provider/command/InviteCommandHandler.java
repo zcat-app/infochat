@@ -105,18 +105,19 @@ public class InviteCommandHandler implements CommandHandler {
 
     // Pre-mint the code via a separate SELECT gen_random_uuid() so the
     // audit row can be written FIRST (audit-before-effect, Invariant 7)
-    // with the code as its target_id, and the INSERT INTO invite_code
-    // can then run with the same code passed as a JDBC bind parameter.
+    // with the code as its target_id, and the mint below can then run
+    // with the same code passed as a JDBC bind parameter.
     // pgcrypto's gen_random_uuid() (cryptographically secure RNG)
     // remains the code source — the spec asks for it explicitly.
     private static final String SELECT_NEW_CODE_SQL =
             "SELECT gen_random_uuid() AS code";
 
+    // Lives in the V62 SECURITY DEFINER routine mint_invite_code:
+    // infochat_provider holds no INSERT on invite_code at all. The
+    // routine resolves its actor from the infochat.actor_id GUC, which
+    // this handler sets per transaction (M1-672).
     private static final String INSERT_INVITE_SQL =
-            "INSERT INTO invite_code "
-                    + "(code, invite_type, adapter, expected_contact_id, "
-                    + " status, created_by, created_at, expires_at) "
-                    + "VALUES (?, ?, ?, ?, 'PENDING', ?, NOW(), ?)";
+            "SELECT mint_invite_code(?, ?, ?, ?, ?, ?)";
 
     // Active-PENDING filter (status='PENDING' AND not expired). Sorts
     // by created_at DESC; limit + offset support `--page N` paging.
@@ -147,14 +148,18 @@ public class InviteCommandHandler implements CommandHandler {
                     + "ORDER BY last_attempted_at DESC "
                     + "LIMIT ? OFFSET ?";
 
-    // FOR UPDATE locks the row so the audit INSERT below cannot
-    // reference an invite another transaction flips before the UPDATE.
+    // Two routines, not one. The lock still has to happen before the
+    // audit INSERT (so the pre-written row cannot reference an invite
+    // another transaction flips out from under it) and the revoke after
+    // it, so folding them together would put the effect before the audit
+    // — Invariant 7. The lock moved into a routine at all because
+    // revoking the table-level UPDATE on invite_code also revokes plain
+    // FOR UPDATE reads on it (M1-672).
     private static final String SELECT_INVITE_FOR_REVOKE_SQL =
-            "SELECT id FROM invite_code WHERE code = ? AND status = 'PENDING' FOR UPDATE";
+            "SELECT lock_pending_invite(?)";
 
     private static final String UPDATE_INVITE_REVOKED_SQL =
-            "UPDATE invite_code SET status = 'REVOKED' "
-                    + "WHERE code = ? AND status = 'PENDING'";
+            "SELECT revoke_invite_code(?)";
 
     private static final int PAGE_SIZE = 20;
 
@@ -546,6 +551,7 @@ public class InviteCommandHandler implements CommandHandler {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
+                setActorGuc(conn, actor.id);
                 long current = countContactBoundPending(conn, now);
                 if (current >= contactCap) {
                     conn.rollback();
@@ -598,6 +604,7 @@ public class InviteCommandHandler implements CommandHandler {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
+                setActorGuc(conn, actor.id);
                 long current = countOpenPendingForAdapter(conn, targetAdapter, now);
                 if (current >= openCap) {
                     conn.rollback();
@@ -681,7 +688,7 @@ public class InviteCommandHandler implements CommandHandler {
             }
             ps.setObject(5, createdBy);
             ps.setObject(6, expiresAt);
-            ps.executeUpdate();
+            ps.execute();
         }
     }
 
@@ -813,6 +820,7 @@ public class InviteCommandHandler implements CommandHandler {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
+                setActorGuc(conn, actor.id);
                 UUID inviteId = lockPendingInviteId(conn, code);
                 if (inviteId == null) {
                     // Zero rows pending under this code (already USED /
@@ -853,10 +861,8 @@ public class InviteCommandHandler implements CommandHandler {
         try (PreparedStatement ps = conn.prepareStatement(SELECT_INVITE_FOR_REVOKE_SQL)) {
             ps.setObject(1, code);
             try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    return null;
-                }
-                return (UUID) rs.getObject("id");
+                rs.next();
+                return rs.getObject(1, UUID.class);
             }
         }
     }
@@ -864,7 +870,27 @@ public class InviteCommandHandler implements CommandHandler {
     private int updateInviteRevoked(Connection conn, UUID code) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(UPDATE_INVITE_REVOKED_SQL)) {
             ps.setObject(1, code);
-            return ps.executeUpdate();
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getInt(1);
+            }
+        }
+    }
+
+    /**
+     * Bind {@code infochat.actor_id} for the current transaction so the
+     * V62 invite routines can resolve their actor. Transaction-local
+     * (set_config's third argument), so it cannot leak to the next
+     * borrower of this pooled connection. The bound value is the same
+     * {@code users.id} every audit row in these transactions claims as
+     * {@code actor_user_id} — V24's {@code trg_audit_log_actor_check}
+     * compares the two and rejects a mismatch.
+     */
+    private void setActorGuc(Connection conn, UUID actorId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT set_config('infochat.actor_id', ?, true)")) {
+            ps.setString(1, actorId.toString());
+            ps.execute();
         }
     }
 

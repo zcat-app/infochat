@@ -45,6 +45,7 @@ class MembershipEventHandlerTest {
     private UUID groupId;
     private UUID userId;
     private String contactId;
+    private UUID botAdminId;
 
     @BeforeEach
     void setup() throws Exception {
@@ -52,6 +53,7 @@ class MembershipEventHandlerTest {
         contactId = "meh-contact-" + userId;
 
         try (Connection conn = dataSource.getConnection()) {
+            botAdminId = resolveBotAdmin(conn);
             try (PreparedStatement ps = conn.prepareStatement(
                     "DELETE FROM group_membership WHERE group_id IN "
                             + "(SELECT id FROM groups WHERE upstream_group_id = ?)")) {
@@ -100,7 +102,7 @@ class MembershipEventHandlerTest {
     @Test
     void userLeft_auditRecordsWasGroupAdmin() throws Exception {
         membershipRepository.addMember(groupId, userId);
-        membershipRepository.promoteToAdmin(groupId, userId);
+        promoteToAdmin(groupId, userId);
 
         handler.handle(
                 new MembershipEvent.UserLeft(TEST_UPSTREAM_GROUP_ID, contactId),
@@ -182,7 +184,7 @@ class MembershipEventHandlerTest {
     @Test
     void userLeft_auditWriteFailureRollsBackMutation() throws Exception {
         membershipRepository.addMember(groupId, userId);
-        membershipRepository.promoteToAdmin(groupId, userId);
+        promoteToAdmin(groupId, userId);
 
         MembershipEventHandler failingHandler = new MembershipEventHandler(
                 dataSource, membershipRepository, groupRepository,
@@ -593,6 +595,47 @@ class MembershipEventHandlerTest {
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Resolve any live bot admin to act as the fixture's actor. The V62
+     * routine behind {@code promoteToAdmin} gates on
+     * {@code infochat.actor_id} naming an {@code is_admin} row, so this
+     * fixture needs one — but it deliberately reuses an existing admin
+     * rather than seeding another: an extra unbanned admin row would be a
+     * permanent fixture leak that breaks the last-admin-protection tests,
+     * whose premise is that exactly one such row remains. The
+     * {@code AdminBootstrap} startup bean seeds one for the {@code %test}
+     * inmemory contact at every boot.
+     */
+    private UUID resolveBotAdmin(Connection conn) throws Exception {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT id FROM users WHERE is_admin = TRUE AND is_banned = FALSE LIMIT 1");
+             ResultSet rs = ps.executeQuery()) {
+            assertTrue(rs.next(),
+                    "fixture precondition: the %test cluster must carry at least one "
+                          + "live bot admin (AdminBootstrap seeds one at boot)");
+            return rs.getObject(1, UUID.class);
+        }
+    }
+
+    /**
+     * Drive {@link GroupMembershipRepository#promoteToAdmin} the way
+     * production drives a routine-mediated write: one transaction, actor
+     * GUC bound first. {@code set_config(..., true)} is transaction-local,
+     * so the bind and the call must share a connection.
+     */
+    private void promoteToAdmin(UUID gId, UUID uId) throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT set_config('infochat.actor_id', ?, true)")) {
+                ps.setString(1, botAdminId.toString());
+                ps.execute();
+            }
+            membershipRepository.promoteToAdmin(conn, gId, uId);
+            conn.commit();
         }
     }
 
