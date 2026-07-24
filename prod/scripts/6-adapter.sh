@@ -106,7 +106,7 @@ dotenv_escape() {
 # Collect a per-adapter bootstrap-admin credential into secrets.env. $4 is the
 # credential noun for the prompt ("contact id" for Signal's address, "claim-token"
 # for SimpleX's secret D50 token); $5 is 1 to read it with no terminal echo (the
-# SimpleX token is a secret, like the LLM key in 2-secrets.sh — Signal's address
+# SimpleX token is a secret, like the LLM key in 4-llm.sh — Signal's address
 # is not). The third arg is 1 when this is the ONLY enabled adapter: then a blank
 # is guaranteed to trip the union gate (below) seconds later, so the prompt is
 # REQUIRED and a blank re-prompts with the reason rather than being accepted as
@@ -131,7 +131,7 @@ collect_admin() {
   while true; do
     if [[ "$secret" -eq 1 ]]; then
       # -s: do not echo the secret token to the terminal (shoulder-surf /
-      # terminal-capture hardening, mirroring the LLM-key prompt in 2-secrets.sh);
+      # terminal-capture hardening, mirroring the LLM-key prompt in 4-llm.sh);
       # the bare echo restores the newline -s eats so following output is aligned.
       if read -rsp "$prompt: " val; then read_ok=1; else read_ok=0; fi
       echo

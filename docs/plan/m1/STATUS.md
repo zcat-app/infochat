@@ -14,10 +14,10 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 700 |
+| done | 701 |
 | deferred | 0 |
 | abandoned | 19 |
-| **total** | **720** |
+| **total** | **721** |
 
 ---
 
@@ -61,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-686 | Fix wizard invite guidance and stale 2-secrets comment refs | 2026-07-24 | round 1 APPROVE |
 | M1-684 | Stop committing regenerable redteam-multi evidence bulk | 2026-07-24 | round 1 APPROVE |
 | M1-672 | Narrow Provider grants on identity/authz tables | 2026-07-24 | round 1 APPROVE |
 | M1-683 | Fail the build when a Signal client pairs a real restart hook with no generation supplier | 2026-07-23 | round 1 APPROVE |
@@ -70,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-679 | DevTerminalHarnessRoundtripIT fails on any repeat verify: the startup poll eats the previous run's input file | 2026-07-23 | round 1 APPROVE |
 | M1-678 | Render the asset 24h delta independently of the 24h spread | 2026-07-23 | round 1 APPROVE |
 | M1-677 | Validate provider-reported token counts before they reach the metric counters | 2026-07-23 | round 1 APPROVE |
-| M1-676 | Canonicalize before closed-list match in LLM sanitizer | 2026-07-23 | round 2 APPROVE |
 
 ---
 
@@ -921,4 +921,5 @@ M1-678 (done)
 M1-679 (done)
 M1-684 (done)
 M1-685 (pending) ← runnable
+M1-686 (done)
 ```

@@ -1,7 +1,7 @@
 ---
 id: M1-686
 title: Fix wizard invite guidance and stale 2-secrets comment refs
-status: pending
+status: done
 created: 2026-07-24
 last_updated: 2026-07-24
 blocked_by: []
@@ -34,12 +34,30 @@ spec_refs:
   - docs/spec/commands.md §Command catalogue
 decision_refs:
   - D60
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-24
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 23
+      removed: 12
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-24
+  verdict: PASS
+  warnings:
+    - "self-check: Context cited 4-llm.sh:190 as the INFOCHAT_LLM_API_KEY write site; :190 deletes it (local-backend cleanup), the write is :566 — citation corrected inline, substance unchanged"
+  blockers: []
 escalation_reason:
 ---
 
@@ -69,7 +87,7 @@ Folded in, per the §Census below: two code comments in
 `prod/scripts/6-adapter.sh` assert the remote LLM key and its prompt live in
 `2-secrets.sh`. They do not — `prod/scripts/2-secrets.sh:11-12` states outright
 that the key "is NOT collected here: it is captured in step 4 (4-llm.sh)", and
-`4-llm.sh:190` is what writes `INFOCHAT_LLM_API_KEY`.
+`4-llm.sh:566` is what writes `INFOCHAT_LLM_API_KEY`.
 
 ## Census
 

@@ -117,9 +117,15 @@ print_handoff() {
   echo "  1. Send  /help   — confirms the bot answers you. (SimpleX: send your"
   echo "     claim-token FIRST to become admin — see the SimpleX note above.)"
   echo "  2. Invite someone:"
-  echo "       /invite create --adapter <app> --contact <their id>"
-  echo "     The bot replies with a one-time code. Send it to them; they connect"
-  echo "     to the bot and send the code on its own as their first DM to register."
+  echo "       /invite create --adapter <app> --open   (then resend it with"
+  echo "                                                'confirm' on the end)"
+  echo "     The bot replies with a one-time code. Send them that code AND the"
+  echo "     bot's own contact — /invite bot-contact prints it — since they"
+  echo "     cannot reach the bot without it. They connect to the bot and send"
+  echo "     the code on its own as their first DM to register."
+  echo "     Want the code locked to one person instead? Their contact id does"
+  echo "     not exist until they have connected, so they connect first and"
+  echo "     /invite pending-contacts then shows the id to use with --contact."
   echo
   echo "Full admin walkthrough: ADMIN_GUIDE.md   ·   Using the bot: USER_GUIDE.md"
 }
