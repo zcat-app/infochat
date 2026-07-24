@@ -1,4 +1,0 @@
-infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingCommandHandler.java:34: * {@code /vouch <contact>} and {@code /ban <contact>} accept.
-infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingUsersDao.java:28: * key that {@code /vouch} and {@code /ban} match on. "Awaiting a vouch" is a
-infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingUsersDao.java:30: * general user directory (D55): banned and settled (vouched, out-of-probation)
-infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingUsersDao.java:43:    // Shared actionable-set predicate: an un-banned user still inside the

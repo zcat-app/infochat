@@ -76,11 +76,21 @@ threat model):
    [`.claude/skills/redteam/SKILL.md`](../../.claude/skills/redteam/SKILL.md)
    §8).
 
-6. **Commit the evidence directory.** `docs/plan/m1/redteam-multi/<slug>-
-   <date>[-rN]/` is the durable audit record. Commit it alongside
-   `docs/plan/m1/redteam/` as a `process:` commit (or fold it into the
+6. **Commit the durable subset of the evidence directory.** In
+   `docs/plan/m1/redteam-multi/<slug>-<date>[-rN]/`, the durable audit
+   record is exactly `verdict-*.txt`, `cross-examination.md`, and any
+   hand-written `disposition.md`. Commit those alongside
+   `docs/plan/m1/redteam/` as a `process:` commit (or fold them into the
    ticket commit if the audit ran on that ticket's branch — same
-   lifecycle-path exemption as single-auditor redteam).
+   lifecycle-path exemption as single-auditor redteam). The rest —
+   `prompt-*.txt`, `reply-*.txt`, `inv-*.txt`, `diff.patch`,
+   `porcelain-*.txt`, `preflight.txt` — is regenerable scratch,
+   `.gitignored` (M1-684); do not commit it. **Timed-out-auditor
+   carve-out:** when an auditor times out (exit 124) its `verdict-*.txt`
+   is the `UNAVAILABLE` stub, so its raw `reply-*.txt` may carry a
+   conclusion the verdict does not — capture that conclusion in
+   `disposition.md` (or the cross-examination report) before the reply is
+   dropped (M1-672 r2 kimi is the worked precedent).
 
 ## Harness bindings (non-Claude substitutions)
 

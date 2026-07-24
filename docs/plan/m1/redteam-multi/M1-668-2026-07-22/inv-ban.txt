@@ -1,1 +1,0 @@
-infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/CommandIntentSynonyms.java:60:     * unrelated query — {@code ban} against {@code lang}, three edits

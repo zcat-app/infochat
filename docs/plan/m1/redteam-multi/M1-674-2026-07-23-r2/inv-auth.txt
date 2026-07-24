@@ -1,5 +1,0 @@
-infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java:51: * v1 loopback-IPC transport — there is nothing to authenticate against a
-infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java:946:        // membership transition invited→connected lands later as an async event
-infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java:1005:                    invitation.adapterGroupId(), invitation.inviterContactId()));
-infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClient.java:592:            // issue an outbound join) and key the FIFO ordering on the inviter,
-infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClient.java:595:                    dispatchAsync(inv.inviterContactId(),

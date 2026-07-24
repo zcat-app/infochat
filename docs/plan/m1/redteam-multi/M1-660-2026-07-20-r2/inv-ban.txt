@@ -1,4 +1,0 @@
-infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java:197:        llmProvider.responses.add(new LlmResponse("Try /ban user123"));
-infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java:202:        assertEquals("Try /ban user123", sanitizerLastInput);
-infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java:585:        llmProvider.responses.add(new LlmResponse("Try /ban user123"));
-infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexIT.java:210:     * (every adapter, ban intake, admin auth, invite gate, digests —

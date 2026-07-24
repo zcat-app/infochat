@@ -1,4 +1,0 @@
-RED-TEAM VERDICT: FINDINGS
-Verdict file: /home/infochat/infochat/docs/plan/m1/redteam-multi/M1-664-2026-07-19/verdict-claude.txt
-Findings: critical=0 high=1 medium=0 low=0
-Out-of-model: 3

@@ -96,10 +96,19 @@ skill discovery from both trees outright (harness-mapping §6.3).
    amendments, or accepted residual risk. Findings reach the lifecycle workflow
    only when the user runs `/m1-tick escalate <id> redteam-finding`.
 
-6. **Commit the evidence directory.** `docs/plan/m1/redteam-multi/<slug>-<date>[-rN]/`
-   is the durable audit record — commit it as a `process:` commit, or fold it
-   into the ticket commit when the audit ran on that ticket's branch (the
-   reviewer's lifecycle-path exemption already covers the directory).
+6. **Commit the durable subset of the evidence directory.** In
+   `docs/plan/m1/redteam-multi/<slug>-<date>[-rN]/`, the durable audit record is
+   exactly `verdict-*.txt` (the per-auditor verdicts), `cross-examination.md`,
+   and any hand-written `disposition.md`. Commit those as a `process:` commit, or
+   fold them into the ticket commit when the audit ran on that ticket's branch
+   (the reviewer's lifecycle-path exemption already covers the directory). The
+   rest — `prompt-*.txt`, `reply-*.txt`, `inv-*.txt`, `diff.patch`,
+   `porcelain-*.txt`, `preflight.txt` — is regenerable scratch, `.gitignored`
+   (M1-684); do not commit it. **Timed-out-auditor carve-out:** when an auditor
+   times out (exit 124) its `verdict-*.txt` is the `UNAVAILABLE` stub, so its raw
+   `reply-*.txt` may carry a conclusion the verdict does not — capture that
+   conclusion in `disposition.md` (or the cross-examination report) before the
+   reply is dropped (M1-672 r2 kimi is the worked precedent).
 
 ## Cross-cutting rules this skill must obey
 

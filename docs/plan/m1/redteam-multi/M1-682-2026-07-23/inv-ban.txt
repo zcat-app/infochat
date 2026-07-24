@@ -1,2 +1,0 @@
-infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/MessagingAdapter.java:244:     * {@link #joinGroup} back; an unregistered/banned inviter is simply not
-infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/MessagingAdapter.java:258:     * calls this back only for an invitation from a registered, non-banned

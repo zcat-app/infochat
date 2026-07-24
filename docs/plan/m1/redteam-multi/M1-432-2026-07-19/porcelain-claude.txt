@@ -1,5 +1,0 @@
- M docs/process/harness-mapping.md
-?? .agents/skills/redteam-multi/
-?? docs/plan/m1/redteam-multi/
-?? scripts/redteam-multi-cross.py
-?? scripts/redteam-multi.sh

@@ -1,2 +1,0 @@
-infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/OutboundDelivery.java:25: * a messaging transport — chat replies ({@link InboundRouter}), progress
-infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java:356:        @Override public void setInboundHandler(InboundHandler h) {}

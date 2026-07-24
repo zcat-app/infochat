@@ -325,13 +325,28 @@ cross-examination stage makes the difference legible to the user.
   convention.
 - **Persistent storage.** Evidence lives under
   `docs/plan/m1/redteam-multi/<slug>-<date>[-rN]/`, NOT under `target/`
-  (gitignored, wiped by `mvn clean`). The directory contains: `preflight.txt`,
-  `diff.patch`, `inv-{auth,authz,input,ban,audit}.txt`, `prompt-<id>.txt`,
-  `reply-<id.txt>`, `verdict-<id>.txt`, `porcelain-<id>.txt`, and
-  `cross-examination.md` (plus an empty `kimi-no-skills/` when the kimi slot
+  (gitignored, wiped by `mvn clean`). The script writes into that directory:
+  `preflight.txt`, `diff.patch`, `inv-{auth,authz,input,ban,audit}.txt`,
+  `prompt-<id>.txt`, `reply-<id>.txt`, `verdict-<id>.txt`, `porcelain-<id>.txt`,
+  and `cross-examination.md` (plus an empty `kimi-no-skills/` when the kimi slot
   ran — the directory §6.3 aims `--skills-dir` at; git tracks no empty
-  directory, so it never reaches the commit). Commit the whole directory alongside
-  `docs/plan/m1/redteam/` as the audit record.
+  directory, so it never reaches the commit).
+- **Commit the durable subset, not the whole directory (M1-684).** Only three
+  kinds of file are the durable audit record: `verdict-<id>.txt` (the per-auditor
+  verdicts), `cross-examination.md`, and any hand-written `disposition.md`.
+  Commit those alongside `docs/plan/m1/redteam/`. Everything else the script
+  writes — `prompt-<id>.txt` (each embeds the full diff + threat model, ≈139 KB),
+  `reply-<id>.txt`, `inv-*.txt`, `diff.patch`, `porcelain-<id>.txt`,
+  `preflight.txt` — is regenerable from the template + diff and is `.gitignored`,
+  so a plain `git add` of the run directory picks up only the durable subset. The
+  script still WRITES the full set as working state; the `.gitignore` rule keeps
+  the regenerable bulk out of history rather than out of the run directory.
+  **Timed-out-auditor carve-out:** when an auditor times out (exit 124) its
+  `verdict-<id>.txt` is the `UNAVAILABLE` stub carrying no conclusion, so its raw
+  `reply-<id>.txt` may hold signal the verdict does not — capture that auditor's
+  actual conclusion in `disposition.md` (or the cross-examination report) before
+  the reply is dropped. The M1-672 r2 kimi run (exit 124, verdict stubbed
+  `UNAVAILABLE`) is the worked precedent.
 
 ### Cross-examination — v1 (shipped) vs v2 (not yet wired)
 

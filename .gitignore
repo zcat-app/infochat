@@ -42,3 +42,18 @@ credentials.json
 prod/runtime/
 !prod/config/secrets.env.example
 .agents/memory-local/
+
+# Redteam-multi regenerable scratch (M1-684). Each /redteam-multi run's durable
+# audit record — verdict-*.txt, cross-examination.md, and any hand-written
+# disposition.md — stays tracked; the bulk below is fully reproducible from the
+# prompt template + diff (rendered prompts embed the whole diff + threat model),
+# so it is kept out of permanent history. The redteam-multi.sh script still
+# WRITES these into the run directory as working state — this only stops them
+# being committed. Single-auditor /redteam evidence (docs/plan/m1/redteam/*.md)
+# is one markdown file per audit and is unaffected.
+docs/plan/m1/redteam-multi/**/prompt-*.txt
+docs/plan/m1/redteam-multi/**/reply-*.txt
+docs/plan/m1/redteam-multi/**/inv-*.txt
+docs/plan/m1/redteam-multi/**/diff.patch
+docs/plan/m1/redteam-multi/**/porcelain-*.txt
+docs/plan/m1/redteam-multi/**/preflight.txt

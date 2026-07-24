@@ -1,5 +1,0 @@
-infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/MessagingAdapter.java:243:     * registered-inviter invitation is accepted by Provider calling
-infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/MessagingAdapter.java:244:     * {@link #joinGroup} back; an unregistered/banned inviter is simply not
-infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/MessagingAdapter.java:259:     * inviter (the D47 registered-only auto-join gate). Default no-op so
-infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/MessagingAdapter.java:462:     * {@code inviterContactId} is the inviting user's adapter-native contact
-infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/MessagingAdapter.java:467:    record GroupInvitation(String adapterGroupId, String inviterContactId) {

@@ -1,4 +1,0 @@
- M docs/plan/m1/STATUS.md
- M docs/plan/m1/tickets/M1-682-fail-the-build-when-a-transpor.md
- M infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/MessagingAdapter.java
- M infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/AdapterCapabilityContractTest.java

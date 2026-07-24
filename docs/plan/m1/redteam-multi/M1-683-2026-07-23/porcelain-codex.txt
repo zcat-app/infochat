@@ -1,7 +1,0 @@
- M docs/plan/m1/STATUS.md
- M docs/plan/m1/tickets/M1-683-fail-the-build-when-a-signal-cli.md
- M infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java
- M infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalEditFallbackTest.java
- M infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalInboundQueueBoundTest.java
- M infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClientTest.java
- M infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java

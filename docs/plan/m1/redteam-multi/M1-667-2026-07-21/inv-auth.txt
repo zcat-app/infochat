@@ -1,3 +1,0 @@
-infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingUsersDao.java:47:    // Deliberately NO registration_state = 'invited' arm: post-D47 'invited' is
-infochat-provider/src/main/java/app/zcat/infochat/provider/command/PendingUsersDao.java:50:    // SimpleXAdminClaim, both bootstrap-admin paths — so an 'invited' arm would
-infochat-provider/src/main/java/app/zcat/infochat/provider/command/QuarantineCommandHandler.java:43: * name, following the {@link InviteCommandHandler} subcommand pattern.

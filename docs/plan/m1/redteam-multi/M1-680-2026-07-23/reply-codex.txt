@@ -1,4 +1,0 @@
-RED-TEAM VERDICT: CLEAN
-Verdict file: /home/infochat/infochat/docs/plan/m1/redteam-multi/M1-680-2026-07-23/verdict-codex.txt
-Findings: critical=0 high=0 medium=0 low=0
-Out-of-model: 0

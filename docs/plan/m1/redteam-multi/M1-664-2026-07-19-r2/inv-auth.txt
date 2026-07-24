@@ -1,4 +1,0 @@
-infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java:848:    // (allowed: user, group, source, post, invite, quarantine, asset,
-infochat-provider/src/main/java/app/zcat/infochat/provider/help/CommandIntentIndexBuilder.java:79: * enforces (ban intake, admin authorization, invite gate, digests,
-infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java:172:            new CommandHelp("invite", BundleKeys.HELP_CMD_INVITE_SHORT, BundleKeys.HELP_CMD_INVITE_USAGE, BundleKeys.HELP_CMD_INVITE_EXAMPLES, HelpTier.BOT_ADMIN),
-infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexIT.java:203:     * (every adapter, ban intake, admin auth, invite gate, digests —

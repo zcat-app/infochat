@@ -1,7 +1,0 @@
- M docs/plan/m1/STATUS.md
- M docs/plan/m1/tickets/M1-674-simplex-peer-close-recovery.md
- M docs/spec/messaging.md
- M infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java
- M infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClient.java
- M infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXReconnectTest.java
- M infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClientTest.java
