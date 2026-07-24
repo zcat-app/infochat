@@ -154,39 +154,31 @@ The whole thing is **one script and a few chat messages**. End to end on a
 laptop is about 30 minutes — most of it the computer downloading and building
 while you wait. No Maven, no Java, no programming.
 
-**1 · Set up the server.** From the project folder, run the wizard and answer a
-handful of plain questions (press **Enter** for the sensible default on almost
-all of them):
+**1 · Get it and run the wizard.** Press **Enter** through the prompts:
 
 ```bash
+git clone https://github.com/zcat-app/infochat.git
+cd infochat
 ./prod/setup.sh
 ```
 
-It checks your machine, generates database secrets, downloads a local AI model,
-wires up your messaging app, and starts both services. When it finishes it
-prints exactly how to reach your bot. On SimpleX it also asks you to pick a
-secret **claim-token** — keep it somewhere safe, you need it in step 2. (The
-only prerequisite is Docker — on the SimpleX happy path the wizard sets up the
-bot's account for you, so there's no manual identity step before it; Signal
-needs a phone number you register first. Details in the
-**[Setup Guide](SETUP_GUIDE.md)**.)
+It checks your machine, generates secrets, downloads a local AI model, wires up
+your messaging app, and starts both services. On SimpleX it asks you to pick a
+secret **claim-token** — keep it, you need it in step 2. You need **Docker** on
+that machine, and the **SimpleX** (or Signal) app on your own phone — that's
+what you talk to the bot with.
 
-**2 · Say hello — you're the admin.** You need no invite code either way, but
-the two apps prove identity differently, so claiming admin differs:
+**2 · Say hello — you're the admin.** Connect to the bot from your own SimpleX
+(or Signal) app. You need no invite code — but on **SimpleX your first message
+must be the secret claim-token you chose during setup**; that message is what
+makes you admin, and anything else (including `/help`) just gets the "you need
+an invite" reply. On Signal you are admin from the first start, so just message
+the bot. Then send `/help` and it answers. You're in.
 
-- **SimpleX** — connect to the bot at the contact link the wizard printed, then
-  send **the claim-token on its own as your very first message**. That message
-  is what makes you admin; the bot replies with an admin welcome. Any other
-  first message — including `/help` — gets the "you need an invite" reply
-  instead, because until the token is presented you are just an unknown
-  contact. Afterwards **unset the token** so a leaked copy can never re-claim
-  admin later: blank `INFOCHAT_SIMPLEX_ADMIN_TOKEN` in
-  `prod/runtime/secrets.env`, then `./prod/scripts/apps.sh restart`.
-- **Signal** — just message the bot's number from your own Signal app. The
-  wizard already has your contact id, so you are admin from the first start and
-  there is nothing to claim.
-
-Now send `/help` and it answers. You're in.
+> Steps 1–2 in full — prerequisites, what each wizard question means, claiming
+> admin on each app, and unsetting the claim-token afterwards — are in the
+> **[Setup Guide](SETUP_GUIDE.md)**. It is the authoritative version; where it
+> and this summary ever disagree, believe it.
 
 **3 · Invite a friend.** DM the bot for a one-time code (it asks you to confirm,
 since an open code can be claimed by anyone on that app):
@@ -198,12 +190,9 @@ You:  /invite create --adapter simplex --open confirm
 Bot:  Invite code: `7f3c8e9a-…` (single use).
 ```
 
-(To bind a code to one specific person instead, you need their contact id — which
-only exists once they have connected to the bot. Let them connect, then read the
-id off `/invite pending-contacts` and use
-`/invite create --adapter signal --contact <id>`, no confirm needed. Note that a
-Signal contact id is an **ACI** — a UUID like
-`8f3c1a2b-4d5e-4f60-9a7b-1c2d3e4f5a6b` — not a phone number.)
+(Want the code locked to one person instead of open to whoever claims it first?
+That takes an extra step, because their contact id doesn't exist until they've
+connected — see the [Admin Guide](ADMIN_GUIDE.md).)
 
 **4 · Your friend joins.** Send them that code, plus the bot's own contact
 (`/invite bot-contact` prints it — a SimpleX link or the bot's Signal number).
