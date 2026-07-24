@@ -78,6 +78,40 @@ the target file plus the ground-truth source list below.
   `.agents/skills/**` (which exist, their subcommands, the exact menu options),
   `scripts/*`, and `docs/process/{workflow,harness-mapping,ticket-template}.md`
 
+### Second pass — walk the sequences, not just the claims
+
+Claim-by-claim falsification is **stateless**: it asks "is this true?" and never
+"is this true *here*, given what the previous steps did or did not establish?"
+That gap is not theoretical. The 2026-07-24 pre-release audit checked every
+command token, link, flag, property key and default across all six guides and
+passed them all, then still shipped a wrong README quick-setup **step 2**
+("connect, then send `/help`"). Every token in that sentence is real; the
+sentence is false only *in position*, because at that point a SimpleX operator
+has no `users` row and the router answers "you need an invite" instead. No
+stateless check can catch that.
+
+So for every numbered or ordered procedure a guide contains — install, bootstrap,
+onboarding, upgrade, migration, recovery — run a second pass that walks it as a
+**state machine**:
+
+1. Track what exists after each step: rows, files, config values, running
+   containers, registered identities, issued credentials.
+2. At each step, ask whether the instruction is valid *in that state* — not
+   whether it is valid in general.
+3. **Walk each variant separately** where the path branches (adapter, OS,
+   profile, local-vs-remote). The README bug was live on the SimpleX leg and
+   correct on the Signal leg; one sentence covering both hid it.
+4. Check the **terminal** state for a missing step — most often a security one
+   the procedure never returns to. The same pass found that the README never
+   tells the operator to unset `INFOCHAT_SIMPLEX_ADMIN_TOKEN`.
+5. Treat "safe to run" as state-dependent too. An instruction can be correct and
+   still be hazardous at the moment the reader reaches it — re-running the
+   SimpleX provisioning step is idempotent, but doing it against a *live* bot
+   puts two writers on identity files that cannot be regenerated.
+
+`SETUP_GUIDE.md` is the primary target (its happy-path test below is this pass,
+made explicit), but any guide with a numbered procedure needs it.
+
 ### Classification scheme
 
 Each finding is exactly one of: **CORRECT** · **WRONG** (contradicts ground
@@ -98,20 +132,37 @@ TARGET: {ABSOLUTE_PATH_TO_FILE}
 GROUND-TRUTH SOURCES (read/grep as needed):
 {paste the ground-truth source list above}
 
-METHOD — for EVERY checkable claim (command, path, env/property key, flag, port,
-service name, version, behavior, order-of-operations, success-check, xref):
+METHOD PASS 1 (claims) — for EVERY checkable claim (command, path, env/property
+key, flag, port, service name, version, behavior, success-check, xref):
   1. Quote it + line number.
   2. Find ground truth; actively try to BREAK the claim (do not just confirm).
   3. Classify: CORRECT | WRONG (give truth) | OUTDATED | MISSING | BURIED | DEADLINK.
+
+METHOD PASS 2 (sequences) — pass 1 is STATELESS and will miss ordering bugs. For
+EVERY numbered/ordered procedure in the file, walk it as a state machine:
+  1. Track what exists after each step (rows, files, config, containers,
+     identities, credentials).
+  2. At each step ask: is this instruction valid IN THAT STATE? A step whose
+     every token is real can still be false in position.
+  3. Walk each branch separately (adapter, OS, profile, local-vs-remote) — a
+     step can be right on one leg and wrong on another, and one sentence
+     covering both hides it.
+  4. Check the terminal state for a MISSING step, especially a security one the
+     procedure never returns to.
+  5. Flag any step that is correct but HAZARDOUS in the state the reader is
+     actually in when they reach it.
 
 DELIVERABLE (final message, no preamble):
   1. Findings list: line ref | claim | classification | truth/fix. Prioritise
      WRONG / OUTDATED / MISSING — those break a real install or use.
   2. Counts per classification.
-  3. For SETUP_GUIDE only — the happy-path test: can a non-expert follow the file
+  3. Sequence-walk result: for each ordered procedure, the state after each step
+     and every step that is wrong, missing, or hazardous in that state. Say
+     which variant each finding applies to.
+  4. For SETUP_GUIDE only — the happy-path test: can a non-expert follow the file
      start-to-finish for the DEFAULT path (SimpleX-only + local LLM) without
      hitting a wrong/missing step? List every place the happy path breaks.
-  4. Verdict for THIS file: REWRITE | FACELIFT | KEEP, with justification and an
+  5. Verdict for THIS file: REWRITE | FACELIFT | KEEP, with justification and an
      estimate of the salvageable fraction.
 Be concrete and terse; quote line numbers.
 ```
