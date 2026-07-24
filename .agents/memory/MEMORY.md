@@ -31,6 +31,7 @@ and this store is the shared one both worlds read.
 - [Ask, don't assume (ambiguous or irreversible)](ask-dont-assume-ambiguous-or-irreversible.md) — a stop/kill word arriving while background work runs is ITSELF the stop sign; ask, however obvious the reading feels.
 - [Persist reached decisions](persist-reached-decisions.md) — a decision reached in a session is a deliverable; commit it or write it here before the session ends.
 - [Verify subagent quotes before pinning them](verify-subagent-quotes-before-pinning.md) — survey-agent "exact quotes" can be invented paraphrases; Read the line yourself before an acceptance item asserts it.
+- [Audit claims vs sequences](audit-claims-vs-sequences.md) — claim-by-claim doc checks are STATELESS and miss ordering bugs; walk every numbered path as a state machine, per variant. Cost: a wrong README step 2 survived a full pre-release audit.
 - [Doc-only edits skip verify](doc-only-edits-skip-verify.md) — run `mvn verify` only when a script/db/code/config file is in the diff.
 - [Release state: read the truth doc, rank your sources](release-state-source-ranking.md) — live DB/config/git > committed docs > scratch handoffs > memory; always read the date.
 
