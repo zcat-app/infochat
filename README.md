@@ -22,7 +22,7 @@ infochat collapses that into one private conversation. It pulls from all your
 sources, evaluates and tags each post, and lets you ask for exactly what you
 want — *"what's new on privacy tech today?"*, *"summarize the top posts"*,
 *"tell me more about that third item"* — in plain language, in a chat you
-already trust. It runs entirely on infrastructure you control.
+already trust.
 
 ## Project status
 
@@ -31,6 +31,88 @@ architecture, security model, and feature set are implemented and tested, but
 the project has not yet been hardened by real-world production use at scale.
 Self-host it for testing and personal use; review the [security
 model](docs/spec/security.md) before exposing it to untrusted users.
+
+---
+
+## Try it end to end (about 30 minutes)
+
+Three commands, then a few chat messages. Most of that half hour is the
+computer downloading and building while you wait — no Maven, no Java, no
+programming.
+
+**1 · Get it and run the wizard.** Press **Enter** through the prompts:
+
+```bash
+git clone https://github.com/zcat-app/infochat.git
+cd infochat
+./prod/setup.sh
+```
+
+It checks your machine, generates secrets, downloads a local AI model, wires up
+your messaging app, and starts both services. On SimpleX it asks you to pick a
+secret **claim-token** — keep it, you need it in step 2. You need **Docker** on
+that machine, and the **SimpleX** (or Signal) app on your own phone — that's
+what you talk to the bot with.
+
+**2 · Say hello — you're the admin.** Connect to the bot from your own SimpleX
+(or Signal) app. You need no invite code — but on **SimpleX your first message
+must be the secret claim-token you chose during setup**; that message is what
+makes you admin, and anything else (including `/help`) just gets the "you need
+an invite" reply. On Signal you are admin from the first start, so just message
+the bot. Then send `/help` and it answers. You're in.
+
+> Steps 1–2 in full — prerequisites, what each wizard question means, claiming
+> admin on each app, and unsetting the claim-token afterwards — are in the
+> **[Setup Guide](SETUP_GUIDE.md)**. It is the authoritative version; where it
+> and this summary ever disagree, believe it.
+
+**3 · Invite a friend.** DM the bot for a one-time code (it asks you to confirm,
+since an open code can be claimed by anyone on that app):
+
+```text
+You:  /invite create --adapter simplex --open
+Bot:  (confirm prompt — resend the command with "confirm" on the end)
+You:  /invite create --adapter simplex --open confirm
+Bot:  Invite code: `7f3c8e9a-…` (single use).
+```
+
+(Want the code locked to one person instead of open to whoever claims it first?
+That takes an extra step, because their contact id doesn't exist until they've
+connected — see the [Admin Guide](ADMIN_GUIDE.md).)
+
+**4 · Your friend joins.** Send them that code, plus the bot's own contact
+(`/invite bot-contact` prints it — a SimpleX link or the bot's Signal number).
+They connect to the bot and send **the code on its own** as their first message:
+
+```text
+Friend:  7f3c8e9a-…
+Bot:     Welcome! You're registered. I aggregate news and social posts.
+         Your account is in the probation period for the next ~24h…
+```
+
+**4b · (optional) Skip their probation.** Trust them already? As the admin,
+`/vouch` them and free-form chat unlocks immediately — no ~24h wait:
+
+```text
+You:  /vouch <your friend's id>
+Bot:  User vouched. Probation cleared.
+```
+
+**5 · Read the news.** Right away they can pull a digest; ask in plain language
+once the short probation lifts (or instantly if you `/vouch` them):
+
+```text
+Friend:  /summary -w 24h
+Friend:  what's new on privacy tech today?     ← chat mode, after probation
+```
+
+That's the whole happy path: **one wizard, one invite, one code.** For
+moderating, groups, adding sources, or moving the AI to the cloud, see
+[Documentation](#documentation) below.
+
+> **Working on the code instead?** Skip the wizard and build from source —
+> **[DEVELOPER.md](DEVELOPER.md)** runs both services in Quarkus dev mode against
+> a local PostgreSQL + Ollama.
 
 ---
 
@@ -147,86 +229,6 @@ Found a security problem? Please report it privately — see
 [SECURITY.md](SECURITY.md). Don't open a public issue for vulnerabilities.
 
 ---
-
-## Quick setup
-
-The whole thing is **one script and a few chat messages**. End to end on a
-laptop is about 30 minutes — most of it the computer downloading and building
-while you wait. No Maven, no Java, no programming.
-
-**1 · Get it and run the wizard.** Press **Enter** through the prompts:
-
-```bash
-git clone https://github.com/zcat-app/infochat.git
-cd infochat
-./prod/setup.sh
-```
-
-It checks your machine, generates secrets, downloads a local AI model, wires up
-your messaging app, and starts both services. On SimpleX it asks you to pick a
-secret **claim-token** — keep it, you need it in step 2. You need **Docker** on
-that machine, and the **SimpleX** (or Signal) app on your own phone — that's
-what you talk to the bot with.
-
-**2 · Say hello — you're the admin.** Connect to the bot from your own SimpleX
-(or Signal) app. You need no invite code — but on **SimpleX your first message
-must be the secret claim-token you chose during setup**; that message is what
-makes you admin, and anything else (including `/help`) just gets the "you need
-an invite" reply. On Signal you are admin from the first start, so just message
-the bot. Then send `/help` and it answers. You're in.
-
-> Steps 1–2 in full — prerequisites, what each wizard question means, claiming
-> admin on each app, and unsetting the claim-token afterwards — are in the
-> **[Setup Guide](SETUP_GUIDE.md)**. It is the authoritative version; where it
-> and this summary ever disagree, believe it.
-
-**3 · Invite a friend.** DM the bot for a one-time code (it asks you to confirm,
-since an open code can be claimed by anyone on that app):
-
-```text
-You:  /invite create --adapter simplex --open
-Bot:  (confirm prompt — resend the command with "confirm" on the end)
-You:  /invite create --adapter simplex --open confirm
-Bot:  Invite code: `7f3c8e9a-…` (single use).
-```
-
-(Want the code locked to one person instead of open to whoever claims it first?
-That takes an extra step, because their contact id doesn't exist until they've
-connected — see the [Admin Guide](ADMIN_GUIDE.md).)
-
-**4 · Your friend joins.** Send them that code, plus the bot's own contact
-(`/invite bot-contact` prints it — a SimpleX link or the bot's Signal number).
-They connect to the bot and send **the code on its own** as their first message:
-
-```text
-Friend:  7f3c8e9a-…
-Bot:     Welcome! You're registered. I aggregate news and social posts.
-         Your account is in the probation period for the next ~24h…
-```
-
-**4b · (optional) Skip their probation.** Trust them already? As the admin,
-`/vouch` them and free-form chat unlocks immediately — no ~24h wait:
-
-```text
-You:  /vouch <your friend's id>
-Bot:  User vouched. Probation cleared.
-```
-
-**5 · Read the news.** Right away they can pull a digest; ask in plain language
-once the short probation lifts (or instantly if you `/vouch` them):
-
-```text
-Friend:  /summary -w 24h
-Friend:  what's new on privacy tech today?     ← chat mode, after probation
-```
-
-That's the whole happy path: **one script, one invite, one code.** For
-moderating, groups, adding sources, or moving the AI to the cloud, see the
-guides above.
-
-> **Working on the code instead?** Skip the wizard and build from source —
-> **[DEVELOPER.md](DEVELOPER.md)** runs both services in Quarkus dev mode against
-> a local PostgreSQL + Ollama.
 
 ## License
 
