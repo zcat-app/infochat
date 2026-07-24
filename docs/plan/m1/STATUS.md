@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 700 |
 | deferred | 0 |
 | abandoned | 19 |
-| **total** | **719** |
+| **total** | **720** |
 
 ---
 
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-685 — Chat model text can contradict the appended curated answer (complexity: medium, risk: low)
 
 ---
 
@@ -920,4 +920,5 @@ M1-677 (done)
 M1-678 (done)
 M1-679 (done)
 M1-684 (done)
+M1-685 (pending) ← runnable
 ```
