@@ -16,17 +16,14 @@ Always run the latest `main`.
 pull requests, or discussions.** Public disclosure before a fix puts every
 self-hosted deployment at risk.
 
-Instead, report privately through GitHub's **private vulnerability reporting**:
+Instead, report privately through **either** channel:
 
-1. Go to the repository's **Security** tab.
-2. Click **Report a vulnerability** (under "Advisories").
-3. Fill in the form with the details below.
+- **GitHub private vulnerability reporting** — go to the repository's
+  **Security** tab, click **Report a vulnerability** (under "Advisories"), and
+  fill in the form with the details below.
+- **Email** — **zcat-app@tuta.io**.
 
-<!--
-  Maintainers: enable this at Settings -> Code security and analysis ->
-  Private vulnerability reporting. To additionally offer an email channel,
-  add a contact address here (optionally with a PGP key).
--->
+Use email if the Security tab shows no "Report a vulnerability" button.
 
 Please include, as far as you can:
 

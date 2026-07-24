@@ -17,9 +17,10 @@
 infochat is a **self-hosted news and social-media aggregator chatbot**. It
 fetches the feeds you care about (RSS, Bluesky, Nostr, Reddit, YouTube, Odysee,
 Nitter), runs every post through an LLM evaluation pipeline (security check,
-tagging, entity extraction, embedding), and serves it back to you on demand —
-summaries, filtered lists, follow-up questions — inside a private messaging app
-(SimpleX or Signal). You run it on your own hardware; your data stays there.
+tagging, entity extraction, classification, embedding), and serves it back to you
+on demand — summaries, filtered lists, follow-up questions — inside a private
+messaging app (SimpleX or Signal). You run it on your own hardware; your data
+stays there.
 
 It is built as **two cooperating services** that share a single PostgreSQL
 database and never talk to each other directly over the network.
@@ -37,7 +38,7 @@ flowchart LR
     db[("PostgreSQL<br/>+ pgvector")]
     provider["<b>Provider</b><br/>(user-facing)"]
     apps["Messaging apps<br/>(SimpleX, Signal)"]
-    llm["LLM / embeddings<br/>(Ollama, OpenAI, Anthropic)"]
+    llm["LLM / embeddings<br/>(Ollama, llama.cpp,<br/>OpenAI, DeepSeek, Anthropic)"]
 
     ext -->|fetch| collector
     collector -->|writes posts| db
@@ -116,9 +117,9 @@ flowchart TD
 |---|---|---|
 | **infochat-core** | • Shared DTOs, Panache entities, repositories<br>• Flyway database migrations (the schema lives here)<br>• Audit logging, redaction/`SafeLog`, throttled admin notifier<br>• Shared utilities and profile config | both services |
 | **infochat-ssrf** | • The single SSRF-gated outbound HTTP/WS client<br>• IP-range blocklist, DNS-rebind defense, redirect cap, scheme allowlist, body-size caps<br>• Every outbound fetch in the system goes through it | Collector (feed/stream fetch), Provider (`/add-source` URL probe) |
-| **infochat-llm-adapter** | • `LlmProvider` / `EmbeddingProvider` SPI<br>• Task-based router (per-`ModelTask` model + config)<br>• OpenAI-compatible and Anthropic implementations + startup guards | both services |
+| **infochat-llm-adapter** | • `LlmProvider` / `EmbeddingProvider` SPI<br>• Task-based router (per-`ModelTask` model + config)<br>• OpenAI-compatible, DeepSeek, and Anthropic implementations + startup guards | both services |
 | **infochat-messaging-adapter** | • `MessagingAdapter` SPI (wire-anchored identity, capability flags)<br>• `TranslationProvider`, `ProgressNotifier` SPIs<br>• Concrete adapters: SimpleX, Signal, and an in-memory test adapter | **Provider only** |
-| **infochat-collector** | • Schedulers and fetchers (RSS, Bluesky, Reddit, Nitter, YouTube, Odysee, Nostr)<br>• The eval pipeline (Stage 1, Stage 2, tagger, entities, embeddings)<br>• Outbox rehydrator, linking job, asset price fetch, `NOTIFY` emitters | runnable service |
+| **infochat-collector** | • Schedulers and fetchers (RSS, Bluesky, Reddit, Nitter, YouTube, Odysee, Nostr)<br>• The eval pipeline (Stage 1, Stage 2, tagger, entities, classifier, embeddings)<br>• Outbox rehydrator, linking job, asset price fetch, `NOTIFY` emitters | runnable service |
 | **infochat-provider** | • Messaging-adapter registry and inbound dispatch<br>• Command router, chat agent, summarizer, group digests<br>• User/group management, ban & admin guards<br>• `NOTIFY` listeners + high-water-mark reconcilers | runnable service |
 
 The Collector deliberately does **not** depend on `infochat-messaging-adapter`:
@@ -146,8 +147,10 @@ flowchart TD
     s1 --> tag["Tagger"]
     s2 --> tag
     tag --> ent["Entity extraction"]
+    tag --> cls["Classification"]
     tag --> emb["Embedding"]
     ent --> ready["mark READY"]
+    cls --> ready
     emb --> ready
     ready --> notify["NOTIFY new_post"]
 ```
@@ -156,8 +159,9 @@ flowchart TD
   anything left in `RAW` after a crash — no work is lost.
 - **Stage 1 is deterministic and always runs; Stage 2 (LLM) runs only on a
   Stage 1 hit.** The LLM is downstream of the security decision, never the gate.
-- **Entity extraction and embedding run in parallel** after tagging; `READY`
-  promotion waits for both.
+- **Entity extraction, classification, and embedding run in parallel** after
+  tagging — none gates the others; `READY` promotion is the single point that
+  waits for all three.
 
 → [docs/spec/architecture.md](docs/spec/architecture.md) §Pipelines ·
 [docs/spec/security.md](docs/spec/security.md) §Ingest pipeline ·

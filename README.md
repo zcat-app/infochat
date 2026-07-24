@@ -49,8 +49,9 @@ model](docs/spec/security.md) before exposing it to untrusted users.
 | **Nitter** | X / Twitter timelines via a Nitter instance |
 
 Every post runs through an LLM evaluation pipeline — a security/safety check,
-topic **tagging**, **entity extraction**, and vector **embedding** — before it
-is stored, so retrieval is fast, filterable, and reproducible.
+topic **tagging**, **entity extraction**, **classification** (a fixed label set),
+and vector **embedding** — before it is stored, so retrieval is fast,
+filterable, and reproducible.
 
 ### Asset commands
 
@@ -116,8 +117,8 @@ The full architecture, data model, and design rationale are in
 
 **Stack:** Quarkus 3.33 LTS · Java 25 · PostgreSQL + `pgvector` ·
 quarkus-langchain4j. The LLM is pluggable: a local model via **Ollama** (the
-default) or **llama.cpp**, or a remote **OpenAI-compatible** or **Anthropic** API
-endpoint.
+default) or **llama.cpp**, or a remote API in one of three dialects —
+**OpenAI-compatible**, **DeepSeek**, or **Anthropic**.
 
 ## Security & privacy posture
 
@@ -182,12 +183,16 @@ You:  /invite create --adapter simplex --open confirm
 Bot:  Invite code: `7f3c8e9a-…` (single use).
 ```
 
-(If you already know the person's id — e.g. a Signal number — you can target
-them directly instead: `/invite create --adapter signal --contact +15551234567`,
-no confirm needed.)
+(To bind a code to one specific person instead, you need their contact id — which
+only exists once they have connected to the bot. Let them connect, then read the
+id off `/invite pending-contacts` and use
+`/invite create --adapter signal --contact <id>`, no confirm needed. Note that a
+Signal contact id is an **ACI** — a UUID like
+`8f3c1a2b-4d5e-4f60-9a7b-1c2d3e4f5a6b` — not a phone number.)
 
-**4 · Your friend joins.** Send them that code. They connect to the bot and send
-**the code on its own** as their first message:
+**4 · Your friend joins.** Send them that code, plus the bot's own contact
+(`/invite bot-contact` prints it — a SimpleX link or the bot's Signal number).
+They connect to the bot and send **the code on its own** as their first message:
 
 ```text
 Friend:  7f3c8e9a-…

@@ -75,10 +75,24 @@ A few things hold for both:
   actions are tied to the messaging app they arrive on — e.g. to ban someone who
   uses Signal, run `/ban` from your Signal account. (Inviting is the one
   exception — see [`/invite`](#inviting--registering-users).)
+- **Know what a `<contact>` is.** Every command below that takes a `<contact>`
+  wants that app's **contact id**, exactly as the bot sees it on the wire —
+  **not** a display name, and on Signal **not** a phone number:
+
+  | App | A `<contact>` looks like | Where to get it |
+  |---|---|---|
+  | **SimpleX** | the **queue address** — a ~32-character URL-safe-base64 string; the address *is* the identity, there is no username layer | `/invite pending-contacts` |
+  | **Signal** | an **ACI** — the UUID Signal binds to its identity keys, e.g. `8f3c1a2b-4d5e-4f60-9a7b-1c2d3e4f5a6b`. The phone number and username are discovery identifiers only and can change without the ACI changing | `/invite pending-contacts` |
+
+  A person's contact id **does not exist until they have connected to the bot**,
+  which is why `/invite pending-contacts` (and `/pending`, for people already
+  registered) is how you read one. Passing the wrong form — a phone number for a
+  Signal user, say — is not rejected: it is stored as written and then simply
+  never matches that person, so the invite or ban silently does nothing.
 - **Some actions ask you to confirm** before they take effect (the riskier
   ones). Confirmation is a two-step **keyword resend**, not a yes/no prompt: the
   bot replies asking you to repeat the command with `confirm` on the end (e.g.
-  `/ban +15551234567 confirm`). Sending anything else cancels the pending action.
+  `/ban 8f3c1a2b-… confirm`). Sending anything else cancels the pending action.
 - **Everything is logged.** Every admin action is recorded in an audit trail
   *before* it happens, so there's always a record of who did what.
 
@@ -96,24 +110,53 @@ the deployment private.
 
 | Command | What it does |
 |---|---|
-| `/invite create --adapter <app> --contact <id>` | Make a one-time invite code for **one specific person**. Send them the code; their first message registers them. |
-| `/invite create --adapter <app> --open` | Make a one-time code that the **first person to use it** claims (anyone on that app). Broader, so it asks you to confirm. |
+| `/invite create --adapter <app> --open` | Make a one-time code that the **first person to use it** claims (anyone on that app). **This is the normal way to invite someone new** — see below. Broader blast radius, so it asks you to confirm. |
+| `/invite create --adapter <app> --contact <id>` | Make a one-time code bound to **one specific contact id**. Tighter, but only usable once that person has connected (that's when their id comes into existence). |
+| `/invite create --adapter <app>` | The bare form. Same as `--open`, confirm gate included. |
+| `/invite bot-contact [--adapter <app>]` | Print **the bot's own contact** so you can send it to someone: SimpleX answers its live connect link, Signal its registered number. Shown once, never logged or stored. |
+| `/invite pending-contacts [--page N]` | List people who have **connected to the bot but aren't registered** — most recent first, with each one's full contact id. This is where a `--contact` id comes from. |
 | `/invite list [--page N]` | See all unused invite codes, who they're for, and when they expire. |
 | `/invite revoke <code>` | Cancel an unused code. Asks to confirm. |
 | `/vouch <contact>` | Instantly graduate a user out of the new-user "probation" period (see below). |
 
-**Example — invite one person on Signal:**
+**Two ways to invite, and when to use which.** A brand-new person has **no
+contact id yet** — it comes into existence when they connect to the bot. So the
+open code is the path that works from a standing start:
 
 ```text
-/invite create --adapter signal --contact +15551234567
+/invite create --adapter simplex --open
+/invite create --adapter simplex --open confirm
 ```
 
-The bot replies with a code (shown only once). Give it to that person; they send
-the code **on its own** as their first DM to the bot, and that registers them.
+Give them that code **and** the bot's own contact, which `/invite bot-contact`
+prints for you — they need it to reach the bot in the first place:
+
+```text
+/invite bot-contact
+```
+
+(On SimpleX the wizard also prints this link during setup, but only once and it
+is never saved to disk — `/invite bot-contact` is how you get it back without
+shell access to the server.)
+
+If you specifically want a code that only **one** identity can redeem, do it in
+two steps: let them connect and message the bot first (they'll be turned away for
+having no code), then read their id off `/invite pending-contacts` and bind a
+code to it:
+
+```text
+/invite pending-contacts
+/invite create --adapter signal --contact 8f3c1a2b-4d5e-4f60-9a7b-1c2d3e4f5a6b
+```
+
+Either way the bot replies with a code shown **only once**. They send that code
+**on its own** as their first DM, and that registers them.
 
 > **Inviting works across apps.** Unlike other admin commands, `/invite create`
 > takes an explicit `--adapter` so a SimpleX admin can invite a Signal user. The
 > code only opens the door for that one identity — it grants no special powers.
+> `/invite bot-contact` takes `--adapter` the same way; the rest of the `/invite`
+> subcommands act on the app you run them from.
 
 ### The new-user probation period
 
@@ -236,10 +279,18 @@ A few guarantees worth understanding — they're why the bot is safe to run:
 
 ### Onboarding a new user
 
-1. `/invite create --adapter <app> --contact <their id>`.
-2. Send them the code; they DM it to the bot and get registered.
-3. They're now in **probation** with limited commands. When you trust them,
-   `/vouch <their id>` to give full access (or just let probation expire).
+1. `/invite bot-contact` — get the bot's connect link / number.
+2. `/invite create --adapter <app> --open`, then resend with `confirm`.
+3. Send them **both**: the bot's contact so they can reach it, and the code.
+4. They connect and DM the code on its own; that registers them.
+5. They're now in **probation** with limited commands. When you trust them,
+   `/vouch <their id>` to give full access (or just let probation expire) — take
+   `<their id>` from `/pending`, not from their display name.
+
+> Want the code locked to one person instead of open to the first claimant? Swap
+> steps 2–4: send them the bot contact first, let them connect and get turned
+> away, then `/invite pending-contacts` → `/invite create --adapter <app>
+> --contact <the id it shows>`. Their id doesn't exist before they connect.
 
 ### Turning the bot on in a group
 
@@ -325,13 +376,15 @@ classifier read from them:
 - **Bot-admin only:** `/grant-admin`, `/revoke-admin`, `/ban`, `/unban`,
   `/promote`, `/demote`, `/vouch`, `/pending`, `/invite create`,
   `/invite list`,
-  `/invite revoke`, `/quarantine list`, `/quarantine approve`,
+  `/invite revoke`, `/invite bot-contact`, `/invite pending-contacts`,
+  `/quarantine list`, `/quarantine approve`,
   `/quarantine reject`, `/audit`, `/remove-source`, `/source-enable`,
   `/source-disable`, `/list-sources --all`, `/list-sources --include-deleted`,
-  `/approve-group`, `/reject-group`, `/list-groups`.
+  `/approve-group`, `/reject-group`, `/list-groups`, `/recover-pool`.
 - **Group-admin (or bot admin acting in the group):** `/add-source` in groups,
-  `/unfollow-source` in groups, `/lang` in groups, `/group-timezone`,
-  `/digest`, `/follow-tag` in groups, `/unfollow-tag` in groups.
+  `/unfollow-source` in groups, `/follow-all-sources` in groups, `/lang` in
+  groups, `/group-timezone`, `/digest`, `/follow-tag` in groups,
+  `/unfollow-tag` in groups.
 
 ### Group digests
 

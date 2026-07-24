@@ -96,8 +96,17 @@ bullet per behavior. For `/now`:
 - `/now` is allowed during slow-start probation (it's a harmless read).
 - `/help` lists `/now`.
 
-Also set `files_budget` (max files the change may touch) and `out_of_scope`. The
-ticket *is* the spec for the change — the review gate later checks the diff
+Then declare the change's scope. Two fields do that, and they are not equally
+binding:
+
+- **`files_scope`** — an optional list of paths/globs. When you set it, it is a
+  **hard gate**: a diffed file outside the list fails review as scope drift. Set
+  it when you know which files the change belongs in.
+- **`files_budget`** — an optional numeric file-count hint. **Advisory** since
+  the 2026-07-19 cutover: going over is a note in the review, not a failure.
+- **`out_of_scope`** — paths the change must not touch. Also a hard gate.
+
+The ticket *is* the spec for the change — the review gate later checks the diff
 against exactly these criteria. Commit the draft:
 
 ```bash
@@ -132,7 +141,8 @@ branch `start` created. This is the interactive part of the flow: you discuss th
 approach, watch the diff take shape, and **steer it** — ask for changes, point
 out a missed case, course-correct — before the formal review gate runs. This is
 where the code is written — guided by the acceptance criteria and the engineering
-rules, touching **at most `files_budget` files** and nothing in `out_of_scope`.
+rules, staying inside `files_scope` (when set) and out of `out_of_scope`, and
+keeping an eye on the advisory `files_budget`.
 For `/now` the implementation adds a new command handler in the provider, lets
 probation users run it, lists it in `/help`, localizes the reply, and adds a
 test. Staying inside the declared scope is what keeps the next step (the review)

@@ -611,6 +611,12 @@ The post-setup **helper** scripts are documented in the main sections above:
   rebuild the app images, restart Collector then Provider, all data and config
   preserved (see [After setup](#after-setup) and `docs/design/07-deployment.md`
   §7.11).
+- `prod/scripts/pack.sh` / `prod/scripts/restore.sh [--source-stopped] <bundle>`
+  — clone the whole deployment onto another machine, identity included (see
+  [Migrating to another device](#migrating-to-another-device)).
+- `prod/scripts/shred-bundle.sh [-y] <target>` — securely dispose of a `pack.sh`
+  bundle once the clone is verified (see
+  [Migrating to another device](#migrating-to-another-device)).
 
 ### What gets written where
 
@@ -749,13 +755,30 @@ are exactly what make the clone the *same* bot.
    after the Collector and print the one command to start the Provider once the
    old machine is off. When it finishes it prints the checks to run in chat.
 
+4. **Once the clone is verified healthy, destroy the bundle** — on both machines,
+   and any copy you made in transit:
+   ```bash
+   ./prod/scripts/shred-bundle.sh infochat-migration-YYYYMMDD.tgz
+   ./prod/scripts/shred-bundle.sh -y <path>   # unattended (skips the prompt)
+   ```
+   It overwrites each file (`shred -uz`) before removing it, rather than leaving
+   the contents in freed blocks the way a plain `rm` does. **Do this only after
+   you have confirmed the clone works** — until then the bundle is your only
+   disaster-recovery fallback, which is why nothing destroys it automatically.
+
+   Best-effort by nature: on a copy-on-write or journaling filesystem (btrfs,
+   zfs, ext4 with journaling) or an SSD with wear-levelling, overwriting cannot
+   guarantee the old blocks are gone. Full-disk encryption on the machines that
+   held the bundle is what actually bounds this.
+
 **One rule you must not break: only one copy may be live at a time.** The two
 machines each have their own database, so nothing *automatically* stops both from
 running — but two bots on the same Signal/SimpleX identity **corrupt** it. So stop
 the old bot (`./prod/scripts/apps.sh stop`) before the clone connects — restore.sh
 holds the Provider back until you confirm that (the prompt, or `--source-stopped`) —
 and decommission the old machine only **after** you've confirmed the clone is healthy.
-The safe order is: stop old → pack → copy → restore + verify → retire old.
+The safe order is: stop old → pack → copy → restore + verify → retire old →
+shred the bundle.
 
 Why the same absolute path? v1 rebuilds the identity folders at their original
 locations, so the new checkout must live at the same path; restore refuses rather
