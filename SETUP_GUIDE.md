@@ -347,18 +347,24 @@ Prefer **SimpleX** if you value privacy and don't want to use a phone number.
 
 Trying infochat on your own Linux laptop, using the free local AI and SimpleX:
 
+These are the prompts as the wizard actually prints them, in order — everything
+else it does needs no input:
+
 ```text
-Hardware profile [laptop]:            ⏎  (just press Enter)
-LLM backend [ollama]:                 ⏎  (Enter — downloads a local model)
-Custom bootstrap-sources path [blank]: ⏎  (Enter — use the bundled sources)
-Enable crypto asset commands (zcash, monero)? [Yes/no]: ⏎  (Enter — Yes, the default)
-Custom bootstrap-assets path [blank]:  ⏎  (Enter — bundled zcash+monero)
-Enable which adapters [simplex]:      ⏎  (Enter — SimpleX)
-simplex-chat binary path [...]:       ⏎  (Enter — the image bakes it)
-SimpleX data-dir [prod/runtime/simplex]: ⏎
-SimpleX WebSocket port [5225]:        ⏎
-SimpleX bot display name [infochat-bot]: ⏎  (or type a name for the bot)
-Bootstrap admin claim-token for simplex: <type a secret token — keep it safe>
+Hardware profile [laptop]:                                          ⏎  (just press Enter)
+LLM backend (ollama|llamacpp|remote) [ollama]:                      ⏎  (Enter — downloads a local model)
+Path to a custom bootstrap-sources.json (blank = bundled default):  ⏎  (Enter — use the bundled sources)
+Enable crypto asset commands (zcash, monero)? [Yes/no]:             ⏎  (Enter — Yes, the default)
+Path to a custom bootstrap-assets.json (blank = bundled zcash+monero defaults):
+                                                                    ⏎  (Enter — bundled zcash+monero)
+Adapters to enable — comma-separated for multiple (options: simplex, signal) [simplex]:
+                                                                    ⏎  (Enter — SimpleX)
+  simplex-chat binary path [/usr/local/bin/simplex-chat]:           ⏎  (Enter — the image bakes it)
+  SimpleX data-dir (bot state directory) [.../prod/runtime/simplex]: ⏎
+  simplex-chat WebSocket port (loopback) [5225]:                    ⏎
+  SimpleX bot display name (the bot's profile name) [infochat-bot]: ⏎  (or type a name for the bot)
+Bootstrap admin claim-token for simplex (required — the only enabled adapter, ...):
+                                                <type a secret token — keep it safe>
 ```
 
 (The token is hidden as you type. After the bot is up, DM it this exact token
