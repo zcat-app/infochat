@@ -164,14 +164,29 @@ all of them):
 
 It checks your machine, generates database secrets, downloads a local AI model,
 wires up your messaging app, and starts both services. When it finishes it
-prints exactly how to reach your bot. (The only prerequisite is Docker — on the
-SimpleX happy path the wizard sets up the bot's account for you, so there's no
-manual identity step before it; Signal needs a phone number you register first.
-Details in the **[Setup Guide](SETUP_GUIDE.md)**.)
+prints exactly how to reach your bot. On SimpleX it also asks you to pick a
+secret **claim-token** — keep it somewhere safe, you need it in step 2. (The
+only prerequisite is Docker — on the SimpleX happy path the wizard sets up the
+bot's account for you, so there's no manual identity step before it; Signal
+needs a phone number you register first. Details in the
+**[Setup Guide](SETUP_GUIDE.md)**.)
 
-**2 · Say hello — you're the admin.** Connect to the bot from your personal
-SimpleX (or Signal) app. **You don't need an invite code** — you're the
-bootstrap admin. Send `/help` and it answers. You're in.
+**2 · Say hello — you're the admin.** You need no invite code either way, but
+the two apps prove identity differently, so claiming admin differs:
+
+- **SimpleX** — connect to the bot at the contact link the wizard printed, then
+  send **the claim-token on its own as your very first message**. That message
+  is what makes you admin; the bot replies with an admin welcome. Any other
+  first message — including `/help` — gets the "you need an invite" reply
+  instead, because until the token is presented you are just an unknown
+  contact. Afterwards **unset the token** so a leaked copy can never re-claim
+  admin later: blank `INFOCHAT_SIMPLEX_ADMIN_TOKEN` in
+  `prod/runtime/secrets.env`, then `./prod/scripts/apps.sh restart`.
+- **Signal** — just message the bot's number from your own Signal app. The
+  wizard already has your contact id, so you are admin from the first start and
+  there is nothing to claim.
+
+Now send `/help` and it answers. You're in.
 
 **3 · Invite a friend.** DM the bot for a one-time code (it asks you to confirm,
 since an open code can be claimed by anyone on that app):

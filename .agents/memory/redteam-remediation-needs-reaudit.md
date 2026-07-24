@@ -33,5 +33,13 @@ the must-shrink mandate (user-accepted redteam remediation) cited **in the round
 message**, since the reviewer verifies that citation against git rather than trusting the
 prompt. Persist every audit separately (`docs/plan/m1/redteam/<id>-<date>[-rN].md`).
 
+**This rule is written down NOWHERE in the repo** (verified 2026-07-24: no re-audit
+guidance in `.claude/skills/redteam/SKILL.md`, `docs/process/workflow.md`, or
+`redteam-prompt.md` — the only adjacent hook is the verdict file's free-form
+`disposition:` field). So it does not survive into any session that lacks this memory,
+and it was deliberately NOT added to CONTRIBUTING.md during the 2026-07-24 doc pass:
+minting process in a contributor guide is the wrong place. Worth a real ticket against
+the redteam skill.
+
 Related: [[redteam-diffrange-refine-uncommitted-gap]] (all three audits needed the
 manual working-tree diff workaround), [[investigation-ticket-flow-too-heavy]].
