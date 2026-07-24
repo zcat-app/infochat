@@ -33,7 +33,7 @@ because the claims it checks are not machine-gateable. That is the correct tool
 for non-machine-checkable prose — accept the post-hoc property rather than
 pretend a lint covers it.
 
-## Scope — the four root guides
+## Scope — the six root guides
 
 | File | Audience | Highest drift risk |
 |---|---|---|
@@ -41,9 +41,19 @@ pretend a lint covers it.
 | `SETUP_GUIDE.md` | Operator (clone → running bot) | **Behavior prose** — bundled binaries, env keys, wizard step order, backup defaults, captcha/registration flow |
 | `ADMIN_GUIDE.md` | Bot/group admin | Confirm mechanism, permission tiers, missing/renamed commands |
 | `USER_GUIDE.md` | End user | Command flags, confirm prompts, asset sub-verbs |
+| `OVERVIEW.md` | Architecture reader | Pipeline-stage and module enumerations that silently gain a stage; provider/adapter lists |
+| `CONTRIBUTING.md` | Contributor | Workflow mechanics that moved — gate names and ordering, frontmatter field semantics, which harnesses and skills exist |
 
 `SETUP_GUIDE.md` carries the most behavior risk and the most cost when wrong;
 weight effort there.
+
+`OVERVIEW.md` and `CONTRIBUTING.md` were added to this scope on 2026-07-24: the
+pre-release audit found drift that had survived the previous run precisely
+because those two files sat outside it (a stale ingest-stage list and a
+`files_budget`-vs-`files_scope` reversal). Their ground truth is not the guides'
+— `OVERVIEW.md` checks against the code and `docs/spec/`, `CONTRIBUTING.md`
+against the skills under `.claude/skills/` and `.agents/skills/`, the scripts
+under `scripts/`, and `docs/process/{workflow,harness-mapping,ticket-template}.md`.
 
 ## Method — one falsification agent per file, in parallel
 
@@ -64,6 +74,9 @@ the target file plus the ground-truth source list below.
 - `docs/spec/**` and `docs/design/**` (authoritative; the guides render these for
   operators — when guide and spec disagree, the spec wins and the guide is the bug)
 - Java under `infochat-*/src/main/java` (command handlers, behavior claims)
+- For `CONTRIBUTING.md` only: the skills under `.claude/skills/**` and
+  `.agents/skills/**` (which exist, their subcommands, the exact menu options),
+  `scripts/*`, and `docs/process/{workflow,harness-mapping,ticket-template}.md`
 
 ### Classification scheme
 
@@ -113,9 +126,10 @@ the right guide?).
 
 1. **Triage** by classification. WRONG/OUTDATED on `SETUP_GUIDE` are
    install-breaking → fix first. MISSING next. BURIED is a de-verbosify pass.
-2. **One scoped fix-ticket**, not a rewrite. The 2026-06-30 audit found all four
-   guides ~90 %+ accurate; the standing expectation is FACELIFT, not REWRITE.
-   A REWRITE verdict on any file is a signal to escalate, not to start typing.
+2. **One scoped fix-ticket**, not a rewrite. The 2026-06-30 audit found the four
+   guides in scope at the time ~90 %+ accurate; the standing expectation is
+   FACELIFT, not REWRITE. A REWRITE verdict on any file is a signal to escalate,
+   not to start typing.
 3. **Fix code, never docs, when the two disagree on behavior** — the guides must
    describe what IS. If the audit shows a doc is right and the code is wrong,
    that is a code bug, filed separately.

@@ -26,7 +26,7 @@ automated. Before changing anything, read:
 - **[CLAUDE.md](CLAUDE.md)** — the always-loaded summary of those rules plus the
   coding style.
 - **[AGENTS.md](AGENTS.md)** — the entry point for non-Claude coding agents
-  (opencode, Codex CLI, others); routes to the same canonical sources.
+  (opencode, Codex CLI, Kimi Code, others); routes to the same canonical sources.
 
 ## Conventions that bind every change
 
@@ -45,14 +45,29 @@ These hold whatever editor you use:
 > repo** — a coding-agent skill that drives the lifecycle above and runs the
 > code-review and red-team gate agents that are the whole point of the flow
 > (the next section walks through it). It runs natively under Claude Code with
-> the repo's bundled skills; under opencode and Codex CLI via the
+> the repo's bundled skills; under opencode, Codex CLI, and Kimi Code via the
 > `.agents/skills/` wrappers plus
-> [docs/process/harness-mapping.md](docs/process/harness-mapping.md). If you
-> work with other tooling you can still follow the same conventions by hand
-> (branch → surgical change → `mvn verify` → commit with the right prefix),
-> but then the review and red-team gates are yours to reproduce —
-> self-review against the engineering rules and the threat model rather than
-> getting them for free.
+> [docs/process/harness-mapping.md](docs/process/harness-mapping.md), which maps
+> each abstract step onto the concrete mechanism per tool and records the
+> verified gotchas that silently break a gate. If you work with other tooling you
+> can still follow the same conventions by hand (branch → surgical change →
+> `mvn verify` → commit with the right prefix), but then the review and red-team
+> gates are yours to reproduce — self-review against the engineering rules and
+> the threat model rather than getting them for free.
+
+### The four skills
+
+| Skill | What it is |
+|---|---|
+| `/m1-tick` | The ticket lifecycle driver — every subcommand below. `/m1-tick run <id>` drives one ticket through the **whole** cycle unattended, stopping only at human-owned gates; the step-by-step walkthrough below is the same flow run one subcommand at a time. |
+| `/redteam` | The single-auditor adversarial security gate (Step 8). |
+| `/redteam-multi` | The **multi-auditor** form: fans the same rendered red-team prompt through several independent coding-agent CLIs (claude, opencode, codex, kimi) headlessly and cross-examines their verdicts, so one model's systematic blind spot can't pass unnoticed. Use it for high-stakes `security_relevant` tickets, milestone boundaries, and before tagging a release. |
+| `/deep-code-review` | Advisory senior-engineer review of a diff, module, path, or the whole architecture surface. Independent of the gates — it blocks nothing. |
+
+Each ships twice: `.claude/skills/<name>/` for Claude Code and
+`.agents/skills/<name>/` for the other harnesses. `/redteam-multi` is also
+runnable directly on any host as `scripts/redteam-multi.sh`, which is what the
+skill wrappers dispatch to.
 
 ## The flow step by step: adding a `/now` command
 
@@ -67,9 +82,11 @@ We'll add a trivial read-only command, `/now`, that replies with the current
 date and time, and take it all the way from idea to merged.
 
 > Everything below is run **inside your coding agent** — Claude Code natively,
-> opencode/Codex CLI via the wrappers (see
-> [docs/process/harness-mapping.md](docs/process/harness-mapping.md)) — where
-> `/m1-tick` and `/redteam` live. You'll need a working dev environment first — see
+> opencode / Codex CLI / Kimi Code via the wrappers (see
+> [docs/process/harness-mapping.md](docs/process/harness-mapping.md)) — where the
+> skills live. Prefer `/m1-tick run M1-900` to drive the whole cycle in one go
+> once the shape is familiar; the steps below unpack what it does.
+> You'll need a working dev environment first — see
 > [DEVELOPER.md](DEVELOPER.md). The illustrative ticket number `M1-900` is a
 > stand-in; use the next unused number (check `docs/plan/m1/tickets/` and
 > `docs/plan/m1/STATUS.md`).
@@ -205,6 +222,21 @@ second advantage the flow gives you over coding by hand. If it surfaces a
 finding, fix it on the same branch (or `/m1-tick escalate M1-900 redteam-finding`)
 before merging.
 
+**When one auditor isn't enough**, use the multi-auditor form instead:
+
+```
+/redteam-multi M1-900
+```
+
+It runs the same rendered prompt through every available coding-agent CLI
+(claude, opencode, codex, kimi) as separate headless processes, writes one
+verdict file per auditor, and cross-examines them — a finding only one auditor
+reports is either a real gap the others missed or that model's false positive,
+and the report surfaces it for falsification either way. Probe which auditors
+are actually available first with `scripts/redteam-multi.sh preflight` (costs no
+model tokens). Reach for it on high-stakes `security_relevant` work, at
+milestone boundaries, and before tagging a release.
+
 ### Step 9 — Merge
 
 ```
@@ -220,10 +252,11 @@ never pushes — pushing remains your call.
 /m1-tick escalate M1-900
 ```
 
-Prints a five-way menu — **refine** (the ticket was ambiguous), **override** (the
+Prints a six-way menu — **refine** (the ticket was ambiguous), **override** (the
 reviewer was too strict), **decompose** (split into several tickets), **defer**
 (block on new work the change surfaced), **spec-amend** (the spec itself is
-wrong). Pick the one that fits; the flow records the decision and adjusts state.
+wrong), **abandon** (decided against; nothing gets built). Pick the one that
+fits; the flow records the decision and adjusts state.
 
 > Curious where command code actually lives before you write a ticket? Read a
 > couple of existing handlers — `GetSourcesCommandHandler` and
