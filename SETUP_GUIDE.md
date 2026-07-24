@@ -31,11 +31,17 @@ downloading and building things while you wait).
 ## Quickstart (the default path)
 
 The most common setup — **SimpleX** (no phone number) + the free local **Ollama**
-AI, on one Linux machine — is essentially one command and two chat messages.
-Everything after this section is detail, options, and the Signal / remote-AI /
-advanced paths; read on only if you need them.
+AI, on one Linux machine — is: download it, run one command, send two chat
+messages. Everything after this section is detail, options, and the Signal /
+remote-AI / advanced paths; read on only if you need them.
 
-1. **Clone** infochat and open a terminal in its folder.
+1. **Get the code.** Open a terminal and clone it (needs `git`):
+   ```bash
+   git clone https://github.com/zcat-app/infochat.git
+   cd infochat
+   ```
+   No `git`? Open https://github.com/zcat-app/infochat, use the green **Code**
+   button → **Download ZIP**, unzip it, and `cd` into the unzipped folder.
 2. **Run the wizard**, pressing **Enter** at each prompt to take the defaults:
    ```bash
    ./prod/setup.sh
@@ -48,7 +54,8 @@ advanced paths; read on only if you need them.
    `secrets.env` + restart — see
    [Connecting to the bot](#connecting-to-the-bot-for-the-first-time)).
 
-The only prerequisite is **Docker**. That's the whole happy path.
+You need **Docker** on that machine, and the **SimpleX app** on your own phone or
+desktop — that's what you talk to the bot with. That's the whole happy path.
 
 ---
 
@@ -66,10 +73,10 @@ or a rented cloud server all work). You'll need:
 
 ### Software you must install first
 
-The wizard checks for these at the start and, in a single pass, lists every one
-that is missing or misconfigured — each with the command to fix it — so you can
-resolve them all at once rather than one re-run at a time. Install them before
-you begin:
+**On the machine that will run infochat.** The wizard checks for these at the
+start and, in a single pass, lists every one that is missing or misconfigured —
+each with the command to fix it — so you can resolve them all at once rather
+than one re-run at a time. Install them before you begin:
 
 | You need | What it is | How to check it's installed |
 |---|---|---|
@@ -80,6 +87,22 @@ you begin:
 > Most Linux systems already have everything except Docker. Installing **Docker
 > Desktop** (or Docker Engine + the Compose plugin) covers the first two rows.
 > See https://docs.docker.com/get-docker/
+
+`git` is not in that list because you need it *before* the wizard exists on your
+machine — it is how you download infochat in the first place. If you don't have
+it, use the Download-ZIP route in the [Quickstart](#quickstart-the-default-path)
+instead; nothing later needs `git`.
+
+**On your own phone or desktop.** infochat has no website and no app of its own —
+you talk to it inside a messenger, so you need that messenger yourself:
+
+- The **SimpleX** app (recommended — no phone number) *or* the **Signal** app,
+  on whatever device you'll actually read your news on. This is how you reach
+  the bot: you connect to it, claim admin, and run every command from here.
+
+The wizard cannot check this one for you — it runs on the server and has no way
+to see your phone. Install it before you finish setup, or you'll end up with a
+running bot you have no way to talk to.
 
 ### Setting up the bot's chat account
 
@@ -445,6 +468,28 @@ How you reach the bot depends on your app:
   `/c <bot-address>`; in the mobile/desktop app, tap "Connect" and paste the
   link. The bot auto-accepts and you're connected.
 
+  > **Lost the link?** It is printed once and deliberately never saved to disk.
+  > There are two ways back, and which one you need depends on whether you have
+  > connected yet:
+  >
+  > - **Already connected and admin** (you just need the link again, e.g. to
+  >   invite someone): ask the bot — `/invite bot-contact` replies with its
+  >   current address. No downtime, nothing to stop. This is the normal way.
+  > - **Never connected yet** (so you can't run commands): stop the apps, re-run
+  >   the provisioning step, start them again:
+  >
+  >   ```bash
+  >   ./prod/scripts/apps.sh stop
+  >   ./prod/scripts/6b-simplex-provision.sh
+  >   ./prod/scripts/apps.sh start
+  >   ```
+  >
+  >   Re-running it is safe — it rotates neither the profile nor the address, so
+  >   your bot keeps its identity and existing contacts. **Do stop the apps
+  >   first**, though: it drives a second `simplex-chat` against the same
+  >   identity files the running bot is using, and two writers on those files is
+  >   how you corrupt an identity that cannot be regenerated.
+
 You are the **bootstrap admin**, so you do **not** need an invite code — but how
 you claim admin differs by app:
 
@@ -545,6 +590,7 @@ memorize; the per-task config it writes is documented in
 | **You provided your own model file (llamacpp) and it's rejected** | The pinned default models are checksum-verified automatically. For a custom URL: if you entered a checksum the file must match it (re-check the URL and checksum), and a custom *embeddings* model must be 768-dimensional. |
 | **Step 8 says a service is "DEGRADED"** | Often harmless — usually one messaging adapter hasn't finished connecting yet. Give it a minute; if it stays down, check that the bot's messaging account (step 6 paths) is correct. |
 | **A service exits right away saying another instance is "already running"** | You started a second Collector or Provider against the same database. infochat allows only one of each — stop the extra copy. See [Run only one copy of each service](#run-only-one-copy-of-each-service). |
+| **You closed the terminal and lost the bot's SimpleX contact link** | It is printed once during step 7 and never saved. If you're already connected and admin, just ask the bot: `/invite bot-contact`. If you never connected, stop the apps first, then re-run `./prod/scripts/6b-simplex-provision.sh`, then start them — never run it against a live bot. Full detail in [Connecting to the bot](#connecting-to-the-bot-for-the-first-time). |
 
 ---
 
