@@ -388,24 +388,26 @@ close the same way, and the difference is the lesson:
   degraded group digest) are additionally passed through the closed-list
   `LlmOutputSanitizer` at **render**, where a title or tag whose
   canonical form is a privileged command renders as
-  `[redacted command]`. On `/summary` both the redaction point and its
-  **completeness** depend on the render form (`commands.md` §Content).
-  The default categorized form renders no headline and instead sanitizes
-  the whole per-cluster prose — degraded prose included — so on that form
-  every feed title that reaches the reader is redacted and audited.
-  `--full` sanitizes the cluster **headline** only: its `summary:` field
-  passes degraded prose through verbatim, and that prose carries
-  `title — url (uid)` for *every* post in the cluster, so a
-  command-shaped title still reaches the reader on that form. The
-  headline sanitize also only ever sees the cluster's first post, so a
-  multi-post cluster whose command-shaped post is not first produces no
-  `LLM_OUTPUT_SANITIZED` row at all. This closed-list residual is
-  distinct from the degraded digest's `](` adjacency residual, which
-  M1-691 closed at the outbound chokepoint (see §"Sanitizer output never
-  contains `](`" below); `/retry` inherits this closed-list residual too
-  because it always replays the flat form. On `--full` and `/retry`,
-  therefore, the surface is **open, not closed** — and it is owned by
-  M1-697, which narrows the sanitize unit on the flat render paths. This
+  `[redacted command]`. On `/summary` the redaction unit is ONE post's
+  title on every render form (`commands.md` §Content): degraded prose
+  (`title — url (uid)` per post) is derived from the cluster at render
+  and sanitized per title
+  (`SummaryProseGenerator.degradedProseFor`, M1-697), so the default
+  categorized form — which renders no headline — redacts every feed
+  title that reaches the reader, and the `--full` flat form redacts both
+  its headline and every title inside its `summary:` field. `/retry`
+  replays the flat form and inherits the same per-title redaction with
+  no handler change. A command-shaped title is redacted and audited no
+  matter where its post sits in the cluster — the detector no longer
+  depends on cluster position. The one residual is a privileged command
+  split ACROSS two posts' fields (see §"Flag position mirrors the
+  parser's own scan" below): neither redacted nor audited, accepted
+  because dispatch still requires `is_admin=true` and the multi-author
+  sanitize unit that would catch it is the content-suppression vector
+  M1-697 removed. This is distinct from the degraded digest's `](`
+  adjacency residual, which M1-691 closed at the outbound chokepoint
+  (see §"Sanitizer output never contains `](`" below). The surface is
+  therefore **closed** on all render forms. This
   instance sits at the **same attacker tier**
   as `/add-source` in a DM — both are open to any non-banned user
   (`commands.md` §Source management) — not a lower one; it escaped
@@ -513,27 +515,34 @@ evading the match — and the line bound also regressed the adjacent
 Whitespace is read the way the parser's `split("\s+")` reads it — every
 ASCII `\s` character is a token separator, so `/list-sources` and
 `--all` separated by a bare `\r` or by newlines match, mirroring the
-dispatch. **The span's justification depends on the caller's unit of input, and
-one caller now widens it.** The argument below — that a collapsed span
-only ever swallows bot-authored bytes — holds while every sanitize call
-over feed-derived text is scoped to a *single* author's field, which is
-how the pre-existing call sites are built (`ClusterBlockRenderer` passes
-one post title, `DegradedDigestRenderer` one title per post, the
-`/saved` reply one row's title and one row's tags). The categorized
-`/summary` form (M1-694) is the first caller to hand the sanitizer a
-*cluster's* assembled degraded prose, which concatenates `title — url
-(uid)` for every post in that cluster — several mutually untrusted
-publishers in one call. A command word in one post and a matching flag
-in another therefore collapse into a single `[redacted command]`,
-deleting any third post between them. This is **accepted residual**, not
-a closed control: the direction is over-redaction rather than
-under-redaction, the marker is visible to the reader, and every hit
-still emits the WARN and the per-occurrence audit row, so it degrades
-availability of one story rather than the injection guarantee. It is
-recorded here because the paragraph's own reasoning no longer covers it,
-and because the fix — scoping the sanitize call to one post, not one
-cluster — is the same fix the `/summary --full`, `/retry` and
-degraded-digest paths need, and is deliberately not attempted piecemeal.
+dispatch. **The span's justification holds because every caller's unit of input is
+one author's field** (M1-697, restoring the invariant M1-694 briefly
+widened). The argument below — that a collapsed span only ever swallows
+bot-authored bytes — requires every sanitize call over feed-derived text
+to be scoped to a *single* author's field, and every call site is built
+that way: `ClusterBlockRenderer` passes one post title,
+`DegradedDigestRenderer` one title per post, the `/saved` reply one
+row's title and one row's tags, and degraded prose is DERIVED from the
+cluster at render and sanitized per post title
+(`SummaryProseGenerator.degradedProseFor`) — the renderers never trust
+the prose bytes a `ClusterProse` record carries, so a hand-assembled
+record cannot smuggle unsanitized titles past them (M1-697 redteam,
+2026-07-25) — so no caller hands the sanitizer a multi-post
+concatenation. The whole-message
+span guarantee is therefore scoped **within one author's field**: a
+flag-bearing entry redacts only when its command word and flag appear in
+the same field. The converse residual is accepted and deliberate: a
+privileged command split ACROSS two posts' fields — `/list-sources` in
+one title, `--all` in another — is **neither redacted nor audited**,
+because the two tokens never share one sanitize input. That is the
+pre-M1-694 posture on the flat renders, and it is bounded by dispatch
+still requiring `is_admin=true`; the alternative — one sanitize call
+over assembled multi-author prose — is strictly worse, because the span
+then swallows *other publishers'* bytes and a co-clustered attacker can
+delete a third party's post (the content-suppression vector M1-694's
+redteam round 3 caught). The detector narrows only for that split case:
+within one field, per-occurrence `LLM_OUTPUT_SANITIZED` rows fire at
+least as often as before the narrowing.
 
 The cost of the whole-message bound is that a genuine mention
 of the command and a later, unrelated admin flag in the bot's own
@@ -585,12 +594,14 @@ closed-list command redaction is a SEPARATE control and does NOT move
 to the chokepoint — its unit is one author's free-text field, and
 running it over a URL would rewrite ordinary feed paths like `/audit`
 or `/pending` to `[redacted command]` — so it stays at each sanitize
-call site, and narrowing its unit on the `/summary --full` and `/retry`
-flat renders (where a command-shaped title still reaches the reader
-unredacted) is M1-697, not this ticket. The default categorized
-`/summary` form sanitizes the **assembled** degraded prose rather than
-the headline alone, so for that path the closed-list guarantee covers
-the whole per-cluster string.
+call site, with the unit everywhere narrowed to one author's field
+(M1-697): degraded prose is sanitized per post title at composition, so
+the `/summary --full` and `/retry` flat renders — whose `summary:`
+field carries degraded prose verbatim — now deliver per-title redaction
+instead of a raw command-shaped title, and the default categorized
+`/summary` form relies on the same per-title redaction, derived from
+the cluster at render rather than sanitizing an assembled per-cluster
+string.
 Flattening alone cannot carry
 that guarantee, because flattening means *parsing*, and the parser is a
 regular expression: CommonMark permits balanced brackets inside a link
@@ -614,6 +625,22 @@ manufactured from text that was not one. Note the two passes stay
 independent throughout: the closed-list match's word-boundary rule
 admits `)`, so a privileged token inside a link target is stripped,
 audit-logged and WARNed whether or not any flattening succeeded.
+
+**Bare feed URLs rest on the ingest scheme allowlist, not on any render
+pass.** Degraded prose interpolates `post.url` bare (`title — url
+(uid)`), and no sanitize pass ever sees it — correctly, because the
+closed-list pass would rewrite ordinary feed paths (`/audit`,
+`/pending`) to `[redacted command]`. Display-side safety for that
+operand is carried at the WRITE boundary:
+`PostPersister.normalizeUrlForStorage` binds a feed link only when it
+parses as an `http`/`https` URI and stores NULL otherwise, and the url
+column has exactly one writer, so a `javascript:`-style feed link never
+reaches storage, let alone a reply. Chat clients may auto-link the bare
+`http(s)` URLs that remain — that is intended (D30 plain-text
+formatting). How a client renders scheme-like text inside free-text
+fields (a title, LLM prose) is client behavior outside this threat
+model; the label-hiding markdown variant of the same concern is the one
+the bot can control, and it is closed above.
 
 **Match-set derivation.** The sanitizer's match set is **derived
 from the closed privileged-tier list at spec level**

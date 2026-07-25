@@ -7,6 +7,7 @@ import app.zcat.infochat.llm.routing.LlmRouter;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
+import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -108,7 +109,7 @@ class SummaryProseGeneratorTest {
         Post p = new Post(UUID.randomUUID(), "p-bare", UUID.randomUUID(), "Src", "Title",
                 "https://example.com/x", "Body", Instant.now(), List.of("news"), List.of("unknown"));
         String degraded = SummaryProseGenerator.degradedProseFor(
-                new Cluster("t-bare", List.of(p)));
+                new Cluster("t-bare", List.of(p)), SanitizerTestDoubles.noAuditSanitizer());
         assertFalse(degraded.contains("]("),
                 "degraded prose MUST NOT contain markdown link syntax");
         assertTrue(degraded.contains("https://example.com/x"));
@@ -117,6 +118,11 @@ class SummaryProseGeneratorTest {
     private SummaryProseGenerator generatorWith(LlmProvider provider) {
         SummaryProseGenerator gen = new SummaryProseGenerator();
         gen.llmRouter = routerYielding(provider);
+        // The degraded-fallback paths sanitize each post's title at
+        // composition (M1-697), so the generator now needs a real
+        // sanitizer — the double sanitizes for real; only its audit
+        // DB write is stubbed.
+        gen.llmOutputSanitizer = SanitizerTestDoubles.noAuditSanitizer();
         return gen;
     }
 

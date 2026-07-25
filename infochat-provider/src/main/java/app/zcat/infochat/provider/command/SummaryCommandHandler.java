@@ -452,7 +452,7 @@ public class SummaryCommandHandler implements CommandHandler {
         // not generate it).
         List<ClusterProse> degradedProse = clusters.stream()
                 .map(cluster -> new ClusterProse(
-                        cluster, SummaryProseGenerator.degradedProseFor(cluster), true))
+                        cluster, SummaryProseGenerator.degradedProseFor(cluster, llmOutputSanitizer), true))
                 .toList();
         out.append(renderBody(degradedProse, scopeLanguage, full));
         return out.toString().stripTrailing();

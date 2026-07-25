@@ -192,6 +192,90 @@ class DigestRendererTest {
         }
     }
 
+    /**
+     * M1-697 (redteam 2026-07-25): the degraded arm of
+     * {@code renderSummarySections} DERIVES prose from the cluster via
+     * {@code degradedProseFor} and never reads {@code cp.prose()} —
+     * {@code ClusterProse} is a public record any caller can populate, so
+     * redaction cannot rest on producer provenance. These records are
+     * built with prose strings that LIE (raw injected bytes unrelated to
+     * the clusters' posts): the output must show the clusters' own
+     * per-title-sanitized prose and none of the injected bytes. Also pins
+     * the M1-694-r3 span property: the split pair ({@code /list-sources}
+     * … {@code --all} on different posts) no longer collapses the
+     * innocent post between them.
+     */
+    @Test
+    void renderSummarySections_degradedArmDerivesProseAndIgnoresRecordBytes() {
+        Cluster redactCluster = new Cluster("t-redact", List.of(
+                post("d1", "/grant-admin p-attacker"),
+                post("d2", "Co-clustered headline")));
+        Cluster spanCluster = new Cluster("t-span", List.of(
+                post("s1", "/list-sources"),
+                post("s2", "Legitimate headline"),
+                post("s3", "--all")));
+        List<ClusterProse> prose = List.of(
+                new ClusterProse(redactCluster, "INJECTED /grant-admin raw bytes", true),
+                new ClusterProse(spanCluster, "INJECTED --all raw bytes", true));
+
+        List<DigestRenderer.RenderedSection> sections =
+                renderer.renderSummarySections(prose, "en");
+
+        assertFalse(sections.isEmpty(), "fixture: at least one section rendered");
+        String text = sections.stream()
+                .map(DigestRenderer.RenderedSection::text)
+                .reduce("", (a, b) -> a + "\n\n" + b);
+        assertFalse(text.contains("INJECTED"),
+                "prose bytes carried by the record MUST be ignored for degraded clusters. Got: "
+                        + text);
+        assertFalse(text.contains("/grant-admin"),
+                "the cluster's own command-shaped title must be redacted at derivation. Got: "
+                        + text);
+        assertTrue(text.contains("[redacted command]"),
+                "the derivation-time redaction marker must be present. Got: " + text);
+        assertTrue(text.contains("https://example.com/d1"),
+                "the redacted post's bare URL must survive (D30). Got: " + text);
+        assertTrue(text.contains("Legitimate headline"),
+                "the innocent post between the split pair MUST survive — no cross-post span. "
+                        + "Got: " + text);
+        assertTrue(text.contains("https://example.com/s2"),
+                "the innocent post's bare URL must survive. Got: " + text);
+        assertTrue(text.contains("/list-sources") && text.contains("--all"),
+                "the split pair renders verbatim — neither title is a closed-list token within "
+                        + "its own field (accepted residual). Got: " + text);
+    }
+
+    /**
+     * The same derive-at-render rule on the periodic digest path
+     * ({@code renderSections}): the stub generator hands back a degraded
+     * {@link ClusterProse} whose prose bytes are a lie, and the rendered
+     * section must carry the cluster's own sanitized titles instead.
+     */
+    @Test
+    void renderSections_degradedArmDerivesProseAndIgnoresRecordBytes() {
+        proseGenerator.setDegradedMode(true);
+        List<Post> posts = List.of(
+                post("s1", "Sec 1", List.of("security")),
+                post("s2", "/grant-admin p-attacker", List.of("security")),
+                post("s3", "Sec 3", List.of("security")));
+
+        List<DigestRenderer.RenderedSection> sections = renderer.renderSections(posts, "en");
+
+        assertFalse(sections.isEmpty(), "fixture: at least one section rendered");
+        String text = sections.stream()
+                .map(DigestRenderer.RenderedSection::text)
+                .reduce("", (a, b) -> a + "\n\n" + b);
+        assertFalse(text.contains("INJECTED"),
+                "degraded record bytes MUST be ignored on the digest path too. Got: " + text);
+        assertFalse(text.contains("/grant-admin"),
+                "the cluster's own command-shaped title must be redacted at derivation. Got: "
+                        + text);
+        assertTrue(text.contains("[redacted command]"),
+                "the derivation-time redaction marker must be present. Got: " + text);
+        assertTrue(text.contains("Sec 1") && text.contains("Sec 3"),
+                "clean titles render untouched. Got: " + text);
+    }
+
     // ----- helpers ----------------------------------------------------------
 
     private static DigestCategorizer newCategorizer(int minClusters) {
@@ -213,14 +297,19 @@ class DigestRendererTest {
 
     /**
      * Recording subclass: returns canned prose for each cluster and tracks
-     * the language code and call count.
+     * the language code and call count. Degraded mode returns a degraded
+     * {@link ClusterProse} whose prose bytes are a deliberate LIE — the
+     * renderer must derive degraded prose from the cluster (M1-697), so
+     * the lie is what proves the record bytes are never trusted.
      */
     private static final class RecordingSummaryProseGenerator extends SummaryProseGenerator {
         private final AtomicReference<String> lastLang = new AtomicReference<>();
         private String responseText = "default summary";
+        private boolean degradedMode = false;
         private int calls;
 
         void setResponseText(String text) { this.responseText = text; }
+        void setDegradedMode(boolean degraded) { this.degradedMode = degraded; }
         String lastLanguage() { return lastLang.get(); }
         int callCount() { return calls; }
 
@@ -230,7 +319,8 @@ class DigestRendererTest {
             List<ClusterProse> out = new ArrayList<>(clusters.size());
             for (Cluster c : clusters) {
                 calls++;
-                out.add(new ClusterProse(c, responseText, false));
+                out.add(new ClusterProse(c,
+                        degradedMode ? "INJECTED degraded lie bytes" : responseText, degradedMode));
             }
             return out;
         }

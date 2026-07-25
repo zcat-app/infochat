@@ -29,7 +29,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Every fixture cluster uses <em>degraded</em> prose so the LLM
  * sanitize&rarr;translate path is bypassed (D43) and the assertions isolate
  * the deterministic label layer; the en single-source case is asserted
- * byte-for-byte as the byte-identical-replay guard.
+ * byte-for-byte as the byte-identical-replay guard. The fixture prose
+ * string is a marker the renderer IGNORES — degraded prose is derived
+ * from the cluster at render (M1-697), so the {@code summary:} line shows
+ * the derived {@code title — url (uid)} composition, and the marker's
+ * absence from the output is itself part of the pin.
  */
 class ClusterBlockRendererTest {
 
@@ -46,7 +50,8 @@ class ClusterBlockRendererTest {
             throw new RuntimeException("Failed to initialize BundleLoader for test", e);
         }
         // TranslationPipeline is never exercised here: all fixtures use degraded
-        // prose, which the renderer copies verbatim without touching the pipeline.
+        // prose, which the renderer derives from the cluster (M1-697) without
+        // touching the pipeline.
         renderer = new ClusterBlockRenderer(
                 SanitizerTestDoubles.noAuditSanitizer(), new TranslationPipeline(), bundleLoader);
     }
@@ -61,7 +66,7 @@ class ClusterBlockRendererTest {
                         + "Headline\n"
                         + "covered by: Src1 (uid p-1)\n"
                         + "score: 1 source\n"
-                        + "summary: Degraded prose.\n"
+                        + "summary: Headline — https://example.com/p-1 (uid p-1)\n"
                         + "classification: factual\n"
                         + "tags: a\n"
                         + "\n",
@@ -88,7 +93,7 @@ class ClusterBlockRendererTest {
                         + "Headline\n"
                         + "pokrývají: Src1 (uid p-1)\n"
                         + "skóre: 1 zdroj\n"
-                        + "shrnutí: Degraded prose.\n"
+                        + "shrnutí: Headline — https://example.com/p-1 (uid p-1)\n"
                         + "klasifikace: factual\n"
                         + "tagy: a\n"
                         + "\n",

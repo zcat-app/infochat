@@ -4,9 +4,11 @@ import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
 import app.zcat.infochat.llm.routing.LlmRouter;
+import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
+import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -42,6 +44,8 @@ class SummaryProseRefusalDegradeTest {
                 "Normal one-paragraph summary about the second cluster."));
         SummaryProseGenerator gen = new SummaryProseGenerator();
         gen.llmRouter = routerYielding(stub);
+        LlmOutputSanitizer sanitizer = SanitizerTestDoubles.noAuditSanitizer();
+        gen.llmOutputSanitizer = sanitizer;
 
         Cluster refusingCluster = singletonCluster("p-ref", "RefTitle");
         Cluster normalCluster = singletonCluster("p-ok", "OkTitle");
@@ -55,7 +59,7 @@ class SummaryProseRefusalDegradeTest {
         ClusterProse refusing = result.get(0);
         assertTrue(refusing.degraded(),
                 "refusal marker must route through the degraded path");
-        assertEquals(SummaryProseGenerator.degradedProseFor(refusingCluster), refusing.prose(),
+        assertEquals(SummaryProseGenerator.degradedProseFor(refusingCluster, sanitizer), refusing.prose(),
                 "refusing cluster's prose must be the canonical degraded form");
         assertFalse(refusing.prose().contains("[REFUSAL:"),
                 "the [REFUSAL: ...] literal MUST NOT appear in user-visible output");

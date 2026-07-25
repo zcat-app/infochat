@@ -5,6 +5,7 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
+import app.zcat.infochat.provider.summary.SummaryProseGenerator;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 
@@ -84,6 +85,11 @@ final class ClusterBlockRenderer {
         // headline — first post's title, closed-list-sanitized (M1-675): a
         // group-visible line-start title shaped like a privileged command
         // would otherwise reflect straight into a broadcast reply.
+        // Sanitize-unit invariant (M1-697): the input is ONE post's title —
+        // every sanitize call over feed-derived text takes a single
+        // author's field, never a concatenation of several posts' bytes
+        // (the flag-entry span would otherwise erase whole posts between
+        // a command word in one title and its flag in another).
         out.append(llmOutputSanitizer.sanitize(first.title())).append("\n");
         // covered by: source display name (uid p-...), ...
         out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_CLUSTER_COVERED_BY, scopeLanguage))
@@ -105,12 +111,16 @@ final class ClusterBlockRenderer {
                         bundleLoader.get(BundleKeys.REPLY_SUMMARY_CLUSTER_SCORE, scopeLanguage),
                         sourceSet.size()))
            .append("\n");
-        // summary: degraded prose bypasses the pipeline per D43
-        // (bundle-not-translator invariant); non-degraded prose runs
-        // through sanitizer-1 then the translation pipeline (which
-        // internally runs sanitizer-2 + cache).
+        // summary: degraded prose is DERIVED from the cluster, never read
+        // from cp.prose() (M1-697, redteam 2026-07-25): ClusterProse is a
+        // public record any caller can populate, so degraded bytes in it
+        // are untrusted. degradedProseFor re-composes and sanitizes EACH
+        // post's title — one author's field per sanitize call (the same
+        // invariant as the headline above). Non-degraded prose runs
+        // through sanitizer-1 (one LLM-authored value — the correct unit)
+        // then the translation pipeline (sanitizer-2 + cache inside).
         String summaryText = cp.degraded()
-                ? cp.prose()
+                ? SummaryProseGenerator.degradedProseFor(cluster, llmOutputSanitizer)
                 : translationPipeline.run(
                         llmOutputSanitizer.sanitize(cp.prose()), scopeLanguage);
         out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_CLUSTER_SUMMARY_LABEL, scopeLanguage))

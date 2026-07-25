@@ -127,9 +127,14 @@ public class DigestRenderer {
             for (int i = 0; i < shownCount; i++) {
                 sb.append("\n\n");
                 ClusterProse cp = proseList.get(proseIndex++);
-                // Degraded per-cluster prose skips sanitizer+translator (same as SummaryCommandHandler)
+                // Degraded prose is DERIVED from the cluster, never read
+                // from the record (M1-697) — same structural-trust rule as
+                // renderSummarySections below: degradedProseFor re-composes
+                // and sanitizes each post's title (one author's field per
+                // call). Non-degraded prose skips nothing: sanitizer-1
+                // (one LLM-authored value), then the translator.
                 if (cp.degraded()) {
-                    sb.append(cp.prose());
+                    sb.append(SummaryProseGenerator.degradedProseFor(cp.cluster(), llmOutputSanitizer));
                 } else {
                     String sanitized = llmOutputSanitizer.sanitize(cp.prose());
                     sb.append(translationPipeline.run(sanitized, langCode));
@@ -183,12 +188,15 @@ public class DigestRenderer {
      * digest's own {@code reply.digest.category.more} is group-worded
      * ("@mention me to see them") and would be wrong in a DM.
      *
-     * <p>One thing it adds: degraded prose is sanitized here, where
-     * {@link #renderSections} passes it through. This form renders no
-     * headline, so it is the only place a feed-controlled title can be
-     * redacted on the {@code /summary} path — see the inline note at the
-     * sanitize call. The digest's own unsanitized assembly operands are
-     * M1-691 and are deliberately untouched.
+     * <p>One thing it relies on: for degraded clusters it DERIVES the prose
+     * from the cluster ({@code SummaryProseGenerator.degradedProseFor},
+     * M1-697) — sanitizing each post's title, one author's field per call —
+     * and never reads {@code cp.prose()}. {@code ClusterProse} is a public
+     * record any caller can populate, so the redaction cannot rest on
+     * producer provenance; this form renders no headline, so the derivation
+     * is the only place a feed-controlled title can be redacted on the
+     * {@code /summary} default path. The digest's own unsanitized assembly
+     * operands are M1-691 and are deliberately untouched.
      */
     public List<RenderedSection> renderSummarySections(List<ClusterProse> proseList,
                                                        String langCode) {
@@ -224,23 +232,24 @@ public class DigestRenderer {
                 // for the same reason).
                 ClusterProse cp = Objects.requireNonNull(
                         proseByCluster.get(section.clusters().get(i)));
-                // BOTH branches sanitize; only non-degraded prose is also
-                // translated. The two bypasses degraded prose gets elsewhere
-                // have different reasons and only the translation one
-                // survives here: translation is skipped because degraded
-                // prose is deterministic non-LLM text and D43 is a
-                // bundle-not-translator rule, but the BYTES are
-                // upstream-controlled feed titles (degradedProseFor composes
-                // "title — url (uid)"), which is exactly the tier M1-675's
-                // render-side redaction exists for. ClusterBlockRenderer can
-                // skip sanitizing its degraded prose only because it
-                // sanitizes the headline separately (:87); this form renders
-                // no headline, so skipping here would leave nothing
-                // sanitized at all. The sanitizer loses no characters and
-                // only breaks "](" adjacency, so the bare URL survives (D30).
-                String sanitized = llmOutputSanitizer.sanitize(cp.prose());
-                sb.append(cp.degraded() ? sanitized
-                        : translationPipeline.run(sanitized, langCode));
+                // Degraded prose is DERIVED here from the cluster, never
+                // read from cp.prose() (M1-697, redteam 2026-07-25):
+                // ClusterProse is a public record any caller can populate
+                // with arbitrary bytes, so trusting prose() would make
+                // redaction a producer convention. degradedProseFor
+                // re-composes from cluster.posts() and sanitizes EACH
+                // post's title — one author's field per sanitize call, so
+                // no multi-post string ever reaches the sanitizer (the
+                // M1-694-r3 cross-post span bug). Only non-degraded prose
+                // (one LLM-authored value — the correct unit) is sanitized
+                // from the record and translated. The bare URL operands
+                // survive (D30): the closed-list pass never sees them, and
+                // the `](` no-link guarantee is carried at OutboundDelivery
+                // (M1-691), not here.
+                sb.append(cp.degraded()
+                        ? SummaryProseGenerator.degradedProseFor(cp.cluster(), llmOutputSanitizer)
+                        : translationPipeline.run(
+                                llmOutputSanitizer.sanitize(cp.prose()), langCode));
             }
             int overflow = section.clusters().size() - shownCount;
             if (overflow > 0) {

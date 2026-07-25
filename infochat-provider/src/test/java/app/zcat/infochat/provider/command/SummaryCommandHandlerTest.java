@@ -3,6 +3,8 @@ package app.zcat.infochat.provider.command;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ProgressStage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.core.audit.AuditLogWriter;
+import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.InFlightTracker;
@@ -17,6 +19,7 @@ import app.zcat.infochat.provider.summary.EligiblePostQuery;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Result;
 import app.zcat.infochat.provider.summary.EmptyEdgeSource;
+import app.zcat.infochat.provider.summary.PostReferenceEdgeSource;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
 import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
@@ -26,12 +29,18 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 
+import java.sql.Connection;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
@@ -117,6 +126,7 @@ class SummaryCommandHandlerTest {
         handler.clusterTraversal = new ClusterTraversal(new EmptyEdgeSource(), 3);
         handler.summaryProseGenerator = proseGenerator;
         LlmOutputSanitizer sanitizer = SanitizerTestDoubles.noAuditSanitizer();
+        proseGenerator.degradedSanitizer = sanitizer;
         TranslationPipeline translationPipeline = newEnShortCircuitPipeline(bundleLoader);
         handler.llmOutputSanitizer = sanitizer;
         handler.translationPipeline = translationPipeline;
@@ -449,6 +459,123 @@ class SummaryCommandHandlerTest {
         assertFalse(body.contains("@mention me to go deeper"),
                 "the digest's closing affordance is a broadcast device and must not be "
                         + "emitted by /summary at all. Got: " + body);
+    }
+
+    /**
+     * M1-697 gap 1 — the exact M1-694-r3 repro: posts titled
+     * {@code /list-sources}, a legitimate headline and {@code --all}
+     * co-clustered in that order. With the sanitize unit narrowed to ONE
+     * post's title at composition, the flag-entry span can no longer cross
+     * post boundaries: the innocent post's headline, bare URL and uid all
+     * SURVIVE. The two crafted titles render VERBATIM — neither is a
+     * closed-list token within its own field (a flag-bearing entry redacts
+     * only when command word and flag share one sanitize input), which is
+     * the accepted residual the ticket and security.md name. Driven through
+     * the over-cap branch, the degraded path a feed can force with volume
+     * alone (no LLM outage needed).
+     */
+    @Test
+    void defaultFormDegradedProseSpanCannotCrossPostBoundaries() {
+        Instant now = Instant.now();
+        Post command = post(PREFIX + "x1", "/list-sources", now.minus(Duration.ofMinutes(1)));
+        Post victim = post(PREFIX + "x2", "Legitimate headline", now.minus(Duration.ofMinutes(2)));
+        Post flag = post(PREFIX + "x3", "--all", now.minus(Duration.ofMinutes(3)));
+        eligiblePostQuery.seedPosts(List.of(command, victim, flag), /* excludedCount */ 0);
+        handler.clusterTraversal = new ClusterTraversal(
+                new ChainEdgeSource(List.of(command, victim, flag)), 3);
+        handler.summarizerPostCap = 2;
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "span"), "/summary");
+
+        assertNotNull(reply, "the over-cap guard replies through the router");
+        String body = reply.text();
+        assertTrue(body.contains("Legitimate headline"),
+                "the innocent post's headline MUST survive — the span must not cross post "
+                        + "boundaries. Got: " + body);
+        assertTrue(body.contains("https://example.com/" + PREFIX + "x2"),
+                "the innocent post's bare URL must survive (D30). Got: " + body);
+        assertTrue(body.contains("(uid " + PREFIX + "x2)"),
+                "the innocent post's uid must survive. Got: " + body);
+        assertTrue(body.contains("/list-sources"),
+                "a bare /list-sources title is not a closed-list token within its own field — "
+                        + "it renders verbatim (accepted residual). Got: " + body);
+        assertTrue(body.contains("--all"),
+                "a bare --all title is not a closed-list token within its own field — "
+                        + "it renders verbatim (accepted residual). Got: " + body);
+        assertFalse(body.contains("[redacted command]"),
+                "no redaction span may form across posts. Got: " + body);
+    }
+
+    /**
+     * M1-697 gap 2 — the flat ({@code --full}) form writes degraded prose
+     * verbatim into the {@code summary:} field, so a command-shaped feed
+     * title used to ship unredacted two lines below a
+     * {@code [redacted command]} headline. Composition now sanitizes every
+     * post's title, so the flat form redacts too. Driven through the
+     * over-cap branch, which renders degraded prose deterministically.
+     */
+    @Test
+    void fullFormRedactsCommandShapedFeedTitleInDegradedProse() {
+        Instant now = Instant.now();
+        List<Post> posts = List.of(
+                post(PREFIX + "f1", "/grant-admin p-attacker", now.minus(Duration.ofMinutes(1))),
+                post(PREFIX + "f2", "Ordinary headline", now.minus(Duration.ofMinutes(2))),
+                post(PREFIX + "f3", "Another headline", now.minus(Duration.ofMinutes(3))));
+        eligiblePostQuery.seedPosts(posts, /* excludedCount */ 0);
+        handler.summarizerPostCap = 2;
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "full"), "/summary --full");
+
+        assertNotNull(reply, "the over-cap guard replies through the router");
+        String body = reply.text();
+        assertFalse(body.contains("/grant-admin"),
+                "a command-shaped feed title MUST NOT reach the reader verbatim anywhere on "
+                        + "the flat form — headline or summary: field. Got: " + body);
+        assertTrue(body.contains("[redacted command]"),
+                "the flat form must carry the redaction marker. Got: " + body);
+        assertTrue(body.contains("https://example.com/" + PREFIX + "f1"),
+                "the bare URL must survive sanitization (D30 plain-text). Got: " + body);
+    }
+
+    /**
+     * M1-697 gap 3 — pre-fix the flat form's only title sanitize call saw
+     * {@code posts.get(0)}, so a command-shaped title on a NON-first post
+     * was neither redacted nor audited. Composition now sanitizes every
+     * post's title, so the second post's title lands as
+     * {@code [redacted command]} AND emits its per-occurrence
+     * LLM_OUTPUT_SANITIZED row: the operator's detector no longer depends
+     * on cluster position. The flat form is what {@code /retry} replays
+     * (RetryCommandHandler constructs ClusterBlockRenderer unconditionally),
+     * so this pins the inherited fix on that path too.
+     */
+    @Test
+    void fullFormRedactsAndAuditsCommandShapedTitleOnNonFirstPost() {
+        Instant now = Instant.now();
+        Post first = post(PREFIX + "n1", "Innocent headline", now.minus(Duration.ofMinutes(1)));
+        Post second = post(PREFIX + "n2", "/grant-admin p-attacker", now.minus(Duration.ofMinutes(2)));
+        eligiblePostQuery.seedPosts(List.of(first, second), /* excludedCount */ 0);
+        handler.clusterTraversal = new ClusterTraversal(
+                new ChainEdgeSource(List.of(first, second)), 3);
+        handler.summarizerPostCap = 1;
+        RecordingAuditLogWriter auditWriter = new RecordingAuditLogWriter();
+        handler.llmOutputSanitizer =
+                new LlmOutputSanitizer(auditWriter, SanitizerTestDoubles.noOpDataSource());
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "pos"), "/summary --full");
+
+        assertNotNull(reply, "the over-cap guard replies through the router");
+        String body = reply.text();
+        assertTrue(body.contains("Innocent headline"),
+                "the first post's clean title renders untouched. Got: " + body);
+        assertFalse(body.contains("/grant-admin"),
+                "a command-shaped title on a NON-first post must be redacted. Got: " + body);
+        assertTrue(body.contains("[redacted command]"),
+                "the redaction marker must be present. Got: " + body);
+        assertEquals(2, auditWriter.rows(),
+                "one LLM_OUTPUT_SANITIZED row at producer composition and one at renderer "
+                        + "derivation — two sanitize calls, two truthful per-occurrence rows "
+                        + "(M1-697 derive-at-render); the key property is that the non-first "
+                        + "post's title is redacted AND audited at all");
     }
 
     @Test
@@ -871,6 +998,9 @@ class SummaryCommandHandlerTest {
             this.responseText = text;
         }
 
+        /** Sanitizer used when composing degraded prose (M1-697 signature). */
+        LlmOutputSanitizer degradedSanitizer = SanitizerTestDoubles.noAuditSanitizer();
+
         void setDegradedMode(boolean degraded) {
             this.degradedMode = degraded;
         }
@@ -932,7 +1062,7 @@ class SummaryCommandHandlerTest {
             for (Cluster c : clusters) {
                 callCount.incrementAndGet();
                 if (degradedMode) {
-                    out.add(new ClusterProse(c, SummaryProseGenerator.degradedProseFor(c), true));
+                    out.add(new ClusterProse(c, SummaryProseGenerator.degradedProseFor(c, degradedSanitizer), true));
                 } else {
                     out.add(new ClusterProse(c, responseText, false));
                 }
@@ -942,6 +1072,60 @@ class SummaryCommandHandlerTest {
 
         int callCount() {
             return callCount.get();
+        }
+    }
+
+    /**
+     * Edge source reporting the given posts as a chain in list order
+     * (p0—p1—p2—…), so {@link ClusterTraversal} merges them into ONE
+     * cluster whose {@code posts()} preserve that order — the multi-post
+     * cluster shape the M1-697 span tests need, which
+     * {@link EmptyEdgeSource} (all singletons) cannot produce.
+     */
+    private static final class ChainEdgeSource implements PostReferenceEdgeSource {
+        private final List<UUID> orderedIds;
+
+        ChainEdgeSource(List<Post> posts) {
+            orderedIds = posts.stream().map(Post::id).toList();
+        }
+
+        @Override
+        public Map<UUID, Set<UUID>> neighborsAmong(Collection<UUID> postIds) {
+            Map<UUID, Set<UUID>> out = new HashMap<>();
+            for (UUID id : postIds) {
+                out.put(id, new LinkedHashSet<>());
+            }
+            for (int i = 0; i + 1 < orderedIds.size(); i++) {
+                UUID current = orderedIds.get(i);
+                UUID next = orderedIds.get(i + 1);
+                if (out.containsKey(current) && out.containsKey(next)) {
+                    out.get(current).add(next);
+                    out.get(next).add(current);
+                }
+            }
+            return out;
+        }
+    }
+
+    /**
+     * {@link AuditLogWriter} that counts rows instead of discarding them
+     * (the {@link SanitizerTestDoubles} no-op variant with a counter) so a
+     * test can pin the per-occurrence LLM_OUTPUT_SANITIZED emission.
+     */
+    private static final class RecordingAuditLogWriter extends AuditLogWriter {
+        private final AtomicInteger rows = new AtomicInteger();
+
+        RecordingAuditLogWriter() {
+            super(row -> row);
+        }
+
+        @Override
+        public void write(Connection conn, RedactionHook.AuditRow row) {
+            rows.incrementAndGet();
+        }
+
+        int rows() {
+            return rows.get();
         }
     }
 

@@ -5,6 +5,7 @@ import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
 import app.zcat.infochat.llm.routing.LlmRouter;
+import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -89,6 +90,9 @@ public class SummaryProseGenerator {
     @Inject
     LlmRouter llmRouter;
 
+    @Inject
+    LlmOutputSanitizer llmOutputSanitizer;
+
     /** Carries the per-cluster generation outcome the handler reads. */
     public record ClusterProse(Cluster cluster, String prose, boolean degraded) {}
 
@@ -107,7 +111,7 @@ public class SummaryProseGenerator {
         } catch (RuntimeException e) {
             SafeLog.warn(LOG, "SUMMARIZER provider unresolvable; degrading every cluster", e);
             return clusters.stream()
-                    .map(c -> new ClusterProse(c, degradedProseFor(c), true))
+                    .map(c -> new ClusterProse(c, degradedProseFor(c, llmOutputSanitizer), true))
                     .collect(Collectors.toList());
         }
 
@@ -127,18 +131,18 @@ public class SummaryProseGenerator {
                     // (or any LLM-authored prose) to the user.
                     LOG.warn("SUMMARIZER returned refusal marker for topic {}; degrading",
                             cluster.topicId());
-                    out.add(new ClusterProse(cluster, degradedProseFor(cluster), true));
+                    out.add(new ClusterProse(cluster, degradedProseFor(cluster, llmOutputSanitizer), true));
                 } else if (text.isEmpty()) {
                     LOG.warn("SUMMARIZER returned empty text for topic {}; degrading",
                             cluster.topicId());
-                    out.add(new ClusterProse(cluster, degradedProseFor(cluster), true));
+                    out.add(new ClusterProse(cluster, degradedProseFor(cluster, llmOutputSanitizer), true));
                 } else {
                     out.add(new ClusterProse(cluster, text, false));
                 }
             } catch (RuntimeException e) {
                 SafeLog.warn(LOG, "SUMMARIZER call failed for topic " + cluster.topicId() + "; degrading",
                         e);
-                out.add(new ClusterProse(cluster, degradedProseFor(cluster), true));
+                out.add(new ClusterProse(cluster, degradedProseFor(cluster, llmOutputSanitizer), true));
             }
         }
         return out;
@@ -189,11 +193,35 @@ public class SummaryProseGenerator {
      * Degraded form: headlines + bare URLs + post UIDs, no prose
      * paragraph (decision D17). The deterministic post selection is
      * unaffected.
+     *
+     * <p><b>Sanitize unit: ONE post's title per call (M1-697).</b> Each
+     * title is passed through {@link LlmOutputSanitizer} as it is
+     * composed. This method is the single composition point for degraded
+     * prose and is called in two roles: producers fill the {@code
+     * ClusterProse} record with it, and renderers RE-DERIVE the prose
+     * from {@code cp.cluster()} through it rather than trusting the
+     * record's bytes — {@code ClusterProse} is a public record any
+     * caller can populate, so derivation is what makes the redaction
+     * structural rather than a producer convention (M1-697 redteam,
+     * 2026-07-25). Feeding the WHOLE assembled string to one sanitize
+     * call is visibly wrong either way: the flag-bearing closed-list
+     * entries ({@code /list-sources --all}, {@code /list-sources
+     * --include-deleted}) delete the span from command word to flag
+     * token, so a multi-post input lets one post's {@code /list-sources}
+     * title and another's {@code --all} title erase every post between
+     * them (M1-694 redteam round 3). The converse residual is accepted
+     * and spec'd (docs/spec/security.md §LLM output sanitizer): a
+     * privileged command split ACROSS two posts' titles neither redacts
+     * nor audits, because the two tokens never share one sanitize input.
+     * The url and uid operands are NOT sanitized — they cannot carry a
+     * closed-list token (a stored url leads with {@code http}), and the
+     * {@code ](} no-link guarantee is carried once at {@code
+     * OutboundDelivery} (M1-691), not here.
      */
-    public static String degradedProseFor(Cluster cluster) {
+    public static String degradedProseFor(Cluster cluster, LlmOutputSanitizer llmOutputSanitizer) {
         StringBuilder sb = new StringBuilder();
         for (Post p : cluster.posts()) {
-            sb.append(p.title());
+            sb.append(llmOutputSanitizer.sanitize(p.title()));
             if (p.url() != null && !p.url().isEmpty()) {
                 sb.append(" — ").append(p.url());
             }
