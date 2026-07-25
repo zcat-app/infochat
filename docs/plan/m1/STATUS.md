@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 704 |
 | deferred | 0 |
 | abandoned | 20 |
-| **total** | **731** |
+| **total** | **732** |
 
 ---
 
@@ -32,6 +32,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-693 — Normalize post.title at ingest: empty, content-as-title, and unbounded length (complexity: medium, risk: medium)
 - M1-695 — Deliver the default /summary as one message per category section (complexity: low, risk: low)
 - M1-696 — /retry replays the render form its anchored /summary produced (complexity: low, risk: low)
+- M1-697 — Scope every feed-bytes sanitize call to one author's field (complexity: medium, risk: medium)
 
 ---
 
@@ -939,4 +940,5 @@ M1-693 (pending) ← runnable
 M1-694 (done)
   ├── M1-695 (pending) ← runnable
   └── M1-696 (pending) ← runnable
+M1-697 (pending) ← runnable
 ```
