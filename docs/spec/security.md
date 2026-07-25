@@ -524,11 +524,16 @@ otherwise leave the sanitizer emitting link syntax it manufactured
 itself.
 
 **Sanitizer output never contains `](`.** The guarantee is scoped to what
-the sanitizer emits, not to every byte of every delivered message: the
-deterministic render paths that deliberately bypass it — notably the
-degraded per-cluster prose branch, which ships feed-derived headlines
-without sanitizing or translating — are outside it, and the residual
-risk §Failure handling already records for degraded output covers them.
+the sanitizer emits, not to every byte of every delivered message: a
+render path that *assembles* sanitizer output with bytes the sanitizer
+never saw carries the guarantee for its parts, not for the whole. The
+degraded per-cluster prose branch is the case in point — it sanitizes
+each feed-derived headline but joins the results with the source's
+display name and a bare URL, neither of which passes through the
+sanitizer, and it does not translate. The assembled message is
+therefore outside the guarantee, and the residual risk §Failure
+handling already records for degraded output covers it. (Whether those
+unsanitized assembly operands are acceptable is M1-691.)
 Flattening alone cannot carry
 that guarantee, because flattening means *parsing*, and the parser is a
 regular expression: CommonMark permits balanced brackets inside a link
