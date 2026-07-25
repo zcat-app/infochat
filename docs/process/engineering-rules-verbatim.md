@@ -113,6 +113,16 @@ A `FAIL` on `TEST-INTEGRITY-CHECK` is never `REWORK`-able by the developer alone
 
 ---
 
+## §10 Preserve the controls of a path you replace
+
+- When a diff **reroutes, replaces, or re-parameterizes an existing code path**, the path's *incidental* obligations do not travel with its stated purpose. Before the diff is written, enumerate what the OLD path did that is not in the NEW path's job description — specifically: **sanitize/redaction calls, audit-log emissions, authorization checks, validation, and the tests that pinned any of them** — and carry each one across or state explicitly why it is no longer needed. The enumeration belongs in the ticket's acceptance criteria, authored at `start`, not improvised at implementation.
+- **The failure this prevents.** A renderer's stated job is "render X"; its unstated jobs may include sanitizing an upstream-controlled field and thereby emitting the audit row that is the operator's only detector. Swapping in a different renderer that does the stated job faithfully and none of the unstated ones is not caught by tests (the replaced control often had no test of its own — that is *why* it was invisible), is not caught by the reviewer (the diff matches its ticket), and surfaces only in adversarial review, one instance per round. M1-694 is the reference case: three redteam rounds, and the first two findings were one relocated `LlmOutputSanitizer.sanitize` call and the `LLM_OUTPUT_SANITIZED` audit row that rode on it.
+- **Granularity counts as a control.** Preserving the *call* is not enough if the diff changes the *unit* the call operates on. A security function's contract may hold at one unit and fail at another — M1-694 restored a `sanitize` call but widened its input from one author's field to several publishers' concatenated bytes, which changed what the sanitizer's span-deletion could reach. State the unit, not just the call.
+- **Tests are controls too.** An assertion that incidentally pins a security property (cross-adapter non-leakage, per-scope isolation) is load-bearing beyond its test name. Retargeting it onto a different code path silently removes coverage from the path users actually take; retargeting it onto a stub whose output cannot discriminate makes it vacuous. When a diff moves an assertion, say which property it was pinning and confirm the property is still pinned *on the default path*.
+- The reviewer applies this **narrowly and only to paths the diff actually reroutes** — it is not a licence to demand audits of untouched code. Where the ticket's acceptance enumerates the carried-over controls, the existing `ACCEPTANCE-CHECK` covers it; where the diff plainly drops a `sanitize` / audit / authz call that the removed lines show existed, that is a REWORK item citing both file:line pairs.
+
+---
+
 ## When to update this file
 
 - A new universal rule emerges from a retrospective.
