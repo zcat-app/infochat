@@ -14,8 +14,27 @@ risk: low
 round_cap: 2
 security_relevant: false
 migration_touch: false
-out_of_scope: []
-acceptance: []
+out_of_scope:
+  - >-
+    The categorized render itself (M1-694, done): DigestRenderer, the bundle
+    keys, and the section-splitting logic are untouched — this ticket changes
+    delivery, not output bytes.
+  - >-
+    /retry's render form (M1-696) and /retry's delivery shape: RetryCommandHandler
+    keeps returning one OutboundMessage; SummaryAnchorRepository and the
+    summary_anchor table are untouched.
+  - >-
+    The scheduled digest's delivery path: DigestDelivery, DigestWorker,
+    DigestScheduler, and DigestRetryService are untouched.
+acceptance:
+  - >-
+    In the default form, /summary is delivered as one outbound message per
+    category section, not one joined body.
+  - The closing affordance lands on the last section exactly once.
+  - >-
+    The placeholder/abandonment safety net still holds: terminateAbandoned
+    (M1-334 / M1-611) must not regress, and no placeholder is left dangling.
+  - The over-cap degraded form is delivered per-section too.
 test_plan:
   adds: []
   preserves:
@@ -79,7 +98,7 @@ but give it a row.
 
 ## Acceptance
 
-TO BE WRITTEN. Carried forward from M1-687:
+Carried forward from M1-687 (now in frontmatter):
 
 - in the default form, `/summary` is delivered as one outbound message per
   category section, not one joined body
@@ -90,7 +109,7 @@ TO BE WRITTEN. Carried forward from M1-687:
 
 ## Out-of-scope
 
-TO BE WRITTEN. At minimum: the render itself (M1-694), `/retry`'s render form
+Declared in frontmatter: the render itself (M1-694), `/retry`'s render form
 (M1-696) and `/retry`'s delivery shape (it returns one `OutboundMessage` and
 stays that way), and the scheduled digest's delivery path (`DigestDelivery`,
 `DigestWorker`, `DigestScheduler`, `DigestRetryService`).
