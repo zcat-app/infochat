@@ -360,6 +360,20 @@ connect with (see decision D34 and `security.md`).
     BY published_at DESC` fed to the chat LLM (the ordering rationale
     in security.md §Prompt-injection defenses) and from pushing the
     per-source reconnect cursor `MAX(published_at)` past now.
+    The clamp can only bound a date the source *supplied*; it cannot
+    invent an absent one, and `published_at` is nullable. Since
+    retrieval windows key on `ready_at` (M1-689), date-less posts do
+    reach those result sets, so the defense is extended to the sort
+    side: every window-bounded query orders on
+    `COALESCE(published_at, fetched_at)`, never a bare `published_at
+    DESC`, which would sort NULLs FIRST and hand the head to any source
+    that simply omits the field. The fallback is `fetched_at` — the
+    immutable partition key — so an undated row is bounded by the very
+    ceiling this clamp imposes on dated rows, rather than by `ready_at`,
+    which is stamped after fetch and re-stamped on quarantine approve.
+    The residual is bounded and stated deliberately rather than
+    over-promised: an undated row sorts at the top of its own fetch
+    batch and no higher.
 - **Post entity.** Named entities extracted from a post; used for Tier-2
   cross-source linking (decision D6: hybrid named-entity match for
   precision plus cosine similarity over embeddings for recall).

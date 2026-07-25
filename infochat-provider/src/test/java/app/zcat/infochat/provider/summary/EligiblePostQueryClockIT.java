@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Pins the deterministic {@code /summary} {@code published_at} retrieval-window
+ * Pins the deterministic {@code /summary} {@code ready_at} retrieval-window
  * boundary against an injected {@link Clock} (M1-454, engineering-rules §9).
  * {@link EligiblePostQuery#fetch} samples the cutoff once from
  * {@code clock.instant()} and threads it to both queries, so fixing the Clock
@@ -36,6 +36,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the {@code >=} predicate and returned, one a second earlier is excluded. The
  * fixtures sit weeks before any 24-hour wall-clock cutoff, so the boundary post
  * surfacing proves the window decision read the injected instant.
+ *
+ * <p>The window compares against {@code ready_at}, not the source-supplied
+ * {@code published_at} (M1-689). Both fixtures therefore carry one shared
+ * {@code published_at} far outside the window, so nothing but {@code ready_at}
+ * can account for them landing on opposite sides of the boundary.
  */
 @QuarkusTest
 class EligiblePostQueryClockIT {
@@ -60,7 +65,7 @@ class EligiblePostQueryClockIT {
     }
 
     @Test
-    void publishedAtWindowBoundaryDecidedByInjectedClock() throws Exception {
+    void readyAtWindowBoundaryDecidedByInjectedClock() throws Exception {
         QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
 
         UUID userId = insertUser("actor");
@@ -68,10 +73,14 @@ class EligiblePostQueryClockIT {
         insertSubscription("dm", userId, sourceId);
 
         Instant cutoff = PINNED_NOW.minus(Duration.ofHours(24));
-        // published_at >= cutoff is the window predicate: a post ON the cutoff
-        // is included, one a second before is excluded.
-        insertPost("on-cutoff", sourceId, "OnCutoff", cutoff);
-        insertPost("before-cutoff", sourceId, "BeforeCutoff", cutoff.minusSeconds(1));
+        // ready_at >= cutoff is the window predicate: a post ON the cutoff is
+        // included, one a second before is excluded. Both fixtures share a
+        // published_at 30 days outside the window, so only ready_at can put
+        // them on opposite sides of the boundary.
+        Instant sharedPublishedAt = cutoff.minus(Duration.ofDays(30));
+        insertPost("on-cutoff", sourceId, "OnCutoff", sharedPublishedAt, cutoff);
+        insertPost("before-cutoff", sourceId, "BeforeCutoff", sharedPublishedAt,
+                cutoff.minusSeconds(1));
 
         Result result = query.fetch("dm", userId, Optional.empty(), Duration.ofHours(24));
         Set<String> titles = result.posts().stream()
@@ -79,11 +88,11 @@ class EligiblePostQueryClockIT {
                 .collect(Collectors.toSet());
 
         assertTrue(titles.contains("OnCutoff"),
-            "a post whose published_at equals the injected-clock cutoff is inside the >= "
+            "a post whose ready_at equals the injected-clock cutoff is inside the >= "
                 + "window and must be returned; got: " + titles);
         assertFalse(titles.contains("BeforeCutoff"),
-            "a post published one second before the injected-clock cutoff is outside the "
-                + "window and must be excluded; got: " + titles);
+            "a post that became ready one second before the injected-clock cutoff is "
+                + "outside the window and must be excluded; got: " + titles);
     }
 
     // ----- helpers ------------------------------------------------------
@@ -129,19 +138,20 @@ class EligiblePostQueryClockIT {
     }
 
     private void insertPost(String uidSuffix, UUID sourceId, String title,
-                            Instant publishedAt) throws Exception {
+                            Instant publishedAt, Instant readyAt) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO post (uid, source_id, title, body, published_at, status, tags, "
-                             + "upstream_identifier) "
-                             + "VALUES (?, ?, ?, ?, ?, 'READY', ?, ?)")) {
+                     "INSERT INTO post (uid, source_id, title, body, published_at, ready_at, "
+                             + "status, tags, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, 'READY', ?, ?)")) {
             ps.setString(1, PREFIX + uidSuffix);
             ps.setObject(2, sourceId);
             ps.setString(3, title);
             ps.setString(4, "Body for " + title);
             ps.setTimestamp(5, Timestamp.from(publishedAt));
-            ps.setArray(6, conn.createArrayOf("TEXT", new String[] { PREFIX + "news" }));
-            ps.setString(7, PREFIX + uidSuffix);
+            ps.setTimestamp(6, Timestamp.from(readyAt));
+            ps.setArray(7, conn.createArrayOf("TEXT", new String[] { PREFIX + "news" }));
+            ps.setString(8, PREFIX + uidSuffix);
             ps.executeUpdate();
         }
     }

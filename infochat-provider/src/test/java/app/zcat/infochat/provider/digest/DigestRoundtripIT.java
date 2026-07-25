@@ -99,8 +99,8 @@ class DigestRoundtripIT {
         // Tick one second before window end — past any stagger offset
         Instant morningTick = morningWindowEnd.minusSeconds(1);
 
-        // Seed the post with published_at inside the morning window
-        updatePostPublishedAt(morningWindowStart.plusSeconds(60));
+        // Move the post inside the morning window
+        movePostTo(morningWindowStart.plusSeconds(60));
 
         // ---- Step (a): scheduler fires slot for group with active subscriptions ----
         awaitDispatches(scheduler.tickAt(morningTick));
@@ -156,16 +156,16 @@ class DigestRoundtripIT {
         int llmBefore = testLlmProvider.callCount();
 
         // Evening slot: center=12:00 UTC (Profile config), same day as morning.
-        // Move the post's published_at BETWEEN the two slots — after the
-        // morning window closed, before the evening window opens. The
-        // collector's lower bound is the previous digest boundary (the
-        // morning row), so the between-slots post must still appear in the
-        // evening digest (M1-263 acceptance item 1).
+        // Move the post BETWEEN the two slots — after the morning window
+        // closed, before the evening window opens. The collector's lower
+        // bound is the previous digest boundary (the morning row), so the
+        // between-slots post must still appear in the evening digest
+        // (M1-263 acceptance item 1).
         ZonedDateTime futureNoon = futureMidnight.plusHours(12);
         Instant eveningWindowStart = futureNoon.minusMinutes(WINDOW_HALF).toInstant();
         Instant eveningWindowEnd = futureNoon.plusMinutes(WINDOW_HALF).toInstant();
         Instant eveningTick = eveningWindowEnd.minusSeconds(1);
-        updatePostPublishedAt(futureMidnight.plusHours(6).toInstant());
+        movePostTo(futureMidnight.plusHours(6).toInstant());
 
         awaitDispatches(scheduler.tickAt(eveningTick));
 
@@ -181,7 +181,7 @@ class DigestRoundtripIT {
         // expired). Trigger it with a past windowEnd. slot_fired_at must
         // be the latest GROUP_1 entry so the retry in step (g) targets it.
         Instant degradedFiredAt = eveningWindowStart.plusSeconds(3600);
-        updatePostPublishedAt(degradedFiredAt.plusSeconds(60));
+        movePostTo(degradedFiredAt.plusSeconds(60));
         Instant degradedWindowEnd = Instant.now().minusSeconds(1);
         DigestSlot degradedSlot = new DigestSlot(
                 GROUP_1, "UTC", "morning", degradedFiredAt, degradedWindowEnd);
@@ -320,12 +320,23 @@ class DigestRoundtripIT {
         }
     }
 
-    private void updatePostPublishedAt(Instant publishedAt) throws SQLException {
+    /**
+     * Moves the fixture post in time relative to the digest slots. Both
+     * columns move together: {@code ready_at} is what the collection window
+     * compares against (M1-689), while {@code published_at} still drives
+     * presentation order, and the fixture models negligible fetch+evaluation
+     * lag. Moving only {@code published_at} would leave the post outside
+     * every window — and that failure is quiet, because a digest with no
+     * eligible posts still sends the non-degraded, non-empty "no posts yet"
+     * reply.
+     */
+    private void movePostTo(Instant instant) throws SQLException {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "UPDATE post SET published_at = ? WHERE id = ?")) {
-            ps.setTimestamp(1, Timestamp.from(publishedAt));
-            ps.setObject(2, POST_1);
+                     "UPDATE post SET published_at = ?, ready_at = ? WHERE id = ?")) {
+            ps.setTimestamp(1, Timestamp.from(instant));
+            ps.setTimestamp(2, Timestamp.from(instant));
+            ps.setObject(3, POST_1);
             ps.executeUpdate();
         }
     }
@@ -417,7 +428,8 @@ class DigestRoundtripIT {
                         + " ON CONFLICT DO NOTHING",
                 GROUP_3, SOURCE_1);
 
-        // published_at is updated dynamically in the test to match the window
+        // published_at and ready_at are moved together mid-test (movePostTo) to
+        // position the post relative to each digest window
         Instant seedTime = Instant.parse("2026-05-26T06:00:00Z");
         exec(conn,
                 "INSERT INTO post (id, uid, source_id, title, body, status,"

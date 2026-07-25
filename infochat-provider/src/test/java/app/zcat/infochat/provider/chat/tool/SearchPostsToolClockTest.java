@@ -26,11 +26,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Pins the {@link SearchPostsTool} {@code published_at} retrieval-window
  * boundary against an injected {@link Clock} (M1-454, engineering-rules §9).
  * With the Clock fixed, the window cutoff is {@code pinnedNow - window}: a post
- * whose {@code published_at} equals that cutoff is inside the {@code >=}
+ * whose {@code ready_at} equals that cutoff is inside the {@code >=}
  * predicate and returned; one a second earlier is excluded. The fixtures live
  * in May 2026, weeks before any 2-hour wall-clock cutoff, so the boundary post
  * surfacing can only come from the pinned Clock — proving the window decision
  * reads {@code clock.instant()}, not {@code Instant.now()}.
+ *
+ * <p>The window compares against {@code ready_at}, not the source-supplied
+ * {@code published_at} (M1-689), so both fixtures carry one shared
+ * {@code published_at} far outside the window: nothing but {@code ready_at}
+ * can account for them landing on opposite sides of the boundary.
  */
 @QuarkusTest
 class SearchPostsToolClockTest {
@@ -60,7 +65,7 @@ class SearchPostsToolClockTest {
     }
 
     @Test
-    void publishedAtWindowBoundaryDecidedByInjectedClock() throws Exception {
+    void readyAtWindowBoundaryDecidedByInjectedClock() throws Exception {
         // The injected Clock is @ApplicationScoped, so the proxy in the tool's
         // field resolves to this mock for the rest of the call.
         QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
@@ -70,19 +75,22 @@ class SearchPostsToolClockTest {
         seedSubscription("dm", userId, sourceId);
 
         Instant cutoff = PINNED_NOW.minus(Duration.ofHours(2));
-        // published_at >= cutoff is the window predicate: a post ON the cutoff
-        // is included, one a second before is excluded.
-        seedReadyPost("on-cutoff", sourceId, cutoff);
-        seedReadyPost("before-cutoff", sourceId, cutoff.minusSeconds(1));
+        // ready_at >= cutoff is the window predicate: a post ON the cutoff is
+        // included, one a second before is excluded. Both fixtures share a
+        // published_at 30 days outside the window, so only ready_at can put
+        // them on opposite sides of the boundary.
+        Instant sharedPublishedAt = cutoff.minus(Duration.ofDays(30));
+        seedReadyPost("on-cutoff", sourceId, sharedPublishedAt, cutoff);
+        seedReadyPost("before-cutoff", sourceId, sharedPublishedAt, cutoff.minusSeconds(1));
 
         String json = tool.execute(userId, "dm", userId, Map.of("window", "PT2H"));
 
         assertTrue(json.contains(PREFIX + "on-cutoff"),
-            "a post whose published_at equals the injected-clock cutoff is inside the "
+            "a post whose ready_at equals the injected-clock cutoff is inside the "
                 + ">= window and must be returned; got: " + json);
         assertFalse(json.contains(PREFIX + "before-cutoff"),
-            "a post published one second before the injected-clock cutoff is outside the "
-                + "window and must be excluded; got: " + json);
+            "a post that became ready one second before the injected-clock cutoff is "
+                + "outside the window and must be excluded; got: " + json);
     }
 
     // ---------- helpers ----------
@@ -127,7 +135,8 @@ class SearchPostsToolClockTest {
         }
     }
 
-    private void seedReadyPost(String slug, UUID sourceId, Instant publishedAt) throws Exception {
+    private void seedReadyPost(String slug, UUID sourceId, Instant publishedAt,
+                               Instant readyAt) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "INSERT INTO post (uid, source_id, title, body, url, published_at, "
@@ -140,7 +149,7 @@ class SearchPostsToolClockTest {
             ps.setString(5, "https://example.com/" + slug);
             ps.setTimestamp(6, Timestamp.from(publishedAt));
             ps.setTimestamp(7, Timestamp.from(FETCHED_AT));
-            ps.setTimestamp(8, Timestamp.from(publishedAt.plusSeconds(300)));
+            ps.setTimestamp(8, Timestamp.from(readyAt));
             ps.setString(9, PREFIX + slug);
             ps.executeUpdate();
         }

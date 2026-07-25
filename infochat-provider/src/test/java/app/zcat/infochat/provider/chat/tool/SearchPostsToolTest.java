@@ -18,6 +18,7 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import org.jspecify.annotations.Nullable;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -39,10 +40,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * its window/ordering semantics. Two things are pinned: (1) the emitted
  * {@code ready_at} JSON field carries the post's {@code ready_at} column
  * value (the spec's tool-catalogue shape), not {@code published_at}; and
- * (2) the {@code window} filter and result ordering both bind to
- * {@code published_at}, with {@code ready_at} a display field only
- * (docs/spec/security.md §Prompt-injection defenses). Seeds fixtures
- * directly via JDBC against the &#64;QuarkusTest DevServices DB.
+ * (2) the {@code window} filter binds to {@code ready_at} while result
+ * ordering binds to {@code COALESCE(published_at, fetched_at)} (M1-689 —
+ * membership is decided on when a post reached readers, presentation on
+ * when its source says it was published, falling back to arrival when the
+ * source says nothing so that omitting the date cannot buy the head of the
+ * result). Seeds fixtures directly via JDBC against the &#64;QuarkusTest
+ * DevServices DB.
  */
 @QuarkusTest
 class SearchPostsToolTest {
@@ -96,9 +100,9 @@ class SearchPostsToolTest {
         UUID userId = seedUser("ready-at");
         UUID sourceId = seedSource("ready-at-src", "Ready-at source");
         seedSubscription("dm", userId, sourceId);
-        // published_at must sit inside the default search window
-        // (published_at is the window filter); ready_at is a distinct
-        // value so the assertion can tell the two columns apart.
+        // ready_at must sit inside the default search window (ready_at is
+        // the window filter); published_at is a distinct value so the
+        // assertion can tell the two columns apart.
         Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
                 .minus(1, ChronoUnit.HOURS);
         Instant readyAt = publishedAt.plus(15, ChronoUnit.MINUTES);
@@ -149,14 +153,17 @@ class SearchPostsToolTest {
     }
 
     @Test
-    void windowFilterBindsToPublishedAtNotReadyAt() throws Exception {
+    void windowFilterBindsToReadyAtNotPublishedAt() throws Exception {
         UUID userId = seedUser("window-bind");
         UUID sourceId = seedSource("window-bind-src", "Window-bind source");
         seedSubscription("dm", userId, sourceId);
         // A late-readied post: published long before the window opens, but
-        // readied just now. published_at is the window filter, so it must be
-        // EXCLUDED from a 2h window — even though ready_at falls inside it.
-        // Were the window bound to ready_at, this post would surface.
+        // readied just now. ready_at is the window filter, so it must be
+        // INCLUDED in a 2h window even though its published_at is 5h old
+        // (M1-689). Were the window still bound to published_at, this post
+        // would be dropped — which is exactly the defect that ticket fixes:
+        // a post delayed by fetch + evaluation lag was never delivered at
+        // all, rather than merely delivered late.
         Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
                 .minus(5, ChronoUnit.HOURS);
         Instant readyAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
@@ -165,9 +172,54 @@ class SearchPostsToolTest {
 
         String json = tool.execute(userId, "dm", userId, Map.of("window", "PT2H"));
 
-        assertEquals("[]", json,
-            "a post whose published_at predates the window must be excluded even "
-                + "when its ready_at falls inside the window; got: " + json);
+        assertTrue(json.contains(PREFIX + "late-readied-post"),
+            "a post whose ready_at falls inside the window must be returned even "
+                + "when its published_at predates the window; got: " + json);
+    }
+
+    @Test
+    void undatedPostSortsByFetchCeilingNotByPromotionInstant() throws Exception {
+        // M1-689 redteam rounds 1-2. published_at is source-supplied AND
+        // nullable, and Postgres sorts NULLs FIRST under DESC, so once the
+        // window predicate moved to ready_at (admitting undated posts at all),
+        // a bare `ORDER BY published_at DESC` handed the head of this result
+        // to any feed that simply OMITS its date — the position re-injected
+        // first into the chat prompt, and the one schema.md's ingest clamp
+        // exists to defend.
+        //
+        // The fallback must be fetched_at, not ready_at. This fixture is built
+        // so the two choices disagree: the undated post is fetched EARLIER but
+        // promoted LATER than the dated one. Keyed on ready_at it would lead
+        // (promotion is recent); keyed on fetched_at it trails, which is the
+        // shipped behaviour. Both fetched_at values stay inside the May 2026
+        // partition the other fixtures use.
+        UUID userId = seedUser("null-order");
+        UUID sourceId = seedSource("null-order-src", "Null-order source");
+        seedSubscription("dm", userId, sourceId);
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        Instant undatedFetchedAt = FETCHED_AT;
+        Instant datedFetchedAt = FETCHED_AT.plus(1, ChronoUnit.DAYS);
+
+        // Dated: fetched a day later, published just under its own fetch
+        // instant (the clamp ceiling). Readied an hour ago.
+        seedReadyPostAt("dated", sourceId, datedFetchedAt.minus(1, ChronoUnit.HOURS),
+                now.minus(1, ChronoUnit.HOURS), datedFetchedAt);
+        // Undated: fetched a day EARLIER, no date at all, promoted most
+        // recently of the two.
+        seedReadyPostAt("undated", sourceId, null,
+                now.minus(30, ChronoUnit.MINUTES), undatedFetchedAt);
+
+        String json = tool.execute(userId, "dm", userId, Map.of("window", "PT4H"));
+
+        int datedIndex = json.indexOf(PREFIX + "dated");
+        int undatedIndex = json.indexOf(PREFIX + "undated");
+        assertTrue(datedIndex >= 0 && undatedIndex >= 0,
+            "both posts are inside the 4h ready_at window and must be returned; got: " + json);
+        assertTrue(datedIndex < undatedIndex,
+            "an undated post must sort by the instant it was FETCHED — the same ceiling the "
+                + "ingest clamp gives a dated post — not by its later promotion instant. "
+                + "Ordering it by ready_at would let omitting a date outrank every dated post "
+                + "in the window, and would let a quarantine-approve re-stamp move it; got: " + json);
     }
 
     @Test
@@ -435,6 +487,27 @@ class SearchPostsToolTest {
             ps.setString(5, "https://example.com/" + slug);
             ps.setTimestamp(6, Timestamp.from(publishedAt));
             ps.setTimestamp(7, Timestamp.from(FETCHED_AT));
+            ps.setTimestamp(8, Timestamp.from(readyAt));
+            ps.setString(9, PREFIX + slug);
+            ps.executeUpdate();
+        }
+    }
+
+    /** Seeds with an explicit {@code fetched_at} so ordering tests can separate fetch from promotion. */
+    private void seedReadyPostAt(String slug, UUID sourceId, @Nullable Instant publishedAt,
+                                 Instant readyAt, Instant fetchedAt) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO post (uid, source_id, title, body, url, published_at, "
+                     + "fetched_at, status, ready_at, tags, upstream_identifier) "
+                     + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, '{}', ?)")) {
+            ps.setString(1, PREFIX + slug);
+            ps.setObject(2, sourceId);
+            ps.setString(3, "Title " + slug);
+            ps.setString(4, "Body " + slug);
+            ps.setString(5, "https://example.com/" + slug);
+            ps.setTimestamp(6, publishedAt == null ? null : Timestamp.from(publishedAt));
+            ps.setTimestamp(7, Timestamp.from(fetchedAt));
             ps.setTimestamp(8, Timestamp.from(readyAt));
             ps.setString(9, PREFIX + slug);
             ps.executeUpdate();

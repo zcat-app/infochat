@@ -164,6 +164,29 @@ class EligiblePostQueryIT {
     }
 
     @Test
+    void postPublishedBeforeTheWindowButReadyInsideItIsReturned() throws Exception {
+        // The M1-689 window semantics: `-w 24h` asks for posts that reached
+        // readers in the last 24h, not posts a feed dated in the last 24h. An
+        // item with a week-old publication date that cleared the evaluation
+        // pipeline minutes ago belongs in the window; under the old
+        // published_at predicate it was never returned at all, at any point.
+        UUID userId = insertUser("late-user");
+        UUID sourceId = insertSource("late-src", "LATE");
+        insertSubscription("dm", userId, sourceId);
+        Instant now = Instant.now();
+        insertPost("late-1", sourceId, "Late arrival",
+                now.minus(Duration.ofDays(7)), now.minus(Duration.ofMinutes(5)),
+                "READY", List.of(PREFIX + "news"));
+
+        Result result = query.fetch("dm", userId, Optional.empty(), Duration.ofHours(24));
+
+        assertEquals(1, result.posts().size(),
+                "a post whose published_at predates the window but whose ready_at "
+                        + "falls inside it is in the window /summary reports on");
+        assertEquals("Late arrival", result.posts().get(0).title());
+    }
+
+    @Test
     void retainedRedactionPostIsIncluded() throws Exception {
         // stage2_failed=true posts with [REDACTED:<id>] placeholders are
         // STILL eligible per docs/spec/security.md §Failure handling.
@@ -173,16 +196,17 @@ class EligiblePostQueryIT {
         Instant now = Instant.now();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO post (uid, source_id, title, body, published_at, status, "
-                             + "stage2_failed, tags, upstream_identifier) "
-                             + "VALUES (?, ?, ?, ?, ?, 'READY', TRUE, ?, ?)")) {
+                     "INSERT INTO post (uid, source_id, title, body, published_at, ready_at, "
+                             + "status, stage2_failed, tags, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, 'READY', TRUE, ?, ?)")) {
             ps.setString(1, PREFIX + "redact-1");
             ps.setObject(2, sourceId);
             ps.setString(3, "Redacted post");
             ps.setString(4, "Body with [REDACTED:abc123] placeholder.");
             ps.setTimestamp(5, Timestamp.from(now));
-            ps.setArray(6, conn.createArrayOf("TEXT", new String[] { PREFIX + "news" }));
-            ps.setString(7, PREFIX + "redact-1");
+            ps.setTimestamp(6, Timestamp.from(now));
+            ps.setArray(7, conn.createArrayOf("TEXT", new String[] { PREFIX + "news" }));
+            ps.setString(8, PREFIX + "redact-1");
             ps.executeUpdate();
         }
 
@@ -497,17 +521,18 @@ class EligiblePostQueryIT {
         Instant now = Instant.now();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO post (uid, source_id, title, body, published_at, status, "
-                             + "tags, classification, upstream_identifier) "
-                             + "VALUES (?, ?, ?, ?, ?, 'READY', ?, ?, ?)")) {
+                     "INSERT INTO post (uid, source_id, title, body, published_at, ready_at, "
+                             + "status, tags, classification, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, 'READY', ?, ?, ?)")) {
             ps.setString(1, PREFIX + "classif-1");
             ps.setObject(2, sourceId);
             ps.setString(3, "Classified post");
             ps.setString(4, "Body");
             ps.setTimestamp(5, Timestamp.from(now));
-            ps.setArray(6, conn.createArrayOf("TEXT", new String[] { PREFIX + "news" }));
-            ps.setArray(7, conn.createArrayOf("TEXT", new String[] { "factual", "technical" }));
-            ps.setString(8, PREFIX + "classif-1");
+            ps.setTimestamp(6, Timestamp.from(now));
+            ps.setArray(7, conn.createArrayOf("TEXT", new String[] { PREFIX + "news" }));
+            ps.setArray(8, conn.createArrayOf("TEXT", new String[] { "factual", "technical" }));
+            ps.setString(9, PREFIX + "classif-1");
             ps.executeUpdate();
         }
 
@@ -591,21 +616,38 @@ class EligiblePostQueryIT {
         }
     }
 
+    /**
+     * Seeds a post whose {@code ready_at} mirrors its {@code published_at} —
+     * the negligible-lag shape, where both windows agree on membership.
+     */
     private void insertPost(String uidSuffix, UUID sourceId, String title,
                              Instant publishedAt, String status, List<String> tags) throws Exception {
+        insertPost(uidSuffix, sourceId, title, publishedAt, publishedAt, status, tags);
+    }
+
+    /**
+     * Seeds a post with independent publication and readiness instants.
+     * {@code ready_at} is the column the /summary window compares against, so
+     * the two diverge exactly when fetch + evaluation lag is what the test is
+     * about.
+     */
+    private void insertPost(String uidSuffix, UUID sourceId, String title,
+                             Instant publishedAt, Instant readyAt, String status,
+                             List<String> tags) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO post (uid, source_id, title, body, published_at, status, tags, "
-                             + "upstream_identifier) "
-                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)")) {
+                     "INSERT INTO post (uid, source_id, title, body, published_at, ready_at, "
+                             + "status, tags, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
             ps.setString(1, PREFIX + uidSuffix);
             ps.setObject(2, sourceId);
             ps.setString(3, title);
             ps.setString(4, "Body for " + title);
             ps.setTimestamp(5, Timestamp.from(publishedAt));
-            ps.setString(6, status);
-            ps.setArray(7, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
-            ps.setString(8, PREFIX + uidSuffix);
+            ps.setTimestamp(6, Timestamp.from(readyAt));
+            ps.setString(7, status);
+            ps.setArray(8, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
+            ps.setString(9, PREFIX + uidSuffix);
             ps.executeUpdate();
         }
     }

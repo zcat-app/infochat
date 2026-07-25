@@ -43,6 +43,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -342,6 +343,7 @@ public class RetryCommandHandler implements CommandHandler {
     private Post mapPost(ResultSet rs) throws SQLException {
         String[] rawTags = (String[]) rs.getArray("tags").getArray();
         String[] rawClassification = (String[]) rs.getArray("classification").getArray();
+        Timestamp publishedTs = rs.getTimestamp("published_at");
         return new Post(
                 (UUID) rs.getObject("id"),
                 rs.getString("uid"),
@@ -350,7 +352,15 @@ public class RetryCommandHandler implements CommandHandler {
                 rs.getString("title"),
                 rs.getString("url"),
                 rs.getString("body"),
-                rs.getTimestamp("published_at").toInstant(),
+                // Nullable per V7__joins_post.sql: a source need not supply a
+                // publication date. This re-fetch keys on the uids /summary
+                // froze into the anchor and applies no window of its own, so
+                // it inherits reachability from whatever /summary could
+                // return — and since M1-689 moved that window predicate off
+                // published_at, a NULL row can reach here. Under the old
+                // published_at >= ? predicate it could not, which is why this
+                // read was unguarded (M1-689 redteam round 3).
+                publishedTs == null ? null : publishedTs.toInstant(),
                 List.of(rawTags),
                 List.of(rawClassification));
     }

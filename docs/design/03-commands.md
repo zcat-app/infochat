@@ -446,6 +446,58 @@ traversal of the `post_reference` graph **before any LLM call**; the LLM
 writes prose per pre-computed cluster, so the cluster set is reproducible
 (determinism boundary D19).
 
+**Window column.** The `-w` predicate is `post.ready_at >= cutoff`, not
+`published_at` (M1-689). `published_at` is source-supplied, nullable
+(`V7__joins_post.sql`), and lags arbitrarily behind the instant the post
+actually reached readers, so keying on it dropped slow-fetched posts
+entirely and made NULL-dated posts permanently unreachable. `ready_at` is
+stamped by every writer that sets `status='READY'` — `ReadyPromoter` and
+the quarantine-approve procedures — so it is always present on the rows
+the window can see, and no `COALESCE` is needed. Determinism (D19) is
+unaffected and arguably strengthened: `ready_at` records our own pipeline
+and cannot be rewritten by a source re-publishing an item.
+
+The same column change applies to the top-3-active-tags query (it must be
+computed over the post set it restricts), the two `DigestPostCollector`
+queries, and the chat `searchPosts` tool.
+
+**Sort key.** Presentation order stays publication-ordered, but the key is
+`COALESCE(published_at, fetched_at) DESC, id DESC`, not a bare
+`published_at DESC`. Moving membership to `ready_at` admits NULL-dated
+posts for the first time, and Postgres sorts NULLs FIRST under `DESC` — so
+a bare key would hand the head of every result set to any feed that simply
+omits its `<pubDate>`, which is the exact position `schema.md`'s ingest
+clamp exists to defend and strictly easier than the future-dating that
+clamp denies. Flagged as a high finding by the 2026-07-25 red-team; see
+`docs/plan/m1/redteam/M1-689-2026-07-25.md`. Dated rows are unaffected —
+their `COALESCE` resolves to `published_at`, so their relative order is
+byte-identical. `NULLS LAST` was rejected: it makes date-less posts the
+first evicted under the cluster cap, which defeats the reachability this
+ticket was filed to deliver.
+
+The fallback is `fetched_at`, **not** `ready_at` — round 2 of the audit
+rejected `ready_at`. `ready_at` is stamped at the READY promotion, so it
+is always later than the same row's `fetched_at`; an undated post keyed
+on it outranks every dated post the clamp bounded to that fetch. Worse,
+`approve_quarantine` and re-evaluation re-stamp `ready_at`, so a released
+undated post jumps to a head position no dated post can reach (the clamp
+forbids dating forward). `fetched_at` is the partition key — `NOT NULL`,
+part of the PK, never re-stamped — and is the exact ceiling the clamp
+imposes on dated rows. The residual, stated rather than glossed: an
+undated post still sorts at the top of *its own fetch batch*. It cannot
+outrank a later fetch and cannot move on release.
+
+**Index and sort cost.** `V64__post_window_index_on_ready_at.sql` drops
+`idx_post_published`; the partial index `idx_post_ready_at ON post(ready_at,
+id) WHERE status = 'READY'` serves the new window exactly. No index serves
+the `COALESCE` sort key (a plain btree on `published_at` cannot), so the
+window set is sorted per call — the drop costs nothing that the sort-key
+change had not already cost. The window bounds that set, the per-turn
+tool-call cap bounds how often it runs, and the armed `statement_timeout`
+bounds the worst case; the widest exposure is a `searchPosts` with
+`window: P30D`, which sorts the last 30 days of READY posts. No spec-level
+query-cost budget exists, so this is recorded rather than gated.
+
 **No-arg behaviour with many followed tags.** When `/summary` is called with
 no positional tag and the calling scope follows more than 5 tags, retrieval
 is restricted to the **3 most-active tags in the window** (most posts in
@@ -1611,8 +1663,13 @@ during the cache TTL is served from cache (no second LLM call).
 **Collection window.** The slot window above decides *when* a digest
 fires; it is not the period the digest covers. The collection lower bound
 is the **previous digest boundary** — the group's latest `summary_cache`
-row before this slot — so a post published between two slots still
-appears in the next digest. A group's **first-ever** digest has no
+row before this slot — so a post that arrives between two slots still
+appears in the next digest. The bound is compared against `ready_at`
+(§`/summary` *Window column*), which is what makes that guarantee hold
+for a post whose feed date predates the boundary but which only finished
+evaluating after it. It is also what makes a zero-post slot lossless: the
+empty slot still advances the boundary, and anything that becomes READY
+afterwards satisfies the next period (M1-689). A group's **first-ever** digest has no
 previous boundary and falls back **one inter-slot period**, derived from
 the gap between the two configured centre hours above (12h at the
 defaults, complemented for the morning slot whose predecessor is the

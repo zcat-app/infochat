@@ -70,10 +70,13 @@ public class ClusterTraversal {
 
     /**
      * Build connected components from the input post list. The input
-     * order (deterministic {@code published_at DESC, id DESC} from
-     * {@link EligiblePostQuery}) drives the BFS seed order, so the same
-     * input + same DB state produces the same cluster sequence across
-     * runs.
+     * order (deterministic {@code COALESCE(published_at, fetched_at) DESC,
+     * id DESC} from {@link EligiblePostQuery}) drives the BFS seed order,
+     * so the same input + same DB state produces the same cluster
+     * sequence across runs. The determinism argument holds under the
+     * COALESCE the same way it held under the bare column: both operands
+     * are DB-side values, so neither the LLM nor a source can reorder the
+     * seeds (M1-689).
      */
     public List<Cluster> cluster(List<Post> posts) {
         if (posts == null || posts.isEmpty()) {

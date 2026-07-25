@@ -177,17 +177,21 @@ class SummaryAdapterScopeIT {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO post (uid, source_id, title, body, url, "
-                             + "published_at, status, tags, upstream_identifier) "
-                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+                             + "published_at, ready_at, status, tags, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
             ps.setString(1, uid);
             ps.setObject(2, sourceId);
             ps.setString(3, title);
             ps.setString(4, "Body for " + title);
             ps.setString(5, "https://example.com/" + uid);
             ps.setTimestamp(6, Timestamp.from(publishedAt));
-            ps.setString(7, status);
-            ps.setArray(8, conn.createArrayOf("TEXT", tags));
-            ps.setString(9, uid);
+            // The retrieval window keys on ready_at (M1-689). These fixtures
+            // model negligible fetch+evaluation lag, so it mirrors published_at
+            // and the window means the same thing it did before.
+            ps.setTimestamp(7, Timestamp.from(publishedAt));
+            ps.setString(8, status);
+            ps.setArray(9, conn.createArrayOf("TEXT", tags));
+            ps.setString(10, uid);
             ps.executeUpdate();
         }
     }

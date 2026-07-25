@@ -1,0 +1,36 @@
+-- V64: drop idx_post_published — no query filters on published_at anymore.
+--
+-- M1-689 moved every window-bounded retrieval predicate off the
+-- source-supplied published_at and onto ready_at (the digest's two
+-- collection queries, /summary's window and its top-3-active-tags
+-- companion, and the chat searchPosts tool). The window predicate those
+-- queries now issue is
+--
+--     WHERE status = 'READY' AND ready_at >= ?
+--
+-- which idx_post_ready_at ON post(ready_at, id) WHERE status = 'READY'
+-- (V7__joins_post.sql:184) already serves exactly: same status literal on
+-- the partial predicate, range scan on the leading column. So the index
+-- supporting the new predicate needs no migration — only the one supporting
+-- the old predicate needs removing.
+--
+-- idx_post_published (V7__joins_post.sql:182) can no longer serve a filter,
+-- and it can no longer serve the sort either: the same ticket's red-team
+-- remediation moved every one of those ORDER BY clauses to
+-- COALESCE(published_at, fetched_at) DESC (a bare published_at DESC sorts
+-- NULLs FIRST, handing the head of every LLM-fed result set to any source
+-- that omits its publication date). No plain btree on published_at can
+-- serve that COALESCE expression, so after that change the index has no
+-- remaining consumer at all — it would only cost every post INSERT and
+-- every status transition a second index to maintain.
+--
+-- The queries therefore sort their window set per call. That is bounded by
+-- the window itself, by the LIMIT/cluster-cap, by the per-turn tool-call
+-- cap, and by the armed statement_timeout; no spec-level query-cost budget
+-- exists to trade against. Recorded here because the widest case — a
+-- searchPosts with window: P30D — sorts 30 days of READY posts.
+--
+-- Per-source publication lookups (V36's SELECT MAX(published_at) FROM post
+-- WHERE source_id = ?) keep their own index, idx_post_source_published ON
+-- post(source_id, published_at DESC) — untouched by this migration.
+DROP INDEX idx_post_published;

@@ -762,8 +762,12 @@ CREATE TABLE post (
 -- Indexes are created on the parent and propagated to partitions.
 CREATE INDEX idx_post_status_fetched ON post(status, fetched_at DESC);
 CREATE INDEX idx_post_source         ON post(source_id, fetched_at DESC);
-CREATE INDEX idx_post_published      ON post(published_at DESC);
--- Provider startup reconciler scan (architecture.md §Catch-up):
+-- Provider startup reconciler scan (architecture.md §Catch-up), and since
+-- M1-689 the retrieval window for /summary, the periodic digest, and the
+-- chat searchPosts tool — all of which filter `status='READY' AND
+-- ready_at >= ?`, which this partial index serves exactly. The former
+-- idx_post_published ON post(published_at DESC) was dropped by
+-- V64__post_window_index_on_ready_at.sql once no predicate used the column.
 CREATE INDEX idx_post_ready_at       ON post(ready_at, id) WHERE status = 'READY';
 -- LinkingJob driving-set scan:
 CREATE INDEX idx_post_link_cursor    ON post(fetched_at)

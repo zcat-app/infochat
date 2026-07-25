@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 702 |
+| done | 703 |
 | deferred | 0 |
 | abandoned | 19 |
 | **total** | **726** |
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-685 — Chat model text can contradict the appended curated answer (complexity: medium, risk: low)
 - M1-687 — /summary renders the categorized digest form by default (complexity: high, risk: medium)
-- M1-689 — Key post-retrieval windows on ready_at, not published_at (complexity: medium, risk: medium)
 - M1-690 — Chat prompt stops declining off-feed questions (complexity: low, risk: low)
 - M1-691 — Decide whether degraded-digest assembly operands need sanitizing (complexity: low, risk: medium)
 
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-689 | Key post-retrieval windows on ready_at, not published_at | 2026-07-25 | round 1 APPROVE |
 | M1-688 | Fix digest first-run collection window | 2026-07-25 | round 1 APPROVE |
 | M1-686 | Fix wizard invite guidance and stale 2-secrets comment refs | 2026-07-24 | round 1 APPROVE |
 | M1-684 | Stop committing regenerable redteam-multi evidence bulk | 2026-07-24 | round 1 APPROVE |
@@ -74,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-681 | Make a dead transport honest on readiness and on Signal | 2026-07-23 | round 2 APPROVE |
 | M1-680 | Match closed-list flag entries at any argument position | 2026-07-23 | round 1 APPROVE |
 | M1-679 | DevTerminalHarnessRoundtripIT fails on any repeat verify: the startup poll eats the previous run's input file | 2026-07-23 | round 1 APPROVE |
-| M1-678 | Render the asset 24h delta independently of the 24h spread | 2026-07-23 | round 1 APPROVE |
 
 ---
 
@@ -928,7 +927,7 @@ M1-685 (pending) ← runnable
 M1-686 (done)
 M1-687 (pending) ← runnable
 M1-688 (done)
-  └── M1-689 (pending) ← runnable
+  └── M1-689 (done)
 M1-690 (pending) ← runnable
 M1-691 (pending) ← runnable
 ```

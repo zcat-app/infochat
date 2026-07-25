@@ -30,6 +30,7 @@ import java.util.UUID;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -174,6 +175,51 @@ class DigestPostCollectorIT {
     }
 
     @Test
+    void nullPublishedAtPostIsCollected() throws Exception {
+        // published_at is nullable (V7__joins_post.sql:145) — a source need
+        // not supply a date. Under the old `published_at >= ?` window such a
+        // post could never satisfy the comparison and was invisible for its
+        // entire lifetime; the ready_at window reaches it (M1-689).
+        Instant now = Instant.now();
+        insertPost("null-pub", sourceId, "No publication date",
+                null, now.minus(Duration.ofMinutes(1)), List.of());
+
+        DigestPostCollector.CollectionResult result =
+                collector.collectForGroup(groupId, now.minus(Duration.ofHours(1)));
+
+        assertEquals(1, result.posts().size(),
+                "a post whose source supplied no published_at is still readable "
+                        + "and must reach the digest");
+        assertEquals("No publication date", result.posts().get(0).title());
+        assertNull(result.posts().get(0).publishedAt(),
+                "the absent publication date survives collection as null rather "
+                        + "than throwing or being substituted");
+    }
+
+    @Test
+    void postBecomingReadyAfterAnEmptySlotIsCollectedByTheNextSlot() throws Exception {
+        // The zero-post boundary property M1-688 deliberately left to this
+        // ticket (see its §Notes): an empty slot still writes its own run time
+        // as the next slot's `since`. Under the published_at window a post
+        // published before that boundary but evaluated after it fell between
+        // the two slots and was never delivered — not late, never. Keyed on
+        // ready_at the advance is lossless.
+        Instant emptySlotBoundary = Instant.now().minus(Duration.ofMinutes(30));
+        insertPost("late-arrival", sourceId, "Late arrival",
+                emptySlotBoundary.minus(Duration.ofHours(6)),
+                emptySlotBoundary.plus(Duration.ofMinutes(5)),
+                List.of());
+
+        DigestPostCollector.CollectionResult result =
+                collector.collectForGroup(groupId, emptySlotBoundary);
+
+        assertEquals(1, result.posts().size(),
+                "a post that became READY after the empty slot's boundary must be "
+                        + "collected by the next slot, however old its feed date");
+        assertEquals("Late arrival", result.posts().get(0).title());
+    }
+
+    @Test
     void collectForGroupQueriesRunUnderStatementTimeout() throws Exception {
         RecordingDataSource recordingDataSource = new RecordingDataSource(dataSource);
         collector.dataSource = recordingDataSource;
@@ -300,20 +346,38 @@ class DigestPostCollectorIT {
         insertPost(uidSuffix, postSourceId, title, publishedAt, List.of());
     }
 
+    /**
+     * Seeds a post whose {@code ready_at} mirrors its {@code published_at} —
+     * the negligible-lag shape, where both windows agree on membership.
+     */
     private void insertPost(String uidSuffix, UUID postSourceId, String title,
                             Instant publishedAt, List<String> tags) throws Exception {
+        insertPost(uidSuffix, postSourceId, title, publishedAt, publishedAt, tags);
+    }
+
+    /**
+     * Seeds a post with independent publication and readiness instants.
+     * {@code publishedAt} may be null — the column is nullable and a source
+     * need not supply a date. {@code readyAt} is what the digest window
+     * compares against and is always set, matching every {@code
+     * status='READY'} writer in the pipeline.
+     */
+    private void insertPost(String uidSuffix, UUID postSourceId, String title,
+                            @Nullable Instant publishedAt, Instant readyAt,
+                            List<String> tags) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO post (uid, source_id, title, body, published_at, status, tags, "
-                             + "upstream_identifier) "
-                             + "VALUES (?, ?, ?, ?, ?, 'READY', ?, ?)")) {
+                     "INSERT INTO post (uid, source_id, title, body, published_at, ready_at, "
+                             + "status, tags, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, 'READY', ?, ?)")) {
             ps.setString(1, PREFIX + uidSuffix);
             ps.setObject(2, postSourceId);
             ps.setString(3, title);
             ps.setString(4, "Body for " + title);
-            ps.setTimestamp(5, Timestamp.from(publishedAt));
-            ps.setArray(6, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
-            ps.setString(7, PREFIX + uidSuffix);
+            ps.setTimestamp(5, publishedAt == null ? null : Timestamp.from(publishedAt));
+            ps.setTimestamp(6, Timestamp.from(readyAt));
+            ps.setArray(7, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
+            ps.setString(8, PREFIX + uidSuffix);
             ps.executeUpdate();
         }
     }

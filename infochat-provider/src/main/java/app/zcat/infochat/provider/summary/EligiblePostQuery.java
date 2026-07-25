@@ -29,8 +29,10 @@ import org.jspecify.annotations.Nullable;
  * {@code /summary}. The query lives BEFORE any LLM invocation per the
  * docs/spec/llm.md §Determinism boundary contract: the same DB state
  * produces the same post set across runs, ordered by
- * {@code published_at DESC, id DESC} (the secondary id key breaks
- * ties stably). The cluster cap is applied here — when more than
+ * {@code COALESCE(published_at, fetched_at) DESC, id DESC} (the
+ * secondary id key breaks ties stably; the COALESCE bounds a source that
+ * supplies NO date, which a bare {@code published_at DESC} would put at
+ * the unconditional head because Postgres sorts NULLs first — M1-689). The cluster cap is applied here — when more than
  * {@code infochat.summary.cluster-cap} posts match, the OLDEST posts
  * are dropped (the tail of the ORDER BY) and the surplus is reported
  * via {@link Result#totalBeforeCap()} + {@link Result#excludedCount()}.
@@ -66,7 +68,7 @@ public class EligiblePostQuery {
     @Inject
     CancellationService cancellationService;
 
-    // The /summary published_at window cutoff is a decision-gate "now", so it
+    // The /summary ready_at window cutoff is a decision-gate "now", so it
     // reads from the injected Clock to stay pinnable in tests (M1-454,
     // engineering-rules §9). Sampled once below and threaded to both
     // selectPosts and topActiveFollowedTags so the two queries share one
@@ -192,7 +194,13 @@ public class EligiblePostQuery {
                                     TagMode tagMode, List<String> restrictedTags) {
         // The SELECT pins:
         //   - status='READY' (exclude RAW, QUARANTINED, NEEDS_REVIEW)
-        //   - published_at >= cutoff (window filter)
+        //   - ready_at >= cutoff (window filter). ready_at, not published_at:
+        //     "the last N hours" means posts that reached readers in that
+        //     span, so a slow-fetched post with an old feed date still lands
+        //     in the window it actually arrived in, and a post whose source
+        //     supplied no date at all stops being permanently invisible
+        //     (published_at is nullable; ready_at is set by every
+        //     status='READY' writer) — M1-689.
         //   - the D59 world predicate: bootstrap-origin sources (live, not
         //     excluded by this scope) are implicitly visible, OR the source
         //     is in this scope's source_subscription. deleted_at IS NULL
@@ -201,8 +209,8 @@ public class EligiblePostQuery {
         //   - optional positional tag → post.tags @> ARRAY[?]
         //   - optional scope_preferences.tag_mode='EXPLICIT' → tags intersect scope_tag
         //   - optional top-3 restricted tags → tags intersect restricted set
-        //   - ORDER BY published_at DESC, id DESC (deterministic; secondary
-        //     key breaks ties stably across runs)
+        //   - ORDER BY COALESCE(published_at, fetched_at) DESC, id DESC
+        //     (deterministic; secondary key breaks ties stably across runs)
         //   - COUNT(*) OVER () projects the pre-LIMIT match total on every
         //     row (window functions evaluate before LIMIT), so the
         //     cap-excess counts stay exact without a second round-trip
@@ -215,7 +223,7 @@ public class EligiblePostQuery {
            .append("  FROM post p ")
            .append("  JOIN source s ON s.id = p.source_id ")
            .append(" WHERE p.status = 'READY' ")
-           .append("   AND p.published_at >= ? ")
+           .append("   AND p.ready_at >= ? ")
            .append("   AND ((s.source_origin = 'bootstrap' AND s.deleted_at IS NULL ")
            .append("         AND NOT EXISTS (SELECT 1 FROM source_exclusion e ")
            .append("                          WHERE e.scope_kind = ? AND e.scope_id = ? ")
@@ -248,7 +256,25 @@ public class EligiblePostQuery {
         }
         // tag_mode='ALL' + no positional tag + ≤5 followed → no tag filter.
 
-        sql.append(" ORDER BY p.published_at DESC, p.id DESC ");
+        // COALESCE, not a bare published_at: published_at is nullable and
+        // Postgres sorts NULLs FIRST under DESC, so once the window predicate
+        // moved to ready_at (admitting date-less posts for the first time) a
+        // bare sort key would hand every one of them the head of the result —
+        // ahead of every row the ingest clamp bounded. schema.md §"published_at
+        // clamp" names that position as the thing the clamp defends, and the
+        // clamp can only bound a date from above, never supply an absent one.
+        //
+        // The fallback is fetched_at, NOT ready_at. ready_at is stamped at the
+        // RAW->READY promotion, so it is always LATER than the same row's
+        // fetched_at — an undated post would outrank every dated post the
+        // clamp had bounded to that fetch, and approve_quarantine/re-eval
+        // re-stamp ready_at, letting a released post jump to a head position
+        // no dated post can reach. fetched_at is the partition key: never
+        // re-stamped, and the exact ceiling the clamp gives dated rows. An
+        // undated post therefore sorts at the top of its own fetch cycle and
+        // no higher. Dated rows are unaffected (COALESCE resolves to
+        // published_at). M1-689 redteam rounds 1-2.
+        sql.append(" ORDER BY COALESCE(p.published_at, p.fetched_at) DESC, p.id DESC ");
         sql.append(" LIMIT ? ");
         params.add(clusterCap);
 
@@ -316,7 +342,9 @@ public class EligiblePostQuery {
               + "  JOIN scope_tag st ON st.scope_kind = ? AND st.scope_id = ? "
               + "  JOIN tag t ON t.id = st.tag_id AND t.name = tag_name "
               + " WHERE p.status = 'READY' "
-              + "   AND p.published_at >= ? "
+              // Same window column as selectPosts — the top-3 restriction
+              // must be computed over the same post set it restricts.
+              + "   AND p.ready_at >= ? "
               + "   AND ((s.source_origin = 'bootstrap' AND s.deleted_at IS NULL "
               + "         AND NOT EXISTS (SELECT 1 FROM source_exclusion e "
               + "                          WHERE e.scope_kind = ? AND e.scope_id = ? "

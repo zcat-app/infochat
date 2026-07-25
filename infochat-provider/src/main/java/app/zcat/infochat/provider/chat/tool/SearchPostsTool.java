@@ -44,7 +44,7 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
     private final DataSource dataSource;
     private final CancellationService cancellationService;
 
-    // The published_at retrieval-window cutoff is a decision-gate "now", so it
+    // The ready_at retrieval-window cutoff is a decision-gate "now", so it
     // reads from the injected Clock to stay pinnable in tests (M1-454,
     // engineering-rules §9). Field initialiser keeps the constructor-built
     // test instances non-null; CDI overrides it at runtime (M1-444 reference).
@@ -125,13 +125,29 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
                                List<String> requestedTags, Instant cutoff,
                                int limit) throws SQLException {
         StringBuilder sql = new StringBuilder();
-        // published_at stays the window filter and sort key below; the
-        // emitted ready_at field carries the ready_at column per the
-        // spec's tool catalogue result shape.
+        // ready_at is the window filter, and the emitted ready_at field
+        // carries the ready_at column per the spec's tool catalogue result
+        // shape. Filtering on ready_at keeps "the last N hours" meaning the
+        // same thing here as it does in /summary and the digest — otherwise
+        // one conversation could hold two definitions of the same window
+        // (M1-689).
+        //
+        // The sort key below is COALESCE(published_at, fetched_at), not a
+        // bare published_at: this result is re-injected verbatim into the chat
+        // prompt, so its head is the position an attacker most wants. NULLs
+        // sort FIRST under DESC in Postgres, and published_at is nullable and
+        // source-supplied, so a bare key would let any feed take that head by
+        // simply OMITTING its date — strictly easier than the future-dating
+        // the ingest clamp already denies (schema.md §"published_at clamp").
+        // The fallback is fetched_at rather than ready_at because ready_at is
+        // stamped at promotion (later than fetch) and re-stamped by
+        // approve_quarantine/re-eval, both of which would rank an undated post
+        // above the clamp ceiling; fetched_at is the immutable partition key.
+        // M1-689 redteam rounds 1-2.
         sql.append("SELECT p.uid, p.title, p.url, p.ready_at, p.tags ")
            .append("FROM post p ")
            .append("WHERE p.status = 'READY' ")
-           .append("AND p.published_at >= ? ")
+           .append("AND p.ready_at >= ? ")
            .append("AND ").append(worldPredicateSql("p")).append(' ');
 
         List<Object> params = new ArrayList<>();
@@ -146,7 +162,7 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
             params.add(requestedTags.toArray(new String[0]));
         }
 
-        sql.append("ORDER BY p.published_at DESC, p.id DESC LIMIT ?");
+        sql.append("ORDER BY COALESCE(p.published_at, p.fetched_at) DESC, p.id DESC LIMIT ?");
         params.add(limit);
 
         try (PreparedStatement ps = conn.prepareStatement(sql.toString())) {

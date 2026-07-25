@@ -379,6 +379,26 @@ them to the marked region — doing so would red the build.
   summarize time as it does at delivery time (it tells the model
   that text was removed without revealing what, and it preserves
   the visual cue when the prose is read back to the user).
+  **What the window measures.** Every `-w` window is bounded on the
+  instant a post became **available to readers** — the moment it
+  cleared the evaluation pipeline — not on the publication date its
+  source supplied. The two diverge by however long fetching and
+  evaluation take, and a source-supplied date is neither guaranteed
+  monotonic nor guaranteed present. Two consequences are
+  user-visible and intended: `/summary -w 24h` returns posts whose
+  stated publication date is older than 24 hours when they *arrived*
+  within the last 24 hours, and a post whose source supplied no
+  publication date at all is reachable rather than permanently
+  invisible. Posts are still *presented* in publication order; only
+  window membership is decided on arrival. A post carrying no
+  publication date is presented by the instant we fetched it instead of
+  being treated as newest. That places it at the top of the batch it
+  arrived in — no higher — because a dated post from that same fetch is
+  capped at the same instant (security.md §Prompt-injection defenses,
+  `searchPosts`). The same rule governs the
+  periodic group digest's period and the chat agent's post-search
+  tool, so "the last N hours" cannot mean two different things
+  within one conversation.
 - `/save <uid> [-t personal-tags]` — bookmark a post into the calling
   user's library. **Saves are per-user-globally** (decision D13): a
   save made in DM is visible from any group, and vice versa. Personal
@@ -1355,7 +1375,15 @@ contacts and contradict the registration-state model
   `BENIGN_CLOSED → APPROVED`), restores the redacted span, and
   fires `NOTIFY new_post` for the post (so the Provider re-renders
   the now-unredacted body via the standard high-water-mark path —
-  `architecture.md` §Inter-service communication); reject
+  `architecture.md` §Inter-service communication). Approve **re-stamps
+  `ready_at`**, so the approved post re-enters the *current* retrieval
+  window of every scope in that source's world — the next digest and
+  the next `/summary` can carry a post published arbitrarily long ago.
+  That is intended (approval is the admin asserting the content is
+  safe, and the arrival-keyed window means "available to readers as of
+  now"), but it is a wider blast radius than a publication-keyed window
+  gave, and admins should expect the post to resurface rather than
+  land silently in a back-window; reject
   transitions to `REJECTED` (from `PENDING` for the routine path,
   from `BENIGN_CLOSED` for the forensic path) and leaves the
   placeholder permanently. The **forensic reject path
@@ -1722,7 +1750,14 @@ served from cache (no second LLM call).
 **What a digest covers.** A digest summarizes the period **since
 that group's previous digest**, not merely the slot window it
 fires in — a post that arrives between two slots appears in the
-next digest rather than being skipped. A group's **first** digest
+next digest rather than being skipped. "Arrives" is the same
+arrival-keyed measure `/summary`'s window uses (§Content, *What
+the window measures*): a post the pipeline finished evaluating
+after a slot fired belongs to the next digest, however old the
+date its source supplied. This also means a slot that collected
+nothing strands nothing — the next digest's period still opens
+where that slot ended, and a post that became available after it
+satisfies the new period. A group's **first** digest
 has no previous digest to bound it and instead covers **one
 inter-slot period** (the gap between the two configured slot
 hours). A missed slot, or one the group was paused through, still

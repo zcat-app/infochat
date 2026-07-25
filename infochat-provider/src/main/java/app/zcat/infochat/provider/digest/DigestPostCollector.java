@@ -42,9 +42,16 @@ public class DigestPostCollector {
 
     /**
      * Collects posts in the group's D59 world (implicit bootstrap corpus
-     * minus the group's exclusions, plus its subscriptions) published since
-     * the given instant, plus the current subscription versions for
-     * cache-keying.
+     * minus the group's exclusions, plus its subscriptions) that became
+     * readable since the given instant, plus the current subscription
+     * versions for cache-keying.
+     *
+     * <p>"Became readable" is {@code ready_at}, not the source-supplied
+     * {@code published_at}: the window states when a post entered OUR
+     * pipeline's output, which is monotonic and always set, where feed
+     * metadata is neither. Keying on {@code published_at} silently dropped
+     * every post whose fetch+evaluation lag outran the slot that would have
+     * carried it (M1-689).
      */
     public CollectionResult collectForGroup(UUID groupId, Instant since)
             throws SQLException {
@@ -96,6 +103,7 @@ public class DigestPostCollector {
         List<String> tags = tagsArray == null
                 ? List.of()
                 : List.of((String[]) tagsArray.getArray());
+        Timestamp publishedTs = rs.getTimestamp("published_at");
         return new EligiblePostQuery.Post(
                 rs.getObject("id", UUID.class),
                 rs.getString("uid"),
@@ -104,7 +112,11 @@ public class DigestPostCollector {
                 rs.getString("title"),
                 rs.getString("url"),
                 rs.getString("body"),
-                rs.getTimestamp("published_at").toInstant(),
+                // Nullable per V7__joins_post.sql: a source need not supply a
+                // publication date. Reachable here only since M1-689 moved the
+                // window predicate off this column — under published_at >= ?
+                // a NULL row could never match, so this read was unguarded.
+                publishedTs == null ? null : publishedTs.toInstant(),
                 tags,
                 // The digest path never renders the classification: line (that
                 // belongs to /summary + /retry via ClusterBlockRenderer); the
@@ -129,14 +141,14 @@ public class DigestPostCollector {
               FROM post p
               JOIN source s ON s.id = p.source_id
              WHERE p.status = 'READY'
-               AND p.published_at >= ?
+               AND p.ready_at >= ?
                AND ((s.source_origin = 'bootstrap' AND s.deleted_at IS NULL
                      AND NOT EXISTS (SELECT 1 FROM source_exclusion e
                                       WHERE e.scope_kind = 'group' AND e.scope_id = ?
                                         AND e.source_id = s.id))
                  OR p.source_id IN (SELECT source_id FROM source_subscription
                                      WHERE scope_kind = 'group' AND scope_id = ?))
-             ORDER BY p.published_at DESC, p.id DESC
+             ORDER BY COALESCE(p.published_at, p.fetched_at) DESC, p.id DESC
              LIMIT ?""";
 
     // D59 world predicate + EXPLICIT tag-subscription filter (the digest
@@ -147,7 +159,7 @@ public class DigestPostCollector {
               FROM post p
               JOIN source s ON s.id = p.source_id
              WHERE p.status = 'READY'
-               AND p.published_at >= ?
+               AND p.ready_at >= ?
                AND ((s.source_origin = 'bootstrap' AND s.deleted_at IS NULL
                      AND NOT EXISTS (SELECT 1 FROM source_exclusion e
                                       WHERE e.scope_kind = 'group' AND e.scope_id = ?
@@ -158,6 +170,6 @@ public class DigestPostCollector {
                                 FROM scope_tag st
                                 JOIN tag t ON t.id = st.tag_id
                                WHERE st.scope_kind = 'group' AND st.scope_id = ?)
-             ORDER BY p.published_at DESC, p.id DESC
+             ORDER BY COALESCE(p.published_at, p.fetched_at) DESC, p.id DESC
              LIMIT ?""";
 }

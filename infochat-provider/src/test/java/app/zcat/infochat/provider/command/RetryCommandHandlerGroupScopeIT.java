@@ -12,6 +12,7 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -47,6 +48,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>{@link #dmRetryStillReReadsTheDmAnchor} — acceptance item 2: the
  *       existing DM-scope {@code /retry} path is unchanged and still
  *       re-renders the caller's DM summary.</li>
+ *   <li>{@link #retryReplaysAnAnchorHoldingAnUndatedPost} — M1-689, not
+ *       M1-478: the anchor re-fetch survives a post whose source supplied no
+ *       publication date, which the ready_at window admits to {@code /summary}
+ *       and therefore to the anchor.</li>
  * </ol>
  *
  * <p>Test isolation: every fixture carries the {@code m1-478-} prefix;
@@ -174,6 +179,47 @@ class RetryCommandHandlerGroupScopeIT {
                 "the retried DM summary must cite the DM-subscribed post. Got: " + retryBody);
     }
 
+    @Test
+    void retryReplaysAnAnchorHoldingAnUndatedPost() throws Exception {
+        // M1-689 redteam round 3 (high/DOS). /retry re-fetches by the uids
+        // /summary froze into summary_anchor.post_uids and applies no window
+        // of its own, so it inherits reachability from /summary. Moving the
+        // window predicate onto ready_at made a NULL-published_at post
+        // reachable there for the first time, and the anchor re-fetch's
+        // mapper read published_at unguarded — the NPE escaped handle(),
+        // killing /retry for the whole scope for as long as the post stayed
+        // in the window. No adversary needed: an undated or unparseable
+        // <pubDate> is common in real RSS.
+        String user = PREFIX + "undated-user";
+        insertUser(user);
+        UUID userId = userIdOf(user);
+        UUID sourceId = insertSource(PREFIX + "undated-src", "UndatedNews");
+        insertSubscription("dm", userId, sourceId);
+        insertPost(PREFIX + "undated-p1", sourceId, "UNDATED RETRY HEADLINE",
+                null, Instant.now().minus(Duration.ofMinutes(1)), "READY",
+                new String[] { PREFIX + "news" });
+        mockLlm.setResponseText("Undated retry prose.");
+
+        adapter.deliverDm(user, "/summary");
+        awaitDispatchIdle();
+        adapter.reset();
+
+        adapter.deliverDm(user, "/retry");
+        awaitDispatchIdle();
+
+        List<OutboundMessage> sent = adapter.sentMessages();
+        assertEquals(1, sent.size(),
+                "/retry over an anchor holding an undated post must produce "
+                        + "exactly one reply, not die in the mapper");
+        String retryBody = sent.get(0).text();
+        assertNotEquals(noAnchorText(), retryBody,
+                "the anchor /summary wrote must still be readable. Got: " + retryBody);
+        assertTrue(retryBody.contains("UNDATED RETRY HEADLINE"),
+                "the replayed summary must cite the undated post, so the absent "
+                        + "publication date survives the re-fetch as null rather than "
+                        + "throwing. Got: " + retryBody);
+    }
+
     // ----- helpers ------------------------------------------------------
 
     /** Await M1-634 worker-pool quiescence so negative asserts are race-free. */
@@ -253,21 +299,41 @@ class RetryCommandHandlerGroupScopeIT {
         }
     }
 
+    /**
+     * Seeds a post whose {@code ready_at} mirrors its {@code published_at} —
+     * the negligible fetch+evaluation lag shape, where the retrieval window
+     * means the same thing it did before M1-689 moved it onto {@code ready_at}.
+     */
     private void insertPost(String uid, UUID sourceId, String title, Instant publishedAt,
+                            String status, String[] tags) throws Exception {
+        insertPost(uid, sourceId, title, publishedAt, publishedAt, status, tags);
+    }
+
+    /**
+     * Seeds a post with independent publication and readiness instants.
+     * {@code publishedAt} may be null — the column is nullable
+     * (V7__joins_post.sql:145) and a source need not supply a date.
+     * {@code readyAt} is what the retrieval window compares against and is
+     * always set, matching every {@code status='READY'} writer in the pipeline.
+     */
+    private void insertPost(String uid, UUID sourceId, String title,
+                            @Nullable Instant publishedAt, Instant readyAt,
                             String status, String[] tags) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO post (uid, source_id, title, body, url, published_at, "
-                             + "status, tags, upstream_identifier) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+                             + "ready_at, status, tags, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
             ps.setString(1, uid);
             ps.setObject(2, sourceId);
             ps.setString(3, title);
             ps.setString(4, "Body for " + title);
             ps.setString(5, "https://example.com/" + uid);
-            ps.setTimestamp(6, Timestamp.from(publishedAt));
-            ps.setString(7, status);
-            ps.setArray(8, conn.createArrayOf("TEXT", tags));
-            ps.setString(9, uid);
+            ps.setTimestamp(6, publishedAt == null ? null : Timestamp.from(publishedAt));
+            ps.setTimestamp(7, Timestamp.from(readyAt));
+            ps.setString(8, status);
+            ps.setArray(9, conn.createArrayOf("TEXT", tags));
+            ps.setString(10, uid);
             ps.executeUpdate();
         }
     }
