@@ -1,7 +1,7 @@
 ---
 id: M1-693
 title: "Normalize post.title at ingest: empty, content-as-title, and unbounded length"
-status: pending
+status: done
 created: 2026-07-25
 last_updated: 2026-07-25
 blocked_by: []
@@ -60,9 +60,9 @@ acceptance:
     codepoint at the cut boundary is a surrogate pair.
   - mvn verify from the repo root is green
 test_plan:
-  adds: []
-  modifies:
+  adds:
     - infochat-collector/src/test/java/app/zcat/infochat/collector/outbox/PostPersisterTest.java
+  modifies: []
   preserves:
     - all tests currently green on main
 spec_refs:
@@ -71,13 +71,48 @@ spec_refs:
 decision_refs:
   - D17
   - D19
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 282
+      removed: 17
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-07-25
+    verdict: CLEAN
+    base: 8b2c41d13ca0147491d7493015a670cf3ecbc771
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-693-2026-07-25.md
+    out_of_model_count: 2
+    note: |
+      Pre-commit --in-progress audit at the /m1-tick run gate. CLEAN — the
+      title-normalization diff violates no threat-model promise. Two out-of-model
+      advisories (neither warrants a follow-up ticket): pre-M1-693 rows are not
+      backfilled (already this ticket's explicit out_of_scope), and NFKC is not
+      applied to title at the write boundary (pre-existing, unchanged; no promise
+      violated — NFKC is body-only at Stage 1, title command-shape redaction is
+      render-side). Full verdict in verdict_file.
 clarity_check:
+  date: 2026-07-25
+  verdict: PASS
+  warnings:
+    - >-
+      test_plan listed PostPersisterTest.java under 'modifies' but the file
+      does not exist on main; moved to 'adds' (the file is already in
+      files_scope; intent — a unit test for the five title-normalization
+      cases — is unchanged).
 escalation_reason:
 ---
 

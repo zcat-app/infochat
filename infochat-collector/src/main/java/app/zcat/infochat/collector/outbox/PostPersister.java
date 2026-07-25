@@ -168,12 +168,16 @@ public class PostPersister {
             // misleading apparent line into a bot reply. See M1-433 /
             // docs/spec/security.md §Ingest pipeline (security side).
             ps.setString(4, normalizeUrlForStorage(normalized.url()));
-            // post.title is NOT NULL per V7 schema; the SPI marks title
-            // nullable. Coerce null -> "" so a malformed feed item
-            // missing a title does not abort the whole batch, then strip.
-            String rawTitle = normalized.title();
-            String title = rawTitle == null ? "" : rawTitle;
-            ps.setString(5, IngestTextNormalizer.stripMetadataField(title));
+            // post.title is normalized once at this sole write path so
+            // every consumer (/summary, the digest, searchPosts, the
+            // chat tools) sees the same value: null/blank -> the
+            // "untitled" placeholder (no more blank Bluesky headline),
+            // then bidi/zero-width/control strip, then length-cap
+            // truncation. The cap runs AFTER the strip so an obfuscation
+            // sequence can never be split mid-strip; the V7 NOT NULL
+            // constraint holds because normalizeTitle never returns null.
+            // M1-693.
+            ps.setString(5, normalizeTitle(normalized.title()));
             ps.setString(6, normalized.body());
             // NormalizedPost v1 has no author field; the column is
             // nullable per V7.
@@ -251,6 +255,38 @@ public class PostPersister {
         } catch (URISyntaxException e) {
             return null;
         }
+    }
+
+    /**
+     * Normalize a post {@code title} for storage. Composes, in order:
+     * <ol>
+     *   <li>null → {@code ""} — the SPI marks title nullable but V7
+     *       declares it NOT NULL, and a null arrival must not abort the
+     *       batch;</li>
+     *   <li>bidi/zero-width/control strip via
+     *       {@link IngestTextNormalizer#stripMetadataField};</li>
+     *   <li>blank replacement — a title that is empty or whitespace-only
+     *       after the strip becomes the literal {@code "untitled"} so a
+     *       titleless post (Bluesky, Nostr) no longer renders a blank
+     *       headline downstream;</li>
+     *   <li>length-cap truncation via
+     *       {@link IngestTextNormalizer#truncateMetadataField}, which
+     *       runs AFTER the strip so an obfuscation sequence can never be
+     *       split mid-sequence and the cut never lands inside a
+     *       surrogate pair.</li>
+     * </ol>
+     * Applied once at this sole write path so every consumer sees the
+     * same value (M1-693). Never returns null. Package-private so the
+     * unit test pins the normalization without a database.
+     */
+    static String normalizeTitle(@Nullable String rawTitle) {
+        String stripped = IngestTextNormalizer.stripMetadataField(
+            rawTitle == null ? "" : rawTitle);
+        if (stripped.isBlank()) {
+            return "untitled";
+        }
+        return IngestTextNormalizer.truncateMetadataField(
+            stripped, IngestTextNormalizer.TITLE_MAX_LENGTH);
     }
 
     /**

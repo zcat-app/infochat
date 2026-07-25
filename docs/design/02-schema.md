@@ -690,7 +690,16 @@ CREATE TABLE post (
                                                       --   beyond the cap the fetcher hashes the
                                                       --   raw value (sha256-hex) and stores the digest.
   url                 TEXT,
-  title               TEXT NOT NULL,
+  title               TEXT NOT NULL,                   -- normalized once at ingest (PostPersister,
+                                                      --   the sole write path) so every consumer sees
+                                                      --   one value: null/blank → 'untitled' (no blank
+                                                      --   Bluesky/Nostr headline), bidi/zero-width/
+                                                      --   control strip (M1-433), then length-cap
+                                                      --   truncation at IngestTextNormalizer.
+                                                      --   TITLE_MAX_LENGTH (200 chars + '…'; the cut
+                                                      --   runs AFTER the strip and is surrogate-aware).
+                                                      --   Render sites print title verbatim; the cap
+                                                      --   is at ingest, not per-renderer (M1-693).
   body                TEXT,                           -- always plain text (HTML stripped at ingest)
   body_summary        TEXT,                           -- LLM abstract; populated when body length
                                                       --   exceeds the body-summary threshold

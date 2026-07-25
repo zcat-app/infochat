@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 705 |
+| done | 706 |
 | deferred | 0 |
 | abandoned | 20 |
 | **total** | **732** |
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-690 — Chat prompt stops declining off-feed questions (complexity: low, risk: low)
 - M1-691 — Decide whether degraded-digest assembly operands need sanitizing (complexity: low, risk: medium)
 - M1-692 — Pin the NULL-ordering property at the three uncovered sort sites (complexity: low, risk: low)
-- M1-693 — Normalize post.title at ingest: empty, content-as-title, and unbounded length (complexity: medium, risk: medium)
 - M1-695 — Deliver the default /summary as one message per category section (complexity: low, risk: low)
 - M1-696 — /retry replays the render form its anchored /summary produced (complexity: low, risk: low)
 - M1-697 — Scope every feed-bytes sanitize call to one author's field (complexity: medium, risk: medium)
@@ -68,6 +67,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-694 | /summary renders the categorized form by default; --full keeps the flat form | 2026-07-25 | round 2 APPROVE |
+| M1-693 | Normalize post.title at ingest: empty, content-as-title, and unbounded length | 2026-07-25 | round 1 APPROVE |
 | M1-689 | Key post-retrieval windows on ready_at, not published_at | 2026-07-25 | round 1 APPROVE |
 | M1-688 | Fix digest first-run collection window | 2026-07-25 | round 1 APPROVE |
 | M1-685 | Chat model text can contradict the appended curated answer | 2026-07-25 | round 2 APPROVE |
@@ -76,7 +76,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-672 | Narrow Provider grants on identity/authz tables | 2026-07-24 | round 1 APPROVE |
 | M1-683 | Fail the build when a Signal client pairs a real restart hook with no generation supplier | 2026-07-23 | round 1 APPROVE |
 | M1-682 | Fail the build when a transport adapter inherits connected() | 2026-07-23 | round 1 APPROVE |
-| M1-681 | Make a dead transport honest on readiness and on Signal | 2026-07-23 | round 2 APPROVE |
 
 ---
 
@@ -935,7 +934,7 @@ M1-688 (done)
         └── M1-692 (pending) ← runnable
 M1-690 (pending) ← runnable
 M1-691 (pending) ← runnable
-M1-693 (pending) ← runnable
+M1-693 (done)
 M1-694 (done)
   ├── M1-695 (pending) ← runnable
   └── M1-696 (pending) ← runnable

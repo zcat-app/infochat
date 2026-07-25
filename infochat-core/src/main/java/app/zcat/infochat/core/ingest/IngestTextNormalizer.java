@@ -108,4 +108,51 @@ public final class IngestTextNormalizer {
         }
         return out.toString();
     }
+
+    /**
+     * Maximum length, in UTF-16 {@code char} units, of a stored
+     * {@code post.title}. Titles longer than this are stored truncated
+     * with a trailing {@code "…"} so a single nitter tweet-as-title
+     * (up to 280 chars) cannot become a paragraph-length bot headline.
+     *
+     * <p>200 matches the existing in-repo prose-summary cut at
+     * {@code CompressCommandHandler.java:272}, is shorter than a
+     * tweet's 280-char ceiling so the common nitter case actually
+     * truncates, and exceeds the 31-char
+     * {@code NitterFetcher.XCANCEL_PLACEHOLDER_TITLE} ({@code "RSS
+     * reader not yet whitelisted!"}) so the D42 placeholder detection
+     * at {@code NitterFetcher.java:86-87} is unaffected. Measured in
+     * {@code char} units to match the existing in-repo length caps
+     * ({@code CompressCommandHandler}, {@code NostrMessage}).
+     */
+    public static final int TITLE_MAX_LENGTH = 200;
+
+    /**
+     * Truncate a single-line metadata field to at most {@code maxLength}
+     * UTF-16 {@code char} units, appending the {@code "…"} ellipsis
+     * marker when truncation fires so the cut is visible to a reader.
+     *
+     * <p>The cut is surrogate-aware: if the boundary would land inside
+     * a surrogate pair (the {@code char} before the cut is a high
+     * surrogate), the cut backs off by one so a supplementary codepoint
+     * is never split in two. This is the one correction to the
+     * {@code char}-based {@code substring} cuts the existing in-repo
+     * truncators use ({@code ThrottledAdminNotifier.sanitize},
+     * {@code NostrMessage}); those split a surrogate pair at the
+     * boundary, which a headline must not.
+     *
+     * <p>Callers must supply an already-stripped string — the cap runs
+     * AFTER {@link #stripMetadataField} so a bidi/zero-width/control
+     * strip can never be split mid-sequence by the cut (M1-693).
+     */
+    public static String truncateMetadataField(String text, int maxLength) {
+        if (text.length() <= maxLength) {
+            return text;
+        }
+        int keep = Math.max(0, maxLength - 1); // 1 == "…".length()
+        if (keep > 0 && Character.isHighSurrogate(text.charAt(keep - 1))) {
+            keep--;
+        }
+        return text.substring(0, keep) + "…";
+    }
 }
