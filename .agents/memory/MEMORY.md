@@ -55,6 +55,10 @@ and this store is the shared one both worlds read.
 - [Quarkus fast-jar live debugging](quarkus-fastjar-live-debug.md) — transformed-bytecode.jar shadows lib/main so jar overlays silently no-op; adapter dispatch threads carry a foreign context classloader.
 - [git add with a stale pathspec stages nothing](git-add-stale-pathspec-silent-nostage.md) — all-or-nothing pathspecs; `RM` in status means your rewrite is UNSTAGED.
 
+## Open TODOs
+
+- [Recheck mutation testing (pitest) after this batch](mutation-testing-recheck-after-batch.md) — user-requested 2026-07-25, research deliberately deferred; motivated by M1-689's vacuous-pass tests that stayed green while asserting nothing.
+
 ## Known nits awaiting a passing ticket
 
 - [EvalQueueProducer javadoc nit](evalqueueproducer-javadoc-nit.md) — says "first emit" but the gate is per-emit; fold the fix into the next ticket touching that file.
