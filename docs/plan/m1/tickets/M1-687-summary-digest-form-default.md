@@ -5,20 +5,23 @@ status: pending
 created: 2026-07-25
 last_updated: 2026-07-25
 blocked_by: []
-files_budget: 17
+files_budget: 20
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SummaryCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SummaryArgs.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRenderer.java
-  - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/SummaryAnchorRepository.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/StageProgressNotifier.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/bundles/cs.properties
-  - infochat-core/src/main/resources/db/migration/V63__*.sql
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryArgsTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerRenderFormTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryGroupScopeIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryAdapterScopeIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/journey/GoldenPathJourneyIT.java
   - docs/spec/commands.md
   - docs/spec/decisions.md
   - docs/design/03-commands.md
@@ -26,7 +29,7 @@ complexity: high
 risk: medium
 round_cap: 3
 security_relevant: true
-migration_touch: true
+migration_touch: false
 out_of_scope:
   - >-
     The periodic group digest's own render and delivery path
@@ -73,8 +76,29 @@ acceptance:
   - >-
     /retry replays in the SAME render form the anchored /summary produced
     (D36 re-runs the prose stage of the last summary-producing command).
-    A new SummaryCommandHandlerRenderFormTest pins that a --full anchor
-    replays flat and a default anchor replays categorized.
+    The form is carried in the EXISTING summary_anchor.command_name column
+    — "summary" for the default form, "summary --full" for the flat one —
+    which is TEXT NOT NULL with no CHECK constraint (V19:10; the CHECK is
+    on command_kind, V19:8-9). No migration, no SummaryAnchorRepository
+    signature change. A new SummaryCommandHandlerRenderFormTest pins that
+    a --full anchor replays flat and a default anchor replays categorized.
+  - >-
+    The five pre-existing tests that assert ClusterBlockRenderer fields on
+    the DEFAULT /summary are retargeted, never weakened or deleted, per
+    the disposition table in the body's "Pre-existing test dispositions"
+    section. Four move their existing assertions verbatim onto a
+    /summary --full invocation — which still renders those exact fields,
+    so coverage is preserved byte-for-byte, including
+    SummaryAdapterScopeIT's D46 cross-adapter non-leakage property.
+    GoldenPathJourneyIT stays on the DEFAULT command (it pins the MVP
+    journey a real user walks) and re-points hop 6 at the stubbed cluster
+    prose, which the categorized form does render. No assertion is
+    removed, no test is disabled, and no @Disabled/assumeTrue is added.
+  - >-
+    SummaryCommandHandlerTest.buildHandlerWithStubs (lines 111-127)
+    hand-wires every @Inject field of SummaryCommandHandler, so it is
+    extended with whatever renderer collaborator the new default path
+    adds. Without this the terminal path NPEs in that test.
   - >-
     The degraded-prose path stays sanitizer/translator-correct in the new
     default form: degraded cluster prose bypasses sanitize+translate and
@@ -99,8 +123,18 @@ test_plan:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerRenderFormTest.java
   modifies:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryArgsTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryGroupScopeIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryAdapterScopeIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/journey/GoldenPathJourneyIT.java
   preserves:
-    - all tests currently green on main
+    - >-
+      Every test green on main EXCEPT the five named in `modifies` above,
+      which assert ClusterBlockRenderer fields on the default /summary and
+      are retargeted per the body's disposition table. Their assertions are
+      preserved verbatim; only the invocation (or, for GoldenPathJourneyIT,
+      the asserted string) changes. Nothing is deleted or disabled.
 spec_refs:
   - docs/spec/commands.md §Content
   - docs/spec/commands.md §Periodic group digests
@@ -116,37 +150,6 @@ aborted_attempts: []
 reopens: []
 redteam_findings: []
 clarity_check:
-  date: 2026-07-25
-  verdict: WARN
-  warnings:
-    - >-
-      lint PASS (0 blockers, 0 warnings). Self-check raised three items,
-      all resolved with the user 2026-07-25 before the status flip.
-    - >-
-      Acceptance 1 and 7 disagreed on whether the over-cap degraded path
-      is re-rendered. Sec Context names that path as the reported wall
-      (remote-llm retrieves up to 500 posts against a summarizer-post-cap
-      of 50, so production never reaches the LLM branch) and out_of_scope
-      calls the fix RENDER-side, so both items were tightened to state
-      the degraded reply is categorized too.
-    - >-
-      files_scope omitted three unavoidable paths - DigestRenderer.java
-      (out_of_scope already contemplates extending it),
-      SummaryAnchorRepository.java (owns the summary_anchor SQL that
-      acceptance 5's render-form persistence needs) and
-      StageProgressNotifier.java (acceptance 3's N-message terminal, and
-      the adapter resolution lives there). Added; files_budget 14 -> 17.
-    - >-
-      Sizing question in Sec Notes answered - the over-cap guard bounds
-      the default path's prose-call count at summarizer-post-cap (50),
-      exactly as today. shownClusters is a subset of the clustered posts,
-      so per-category capping can only lower the count, never raise it.
-      The ~96-cluster worry assumed the guard does not fire; it does.
-    - >-
-      Incidental finding NOT folded in - post.title is unbounded (nitter
-      stores whole tweets) and empty for bluesky sources. Filed as M1-693
-      (97548b48) per the user's call to leave it as is for now.
-  blockers: []
 escalation_reason:
 ---
 
@@ -204,6 +207,39 @@ digest"*, and decision **D62** carries the same carve-out (*"`/summary`'s
 flat interactive format … unchanged"*). Both must be updated to describe the
 new default-plus-`--full` split rather than left contradicting the code.
 
+## Pre-existing test dispositions
+
+`DigestRenderer.renderSections` emits **prose only** per cluster — no title,
+no source display name, no uid, no `[topic_id=` (`DigestRenderer.java:124-134`).
+So every pre-existing test that asserts a `ClusterBlockRenderer` field on the
+**default** `/summary` stops passing the moment acceptance 1 lands. Enumerate
+the class mechanically:
+
+```
+grep -rln "topic_id=\|covered by:\|classification: \|finalizedBodies" \
+  --include=*.java infochat-provider/src/test/java | xargs grep -ln "/summary"
+```
+
+Each site is disposed as follows. **No assertion is deleted, weakened,
+`@Disabled`, or `assumeTrue`'d** — the engineering rules forbid it and the
+reviewer enforces it.
+
+| Site | Asserts | Disposition |
+|---|---|---|
+| `SummaryCommandHandlerTest:266-275` | `[topic_id=` ×3, `covered by:`, `classification: technical\n`, `tags: …\n` | retarget the invocation to `/summary --full`; assertions verbatim. Add the default-form coverage in the new `SummaryCommandHandlerRenderFormTest` instead |
+| `SummaryCommandHandlerTest:111-127` | — (`buildHandlerWithStubs` hand-wires every `@Inject` field) | extend with the new renderer collaborator, else the terminal path NPEs |
+| `SummaryIT:116-126` | four post uids + both source display names | retarget to `/summary --full`; assertions verbatim |
+| `SummaryGroupScopeIT:141-144` | `GROUP FLOW HEADLINE` + uid | retarget to `/summary --full`; assertions verbatim |
+| `SummaryAdapterScopeIT:117` | `ALPHA HEADLINE m1-040si` — **D46 cross-adapter non-leakage** | retarget to `/summary --full`; assertion verbatim. `--full` renders the headline identically, so the security property is pinned exactly as before |
+| `GoldenPathJourneyIT:239-249` | `postTitle` — **MVP §6 exit criterion**, hop 6 | **stays on the default command** — the golden path must walk what a real user gets. Re-point the assertion at the stubbed cluster prose (`"Cluster prose for the journey summary."`), which the categorized form does render |
+
+Why `--full` for four of them: `--full` preserves today's flat
+`ClusterBlockRenderer` output verbatim (acceptance 2), so moving the
+invocation preserves the assertion's meaning byte-for-byte rather than
+trading coverage away. `GoldenPathJourneyIT` is the exception because its
+value is specifically that it exercises the *default* journey; retargeting it
+to `--full` would silently stop covering the path every user actually hits.
+
 ## Notes
 
 - Delivery shape: the user explicitly chose per-category messages over one
@@ -219,18 +255,29 @@ new default-plus-`--full` split rather than left contradicting the code.
   finalizing the placeholder with the first section and sending the rest as
   fresh messages is the obvious shape, but the placeholder/abandonment
   safety net (`terminateAbandoned`, M1-334/M1-611) must still hold.
-- Render-form persistence for `/retry`: `summary_anchor` (V19) stores
-  `command_kind`, `command_name`, `arg_hash`, `post_uids`, `cluster_map` —
-  nothing that distinguishes the two render forms. Highest existing
-  migration is V62. Whether to add a column or encode the form elsewhere is
-  an implementation call; `migration_touch: true` is set conservatively.
-- Sizing check the implementer should make explicitly: at
-  `cluster-cap=500`, categorizing then capping at 12/category can still put
-  ~8 categories × 12 = ~96 clusters into `SummaryProseGenerator.generate`,
-  where today's `summarizer-post-cap` hard-stops at 50. Decide and state
-  what bounds the total prose-call count on the new default path.
+- **Render-form persistence for `/retry`: settled, no migration.**
+  `summary_anchor.command_name` is `TEXT NOT NULL` with no CHECK
+  (`V19__summary_anchor.sql:10`; the CHECK is on `command_kind`, lines 8-9),
+  and `SummaryAnchorRepository.write` already takes `commandName` as a
+  parameter while `AnchorRow` already exposes it. Writing `"summary"` vs
+  `"summary --full"` therefore carries the render form with **no DDL and no
+  repository signature change**, which also avoids breaking three
+  pre-existing files that a signature change would hit at compile time
+  (`RetryCommandHandlerTest:345-379`, `InboundRouterStopRetryIT:104,128`,
+  `SummaryAnchorRepositoryTest`). `RetryCommandHandler` must start *reading*
+  `anchor.commandName()` — it does not today.
+  A V63 migration is **actively unsafe** here: the tree holds
+  `V64__post_window_index_on_ready_at.sql` (M1-689, merged), and Flyway runs
+  with default `outOfOrder=false` (no `quarkus.flyway.*out-of-order`
+  property exists in the repo), so a V63 landing after V64 fails validation
+  on any database that already applied V64.
+- **Sizing: settled.** The over-cap guard bounds the default path's
+  prose-call count at `summarizer-post-cap` (50) — identical to today. The
+  guard returns before any LLM call, so `renderSections` only ever runs on
+  a ≤50-post set; `shownClusters` is a subset of those clusters, so
+  per-category capping can only *lower* the call count, never raise it. The
+  "~8 categories × 12 = ~96 clusters" concern assumed the guard does not
+  fire; it does.
 - Adjacent code: `DigestRenderer.java`, `DigestCategorizer.java`,
   `ClusterBlockRenderer.java` (shared today by `/summary` and `/retry`
   only).
-- Relevant design note: `docs/design/03-commands.md` §`/summary [tag]
-  [-w 24h]` carries the canonical output shape and the cluster-cap table.
