@@ -384,11 +384,27 @@ close the same way, and the difference is the lesson:
   reply line interpolates the post **title**, which is upstream-
   controlled and legitimately contains slashes (`TCP/IP`), so it cannot
   be rejected; and pre-existing tag rows predate the reject. So the
-  group-visible echo surfaces (`/saved` reply, the `/summary` cluster
-  headline, and the degraded group digest) are additionally passed
-  through the closed-list `LlmOutputSanitizer` at **render**, where a
-  title or tag whose canonical form is a privileged command renders as
-  `[redacted command]`. This instance sits at the **same attacker tier**
+  group-visible echo surfaces (`/saved` reply, `/summary`, and the
+  degraded group digest) are additionally passed through the closed-list
+  `LlmOutputSanitizer` at **render**, where a title or tag whose
+  canonical form is a privileged command renders as
+  `[redacted command]`. On `/summary` both the redaction point and its
+  **completeness** depend on the render form (`commands.md` §Content).
+  The default categorized form renders no headline and instead sanitizes
+  the whole per-cluster prose — degraded prose included — so on that form
+  every feed title that reaches the reader is redacted and audited.
+  `--full` sanitizes the cluster **headline** only: its `summary:` field
+  passes degraded prose through verbatim, and that prose carries
+  `title — url (uid)` for *every* post in the cluster, so a
+  command-shaped title still reaches the reader on that form. The
+  headline sanitize also only ever sees the cluster's first post, so a
+  multi-post cluster whose command-shaped post is not first produces no
+  `LLM_OUTPUT_SANITIZED` row at all. This is the same
+  unsanitized-assembly residual recorded below for the degraded digest,
+  and `/retry` inherits it too because it always replays the flat form.
+  On `--full` and `/retry`, therefore, the surface is **open, not
+  closed** — and it is outside M1-691, whose scope is
+  `DegradedDigestRenderer` and which explicitly excludes `/summary`. This instance sits at the **same attacker tier**
   as `/add-source` in a DM — both are open to any non-banned user
   (`commands.md` §Source management) — not a lower one; it escaped
   earlier constraint because the write-side caps were designed for size,
@@ -495,7 +511,29 @@ evading the match — and the line bound also regressed the adjacent
 Whitespace is read the way the parser's `split("\s+")` reads it — every
 ASCII `\s` character is a token separator, so `/list-sources` and
 `--all` separated by a bare `\r` or by newlines match, mirroring the
-dispatch. The cost of the whole-message bound is that a genuine mention
+dispatch. **The span's justification depends on the caller's unit of input, and
+one caller now widens it.** The argument below — that a collapsed span
+only ever swallows bot-authored bytes — holds while every sanitize call
+over feed-derived text is scoped to a *single* author's field, which is
+how the pre-existing call sites are built (`ClusterBlockRenderer` passes
+one post title, `DegradedDigestRenderer` one title per post, the
+`/saved` reply one row's title and one row's tags). The categorized
+`/summary` form (M1-694) is the first caller to hand the sanitizer a
+*cluster's* assembled degraded prose, which concatenates `title — url
+(uid)` for every post in that cluster — several mutually untrusted
+publishers in one call. A command word in one post and a matching flag
+in another therefore collapse into a single `[redacted command]`,
+deleting any third post between them. This is **accepted residual**, not
+a closed control: the direction is over-redaction rather than
+under-redaction, the marker is visible to the reader, and every hit
+still emits the WARN and the per-occurrence audit row, so it degrades
+availability of one story rather than the injection guarantee. It is
+recorded here because the paragraph's own reasoning no longer covers it,
+and because the fix — scoping the sanitize call to one post, not one
+cluster — is the same fix the `/summary --full`, `/retry` and
+degraded-digest paths need, and is deliberately not attempted piecemeal.
+
+The cost of the whole-message bound is that a genuine mention
 of the command and a later, unrelated admin flag in the bot's own
 explanatory prose collapse into one redacted span; that is bot-authored
 text, and the same span copy-pasted from the `/` does dispatch, so the
@@ -533,7 +571,15 @@ display name and a bare URL, neither of which passes through the
 sanitizer, and it does not translate. The assembled message is
 therefore outside the guarantee, and the residual risk §Failure
 handling already records for degraded output covers it. (Whether those
-unsanitized assembly operands are acceptable is M1-691.)
+unsanitized assembly operands are acceptable is M1-691.) The default
+categorized `/summary` form is the exception that shows the shape of the
+fix: it sanitizes the **assembled** degraded prose rather than the
+headline alone, so for that path the guarantee covers the whole
+per-cluster string. M1-691 is what decides whether the digest's own
+branch follows. The `/summary --full` and `/retry` flat renders still
+assemble the old way and are covered by neither — M1-691's scope is
+`DegradedDigestRenderer` and it excludes `/summary` explicitly, so that
+residual currently has no owning ticket.
 Flattening alone cannot carry
 that guarantee, because flattening means *parsing*, and the parser is a
 regular expression: CommonMark permits balanced brackets inside a link

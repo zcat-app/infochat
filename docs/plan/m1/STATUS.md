@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 703 |
+| done | 704 |
 | deferred | 0 |
 | abandoned | 20 |
 | **total** | **731** |
@@ -30,7 +30,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-691 — Decide whether degraded-digest assembly operands need sanitizing (complexity: low, risk: medium)
 - M1-692 — Pin the NULL-ordering property at the three uncovered sort sites (complexity: low, risk: low)
 - M1-693 — Normalize post.title at ingest: empty, content-as-title, and unbounded length (complexity: medium, risk: medium)
-- M1-694 — /summary renders the categorized form by default; --full keeps the flat form (complexity: low, risk: low)
+- M1-695 — Deliver the default /summary as one message per category section (complexity: low, risk: low)
+- M1-696 — /retry replays the render form its anchored /summary produced (complexity: low, risk: low)
 
 ---
 
@@ -47,8 +48,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-695 — blocked_by: M1-694 (pending)
-- M1-696 — blocked_by: M1-694 (pending)
+_(none)_
 
 ---
 
@@ -67,6 +67,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-694 | /summary renders the categorized form by default; --full keeps the flat form | 2026-07-25 | round 2 APPROVE |
 | M1-689 | Key post-retrieval windows on ready_at, not published_at | 2026-07-25 | round 1 APPROVE |
 | M1-688 | Fix digest first-run collection window | 2026-07-25 | round 1 APPROVE |
 | M1-686 | Fix wizard invite guidance and stale 2-secrets comment refs | 2026-07-24 | round 1 APPROVE |
@@ -76,7 +77,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-682 | Fail the build when a transport adapter inherits connected() | 2026-07-23 | round 1 APPROVE |
 | M1-681 | Make a dead transport honest on readiness and on Signal | 2026-07-23 | round 2 APPROVE |
 | M1-680 | Match closed-list flag entries at any argument position | 2026-07-23 | round 1 APPROVE |
-| M1-679 | DevTerminalHarnessRoundtripIT fails on any repeat verify: the startup poll eats the previous run's input file | 2026-07-23 | round 1 APPROVE |
 
 ---
 
@@ -936,7 +936,7 @@ M1-688 (done)
 M1-690 (pending) ← runnable
 M1-691 (pending) ← runnable
 M1-693 (pending) ← runnable
-M1-694 (pending) ← runnable
-  ├── M1-695 (pending)
-  └── M1-696 (pending)
+M1-694 (done)
+  ├── M1-695 (pending) ← runnable
+  └── M1-696 (pending) ← runnable
 ```

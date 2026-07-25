@@ -21,6 +21,7 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>positional {@code [tag]} (optional)</li>
  *   <li>{@code -w <duration>} (optional; default 24h)</li>
+ *   <li>{@code --full} (optional; selects the flat per-cluster render form)</li>
  * </ul>
  *
  * <p>Tag normalization is delegated to {@link TagNormalizer} — the
@@ -32,7 +33,18 @@ import java.util.regex.Pattern;
  */
 public record SummaryArgs(
         Optional<String> tag,
-        Duration window) {
+        Duration window,
+        boolean full) {
+
+    /**
+     * The flat-render opt-in. The default {@code /summary} renders the
+     * categorized form (category headers, one prose paragraph per cluster,
+     * per-category cap); {@code --full} selects the flat per-cluster block
+     * form instead. Kept as an exact-match token rather than a prefix so a
+     * mistyped {@code --fully} still lands on the unknown-flag error rather
+     * than silently changing the render form.
+     */
+    private static final String FULL_FLAG = "--full";
 
     /** Default time window per design 03 §Time window flag. */
     public static final Duration DEFAULT_WINDOW = Duration.ofHours(24);
@@ -68,11 +80,15 @@ public record SummaryArgs(
 
         Optional<String> tag = Optional.empty();
         Duration window = DEFAULT_WINDOW;
+        boolean full = false;
 
         int i = 0;
         while (i < tokens.size()) {
             String token = tokens.get(i);
-            if (token.equals("-w")) {
+            if (token.equals(FULL_FLAG)) {
+                full = true;
+                i++;
+            } else if (token.equals("-w")) {
                 if (i + 1 >= tokens.size()) {
                     return new Failure(BUNDLE_WINDOW_OUT_OF_RANGE);
                 }
@@ -101,7 +117,7 @@ public record SummaryArgs(
                 i++;
             }
         }
-        return new Success(new SummaryArgs(tag, window));
+        return new Success(new SummaryArgs(tag, window, full));
     }
 
     private static ParseResult parseWindow(String raw) {
@@ -131,7 +147,10 @@ public record SummaryArgs(
         if (!isWithinRange(unit, n)) {
             return new Failure(BUNDLE_WINDOW_OUT_OF_RANGE);
         }
-        return new Success(new SummaryArgs(Optional.empty(), d));
+        // Window-only carrier: the caller reads .window() off it and folds
+        // the value into the record it is building, so tag/full here are
+        // placeholders, never the parsed invocation's values.
+        return new Success(new SummaryArgs(Optional.empty(), d, false));
     }
 
     private static boolean isWithinRange(String unit, int n) {

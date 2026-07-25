@@ -99,7 +99,11 @@ class SummaryAdapterScopeIT {
                 now, "READY", new String[] { PREFIX + "news" });
         mockLlm().setResponseText("ProseFor(m1-040si)");
 
-        adapter.deliverDm(SHARED_CONTACT_ID, "/summary");
+        // --full renders the flat per-cluster blocks carrying the headlines
+        // this test's D46 non-leakage pair asserts on (ALPHA present, BRAVO
+        // absent); the M1-694 default form renders prose only, which would
+        // make the assertFalse pass vacuously.
+        adapter.deliverDm(SHARED_CONTACT_ID, "/summary --full");
 
         // /summary runs on an M1-634 worker — drain the pool so the
         // exactly-one and never-BRAVO negative asserts are race-free.
@@ -126,9 +130,43 @@ class SummaryAdapterScopeIT {
                 "exactly one LLM call expected (one eligible post → one cluster)");
         assertFalse(inmemoryUserId.equals(foreignUserId),
                 "test fixture sanity: the two users have distinct user ids");
+
+        // The same D46 property on the DEFAULT form, which is what users
+        // actually receive. A headline assertFalse would pass vacuously here
+        // (the categorized form renders prose only), so the discriminator is
+        // the paragraph COUNT: the shared contact subscribes to the alpha
+        // source alone, so a contact_id-only cross-resolve surfaces the
+        // foreign post as a SECOND cluster prose paragraph. Counting is
+        // required because the stub returns one fixed string per cluster.
+        adapter.reset();
+        mockLlm().reset();
+        mockLlm().setResponseText("ProseFor(m1-040si)");
+
+        adapter.deliverDm(SHARED_CONTACT_ID, "/summary");
+
+        DispatchAwaits.await(() -> interruptibleDispatcher.inFlightTaskCount() == 0,
+                "interruptible dispatch pool quiescent");
+
+        assertEquals(1, adapter.finalizedBodies().size(),
+                "exactly one finalized summary on the default form too");
+        String defaultBody = adapter.finalizedBodies().get(0);
+        assertEquals(1, countOccurrences(defaultBody, "ProseFor(m1-040si)"),
+                "the default form MUST render exactly one cluster prose paragraph — a "
+                        + "second one means the foreign-adapter user's post leaked through "
+                        + "a contact_id-only SELECT. Got: " + defaultBody);
+        assertEquals(1, mockLlm().callCount(),
+                "exactly one LLM call on the default form (one eligible post → one cluster)");
     }
 
     // --- helpers ---------------------------------------------------------
+
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        for (int i = haystack.indexOf(needle); i >= 0; i = haystack.indexOf(needle, i + needle.length())) {
+            count++;
+        }
+        return count;
+    }
 
     private UUID insertUser(String adapterName, String contactId) throws Exception {
         try (Connection conn = dataSource.getConnection();

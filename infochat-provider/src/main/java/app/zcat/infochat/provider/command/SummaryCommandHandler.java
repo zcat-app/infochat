@@ -14,6 +14,8 @@ import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.command.SummaryArgs.Failure;
 import app.zcat.infochat.provider.command.SummaryArgs.ParseResult;
 import app.zcat.infochat.provider.command.SummaryArgs.Success;
+import app.zcat.infochat.provider.digest.DigestRenderer;
+import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
@@ -147,6 +149,15 @@ public class SummaryCommandHandler implements CommandHandler {
     @Inject
     SummaryProseGenerator summaryProseGenerator;
 
+    /**
+     * Renders the DEFAULT (categorized) form via
+     * {@link DigestRenderer#renderSummarySections} — the no-LLM entry point,
+     * so it is equally usable on the over-cap branch below. {@code --full}
+     * bypasses it for {@link ClusterBlockRenderer}'s flat blocks.
+     */
+    @Inject
+    DigestRenderer digestRenderer;
+
     @Inject
     LlmOutputSanitizer llmOutputSanitizer;
 
@@ -262,7 +273,7 @@ public class SummaryCommandHandler implements CommandHandler {
         // the doomed per-cluster calls this gate exists to prevent.
         if (result.posts().size() > summarizerPostCap) {
             String scopeLanguage = readScopeLanguage(scopeKind, scopeId.get());
-            return reply(scope, composeWindowTooLargeReply(result, scopeLanguage));
+            return reply(scope, composeWindowTooLargeReply(result, scopeLanguage, args.full()));
         }
 
         // At most one in-flight interruptible request per (user, scope)
@@ -356,11 +367,7 @@ public class SummaryCommandHandler implements CommandHandler {
                     out.append("\n\n");
                 }
 
-                ClusterBlockRenderer clusterBlockRenderer =
-                        new ClusterBlockRenderer(llmOutputSanitizer, translationPipeline, bundleLoader);
-                for (ClusterProse cp : prose) {
-                    clusterBlockRenderer.appendClusterBlock(out, cp, scopeLanguage);
-                }
+                out.append(renderBody(prose, scopeLanguage, args.full()));
 
                 // Degraded prose is still a successful terminal delivery
                 // (the composed body carries the degraded notice). Only a
@@ -420,7 +427,7 @@ public class SummaryCommandHandler implements CommandHandler {
      * work — so the degraded blocks are byte-identical to what the
      * LLM-failure path would have rendered for the same posts.
      */
-    private String composeWindowTooLargeReply(Result result, String scopeLanguage) {
+    private String composeWindowTooLargeReply(Result result, String scopeLanguage, boolean full) {
         List<Cluster> clusters = clusterTraversal.cluster(result.posts());
         StringBuilder out = new StringBuilder();
         if (result.topTagRestriction().isPresent()) {
@@ -439,14 +446,44 @@ public class SummaryCommandHandler implements CommandHandler {
         out.append(format(BundleKeys.REPLY_SUMMARY_WINDOW_TOO_LARGE_NOTICE,
                 result.totalBeforeCap(), summarizerPostCap));
         out.append("\n\n");
+        // Degraded prose is composed here, not by the summarizer, which is
+        // the whole point of this branch — so the categorized render below
+        // reaches no LLM either (renderSummarySections takes prose, it does
+        // not generate it).
+        List<ClusterProse> degradedProse = clusters.stream()
+                .map(cluster -> new ClusterProse(
+                        cluster, SummaryProseGenerator.degradedProseFor(cluster), true))
+                .toList();
+        out.append(renderBody(degradedProse, scopeLanguage, full));
+        return out.toString().stripTrailing();
+    }
+
+    /**
+     * Render the per-cluster body in the caller's chosen form. The DEFAULT
+     * (categorized) form groups clusters under category headers with a
+     * per-category cap; {@code --full} emits {@link ClusterBlockRenderer}'s
+     * flat seven-field block per cluster, which is what {@code /retry}
+     * replays and what the {@code --full}-retargeted tests assert on.
+     *
+     * <p>Both branches take prose the CALLER already generated, so neither
+     * makes an LLM call and the summarizer call count is identical in both
+     * forms — the property {@code TranslationPipelineIT}'s exact
+     * {@code mockLlm.callCount()} assertions rest on.
+     */
+    private String renderBody(List<ClusterProse> prose, String scopeLanguage, boolean full) {
+        if (!full) {
+            return String.join("\n\n",
+                    digestRenderer.renderSummarySections(prose, scopeLanguage).stream()
+                            .map(RenderedSection::text)
+                            .toList());
+        }
+        StringBuilder out = new StringBuilder();
         ClusterBlockRenderer clusterBlockRenderer =
                 new ClusterBlockRenderer(llmOutputSanitizer, translationPipeline, bundleLoader);
-        for (Cluster cluster : clusters) {
-            clusterBlockRenderer.appendClusterBlock(out,
-                    new ClusterProse(cluster, SummaryProseGenerator.degradedProseFor(cluster), true),
-                    scopeLanguage);
+        for (ClusterProse cp : prose) {
+            clusterBlockRenderer.appendClusterBlock(out, cp, scopeLanguage);
         }
-        return out.toString().stripTrailing();
+        return out.toString();
     }
 
     /**

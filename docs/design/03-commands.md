@@ -436,7 +436,7 @@ sources subscribed by the calling scope.
 
 ## 3.5 Content commands
 
-### `/summary [tag] [-w 24h]`
+### `/summary [tag] [-w 24h] [--full]`
 
 Generates an on-the-fly summary of `READY` posts matching the tag (or all
 followed tags if no arg) within the time window (decision D18 — on-the-fly
@@ -445,6 +445,30 @@ periodic group digests, §3.12). Cluster grouping is by deterministic SQL
 traversal of the `post_reference` graph **before any LLM call**; the LLM
 writes prose per pre-computed cluster, so the cluster set is reproducible
 (determinism boundary D19).
+
+**Render form (M1-694).** `SummaryArgs.full` selects between two renderers;
+it changes nothing about post selection, so both forms are equally
+reproducible.
+
+- **default** — `DigestRenderer.renderSummarySections(List<ClusterProse>,
+  String)`: the D62 categorized form (category headers, one prose paragraph
+  per cluster, `infochat.digest.category-item-cap`, overflow line from
+  `reply.summary.category.more`). No closing affordance — that key is
+  group-worded. The method takes prose the handler ALREADY generated, so it
+  issues no LLM call of its own; that is what makes it reusable on the
+  over-cap branch, and what keeps the summarizer/translator call counts
+  identical to the flat form. Its name differs from `renderSections`
+  because a `List<ClusterProse>` overload would collide with
+  `renderSections(List<Post>, String)`'s erasure.
+- **`--full`** — `ClusterBlockRenderer.appendClusterBlock`: the flat
+  seven-field block per cluster (`[topic_id=…]`, headline, `covered by:`,
+  `score:`, `summary:`, `classification:`, `tags:`). This is also the form
+  `/retry` replays.
+
+`DigestRenderer.forSummaryRendering(...)` is the cross-package construction
+seam the plain-JUnit handler tests use; the renderer's `@Inject` fields are
+package-private, and the tests must wire a REAL renderer holding their own
+sanitizer so the sanitization assertions stay meaningful.
 
 **Window column.** The `-w` predicate is `post.ready_at >= cutoff`, not
 `published_at` (M1-689). `published_at` is source-supplied, nullable

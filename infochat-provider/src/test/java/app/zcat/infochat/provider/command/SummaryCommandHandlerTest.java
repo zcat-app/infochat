@@ -8,6 +8,7 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
+import app.zcat.infochat.provider.digest.DigestRenderer;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.summary.ClusterTraversal;
@@ -19,6 +20,7 @@ import app.zcat.infochat.provider.summary.EmptyEdgeSource;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
 import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
+import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -114,8 +116,20 @@ class SummaryCommandHandlerTest {
         handler.eligiblePostQuery = eligiblePostQuery;
         handler.clusterTraversal = new ClusterTraversal(new EmptyEdgeSource(), 3);
         handler.summaryProseGenerator = proseGenerator;
-        handler.llmOutputSanitizer = SanitizerTestDoubles.noAuditSanitizer();
-        handler.translationPipeline = newEnShortCircuitPipeline(bundleLoader);
+        LlmOutputSanitizer sanitizer = SanitizerTestDoubles.noAuditSanitizer();
+        TranslationPipeline translationPipeline = newEnShortCircuitPipeline(bundleLoader);
+        handler.llmOutputSanitizer = sanitizer;
+        handler.translationPipeline = translationPipeline;
+        // The default (categorized) render path runs inside DigestRenderer,
+        // so the renderer must hold THIS test's sanitizer and pipeline —
+        // otherwise sanitizerStripsPrivilegedCommandFromLlmAuthoredProse and
+        // the cs-scope tests would be asserting against a different
+        // collaborator than the one they configure. The cap values mirror the
+        // production @ConfigProperty defaults that manual field injection
+        // does not apply (same reason summarizerPostCap is set below).
+        handler.digestRenderer = DigestRenderer.forSummaryRendering(
+                sanitizer, translationPipeline, bundleLoader,
+                /* categoryItemCap */ 12, /* categoryMinClusters */ 3);
         handler.summaryAnchorRepository = anchorRepository;
         handler.inFlightTracker = tracker;
         handler.llmRateCap = new LlmRateCap(10);
@@ -257,7 +271,10 @@ class SummaryCommandHandlerTest {
 
         // Terminal path: handle() self-delivers via the notifier and
         // returns null; the composed body is the argument to complete().
-        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "happy"), "/summary");
+        // --full is what renders the flat per-cluster blocks this test
+        // asserts on (M1-694 made the categorized form the default).
+        OutboundMessage reply =
+                handler.handle(new ScopeRef.Dm(PREFIX + "happy"), "/summary --full");
         assertNull(reply, "terminal /summary self-delivers via the notifier and returns null");
 
         assertEquals(3, proseGenerator.callCount(), "one LLM call per cluster");
@@ -274,6 +291,164 @@ class SummaryCommandHandlerTest {
         assertTrue(body.contains("tags: " + PREFIX + "news\n"),
                 "tags: line reflects the seeded tags, distinct from classification. Got: " + body);
         assertTrue(body.contains("Headline A"));
+    }
+
+    /**
+     * The M1-694 default: the same three posts render as one prose paragraph
+     * per cluster under a category header, with none of the seven
+     * ClusterBlockRenderer fields the --full sibling above asserts on. The
+     * three posts share one tag and categoryMinClusters is 3, so the tag
+     * qualifies as a category rather than falling into Other.
+     */
+    @Test
+    void defaultSummaryRendersCategorizedFormWithoutClusterBlockFields() {
+        Instant now = Instant.now();
+        List<Post> posts = List.of(
+                post(PREFIX + "g1", "Headline A", now.minus(Duration.ofMinutes(1))),
+                post(PREFIX + "g2", "Headline B", now.minus(Duration.ofMinutes(2))),
+                post(PREFIX + "g3", "Headline C", now.minus(Duration.ofMinutes(3))));
+        eligiblePostQuery.seedPosts(posts, /* excludedCount */ 0);
+        proseGenerator.setResponseText("Summary prose for the cluster.");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "cat"), "/summary");
+        assertNull(reply, "terminal /summary self-delivers via the notifier and returns null");
+
+        assertEquals(3, proseGenerator.callCount(),
+                "the default form generates prose exactly as the flat form does");
+        String body = progressNotifier.completedText();
+        assertNotNull(body, "the composed summary must reach the notifier's complete() call");
+        assertTrue(body.contains((PREFIX + "news news").toUpperCase(Locale.ROOT)),
+                "default form must carry the uppercased category header. Got: " + body);
+        assertTrue(body.contains("Summary prose for the cluster."),
+                "default form must carry the LLM-authored cluster prose. Got: " + body);
+        assertFalse(body.contains("[topic_id="),
+                "default form must not emit the flat cluster-block topic id. Got: " + body);
+        assertFalse(body.contains("covered by:"),
+                "default form must not emit the flat covered-by line. Got: " + body);
+        assertFalse(body.contains("score:"),
+                "default form must not emit the flat score line. Got: " + body);
+        assertFalse(body.contains("classification:"),
+                "default form must not emit the flat classification line. Got: " + body);
+        assertFalse(body.contains("tags:"),
+                "default form must not emit the flat tags line. Got: " + body);
+        assertFalse(body.contains("Headline A"),
+                "the categorized form renders prose only — no per-post headline. Got: " + body);
+    }
+
+    /**
+     * The over-cap branch (M1-623) is the one production actually hits, so
+     * it must categorize too — while keeping every guarantee that made it a
+     * guard in the first place: no LLM call, no anchor, and the too-large
+     * notice. The degraded prose still carries headline/url/uid because
+     * degradedProseFor composes them INTO the prose.
+     */
+    @Test
+    void overCapDefaultFormIsCategorizedAndStillMakesNoLlmCall() {
+        Instant now = Instant.now();
+        // Three posts (not two) so the shared tag reaches categoryMinClusters
+        // and forms a real category section rather than falling into Other.
+        List<Post> posts = List.of(
+                post(PREFIX + "o1", "Over headline A", now.minus(Duration.ofMinutes(1))),
+                post(PREFIX + "o2", "Over headline B", now.minus(Duration.ofMinutes(2))),
+                post(PREFIX + "o3", "Over headline C", now.minus(Duration.ofMinutes(3))));
+        eligiblePostQuery.seedPosts(posts, /* excludedCount */ 0);
+        handler.summarizerPostCap = 2;
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "over"), "/summary");
+
+        assertNotNull(reply, "the over-cap guard replies through the router, not the notifier");
+        String body = reply.text();
+        assertEquals(0, proseGenerator.callCount(),
+                "the over-cap guard must not reach the summarizer");
+        assertEquals(0, anchorRepository.writeCount(),
+                "the over-cap guard must write no summary anchor");
+        assertTrue(body.contains((PREFIX + "news news").toUpperCase(Locale.ROOT)),
+                "over-cap default form must carry the category header. Got: " + body);
+        assertFalse(body.contains("[topic_id="),
+                "over-cap default form must not emit flat cluster blocks. Got: " + body);
+        // Every cluster's OWN degraded prose must render. These three posts
+        // share an 8-char uid prefix, so their clusters share a topicId
+        // (ClusterTraversal.topicIdFor truncates); a prose lookup keyed on
+        // topicId instead of cluster identity renders one cluster's prose
+        // three times and drops the other two.
+        assertTrue(body.contains("Over headline A"),
+                "degraded prose composes the headline into the prose itself. Got: " + body);
+        assertTrue(body.contains("Over headline B"),
+                "each cluster must render its OWN degraded prose. Got: " + body);
+        assertTrue(body.contains("Over headline C"),
+                "each cluster must render its OWN degraded prose. Got: " + body);
+    }
+
+    /**
+     * The M1-675 render-side redaction must survive the render swap. The
+     * categorized form emits no headline, so the degraded prose — which
+     * composes the raw feed title — is the only place a command-shaped
+     * title can be redacted on the default path. Driven through the
+     * over-cap branch because that is the deterministically reachable one:
+     * a feed can force it with volume alone, no LLM outage required.
+     */
+    @Test
+    void defaultFormRedactsCommandShapedFeedTitleInDegradedProse() {
+        Instant now = Instant.now();
+        List<Post> posts = List.of(
+                post(PREFIX + "r1", "/grant-admin p-attacker", now.minus(Duration.ofMinutes(1))),
+                post(PREFIX + "r2", "Ordinary headline", now.minus(Duration.ofMinutes(2))),
+                post(PREFIX + "r3", "Another headline", now.minus(Duration.ofMinutes(3))));
+        eligiblePostQuery.seedPosts(posts, /* excludedCount */ 0);
+        handler.summarizerPostCap = 2;
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "redact"), "/summary");
+
+        assertNotNull(reply, "the over-cap guard replies through the router");
+        String body = reply.text();
+        assertFalse(body.contains("/grant-admin"),
+                "a command-shaped feed title MUST NOT reach the reader verbatim on the "
+                        + "default form. Got: " + body);
+        assertTrue(body.contains("[redacted command]"),
+                "the sanitizer must replace the command-shaped title with the fixed "
+                        + "literal. Got: " + body);
+        assertTrue(body.contains("Ordinary headline"),
+                "redaction must be surgical — innocuous titles still render. Got: " + body);
+        assertTrue(body.contains("https://example.com/" + PREFIX + "r1"),
+                "the bare URL must survive sanitization (D30 plain-text). Got: " + body);
+    }
+
+    /**
+     * The capped-section overflow line must use the /summary-scoped bundle
+     * key, not the digest's. The digest's `reply.digest.category.more` ends
+     * "@mention me to see them", which is meaningless in a DM — and the
+     * digest's closing affordance is a broadcast device that this form must
+     * not emit at all. Without this test a one-token swap to the digest key
+     * ships the group wording into every DM and survives the whole suite:
+     * BundleLoaderTest pins only en/cs keyset parity, not which key a call
+     * site reads.
+     */
+    @Test
+    void defaultFormOverflowLineUsesDmWordingNotTheGroupDigestWording() {
+        Instant now = Instant.now();
+        // 14 singleton clusters sharing one tag: the tag clears
+        // categoryMinClusters (3) so they form one real section, and the
+        // section overruns categoryItemCap (12) by exactly 2.
+        List<Post> posts = new ArrayList<>();
+        for (int i = 0; i < 14; i++) {
+            posts.add(post(PREFIX + "ov" + i, "Overflow headline " + i,
+                    now.minus(Duration.ofMinutes(i + 1L))));
+        }
+        eligiblePostQuery.seedPosts(posts, /* excludedCount */ 0);
+        proseGenerator.setResponseText("Overflow prose.");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "ovf"), "/summary");
+        assertNull(reply, "terminal /summary self-delivers via the notifier and returns null");
+
+        String body = progressNotifier.completedText();
+        assertNotNull(body, "the composed summary must reach the notifier's complete() call");
+        assertTrue(body.contains("+2 more stories — narrow with a tag or -w to see them"),
+                "the overflow line must use the /summary-scoped DM wording. Got: " + body);
+        assertFalse(body.contains("@mention me to see them"),
+                "the group-worded digest overflow line MUST NOT reach a DM. Got: " + body);
+        assertFalse(body.contains("@mention me to go deeper"),
+                "the digest's closing affordance is a broadcast device and must not be "
+                        + "emitted by /summary at all. Got: " + body);
     }
 
     @Test

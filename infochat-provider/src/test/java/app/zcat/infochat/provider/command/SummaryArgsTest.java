@@ -118,6 +118,51 @@ class SummaryArgsTest {
     }
 
     @Test
+    void bareFullFlagIsAcceptedAndLeavesTagAndWindowAtDefaults() {
+        ParseResult result = SummaryArgs.parse("/summary --full");
+        Success success = assertInstanceOf(Success.class, result);
+        assertTrue(success.args().full(), "--full must set the flat-render opt-in");
+        assertTrue(success.args().tag().isEmpty());
+        assertEquals(SummaryArgs.DEFAULT_WINDOW, success.args().window());
+    }
+
+    @Test
+    void fullFlagCombinesWithPositionalTag() {
+        ParseResult result = SummaryArgs.parse("/summary security --full");
+        Success success = assertInstanceOf(Success.class, result);
+        assertTrue(success.args().full());
+        assertEquals("security", success.args().tag().orElseThrow());
+    }
+
+    @Test
+    void fullFlagCombinesWithExplicitWindow() {
+        ParseResult result = SummaryArgs.parse("/summary --full -w 7d");
+        Success success = assertInstanceOf(Success.class, result);
+        assertTrue(success.args().full());
+        assertEquals(Duration.ofDays(7), success.args().window());
+    }
+
+    /**
+     * The flag is matched exactly, so a near-miss lands on the unknown-flag
+     * error rather than silently selecting a render form the user did not
+     * ask for.
+     */
+    @Test
+    void nearMissOfFullFlagIsRejectedAsUnknownFlag() {
+        ParseResult result = SummaryArgs.parse("/summary --fully");
+        Failure failure = assertInstanceOf(Failure.class, result);
+        assertEquals("error.summary.window_out_of_range", failure.bundleKey());
+    }
+
+    @Test
+    void bareSummaryLeavesFullFlagOff() {
+        ParseResult result = SummaryArgs.parse("/summary");
+        Success success = assertInstanceOf(Success.class, result);
+        assertFalse(success.args().full(),
+                "the categorized form is the default; --full is opt-in");
+    }
+
+    @Test
     void windowAcceptsWeekUnit() {
         ParseResult result = SummaryArgs.parse("/summary -w 2w");
         Success success = assertInstanceOf(Success.class, result);

@@ -244,9 +244,22 @@ class GoldenPathJourneyIT {
         awaitDispatchIdle();
         assertEquals(1, adapter.finalizedBodies().size(),
                 "hop 6: /summary must deliver exactly one finalized summary body");
-        assertTrue(adapter.finalizedBodies().get(0).contains(postTitle),
-                "hop 6: the summary must surface the seeded READY post; got: "
-                        + adapter.finalizedBodies().get(0));
+        // Stays on the DEFAULT /summary: the golden path must walk what a
+        // real user gets. The M1-694 categorized form renders cluster prose
+        // rather than the post title, so the seeded-post evidence is the
+        // stubbed prose above, not postTitle. Counted rather than a bare
+        // contains(): the stub returns one fixed string for every cluster,
+        // so only the paragraph count can tell one surfaced post from two.
+        String hop6Body = adapter.finalizedBodies().get(0);
+        int proseParagraphs = 0;
+        String journeyProse = "Cluster prose for the journey summary.";
+        for (int i = hop6Body.indexOf(journeyProse); i >= 0;
+                i = hop6Body.indexOf(journeyProse, i + journeyProse.length())) {
+            proseParagraphs++;
+        }
+        assertEquals(1, proseParagraphs,
+                "hop 6: the summary must surface prose for exactly the one seeded READY "
+                        + "post; got: " + hop6Body);
         adapter.reset();
 
         // ----- Hop 7 — a chat-mode turn returns the stubbed reply ----------

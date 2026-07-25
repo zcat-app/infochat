@@ -1,7 +1,7 @@
 ---
 id: M1-694
 title: "/summary renders the categorized form by default; --full keeps the flat form"
-status: pending
+status: done
 created: 2026-07-25
 last_updated: 2026-07-25
 blocked_by: []
@@ -23,6 +23,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/journey/GoldenPathJourneyIT.java
   - docs/spec/commands.md
   - docs/spec/decisions.md
+  - docs/spec/security.md
   - docs/design/03-commands.md
 complexity: medium
 risk: medium
@@ -54,7 +55,10 @@ out_of_scope:
     CategoryRollupGenerator). DigestRenderer may only be EXTENDED with a new
     entry point plus a construction seam; DigestRenderer.render and
     DigestRenderer.renderSections must stay behaviorally unchanged so every
-    digest test passes unmodified.
+    digest test passes unmodified. In particular, acceptance 7's
+    sanitize-the-degraded-prose change applies to the /summary entry point
+    ONLY — the digest's own unsanitized assembly operands are M1-691's
+    ticket and must not be pre-empted here.
   - >-
     infochat.summary.cluster-cap, infochat.summary.summarizer-post-cap,
     infochat.digest.category-item-cap and their profile overrides. This is a
@@ -111,11 +115,38 @@ acceptance:
     (%remote-llm.infochat.summary.cluster-cap=500 against a
     summarizer-post-cap of 50 — application.properties:309,324).
   - >-
-    The degraded-prose split is preserved in the new form: degraded
-    ClusterProse bypasses sanitize+translate, non-degraded prose runs
-    sanitizer-1 then the translation pipeline — matching both
-    ClusterBlockRenderer and DigestRenderer.renderSections. No LLM-authored
-    text reaches the adapter unsanitized.
+    In the /summary entry point, BOTH degraded and non-degraded per-cluster
+    prose run through llmOutputSanitizer.sanitize; only non-degraded prose
+    additionally runs the translation pipeline. Degraded prose keeps its
+    translation bypass (D43 is a bundle-not-translator rule) but NOT a
+    sanitize bypass: degradedProseFor composes "title — url (uid)" from
+    upstream-controlled feed bytes, and security.md §LLM output sanitizer
+    requires a title whose canonical form is a privileged command to render
+    as [redacted command]. Bare URLs survive — the sanitizer loses no
+    characters and only breaks "](" adjacency (security.md §"Sanitizer
+    output never contains `](`"), so D30's bare-URL requirement holds.
+    REDTEAM ROUND 1, finding 1 (INJECTION, medium).
+  - >-
+    A feed title whose canonical form is a privileged command produces a
+    per-occurrence LLM_OUTPUT_SANITIZED audit row when it reaches a user
+    through the DEFAULT /summary form, including on the over-cap branch —
+    restoring the operator's mechanical detector, which the pre-diff path
+    emitted from ClusterBlockRenderer.java:87 and which the categorized form
+    dropped by rendering no headline. A test pins that a command-shaped
+    title renders as [redacted command] in the default form.
+    REDTEAM ROUND 1, finding 2 (AUDIT-EVASION, medium).
+  - >-
+    The DEFAULT form keeps a non-vacuous end-to-end isolation assertion —
+    retargeting the negatives onto --full must not leave the form every user
+    receives unguarded. SummaryAdapterScopeIT additionally drives a bare
+    /summary and asserts the rendered body carries EXACTLY ONE cluster prose
+    paragraph (the shared contact subscribes only to the alpha source, so a
+    foreign-adapter leak renders a second one); GoldenPathJourneyIT's hop-6
+    assertion is likewise made count-sensitive rather than a bare contains.
+    Occurrence-counting is the discriminator because the prose stub returns
+    one fixed string for every cluster, so a contains() on it cannot
+    distinguish one surfaced post from two.
+    REDTEAM ROUND 1, finding 3 (INFO-LEAK, low).
   - >-
     SummaryCommandHandlerTest.sanitizerStripsPrivilegedCommandFromLlmAuthoredProse
     passes against the DEFAULT form. This requires the renderer wired into
@@ -167,6 +198,21 @@ acceptance:
     docs/spec/decisions.md drops its "/summary's flat interactive format ...
     unchanged" clause (decisions.md:79), and docs/design/03-commands.md
     §`/summary [tag] [-w 24h]` documents the default-plus---full split.
+  - >-
+    docs/spec/security.md is amended so the threat model stops asserting a
+    control the code does not perform. The M1-675 closure paragraph
+    (security.md:381-397) names "the `/summary` cluster headline" as a
+    render-side-redacted surface; the default form renders no headline at
+    all, so that clause must describe what actually ships — the headline
+    redaction applies to the --full form, and the default form's protection
+    is the per-cluster prose sanitize of acceptance 7. The §"Sanitizer output
+    never contains `](`" residual paragraph (security.md:526-536) likewise
+    says the degraded branch "sanitizes each feed-derived headline but joins
+    the results with the source's display name and a bare URL"; under
+    acceptance 7 the /summary path sanitizes the whole assembled degraded
+    prose, so that description must be corrected for this path while leaving
+    the digest's own operands to M1-691. Missing this amendment while
+    amending commands.md and D62 is exactly what redteam round 1 caught.
   - mvn verify from the repo root is green
 test_plan:
   # No new test FILES. The added coverage is new test METHODS in two
@@ -204,12 +250,332 @@ decision_refs:
   - D43
   - D46
   - D62
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      assertion_adequacy: WARN
+    diff_stats:
+      files: 22
+      added: 1441
+      removed: 67
+    note: |
+      ASSERTION-ADEQUACY WARN (informational, not a FAIL — both mandated
+      questions answered yes): the /summary overflow line
+      (DigestRenderer.java:245-249) has no test anywhere in the repo. A
+      mutation swapping REPLY_SUMMARY_CATEGORY_MORE for
+      REPLY_DIGEST_CATEGORY_MORE emits the group-worded "@mention me to see
+      them" into a DM — exactly what acceptance 14 forbids — and survives the
+      whole suite, since BundleLoaderTest only pins en/cs keyset parity.
+      Reachable in production (up to summarizer-post-cap=50 clusters can land
+      in one section against a cap of 12). Closed in round 2 rather than
+      deferred.
+      REDTEAM GATE NOT RE-FIRED for round 2, deliberately and on evidence: the
+      round-2 delta is one additive test method plus the accepted-residual
+      documentation in security.md that redteam round 3 itself asked for. No
+      file under any module's src/main is newer than
+      docs/plan/m1/redteam/M1-694-2026-07-25-r3.md, so the threat surface is
+      byte-identical to what round 3 audited. Re-auditing unchanged production
+      code has a known failure mode — a later round under momentum manufactures
+      a finding to justify itself — and no upside.
+  - round: 2
+    date: 2026-07-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      assertion_adequacy: PASS
+    diff_stats:
+      files: 22
+      added: 1513
+      removed: 68
+    note: |
+      Round 2 exists because round 1's ASSERTION-ADEQUACY WARN was closed
+      rather than deferred: the /summary overflow line had zero coverage, so a
+      one-token swap to the group-worded digest key would have shipped
+      "@mention me to see them" into every DM and survived the suite. Added
+      defaultFormOverflowLineUsesDmWordingNotTheGroupDigestWording. All six
+      checks PASS. Must-shrink not applicable — files unchanged at 22, so
+      growth is not simultaneous on all three axes.
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-07-25
+    category: INJECTION
+    severity: medium
+    promise: |
+      docs/spec/security.md §LLM output sanitizer, M1-675 paragraph: "the
+      group-visible echo surfaces (/saved reply, the /summary cluster
+      headline, and the degraded group digest) are additionally passed
+      through the closed-list LlmOutputSanitizer at render, where a title or
+      tag whose canonical form is a privileged command renders as
+      [redacted command]."
+    gap: |
+      The categorized default form renders no post title at all, so no
+      upstream-controlled title reaches llmOutputSanitizer.sanitize on the
+      path every user now hits. DigestRenderer.renderSummarySections emits
+      only the section header plus per-cluster prose, and appends degraded
+      prose verbatim; degradedProseFor composes "title — url (uid)" from raw
+      feed bytes. The pre-diff default called
+      ClusterBlockRenderer.appendClusterBlock, which sanitized the headline
+      at ClusterBlockRenderer.java:87; after the diff that call is reachable
+      only behind the opt-in --full flag. commands.md and D62 were amended
+      for the new render form, but security.md's M1-675 closure claim was
+      not, so the threat model now asserts a control the default path does
+      not perform.
+    repro: |
+      Publish a feed post whose title is a privileged command string (e.g.
+      "/ban p-victimcontact"); title normalization is still open (M1-693).
+      Publish more than infochat.summary.summarizer-post-cap posts in a
+      window to force the deterministic over-cap branch — no LLM outage
+      needed. Any non-banned user runs bare /summary; the reply renders
+      "/ban p-victimcontact — https://attacker/… (uid p-…)" at line start
+      with no [redacted command] substitution. Pre-diff the same reply
+      carried [redacted command] on the headline line.
+    suggested_fix_class: input-sanitization
+  - date: 2026-07-25
+    category: AUDIT-EVASION
+    severity: medium
+    promise: |
+      docs/spec/security.md §LLM output sanitizer: "the M1-675 render-side
+      redaction, by contrast, emits the per-occurrence LLM_OUTPUT_SANITIZED
+      audit row on every hit ... Every match is audit-logged
+      (per-occurrence, not throttled)."
+    gap: |
+      The audit row is emitted only from inside LlmOutputSanitizer.sanitize.
+      Because the default /summary form never calls sanitize on any post
+      title, and skips the sanitizer entirely for degraded prose, a
+      feed-supplied privileged-command token that reaches a user through
+      /summary now produces zero audit rows and zero WARN lines. The
+      pre-diff path produced one row per matching cluster headline. The loss
+      covers the deterministically-reachable over-cap branch, not just the
+      LLM-outage branch, so the operator loses the only mechanical signal
+      that a feed is injecting command-shaped titles into user-visible
+      output.
+    repro: |
+      Run the INJECTION finding's sequence, then query audit_log_view as the
+      operator Admin role. Pre-diff each /summary surfacing a command-shaped
+      feed title wrote one LLM_OUTPUT_SANITIZED row; post-diff the same
+      attack produces an identical user-visible delivery with an empty audit
+      trail, leaving no way to distinguish "no attack" from "attack with the
+      detector removed".
+    suggested_fix_class: audit-log-coverage
+  - date: 2026-07-25
+    category: INFO-LEAK
+    severity: low
+    promise: |
+      docs/spec/security.md §Trust boundaries item 1 and the cross-adapter
+      isolation invariant (messaging.md §Per-adapter trust level, referenced
+      from §Threat model: "the cross-adapter isolation invariant … prevents
+      identity bleed between adapters").
+    gap: |
+      Every end-to-end negative assertion for /summary was moved off the new
+      default render path onto the opt-in --full path, so the form all users
+      now receive has no integration-level coverage of the isolation
+      negatives — including SummaryAdapterScopeIT's D46 cross-adapter
+      non-leakage assertFalse. GoldenPathJourneyIT stays on the default but
+      its content assertion was weakened from the seeded post title to the
+      stubbed LLM prose string, so it can no longer distinguish which posts
+      were surfaced. This is a coverage/resilience loss, not a live leak:
+      the world predicate is enforced upstream in EligiblePostQuery.fetch
+      identically for both forms, and renderSummarySections uses only
+      method-local state.
+    repro: |
+      No live exploit today. Mutation check: reintroduce a contact_id-only
+      user lookup (the bug SummaryAdapterScopeIT was written to catch) and
+      the suite still goes green for every user running bare /summary — only
+      the retargeted --full invocation fails.
+    suggested_fix_class: other
+  - date: 2026-07-25
+    round: 2
+    status: CLOSED
+    category: INJECTION
+    severity: medium
+    promise: |
+      docs/spec/security.md §LLM output sanitizer, as amended by the round-1
+      remediation: "Both forms therefore redact, and both emit the audit row
+      below; neither leaves a command-shaped title unredacted."
+    gap: |
+      The final clause was false for the --full form this ticket introduces.
+      ClusterBlockRenderer.java:112-115 writes the summary: field as
+      cp.degraded() ? cp.prose() : translate(sanitize(...)), so the degraded
+      arm passes prose through verbatim, and degradedProseFor composes
+      "title — url (uid)" for every post from raw feed bytes. The headline
+      sanitize at :87 also only ever sees posts.get(0), so a multi-post
+      cluster whose command-shaped post is not first emits no
+      LLM_OUTPUT_SANITIZED row. The round-1 remediation thus mirrored onto
+      --full the exact failure mode round 1 flagged for the default form:
+      the threat model asserting a control the code does not perform.
+    repro: |
+      Publish a post titled "/grant-admin p-attacker" on a bootstrap source
+      (D59: public to every scope; title normalization is still open,
+      M1-693), force the degraded branch with volume alone, then run
+      /summary --full. The summary: line carries the raw title while the
+      headline line above reads [redacted command].
+    suggested_fix_class: input-sanitization
+    resolution: |
+      Remediated by SPEC WORDING ONLY. The §LLM output sanitizer paragraph
+      now states that completeness differs per render form and labels the
+      --full and /retry surface "open, not closed"; the "](" residual
+      paragraph records that neither M1-691 nor this ticket owns it.
+      ClusterBlockRenderer.java is NOT modified — it is in this ticket's
+      out_of_scope, and the runtime behavior is pre-existing and strictly
+      narrower than what shipped pre-diff, where the flat form was the only
+      /summary form. Round 3 verified this CLOSED sentence by sentence.
+  - date: 2026-07-25
+    round: 3
+    status: OPEN
+    category: INJECTION
+    severity: low
+    promise: |
+      docs/spec/security.md §LLM output sanitizer, "Flag position mirrors
+      the parser's own scan": the whole-message redaction span is accepted
+      at spec level ONLY on the stated ground that the bytes swallowed
+      between the command word and the flag are bot-authored.
+    gap: |
+      This ticket changes the sanitizer's UNIT OF INPUT on the default
+      /summary path from one feed title to one cluster's whole assembled
+      multi-post prose. DigestRenderer.java:241 calls sanitize(cp.prose())
+      once per cluster, and degradedProseFor concatenates "title — url
+      (uid)" for EVERY post, so that single call spans several mutually
+      untrusted publishers' bytes. redactFlagEntry
+      (LlmOutputSanitizer.java:294-333) deletes everything from the command
+      word through the flag token (appended = flagEnd at :327) and the
+      token search crosses newlines (isTokenSeparator includes '\n'), so a
+      redaction span can now cross post boundaries and erase a third
+      party's content. Every pre-existing feed-bytes sanitize site is
+      scoped to a SINGLE author's field (ClusterBlockRenderer:87,
+      DegradedDigestRenderer:38, SavedCommandHandler:275/277). The two
+      flag-bearing closed-list entries are "/list-sources --all" and
+      "/list-sources --include-deleted".
+    repro: |
+      Co-cluster three posts via a post_reference edge (e.g. a Nostr kind-6
+      repost, which security.md §Per-source trust boundaries specifies
+      writes such an edge) so cluster.posts() orders them A, V, B with
+      titles "/list-sources", "Legitimate headline", "--all". Force the
+      degraded branch with volume. A bare /summary hands the whole cluster
+      string to one sanitize() call; the span from /list-sources to --all is
+      replaced by [redacted command], deleting V's headline, URL and uid.
+      Pre-diff the sanitize input was a single title, where no cross-post
+      span was constructible. Direction is over-redaction, not
+      under-redaction, and the marker plus audit row still ship — hence low.
+    suggested_fix_class: trust-boundary-tightening
+    resolution: |
+      ACCEPTED RESIDUAL, documented in docs/spec/security.md §LLM output
+      sanitizer ("The span's justification depends on the caller's unit of
+      input"). Not fixed in this ticket, by explicit decision: the direction
+      is over-redaction rather than under-redaction, the marker is visible
+      and the audit row still fires, so it costs the availability of one
+      story rather than the injection guarantee. The cheap in-scope fix
+      (sanitize per line inside DigestRenderer) is REJECTED as unsafe —
+      "/list-sources" is not a bare CLOSED_LIST entry (only the two
+      flag-bearing forms are), so a feed title containing a newline would
+      split across lines and UNDER-redact, which is the wrong direction and
+      is reachable until M1-693 normalizes titles. The correct fix scopes the
+      sanitize call to one post rather than one cluster, which needs
+      SummaryProseGenerator.java — outside this ticket's files_scope. Filed
+      as a follow-up covering the whole class (this cross-post span,
+      /summary --full, and /retry), none of which M1-691 owns: its
+      files_scope is DegradedDigestRenderer.java and its out_of_scope names
+      /summary explicitly.
+redteam_audits:
+  - date: 2026-07-25
+    verdict: FINDINGS
+    base: 6c487d9cc65e1dc1fe3acd5b0418dbc4906a2379
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-694-2026-07-25.md
+    findings_count: 3
+    out_of_model_count: 2
+    note: |
+      Round 1 at the /m1-tick run redteam gate, ahead of review. Findings 1
+      and 2 share one root cause — the categorized default form renders no
+      headline, so the M1-675 render-side sanitize and its per-occurrence
+      LLM_OUTPUT_SANITIZED audit row are both absent from the default path,
+      while security.md still records that control as closed for /summary.
+      Finding 3 is the coverage regression from retargeting the end-to-end
+      negatives onto --full. Two out-of-model items: the raw title inside
+      degraded prose predates this diff (booked as residual, M1-691), and
+      DigestRenderer.forSummaryRendering widens the production API with a
+      partially-initialised-bean seam that is not adversary-reachable.
+  - date: 2026-07-25
+    verdict: FINDINGS
+    base: 6c487d9cc65e1dc1fe3acd5b0418dbc4906a2379
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-694-2026-07-25-r2.md
+    findings_count: 1
+    out_of_model_count: 3
+    note: |
+      Round 2, after remediating round 1. All three round-1 findings verified
+      CLOSED against the code, not accepted on the remediation note. One new
+      medium, in the remediation itself: the security.md amendment asserted
+      "neither leaves a command-shaped title unredacted", which is false for
+      --full. Remediated in-band by correcting the spec wording only, since
+      that finding is a failure of the refine's own accepted acceptance item
+      ("security.md stops asserting a control the code does not perform") and
+      ClusterBlockRenderer is out_of_scope.
+  - date: 2026-07-25
+    verdict: FINDINGS
+    base: 6c487d9cc65e1dc1fe3acd5b0418dbc4906a2379
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-694-2026-07-25-r3.md
+    findings_count: 1
+    out_of_model_count: 4
+    note: |
+      Round 3, after remediating round 2. The round-2 medium verified CLOSED
+      sentence by sentence. One new LOW, not remediated and surfaced to the
+      user: widening the sanitizer's unit of input to a cluster's whole
+      multi-post prose lets redactFlagEntry's command-to-flag span cross post
+      boundaries and delete a third party's post. Fails safe (over-redaction,
+      visible marker, audit row still emitted). The cheap in-scope fix
+      (sanitize per line) risks UNDER-redaction when a feed title itself
+      contains a newline, which titles may until M1-693 lands; the thorough
+      fix needs SummaryProseGenerator, outside files_scope. Also noted
+      out-of-model: capped-out clusters are no longer scanned, so the
+      operator's corpus-wide detector coverage narrows — worth a deliberate
+      accept.
+clarity_check:
+  date: 2026-07-25
+  verdict: PASS
+  warnings:
+    - >-
+      lint PASS (0 blockers, 0 warnings). The skeleton this ticket started as
+      failed lint on OUT-OF-SCOPE-PRESENT and carried empty acceptance /
+      files_scope plus three TO BE WRITTEN body sections; filled in from
+      M1-687's settled shape and re-verified against the code (commit
+      6c487d9c).
+    - >-
+      CLASS-COMPLETENESS - re-ran the body's invocation-based census grep
+      live: 35 files, and all 35 are named in the ticket's three disposition
+      tables (verified mechanically per basename, not by row count - the
+      tables group some files and give others multiple rows, so 31 rows cover
+      35 files).
+    - >-
+      Ticket-vs-code spot checks all passed: ClusterBlockRenderer.java:87/:94
+      are the bare headline and uid, DigestRenderer.java:33-65 fields are
+      package-private and :104 passes langCode where
+      SummaryCommandHandler.java:315 hardcodes "en",
+      SummaryProseGenerator.degradedProseFor:193-203 emits title/url/uid
+      inside the prose, en.properties:832-833 are group-worded,
+      application.properties:309,324 carry the over-cap arithmetic,
+      commands.md:1802 and decisions.md:79 carry the carve-outs to amend, and
+      every cited test line range matches its stub mode (setResponseText vs
+      setThrowOnCall) and assertion text.
+    - >-
+      Two couplings M1-687 never listed were found and verified green without
+      edits: SummaryHelpFlagParityTest (advertised-flag/parser parity) and
+      HelpCommandHandlerTest:275 (substring signature assertion survives
+      appending the new flag).
+  blockers: []
 escalation_reason:
 ---
 
@@ -278,9 +644,9 @@ were verified in the main session:
 | `SummaryCommandHandlerTest:104-137` (`buildHandlerWithStubs`) | — (hand-wires every `@Inject` field) | extend with a REAL `DigestRenderer` built from the test's own sanitizer/translator/bundle, else the terminal path NPEs and `sanitizerStrips…` becomes a test of a fake |
 | `SummaryIT:95-137` (happy path) | four post uids + both source display names (`MvpNews`, `MvpTech`) — non-degraded (`setResponseText`) | retarget to `/summary --full`; assertions verbatim |
 | `SummaryGroupScopeIT:124,141-144` | `GROUP FLOW HEADLINE` + `flow-p1` uid — non-degraded | retarget to `/summary --full`; assertions verbatim |
-| `SummaryAdapterScopeIT:100,117-121` | `ALPHA HEADLINE m1-040si` present **and** `BRAVO HEADLINE m1-040si` absent — **D46 cross-adapter non-leakage**, non-degraded | retarget to `/summary --full`; BOTH assertions verbatim. `--full` renders the headline identically, so the security property is pinned exactly as before |
+| `SummaryAdapterScopeIT:100,117-121` | `ALPHA HEADLINE m1-040si` present **and** `BRAVO HEADLINE m1-040si` absent — **D46 cross-adapter non-leakage**, non-degraded | retarget to `/summary --full`; BOTH assertions verbatim. `--full` renders the headline identically, so the security property is pinned exactly as before. **Additionally** drive a bare `/summary` and assert exactly one cluster prose paragraph, so the DEFAULT form keeps a non-vacuous non-leakage guard (redteam round 1, finding 3) |
 | `DevTerminalHarnessRoundtripIT:80,95,109-114` | three seeded post uids, driven as `dm … /summary -w 24h` — non-degraded (`setResponseText("Seeded summary prose.")`) | retarget to `/summary --full -w 24h`; assertions verbatim. This is one of the two sites M1-687's round-2 plan pass found and its label-based census had missed |
-| `GoldenPathJourneyIT:238-249` | `postTitle` — **MVP §6 exit criterion**, hop 6, non-degraded | **stays on the default command** — the golden path must walk what a real user gets. Re-point the assertion at the stubbed cluster prose (`"Cluster prose for the journey summary."`), which the categorized form does render |
+| `GoldenPathJourneyIT:238-249` | `postTitle` — **MVP §6 exit criterion**, hop 6, non-degraded | **stays on the default command** — the golden path must walk what a real user gets. Re-point the assertion at the stubbed cluster prose (`"Cluster prose for the journey summary."`), which the categorized form does render, and make it count-sensitive (exactly one paragraph for the one seeded post) so it can still distinguish which posts surfaced (redteam round 1, finding 3) |
 | `SummaryArgsTest` | — (pure parser tests, no render) | **additions only**: `--full` cases. `tagWithLeadingHyphenIsMalformed:107-117` uses `-leading-hyphen` and is unaffected by adding `--full` |
 
 ### Unaffected but load-bearing — 6 files
@@ -380,7 +746,23 @@ grounding pass established. All re-verified in the main session 2026-07-25.
   generates prose for every cluster and the renderer caps afterwards, the
   call count is byte-for-byte what it is today on every branch — which is
   exactly why the pre-existing call-count assertions survive.
-- This ticket **amends spec**: `docs/spec/commands.md` §Periodic group
-  digests (the carve-out at `commands.md:1802`) and decision **D62**
-  (`decisions.md:79`) both state `/summary` keeps its flat format, which
-  this change contradicts.
+- This ticket **amends spec** in three files: `docs/spec/commands.md`
+  §Periodic group digests (the carve-out at `commands.md:1802`) and decision
+  **D62** (`decisions.md:79`) both state `/summary` keeps its flat format,
+  which this change contradicts; and `docs/spec/security.md` records a
+  render-side redaction of "the `/summary` cluster headline" (`:381-397`)
+  plus a residual paragraph describing the degraded branch as sanitizing
+  "each feed-derived headline" (`:526-536`), neither of which describes the
+  default form. Redteam round 1 caught the security.md omission — amending
+  the two behavioral specs while leaving the threat model asserting a
+  control the code no longer performs is the failure mode to avoid.
+- **Why degraded prose is sanitized here but not translated.** The two
+  bypasses have different reasons and only one of them survives. Translation
+  is skipped because degraded prose is deterministic, non-LLM text and D43
+  is a bundle-not-translator rule. Sanitization was skipped for the same
+  "it's not LLM output" intuition, but that is the wrong test: the bytes are
+  upstream-controlled feed titles, which is precisely the tier M1-675's
+  render-side redaction exists for. `ClusterBlockRenderer` gets away with
+  the bypass only because it sanitizes the headline separately
+  (`ClusterBlockRenderer.java:87`); the categorized form has no headline, so
+  the bypass would leave nothing sanitized at all.

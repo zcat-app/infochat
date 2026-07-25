@@ -92,7 +92,10 @@ class DevTerminalHarnessRoundtripIT {
 
         Files.writeString(Path.of(INPUT_FILE),
                 "dm " + newContact + " " + inviteCode + "\n"
-                        + "dm " + SEED_USER + " /summary -w 24h\n",
+                        // --full renders the flat per-cluster blocks whose
+                        // uids directive 2 below asserts on; the M1-694
+                        // default form renders prose only.
+                        + "dm " + SEED_USER + " /summary --full -w 24h\n",
                 StandardCharsets.UTF_8);
 
         harness.poll();

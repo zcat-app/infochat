@@ -654,6 +654,17 @@ public final class BundleKeys {
     /** Cluster-block {@code tags: } label prefix; the comma-joined tag union is appended after it. */
     public static final String REPLY_SUMMARY_CLUSTER_TAGS_LABEL = "reply.summary.cluster.tags_label";
 
+    /**
+     * Capped-section overflow line for the categorized {@code /summary} form
+     * (M1-694). Token {@code {0}} = the count of clusters not shown; the cs
+     * value carries a {@code {0,choice,...}} plural shape. Distinct from
+     * {@link #REPLY_DIGEST_CATEGORY_MORE} because that one is group-worded
+     * ("@mention me to see them") — {@code /summary} is a DM-first
+     * interactive surface where the caller narrows with {@code -w} or a tag
+     * instead.
+     */
+    public static final String REPLY_SUMMARY_CATEGORY_MORE = "reply.summary.category.more";
+
     // ----- Intake-step splice fixed replies (M1-044b) ---------------------
     // Per docs/spec/security.md §Authorization model + §User ban +
     // §Invite-code registration, and docs/design/03-commands.md §3.11
