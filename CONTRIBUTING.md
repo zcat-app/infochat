@@ -17,7 +17,8 @@ infochat is **ticket-driven**, and during the v1 build that lifecycle is largely
 automated. Before changing anything, read:
 
 - **[docs/process/workflow.md](docs/process/workflow.md)** — the universal ticket
-  lifecycle (start → implement → `mvn verify` → review → commit → merge → escalate).
+  lifecycle (start → implement → `mvn verify` → red-team → review → commit → merge
+  → escalate).
 - **[docs/plan/m1/README.md](docs/plan/m1/README.md)** — M1-specific framing
   (ID prefix `M1-NNN`, branch token, status board) and a pointer table into every
   process document.
@@ -60,7 +61,7 @@ These hold whatever editor you use:
 | Skill | What it is |
 |---|---|
 | `/m1-tick` | The ticket lifecycle driver — every subcommand below. `/m1-tick run <id>` drives one ticket through the **whole** cycle unattended, stopping only at human-owned gates; the step-by-step walkthrough below is the same flow run one subcommand at a time. |
-| `/redteam` | The single-auditor adversarial security gate (Step 8). |
+| `/redteam` | The single-auditor adversarial security gate (Step 6 — it runs *before* code review). |
 | `/redteam-multi` | The **multi-auditor** form: fans the same rendered red-team prompt through several independent coding-agent CLIs (claude, opencode, codex, kimi) headlessly and cross-examines their verdicts, so one model's systematic blind spot can't pass unnoticed. Use it for high-stakes `security_relevant` tickets, milestone boundaries, and before tagging a release. |
 | `/deep-code-review` | Advisory senior-engineer review of a diff, module, path, or the whole architecture surface. Independent of the gates — it blocks nothing. |
 
@@ -74,8 +75,8 @@ skill wrappers dispatch to.
 The key thing to understand: **you don't hand-write the change and open a pull
 request.** You describe the change as a *ticket*, then drive it through
 `/m1-tick`, which runs the implementation through two quality gates the
-conventional "code it by hand" approach doesn't have — an automated **code
-review** and, for security-sensitive work, an adversarial **red-team** pass.
+conventional "code it by hand" approach doesn't have — for security-sensitive
+work an adversarial **red-team** pass, then an automated **code review**.
 Those gates are the point of the flow.
 
 We'll add a trivial read-only command, `/now`, that replies with the current
@@ -171,47 +172,17 @@ honest — don't free-hand changes the ticket didn't ask for.
 mvn verify
 ```
 
-The **whole** suite, not just your new test. It must be green before you ask for
-review.
+The **whole** suite, not just your new test. It must be green before you open
+either gate.
 
-### Step 6 — Code review (the first gate)
+### Step 6 — Red-team (the first gate, when it applies)
 
-```
-/m1-tick review M1-900
-```
-
-Spawns the **code-reviewer subagent**, which checks the diff against the
-engineering rules: scope drift, test integrity, anything touched outside scope,
-and whether **every** acceptance criterion is actually met. It returns:
-
-- **APPROVE** → go to Step 7.
-- **REWORK** → fix only the named items, re-run `mvn verify`, then
-  `/m1-tick review M1-900` again.
-- **MANUAL** → `/m1-tick escalate M1-900` (see below).
-
-### Step 7 — Commit
-
-```
-/m1-tick commit M1-900
-```
-
-Only after an `APPROVE`. It makes one commit on the ticket branch with the
-`M1-900: …` subject and a `Reviewed-by:` trailer recording the verdict, and marks
-the ticket `done`. Nothing is on `main` yet — that happens at Step 9.
-
-### Step 8 — Red-team (the security gate, when it applies)
-
-For a change marked `security_relevant: true`, run an adversarial review on the
-committed branch, **before** you merge:
+For a change marked `security_relevant: true`, the adversarial pass runs
+**before** code review:
 
 ```
 /redteam M1-900 --in-progress
 ```
-
-The `--in-progress` flag is required here: the commit lives on the ticket branch
-but isn't on `main` yet, so red-team audits the branch tip (`main...branch`).
-Without the flag it searches `main` for the ticket's commit, doesn't find it, and
-refuses.
 
 A **threat-actor subagent** reads the project's threat model
 ([docs/spec/security.md](docs/spec/security.md)) plus the diff and flags gaps
@@ -220,7 +191,28 @@ so here it's not required — but anything touching authorization, input parsing
 or outbound network calls **must** go through it. This adversarial pass is the
 second advantage the flow gives you over coding by hand. If it surfaces a
 finding, fix it on the same branch (or `/m1-tick escalate M1-900 redteam-finding`)
-before merging.
+before going on to review.
+
+**Why this gate is first.** A finding forces a code change, and a code change
+invalidates a review that already passed — so auditing second guarantees a
+second review round whenever the adversary finds anything. Auditing first means
+review sees the remediated diff. The M1 corpus bears the asymmetry out: red-team
+returns findings on ~30% of audits while review returns REWORK or MANUAL on ~12%
+of tickets, and 13 tickets recorded an `APPROVE, APPROVE` pair whose second round
+existed *only* because a post-review audit found something. Running the more
+selective gate first is strictly cheaper. (If a later review round changes any
+file under a module's `src/`, re-run this gate — the ordering buys nothing if a
+post-audit code change ships unaudited.)
+
+`--in-progress` is the only flag, and it is required here. Without it, red-team
+looks for the ticket's squash-merge commit on `main`, doesn't find one, and
+refuses. With it, the skill resolves the branch itself — `m1/M1-900-<slug>`,
+falling back to a `m1/M1-900-*` glob if the slug has drifted — so you never pass
+the slug or the ticket path yourself. At this point in the flow the branch
+carries **no commits yet** (Step 8 is what commits), so red-team audits the
+working tree against the branch's fork point, which is byte-identical to what
+the reviewer will see in Step 7. Once there *are* commits on the branch, the same
+flag audits `main...branch` instead.
 
 **When one auditor isn't enough**, use the multi-auditor form instead:
 
@@ -236,6 +228,31 @@ and the report surfaces it for falsification either way. Probe which auditors
 are actually available first with `scripts/redteam-multi.sh preflight` (costs no
 model tokens). Reach for it on high-stakes `security_relevant` work, at
 milestone boundaries, and before tagging a release.
+
+### Step 7 — Code review (the second gate)
+
+```
+/m1-tick review M1-900
+```
+
+Spawns the **code-reviewer subagent**, which checks the diff against the
+engineering rules: scope drift, test integrity, anything touched outside scope,
+and whether **every** acceptance criterion is actually met. It returns:
+
+- **APPROVE** → go to Step 8.
+- **REWORK** → fix only the named items, re-run `mvn verify`, then
+  `/m1-tick review M1-900` again.
+- **MANUAL** → `/m1-tick escalate M1-900` (see below).
+
+### Step 8 — Commit
+
+```
+/m1-tick commit M1-900
+```
+
+Only after an `APPROVE`. It makes one commit on the ticket branch with the
+`M1-900: …` subject and a `Reviewed-by:` trailer recording the verdict, and marks
+the ticket `done`. Nothing is on `main` yet — that happens at Step 9.
 
 ### Step 9 — Merge
 
