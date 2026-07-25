@@ -22,6 +22,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryGroupScopeIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryAdapterScopeIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/journey/GoldenPathJourneyIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/translation/TranslationPipelineIT.java
   - docs/spec/commands.md
   - docs/spec/decisions.md
   - docs/design/03-commands.md
@@ -128,6 +129,10 @@ test_plan:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryGroupScopeIT.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryAdapterScopeIT.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/journey/GoldenPathJourneyIT.java
+    - >-
+      infochat-provider/src/test/java/app/zcat/infochat/provider/translation/TranslationPipelineIT.java
+      (conditional — in scope so it can be audited against the new default
+      form; edit only if the call counts genuinely change)
   preserves:
     - >-
       Every test green on main EXCEPT the five named in `modifies` above,
@@ -232,6 +237,17 @@ reviewer enforces it.
 | `SummaryGroupScopeIT:141-144` | `GROUP FLOW HEADLINE` + uid | retarget to `/summary --full`; assertions verbatim |
 | `SummaryAdapterScopeIT:117` | `ALPHA HEADLINE m1-040si` — **D46 cross-adapter non-leakage** | retarget to `/summary --full`; assertion verbatim. `--full` renders the headline identically, so the security property is pinned exactly as before |
 | `GoldenPathJourneyIT:239-249` | `postTitle` — **MVP §6 exit criterion**, hop 6 | **stays on the default command** — the golden path must walk what a real user gets. Re-point the assertion at the stubbed cluster prose (`"Cluster prose for the journey summary."`), which the categorized form does render |
+| `TranslationPipelineIT:126-153, 178-197` | default `/summary -w 24h` in cs and en scopes: `exactly one placeholder send`, `exactly one finalized summary message`, prose/translation sentinels, and exact `mockLlm.callCount()` (3 and 2) | **stays on the default command** — it is the end-to-end pin for acceptance 6. **Audit, do not assume.** Both fixtures seed 2 posts sharing one tag, and `infochat.digest.category-min-clusters` defaults to 3, so both clusters fall into a single Other section and the one-message assertions should still hold. The call counts are the live risk: `DigestRenderer.renderSections` passes `langCode` to `SummaryProseGenerator.generate`, whereas `SummaryCommandHandler` hardcodes `"en"` today, so the cs-scope routing changes. Verify both counts explicitly; adjust only if the new form genuinely changes them, and never by loosening the assertion to a range |
+
+Explicitly **not** disposed, and why (the census grep returns them; both are unaffected):
+
+- `ClusterBlockRendererTest` — constructs `ClusterBlockRenderer` directly and
+  never invokes the handler; `/summary` appears only in a javadoc line.
+  `ClusterBlockRenderer` is unchanged by this ticket and still backs `--full`.
+- `InMemoryConversationBackend` — a scenario helper, not a test. It watermarks
+  `sentMessages()`/`finalizedBodies()` and returns *every* reply since the
+  mark, matching if any one matches, so per-section delivery widens what it
+  sees without breaking it.
 
 Why `--full` for four of them: `--full` preserves today's flat
 `ClusterBlockRenderer` output verbatim (acceptance 2), so moving the
