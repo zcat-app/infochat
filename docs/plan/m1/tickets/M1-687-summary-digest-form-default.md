@@ -5,11 +5,14 @@ status: pending
 created: 2026-07-25
 last_updated: 2026-07-25
 blocked_by: []
-files_budget: 14
+files_budget: 17
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SummaryCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SummaryArgs.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRenderer.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/SummaryAnchorRepository.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/StageProgressNotifier.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/bundles/cs.properties
@@ -48,8 +51,10 @@ acceptance:
   - >-
     /summary with no flags renders the categorized digest form: category
     headers, one prose paragraph per cluster, the per-category item cap,
-    and the localized "+N more" overflow line — i.e. it routes through
-    DigestRenderer.renderSections rather than ClusterBlockRenderer.
+    and the localized "+N more" overflow line — i.e. the default render
+    path routes through DigestRenderer's section renderers rather than
+    ClusterBlockRenderer. Under the summarizer post cap that is
+    renderSections; over it, the no-LLM sibling required by acceptance 7.
   - >-
     /summary --full renders exactly today's flat per-cluster form
     (ClusterBlockRenderer: topic_id, title, covered by, score, summary,
@@ -79,6 +84,15 @@ acceptance:
     The existing over-cap guard still fires — a window whose post count
     exceeds infochat.summary.summarizer-post-cap makes no LLM call, writes
     no anchor, and returns the degraded reply plus the too-large notice.
+    In the DEFAULT form that degraded reply is ALSO categorized: a new
+    no-LLM DigestRenderer entry point applies the same category headers,
+    per-category item cap and "+N more" overflow to degraded per-cluster
+    prose, and it is delivered per-section like the under-cap form. This
+    is the branch production actually hits
+    (%remote-llm.infochat.summary.cluster-cap=500 against a
+    summarizer-post-cap of 50, application.properties:309,324), so
+    leaving it on ClusterBlockRenderer would leave the reported wall
+    unfixed. --full keeps the flat form on this branch too.
   - mvn verify from the repo root is green
 test_plan:
   adds:
@@ -101,7 +115,38 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-25
+  verdict: WARN
+  warnings:
+    - >-
+      lint PASS (0 blockers, 0 warnings). Self-check raised three items,
+      all resolved with the user 2026-07-25 before the status flip.
+    - >-
+      Acceptance 1 and 7 disagreed on whether the over-cap degraded path
+      is re-rendered. Sec Context names that path as the reported wall
+      (remote-llm retrieves up to 500 posts against a summarizer-post-cap
+      of 50, so production never reaches the LLM branch) and out_of_scope
+      calls the fix RENDER-side, so both items were tightened to state
+      the degraded reply is categorized too.
+    - >-
+      files_scope omitted three unavoidable paths - DigestRenderer.java
+      (out_of_scope already contemplates extending it),
+      SummaryAnchorRepository.java (owns the summary_anchor SQL that
+      acceptance 5's render-form persistence needs) and
+      StageProgressNotifier.java (acceptance 3's N-message terminal, and
+      the adapter resolution lives there). Added; files_budget 14 -> 17.
+    - >-
+      Sizing question in Sec Notes answered - the over-cap guard bounds
+      the default path's prose-call count at summarizer-post-cap (50),
+      exactly as today. shownClusters is a subset of the clustered posts,
+      so per-category capping can only lower the count, never raise it.
+      The ~96-cluster worry assumed the guard does not fire; it does.
+    - >-
+      Incidental finding NOT folded in - post.title is unbounded (nitter
+      stores whole tweets) and empty for bluesky sources. Filed as M1-693
+      (97548b48) per the user's call to leave it as is for now.
+  blockers: []
 escalation_reason:
 ---
 
