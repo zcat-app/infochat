@@ -27,7 +27,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-685 — Chat model text can contradict the appended curated answer (complexity: medium, risk: low)
 - M1-687 — /summary renders the categorized digest form by default (complexity: high, risk: medium)
-- M1-688 — Fix digest first-run window and zero-post boundary advance (complexity: medium, risk: medium)
+- M1-688 — Fix digest first-run collection window (complexity: medium, risk: medium)
 - M1-690 — Chat prompt stops declining off-feed questions (complexity: low, risk: low)
 
 ---

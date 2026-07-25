@@ -1,6 +1,6 @@
 ---
 id: M1-688
-title: "Fix digest first-run window and zero-post boundary advance"
+title: "Fix digest first-run collection window"
 status: pending
 created: 2026-07-25
 last_updated: 2026-07-25
@@ -36,6 +36,12 @@ out_of_scope:
     Backfilling or repairing summary_cache rows already written by the
     buggy path on live deployments. That is an operator action, not a
     migration.
+  - >-
+    The zero-post boundary advance (a slot that collected nothing still
+    writing summary_cache, so its windowStart becomes the next slot's
+    lower bound). Investigated at start and deliberately NOT compensated
+    for here — see §Notes. It is a symptom of the published_at predicate,
+    which M1-689 fixes at the root; the coverage that pins it lives there.
 acceptance:
   - >-
     A group's FIRST-EVER digest collects from a full inter-slot period
@@ -44,17 +50,17 @@ acceptance:
     DigestWorker.executeSlot derives collectFrom by subtracting one slot
     interval from windowStart instead of using windowStart itself.
   - >-
-    A zero-post slot no longer establishes the collection boundary for the
-    next slot. DigestWorkerTest gains a test asserting that after a slot
-    that collected zero posts, the NEXT slot's collectFrom is still the
-    older boundary (or the first-run fallback), not the empty slot's
-    windowStart. No such test exists today.
+    The lookback is derived from the configured slot hours
+    (infochat.digest.morning-slot-hour / evening-slot-hour), not a
+    hardcoded 12h, so a deployment that re-points those hours gets a
+    matching first-run lookback. DigestWorkerTest covers a non-default
+    hour pair.
   - >-
-    The existing zero-post behavior a user sees is otherwise unchanged: the
-    fixed no-posts reply is still sent and no digest_section rows are
+    Zero-post behavior is unchanged in every respect: the fixed no-posts
+    reply is still sent, the cache row is still written (it is the
+    scheduler's only re-fire guard), and no digest_section rows are
     persisted. DigestWorkerTest.execute_zeroPosts_sendsFixedReply and
-    execute_zeroPostsPersistsNoSections stay green, amended only where
-    they assert the cache-write count.
+    execute_zeroPostsPersistsNoSections stay green UNAMENDED.
   - >-
     DigestWorkerTest.execute_includesPostPublishedBetweenSlots stays green
     — a normal slot following a NON-empty slot still collects from that
@@ -79,7 +85,7 @@ clarity_check: {}
 escalation_reason:
 ---
 
-# M1-688: Fix digest first-run window and zero-post boundary advance
+# M1-688: Fix digest first-run collection window
 
 ## Context
 
@@ -100,15 +106,12 @@ posts published since the previous evening. The corpus was full; the window
 was half an hour wide. `DigestWorkerTest.execute_collectsFromWindowStartWhenNoPreviousDigest`
 currently pins this as intended behavior.
 
-The second defect compounds it. The `summary_cache` upsert at
-`DigestWorker.java:228` sits **outside** the zero-post branch and runs
-unconditionally — pinned by `DigestWorkerTest.execute_zeroPosts_sendsFixedReply`,
-which asserts `assertEquals(1, cacheRepository.upsertCount())`. That row is
-what `findPreviousBoundary` returns for the next slot
-(`SummaryCacheRepository.java:177`), so an empty 08:00 digest silently makes
-07:45Z the lower bound for the 20:00 digest, and every post published before
-07:45 is excluded from that slot and every slot after it. Nothing in the
-suite covers what `collectFrom` becomes on the slot *after* an empty one.
+This ticket was filed with a second defect — the unconditional
+`summary_cache` upsert at `DigestWorker.java:228`, which lets an empty slot's
+`windowStart` become the next slot's lower bound via
+`findPreviousBoundary` (`SummaryCacheRepository.java:177`). That was
+investigated at `start` on 2026-07-25 and removed from scope; §Notes records
+why. It is not a defect that DigestWorker can or should fix.
 
 The manual `/retry --digest` path shares this collection code exactly — one
 call site, same `since`, same SQL. It appears to "work" only because the
@@ -118,46 +121,62 @@ READY in between.
 ## Acceptance
 
 See the frontmatter. First-run collection falls back one slot interval
-instead of to `windowStart`; a zero-post slot does not become the next
-slot's boundary; the user-visible zero-post reply and the
-no-sections-persisted behavior are unchanged; a new test covers the
-slot-after-an-empty-slot case.
+instead of to `windowStart`, with the interval derived from the configured
+slot hours; every other digest behavior — including the zero-post reply and
+its cache write — is unchanged.
 
 ## Out-of-scope
 
-The `published_at` → `ready_at` column change (M1-689), the scheduler's slot
-arithmetic, `DigestPostCollector`'s predicates, `/summary`'s own empty
-window, and repairing already-written rows on live deployments. See the
-frontmatter.
+The `published_at` → `ready_at` column change (M1-689), the zero-post
+boundary advance, the scheduler's slot arithmetic, `DigestPostCollector`'s
+predicates, `/summary`'s own empty window, and repairing already-written
+rows on live deployments. See the frontmatter.
 
 ## Notes
 
-- The two defects are separable but belong together: fixing only the
-  first-run fallback still leaves the zero-post boundary poisoning later
-  slots, and fixing only the boundary write leaves every new group's first
-  digest empty. Either alone would have produced the reported symptom.
+- **Why the zero-post boundary advance is not fixed here (start-gate
+  finding, 2026-07-25).** The originally-filed shape was "skip the cache
+  upsert when the slot collected nothing". Three findings killed it:
+  1. That row is the scheduler's *only* re-fire guard —
+     `DigestScheduler.java:150` calls
+     `existsByGroupAndSlot(groupId, slotKind, windowStart)` with no expiry
+     filter. With no row the slot re-fires on every 60s tick for the rest
+     of the 30-minute window, re-sending "no posts to summarize yet".
+  2. At `windowEnd`, `recordMissedSlot` (`DigestScheduler.java:276`) inserts
+     a sentinel into `summary_cache` at the **same** `slot_fired_at`, plus a
+     `DIGEST_SLOT_MISSED` audit row and an admin notification. The boundary
+     is written anyway, so the acceptance item was not even achieved.
+  3. The remaining alternative — a non-boundary marker column — needs a
+     migration plus `SummaryCacheRepository`, both outside `files_scope`,
+     and would add a fourth semantic to a table already carrying three
+     (content cache, idempotency guard, boundary source).
+  It is also unnecessary. The advance is only *harmful* because the window
+  compares `published_at`: a post published 06:00 that goes READY at 09:00
+  is invisible to the 07:45 slot and then excluded by the 19:45 slot's
+  `published_at >= 07:45`. Under M1-689's `ready_at` predicate the same post
+  satisfies `ready_at >= 07:45` and is collected — the advance becomes
+  lossless. A marker column would therefore be a schema-level compensator
+  for a defect M1-689 removes at the root, vestigial the moment it lands.
+  M1-689 carries the acceptance item and the IT case that pin the property.
 - The "one slot interval" is the gap between the morning and evening centre
   hours (`infochat.digest.morning-slot-hour=8`,
   `infochat.digest.evening-slot-hour=20`, `application.properties:572`), not
   a hardcoded 12h — a deployment that re-points those hours should get a
-  matching lookback. Whether this becomes a derived value or its own
-  property is an implementation call; `application.properties` is in
-  `files_scope` for that reason.
+  matching lookback. Both properties already exist and already carry these
+  defaults, so deriving the interval needs no new property;
+  `application.properties` stays in `files_scope` only in case the
+  derivation turns out to need one.
 - `DigestWorker` already injects `java.time.Clock` (`DigestWorker.java:96`)
   and uses it for the degrade deadline; the collection window is derived
   from slot coordinates, not from `now()`, so this ticket introduces no new
   ambient time into decision logic.
-- Skipping the cache upsert entirely on zero posts is the simplest shape,
-  but check what else reads `summary_cache` for that slot first — the
-  scheduler's already-fired check (`DigestSchedulerTest.tick_skipsGroupAlreadyFiredInWindow`)
-  is the one to confirm, since a slot that writes nothing may re-fire within
-  its window. A non-boundary marker column is the alternative if it does.
 - Adjacent code: `DigestWorker.executeSlot`,
   `SummaryCacheRepository.findPreviousBoundary`,
   `DigestScheduler.tickAt` (the missed-slot sentinel at
-  `DigestScheduler.java:260` is a deliberate boundary write — do not
-  confuse it with the zero-post write this ticket removes).
+  `DigestScheduler.java:260` is a deliberate boundary write —
+  skip-not-catch-up, not a defect).
 - Operator note for whoever runs the live deployment after this lands: the
-  poisoned row is already in the database, so the next digest will still
-  collect from 07:45Z until that row is deleted. Deleting it is an operator
-  action, deliberately out of scope here.
+  07:45Z row is already in the database and `findPreviousBoundary` will
+  still return it, so the next digest collects from 07:45Z until that row is
+  deleted. Deleting it is an operator action, deliberately out of scope
+  here.

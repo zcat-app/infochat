@@ -70,6 +70,14 @@ acceptance:
     predates the window but whose ready_at falls inside it being returned
     by /summary.
   - >-
+    A slot that collected zero posts no longer strands a late-arriving
+    post. A new DigestPostCollectorIT case covers a post whose published_at
+    predates an empty slot's boundary but whose ready_at falls after it
+    being collected by the NEXT slot. This is the property M1-688
+    deliberately did not compensate for in DigestWorker (see its §Notes):
+    under the ready_at predicate the zero-post boundary advance is
+    lossless, and this case is what pins that.
+  - >-
     Any index supporting the old predicate is replaced by one supporting
     the new one, so neither query regresses to a sequential scan on the
     post table.
@@ -186,6 +194,17 @@ frontmatter.
   paragraph — if `ready_at` turns out to be nullable or set at a different
   pipeline stage than assumed, the predicate needs a `COALESCE` and this
   ticket's shape changes.
+- **This ticket carries the zero-post boundary property.** M1-688 was filed
+  with a second acceptance item — an empty slot must not become the next
+  slot's collection boundary — and dropped it at its start gate on
+  2026-07-25: the `summary_cache` row it would have suppressed is the
+  scheduler's only re-fire guard, the missed-slot sentinel rewrites the same
+  boundary anyway, and the marker-column alternative would be a schema
+  compensator for a defect this ticket removes at the root. Under
+  `ready_at >= since` the boundary advance is lossless — a post that goes
+  READY after an empty slot satisfies the next slot's predicate. That is why
+  the acceptance item above exists here rather than there; do not treat it
+  as scope creep.
 - D19 is unaffected in substance: the retrieval stays deterministic SQL and
   the same query on unchanged DB state still returns the same posts. The
   reproducibility property moves from "same feed timestamps" to "same
