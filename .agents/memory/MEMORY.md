@@ -34,6 +34,7 @@ and this store is the shared one both worlds read.
 - [Audit claims vs sequences](audit-claims-vs-sequences.md) — claim-by-claim doc checks are STATELESS and miss ordering bugs; walk every numbered path as a state machine, per variant. Cost: a wrong README step 2 survived a full pre-release audit.
 - [Doc-only edits skip verify](doc-only-edits-skip-verify.md) — run `mvn verify` only when a script/db/code/config file is in the diff.
 - [Release state: read the truth doc, rank your sources](release-state-source-ranking.md) — live DB/config/git > committed docs > scratch handoffs > memory; always read the date.
+- [v1.0.0 tag was pulled pre-announcement](v1-0-0-tag-pulled-pre-announcement.md) — tagged at `3fb97365`, deleted local+origin 2026-07-25 so M1-687..690 ship first; there is currently NO release tag, and that is expected.
 
 ## Build, test and CI mechanics
 
