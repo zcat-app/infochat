@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 703 |
 | deferred | 0 |
 | abandoned | 19 |
-| **total** | **727** |
+| **total** | **728** |
 
 ---
 
@@ -30,6 +30,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-690 — Chat prompt stops declining off-feed questions (complexity: low, risk: low)
 - M1-691 — Decide whether degraded-digest assembly operands need sanitizing (complexity: low, risk: medium)
 - M1-692 — Pin the NULL-ordering property at the three uncovered sort sites (complexity: low, risk: low)
+- M1-693 — Normalize post.title at ingest: empty, content-as-title, and unbounded length (complexity: medium, risk: medium)
 
 ---
 
@@ -932,4 +933,5 @@ M1-688 (done)
         └── M1-692 (pending) ← runnable
 M1-690 (pending) ← runnable
 M1-691 (pending) ← runnable
+M1-693 (pending) ← runnable
 ```
