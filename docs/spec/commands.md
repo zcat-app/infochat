@@ -1719,6 +1719,23 @@ pool is saturated" recovery path. Results are cached briefly so a
 follow-up `/summary` from the same group during the cache TTL is
 served from cache (no second LLM call).
 
+**What a digest covers.** A digest summarizes the period **since
+that group's previous digest**, not merely the slot window it
+fires in — a post that arrives between two slots appears in the
+next digest rather than being skipped. A group's **first** digest
+has no previous digest to bound it and instead covers **one
+inter-slot period** (the gap between the two configured slot
+hours). A missed slot, or one the group was paused through, still
+bounds the next digest's period: that period is skipped, not
+folded forward (the same skip-not-catch-up rule as above). One
+consequence is worth stating plainly: because a first digest
+reaches back a full inter-slot period, a newly approved group's
+opening digest can include posts published before it was
+approved. No digest is *emitted* while a group is pending — only
+the span of its first legitimate digest reaches back that far,
+and it reaches only into the group's own D59 world, never into
+another scope's.
+
 **Categorized digest format (D62).** The non-degraded digest
 renders its story clusters grouped under **topic category
 headers** rather than as one flat list. Categorization is
@@ -1753,7 +1770,7 @@ surface, unlike the broadcast digest.
 
 **Zero-eligible-posts digest.** When a digest slot fires and there
 are no eligible posts for the group (an empty world, or nothing
-arrived in the window), the digest sends a
+arrived in the period above), the digest sends a
 fixed **"no posts yet"** reply — the same deterministic
 localization-bundle string as `/summary` §Content empty window —
 rather than silently sending nothing. A silent digest slot would
