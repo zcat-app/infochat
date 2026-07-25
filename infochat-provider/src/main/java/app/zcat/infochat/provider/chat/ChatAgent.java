@@ -160,6 +160,27 @@ public class ChatAgent {
           + "example: tell me more about that first article). Keep it to a brief "
           + "offer and do not fetch anything unless the user actually asks.";
 
+    // M1-685: when a deterministic topic/command match fires (doHandle
+    // step 3c), the appended authoritative block IS the answer to the
+    // user's matched question. This directive steers the model to defer
+    // to it — a brief lead-in, NOT a substitute/competing answer — so the
+    // user never sees two conflicting answers in one reply (the
+    // live-observed "probation" defect: the model stated a false
+    // substitute immediately before the correct curated answer). It takes
+    // precedence over the semantic-grounding refinement directives above:
+    // a clarifying question or a more-posts affordance alongside a
+    // delivered authoritative answer would itself be the competing text
+    // this removes. Appended to the user prompt (a trusted region, like
+    // CLARIFY/AFFORDANCE_DIRECTIVE); the model's resulting lead-in is
+    // user-facing chat output and routes through the normal sanitize +
+    // translate path. No-match turns never see it.
+    static final String DETERMINISTIC_DELIVERY_DIRECTIVE =
+            "\n\nThe system appends an authoritative answer to the user's question "
+          + "after your reply. Do NOT provide your own substitute or competing "
+          + "answer to that question — let the appended block carry it. Keep your "
+          + "text to a brief, friendly lead-in, or address only other aspects of "
+          + "the user's message if any. Never contradict the answer that follows.";
+
     private final InFlightTracker inFlightTracker;
     private final ChatPromptBuilder promptBuilder;
     private final ChatToolDispatcher toolDispatcher;
@@ -461,6 +482,23 @@ public class ChatAgent {
             }
         }
 
+        // 3d. M1-685 deterministic-delivery steering. When a topic or
+        // command match fired in step 3c, the appended block IS the
+        // authoritative answer to the user's matched question, so the
+        // model must defer to it (a brief lead-in, not a substitute)
+        // instead of presenting a competing answer — the live-observed
+        // "probation" defect had the model state a false substitute
+        // immediately before the correct curated answer. The defer
+        // directive takes precedence over the semantic-grounding
+        // refinement directive from 3b: a clarifying question or a
+        // more-posts affordance alongside a delivered authoritative
+        // answer would itself be the competing text this removes.
+        // No-match turns (both delivery locals null) keep
+        // refinementDirective unchanged — the no-match path is
+        // untouched (acceptance item 3).
+        boolean deterministicDelivery = deliveredTopicSlug != null || deliveredCommandName != null;
+        String turnDirective = deterministicDelivery ? DETERMINISTIC_DELIVERY_DIRECTIVE : refinementDirective;
+
         // 4. Resolve LLM provider for chat task
         LlmProvider provider = llmRouter.forTask(ModelTask.CHAT_AGENT, scopeLanguage);
 
@@ -468,7 +506,7 @@ public class ChatAgent {
         String baseSystemPrompt = prompt.systemPrompt();
         String augmentedSystemPrompt = baseSystemPrompt + TOOL_INSTRUCTIONS;
         String finalText = runToolLoop(provider, augmentedSystemPrompt, baseSystemPrompt,
-                prompt.userPrompt() + semanticBlock + refinementDirective,
+                prompt.userPrompt() + semanticBlock + turnDirective,
                 userId, scopeKind, scopeId, turnContext, retrievedPostUids);
 
         // 6. Strip any residual TOOL_CALL fragments that leaked past the

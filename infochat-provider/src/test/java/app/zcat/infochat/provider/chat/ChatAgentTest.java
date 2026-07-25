@@ -1226,6 +1226,88 @@ class ChatAgentTest {
                 "one probe per turn, each from the caller's text alone");
     }
 
+    // --- M1-685: deterministic-match steering (no competing model answer). ---
+    //
+    // The deterministic block (M1-665 usage / M1-666 topic) is appended
+    // AFTER the model's free text; the defect was that the model could
+    // state a substitute/contradictory answer to the SAME question before
+    // the authoritative block. The fix steers the model to defer to the
+    // block (a brief lead-in, not a substitute) when a match fires in
+    // step 3c — known BEFORE the LLM call. These tests pin the mechanism
+    // (the defer directive reaches the model on a match, is absent on a
+    // no-match) and the reply shape (block delivered). Stub LLMs ignore
+    // the directive's prose, so the directive's PRESENCE in the prompt is
+    // the load-bearing assertion; a real model's compliance is the
+    // live-test concern, not a unit test's.
+
+    @Test
+    void topicMatchSteersModelToDeferToCuratedAnswer() {
+        // M1-685 acceptance item 1 — the live-observed "probation" turn:
+        // a topic match fires, so the model is steered to defer to the
+        // appended curated answer rather than emit a competing substitute.
+        // The defer directive is present in the prompt; the reply carries
+        // the curated block; the model's text precedes it as a lead-in.
+        triggerTopicMatch = "probation";
+        sanitizerOutput = null;
+
+        llmProvider.responses.add(new LlmResponse("Sure — here's how that works."));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "what is probation");
+
+        assertTrue(llmProvider.lastUserPrompt.contains(ChatAgent.DETERMINISTIC_DELIVERY_DIRECTIVE),
+                "a topic-match turn must steer the model to defer to the curated answer. "
+                        + "Prompt: " + llmProvider.lastUserPrompt);
+        assertTrue(reply.contains(BundleKeys.CHAT_TOPIC_DELIVERY_HEADER),
+                "the curated topic block is delivered. Reply: " + reply);
+        assertTrue(reply.contains(BundleKeys.TOPIC_PROBATION_ANSWER),
+                "the curated probation answer is delivered. Reply: " + reply);
+    }
+
+    @Test
+    void commandMatchSteersModelToDeferToUsageBlock() {
+        // M1-685 acceptance item 2: a command-usage match (M1-665) fires
+        // the same defer steering — the deterministic usage block is
+        // authoritative and the model must not emit a competing usage
+        // description.
+        triggerIntentMatch = "unfollow-source";
+        sanitizerOutput = null;
+
+        llmProvider.responses.add(new LlmResponse("Got it."));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "how do I unfollow a feed");
+
+        assertTrue(llmProvider.lastUserPrompt.contains(ChatAgent.DETERMINISTIC_DELIVERY_DIRECTIVE),
+                "a command-match turn must steer the model to defer to the usage block. "
+                        + "Prompt: " + llmProvider.lastUserPrompt);
+        assertTrue(reply.contains(BundleKeys.CHAT_HELP_DELIVERY_HEADER),
+                "the deterministic usage block is delivered. Reply: " + reply);
+    }
+
+    @Test
+    void noMatchTurnDoesNotSteerAndReplyIsUnchanged() {
+        // M1-685 acceptance item 3: a turn with NO deterministic match is
+        // unchanged — no defer directive in the prompt, the model answers
+        // normally, no block is appended. The D69 one-accretion invariant
+        // is preserved (zero blocks).
+        triggerTopicMatch = null;
+        triggerIntentMatch = null;
+        sanitizerOutput = null;
+
+        llmProvider.responses.add(new LlmResponse("Normal model answer."));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "tell me about zcash");
+
+        assertFalse(llmProvider.lastUserPrompt.contains(ChatAgent.DETERMINISTIC_DELIVERY_DIRECTIVE),
+                "a no-match turn must NOT carry the defer directive. Prompt: "
+                        + llmProvider.lastUserPrompt);
+        assertEquals("Normal model answer.", reply,
+                "a no-match turn reply is the model's sanitized text exactly — no block");
+        assertFalse(reply.contains(BundleKeys.CHAT_TOPIC_DELIVERY_HEADER),
+                "no topic block on a no-match turn");
+        assertFalse(reply.contains(BundleKeys.CHAT_HELP_DELIVERY_HEADER),
+                "no command usage block on a no-match turn");
+    }
+
     @Test
     void finalCallOmitsToolInstructions() {
         // Fill MAX_TOOL_ITERATIONS with tool calls to hit the cap

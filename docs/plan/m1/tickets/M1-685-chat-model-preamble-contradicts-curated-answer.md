@@ -1,16 +1,17 @@
 ---
 id: M1-685
 title: "Chat model text can contradict the appended curated answer"
-status: pending
+status: done
 created: 2026-07-24
-last_updated: 2026-07-24
+last_updated: 2026-07-25
 blocked_by: []
 files_budget: 5
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/help/HelpTopicCorpus.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/help/CommandIntentIndex.java
-  - infochat-provider/src/main/java/app/zcat/infochat/provider/help/HelpCommandHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java
 complexity: medium
 risk: low
 round_cap: 2
@@ -50,17 +51,64 @@ acceptance:
   - mvn -pl infochat-provider -am verify is green
 test_plan:
   adds: []
-  modifies: []
+  modifies:
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java
   preserves:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-25
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 169
+      removed: 6
+  - round: 2
+    date: 2026-07-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 202
+      removed: 8
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-07-25
+    verdict: CLEAN
+    base: 8b2c41d13ca0147491d7493015a670cf3ecbc771
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-685-2026-07-25.md
+    out_of_model_count: 0
+    note: |
+      Single-auditor /redteam gate at /m1-tick run step 4 (ahead of review);
+      CLEAN, no findings, no out-of-model items. The diff adds a steering
+      directive appended to the model's user prompt when a deterministic
+      topic/command match fires, steering the model to defer to the appended
+      authoritative block. The directive is trusted-region prompt text (same
+      pattern as CLARIFY/AFFORDANCE_DIRECTIVE); it does not touch the
+      sanitizer, the D69 one-accretion rule, the delivery decision, or the
+      post-sanitize append; the no-match path is unchanged.
+clarity_check:
+  date: 2026-07-25
+  verdict: PASS
+  warnings:
+    - files_scope entry help/HelpCommandHandler.java was stale (file lives at messaging/HelpCommandHandler.java; never existed at help/ per git log --all); corrected to messaging/HelpCommandHandler.java at start
 escalation_reason:
 ---
 
@@ -138,7 +186,7 @@ accuracy on chat turns that have no curated answer.
   start rather than assuming.
 - Match source: `infochat-provider/src/main/java/app/zcat/infochat/provider/help/HelpTopicCorpus.java`
   and `infochat-provider/src/main/java/app/zcat/infochat/provider/help/CommandIntentIndex.java`;
-  usage body via `infochat-provider/src/main/java/app/zcat/infochat/provider/help/HelpCommandHandler.java`;
+  usage body via `infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java`;
   accretion + model call in `infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java`.
   Census the exact test class at start (the M1-666 delivery suite) rather
   than assuming its path.
@@ -151,3 +199,19 @@ accuracy on chat turns that have no curated answer.
   change edits the chat output-composition boundary that the sanitizer
   exemption (security.md §LLM output sanitizer) lives on, so the /redteam
   gate should see it.
+
+## Round 1 rework
+
+Reviewer (round 1, REWORK) flagged SCOPE-DRIFT-CHECK FAIL: the diff touches
+`infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java`
+(3 new @Test methods) but the non-empty `files_scope` did not list it.
+Resolution (metadata-only, no code change):
+- Added `ChatAgentTest.java` to `files_scope` (now 5 entries = files_budget).
+- Populated `test_plan.modifies` with `ChatAgentTest.java` (existing file
+  modified; `modifies` per the M1-691 precedent, not `adds` — the lint
+  validates both fields against files_scope).
+
+All other round-1 checks PASS (test-integrity, out-of-scope, negative-space,
+acceptance, assertion-adequacy). The implementation
+(DETERMINISTIC_DELIVERY_DIRECTIVE + step 3d wiring + 3 tests) is unchanged;
+only ticket metadata was corrected.

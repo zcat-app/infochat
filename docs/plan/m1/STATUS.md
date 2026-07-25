@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 704 |
+| done | 705 |
 | deferred | 0 |
 | abandoned | 20 |
 | **total** | **732** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-685 — Chat model text can contradict the appended curated answer (complexity: medium, risk: low)
 - M1-690 — Chat prompt stops declining off-feed questions (complexity: low, risk: low)
 - M1-691 — Decide whether degraded-digest assembly operands need sanitizing (complexity: low, risk: medium)
 - M1-692 — Pin the NULL-ordering property at the three uncovered sort sites (complexity: low, risk: low)
@@ -71,13 +70,13 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-694 | /summary renders the categorized form by default; --full keeps the flat form | 2026-07-25 | round 2 APPROVE |
 | M1-689 | Key post-retrieval windows on ready_at, not published_at | 2026-07-25 | round 1 APPROVE |
 | M1-688 | Fix digest first-run collection window | 2026-07-25 | round 1 APPROVE |
+| M1-685 | Chat model text can contradict the appended curated answer | 2026-07-25 | round 2 APPROVE |
 | M1-686 | Fix wizard invite guidance and stale 2-secrets comment refs | 2026-07-24 | round 1 APPROVE |
 | M1-684 | Stop committing regenerable redteam-multi evidence bulk | 2026-07-24 | round 1 APPROVE |
 | M1-672 | Narrow Provider grants on identity/authz tables | 2026-07-24 | round 1 APPROVE |
 | M1-683 | Fail the build when a Signal client pairs a real restart hook with no generation supplier | 2026-07-23 | round 1 APPROVE |
 | M1-682 | Fail the build when a transport adapter inherits connected() | 2026-07-23 | round 1 APPROVE |
 | M1-681 | Make a dead transport honest on readiness and on Signal | 2026-07-23 | round 2 APPROVE |
-| M1-680 | Match closed-list flag entries at any argument position | 2026-07-23 | round 1 APPROVE |
 
 ---
 
@@ -928,7 +927,7 @@ M1-677 (done)
 M1-678 (done)
 M1-679 (done)
 M1-684 (done)
-M1-685 (pending) ← runnable
+M1-685 (done)
 M1-686 (done)
 M1-687 (abandoned)
 M1-688 (done)
