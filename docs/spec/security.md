@@ -399,12 +399,14 @@ close the same way, and the difference is the lesson:
   command-shaped title still reaches the reader on that form. The
   headline sanitize also only ever sees the cluster's first post, so a
   multi-post cluster whose command-shaped post is not first produces no
-  `LLM_OUTPUT_SANITIZED` row at all. This is the same
-  unsanitized-assembly residual recorded below for the degraded digest,
-  and `/retry` inherits it too because it always replays the flat form.
-  On `--full` and `/retry`, therefore, the surface is **open, not
-  closed** — and it is outside M1-691, whose scope is
-  `DegradedDigestRenderer` and which explicitly excludes `/summary`. This instance sits at the **same attacker tier**
+  `LLM_OUTPUT_SANITIZED` row at all. This closed-list residual is
+  distinct from the degraded digest's `](` adjacency residual, which
+  M1-691 closed at the outbound chokepoint (see §"Sanitizer output never
+  contains `](`" below); `/retry` inherits this closed-list residual too
+  because it always replays the flat form. On `--full` and `/retry`,
+  therefore, the surface is **open, not closed** — and it is owned by
+  M1-697, which narrows the sanitize unit on the flat render paths. This
+  instance sits at the **same attacker tier**
   as `/add-source` in a DM — both are open to any non-banned user
   (`commands.md` §Source management) — not a lower one; it escaped
   earlier constraint because the write-side caps were designed for size,
@@ -561,25 +563,34 @@ word-boundary rule admits one, so a token written as `/ban(url)` would
 otherwise leave the sanitizer emitting link syntax it manufactured
 itself.
 
-**Sanitizer output never contains `](`.** The guarantee is scoped to what
-the sanitizer emits, not to every byte of every delivered message: a
-render path that *assembles* sanitizer output with bytes the sanitizer
-never saw carries the guarantee for its parts, not for the whole. The
-degraded per-cluster prose branch is the case in point — it sanitizes
-each feed-derived headline but joins the results with the source's
-display name and a bare URL, neither of which passes through the
-sanitizer, and it does not translate. The assembled message is
-therefore outside the guarantee, and the residual risk §Failure
-handling already records for degraded output covers it. (Whether those
-unsanitized assembly operands are acceptable is M1-691.) The default
-categorized `/summary` form is the exception that shows the shape of the
-fix: it sanitizes the **assembled** degraded prose rather than the
-headline alone, so for that path the guarantee covers the whole
-per-cluster string. M1-691 is what decides whether the digest's own
-branch follows. The `/summary --full` and `/retry` flat renders still
-assemble the old way and are covered by neither — M1-691's scope is
-`DegradedDigestRenderer` and it excludes `/summary` explicitly, so that
-residual currently has no owning ticket.
+**Sanitizer output never contains `](`.** The guarantee is now an
+OUTBOUND property, carried once at `OutboundDelivery` (M1-691): every
+outbound body — chat reply, progress placeholder/finalize, periodic
+digest, group announcement — has its `](` adjacency broken before it
+reaches the transport, regardless of how it was assembled. It therefore
+covers the WHOLE delivered message, not only what the sanitizer emits:
+a render path that *assembles* sanitizer output with bytes the sanitizer
+never saw — a source display name, a bare feed URL — no longer escapes
+it, because any `](` the join creates is broken at the chokepoint. This
+subsumes the residual the degraded per-cluster prose branch used to
+carry: it sanitizes each feed-derived headline but joins the results
+with the source's display name and a bare URL, neither of which passes
+through the sanitizer, and the assembled message used to sit outside
+the guarantee. The mechanism is the single
+`LlmOutputSanitizer.breakLinkAdjacency` declaration, called both inside
+the sanitizer's own passes (so a redaction or canonicalization cannot
+manufacture link syntax it then emits — M1-676) and at the outbound
+chokepoint; it is idempotent, so the two call sites stack. The
+closed-list command redaction is a SEPARATE control and does NOT move
+to the chokepoint — its unit is one author's free-text field, and
+running it over a URL would rewrite ordinary feed paths like `/audit`
+or `/pending` to `[redacted command]` — so it stays at each sanitize
+call site, and narrowing its unit on the `/summary --full` and `/retry`
+flat renders (where a command-shaped title still reaches the reader
+unredacted) is M1-697, not this ticket. The default categorized
+`/summary` form sanitizes the **assembled** degraded prose rather than
+the headline alone, so for that path the closed-list guarantee covers
+the whole per-cluster string.
 Flattening alone cannot carry
 that guarantee, because flattening means *parsing*, and the parser is a
 regular expression: CommonMark permits balanced brackets inside a link

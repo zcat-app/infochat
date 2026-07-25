@@ -42,10 +42,20 @@ class OutboundDeliveryTest {
                 new ScopeRef.Dm("contact-1"), "hello", Instant.now(), UUID.randomUUID().toString());
     }
 
+    private static OutboundMessage dmMessage(String text) {
+        return new OutboundMessage(
+                new ScopeRef.Dm("contact-1"), text, Instant.now(), UUID.randomUUID().toString());
+    }
+
     private static OutboundMessage groupMessage() {
         return new OutboundMessage(
                 new ScopeRef.Group("group-upstream-1"), "digest",
                 Instant.now(), UUID.randomUUID().toString());
+    }
+
+    private static OutboundMessage groupMessage(String text) {
+        return new OutboundMessage(
+                new ScopeRef.Group("group-upstream-1"), text, Instant.now(), UUID.randomUUID().toString());
     }
 
     @Test
@@ -289,5 +299,83 @@ class OutboundDeliveryTest {
         }
         assertTrue(repo.removed.isEmpty(),
                 "two post-interrupt permanent sequences leave the counter at 2 — not removed");
+    }
+
+    // M1-691: the no-link guarantee is a property of the DELIVERED message,
+    // carried once at OutboundDelivery — not of any one sanitized field. A
+    // render path that assembled `](` from operands the sanitizer never saw
+    // must still reach the adapter with the adjacency broken; a body with no
+    // `](` must pass byte-identical. One test per public entry point, each
+    // catching the mutation that drops the neutralizeLinkSyntax call from
+    // that entry point (a `](` body would then reach the transport unchanged).
+
+    @Test
+    void deliverBreaksLinkAdjacencyBeforeTheAdapter() {
+        RecordingMessagingAdapter adapter = new RecordingMessagingAdapter();
+        OutboundDelivery delivery = delivery(new RecordingAdminNotifier(), new RecordingGroupRepository());
+
+        delivery.deliver(adapter, dmMessage("click ](here"));
+        delivery.deliver(adapter, dmMessage("plain body"));
+
+        assertEquals(List.of("click ] (here", "plain body"), adapter.sends,
+                "deliver breaks ]( adjacency before the adapter and passes ](-free "
+                        + "bodies byte-identical");
+    }
+
+    @Test
+    void deliverToGroupBreaksLinkAdjacencyBeforeTheAdapter() {
+        RecordingMessagingAdapter adapter = new RecordingMessagingAdapter();
+        OutboundDelivery delivery = delivery(new RecordingAdminNotifier(), new RecordingGroupRepository());
+        UUID groupId = UUID.randomUUID();
+
+        delivery.deliverToGroup(adapter, groupMessage("click ](here"), groupId);
+        delivery.deliverToGroup(adapter, groupMessage("plain body"), groupId);
+
+        assertEquals(List.of("click ] (here", "plain body"), adapter.sends,
+                "deliverToGroup breaks ]( adjacency before the adapter and passes ](-free "
+                        + "bodies byte-identical");
+    }
+
+    @Test
+    void deliverSequenceToGroupBreaksLinkAdjacencyBeforeTheAdapter() {
+        RecordingMessagingAdapter adapter = new RecordingMessagingAdapter();
+        OutboundDelivery delivery = delivery(new RecordingAdminNotifier(), new RecordingGroupRepository());
+        UUID groupId = UUID.randomUUID();
+
+        delivery.deliverSequenceToGroup(adapter, List.of(
+                groupMessage("first ](link"),
+                groupMessage("second plain")), groupId);
+
+        assertEquals(List.of("first ] (link", "second plain"), adapter.sends,
+                "deliverSequenceToGroup breaks ]( adjacency per message before the adapter "
+                        + "and passes ](-free bodies byte-identical");
+    }
+
+    @Test
+    void updateInPlaceBreaksLinkAdjacencyBeforeTheAdapter() {
+        RecordingMessagingAdapter adapter = new RecordingMessagingAdapter();
+        OutboundDelivery delivery = delivery(new RecordingAdminNotifier(), new RecordingGroupRepository());
+        MessageHandle handle = new MessageHandle("h-1");
+
+        delivery.updateInPlace(adapter, handle, "edit ](here");
+        delivery.updateInPlace(adapter, handle, "plain edit");
+
+        assertEquals(List.of("edit ] (here", "plain edit"), adapter.updates,
+                "updateInPlace breaks ]( adjacency before the adapter and passes ](-free "
+                        + "bodies byte-identical");
+    }
+
+    @Test
+    void finalizeInPlaceBreaksLinkAdjacencyBeforeTheAdapter() {
+        RecordingMessagingAdapter adapter = new RecordingMessagingAdapter();
+        OutboundDelivery delivery = delivery(new RecordingAdminNotifier(), new RecordingGroupRepository());
+        MessageHandle handle = new MessageHandle("h-1");
+
+        delivery.finalizeInPlace(adapter, handle, "final ](here");
+        delivery.finalizeInPlace(adapter, handle, "plain final");
+
+        assertEquals(List.of("final ] (here", "plain final"), adapter.finalizes,
+                "finalizeInPlace breaks ]( adjacency before the adapter and passes ](-free "
+                        + "bodies byte-identical");
     }
 }

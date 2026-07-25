@@ -272,6 +272,33 @@ class DigestDeliveryTest {
     }
 
     @Test
+    void bodyRewrittenByChokepointStillRecordsDelivery() {
+        // M1-691: OutboundDelivery.deliverSequenceToGroup rewrites a section
+        // body to break "](" adjacency, handing the RecordingAdapter a DIFFERENT
+        // OutboundMessage instance than the one DigestDelivery built. The slug
+        // lookup is keyed on correlationId (not on the instance), so the
+        // delivery row still lands — without the re-keying the rewritten
+        // message would miss an identity map and the section would silently
+        // drop its delivery record, degrading M1-652 replay to a duplicate.
+        RecordingDeliveryRepo deliveryRepo = new RecordingDeliveryRepo();
+        ScriptedAdapter adapter = new ScriptedAdapter(ADAPTER_NAME);
+        DigestDelivery digestDelivery = wiredDelivery(new RecordingRepo(), deliveryRepo);
+        UUID groupId = UUID.randomUUID();
+        Instant windowStart = Instant.now();
+
+        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
+                section("security", "headline ](https://evil.example/x")));
+
+        // The chokepoint rewrote the body — proving the rewrite is live, so the
+        // correlationId re-keying is load-bearing (an identity map would miss).
+        assertEquals("headline ] (https://evil.example/x", adapter.sent.get(0).text(),
+                "the chokepoint broke the ]( adjacency before the adapter saw the body");
+        // ...and the delivery row still recorded, keyed on correlationId.
+        assertEquals(Set.of("security"), deliveryRepo.recordedSlugs(groupId, windowStart),
+                "a section whose body was rewritten by the chokepoint still records its delivery");
+    }
+
+    @Test
     void deliveryRecordWriteFailure_doesNotAbortRemainingCategories() {
         // A record-write failure degrades to the spec-sanctioned duplicate
         // on later replay (D64 at-least-once) — propagation would abort the

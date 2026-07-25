@@ -79,6 +79,33 @@ class DegradedDigestRendererTest {
                 "a non-command slash must not trigger redaction; got: " + result);
     }
 
+    @Test
+    void renderLeavesLinkAdjacencyVerbatim_layeringCarriedAtOutboundDelivery() {
+        // M1-691 layering pin. sourceDisplayName can carry ]( — /add-source
+        // --name rejects slashes but no bracket (SourceUpsertService
+        // .acceptableOverride) — and the renderer does NOT sanitize it: the
+        // no-link guarantee is carried once at OutboundDelivery, not at this
+        // render site. This test pins the DELIBERATE leak so a future edit
+        // that "fixes" the renderer to sanitize locally breaks here and
+        // forces the editor to read the assembly-point comment naming
+        // OutboundDelivery. (The title is sanitized; only the joined display
+        // name and url are the unsanitized operands, and neither can carry a
+        // closed-list token — every command starts with /, which --name
+        // rejects and a stored url cannot lead with.)
+        List<EligiblePostQuery.Post> posts = List.of(
+                post("uid-1", "Legit headline", "Acme](https://evil.example/x",
+                        "https://evil.example/x"));
+
+        String result = renderer.render(posts);
+
+        assertTrue(result.contains("Acme](https://evil.example/x"),
+                "the renderer returns the ](-bearing display name VERBATIM — the no-link "
+                        + "guarantee is carried at OutboundDelivery (M1-691), not at this render "
+                        + "site; got: " + result);
+        assertTrue(result.contains("Legit headline"),
+                "the sanitized title is still rendered; got: " + result);
+    }
+
     private static EligiblePostQuery.Post post(String uid, String title,
                                                String source, String url) {
         return new EligiblePostQuery.Post(

@@ -477,6 +477,31 @@ public class LlmOutputSanitizer {
      * docs/plan/m1/redteam/M1-676-2026-07-23-r3.md.)
      */
     private static String neutralizeResidualLinkSyntax(String text) {
+        return breakLinkAdjacency(text);
+    }
+
+    /**
+     * The `](` adjacency break, as a reusable operation: insert one space
+     * between the two characters so no renderer resolves them as a link.
+     * The single declaration of the mechanism — see
+     * {@link #neutralizeResidualLinkSyntax} for why the property is stated
+     * over two adjacent characters rather than over parsed markdown.
+     *
+     * <p>Two callers, deliberately at different altitudes. This class calls
+     * it <i>within</i> its own passes so a redaction or a canonicalization
+     * cannot manufacture link syntax it then emits (M1-676 rounds 1–3).
+     * {@code OutboundDelivery} calls it on every outbound body, because the
+     * guarantee is a property of the DELIVERED MESSAGE, not of any one
+     * sanitized field: a render path that joins sanitizer output with
+     * operands the sanitizer never saw — a source display name, a bare feed
+     * URL — would otherwise ship `](` while every individual sanitize call
+     * was correct (M1-691).
+     *
+     * <p>Idempotent ({@code "] ("} contains no {@code "]("}) and
+     * character-preserving, so the two call sites stack without interfering
+     * and a bare URL stays readable (D30).
+     */
+    public static String breakLinkAdjacency(String text) {
         return text.replace("](", "] (");
     }
 

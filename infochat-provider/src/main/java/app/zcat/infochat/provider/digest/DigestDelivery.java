@@ -18,7 +18,7 @@ import org.slf4j.LoggerFactory;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.IdentityHashMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -113,11 +113,15 @@ public class DigestDelivery {
                         Instant windowStart,
                         List<RenderedSection> sections) {
         List<OutboundMessage> messages = new ArrayList<>(sections.size());
-        // Identity map so the wrapper can recover the slug from the exact
-        // message object the chokepoint hands back to adapter.send(). An
-        // equals-based map would also work (records have structural equals),
-        // but identity is tighter and free.
-        Map<OutboundMessage, String> messageSlugs = new IdentityHashMap<>();
+        // Keyed on correlationId, NOT on the message instance and not on the
+        // record's structural equality. The chokepoint may hand the adapter a
+        // DIFFERENT OutboundMessage than the one built here — it rewrites the
+        // body to break "](" adjacency (OutboundDelivery.neutralizeLinkSyntax,
+        // M1-691) — so both identity and equals miss on exactly the messages
+        // an attacker controls, silently skipping their delivery row and
+        // degrading M1-652 replay to a duplicate. correlationId is unique per
+        // section, already carries the slug, and no body transform touches it.
+        Map<String, String> messageSlugs = new HashMap<>();
         for (RenderedSection section : sections) {
             String categorySlug = DigestSectionRepository.slugOf(section);
             String correlationId = "digest-" + internalGroupId + "-" + windowStart + "-" + categorySlug;
@@ -127,7 +131,7 @@ public class DigestDelivery {
                     Instant.now(),
                     correlationId);
             messages.add(msg);
-            messageSlugs.put(msg, categorySlug);
+            messageSlugs.put(correlationId, categorySlug);
         }
         MessagingAdapter recording = new RecordingAdapter(
                 adapter, deliveryRepository, internalGroupId, windowStart, messageSlugs);
@@ -147,13 +151,13 @@ public class DigestDelivery {
         private final DigestCategoryDeliveryRepository deliveryRepository;
         private final UUID internalGroupId;
         private final Instant windowStart;
-        private final Map<OutboundMessage, String> messageSlugs;
+        private final Map<String, String> messageSlugs;
 
         RecordingAdapter(MessagingAdapter delegate,
                          DigestCategoryDeliveryRepository deliveryRepository,
                          UUID internalGroupId,
                          Instant windowStart,
-                         Map<OutboundMessage, String> messageSlugs) {
+                         Map<String, String> messageSlugs) {
             this.delegate = delegate;
             this.deliveryRepository = deliveryRepository;
             this.internalGroupId = internalGroupId;
@@ -166,7 +170,7 @@ public class DigestDelivery {
             // Delegate first — a throw means the adapter did NOT accept, so
             // no delivery is recorded and the existing ladder runs unchanged.
             MessageHandle handle = delegate.send(msg);
-            String slug = messageSlugs.get(msg);
+            String slug = messageSlugs.get(msg.correlationId());
             if (slug != null) {
                 try {
                     deliveryRepository.recordDelivery(internalGroupId, windowStart, slug);

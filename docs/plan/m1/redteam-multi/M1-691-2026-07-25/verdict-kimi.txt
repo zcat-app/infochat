@@ -1,0 +1,77 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: INJECTION
+    SEVERITY: low
+    PROMISE: docs/spec/security.md §LLM output sanitizer, as amended by this
+      diff (working-tree security.md:566-574): "The guarantee is now an
+      OUTBOUND property, carried once at OutboundDelivery (M1-691): every
+      outbound body — chat reply, progress placeholder/finalize, periodic
+      digest, group announcement — has its `](` adjacency broken before it
+      reaches the transport, regardless of how it was assembled." The same
+      spec file sets the bar for how such properties must be held: the
+      closed-list match set is CI-enforced so that the property is "a
+      structural property of the codebase rather than a discipline"
+      (§Match-set derivation).
+    GAP: The absolute "every outbound body ... regardless of how it was
+      assembled" is delivered by hand-instrumenting the five enumerated
+      entry points of one class (OutboundDelivery.java:142-144 deliver,
+      :153-155 deliverToGroup, :188-190 deliverSequenceToGroup, :218-221
+      updateInPlace, :231-234 finalizeInPlace, via neutralizeLinkSyntax at
+      :254-262). The completeness evidence in the diff is circular: the
+      ticket census greps OutboundDelivery's OWN public methods
+      (`grep -n "public .*deliver\|public .*InPlace" OutboundDelivery.java`),
+      which enumerates the chokepoint, not its callers — no census of
+      `adapter.send/update/finalizeMessage` call sites across the provider
+      module is shown, and no mechanical guard (CI check, architecture test)
+      is added to keep it that way. The diff itself demonstrates why this is
+      convention rather than construction: DigestDelivery.java:151-173 wraps
+      a raw MessagingAdapter in a RecordingAdapter whose send() calls
+      `delegate.send(msg)` directly — arbitrary provider code can reach an
+      adapter. Any present-or-future path that does so outside the five
+      methods ships `](` unbroken, and the failure is invisible: the
+      chokepoint break (LlmOutputSanitizer.breakLinkAdjacency, :500-504)
+      emits no WARN and no audit row, unlike the closed-list control whose
+      every match is audit-logged per-occurrence. Meanwhile the spec text
+      this diff lands upgrades the claim from the previous honestly-scoped
+      "scoped to what the sanitizer emits" to an absolute — exactly the
+      shape that lets a later bypass be believed impossible.
+    REPRO: A render path calling `adapter.send(...)` (or `adapter.update` /
+      `adapter.finalizeMessage`) directly — e.g. a new decorator built on
+      the DigestDelivery RecordingAdapter pattern, or any of the fixed-reply
+      / admin-notification paths whose routing the diff does not show —
+      delivers the ticket's own zero-privilege vector, a feed `<link>` of
+      `https://x.example/#](` (reachable because PostPersister
+      .normalizeUrlForStorage admits `]` and `(` in URI query/fragment, per
+      the ticket investigation), to the transport with the adjacency intact.
+      A markdown-rendering client resolves the label-hiding link the spec
+      promises can never be delivered; nothing in the diff detects, logs, or
+      audits the miss. Contrast with the paired closed-list control, where
+      the spec mandates a CI byte-for-byte registry check so a missing entry
+      fails the build.
+    SUGGESTED-FIX-CLASS: trust-boundary-tightening
+
+OUT-OF-MODEL:
+  - Client-side Unicode handling after delivery can synthesize the adjacency
+    the chokepoint checks for. The documented property is deliberately two
+    adjacent ASCII characters ("The property is about two characters rather
+    than about markdown", security.md:604-605), and breakLinkAdjacency is a
+    literal `text.replace("](", "] (")`. A chat client that NFKC-normalizes
+    (fullwidth `］（` → `](`) or strips zero-width / bidi-control characters
+    before linkifying (`]​(`, bidi-wrapped pairs) would form the link after
+    the Provider's raw-byte check has run. Notable because the sanitizer's
+    own canonical-form pass exists precisely on the admission that
+    canonicalization synthesizes link syntax (security.md:552-564) — that
+    reasoning stops at the chokepoint. The threat model's renderer model
+    ("a renderer resolves a link only on the adjacent pair") places this
+    outside the documented commitments; flagging in case the model should
+    say something about post-delivery normalization.
+  - Reference-style and collapsed markdown links (`[label][ref]` resolved
+    by a `[ref]: https://...` definition) hide a URL behind a label through
+    a `][` adjacency the property does not cover. Multi-post assembly (the
+    degraded digest joins several mutually untrusted publishers into one
+    body, security.md:516-536) lets one author supply the label and another
+    the definition, synthesizing a label-hiding link across operands even
+    with the chokepoint working exactly as designed. Outside the documented
+    `](` commitment; whether v1 clients render reference links decides if
+    the model needs extending.

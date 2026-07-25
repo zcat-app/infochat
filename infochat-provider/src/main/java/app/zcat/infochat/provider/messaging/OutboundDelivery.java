@@ -9,6 +9,7 @@ import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 import app.zcat.infochat.provider.group.GroupRepository;
+import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -138,7 +139,8 @@ public class OutboundDelivery {
      * replies and progress placeholders/finalizes.
      */
     public @Nullable MessageHandle deliver(MessagingAdapter adapter, OutboundMessage msg) {
-        return execute(adapter.name(), null, msg, () -> adapter.send(msg)).handle();
+        OutboundMessage safe = neutralizeLinkSyntax(msg);
+        return execute(adapter.name(), null, safe, () -> adapter.send(safe)).handle();
     }
 
     /**
@@ -148,7 +150,8 @@ public class OutboundDelivery {
      */
     public @Nullable MessageHandle deliverToGroup(
             MessagingAdapter adapter, OutboundMessage msg, UUID groupId) {
-        return execute(adapter.name(), groupId, msg, () -> adapter.send(msg)).handle();
+        OutboundMessage safe = neutralizeLinkSyntax(msg);
+        return execute(adapter.name(), groupId, safe, () -> adapter.send(safe)).handle();
     }
 
     /**
@@ -183,7 +186,8 @@ public class OutboundDelivery {
         String channel = adapter.name();
         boolean anyDelivered = false;
         for (OutboundMessage msg : messages) {
-            Outcome outcome = execute(channel, null, msg, () -> adapter.send(msg));
+            OutboundMessage safe = neutralizeLinkSyntax(msg);
+            Outcome outcome = execute(channel, null, safe, () -> adapter.send(safe));
             if (outcome.delivered()) {
                 anyDelivered = true;
             } else if (Thread.currentThread().isInterrupted()) {
@@ -212,8 +216,9 @@ public class OutboundDelivery {
      * to this class alone.
      */
     public boolean updateInPlace(MessagingAdapter adapter, MessageHandle handle, String body) {
+        String safe = LlmOutputSanitizer.breakLinkAdjacency(body);
         return execute(adapter.name(), null, null, () -> {
-            adapter.update(handle, body);
+            adapter.update(handle, safe);
             return null;
         }).delivered();
     }
@@ -224,10 +229,43 @@ public class OutboundDelivery {
      * chokepoint grep (acceptance item 1) resolves to this class alone.
      */
     public boolean finalizeInPlace(MessagingAdapter adapter, MessageHandle handle, String body) {
+        String safe = LlmOutputSanitizer.breakLinkAdjacency(body);
         return execute(adapter.name(), null, null, () -> {
-            adapter.finalizeMessage(handle, body);
+            adapter.finalizeMessage(handle, safe);
             return null;
         }).delivered();
+    }
+
+    /**
+     * Break `](` adjacency on an outbound body (M1-691).
+     *
+     * <p><b>Why here and not in the render paths.</b> The no-link guarantee
+     * is a property of the DELIVERED MESSAGE, not of any one sanitized
+     * field. A render path that joins {@code LlmOutputSanitizer} output with
+     * operands the sanitizer never saw — a source display name, a bare feed
+     * URL — ships `](` while every individual sanitize call is correct, and
+     * no per-operand discipline can rule that out in general because a join
+     * can always create the pair across a boundary. Applying it at the one
+     * chokepoint every outbound byte already passes through makes the
+     * property hold by construction: a new render path inherits it without
+     * knowing it exists. The closed-list command redaction deliberately does
+     * NOT move here — that control needs one author's field as its unit and
+     * must never see a URL, so it stays at each interpolation site.
+     *
+     * <p>{@link LlmOutputSanitizer#breakLinkAdjacency} is idempotent, so
+     * bodies that already ran through {@code sanitize()} are unaffected.
+     *
+     * <p>Returns the SAME instance when the body is unchanged (the
+     * overwhelmingly common case — no bundle string contains `](`). Callers
+     * are free to key on the returned reference, but must not assume it
+     * survives a rewrite: {@code DigestDelivery} keys its per-section slug
+     * lookup on {@code correlationId} for exactly that reason.
+     */
+    private static OutboundMessage neutralizeLinkSyntax(OutboundMessage msg) {
+        String safeText = LlmOutputSanitizer.breakLinkAdjacency(msg.text());
+        return safeText.equals(msg.text())
+                ? msg
+                : new OutboundMessage(msg.scope(), safeText, msg.requestedAt(), msg.correlationId());
     }
 
     /**

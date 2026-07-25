@@ -1,0 +1,23 @@
+RED-TEAM VERDICT: CLEAN
+
+OUT-OF-MODEL:
+  - The outbound `](` guarantee is carried by `LlmOutputSanitizer.breakLinkAdjacency`,
+    which performs a raw-byte ASCII `text.replace("](", "] (")` at the
+    `OutboundDelivery` chokepoint. It does NOT canonicalize (NFKC) before
+    matching. Fullwidth `］（` (U+FF5D U+FF08) in an UNSANITIZED operand —
+    a `source.display_name` set via `/add-source --name`, or a feed
+    `post.url` — reaches the chokepoint uncanonicalized and is not broken,
+    because it is not the ASCII `](` sequence. The spec's threat model
+    asserts "no client renders [fullwidth `］`] as link syntax"
+    (§"Sanitizer output never contains `](`"), so this is in-model safe
+    TODAY. The residual: if any enabled messaging adapter's client
+    applies NFKC (or any fold that maps `］` → `]`) before markdown
+    rendering, a display name like `Acme］（https://evil.example/x` would
+    normalize to `Acme](https://evil.example/x` client-side and render as
+    a working link — exactly the label-hiding markdown the `](` break
+    exists to prevent. Inside the sanitizer this is handled (canonicalization
+    folds fullwidth to ASCII, then the internal `breakLinkAdjacency` call
+    breaks the result); the gap is only at the chokepoint over unsanitized
+    operands. Flagged so the user can decide whether to extend the model
+    (e.g. canonicalize-then-break at the chokepoint) or accept the spec's
+    client-rendering assumption as sufficient.
