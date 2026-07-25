@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 702 |
 | deferred | 0 |
 | abandoned | 19 |
-| **total** | **725** |
+| **total** | **726** |
 
 ---
 
@@ -29,6 +29,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-687 — /summary renders the categorized digest form by default (complexity: high, risk: medium)
 - M1-689 — Key post-retrieval windows on ready_at, not published_at (complexity: medium, risk: medium)
 - M1-690 — Chat prompt stops declining off-feed questions (complexity: low, risk: low)
+- M1-691 — Decide whether degraded-digest assembly operands need sanitizing (complexity: low, risk: medium)
 
 ---
 
@@ -929,4 +930,5 @@ M1-687 (pending) ← runnable
 M1-688 (done)
   └── M1-689 (pending) ← runnable
 M1-690 (pending) ← runnable
+M1-691 (pending) ← runnable
 ```
