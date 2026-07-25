@@ -220,6 +220,72 @@ class DigestPostCollectorIT {
     }
 
     @Test
+    void undatedPostSortsBehindDatedByFetchCeiling() throws Exception {
+        // M1-692: POSTS_ALL_SQL. published_at is nullable and Postgres sorts
+        // NULLs FIRST under DESC, so a bare `ORDER BY published_at DESC` would
+        // hand an undated post the head of the digest — ahead of every dated
+        // post the ingest clamp bounds. The shipped key
+        // COALESCE(published_at, fetched_at) DESC, id DESC falls back to
+        // fetched_at (the clamp ceiling), NOT ready_at (the promotion instant).
+        // This fixture makes the two disagree for the undated row: fetched
+        // EARLIER but promoted LATER than the dated one, so it would lead under
+        // a ready_at fallback yet must trail under fetched_at. Both fetched_at
+        // values stay inside the May 2026 partition (post is range-partitioned
+        // on fetched_at with no DEFAULT).
+        Instant now = Instant.now();
+        Instant undatedFetchedAt = Instant.parse("2026-05-22T12:00:00Z");
+        Instant datedFetchedAt = undatedFetchedAt.plus(Duration.ofDays(1));
+        insertPostWithFetchedAt("all-dated", sourceId, "Dated",
+                datedFetchedAt.minus(Duration.ofHours(1)), now.minus(Duration.ofMinutes(40)),
+                datedFetchedAt, List.of());
+        insertPostWithFetchedAt("all-undated", sourceId, "Undated",
+                null, now.minus(Duration.ofMinutes(20)), undatedFetchedAt, List.of());
+
+        DigestPostCollector.CollectionResult result =
+                collector.collectForGroup(groupId, now.minus(Duration.ofHours(1)));
+
+        assertEquals(2, result.posts().size(), "both posts are inside the ready_at window");
+        assertEquals("Dated", result.posts().get(0).title(),
+                "an undated post must sort by the instant it was FETCHED — the clamp ceiling — "
+                        + "not by its later promotion instant");
+        assertEquals("Undated", result.posts().get(1).title());
+    }
+
+    @Test
+    void undatedPostSortsBehindDatedByFetchCeilingExplicitTagMode() throws Exception {
+        // M1-692: POSTS_EXPLICIT_SQL — the EXPLICIT tag-filtered digest path
+        // had no ordering test at all today. Same NULL-ordering property as the
+        // ALL path: the undated row is fetched EARLIER but promoted LATER, so
+        // it must trail under the COALESCE(published_at, fetched_at) fallback.
+        // Both posts carry the group's followed tag so the EXPLICIT filter
+        // admits both.
+        UUID explicitGroup = insertGroup("explicit-null-order");
+        UUID explicitSource = insertBootstrapSource("explicit-null-order-src");
+        UUID tag = insertTag("explicit-null-order-tag");
+        insertScopeTag(explicitGroup, tag);
+        insertScopePreferences(explicitGroup, "EXPLICIT");
+        String followedTag = PREFIX + "explicit-null-order-tag";
+        Instant now = Instant.now();
+        Instant undatedFetchedAt = Instant.parse("2026-05-22T12:00:00Z");
+        Instant datedFetchedAt = undatedFetchedAt.plus(Duration.ofDays(1));
+        insertPostWithFetchedAt("explicit-dated", explicitSource, "Dated",
+                datedFetchedAt.minus(Duration.ofHours(1)), now.minus(Duration.ofMinutes(40)),
+                datedFetchedAt, List.of(followedTag));
+        insertPostWithFetchedAt("explicit-undated", explicitSource, "Undated",
+                null, now.minus(Duration.ofMinutes(20)), undatedFetchedAt,
+                List.of(followedTag));
+
+        DigestPostCollector.CollectionResult result =
+                collector.collectForGroup(explicitGroup, now.minus(Duration.ofHours(1)));
+
+        assertEquals(2, result.posts().size(), "both tagged posts are inside the ready_at window");
+        assertEquals("Dated", result.posts().get(0).title(),
+                "the EXPLICIT digest path must order an undated post by its fetch ceiling, "
+                        + "not its promotion instant");
+        assertEquals("Undated", result.posts().get(1).title());
+    }
+
+    @Test
     void collectForGroupQueriesRunUnderStatementTimeout() throws Exception {
         RecordingDataSource recordingDataSource = new RecordingDataSource(dataSource);
         collector.dataSource = recordingDataSource;
@@ -378,6 +444,32 @@ class DigestPostCollectorIT {
             ps.setTimestamp(6, Timestamp.from(readyAt));
             ps.setArray(7, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
             ps.setString(8, PREFIX + uidSuffix);
+            ps.executeUpdate();
+        }
+    }
+
+    /**
+     * Seeds a READY post with an explicit {@code fetched_at} so ordering tests
+     * can separate the fetch ceiling from the promotion instant. {@code publishedAt}
+     * may be null. Mirrors {@code SearchPostsToolTest.seedReadyPostAt}.
+     */
+    private void insertPostWithFetchedAt(String uidSuffix, UUID postSourceId, String title,
+            @Nullable Instant publishedAt, Instant readyAt, Instant fetchedAt,
+            List<String> tags) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO post (uid, source_id, title, body, published_at, fetched_at, "
+                             + "ready_at, status, tags, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, ?)")) {
+            ps.setString(1, PREFIX + uidSuffix);
+            ps.setObject(2, postSourceId);
+            ps.setString(3, title);
+            ps.setString(4, "Body for " + title);
+            ps.setTimestamp(5, publishedAt == null ? null : Timestamp.from(publishedAt));
+            ps.setTimestamp(6, Timestamp.from(fetchedAt));
+            ps.setTimestamp(7, Timestamp.from(readyAt));
+            ps.setArray(8, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
+            ps.setString(9, PREFIX + uidSuffix);
             ps.executeUpdate();
         }
     }

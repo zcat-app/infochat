@@ -1,7 +1,7 @@
 ---
 id: M1-692
 title: "Pin the NULL-ordering property at the three uncovered sort sites"
-status: pending
+status: done
 created: 2026-07-25
 last_updated: 2026-07-25
 blocked_by:
@@ -77,13 +77,41 @@ spec_refs:
 decision_refs:
   - D19
   - D21
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 177
+      removed: 8
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-07-25
+    verdict: CLEAN
+    base: 668864f7a0b1c0ee7f1eabe84c3931eabb90b16d
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-692-2026-07-25.md
+    out_of_model_count: 0
+    note: |
+      Pre-review redteam gate (/m1-tick run step 4). Audited the uncommitted
+      working-tree diff vs fork point 668864f7. Test-only diff (three NULL-
+      ordering regression tests); no production SQL/Java changed, no security
+      surface touched. CLEAN.
 clarity_check:
+  date: 2026-07-25
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 

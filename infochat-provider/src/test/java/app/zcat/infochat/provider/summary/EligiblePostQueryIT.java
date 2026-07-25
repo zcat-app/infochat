@@ -310,6 +310,43 @@ class EligiblePostQueryIT {
     }
 
     @Test
+    void undatedPostSortsBehindDatedByFetchCeilingNotPromotion() throws Exception {
+        // M1-692. published_at is nullable and Postgres sorts NULLs FIRST under
+        // DESC, so a bare `ORDER BY published_at DESC` would hand an undated
+        // post the head of the result — ahead of every dated post the ingest
+        // clamp bounds. The shipped key COALESCE(published_at, fetched_at) DESC,
+        // id DESC falls back to fetched_at (the clamp ceiling), NOT ready_at
+        // (the promotion instant). This fixture makes the two disagree for the
+        // undated row: fetched EARLIER but promoted LATER than the dated one,
+        // so it would lead under a ready_at fallback yet must trail under
+        // fetched_at. Both fetched_at values stay inside the May 2026 partition
+        // (post is range-partitioned on fetched_at with no DEFAULT).
+        UUID userId = insertUser("null-order");
+        UUID sourceId = insertSource("null-order-src", "NLO");
+        insertSubscription("dm", userId, sourceId);
+        Instant now = Instant.now();
+        Instant undatedFetchedAt = Instant.parse("2026-05-22T12:00:00Z");
+        Instant datedFetchedAt = undatedFetchedAt.plus(Duration.ofDays(1));
+        // Dated: fetched a day later, published just under its fetch ceiling,
+        // readied an hour ago.
+        insertPostWithFetchedAt("null-order-dated", sourceId, "Dated",
+                datedFetchedAt.minus(Duration.ofHours(1)), now.minus(Duration.ofHours(1)),
+                datedFetchedAt, List.of(PREFIX + "news"));
+        // Undated: fetched a day EARLIER, no published_at, promoted most recently.
+        insertPostWithFetchedAt("null-order-undated", sourceId, "Undated",
+                null, now.minus(Duration.ofMinutes(30)), undatedFetchedAt,
+                List.of(PREFIX + "news"));
+
+        Result result = query.fetch("dm", userId, Optional.empty(), Duration.ofHours(24));
+        List<String> titles = result.posts().stream().map(Post::title).toList();
+
+        assertEquals(2, titles.size(), "both posts are inside the 24h ready_at window");
+        assertEquals(List.of("Dated", "Undated"), titles,
+                "an undated post must sort by the instant it was FETCHED — the clamp ceiling — "
+                        + "not by its later promotion instant; a ready_at fallback would put Undated first");
+    }
+
+    @Test
     void explicitTagModeRestrictsToScopeTagUnion() throws Exception {
         UUID userId = insertUser("explicit-user");
         UUID sourceId = insertSource("explicit-src", "EXS");
@@ -646,6 +683,33 @@ class EligiblePostQueryIT {
             ps.setTimestamp(5, Timestamp.from(publishedAt));
             ps.setTimestamp(6, Timestamp.from(readyAt));
             ps.setString(7, status);
+            ps.setArray(8, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
+            ps.setString(9, PREFIX + uidSuffix);
+            ps.executeUpdate();
+        }
+    }
+
+    /**
+     * Seeds a READY post with an explicit {@code fetched_at} so ordering tests
+     * can separate the fetch ceiling from the promotion instant. {@code publishedAt}
+     * may be null — the column is nullable and a source need not supply a date.
+     * Mirrors {@code SearchPostsToolTest.seedReadyPostAt}.
+     */
+    private void insertPostWithFetchedAt(String uidSuffix, UUID sourceId, String title,
+                                         Instant publishedAt, Instant readyAt,
+                                         Instant fetchedAt, List<String> tags) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO post (uid, source_id, title, body, published_at, fetched_at, "
+                             + "ready_at, status, tags, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, ?)")) {
+            ps.setString(1, PREFIX + uidSuffix);
+            ps.setObject(2, sourceId);
+            ps.setString(3, title);
+            ps.setString(4, "Body for " + title);
+            ps.setTimestamp(5, publishedAt == null ? null : Timestamp.from(publishedAt));
+            ps.setTimestamp(6, Timestamp.from(fetchedAt));
+            ps.setTimestamp(7, Timestamp.from(readyAt));
             ps.setArray(8, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
             ps.setString(9, PREFIX + uidSuffix);
             ps.executeUpdate();
