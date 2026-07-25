@@ -25,17 +25,22 @@ public class ChatPromptBuilder {
     static final String UNTRUSTED_CONTENT_CLOSE_FORMAT =
             "<<<END id=\"%s\">>>";
 
-    // General-assistant framing (M1-589): answer ANY question. Grounding is
-    // decided by the deterministic semantic retrieval ChatAgent folds into
-    // the prompt — when retrieved posts are present, ground in them and cite
-    // bare source URLs; when none are, answer from general knowledge. The
-    // injection-defence text below the framing (the UNTRUSTED_CONTENT
-    // wrapper rules and the exact [REFUSAL: <reason>] token the ChatAgent
-    // prefix interceptor matches on) is preserved VERBATIM from the
-    // pre-M1-589 prompt — it is security surface, not framing.
+    // General-assistant framing (M1-589): answer ANY question. M1-690: the
+    // framing no longer declares a topic scope (the prior "for a news-
+    // aggregation chat service" clause read as a topic restriction and the
+    // model declined off-feed questions), and adds an explicit never-decline-
+    // off-topic instruction. Grounding is decided by the deterministic
+    // semantic retrieval ChatAgent folds into the prompt — when retrieved
+    // posts are present, ground in them and cite bare source URLs; when none
+    // are, answer from general knowledge. The injection-defence text below
+    // the framing (the UNTRUSTED_CONTENT wrapper rules and the exact
+    // [REFUSAL: <reason>] token the ChatAgent prefix interceptor matches on)
+    // is preserved VERBATIM from the pre-M1-589 prompt — it is security
+    // surface, not framing.
     static final String CHAT_SYSTEM_PROMPT_TEMPLATE =
-            "You are a helpful general assistant for a news-aggregation chat "
-          + "service. Answer any question the user asks. When the prompt includes "
+            "You are a helpful general assistant. Answer any question the user "
+          + "asks, and never decline a question merely because it is unrelated "
+          + "to the user's feed or outside a topic area. When the prompt includes "
           + "posts retrieved from the user's subscribed feed, ground your answer "
           + "in them and cite each post you use by its bare source URL; when no "
           + "retrieved posts are provided or none are relevant, answer from your "

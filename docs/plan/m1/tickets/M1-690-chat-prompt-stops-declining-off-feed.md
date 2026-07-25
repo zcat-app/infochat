@@ -1,7 +1,7 @@
 ---
 id: M1-690
 title: "Chat prompt stops declining off-feed questions"
-status: pending
+status: done
 created: 2026-07-25
 last_updated: 2026-07-25
 blocked_by: []
@@ -72,12 +72,49 @@ spec_refs:
 decision_refs:
   - D21
   - D58
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 136
+      removed: 19
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-07-25
+    verdict: CLEAN
+    base: 3a655d5681b26de2214fda232a2ca6a3d778a9fe
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-690-2026-07-25.md
+    out_of_model_count: 1
+    note: |
+      Audit ran at the /m1-tick run redteam gate (security_relevant: true),
+      ahead of review, against the uncommitted working-tree diff on branch
+      m1/M1-690-chat-prompt-stops-declining-off-feed. CLEAN — the injection-
+      defence half of CHAT_SYSTEM_PROMPT_TEMPLATE is byte-identical to the
+      pre-edit prompt, and the never-decline-off-topic instruction is scoped
+      to topical relevance, so the [REFUSAL:] directive still governs
+      injection attempts. One out-of-model item flags the widened remit as a
+      pre-existing LLM-judgment surface; advisory only. An initial run was
+      discarded (subagent resolved relative paths against the primary
+      checkout instead of the worktree); the CLEAN verdict is from the
+      re-run with absolute paths.
+clarity_check:
+  date: 2026-07-25
+  verdict: WARN
+  warnings:
+    - "Context para claims 'nothing in the template tells it not to decline off-topic questions' but the template already says 'Answer any question the user asks' (landed by M1-589). Stale motivation prose; the acceptance items stand on their own (reframe the scope-declaring clause + add an explicit never-decline-off-topic instruction) and do not depend on the stale claim. Not a premise-fail — what gets built is unchanged, so no blocking question raised."
+  blockers: []
 escalation_reason:
 ---
 
