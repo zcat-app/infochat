@@ -1,7 +1,7 @@
 ---
 id: M1-687
 title: "/summary renders the categorized digest form by default"
-status: pending
+status: abandoned
 created: 2026-07-25
 last_updated: 2026-07-25
 blocked_by: []
@@ -155,7 +155,33 @@ aborted_attempts: []
 reopens: []
 redteam_findings: []
 clarity_check:
+  date: 2026-07-25
+  verdict: WARN
+  warnings:
+    - >-
+      lint PASS (0 blockers, 0 warnings) on the post-refine ticket.
+    - >-
+      CLASS-COMPLETENESS - re-running the body's census grep live returned
+      8 files against a 5-row disposition table. TranslationPipelineIT was
+      a genuine miss (drives the DEFAULT /summary in cs and en scopes and
+      pins exact mockLlm call counts); added to files_scope and the table,
+      with the langCode-vs-hardcoded-"en" routing risk called out.
+      ClusterBlockRendererTest and InMemoryConversationBackend verified
+      unaffected and recorded as deliberate exclusions. Commit 51a3f8db.
+    - >-
+      Ticket-vs-code spot checks all passed: V19:8-10 CHECK placement,
+      V64 present with Flyway outOfOrder unset, SummaryAnchorRepository
+      .write already takes commandName, AnchorRow exposes it,
+      RetryCommandHandler does not read it today, and all six test sites
+      match their cited line numbers and stub strings.
+    - >-
+      Prior escalation (outline-fail, plan-writer round 1) resolved by
+      refine 81b5cce0; earlier self-check refine 2d1a1f58. Incidental
+      post.title finding deferred to M1-693 (97548b48).
+  blockers: []
 escalation_reason:
+abandoned_reason: decomposed
+deferred_on: M1-694, M1-695, M1-696
 ---
 
 # M1-687: /summary renders the categorized digest form by default
@@ -297,3 +323,66 @@ to `--full` would silently stop covering the path every user actually hits.
 - Adjacent code: `DigestRenderer.java`, `DigestCategorizer.java`,
   `ClusterBlockRenderer.java` (shared today by `/summary` and `/retry`
   only).
+
+## OUTLINE FAILED (round 2)
+
+Second plan-writer pass on the twice-refined ticket, 2026-07-25. All
+claims re-verified in the main session.
+
+Two MORE pre-existing tests are forced red, neither in `files_scope` nor
+in the disposition table:
+
+- `RetryCommandHandlerGroupScopeIT` — all three tests run a bare default
+  `/summary` (`:125`, `:162`, `:203`), then `/retry`, then assert the
+  replayed body contains `GROUP RETRY HEADLINE` / `DM RETRY HEADLINE` /
+  `UNDATED RETRY HEADLINE` (`:146`, `:178`, `:217`) plus
+  `assertEquals(1, sent.size())`. Under acceptance 5 the replay is
+  categorized, which renders no titles. The last of the three is the
+  M1-689 redteam-round-3 NPE regression guard.
+- `DevTerminalHarnessRoundtripIT` — drives `dm … /summary -w 24h`
+  (`:95`) and asserts three post uids (`:109-114`). The categorized form
+  renders no uids.
+
+**Root cause is the census predicate, not the table.** It greps field
+LABELS (`topic_id=`, `covered by:`, `classification:`, `finalizedBodies`)
+and so misses the two `ClusterBlockRenderer` fields that are bare
+content — the headline (`ClusterBlockRenderer.java:87`) and the uid
+(`:94`). An invocation-based census
+(`grep -rln '"/summary\|"/retry' --include=*.java infochat-provider/src/test/java`)
+returns **35 files, 28 outside `files_scope`**. Round 1 found 5 of them,
+the start-time correction added 1, round 2 found 2 more — each pass
+samples a different subset because the predicate is wrong.
+
+Independent design blockers, all verified:
+
+- **No delivery seam inside scope.** `SummaryCommandHandler:168-169`
+  injects the SPI type `ProgressNotifier`, which declares exactly
+  `publish`/`complete`/`fail` (`ProgressNotifier.java:68,79,89`).
+  Acceptance 3 needs either the SPI widened, the handler switched to the
+  concrete `StageProgressNotifier`, or `OutboundDelivery` +
+  `AdapterRegistry` injected directly. Each also drags in
+  `RecordingProgressNotifier.java` (test double, out of scope) which
+  `SummaryCommandHandlerTest:98,126` wires.
+- **Erasure collision.** A cluster-taking sibling cannot be
+  `renderSections(List<Cluster>, String)` — same erasure as
+  `renderSections(List<Post>, String)`, so it will not compile. `/retry`
+  needs a cluster-taking entry point because `renderSections` re-clusters
+  internally (`DigestRenderer.java:90`) and would discard the frozen
+  `cluster_map` (D19/D36).
+- **`DigestRenderer`'s six collaborator fields and `categoryItemCap` are
+  package-private** (`:33-65`), so neither `SummaryCommandHandlerTest`
+  nor the new `SummaryCommandHandlerRenderFormTest` (package
+  `provider.command`) can wire a real renderer without a construction
+  seam.
+- **Anchor values are not normalized** — pre-existing rows write
+  `command_name = '/summary'` with a leading slash
+  (`OutboundDeliveryCleanupIT:297`, `ChatMemoryPrunerTest:215`), so form
+  dispatch must treat anything but the exact `--full` marker as default
+  rather than comparing to `"summary"`.
+- **Acceptance 1 mis-cites "acceptance 7"** for the no-LLM sibling; it is
+  acceptance 9. Introduced by refine 81b5cce0, which inserted two items
+  ahead of it.
+
+SUGGESTED ESCALATION: decompose (the round-1 pass named the same seam as
+its fallback)
+

@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 703 |
 | deferred | 0 |
-| abandoned | 19 |
-| **total** | **728** |
+| abandoned | 20 |
+| **total** | **731** |
 
 ---
 
@@ -26,11 +26,11 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-685 — Chat model text can contradict the appended curated answer (complexity: medium, risk: low)
-- M1-687 — /summary renders the categorized digest form by default (complexity: high, risk: medium)
 - M1-690 — Chat prompt stops declining off-feed questions (complexity: low, risk: low)
 - M1-691 — Decide whether degraded-digest assembly operands need sanitizing (complexity: low, risk: medium)
 - M1-692 — Pin the NULL-ordering property at the three uncovered sort sites (complexity: low, risk: low)
 - M1-693 — Normalize post.title at ingest: empty, content-as-title, and unbounded length (complexity: medium, risk: medium)
+- M1-694 — /summary renders the categorized form by default; --full keeps the flat form (complexity: low, risk: low)
 
 ---
 
@@ -47,7 +47,8 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-695 — blocked_by: M1-694 (pending)
+- M1-696 — blocked_by: M1-694 (pending)
 
 ---
 
@@ -89,7 +90,7 @@ _(none)_
 
 Tickets decided against — not implemented as this ticket. Terminal: not reopenable via the driver's `reopen`. `abandoned_reason` records why (`decomposed` = split into shipped children; `superseded` = absorbed by another ticket; `obsoleted-by-spec-amend` = a spec change dropped the requirement; `wont-do-infeasible` = evaluated and judged not worth building). See `docs/process/workflow.md` §Status values.
 
-### decomposed (8)
+### decomposed (9)
 - M1-034 — Tagger + Embedding pipeline + status→READY + new_post NOTIFY
 - M1-318 — Derive per-adapter bot contact id from adapter identity material (SimpleX queue address, Signal ACI)
 - M1-493 — Schema hardening: NOT NULL upstream_identifier + approve_quarantine phantom NOTIFY
@@ -98,6 +99,7 @@ Tickets decided against — not implemented as this ticket. Terminal: not reopen
 - M1-629 — Investigate the one-in-flight-per-(user, scope) guard under a chat/summary burst (multi-minute-late replies)
 - M1-631 — Default /invite create to --open; fix/retire --contact
 - M1-648 — Semantic command-intent index with deterministic answer composition
+- M1-687 — /summary renders the categorized digest form by default
 
 ### obsoleted-by-spec-amend (1)
 - M1-314 — Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed
@@ -927,11 +929,14 @@ M1-679 (done)
 M1-684 (done)
 M1-685 (pending) ← runnable
 M1-686 (done)
-M1-687 (pending) ← runnable
+M1-687 (abandoned)
 M1-688 (done)
   └── M1-689 (done)
         └── M1-692 (pending) ← runnable
 M1-690 (pending) ← runnable
 M1-691 (pending) ← runnable
 M1-693 (pending) ← runnable
+M1-694 (pending) ← runnable
+  ├── M1-695 (pending)
+  └── M1-696 (pending)
 ```
