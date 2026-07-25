@@ -6,7 +6,7 @@ created: 2026-07-25
 last_updated: 2026-07-25
 blocked_by:
   - M1-688
-files_budget: 9
+files_budget: 15
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestPostCollector.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/summary/EligiblePostQuery.java
@@ -14,6 +14,13 @@ files_scope:
   - infochat-core/src/main/resources/db/migration/V64__*.sql
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestPostCollectorIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/EligiblePostQueryIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/EligiblePostQueryClockIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/SearchPostsToolClockTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryAdapterScopeIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryGroupScopeIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryCommandHandlerGroupScopeIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/translation/TranslationPipelineIT.java
   - docs/spec/commands.md
   - docs/design/03-commands.md
 complexity: medium
@@ -81,12 +88,32 @@ acceptance:
     Any index supporting the old predicate is replaced by one supporting
     the new one, so neither query regresses to a sequential scan on the
     post table.
+  - >-
+    Every window-bounded test fixture seeds ready_at. Fixtures that set
+    published_at alone leave ready_at NULL, which the new predicate
+    excludes — so without this the affected suites go red for a fixture
+    reason rather than a behavioral one.
+  - >-
+    The two tests that pin the window's boundary semantics by column —
+    EligiblePostQueryClockIT and SearchPostsToolClockTest — are
+    re-pointed at ready_at in fixture, name, and comment. Both currently
+    assert the boundary against published_at; SearchPostsToolClockTest
+    additionally seeds ready_at = published_at + 300s, which would place
+    its excluded post inside the new window. They must pin the new
+    semantics, not pass by fixture accident.
   - mvn verify from the repo root is green
 test_plan:
   adds: []
   modifies:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestPostCollectorIT.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/EligiblePostQueryIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/EligiblePostQueryClockIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/SearchPostsToolClockTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryAdapterScopeIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryGroupScopeIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryCommandHandlerGroupScopeIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/translation/TranslationPipelineIT.java
   preserves:
     - all tests currently green on main
 spec_refs:
@@ -194,6 +221,38 @@ frontmatter.
   paragraph — if `ready_at` turns out to be nullable or set at a different
   pipeline stage than assumed, the predicate needs a `COALESCE` and this
   ticket's shape changes.
+  - **Checked at start (2026-07-25): no `COALESCE` needed.** The column is
+    nullable in DDL, but every writer that sets `status='READY'` sets
+    `ready_at` in the same UPDATE — `ReadyPromoter.java:210` plus the
+    quarantine-approve procedures (V21/V25/V32/V41/V48/V50/V53) — and all
+    five predicate sites already filter `status='READY'`, so the predicate
+    never sees a NULL `ready_at`.
+- **The census extends to test fixtures (budget-breach refine, 2026-07-25).**
+  The `## Census` table above enumerates main-source predicate sites only.
+  Moving the predicate also invalidates every window-bounded *fixture* that
+  seeds `published_at` without `ready_at`, because those rows go NULL on the
+  new column and vanish from the surface under test. Enumerate with:
+
+      grep -rn "INSERT INTO post" --include='*.java' infochat-provider/src/test
+
+  and check each hit's column list for `ready_at`. Seven files need it; they
+  are in `files_scope`. `InboundRouterStopRetryIT` seeds a `ready_at`-less
+  post but is NOT affected — its `/retry` re-fetches by uid with no window.
+- **The supporting index already exists.** `idx_post_ready_at ON post(ready_at,
+  id) WHERE status = 'READY'` (`V7__joins_post.sql:184`) matches the new
+  predicate exactly — partial on the same status literal, range scan on the
+  leading column. V64's content is therefore the *removal* half of acceptance
+  item 6: after this change no query filters on `published_at`, leaving
+  `idx_post_published` (`V7:182`) as write-amplification serving nothing. It
+  can only offer a published_at-ordered scan that filters on `ready_at` and
+  discards — and under exactly the late-arrival case this ticket fixes the two
+  orders are uncorrelated, so that plan scans far past the window. Per-source
+  lookups keep `idx_post_source_published` (`V36:33`).
+- **`DigestPostCollector.mapPost` needs a null guard.** It calls
+  `rs.getTimestamp("published_at").toInstant()` unguarded, so it NPEs on the
+  NULL-`published_at` post acceptance item 3 requires. `EligiblePostQuery`
+  already guards the same read and `Post.publishedAt` is already `@Nullable`,
+  so only the digest mapper changes.
 - **This ticket carries the zero-post boundary property.** M1-688 was filed
   with a second acceptance item — an empty slot must not become the next
   slot's collection boundary — and dropped it at its start gate on
