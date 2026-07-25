@@ -1608,6 +1608,20 @@ fires when the window-end is reached without the digest having started.
 Results are cached briefly in `summary_cache` so a follow-up `/summary`
 during the cache TTL is served from cache (no second LLM call).
 
+**Collection window.** The slot window above decides *when* a digest
+fires; it is not the period the digest covers. The collection lower bound
+is the **previous digest boundary** — the group's latest `summary_cache`
+row before this slot — so a post published between two slots still
+appears in the next digest. A group's **first-ever** digest has no
+previous boundary and falls back **one inter-slot period**, derived from
+the gap between the two configured centre hours above (12h at the
+defaults, complemented for the morning slot whose predecessor is the
+previous day's evening slot). It does not fall back to the slot window:
+a ~30-minute lower bound made a new group's opening digest report "no
+posts yet" against a full corpus (M1-688). A missed slot's sentinel row
+counts as a boundary — its period is skipped, not folded into the next
+digest.
+
 **Zero-eligible-posts digest.** When a digest slot fires and there are
 no eligible posts for the group, the digest sends a fixed "no posts yet"
 reply — the same deterministic localization-bundle string as

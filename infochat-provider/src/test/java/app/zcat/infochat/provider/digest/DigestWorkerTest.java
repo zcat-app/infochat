@@ -44,6 +44,11 @@ class DigestWorkerTest {
     private static final String ADAPTER_NAME = "inmemory";
     private static final String UPSTREAM_GROUP_ID = "group-456";
     private static final Duration REPLAY_RETENTION = Duration.ofMinutes(10);
+    // Production defaults (application.properties): 08:00 and 20:00, so the
+    // inter-slot period — and therefore the first-run lookback — is 12h.
+    private static final int MORNING_SLOT_HOUR = 8;
+    private static final int EVENING_SLOT_HOUR = 20;
+    private static final Duration DEFAULT_SLOT_INTERVAL = Duration.ofHours(12);
 
     private DigestWorker worker;
     private RecordingPostCollector postCollector;
@@ -76,6 +81,12 @@ class DigestWorkerTest {
         worker.adapterRegistry = new StubAdapterRegistry(recordingAdapter);
         worker.dataSource = new StubGroupDataSource(ADAPTER_NAME, UPSTREAM_GROUP_ID, "en");
         worker.replayRetention = REPLAY_RETENTION;
+        // @ConfigProperty fields are not injected into a hand-constructed
+        // worker, so the production defaults are set explicitly — a 0/0 pair
+        // would silently give the first-run lookback a different span than
+        // any real deployment has.
+        worker.morningSlotHour = MORNING_SLOT_HOUR;
+        worker.eveningSlotHour = EVENING_SLOT_HOUR;
         // Pass-through chokepoint via the public constructor: the recording
         // adapter never throws, so the retry/cleanup collaborators (notifier,
         // group repo) are never exercised on these success/programming-error
@@ -174,15 +185,43 @@ class DigestWorkerTest {
     }
 
     @Test
-    void execute_collectsFromWindowStartWhenNoPreviousDigest() {
+    void execute_collectsOneSlotIntervalBackWhenNoPreviousDigest() {
         postCollector.seed(testPosts(), 1, 1);
         digestRenderer.setResponse("prose");
         DigestSlot slot = futureSlot();
 
         worker.execute(slot);
 
-        assertEquals(slot.windowStart(), postCollector.lastSince(),
-                "first-ever digest falls back to the slot window");
+        assertEquals(slot.windowStart().minus(DEFAULT_SLOT_INTERVAL), postCollector.lastSince(),
+                "a first-ever digest collects one inter-slot period back, not from the "
+                        + "~30-minute slot window — collecting from windowStart made a new "
+                        + "group's opening digest report 'no posts yet' against a full corpus");
+    }
+
+    @Test
+    void execute_firstRunLookbackTracksConfiguredSlotHours() {
+        // Non-default centre hours: morning 08:00, evening 14:00. The gap is
+        // 6h forward, so an evening slot's predecessor is 6h back and a
+        // morning slot's — the PREVIOUS day's evening slot — is 18h back.
+        // Pins the lookback to the configured hours rather than a hardcoded 12h.
+        worker.eveningSlotHour = 14;
+        postCollector.seed(testPosts(), 1, 1);
+        digestRenderer.setResponse("prose");
+
+        DigestSlot eveningSlot = new DigestSlot(GROUP_ID, "UTC", "evening",
+                Instant.now().minusSeconds(3600), Instant.now().plusSeconds(3600));
+        worker.execute(eveningSlot);
+
+        assertEquals(eveningSlot.windowStart().minus(Duration.ofHours(6)),
+                postCollector.lastSince(),
+                "an evening first-run looks back the morning-to-evening gap");
+
+        DigestSlot morningSlot = futureSlot();
+        worker.execute(morningSlot);
+
+        assertEquals(morningSlot.windowStart().minus(Duration.ofHours(18)),
+                postCollector.lastSince(),
+                "a morning first-run looks back the complement of that gap");
     }
 
     @Test

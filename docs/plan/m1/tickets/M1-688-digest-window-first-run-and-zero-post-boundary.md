@@ -1,7 +1,7 @@
 ---
 id: M1-688
 title: "Fix digest first-run collection window"
-status: pending
+status: done
 created: 2026-07-25
 last_updated: 2026-07-25
 blocked_by: []
@@ -76,12 +76,56 @@ spec_refs:
   - docs/spec/commands.md §Periodic group digests
 decision_refs:
   - D17
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 206
+      removed: 15
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-07-25
+    verdict: CLEAN
+    base: c83067958b511262046f6d98b5132b34566dea80
+    head: "<working tree, branch m1/M1-688-fix-digest-first-run-collectio, 0 commits>"
+    verdict_file: docs/plan/m1/redteam/M1-688-2026-07-25.md
+    out_of_model_count: 3
+    note: |
+      Run at the user's explicit request despite security_relevant: false —
+      the diff widens a retrieval window, a per-(user, scope) isolation
+      surface. CLEAN. Three out-of-model observations, none auto-filed: a
+      group-admin timezone re-trigger of the widened lookback (checked, does
+      NOT reproduce — the slot must fire inside its live 30-minute window, so
+      findPreviousBoundary is non-empty for every slot after a group's
+      genuine first); a first digest that may span pre-approval time (no
+      confidentiality boundary crossed — the D59 world predicate still
+      applies and the same rows are reachable via /summary -w); and a raised
+      probability of the degraded headlines-only render on a first run (a
+      probability shift on an already-accepted bypass surface, not a removed
+      control).
+clarity_check:
+  date: 2026-07-25
+  verdict: WARN
+  warnings:
+    - >-
+      Self-check falsified acceptance item 2's premise against the code
+      (summary_cache is the scheduler's only re-fire guard; the missed-slot
+      sentinel rewrites the same boundary). Raised as a blocking question;
+      the user chose to narrow M1-688 to the first-run window and move the
+      zero-post/late-post property to M1-689. Refine committed on main
+      before the re-run of start.
+  blockers: []
 escalation_reason:
 ---
 

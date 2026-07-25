@@ -107,6 +107,17 @@ public class DigestWorker {
     @ConfigProperty(name = "infochat.digest.replay-retention", defaultValue = "PT24H")
     Duration replayRetention;
 
+    // The two slot centre hours, read here only to derive the first-run
+    // lookback in firstRunLookback(). DigestScheduler owns the slot
+    // arithmetic; this worker needs nothing from it but the gap between the
+    // two centres, so the hours are re-read rather than plumbed through
+    // DigestSlot.
+    @ConfigProperty(name = "infochat.digest.morning-slot-hour", defaultValue = "8")
+    int morningSlotHour;
+
+    @ConfigProperty(name = "infochat.digest.evening-slot-hour", defaultValue = "20")
+    int eveningSlotHour;
+
     // In-flight guard (ConcurrentHashMap-backed, keyed groupId+slotKind): a
     // scheduler tick overrun re-fires a slot whose previous execution is
     // still running; overlapping same-group processing would double-deliver.
@@ -166,12 +177,12 @@ public class DigestWorker {
         // Collect the full inter-digest period, not just the slot window: the
         // lower bound is the previous digest boundary (latest summary_cache
         // row before this slot), so posts published between two slots appear
-        // in the next digest. First-ever digest falls back to the slot
-        // window; a missed slot's sentinel row counts as a boundary
+        // in the next digest. First-ever digest falls back one inter-slot
+        // period; a missed slot's sentinel row counts as a boundary
         // (skip-not-catch-up — its period is not folded into the next digest).
         Instant collectFrom = cacheRepository
                 .findPreviousBoundary(slot.groupId(), slot.windowStart())
-                .orElse(slot.windowStart());
+                .orElse(slot.windowStart().minus(firstRunLookback(slot.slotKind())));
         CollectionResult collection =
                 postCollector.collectForGroup(slot.groupId(), collectFrom);
         GroupMetadata meta = readGroupMetadata(slot.groupId());
@@ -312,6 +323,30 @@ public class DigestWorker {
                         slot.groupId(), slot.slotKind());
             }
         }
+    }
+
+    /**
+     * How far back a group's FIRST-EVER digest collects, when no previous
+     * boundary exists to bound the period: one inter-slot period, which is
+     * exactly the span every subsequent digest covers.
+     *
+     * <p>Falling back to {@code windowStart} instead made an opening digest
+     * span only {@code infochat.digest.window-width-minutes} (30 by default),
+     * so a new group's first digest reported "no posts yet" against a full
+     * corpus (M1-688). The span is derived from the configured centre hours
+     * rather than hardcoded to 12h, so a deployment that re-points them gets
+     * a matching lookback; {@code floorMod} keeps the gap correct whichever
+     * order the two hours are configured in.
+     */
+    private Duration firstRunLookback(String slotKind) {
+        int morningToEveningHours = Math.floorMod(eveningSlotHour - morningSlotHour, 24);
+        return switch (slotKind) {
+            // The evening slot's predecessor is the same day's morning slot.
+            case "evening" -> Duration.ofHours(morningToEveningHours);
+            // The morning slot's predecessor is the PREVIOUS day's evening
+            // slot, so its lookback is the complement of the same gap.
+            default -> Duration.ofHours(24 - morningToEveningHours);
+        };
     }
 
     record GroupMetadata(String adapterName,
