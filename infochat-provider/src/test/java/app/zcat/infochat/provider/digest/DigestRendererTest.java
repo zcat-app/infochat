@@ -100,7 +100,7 @@ class DigestRendererTest {
     }
 
     @Test
-    void capsItemsPerSectionWithLocalizedMoreHint() {
+    void overflowLineNowSteersToSummaryFull() {
         renderer.categoryItemCap = 2;
         proseGenerator.setResponseText("capped story prose");
         List<Post> posts = List.of(
@@ -111,10 +111,33 @@ class DigestRendererTest {
 
         String result = renderer.render(posts, "en");
 
-        assertTrue(result.contains("+2 more — @mention me to see them"),
-                "capped section appends the localized overflow line: " + result);
+        assertTrue(result.contains("+2 more — /summary ai --full to see them"),
+                "capped real-category section steers to /summary <tag> --full: " + result);
+        assertFalse(result.contains("@mention me to see them"),
+                "the old @mention overflow affordance is gone: " + result);
         assertEquals(2, proseGenerator.callCount(),
                 "prose is generated only for the clusters actually shown");
+    }
+
+    @Test
+    void overflowForOtherBucketSteersToBareSummaryFull() {
+        // Untagged posts land in the Other bucket (tag == null, not in the
+        // controlled vocabulary), so the overflow line carries NO tag —
+        // bare /summary --full, which the more_other key omits {1} for.
+        renderer.categoryItemCap = 2;
+        proseGenerator.setResponseText("other bucket prose");
+        List<Post> posts = List.of(
+                post("u1", "Untagged 1", List.of()),
+                post("u2", "Untagged 2", List.of()),
+                post("u3", "Untagged 3", List.of()),
+                post("u4", "Untagged 4", List.of()));
+
+        String result = renderer.render(posts, "en");
+
+        assertTrue(result.contains("+2 more — /summary --full to see them"),
+                "capped Other section steers to bare /summary --full (no tag): " + result);
+        assertFalse(result.contains("/summary null --full"),
+                "the raw null tag must not leak into the rendered line: " + result);
     }
 
     @Test

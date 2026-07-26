@@ -1976,8 +1976,11 @@ public final class BundleKeys {
     /** Header for the Other bucket (clusters with no qualifying category tag); uppercased in code. No tokens; resolved via the 2-arg accessor. */
     public static final String REPLY_DIGEST_CATEGORY_OTHER = "reply.digest.category.other";
 
-    /** Capped-section overflow line. Token {@code {0}} = the count of clusters not shown; the cs value carries a {@code {0,choice,...}} plural shape. */
+    /** Capped-section overflow line for a real category. Token {@code {0}} = the count of clusters not shown, {@code {1}} = the category's controlled-vocabulary tag (the raw token {@code /summary} parses, e.g. {@code ai}); the cs value carries a {@code {0,choice,...}} plural shape. Steers to {@code /summary <tag> --full}. */
     public static final String REPLY_DIGEST_CATEGORY_MORE = "reply.digest.category.more";
+
+    /** Capped-section overflow line for the Other bucket ({@code tag == null}, not in the controlled vocabulary). Token {@code {0}} = the count of clusters not shown; the cs value carries a {@code {0,choice,...}} plural shape. Steers to bare {@code /summary --full} (no tag — "other" would hit {@code error.summary.unknown_tag}). */
+    public static final String REPLY_DIGEST_CATEGORY_MORE_OTHER = "reply.digest.category.more_other";
 
     /** One closing affordance line ending every non-degraded digest (group scope, so it steers to @mention). No tokens; resolved via the 2-arg accessor. */
     public static final String REPLY_DIGEST_CLOSING_AFFORDANCE = "reply.digest.closing_affordance";

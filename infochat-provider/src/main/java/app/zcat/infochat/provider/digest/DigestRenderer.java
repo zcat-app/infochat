@@ -143,8 +143,16 @@ public class DigestRenderer {
             }
             int overflow = section.clusters().size() - shownCount;
             if (overflow > 0) {
+                // Real categories steer to /summary <tag> --full (token {1} =
+                // the raw controlled-vocab tag the command parses, same value
+                // sectionHeader passes to the {0} NEWS header); the Other
+                // bucket (tag == null, not in the vocabulary) steers to bare
+                // /summary --full — mirrors shortFooter's null-tag branch.
+                String moreKey = section.tag() == null
+                        ? BundleKeys.REPLY_DIGEST_CATEGORY_MORE_OTHER
+                        : BundleKeys.REPLY_DIGEST_CATEGORY_MORE;
                 sb.append("\n\n").append(MessageFormat.format(
-                        bundleLoader.get(BundleKeys.REPLY_DIGEST_CATEGORY_MORE, langCode), overflow));
+                        bundleLoader.get(moreKey, langCode), overflow, section.tag()));
             }
             // The closing affordance is folded into the LAST section's text
             // here (render()'s "\n\n" join reproduces today's trailing

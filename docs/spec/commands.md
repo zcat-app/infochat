@@ -1838,10 +1838,16 @@ alphabetical, Other always last; under each header the existing
 per-cluster prose + links render unchanged. Each section
 (including Other) shows at most a per-section **item cap** of
 clusters (operator-configurable, default 12); a capped section
-appends a localized "+N more" line, and per-cluster LLM prose is
-generated only for the clusters actually shown. Every digest
-ends with **one** localized closing affordance line steering
-readers to `@mention` the bot. Given the same clusters and tags,
+appends a localized "+N more" line steering readers to
+`/summary <tag> --full` for real categories (the token is the
+category's raw controlled-vocabulary tag, e.g. `ai`), or to bare
+`/summary --full` for the Other bucket whose tag is not in the
+controlled vocabulary; per-cluster LLM prose is generated only
+for the clusters actually shown. Every digest ends with **one**
+localized closing affordance line steering readers to `@mention`
+the bot for exploratory chat-mode questions (a distinct purpose
+from the overflow line's capped-category promise). Given the same
+clusters and tags,
 the assignment and section order are byte-identical — the LLM
 touches only the per-cluster prose, extending the D19
 determinism boundary to the digest's structure. The degraded

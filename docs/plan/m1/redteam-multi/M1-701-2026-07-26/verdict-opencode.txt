@@ -1,0 +1,72 @@
+RED-TEAM VERDICT: CLEAN
+
+AUDIT SCOPE: M1-701 — periodic digest capped-section overflow line now
+steers readers to `/summary <tag> --full` (real categories) or bare
+`/summary --full` (Other bucket) instead of `@mention`. The change is
+localized to DigestRenderer's overflow render branch, two bundle keys
+(en/cs), matching spec edits in commands.md + D62, and two tests.
+
+THREAT-MODEL COMMITMENTS CHECKED (all upheld or N/A):
+
+- §LLM output sanitizer exemption ("deterministic output is exempt only
+  to the extent it interpolates no inbound-derived text; the handlers
+  must maintain this"). The overflow line is deterministic structure
+  (D62 tag arithmetic, no LLM call), so it rides the deterministic
+  exemption. The single interpolated value is `section.tag()`, which
+  `DigestCategorizer.categorize` draws from `cluster.posts().tags()`.
+  Per the threat model + spec, post tags are tagger-assigned against a
+  controlled vocabulary or fall back to operator-configured
+  `bootstrap_tags` — both bot/operator-authored, bounded short tokens.
+  `DigestDelivery.java:47` commits "Tags are a controlled vocabulary,
+  so no further normalization is applied," and commands.md/D62 call the
+  category token "the raw controlled-vocabulary tag." An attacker
+  (untrusted feed) can influence WHICH vocabulary entry applies, never
+  the BYTES; this is the same class as the spec's "parse-validated
+  echoes count as bot-authored" carve-out, so the exemption applies
+  legitimately. The identical tag is ALREADY interpolated into the
+  category header above this line (`MessageFormat.format(header, tag)`
+  → `ai news`) in the same render pass — this diff introduces no new
+  class of exposure, only a second interpolation of an already-shipped,
+  already-bounded value.
+
+- §"Sanitizer output never contains ](" — carried once at
+  `OutboundDelivery` (M1-691) over every outbound body, periodic
+  digests included, "regardless of how it was assembled." The overflow
+  line is part of the digest body, so the ]( adjacency break is the
+  defense-in-depth backstop even though the controlled-vocabulary tag
+  cannot synthesize link syntax anyway.
+
+- Closed-list command redaction: the line renders `/summary {1}
+  --full`. `/summary` is user-tier, not in the bot-admin/group-admin
+  closed list the sanitizer redacts, so there is nothing to strip; and
+  the controlled vocabulary prevents the tag from composing any admin
+  command string, so the deterministic exemption is not exercising the
+  residual-risk surface the spec flags for attacker-controllable
+  reply.* echoes (e.g. /add-source --name, /save -t personal tags) — a
+  controlled-vocabulary token is not in that risk class.
+
+- Null-tag Other bucket: `section.tag() == null` selects
+  `REPLY_DIGEST_CATEGORY_MORE_OTHER`, whose value omits `{1}` entirely
+  (`/summary --full`, no tag). `MessageFormat.format(tpl, overflow,
+  null)` ignores the unreferenced arg, so the literal "null" never
+  leaks; DigestRendererTest.overflowForOtherBucketSteersToBareSummaryFull
+  asserts both the bare form and `assertFalse("/summary null --full")`.
+
+- Per-cluster prose sanitize/translate path (the actual LLM surface in
+  renderSections) is unchanged: `llmOutputSanitizer.sanitize(cp.prose())`
+  for non-degraded and `degradedProseFor` (per-title redaction) for
+  degraded. The overflow line adds no LLM call and is not routed
+  through the translator (it is a scope-language bundle string like the
+  header).
+
+- MessageFormat robustness: a tag containing `'`, `{`, `}` could
+  perturb formatting — but controlled-vocabulary tags are short tokens
+  (e.g. `ai`) and the SAME interpolation already ships in the category
+  header, so this introduces no new exposure.
+
+REMAINING THREAT-MODEL SURFACES (auth, invite, ban, authorization order,
+rate limits, DB roles, quarantine, SSRF, Nostr, ingest, secrets) are
+untouched by the diff and not re-audited.
+
+No gap found between the threat model's promises and what this diff
+delivers.

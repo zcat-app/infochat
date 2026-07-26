@@ -1,10 +1,41 @@
 ---
 id: M1-701
 title: "digest overflow line steers to /summary --full, not @mention"
-status: pending
+status: done
 created: 2026-07-26
 last_updated: 2026-07-26
 blocked_by: [M1-700]
+clarity_check:
+  date: 2026-07-26
+  verdict: PASS
+  warnings: []
+  blockers: []
+redteam_multi:
+  date: 2026-07-26
+  auditors: [kimi, opencode]
+  evidence_dir: docs/plan/m1/redteam-multi/M1-701-2026-07-26
+  verdict: CLEAN
+  findings: 0
+  note: >-
+    Ran as a user override of run.md step 4 (ticket is security_relevant:
+    false). Both auditors independently CLEAN: the section.tag() interpolation
+    is a controlled-vocabulary parse-validated echo already shipped in the
+    category header; /summary is non-privileged; null-tag branch omits the
+    token (no "null" leak); no new LLM call.
+reviews:
+  - round: 1
+    date: 2026-07-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 68
+      removed: 21
 files_budget: 8
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRenderer.java
