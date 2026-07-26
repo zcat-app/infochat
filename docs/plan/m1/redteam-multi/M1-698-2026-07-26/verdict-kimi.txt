@@ -1,0 +1,108 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: INJECTION
+    SEVERITY: medium
+    PROMISE: docs/spec/security.md §"Sanitizer output never contains `](`":
+      "every outbound body — chat reply, progress placeholder/finalize,
+      periodic digest, group announcement — has its `](` adjacency broken
+      before it reaches the transport, regardless of how it was assembled";
+      and the new §"The chokepoint's totality is mechanically guarded"
+      paragraph added by this diff: "an ArchUnit test ... fails the build if
+      any provider main class other than `OutboundDelivery` and
+      `DigestDelivery.RecordingAdapter` calls `MessagingAdapter.send`,
+      `.update`, or `.finalizeMessage`. A direct `adapter.send` from a
+      seventh call site ... is therefore unlandable in CI."
+    GAP: The guard identifies a guarded call by exact string equality on the
+      bytecode call target's OWNER: diff.patch lines 213-216
+      (`if (!MESSAGING_ADAPTER.equals(target.getOwner().getName())) continue;`
+      in OutboundChokepointArchTest.java). Java bytecode records the
+      compile-time declared owner of the receiver, not the interface that
+      declares the method. Any call site whose receiver is typed as a
+      concrete adapter class (e.g. `SimplexMessagingAdapter`) or as a
+      sub-interface of `MessagingAdapter` (e.g. `StreamingAdapter extends
+      MessagingAdapter`) compiles to an invoke whose owner is that
+      class/sub-interface — the equality check fails, the call is skipped,
+      and the build stays green while a seventh outbound path exists outside
+      the chokepoint. The promised "totality" is therefore total only over
+      call sites typed exactly against the `MessagingAdapter` interface; the
+      bypass the paragraph declares "unlandable in CI" lands silently if
+      written against any more specific type. No resolve-to-declaring-
+      interface or assignability check (e.g. `target.getOwner().isAssignableTo
+      (MessagingAdapter.class)`) appears anywhere in the diff.
+    REPRO: Add a provider main class, e.g.
+      `app.zcat.infochat.provider.notify.AdminAlertSender`, that injects or
+      casts to the concrete adapter type and calls
+      `simplexAdapter.send(recipient, body)` with a body assembled outside
+      `OutboundDelivery` (feed title joined with a display name and bare
+      URL, as in degraded prose). ArchUnit records the call target owner as
+      `SimplexMessagingAdapter`, not `MessagingAdapter`;
+      OutboundChokepointArchTest passes; `mvn verify` is green. The
+      delivered body never passes the chokepoint's `breakLinkAdjacency`, so
+      attacker-influenced content can deliver a `[label](url)` link whose
+      adjacency the spec says must always be broken — the exact invisible
+      bypass the new spec paragraph claims is now structurally impossible.
+    SUGGESTED-FIX-CLASS: trust-boundary-tightening
+
+  - CATEGORY: INJECTION
+    SEVERITY: low
+    PROMISE: Same §"The chokepoint's totality is mechanically guarded"
+      paragraph: the routing invariant "is now structural ... A direct
+      `adapter.send` from a seventh call site — the bypass that would make
+      the break miss an outbound body — is therefore unlandable in CI,
+      rather than invisible."
+    GAP: The test enumerates only direct bytecode method calls
+      (`caller.getMethodCallsFromSelf()`, diff.patch line 212). Invocation
+      through reflection (`Method.invoke`), `MethodHandle`, or a JDK
+      dynamic proxy whose `InvocationHandler` dispatches to the adapter
+      leaves no `JavaMethodCall` edge to `MessagingAdapter.send` in the
+      calling class and is invisible to the guard. Reflection-based bypass
+      is a deliberate-evasion shape rather than an accidental one, but the
+      spec sentence is absolute ("any provider main class ... calls") and
+      the diff adds no companion check (forbidden-API rule, grep gate) for
+      reflective access to the adapter surface.
+    REPRO: In a provider main class, obtain
+      `MessagingAdapter.class.getMethod("send", ...)` and `invoke` it with
+      an assembled outbound body. No direct call exists in bytecode, the
+      ArchUnit scan finds nothing, the build passes, and the body reaches
+      the transport without the `](` adjacency break.
+    SUGGESTED-FIX-CLASS: trust-boundary-tightening
+
+  - CATEGORY: INJECTION
+    SEVERITY: low
+    PROMISE: Same paragraph — the guard must not be able to pass while a
+      bypass exists; the test's own comment (diff.patch lines 190-195)
+      commits to "fail loudly rather than ship a false-green guard" when
+      ArchUnit's bundled ASM cannot read the bytecode.
+    GAP: The fail-loud sanity check only requires the two ALLOWED_CALLERS
+      to have been imported (diff.patch lines 196-208:
+      `missing.removeAll(importedNames); assertTrue(missing.isEmpty(), ...)`).
+      ArchUnit skips a class file its bundled ASM cannot parse with a
+      per-class WARN and imports the rest. If a future JDK/ASM skew makes
+      some class files unreadable while the two allowlisted classes still
+      import, the sanity check passes and any violator among the unreadable
+      classes is silently absent from the scan — the guard passes
+      vacuously for exactly the classes it could not evaluate, the false
+      green the comment says must not ship. The diff asserts nothing about
+      total imported-class count or import warnings.
+    REPRO: Upgrade the provider module to a class-file version newer than
+      ArchUnit 1.4.2's bundled ASM supports for a subset of classes (or
+      land a class compiled by a newer toolchain in a multi-release setup)
+      that contains a direct `adapter.send` call. The two allowlisted
+      classes import fine, the assertion passes, the violator class is
+      dropped with a WARN, and the bypass reaches the transport unguarded.
+    SUGGESTED-FIX-CLASS: trust-boundary-tightening
+
+OUT-OF-MODEL:
+  - A malicious contributor deliberately hiding an outbound bypass behind
+    generated bytecode, build-time code weaving, or a tampered
+    `DO_NOT_INCLUDE_TESTS` import option defeats any static guard; the
+    threat model's adversaries are external (feed publishers, chat users,
+    hostile LLM endpoints) and the codebase itself is trusted-reviewed, so
+    insider evasion of CI is outside the documented model.
+  - Building or deploying with tests skipped (`-DskipTests`) renders the
+    ArchUnit guard inert; CI/build-pipeline discipline (whether release
+    artifacts can be produced without running the test phase) is a
+    supply-chain/operator-infrastructure concern the threat model
+    explicitly places out of scope (§Threat model, "Out of scope for v1:
+    ... supply-chain attacks on operator infrastructure").

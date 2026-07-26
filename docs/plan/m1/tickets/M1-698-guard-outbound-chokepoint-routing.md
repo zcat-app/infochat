@@ -1,9 +1,9 @@
 ---
 id: M1-698
 title: "Guard the outbound chokepoint routing invariant"
-status: pending
+status: done
 created: 2026-07-25
-last_updated: 2026-07-25
+last_updated: 2026-07-26
 blocked_by: []
 remediates: M1-691
 files_budget: 4
@@ -51,12 +51,30 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §LLM output sanitizer
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 317
+      removed: 9
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-26
+  verdict: PASS
+  warnings:
+    - "spec edit (docs/spec/security.md) is implied by files_scope + Context ('honest-by-construction') but not spelled out in acceptance items; adding a brief structural-guard note paralleling section 'Match-set derivation' — claim text unchanged"
+  blockers: []
 escalation_reason:
 ---
 

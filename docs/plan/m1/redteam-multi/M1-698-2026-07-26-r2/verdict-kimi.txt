@@ -1,0 +1,81 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: INJECTION
+    SEVERITY: medium
+    PROMISE: docs/spec/security.md (new paragraph added by this diff,
+      lines 629-639): "an ArchUnit test (`OutboundChokepointArchTest`,
+      M1-698) fails the build if any provider main class other than
+      `OutboundDelivery` and `DigestDelivery.RecordingAdapter` calls
+      `MessagingAdapter.send`, `.update`, or `.finalizeMessage`. A direct
+      `adapter.send` from a seventh call site — the bypass that would make
+      the break miss an outbound body — is therefore unlandable in CI,
+      rather than invisible." This backs the standing commitment
+      (§"Sanitizer output never contains `](`"): "every outbound body —
+      chat reply, progress placeholder/finalize, periodic digest, group
+      announcement — has its `](` adjacency broken before it reaches the
+      transport, regardless of how it was assembled."
+    GAP: The guard enumerates only direct bytecode call edges:
+      infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/OutboundChokepointArchTest.java:111
+      iterates `caller.getMethodCallsFromSelf()`. A bare method reference
+      (`adapter::send`, `adapter::update`, `adapter::finalizeMessage`)
+      passed to a helper as a functional interface compiles to an
+      `invokedynamic` whose target lives in the bootstrap-method table;
+      javac emits NO synthetic lambda-body method and NO invoke-edge to
+      `MessagingAdapter.send` anywhere in the caller's bytecode. ArchUnit
+      models that shape as a `JavaMethodReference`
+      (`getMethodReferencesFromSelf()`), never as a `JavaMethodCall`, so
+      the loop at line 111 never sees it. Verified empirically against the
+      built tree (ArchUnit 1.4.2, the version the pom adds):
+      `DigestCategorizer` uses `Integer::sum` twice
+      (DigestCategorizer.java:65,88) — `getMethodCallsFromSelf()` reports
+      0 calls to `Integer.sum`, `getMethodReferencesFromSelf()` reports 2;
+      `AdapterRegistry` uses `.map(MessagingAdapter::name)` twice
+      (AdapterRegistry.java:247,292) — the reference edges appear only in
+      the references set. The test's own javadoc acknowledges the
+      *reflective* hole (`Method.invoke` / `MethodHandle` / proxy) and
+      dismisses it as deliberate evasion, but a method reference is not a
+      deliberate-evasion shape: it is the idiomatic way to hand
+      `adapter.send` to a retry helper, executor, or progress wrapper —
+      exactly the accidental "seventh call site" the spec paragraph claims
+      is now unlandable. The sanity-count check (line 93) does not catch
+      this either: no class is dropped, no class is unreadable; the edge
+      simply never exists in the bytecode model the guard queries.
+    REPRO: A future contributor adds (or refactors toward) a delivery
+      helper with a functional-interface parameter, e.g.
+      `retryHelper.send(adapter::send, msg)` or
+      `notifier.deliver(scope, adapter::finalizeMessage)`, in any provider
+      main class. `mvn verify` runs OutboundChokepointArchTest: the
+      violators set stays empty (no `JavaMethodCall` edge exists), the
+      build goes green, and the change lands. That path now delivers an
+      outbound body that never passes
+      `LlmOutputSanitizer.breakLinkAdjacency` at the chokepoint. A feed
+      publisher (in-model adversary: "The Collector is exposed to
+      arbitrary feed content") plants a body whose assembled render ends
+      in `[label](https://attacker.example)`; it reaches the transport
+      with the `](` adjacency intact and renders in the chat client as a
+      clickable label-hiding link — the precise outcome the OUTBOUND
+      property exists to prevent, delivered with no WARN and no audit row.
+    SUGGESTED-FIX-CLASS: trust-boundary-tightening (extend the scan to
+      `getMethodReferencesFromSelf()` — and constructor references for
+      symmetry — so the allowlist check covers both edge kinds; the
+      empirical probe above is a ready-made regression assertion)
+
+OUT-OF-MODEL:
+  - Reflective invocation of `MessagingAdapter.send/.update/
+    .finalizeMessage` (`Method.invoke`, `MethodHandle`, dynamic proxy)
+    leaves no bytecode edge and is invisible to the guard. The test
+    javadoc already documents this as accepted residual risk (deliberate
+    evasion; the codebase is trusted-reviewed and the threat model's
+    adversaries are external). Flagged so the user can confirm the
+    acceptance is deliberate rather than inferred.
+  - Call sites outside `app.zcat.infochat.provider..` are unscanned:
+    today only infochat-provider may depend on infochat-messaging-adapter
+    (enforcer rules in infochat-collector/pom.xml, infochat-ssrf/pom.xml,
+    infochat-llm-adapter/pom.xml block the edge), so there is no current
+    gap, but if the module DAG ever changes — or an adapter-internal
+    class inside infochat-messaging-adapter itself ever calls another
+    adapter's `send` — the guard's package scope would not see it. The
+    spec paragraph's claim is scoped to "provider main class", so this is
+    outside the audited commitment; noted in case the model should be
+    extended to the SPI's whole reachable classpath.

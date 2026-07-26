@@ -1,0 +1,73 @@
+RED-TEAM VERDICT: CLEAN
+
+AUDIT SCOPE
+  Target: M1-698
+  Diff:   working-tree → working-tree
+  Files:  docs/spec/security.md (new §"The chokepoint routing is
+          build-guarded"), infochat-provider/pom.xml (test-scope
+          archunit 1.4.2 dep), infochat-provider/src/test/java/.../
+          OutboundChokepointArchTest.java (new), plus ticket/STATUS
+          bookkeeping.
+
+PROMISES AUDITED (added spec text, docs/spec/security.md)
+  1. `mvn verify` fails if any provider main class other than
+     OutboundDelivery or DigestDelivery.RecordingAdapter holds a
+     direct call OR a method-reference edge to MessagingAdapter.send /
+     .update / .finalizeMessage.
+  2. A drift assertion fails the build if the SPI grows a body-delivering
+     method the guard does not yet classify.
+  3. Narrower honest guarantee: "no provider class outside the two
+     allowlisted may reach the three outbound-body methods directly or
+     via method reference." Residuals (helper indirection, sibling-module
+     sender incl. infochat-core convention-only edge, reflection/
+     MethodHandle/dynamic proxy) are ACCEPTED, DOCUMENTED residual risk
+     with the census as backstop.
+
+DELIVERY VERIFICATION
+  - onlyChokepointClassesCallMutatingMessagingAdapterMethods imports
+    app.zcat.infochat.provider.. production classes with
+    DO_NOT_INCLUDE_TESTS (test doubles like FailingMessagingAdapter,
+    RecordingMessagingAdapter, ScriptedAdapter correctly excluded);
+    scans BOTH getMethodCallsFromSelf() and getMethodReferencesFromSelf()
+    (the invokedynamic/bootstrap-method hole for `adapter::send` is
+    covered, as the test's own comment documents); matches by name in
+    {send,update,finalizeMessage} AND owner.isAssignableTo(MessagingAdapter)
+    so a concrete-typed receiver (SimpleXAdapter) or sub-interface edge
+    is flagged the same as an interface-typed one. Promise 1 delivered.
+  - spiSurfaceIsFullyClassified reflects MessagingAdapter.class.
+    getDeclaredMethods() and asserts declared == guarded ∪ non-body,
+    failing on a SPI growth in EITHER direction. Promise 2 delivered.
+  - Import scope matches the on-disk production-classes root: glob of
+    infochat-provider/src/main/java shows every main source file lives
+    under app/zcat/infochat/provider/.., so countProductionClassFiles()
+    (which walks the whole target/classes root) equals the imported
+    provider-package count — the ASM-silent-drop false-green guard is
+    sound, not a spurious-failure or masking hazard.
+  - Test-scope dependency (pom.xml); production classpath unchanged.
+    Guard runs under `mvn verify` as claimed.
+
+WHY NO FINDINGS
+  - Every narrow commitment the spec text makes is mechanically delivered
+    by the test for the provider scope.
+  - The wider bypass surfaces (interprocedural helper in another module,
+    sibling-module sender, the convention-only infochat-core →
+    messaging-adapter edge, reflection) are not promised closed: the
+    spec text names each as accepted residual risk with the census as
+    backstop and the module DAG as the current bound. Penalising an
+    honestly-documented residual as a finding would punish the exact
+    narrow-guarantee posture the threat model demands.
+  - The allowlist string for DigestDelivery.RecordingAdapter is
+    maintenance-sensitive but fail-closed: a rename or move makes the
+    test flag the renamed class as a violator (build breaks until the
+    allowlist is updated), never silently exempting an unknown class.
+  - No INFO-LEAK / INJECTION path is opened: the guard tightens the
+    ](-free OUTBOUND property (which suppresses label-hiding markdown
+    that could smuggle privileged command strings through LLM output);
+    it removes no existing control.
+
+OUT-OF-MODEL NOTES (none warrant flagging)
+  - Reflection/MethodHandle/dynamic-proxy bypass and the infochat-core
+    convention-only dependency edge are both already documented inside
+    the added spec text as accepted residual / deliberate-evasion
+    shapes, so they sit inside the (narrowed) threat model rather than
+    outside it; repeating them here would be redundant with the spec.

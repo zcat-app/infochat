@@ -626,6 +626,45 @@ independent throughout: the closed-list match's word-boundary rule
 admits `)`, so a privileged token inside a link target is stripped,
 audit-logged and WARNed whether or not any flattening succeeded.
 
+**The chokepoint routing is build-guarded.** The `](`-free OUTBOUND
+property above rests on every outbound path routing through
+`OutboundDelivery`'s entry points; that routing was a convention
+enforced by census, not a structural property. It is now build-guarded:
+an ArchUnit test (`OutboundChokepointArchTest`, M1-698) fails the build
+if any class in the provider main source other than `OutboundDelivery`
+and `DigestDelivery.RecordingAdapter` holds a direct call OR a
+method-reference edge (`adapter::send`) to `MessagingAdapter.send`,
+`.update`, or `.finalizeMessage` — the three outbound-body methods of
+the SPI. A drift assertion fails the build if the SPI grows a
+body-delivering method the guard does not yet name, the same shape as
+the sanitizer match-set derivation's CI check below. The guard catches
+the accidental shapes — a provider class that calls the adapter
+directly or hands `adapter::send` to a helper — which is how a future
+bypass would realistically land; it is not totality. Five residual
+routes leave no edge the provider-scoped scan sees and are accepted as
+documented residual risk rather than claimed closed: helper indirection
+(a static helper in another module wrapping `adapter.send`, called from
+provider — an interprocedural shape a static edge guard cannot trace);
+a sender compiled in a sibling module (scoped to the provider module
+today, bounded by the module DAG — collector, llm-adapter, ssrf, and
+messaging-adapter are enforcer-blocked from the messaging-adapter
+dependency, though infochat-core's edge is convention-only and tracked
+as a follow-up); reflective invocation (`Method.invoke` /
+`MethodHandle` / dynamic proxy), a deliberate-evasion shape outside the
+threat model's external-adversary scope; a body-delivering overload
+reusing a non-body method name (the drift check classifies the SPI by
+method name, so a future overload like `setTyping(ContactId,
+OutboundDraft)` inherits the existing non-body name's classification and
+slips the name-based guard — low severity, since the common case of a
+genuinely new method name is caught); and direct transport access that
+bypasses the SPI entirely (provider code opening its own socket to the
+transport subprocess / daemon RPC), which produces no `MessagingAdapter`
+edge at all — a deliberate or grossly-negligent shape, not an accidental
+one. The honest, narrower guarantee — no provider class outside the two
+allowlisted may reach the three outbound-body methods directly or via
+method reference — is what the `mvn verify` gate enforces; the census
+stays the backstop for the residual routes.
+
 **Bare feed URLs rest on the ingest scheme allowlist, not on any render
 pass.** Degraded prose interpolates `post.url` bare (`title — url
 (uid)`), and no sanitize pass ever sees it — correctly, because the

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 715 |
+| done | 716 |
 | deferred | 0 |
 | abandoned | 20 |
 | **total** | **736** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-698 — Guard the outbound chokepoint routing invariant (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -64,13 +64,13 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-701 | digest overflow line steers to /summary --full, not @mention | 2026-07-26 | round 1 APPROVE |
 | M1-700 | summary render forms --short/--full/--flat (4-mode) | 2026-07-26 | round 1 APPROVE |
 | M1-699 | summary_anchor render_form column + typed /retry dispatch | 2026-07-26 | round 1 APPROVE |
+| M1-698 | Guard the outbound chokepoint routing invariant | 2026-07-26 | round 1 APPROVE |
 | M1-696 | /retry replays the render form its anchored /summary produced | 2026-07-26 | round 1 APPROVE |
 | M1-697 | Scope every feed-bytes sanitize call to one author's field | 2026-07-25 | round 1 APPROVE |
 | M1-695 | Deliver the default /summary as one message per category section | 2026-07-25 | round 1 APPROVE |
 | M1-694 | /summary renders the categorized form by default; --full keeps the flat form | 2026-07-25 | round 2 APPROVE |
 | M1-693 | Normalize post.title at ingest: empty, content-as-title, and unbounded length | 2026-07-25 | round 1 APPROVE |
 | M1-692 | Pin the NULL-ordering property at the three uncovered sort sites | 2026-07-25 | round 1 APPROVE |
-| M1-691 | Carry the markdown-link guarantee at the outbound delivery chokepoint | 2026-07-25 | round 1 APPROVE |
 
 ---
 
@@ -934,7 +934,7 @@ M1-694 (done)
   ├── M1-695 (done)
   └── M1-696 (done)
 M1-697 (done)
-M1-698 (pending) ← runnable
+M1-698 (done)
 M1-699 (done)
   └── M1-700 (done)
         └── M1-701 (done)

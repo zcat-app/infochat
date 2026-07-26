@@ -148,6 +148,21 @@
             <artifactId>quarkus-junit5</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+             ArchUnit — backs OutboundChokepointArchTest, which fails the
+             build if any provider main class other than OutboundDelivery
+             or DigestDelivery.RecordingAdapter calls the mutating
+             MessagingAdapter methods (send/update/finalizeMessage),
+             guarding the outbound chokepoint routing invariant
+             (docs/spec/security.md §"Sanitizer output never contains ](").
+             Test-scope only; production classpath is untouched.
+        -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit</artifactId>
+            <version>1.4.2</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

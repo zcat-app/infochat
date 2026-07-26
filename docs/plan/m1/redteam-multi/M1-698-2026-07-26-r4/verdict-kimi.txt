@@ -1,0 +1,75 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: INFO-LEAK
+    SEVERITY: low
+    PROMISE: docs/spec/security.md §"Sanitizer output never contains `](`"
+      (as amended by this diff, §"The chokepoint routing is build-guarded"):
+      "A drift assertion fails the build if the SPI grows a body-delivering
+      method the guard does not yet name", and the test's own javadoc:
+      "the spiSurfaceIsFullyClassified check fails the build if the SPI
+      grows a method that is in neither, so a new outbound-body method
+      cannot bypass the guard silently."
+    GAP: Both the drift assertion and the call-edge match classify SPI
+      methods by NAME ONLY, collapsing overloads.
+      spiSurfaceIsFullyClassified
+      (OutboundChokepointArchTest.java:106-118) builds a Set of
+      m.getName() from MessagingAdapter.getDeclaredMethods() and compares
+      it against the GUARDED_METHODS ∪ NON_BODY_METHODS name set, so a
+      NEW overload of an existing name leaves the compared sets
+      byte-identical and the assertion green. The edge match then skips
+      any call whose target name is not in GUARDED_METHODS
+      (OutboundChokepointArchTest.java:212), and the NON_BODY_METHODS set
+      (OutboundChokepointArchTest.java:99-104) already contains
+      innocuous-sounding names (setTyping, joinGroup, connectContact, …)
+      that a future body-delivering overload could plausibly reuse. Net:
+      the SPI can grow a body-delivering method — an overload of a
+      "non-body" name — that neither fails the drift assertion nor is
+      flagged at call sites, contradicting the absolute "cannot bypass
+      silently" claim. (Same name-set blindness, weaker: a body-delivering
+      method declared only on a concrete adapter subtype or sub-interface
+      is invisible to the drift check, which reflects only
+      MessagingAdapter.class — though that shape is arguably outside the
+      stated "SPI grows" wording.) Severity is low because exploitation
+      requires a future code change landing past review (trusted,
+      reviewed codebase), the census remains the documented backstop, and
+      the impact is one outbound path losing the `](` adjacency break —
+      a label-hiding-link enabler, not a direct compromise.
+    REPRO: A later ticket adds an overload such as
+      `setTyping(ContactId, OutboundDraft)` (or any body-delivering method
+      reusing a name already in NON_BODY_METHODS) to MessagingAdapter.
+      (1) `mvn verify` runs spiSurfaceIsFullyClassified: the declared
+      NAME set is unchanged ({send, update, finalizeMessage, setTyping,
+      …}), assertEquals(declared, classified) passes. (2) A provider
+      class — not on the two-class allowlist — calls
+      `adapter.setTyping(contact, draft)`; collectViolator returns at the
+      first check because "setTyping" ∉ GUARDED_METHODS. (3) The build is
+      green; the unsanitized body reaches the transport with no `](`
+      adjacency break, no WARN, no LLM_OUTPUT_SANITIZED audit row. A feed
+      publisher whose injected content steers bot prose (in scope per
+      §Trust boundaries item 9 and §Prompt-injection defenses) can then
+      get a clickable `[label](attacker-url)` delivered verbatim — the
+      exact property the OUTBOUND guarantee promises never to ship.
+    SUGGESTED-FIX-CLASS: trust-boundary-tightening
+
+OUT-OF-MODEL:
+  - Reflective invocation of the three SPI methods (Method.invoke /
+    MethodHandle / dynamic proxy) leaves no static edge for the guard;
+    a deliberate-evasion shape outside the threat model's
+    external-adversary scope — already enumerated in the diff itself as
+    accepted documented residual risk, so noted here only for
+    completeness.
+  - Direct transport access that bypasses the SPI entirely: provider
+    code opening its own connection to the SimpleX subprocess bot API
+    (trust boundary 7 — unauthenticated loopback WebSocket) or the
+    Signal daemon's RPC endpoint produces no MessagingAdapter call- or
+    reference-edge at all, so neither the guard nor a census of adapter
+    edges sees it. This is a FOURTH residual route beyond the three the
+    amended spec text enumerates; it is a deliberate (or grossly
+    negligent) shape rather than an accidental one, so it sits outside
+    the guard's stated accidental-drift mission — flag for the user to
+    decide whether the residual-risk enumeration should be widened.
+  - The diff adds a new build-time dependency
+    (com.tngtech.archunit:archunit:1.4.2, test scope) — a supply-chain
+    surface addition; supply-chain attacks on operator infrastructure
+    are explicitly out of scope for v1 (§Threat model).
