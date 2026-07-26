@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 716 |
 | deferred | 0 |
 | abandoned | 20 |
-| **total** | **736** |
+| **total** | **737** |
 
 ---
 
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-702 — Ban infochat-messaging-adapter from infochat-core (complexity: low, risk: low)
 
 ---
 
@@ -938,4 +938,5 @@ M1-698 (done)
 M1-699 (done)
   └── M1-700 (done)
         └── M1-701 (done)
+M1-702 (pending) ← runnable
 ```
