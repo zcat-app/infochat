@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 716 |
 | deferred | 0 |
 | abandoned | 20 |
-| **total** | **737** |
+| **total** | **738** |
 
 ---
 
@@ -26,6 +26,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-702 — Ban infochat-messaging-adapter from infochat-core (complexity: low, risk: low)
+- M1-703 — Summary degraded notice misleads when only some topics fail (complexity: low, risk: low)
 
 ---
 
@@ -939,4 +940,5 @@ M1-699 (done)
   └── M1-700 (done)
         └── M1-701 (done)
 M1-702 (pending) ← runnable
+M1-703 (pending) ← runnable
 ```
