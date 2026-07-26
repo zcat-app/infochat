@@ -436,7 +436,7 @@ sources subscribed by the calling scope.
 
 ## 3.5 Content commands
 
-### `/summary [tag] [-w 24h] [--full]`
+### `/summary [tag] [-w 24h] [--short|--full|--flat]`
 
 Generates an on-the-fly summary of `READY` posts matching the tag (or all
 followed tags if no arg) within the time window (decision D18 — on-the-fly
@@ -446,11 +446,11 @@ traversal of the `post_reference` graph **before any LLM call**; the LLM
 writes prose per pre-computed cluster, so the cluster set is reproducible
 (determinism boundary D19).
 
-**Render form (M1-694).** `SummaryArgs.full` selects between two renderers;
-it changes nothing about post selection, so both forms are equally
-reproducible.
+**Render form (M1-694; four modes M1-700).** `SummaryArgs.form` selects
+between four mutually-exclusive renderers; it changes nothing about post
+selection, so all four forms are equally reproducible.
 
-- **default** — `DigestRenderer.renderSummarySections(List<ClusterProse>,
+- **bare (default)** — `DigestRenderer.renderSummarySections(List<ClusterProse>,
   String)`: the D62 categorized form (category headers, one prose paragraph
   per cluster, `infochat.digest.category-item-cap`, overflow line from
   `reply.summary.category.more`). No closing affordance — that key is
@@ -460,15 +460,29 @@ reproducible.
   identical to the flat form. Its name differs from `renderSections`
   because a `List<ClusterProse>` overload would collide with
   `renderSections(List<Post>, String)`'s erasure.
-- **`--full`** — `ClusterBlockRenderer.appendClusterBlock`: the flat
+- **`--short`** — `DigestRenderer.renderShortBody(List<Cluster>, String)`:
+  one `CategoryRollupGenerator` roll-up synthesis per category header, NO
+  per-cluster prose, NO flat blocks. Calls
+  `CategoryRollupGenerator.generateRollupUnconditional` (bypassing the
+  digest's `category-summary-enabled` flag — `--short` is the explicit
+  opt-in). One LLM call per category; zero `SummaryProseGenerator` calls.
+- **`--full`** — `DigestRenderer.renderSummarySections(..., Integer.MAX_VALUE)`:
+  the categorized form with NO per-category cap and NO overflow line (all
+  clusters render). Per-cluster prose IS generated. M1-700 reclaimed
+  `--full` for categorized-uncapped (the legacy flat meaning moved to
+  `--flat`).
+- **`--flat`** — `ClusterBlockRenderer.appendClusterBlock`: the flat
   seven-field block per cluster (`[topic_id=…]`, headline, `covered by:`,
-  `score:`, `summary:`, `classification:`, `tags:`). This is also the form
-  `/retry` replays.
+  `score:`, `summary:`, `classification:`, `tags:`). This is the renamed
+  legacy `--full`; output is byte-identical to the pre-rename `--full`.
+  This is also the form `/retry` replays for a `flat` anchor.
 
 `DigestRenderer.forSummaryRendering(...)` is the cross-package construction
 seam the plain-JUnit handler tests use; the renderer's `@Inject` fields are
 package-private, and the tests must wire a REAL renderer holding their own
-sanitizer so the sanitization assertions stay meaningful.
+sanitizer so the sanitization assertions stay meaningful. The 6-arg
+overload additionally wires a `CategoryRollupGenerator` for the `--short`
+tests.
 
 **Window column.** The `-w` predicate is `post.ready_at >= cutoff`, not
 `published_at` (M1-689). `published_at` is source-supplied, nullable

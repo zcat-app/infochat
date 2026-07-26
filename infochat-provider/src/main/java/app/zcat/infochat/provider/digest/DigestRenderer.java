@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
@@ -201,6 +202,22 @@ public class DigestRenderer {
      */
     public List<RenderedSection> renderSummarySections(List<ClusterProse> proseList,
                                                        String langCode) {
+        return renderSummarySections(proseList, langCode, categoryItemCap);
+    }
+
+    /**
+     * Cap-overload for the {@code /summary}-side entry point (M1-700).
+     * {@code /summary --full} passes {@code Integer.MAX_VALUE} to render
+     * ALL clusters per category with NO 12-per-section cap and NO
+     * "+N more" overflow line — the cap-skip is a render-side switch, NOT
+     * a re-tune of {@code infochat.digest.category-item-cap} (the digest's
+     * own {@code render}/{@code renderSections} entry points stay capped).
+     * The digest broadcast is out-of-scope for M1-700; only the
+     * {@code /summary} path calls this overload.
+     */
+    public List<RenderedSection> renderSummarySections(List<ClusterProse> proseList,
+                                                       String langCode,
+                                                       int effectiveCap) {
         // Categorization reorders clusters into sections, so the positional
         // prose↔cluster correspondence the caller passed does not survive
         // and the prose must be looked up per section cluster.
@@ -224,7 +241,7 @@ public class DigestRenderer {
         for (CategorySection section : sections) {
             StringBuilder sb = new StringBuilder();
             sb.append(sectionHeader(section, langCode));
-            int shownCount = Math.min(section.clusters().size(), categoryItemCap);
+            int shownCount = Math.min(section.clusters().size(), effectiveCap);
             for (int i = 0; i < shownCount; i++) {
                 sb.append("\n\n");
                 // categorize() assigns each input cluster to exactly one
@@ -263,6 +280,101 @@ public class DigestRenderer {
     }
 
     /**
+     * Render the {@code --short} form (M1-700): ONE
+     * {@link CategoryRollupGenerator} roll-up synthesis per category
+     * header, NO per-cluster prose, NO {@link ClusterBlockRenderer} flat
+     * blocks. The roll-up sees ALL clusters in the category including
+     * past-cap ones ({@link CategoryRollupGenerator#generateRollupUnconditional}'s
+     * existing contract). Each section carries a footer steering the
+     * reader to the deeper {@code /summary} paths: a real category names
+     * {@code /summary <tag>} and {@code /summary <tag> --full}; the Other
+     * bucket (tag {@code == null}, not in the controlled vocabulary) names
+     * bare {@code /summary} and {@code /summary --full} instead.
+     *
+     * <p>One LLM call per category (the roll-up); zero
+     * {@link SummaryProseGenerator} calls. A roll-up failure yields
+     * {@link Optional#empty()} and the section ships with its header and
+     * footer but no roll-up line (CategoryRollupGenerator's existing
+     * failure containment). The digest's own
+     * {@code infochat.digest.category-summary-enabled} flag is NOT
+     * consulted — {@code --short} is the explicit opt-in that replaces
+     * the flag's role for this call site.
+     *
+     * <p>Single-string return: the {@code --short} overview is short
+     * enough to ride in one router-sent message (like {@code --flat}),
+     * not per-section (the bare form's M1-695 per-section delivery is for
+     * long sections). Acceptance pins content, not message count.
+     *
+     * <p>Failure reporting: {@link ShortResult#anyRollupMissing()} is true
+     * when at least one category's roll-up came back empty (LLM outage,
+     * empty response, or REFUSAL marker). The caller prefixes the D43
+     * degraded_notice in that case so the user is NOT shown a silent wall
+     * of empty headers — the security.md §Failure handling promise that
+     * {@code --short}'s inherited optional-prefix containment alone did
+     * not honor (redteam M1-700 kimi r1).
+     */
+    public ShortResult renderShortBody(List<Cluster> clusters, String langCode) {
+        List<CategorySection> sections = digestCategorizer.categorize(clusters);
+        StringBuilder out = new StringBuilder();
+        boolean anyRollupMissing = false;
+        for (int sectionIdx = 0; sectionIdx < sections.size(); sectionIdx++) {
+            CategorySection section = sections.get(sectionIdx);
+            if (sectionIdx > 0) {
+                out.append("\n\n");
+            }
+            out.append(sectionHeader(section, langCode));
+            Optional<String> rollup =
+                    categoryRollupGenerator.generateRollupUnconditional(section.clusters(), langCode);
+            if (rollup.isPresent()) {
+                out.append("\n\n").append(rollup.get());
+            } else {
+                // Roll-up failed (LLM outage / empty / REFUSAL). Honor the
+                // D17 degraded-form half of security.md §Failure handling
+                // (redteam M1-700 r2 kimi+opencode): render the deterministic
+                // headlines + URLs + post UIDs degraded prose for each cluster
+                // in the category, the same fallback the other three forms
+                // get through SummaryProseGenerator's degraded path. The
+                // per-cluster degradedProseFor carries the M1-697 title
+                // redaction (one author's field per sanitize call), so a
+                // command-shaped feed title is redacted here too.
+                anyRollupMissing = true;
+                for (Cluster c : section.clusters()) {
+                    out.append("\n\n").append(
+                            SummaryProseGenerator.degradedProseFor(c, llmOutputSanitizer));
+                }
+            }
+            out.append("\n\n").append(shortFooter(section, langCode));
+        }
+        return new ShortResult(out.toString(), anyRollupMissing);
+    }
+
+    /**
+     * Result of {@link #renderShortBody}: the rendered body plus whether any
+     * category's roll-up came back empty (the caller's signal to emit the
+     * degraded_notice). The body is always complete enough to deliver
+     * (headers + footers ride even when a roll-up failed); the flag is the
+     * honesty signal, not a delivery gate.
+     */
+    public record ShortResult(String body, boolean anyRollupMissing) {}
+
+    /**
+     * The {@code --short} per-category footer. Real categories steer to
+     * {@code /summary <tag>} (categorized-capped) and
+     * {@code /summary <tag> --full} (categorized-uncapped); the Other
+     * bucket ({@code tag == null}, not in the controlled vocabulary so
+     * {@code /summary other} would hit {@code error.summary.unknown_tag})
+     * steers to bare {@code /summary} and {@code /summary --full} instead.
+     */
+    private String shortFooter(CategorySection section, String langCode) {
+        if (section.tag() == null) {
+            return bundleLoader.get(BundleKeys.REPLY_SUMMARY_SHORT_OTHER_FOOTER, langCode);
+        }
+        return MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_SUMMARY_SHORT_CATEGORY_FOOTER, langCode),
+                section.tag());
+    }
+
+    /**
      * Cross-package construction seam for {@link #renderSummarySections}.
      * The collaborator fields above are package-private {@code @Inject}
      * fields, so a plain-JUnit test in {@code provider.command} cannot wire
@@ -275,13 +387,36 @@ public class DigestRenderer {
      * <p>Only the collaborators {@link #renderSummarySections} needs are
      * set. The returned instance is NOT usable for {@link #render} or
      * {@link #renderSections}, which additionally need the cluster
-     * traversal and the prose generator.
+     * traversal and the prose generator. {@link #renderShortBody} IS
+     * usable: it shares the categorizer, roll-up generator, sanitizer,
+     * translator and bundle loader this seam wires.
      */
     public static DigestRenderer forSummaryRendering(LlmOutputSanitizer llmOutputSanitizer,
                                                      TranslationPipeline translationPipeline,
                                                      BundleLoader bundleLoader,
                                                      int categoryItemCap,
                                                      int categoryMinClusters) {
+        return forSummaryRendering(llmOutputSanitizer, translationPipeline, bundleLoader,
+                categoryItemCap, categoryMinClusters, new CategoryRollupGenerator());
+    }
+
+    /**
+     * Extended seam that also wires the {@link CategoryRollupGenerator}
+     * (M1-700): the {@code --short} path calls
+     * {@link CategoryRollupGenerator#generateRollupUnconditional} per
+     * category, so a {@code --short} test injects a recording subclass to
+     * assert the roll-up call count and stub its output. The 5-arg
+     * overload above delegates here with a default
+     * {@code new CategoryRollupGenerator()} (flag-gated, no LLM wiring),
+     * which is correct for the categorized/flat tests that never reach the
+     * {@code --short} branch.
+     */
+    public static DigestRenderer forSummaryRendering(LlmOutputSanitizer llmOutputSanitizer,
+                                                     TranslationPipeline translationPipeline,
+                                                     BundleLoader bundleLoader,
+                                                     int categoryItemCap,
+                                                     int categoryMinClusters,
+                                                     CategoryRollupGenerator categoryRollupGenerator) {
         DigestRenderer renderer = new DigestRenderer();
         DigestCategorizer categorizer = new DigestCategorizer();
         categorizer.categoryMinClusters = categoryMinClusters;
@@ -290,6 +425,7 @@ public class DigestRenderer {
         renderer.translationPipeline = translationPipeline;
         renderer.bundleLoader = bundleLoader;
         renderer.categoryItemCap = categoryItemCap;
+        renderer.categoryRollupGenerator = categoryRollupGenerator;
         return renderer;
     }
 

@@ -126,6 +126,24 @@ public class CategoryRollupGenerator {
         if (!categorySummaryEnabled) {
             return Optional.empty();
         }
+        return generateRollupUnconditional(categoryClusters, langCode);
+    }
+
+    /**
+     * The {@code --short} call site (M1-700): the same roll-up synthesis
+     * {@link #generateRollup} produces for the digest's optional prefix,
+     * but WITHOUT the {@code infochat.digest.category-summary-enabled} gate.
+     * {@code /summary --short} IS the explicit opt-in that replaces the
+     * config flag's role for this call site: the roll-up is the form's
+     * whole content, not an optional prefix, so a flag that defaults off
+     * would silently produce empty categories. The prompt/sanitize/translate
+     * pipeline is reused verbatim (the out_of_scope boundary); only the
+     * flag gate is bypassed. Failure containment is identical to
+     * {@link #generateRollup} — a roll-up LLM failure, empty response, or
+     * REFUSAL marker yields {@link Optional#empty()} and the caller ships
+     * the category header without a roll-up line.
+     */
+    public Optional<String> generateRollupUnconditional(List<Cluster> categoryClusters, String langCode) {
         try {
             LlmProvider provider = llmRouter.forTask(ModelTask.SUMMARIZER, langCode);
             String userPrompt = buildPrompt(categoryClusters);

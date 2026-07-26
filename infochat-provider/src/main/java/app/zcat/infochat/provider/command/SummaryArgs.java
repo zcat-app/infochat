@@ -21,7 +21,8 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>positional {@code [tag]} (optional)</li>
  *   <li>{@code -w <duration>} (optional; default 24h)</li>
- *   <li>{@code --full} (optional; selects the flat per-cluster render form)</li>
+ *   <li>exactly one render-form flag (optional; mutually exclusive):
+ *     {@code --short}, {@code --full}, {@code --flat}</li>
  * </ul>
  *
  * <p>Tag normalization is delegated to {@link TagNormalizer} — the
@@ -30,21 +31,47 @@ import java.util.regex.Pattern;
  * {@code /unfollow-tag} became the third and fourth controlled-vocabulary
  * consumers. {@code /summary} is a read-side filter with no SQL CHECK to
  * fall back on, so the char-class step runs here at parse time.
+ *
+ * <p>The four render forms (M1-700): {@code BARE} (the default — categorized,
+ * 12-per-section cap), {@code SHORT} ({@code --short} — one
+ * {@link app.zcat.infochat.provider.digest.CategoryRollupGenerator} roll-up
+ * per category, no per-cluster prose), {@code FULL} ({@code --full} —
+ * categorized, ALL clusters, no 12-cap), and {@code FLAT} ({@code --flat} —
+ * the renamed legacy {@code --full}, flat per-cluster blocks). The form
+ * flag is an exact-match token rather than a prefix so a mistyped
+ * {@code --fully} still lands on the unknown-flag error rather than
+ * silently changing the render form.
  */
 public record SummaryArgs(
         Optional<String> tag,
         Duration window,
-        boolean full) {
+        RenderForm form) {
 
     /**
-     * The flat-render opt-in. The default {@code /summary} renders the
-     * categorized form (category headers, one prose paragraph per cluster,
-     * per-category cap); {@code --full} selects the flat per-cluster block
-     * form instead. Kept as an exact-match token rather than a prefix so a
-     * mistyped {@code --fully} still lands on the unknown-flag error rather
-     * than silently changing the render form.
+     * The four {@code /summary} render forms (M1-700). The
+     * {@link #anchorValue()} is the {@code summary_anchor.render_form}
+     * column value the handler writes and {@code /retry} dispatches on
+     * (M1-699's typed column; the CHECK already permits all four).
      */
+    public enum RenderForm {
+        /** Default: categorized, per-cluster prose, 12-per-section cap. */
+        BARE,
+        /** {@code --short}: one CategoryRollupGenerator roll-up per category, no per-cluster prose. */
+        SHORT,
+        /** {@code --full}: categorized, per-cluster prose, ALL clusters (no 12-cap). */
+        FULL,
+        /** {@code --flat}: renamed legacy {@code --full} — flat per-cluster blocks. */
+        FLAT;
+
+        /** The summary_anchor.render_form column value (lowercase, M1-699 CHECK vocabulary). */
+        public String anchorValue() {
+            return name().toLowerCase(Locale.ROOT);
+        }
+    }
+
+    private static final String SHORT_FLAG = "--short";
     private static final String FULL_FLAG = "--full";
+    private static final String FLAT_FLAG = "--flat";
 
     /** Default time window per design 03 §Time window flag. */
     public static final Duration DEFAULT_WINDOW = Duration.ofHours(24);
@@ -80,13 +107,20 @@ public record SummaryArgs(
 
         Optional<String> tag = Optional.empty();
         Duration window = DEFAULT_WINDOW;
-        boolean full = false;
+        RenderForm form = RenderForm.BARE;
 
         int i = 0;
         while (i < tokens.size()) {
             String token = tokens.get(i);
-            if (token.equals(FULL_FLAG)) {
-                full = true;
+            if (isFormFlag(token)) {
+                // At most one render-form flag per invocation: a second
+                // form flag (e.g. /summary --short --full) is a Failure.
+                // The form flags are mutually exclusive by design (M1-700).
+                RenderForm requested = formFlagValue(token);
+                if (form != RenderForm.BARE) {
+                    return new Failure(BUNDLE_WINDOW_OUT_OF_RANGE);
+                }
+                form = requested;
                 i++;
             } else if (token.equals("-w")) {
                 if (i + 1 >= tokens.size()) {
@@ -117,7 +151,17 @@ public record SummaryArgs(
                 i++;
             }
         }
-        return new Success(new SummaryArgs(tag, window, full));
+        return new Success(new SummaryArgs(tag, window, form));
+    }
+
+    private static boolean isFormFlag(String token) {
+        return token.equals(SHORT_FLAG) || token.equals(FULL_FLAG) || token.equals(FLAT_FLAG);
+    }
+
+    private static RenderForm formFlagValue(String token) {
+        if (token.equals(SHORT_FLAG)) return RenderForm.SHORT;
+        if (token.equals(FULL_FLAG)) return RenderForm.FULL;
+        return RenderForm.FLAT;
     }
 
     private static ParseResult parseWindow(String raw) {
@@ -150,7 +194,7 @@ public record SummaryArgs(
         // Window-only carrier: the caller reads .window() off it and folds
         // the value into the record it is building, so tag/full here are
         // placeholders, never the parsed invocation's values.
-        return new Success(new SummaryArgs(Optional.empty(), d, false));
+        return new Success(new SummaryArgs(Optional.empty(), d, RenderForm.BARE));
     }
 
     private static boolean isWithinRange(String unit, int n) {

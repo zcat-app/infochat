@@ -665,6 +665,23 @@ public final class BundleKeys {
      */
     public static final String REPLY_SUMMARY_CATEGORY_MORE = "reply.summary.category.more";
 
+    /**
+     * {@code --short} per-category footer (M1-700). Token {@code {0}} = the
+     * category's controlled-vocabulary tag. Steers to {@code /summary <tag>}
+     * (categorized-capped) and {@code /summary <tag> --full}
+     * (categorized-uncapped) — the two deeper render paths for THIS category.
+     */
+    public static final String REPLY_SUMMARY_SHORT_CATEGORY_FOOTER = "reply.summary.short.category_footer";
+
+    /**
+     * {@code --short} Other-bucket footer (M1-700). The Other bucket has
+     * {@code tag == null} and is not in the controlled vocabulary, so
+     * {@code /summary other} would hit {@code error.summary.unknown_tag};
+     * this footer steers to bare {@code /summary} and {@code /summary --full}
+     * instead. No interpolation args.
+     */
+    public static final String REPLY_SUMMARY_SHORT_OTHER_FOOTER = "reply.summary.short.other_footer";
+
     // ----- Intake-step splice fixed replies (M1-044b) ---------------------
     // Per docs/spec/security.md §Authorization model + §User ban +
     // §Invite-code registration, and docs/design/03-commands.md §3.11

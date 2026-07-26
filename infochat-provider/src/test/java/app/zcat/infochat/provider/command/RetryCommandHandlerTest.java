@@ -9,6 +9,7 @@ import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository.AnchorRow;
+import app.zcat.infochat.provider.digest.CategoryRollupGenerator;
 import app.zcat.infochat.provider.digest.DigestRenderer;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
@@ -38,6 +39,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 
 import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newEnShortCircuitPipeline;
@@ -56,6 +59,7 @@ class RetryCommandHandlerTest {
     private RetryCommandHandler handler;
     private StubAnchorRepository anchorRepo;
     private RecordingProseGenerator proseGenerator;
+    private RecordingCategoryRollupGenerator rollupGenerator;
     private InFlightTracker tracker;
 
     @BeforeEach
@@ -84,11 +88,16 @@ class RetryCommandHandlerTest {
         // (M1-696), so the renderer must hold THIS test's sanitizer and
         // pipeline — same wiring rule as SummaryCommandHandlerTest. The cap
         // values mirror the production @ConfigProperty defaults that manual
-        // field injection does not apply.
+        // field injection does not apply. The 6-arg seam wires a
+        // RecordingCategoryRollupGenerator so the --short replay test can
+        // assert the roll-up call count; the flat/bare/full tests never
+        // reach renderShortBody so it is inert for them.
+        rollupGenerator = new RecordingCategoryRollupGenerator();
         handler.digestRenderer = DigestRenderer.forSummaryRendering(
                 SanitizerTestDoubles.noAuditSanitizer(),
                 handler.translationPipeline, bundleLoader,
-                /* categoryItemCap */ 12, /* categoryMinClusters */ 3);
+                /* categoryItemCap */ 12, /* categoryMinClusters */ 3,
+                rollupGenerator);
         handler.inFlightTracker = tracker;
         handler.llmRateCap = new LlmRateCap(10);
         handler.retryCap = 3;
@@ -383,6 +392,118 @@ class RetryCommandHandlerTest {
                 "a backfilled '/summary' anchor must not replay flat. Got: " + bareReply.text());
     }
 
+    // ----- M1-700: --short and --full replay arms ------------------------
+
+    /**
+     * Acceptance item 5 — {@code /retry} against a {@code render_form='short'}
+     * anchor re-runs CategoryRollupGenerator per category and emits NO
+     * per-cluster prose (SummaryProseGenerator is not called on this replay
+     * path). The re-rolled roll-up is a fresh LLM generation over the same
+     * anchored cluster set.
+     */
+    @Test
+    void shortAnchorReplaysRollupNotClusterProse() {
+        List<String> postUids = List.of(PREFIX + "sh1");
+        String json = "[{\"topicId\":\"t-sh\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary --short", "short", "hash", postUids, json);
+
+        Post readyPost = post(PREFIX + "sh1", "Short-replay headline", Instant.now());
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
+        proseGenerator.responseText = "Should NOT be called on --short replay.";
+        rollupGenerator.responseText = "Short replay roll-up.";
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(PREFIX + "shretry"), "/retry");
+
+        assertEquals(0, proseGenerator.callCount,
+                "a 'short' anchor replay must NOT call SummaryProseGenerator. Got calls: "
+                        + proseGenerator.callCount);
+        assertEquals(1, rollupGenerator.callCount(),
+                "a 'short' anchor replay re-runs CategoryRollupGenerator once per category "
+                        + "(one Other bucket here). Got: " + rollupGenerator.callCount());
+        assertTrue(reply.text().contains("Short replay roll-up."),
+                "the --short replay must carry the re-rolled roll-up line. Got: " + reply.text());
+        assertFalse(reply.text().contains("[topic_id="),
+                "the --short replay emits NO flat cluster blocks. Got: " + reply.text());
+        assertFalse(reply.text().contains("Should NOT be called"),
+                "the --short replay must not leak per-cluster prose. Got: " + reply.text());
+    }
+
+    /**
+     * Redteam M1-700 kimi r1 — {@code /retry} against a {@code short} anchor
+     * during a summarizer outage must emit the D43 degraded_notice, not a
+     * silent wall of empty headers (mirrors the /summary --short path).
+     */
+    @Test
+    void shortAnchorReplayEmitsDegradedNoticeWhenRollupFails() {
+        List<String> postUids = List.of(PREFIX + "shd1");
+        String json = "[{\"topicId\":\"t-shd\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary --short", "short", "hash", postUids, json);
+
+        Post readyPost = post(PREFIX + "shd1", "Short-degraded headline", Instant.now());
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
+        proseGenerator.responseText = "Should NOT be called.";
+        rollupGenerator.setReturnEmpty(true);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(PREFIX + "shdretry"), "/retry");
+
+        assertEquals(0, proseGenerator.callCount,
+                "a 'short' anchor replay must NOT call SummaryProseGenerator");
+        assertTrue(reply.text().contains("LLM is unreachable"),
+                "the --short replay must prefix the degraded_notice on roll-up failure. Got: "
+                        + reply.text());
+        // The D17 degraded FORM half (redteam r2): the deterministic
+        // headline must render, not just an empty header.
+        assertTrue(reply.text().contains("Short-degraded headline"),
+                "the --short replay degraded path must render the post headline (D17 form). Got: "
+                        + reply.text());
+    }
+
+    /**
+     * Acceptance item 6 — {@code /retry} against a {@code render_form='full'}
+     * anchor replays categorized sections with ALL clusters (no 12-cap),
+     * matching the {@code /summary --full} shape. 14 clusters exceed
+     * categoryItemCap (12): a {@code bare} replay would cap at 12 and emit
+     * "+2 more stories", but a {@code full} replay renders all 14 with no
+     * overflow line.
+     */
+    @Test
+    void fullAnchorReplaysCategorizedUncapped() {
+        // 14 singleton clusters all sharing test-tag → one category of 14
+        // clusters (> categoryItemCap 12). The cluster map carries all 14.
+        List<String> postUids = new ArrayList<>();
+        List<Post> readyPosts = new ArrayList<>();
+        StringBuilder json = new StringBuilder("[");
+        for (int i = 0; i < 14; i++) {
+            String uid = PREFIX + "fu" + i;
+            postUids.add(uid);
+            readyPosts.add(post(uid, "Full-replay headline " + i, Instant.now()));
+            if (i > 0) json.append(",");
+            json.append("{\"topicId\":\"t-").append(uid).append("\",\"postUids\":[\"").append(uid).append("\"]}");
+        }
+        json.append("]");
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary --full", "full", "hash", postUids, json.toString());
+
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, readyPosts);
+        proseGenerator.responseText = "Full-replay prose.";
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(PREFIX + "fulretry"), "/retry");
+
+        assertEquals(14, proseGenerator.callCount,
+                "a 'full' anchor replay generates per-cluster prose for ALL 14 clusters, not 12");
+        assertEquals(0, rollupGenerator.callCount(),
+                "a 'full' anchor replay does not call the roll-up generator");
+        assertFalse(reply.text().contains("more stories"),
+                "a 'full' anchor replay emits NO '+N more' overflow line (cap skipped). Got: "
+                        + reply.text());
+        assertFalse(reply.text().contains("[topic_id="),
+                "a 'full' anchor replay is categorized, not flat. Got: " + reply.text());
+        assertTrue(reply.text().contains("Full-replay prose."),
+                "a 'full' anchor replay carries the re-generated per-cluster prose. Got: " + reply.text());
+    }
+
     // ----- M1-183: LLM rate cap + in-flight no-leak --------------------
     //
     // Per docs/spec/security.md §Rate limiting, /retry re-rolls draw
@@ -526,6 +647,38 @@ class RetryCommandHandlerTest {
             }
             return out;
         }
+    }
+
+    /**
+     * Recording stub for {@link CategoryRollupGenerator}: the {@code --short}
+     * replay path calls {@link CategoryRollupGenerator#generateRollupUnconditional}
+     * per category, so this stub counts calls and returns a fixed synthesis
+     * string. Inert for the flat/bare/full replay tests (they never reach
+     * renderShortBody).
+     */
+    private static final class RecordingCategoryRollupGenerator extends CategoryRollupGenerator {
+        private final AtomicInteger callCount = new AtomicInteger();
+        private final List<Integer> clusterCounts = new CopyOnWriteArrayList<>();
+        private volatile String responseText = "roll-up synthesis";
+        // Simulate a summarizer outage (redteam M1-700 kimi r1).
+        private volatile boolean returnEmpty = false;
+
+        void setResponseText(String text) {
+            this.responseText = text;
+        }
+
+        void setReturnEmpty(boolean empty) {
+            this.returnEmpty = empty;
+        }
+
+        @Override
+        public Optional<String> generateRollupUnconditional(List<Cluster> clusters, String langCode) {
+            callCount.incrementAndGet();
+            clusterCounts.add(clusters.size());
+            return returnEmpty ? Optional.empty() : Optional.of(responseText);
+        }
+
+        int callCount() { return callCount.get(); }
     }
 
     /**

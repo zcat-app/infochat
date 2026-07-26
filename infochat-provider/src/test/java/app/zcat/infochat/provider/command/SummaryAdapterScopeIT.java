@@ -102,8 +102,9 @@ class SummaryAdapterScopeIT {
         // --full renders the flat per-cluster blocks carrying the headlines
         // this test's D46 non-leakage pair asserts on (ALPHA present, BRAVO
         // absent); the M1-694 default form renders prose only, which would
-        // make the assertFalse pass vacuously.
-        adapter.deliverDm(SHARED_CONTACT_ID, "/summary --full");
+        // make the assertFalse pass vacuously. M1-700 renamed the legacy
+        // --full to --flat (the flat per-cluster form).
+        adapter.deliverDm(SHARED_CONTACT_ID, "/summary --flat");
 
         // /summary runs on an M1-634 worker — drain the pool so the
         // exactly-one and never-BRAVO negative asserts are race-free.

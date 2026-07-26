@@ -60,11 +60,14 @@ import java.util.UUID;
  * The personal path replays the prose layer of the last summary-producing
  * command using the frozen post selection and cluster mapping stored in
  * {@code summary_anchor} (D19, D36). The replay comes back in the render
- * form the anchored {@code /summary} produced (M1-696): an anchor whose
- * {@code command_name} carries the exact {@code --full} marker replays the
- * flat per-cluster blocks ({@link ClusterBlockRenderer}), anything else
- * replays the default categorized sections
- * ({@link DigestRenderer#renderSummarySections}) — still as a single
+ * form the anchored {@code /summary} produced (M1-696, M1-700): the typed
+ * {@code summary_anchor.render_form} column (M1-699, D70) selects the
+ * replay shape — {@code flat} the flat per-cluster blocks
+ * ({@link ClusterBlockRenderer}), {@code bare} the categorized sections
+ * capped ({@link DigestRenderer#renderSummarySections}), {@code full} the
+ * categorized sections uncapped (M1-700), {@code short} the per-category
+ * {@link app.zcat.infochat.provider.digest.CategoryRollupGenerator} roll-up
+ * with no per-cluster prose (M1-700) — still as a single
  * {@link OutboundMessage}. The {@code --digest} path delegates
  * to {@link DigestRetryService} for per-group serialized digest
  * re-generation (M1-080c).
@@ -253,12 +256,11 @@ public class RetryCommandHandler implements CommandHandler {
 
             String scopeLanguage = readScopeLanguage(scopeKind, scopeId);
 
-            // Re-run the LLM prose layer
-            List<ClusterProse> prose = summaryProseGenerator.generate(clusters, "en");
-
             StringBuilder out = new StringBuilder();
 
-            // Prepend status-drift notice if drift exceeds threshold
+            // Prepend status-drift notice if drift exceeds threshold (applies
+            // to every render form — drift is about the frozen post set, not
+            // the render shape).
             if (excludedCount > 0
                     && (double) excludedCount / originalCount >= statusDriftThreshold) {
                 out.append(MessageFormat.format(
@@ -267,39 +269,70 @@ public class RetryCommandHandler implements CommandHandler {
                         String.valueOf(originalCount)));
             }
 
-            boolean anyDegraded = prose.stream().anyMatch(ClusterProse::degraded);
-            if (anyDegraded) {
-                out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE, inboundContext.effectiveLanguage()));
-                out.append("\n\n");
-            }
-
             // Replay in the render form the anchored /summary produced
-            // (M1-696, M1-699): render_form is the typed dispatch axis.
-            // 'flat' replays the flat per-cluster blocks; 'bare' replays
-            // the categorized sections, joined back into the single
-            // OutboundMessage /retry has always returned (per-section
+            // (M1-696, M1-699, M1-700): render_form is the typed dispatch
+            // axis. 'short' re-runs CategoryRollupGenerator per category and
+            // emits NO per-cluster prose (SummaryProseGenerator is not called
+            // on this replay path); the re-rolled roll-up is a fresh LLM
+            // generation over the same anchored cluster set. The other three
+            // forms re-run the per-cluster prose layer first, then render:
+            // 'flat' the flat per-cluster blocks, 'full' the categorized
+            // sections UNCAPPED (no 12-cap, matching /summary --full), 'bare'
+            // the categorized sections capped. All four join back into the
+            // single OutboundMessage /retry has always returned (per-section
             // delivery is /summary's shape, M1-695, not /retry's). The
-            // switch is structured so M1-700 can add 'short' and 'full'
-            // arms without restructuring; the default throws so a future
-            // form written without its dispatch arm fails loudly rather
-            // than silently replaying the wrong shape.
-            switch (anchor.renderForm()) {
-                case "flat" -> {
-                    ClusterBlockRenderer clusterBlockRenderer =
-                            new ClusterBlockRenderer(llmOutputSanitizer, translationPipeline, bundleLoader);
-                    for (ClusterProse cp : prose) {
-                        clusterBlockRenderer.appendClusterBlock(out, cp, scopeLanguage);
+            // default throws so a future form written without its dispatch
+            // arm fails loudly rather than silently replaying the wrong shape.
+            if ("short".equals(anchor.renderForm())) {
+                DigestRenderer.ShortResult shortResult =
+                        digestRenderer.renderShortBody(clusters, scopeLanguage);
+                // --short failure reporting (redteam M1-700 kimi r1): emit
+                // the D43 degraded_notice when any roll-up came back empty,
+                // mirroring the /summary --short path — a silent wall of
+                // empty headers on replay is the same §Failure handling gap.
+                if (shortResult.anyRollupMissing()) {
+                    out.append(bundleLoader.get(
+                            BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE,
+                            inboundContext.effectiveLanguage()));
+                    out.append("\n\n");
+                }
+                out.append(shortResult.body());
+            } else {
+                // Re-run the LLM prose layer (flat/full/bare).
+                List<ClusterProse> prose = summaryProseGenerator.generate(clusters, "en");
+
+                boolean anyDegraded = prose.stream().anyMatch(ClusterProse::degraded);
+                if (anyDegraded) {
+                    out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE, inboundContext.effectiveLanguage()));
+                    out.append("\n\n");
+                }
+
+                switch (anchor.renderForm()) {
+                    case "flat" -> {
+                        ClusterBlockRenderer clusterBlockRenderer =
+                                new ClusterBlockRenderer(llmOutputSanitizer, translationPipeline, bundleLoader);
+                        for (ClusterProse cp : prose) {
+                            clusterBlockRenderer.appendClusterBlock(out, cp, scopeLanguage);
+                        }
                     }
+                    case "full" -> {
+                        // M1-700: categorized-uncapped replay (all clusters,
+                        // no 12-per-section cap), matching the /summary --full
+                        // shape. The cap-skip is a render-side switch.
+                        out.append(String.join("\n\n",
+                                digestRenderer.renderSummarySections(prose, scopeLanguage, Integer.MAX_VALUE).stream()
+                                        .map(RenderedSection::text)
+                                        .toList()));
+                    }
+                    case "bare" -> {
+                        out.append(String.join("\n\n",
+                                digestRenderer.renderSummarySections(prose, scopeLanguage).stream()
+                                        .map(RenderedSection::text)
+                                        .toList()));
+                    }
+                    default -> throw new IllegalStateException(
+                            "Unhandled summary_anchor.render_form: " + anchor.renderForm());
                 }
-                case "bare" -> {
-                    out.append(String.join("\n\n",
-                            digestRenderer.renderSummarySections(prose, scopeLanguage).stream()
-                                    .map(RenderedSection::text)
-                                    .toList()));
-                }
-                default -> throw new IllegalStateException(
-                        "Unhandled summary_anchor.render_form: " + anchor.renderForm()
-                                + " ('short'/'full' are M1-700)");
             }
 
             return reply(scope, out.toString().stripTrailing());

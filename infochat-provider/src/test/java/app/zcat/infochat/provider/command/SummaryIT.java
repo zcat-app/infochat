@@ -95,10 +95,10 @@ class SummaryIT {
 
         mockLlm.setResponseText("Fixed prose blob per cluster.");
 
-        // --full renders the flat per-cluster blocks whose uid and
-        // display-name fields this test asserts on; the M1-694 default form
-        // renders prose only.
-        adapter.deliverDm(USER_CONTACT_ID, "/summary --full -w 24h");
+        // --flat (renamed from --full by M1-700) renders the flat per-cluster
+        // blocks whose uid and display-name fields this test asserts on; the
+        // M1-694 default form renders prose only.
+        adapter.deliverDm(USER_CONTACT_ID, "/summary --flat -w 24h");
 
         // /summary is D35-interruptible → the whole handler runs on an
         // M1-634 worker; drain the pool so the exactly-one negative

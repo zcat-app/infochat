@@ -84,8 +84,9 @@ import java.util.UUID;
  *       degraded notices) plus the rendered body and deliver: the default
  *       (categorized) form goes out as ONE outbound message per category
  *       section (M1-695) — the placeholder finalized with the first
- *       section, the rest as fresh sends — while {@code --full} keeps the
- *       single flat body.</li>
+     *       section, the rest as fresh sends — while {@code --flat} and
+     *       {@code --short} keep the single body, and {@code --full} takes
+     *       the same per-section shape uncapped (M1-700).</li>
  * </ol>
  */
 @ApplicationScoped
@@ -155,8 +156,11 @@ public class SummaryCommandHandler implements CommandHandler {
     /**
      * Renders the DEFAULT (categorized) form via
      * {@link DigestRenderer#renderSummarySections} — the no-LLM entry point,
-     * so it is equally usable on the over-cap branch below. {@code --full}
-     * bypasses it for {@link ClusterBlockRenderer}'s flat blocks.
+     * so it is equally usable on the over-cap branch below. {@code --flat}
+     * bypasses it for {@link ClusterBlockRenderer}'s flat blocks;
+     * {@code --short} bypasses it for
+     * {@link DigestRenderer#renderShortBody}; {@code --full} reuses it
+     * with a cap-skip (M1-700).
      */
     @Inject
     DigestRenderer digestRenderer;
@@ -199,7 +203,7 @@ public class SummaryCommandHandler implements CommandHandler {
      *
      * <p>Returns a non-null {@link OutboundMessage} for every guard /
      * error branch (parse failure, no-posts, unknown tag, in-flight,
-     * rate-cap) and for the {@code --full} over-cap reply — the router
+     * rate-cap) and for the {@code --flat} over-cap reply — the router
      * sends those. For the terminal summary path (and the default-form
      * over-cap path, M1-695) the handler owns its own message lifecycle
      * through {@link StageProgressNotifier} (placeholder &rarr; coalesced
@@ -282,17 +286,33 @@ public class SummaryCommandHandler implements CommandHandler {
         // is written either: a written anchor would let /retry replay
         // the over-cap set straight into the doomed per-cluster calls
         // this gate exists to prevent.
-        if (result.posts().size() > summarizerPostCap) {
+        // --short makes one CategoryRollupGenerator call per category, not
+        // one per-cluster summarizer call, so the per-cluster summarizer
+        // timeout that motivated this gate does not apply (M1-700). The
+        // gate's behavior for the per-cluster-prose forms
+        // (bare/full/flat) is unchanged: beyond the summarizer-post-cap the
+        // handler renders the same degraded form the LLM-failure path uses
+        // in the caller's chosen render form, plus an honest too-large
+        // notice steering the user to narrow with -w. Like the other guard
+        // branches this path is deterministic and makes no LLM call, so it
+        // consumes no rate-cap token and holds no in-flight slot. No
+        // summary anchor is written either: a written anchor would let
+        // /retry replay the over-cap set straight into the doomed
+        // per-cluster calls this gate exists to prevent.
+        if (args.form() != SummaryArgs.RenderForm.SHORT
+                && result.posts().size() > summarizerPostCap) {
             String scopeLanguage = readScopeLanguage(scopeKind, scopeId.get());
-            if (args.full()) {
+            if (args.form() == SummaryArgs.RenderForm.FLAT) {
                 return reply(scope, composeWindowTooLargeReply(result, scopeLanguage));
             }
             // M1-695: the default (categorized) over-cap form is delivered
-            // per-section like the terminal path. This branch runs before
-            // the in-flight slot and any publish, so there is no
-            // placeholder to finalize — every section goes out as a fresh
-            // send and the handler returns null (self-delivered, so the
-            // router performs no send).
+            // per-section like the terminal path. --full (M1-700) takes the
+            // same per-section shape but UNCAPPED (Integer.MAX_VALUE) — the
+            // cap-skip is a render-side switch, not a cap re-tune. This
+            // branch runs before the in-flight slot and any publish, so
+            // there is no placeholder to finalize — every section goes out
+            // as a fresh send and the handler returns null (self-delivered,
+            // so the router performs no send).
             List<Cluster> overCapClusters = clusterTraversal.cluster(result.posts());
             // Degraded prose is composed here, not by the summarizer —
             // that is the whole point of this branch — so the categorized
@@ -307,8 +327,12 @@ public class SummaryCommandHandler implements CommandHandler {
             overCapPrefixes.append(format(BundleKeys.REPLY_SUMMARY_WINDOW_TOO_LARGE_NOTICE,
                     result.totalBeforeCap(), summarizerPostCap));
             overCapPrefixes.append("\n\n");
+            List<RenderedSection> overCapSections =
+                    args.form() == SummaryArgs.RenderForm.FULL
+                            ? digestRenderer.renderSummarySections(overCapProse, scopeLanguage, Integer.MAX_VALUE)
+                            : digestRenderer.renderSummarySections(overCapProse, scopeLanguage);
             deliverPerSection(scope, overCapPrefixes.toString(),
-                    digestRenderer.renderSummarySections(overCapProse, scopeLanguage),
+                    overCapSections,
                     /* finalizePlaceholder */ false);
             return null;
         }
@@ -360,70 +384,121 @@ public class SummaryCommandHandler implements CommandHandler {
                 List<Cluster> clusters = clusterTraversal.cluster(result.posts());
 
                 progressNotifier.publish(scope, ProgressStage.GENERATING);
-                List<ClusterProse> prose = summaryProseGenerator.generate(clusters, "en");
 
-                // Write the summary anchor — enables /retry to replay the prose
-                // layer with the same deterministic post selection (D19, D36,
-                // D70). Written on both normal and degraded paths: spec says
-                // "/retry against this degraded run regenerates the prose if
-                // the LLM has recovered."
+                // Shared anchor inputs — the frozen post selection and
+                // cluster map are form-independent; only render_form and
+                // command_name vary per form below.
                 List<String> postUids = result.posts().stream().map(Post::uid).toList();
                 String argHash = computeArgHash(rawText);
                 String clusterMapJson = serializeClusterMap(clusters);
-                // render_form is the typed /retry dispatch axis (M1-699, D70):
-                // --full anchors the flat per-cluster replay, anything else
-                // anchors the categorized replay. command_name remains the
-                // human-readable/audit string; render_form is what /retry
-                // switches on.
-                summaryAnchorRepository.write(
-                        actorId, scopeKind, scopeId.get(),
-                        args.full() ? "summary --full" : "summary",
-                        args.full() ? "flat" : "bare",
-                        argHash, postUids, clusterMapJson);
-
-                // Only publish TRANSLATING when the scope actually translates —
-                // the same guard TranslationPipeline uses. For an English scope
-                // (the default), no translation work happens, so the label would be
-                // misleading.
-                if (!scopeLanguage.equalsIgnoreCase("en")) {
-                    progressNotifier.publish(scope, ProgressStage.TRANSLATING);
-                }
 
                 StringBuilder prefixes = new StringBuilder();
                 appendWindowPrefixes(prefixes, result);
 
-                boolean anyDegraded = prose.stream().anyMatch(ClusterProse::degraded);
-                if (anyDegraded) {
-                    prefixes.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE, inboundContext.effectiveLanguage()));
-                    prefixes.append("\n\n");
-                }
-
-                // Degraded prose is still a successful terminal delivery
-                // (the composed body carries the degraded notice). Only a
-                // thrown failure routes to fail() — the notifier renders a
-                // localized failure string and finalizes the placeholder
-                // so it is never left dangling.
-                progressNotifier.publish(scope, ProgressStage.FINALIZING);
-                if (slot.isCancelled()) {
-                    // /stop marked this request while the work completed (a
-                    // missed interrupt): discard the composed summary and
-                    // render the D35 stopped terminal instead of delivering a
-                    // result as if /stop never happened.
-                    progressNotifier.complete(scope, stoppedTerminal());
-                } else if (args.full()) {
-                    progressNotifier.complete(scope,
-                            (prefixes.toString() + renderFlatBody(prose, scopeLanguage)).stripTrailing());
+                if (args.form() == SummaryArgs.RenderForm.SHORT) {
+                    // --short (M1-700): one CategoryRollupGenerator roll-up
+                    // per category header, NO per-cluster
+                    // SummaryProseGenerator call. No degraded notice — the
+                    // roll-up has its own failure containment (a failed
+                    // roll-up yields Optional.empty and the category ships
+                    // with header + footer only). Single router-sent
+                    // message (like --flat), not per-section.
+                    if (!scopeLanguage.equalsIgnoreCase("en")) {
+                        progressNotifier.publish(scope, ProgressStage.TRANSLATING);
+                    }
+                    DigestRenderer.ShortResult shortResult =
+                            digestRenderer.renderShortBody(clusters, scopeLanguage);
+                    // Write the summary anchor — enables /retry to replay
+                    // the roll-up layer with the same frozen cluster set
+                    // (D19, D36, D70). render_form='short' dispatches
+                    // /retry to the CategoryRollupGenerator replay path.
+                    summaryAnchorRepository.write(
+                            actorId, scopeKind, scopeId.get(),
+                            "summary --short", args.form().anchorValue(),
+                            argHash, postUids, clusterMapJson);
+                    // --short failure reporting (redteam M1-700 kimi r1):
+                    // when a category's roll-up came back empty (LLM outage,
+                    // empty response, REFUSAL), the body carries that
+                    // category's header + footer but no roll-up line. Emit
+                    // the D43 degraded_notice so the user is NOT shown a
+                    // silent wall of empty headers — the security.md
+                    // §Failure handling promise the inherited
+                    // optional-prefix containment alone did not honor.
+                    if (shortResult.anyRollupMissing()) {
+                        prefixes.append(bundleLoader.get(
+                                BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE,
+                                inboundContext.effectiveLanguage()));
+                        prefixes.append("\n\n");
+                    }
+                    progressNotifier.publish(scope, ProgressStage.FINALIZING);
+                    if (slot.isCancelled()) {
+                        progressNotifier.complete(scope, stoppedTerminal());
+                    } else {
+                        progressNotifier.complete(scope,
+                                (prefixes.toString() + shortResult.body()).stripTrailing());
+                    }
+                    delivered = true;
                 } else {
-                    // M1-695: the default (categorized) form is delivered as
-                    // one outbound message per category section — the
-                    // placeholder is finalized with the first section (the
-                    // leading prefixes ride on it), the rest go out as
-                    // fresh sends in section order.
-                    deliverPerSection(scope, prefixes.toString(),
-                            digestRenderer.renderSummarySections(prose, scopeLanguage),
-                            /* finalizePlaceholder */ true);
+                    // bare / --full / --flat: per-cluster LLM prose.
+                    List<ClusterProse> prose = summaryProseGenerator.generate(clusters, "en");
+
+                    // render_form is the typed /retry dispatch axis (M1-699,
+                    // D70): each form anchors its own replay shape.
+                    // command_name remains the human-readable/audit string.
+                    summaryAnchorRepository.write(
+                            actorId, scopeKind, scopeId.get(),
+                            commandNameFor(args.form()), args.form().anchorValue(),
+                            argHash, postUids, clusterMapJson);
+
+                    // Only publish TRANSLATING when the scope actually
+                    // translates — the same guard TranslationPipeline uses.
+                    // For an English scope (the default), no translation
+                    // work happens, so the label would be misleading.
+                    if (!scopeLanguage.equalsIgnoreCase("en")) {
+                        progressNotifier.publish(scope, ProgressStage.TRANSLATING);
+                    }
+
+                    boolean anyDegraded = prose.stream().anyMatch(ClusterProse::degraded);
+                    if (anyDegraded) {
+                        prefixes.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE, inboundContext.effectiveLanguage()));
+                        prefixes.append("\n\n");
+                    }
+
+                    // Degraded prose is still a successful terminal delivery
+                    // (the composed body carries the degraded notice). Only
+                    // a thrown failure routes to fail() — the notifier
+                    // renders a localized failure string and finalizes the
+                    // placeholder so it is never left dangling.
+                    progressNotifier.publish(scope, ProgressStage.FINALIZING);
+                    if (slot.isCancelled()) {
+                        // /stop marked this request while the work completed
+                        // (a missed interrupt): discard the composed summary
+                        // and render the D35 stopped terminal instead of
+                        // delivering a result as if /stop never happened.
+                        progressNotifier.complete(scope, stoppedTerminal());
+                    } else if (args.form() == SummaryArgs.RenderForm.FLAT) {
+                        progressNotifier.complete(scope,
+                                (prefixes.toString() + renderFlatBody(prose, scopeLanguage)).stripTrailing());
+                    } else if (args.form() == SummaryArgs.RenderForm.FULL) {
+                        // --full (M1-700): categorized sections with ALL
+                        // clusters, no 12-per-section cap, no "+N more"
+                        // overflow line. Per-section delivery like the bare
+                        // form; the cap-skip is a render-side switch.
+                        deliverPerSection(scope, prefixes.toString(),
+                                digestRenderer.renderSummarySections(prose, scopeLanguage, Integer.MAX_VALUE),
+                                /* finalizePlaceholder */ true);
+                    } else {
+                        // M1-695: the default (categorized) form is delivered
+                        // as one outbound message per category section — the
+                        // placeholder is finalized with the first section
+                        // (the leading prefixes ride on it), the rest go out
+                        // as fresh sends in section order.
+                        deliverPerSection(scope, prefixes.toString(),
+                                digestRenderer.renderSummarySections(prose, scopeLanguage),
+                                /* finalizePlaceholder */ true);
+                    }
+                    delivered = true;
                 }
-                delivered = true;
             } catch (RuntimeException e) {
                 if (slot.isCancelled()) {
                     // A landed cancellation interrupt surfaced as an exception
@@ -458,16 +533,31 @@ public class SummaryCommandHandler implements CommandHandler {
     }
 
     /**
+     * The summary_anchor.command_name audit string for a given render form.
+     * The render_form column (M1-699) is what /retry dispatches on; this
+     * string is the human-readable echo of the invocation verb + flag.
+     */
+    private static String commandNameFor(SummaryArgs.RenderForm form) {
+        return switch (form) {
+            case BARE  -> "summary";
+            case SHORT -> "summary --short";
+            case FULL  -> "summary --full";
+            case FLAT  -> "summary --flat";
+        };
+    }
+
+    /**
      * Compose the window-too-large reply (M1-623) for the FLAT
-     * ({@code --full}) form, which stays a single router-sent message:
+     * ({@code --flat}) form, which stays a single router-sent message:
      * the same prefix ordering as the terminal path (top-3 restriction,
      * cap-excess), then the too-large notice in the slot the degraded
      * notice occupies on the LLM-failure path, then one degraded block
-     * per cluster. The default (categorized) over-cap form is NOT composed
-     * here — it is delivered per-section at the call site (M1-695).
-     * Clustering still runs — it is deterministic DB+memory work — so the
-     * degraded blocks are byte-identical to what the LLM-failure path
-     * would have rendered for the same posts.
+     * per cluster. The bare/{@code --full} (categorized) over-cap form is
+     * NOT composed here — it is delivered per-section at the call site
+     * (M1-695; --full uncapped per M1-700). Clustering still runs — it is
+     * deterministic DB+memory work — so the degraded blocks are
+     * byte-identical to what the LLM-failure path would have rendered for
+     * the same posts.
      */
     private String composeWindowTooLargeReply(Result result, String scopeLanguage) {
         List<Cluster> clusters = clusterTraversal.cluster(result.posts());
@@ -530,10 +620,10 @@ public class SummaryCommandHandler implements CommandHandler {
     }
 
     /**
-     * Render the flat ({@code --full}) per-cluster body:
+     * Render the flat ({@code --flat}) per-cluster body:
      * {@link ClusterBlockRenderer}'s seven-field block per cluster, which
-     * is what {@code /retry} replays for a {@code --full} anchor (M1-696)
-     * and what the {@code --full}-retargeted
+     * is what {@code /retry} replays for a {@code flat} anchor (M1-696)
+     * and what the {@code --flat}-retargeted
      * tests assert on. Takes prose the CALLER already generated (or
      * composed degraded), so it makes no LLM call and the summarizer call
      * count is identical in both forms — the property

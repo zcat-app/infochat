@@ -1,11 +1,91 @@
 ---
 id: M1-700
 title: "summary render forms --short/--full/--flat (4-mode)"
-status: pending
+status: done
 created: 2026-07-26
 last_updated: 2026-07-26
+clarity_check:
+  date: 2026-07-26
+  verdict: PASS
+  warnings:
+    - "line-cite drift: DigestRenderer Other-bucket tag==null check is at :316 (ticket cites :300-304, the RenderedSection record docstring) — cosmetic, no premise impact"
+    - "--short must bypass CategoryRollupGenerator.categorySummaryEnabled flag gate (generateRollup short-circuits when flag off, default false); acceptance test shortFormEmitsRollupPerCategoryNoClusterProse forces emission — flag-bypassing call site is consistent with out_of_scope (protects prompt/sanitize/translate pipeline only)"
+  blockers: []
+redteam_findings:
+  - date: 2026-07-26
+    auditor: kimi (redteam-multi r1; cross-exam: opencode CLEAN)
+    category: DOS
+    severity: low
+    promise: |
+      security.md §Failure handling, Provider-side LLM failures: "/summary
+      ... summarizer unreachable → fall back to the same degraded form as a
+      saturated periodic digest (D17): headlines + URLs + post UIDs ... The
+      friendly notice is a localization-bundle string (D43); the user is not
+      shown a hung response."
+    gap: |
+      --short's failure containment was inherited verbatim from
+      CategoryRollupGenerator's optional-prefix path: when the summarizer
+      is down and every roll-up returns empty, renderShortBody shipped bare
+      category headers + steering footers with NO roll-up, NO D17 degraded
+      form, and NO D43 notice — unmeeting the §Failure handling promise for
+      the --short surface (low severity: not a hung response).
+    remediation: |
+      r1 in-band — DigestRenderer.renderShortBody returns a ShortResult
+      (body, anyRollupMissing); SummaryCommandHandler (--short branch) and
+      RetryCommandHandler (short replay) emit REPLY_SUMMARY_DEGRADED_NOTICE
+      when any roll-up came back empty. NOTE: this closed only the NOTICE
+      half; r2 found the D17 degraded-CONTENT half still open (see next).
+    status: superseded-by-r2
+  - date: 2026-07-26
+    auditor: kimi + opencode (redteam-multi r2; CORROBORATED — both
+             independently found the same gap; the v1 parser split them
+             into two clusters only because kimi omitted a file cite)
+    category: DOS
+    severity: low
+    promise: |
+      security.md §Failure handling (same as r1) — BOTH halves: the D43
+      friendly notice AND the D17 "headlines + URLs + post UIDs degraded
+      form."
+    gap: |
+      The r1 remediation closed only the notice half. On a full summarizer
+      outage the --short reply was notice + bare headers + footers — never
+      the D17 degraded content (headlines/URLs/UIDs) the promise names as
+      the actual fallback. Both auditors independently identified this
+      identical gap.
+    remediation: |
+      r2 in-band — renderShortBody's roll-up-empty branch now renders the
+      deterministic D17 degraded prose for each cluster in the failed
+      category via SummaryProseGenerator.degradedProseFor (which carries
+      the M1-697 title redaction), so the --short degraded path delivers
+      headlines + URLs + UIDs under the category header alongside the
+      notice. Covered by shortFormEmitsDegradedNoticeWhenRollupFails and
+      shortAnchorReplayEmitsDegradedNoticeWhenRollupFails (both assert the
+      headlines now appear).
+    status: remediated (r3 CLEAN — both auditors, 0 findings)
+  - date: 2026-07-26
+    auditor: kimi + opencode (redteam-multi r3; re-audit after the r2 src/ remediation per the step-5 "invalidation runs in both directions" rule)
+    category: n/a
+    severity: n/a
+    note: CLEAN — 0 findings from both auditors. Both halves of §Failure handling now honored on the --short surface.
+    status: clean
+  - date: 2026-07-26
+    auditor: opencode (redteam-multi r1/r2/r3; out-of-model, not a finding — consistent across all three rounds)
+    category: DOS
+    severity: informational
+    note: |
+      --short skips the summarizer-post-cap (>50) gate, so a wide window
+      drives a CategoryRollupGenerator roll-up prompt whose input is
+      unbounded by the 50-post ceiling. All rounds agreed this is NOT a
+      threat-model violation (the per-user rate-bucket still applies; the
+      retrieval cluster-cap bounds the absolute prompt size; the roll-up
+      degrades gracefully on context-overflow). The two candidate fixes
+      (apply the >50 gate, or cap the roll-up input) both contradict pinned
+      acceptance (item 2: roll-up sees ALL clusters including past-cap
+      ones; --short's purpose is the cheap scan that skips the per-cluster
+      cap). Accepted as out-of-model residual.
+    status: accepted-out-of-model
 blocked_by: [M1-699]
-files_budget: 16
+files_budget: 19
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SummaryArgs.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SummaryCommandHandler.java
@@ -20,6 +100,12 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryRenderFormIT.java
+  # M1-700 refine: the rename broke three pre-existing ITs that used
+  # /summary --full for the flat per-cluster form; they retarget to --flat
+  # (same authorized-retargeting class as SummaryIT).
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryAdapterScopeIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryGroupScopeIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/dev/DevTerminalHarnessRoundtripIT.java
   - docs/spec/commands.md
   - docs/spec/decisions.md
   - docs/design/03-commands.md
@@ -120,9 +206,32 @@ acceptance:
     Spec amended: docs/spec/commands.md §Content documents the four render
     forms (--short roll-up; bare categorized-capped; --full
     categorized-uncapped; --flat flat per-cluster) and notes --flat is the
-    renamed legacy --full. docs/spec/decisions.md D62's "/summary adopts
-    this same categorized structure... keeping the flat per-cluster format
-    behind an explicit --full flag" clause is amended to reflect the rename.
+    renamed legacy --full; §Periodic group digests' "keeps its flat
+    per-cluster format behind --full" clause is amended to reflect the
+    rename. docs/spec/decisions.md D62's "/summary adopts this same
+    categorized structure... keeping the flat per-cluster format behind an
+    explicit --full flag" clause is amended to reflect the rename.
+    docs/design/03-commands.md §3.5 documents all four render forms (the
+    bare/short/full renderers + the renamed --flat) and the 6-arg
+    forSummaryRendering seam. (M1-700 refine: 03-commands.md §3.5 was stale
+    after the rename and is amended alongside the spec files.)
+  - >-
+    Help text amended (M1-700 refine): help.cmd.summary.short and
+    help.cmd.summary.usage (en+cs twins) document the four render forms —
+    the pre-rename help advertised [--full] as "one detailed block per
+    story", which after the rename actively misdirected users (that is now
+    --flat; --full is categorized-uncapped; --short is undocumented). The
+    rename is incomplete without the /help surface reflecting it.
+  - >-
+    --short failure handling (redteam M1-700 kimi r1 remediation): when a
+    category's CategoryRollupGenerator roll-up comes back empty (LLM
+    outage, empty response, REFUSAL), the --short reply is prefixed with
+    the D43 degraded_notice (REPLY_SUMMARY_DEGRADED_NOTICE) on BOTH the
+    /summary --short path and the /retry short-anchor replay — so a
+    summarizer outage surfaces a notice rather than a silent wall of empty
+    headers, honoring security.md §Failure handling. Covered by
+    shortFormEmitsDegradedNoticeWhenRollupFails and
+    shortAnchorReplayEmitsDegradedNoticeWhenRollupFails.
   - >-
     mvn -pl infochat-provider verify is green.
 test_plan:
@@ -135,6 +244,20 @@ spec_refs:
   - docs/spec/commands.md §Periodic group digests
 decision_refs:
   - D62
+reviews:
+  - round: 1
+    date: 2026-07-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 21
+      added: 1526
+      removed: 231
 ---
 
 # M1-700: summary render forms --short/--full/--flat (4-mode)
@@ -218,6 +341,13 @@ preserved:
   form's meaning for the flat path is unchanged).
 - `SummaryCommandHandlerTest` cases asserting `--full` → flat
   `ClusterBlockRenderer` output are retargeted to `--flat`.
+- `SummaryIT`, `SummaryAdapterScopeIT`, `SummaryGroupScopeIT`, and
+  `DevTerminalHarnessRoundtripIT` invocations of `/summary --full` (used to
+  exercise the flat per-cluster blocks whose fields they assert on) are
+  retargeted to `/summary --flat`. These are the same rename consequence as
+  the SummaryArgsTest/SummaryCommandHandlerTest retargetings; the four
+  integration tests were not enumerated in the original ticket and surfaced
+  when the r1 `mvn verify` went red. (M1-700 refine.)
 - New cases assert `--full` → categorized-uncapped (no 12-cap, headers
   present) and `--short` → roll-up.
 

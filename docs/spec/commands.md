@@ -338,31 +338,57 @@ them to the marked region — doing so would red the build.
 
 ### Content
 
-- `/summary [tag] [-w …] [--full]` — on-the-fly summary of READY posts in the
-  window (decision D18: on-the-fly for user `/summary`, distinct
-  from the pre-generated cached path used for periodic group
-  digests). **Render form**: by default the reply is the
-  categorized form the periodic digest uses (§Periodic group
-  digests) — category headers, one prose paragraph per cluster, a
-  per-category item cap and a DM-worded "+N more" overflow line —
-  which is what keeps a wide window readable. `--full` selects the
-  flat per-cluster form instead: one block per cluster carrying
-  topic id, headline, covering sources with post UIDs, score,
-  prose, classification and tags. Both forms apply to the degraded
-  and over-cap replies below; the form changes only the rendering,
-  never which posts are selected. **Delivery**: the default
-  categorized form is delivered as **one outbound message per
-  category section** — the progress placeholder is finalized with
-  the first section (the leading top-3 / cap-excess / degraded
-  notices ride on that first message) and the remaining sections
-  follow as fresh messages, sequentially in section order — so a
-  single category can be forwarded on its own to someone not using
-  the app. `/summary` emits no closing affordance (§Periodic group
-  digests), so there is no trailer to duplicate across the section
-  messages. `--full` stays a single message. The over-cap degraded
-  reply is delivered per-section as well (fresh sends only — that
-  guard branch never opens a placeholder); the other guard replies
-  (no-posts, unknown tag, in-flight, rate-cap) stay single-message. **Summarizer LLM unreachable** (provider down,
+- `/summary [tag] [-w …] [--short|--full|--flat]` — on-the-fly summary of
+  READY posts in the window (decision D18: on-the-fly for user
+  `/summary`, distinct from the pre-generated cached path used for
+  periodic group digests). **Render form** — four mutually-exclusive
+  modes (at most one form flag per invocation; supplying two is an
+  error). The flag changes only the rendering, never which posts are
+  selected:
+  - *(bare default)* — the categorized form the periodic digest uses
+    (§Periodic group digests): category headers, one prose paragraph
+    per cluster, a per-category item cap (default 12) and a DM-worded
+    "+N more" overflow line. This is what keeps a wide window
+    readable. Delivered as one outbound message per category section.
+  - `--short` — a cheap scan: one thematic roll-up synthesis per
+    category header (reusing the digest's `CategoryRollupGenerator`),
+    NO per-cluster prose, NO flat cluster blocks. The roll-up sees
+    ALL clusters in the category including past-cap ones. Zero
+    `SummaryProseGenerator` calls; one roll-up LLM call per category.
+    Each section carries a footer steering to `/summary <tag>` and
+    `/summary <tag> --full` (real categories) or bare `/summary` and
+    `/summary --full` (the Other bucket, which has no expandable tag).
+    Delivered as a single message.
+  - `--full` — categorized sections showing ALL clusters with NO
+    per-category cap and NO "+N more" overflow line. Per-cluster LLM
+    prose IS generated (unlike `--short`). The summarizer-post-cap
+    (50) degraded fallback still applies beyond 50 posts. Delivered
+    per-section like the bare form. (`--full` is reclaimed for
+    categorized-uncapped by M1-700; the legacy flat meaning moved to
+    `--flat`.)
+  - `--flat` — the renamed legacy `--full`: flat per-cluster blocks,
+    one block per cluster carrying topic id, headline, covering
+    sources with post UIDs, score, prose, classification and tags.
+    No category headers, no cap, single message. The output is
+    byte-identical to what the pre-rename `/summary --full` produced
+    (M1-700 renamed the flag only; `ClusterBlockRenderer` is
+    unchanged).
+  All four forms apply to the degraded and over-cap replies below.
+  **Delivery**: the bare and `--full` categorized forms are delivered
+  as **one outbound message per category section** — the progress
+  placeholder is finalized with the first section (the leading top-3 /
+  cap-excess / degraded notices ride on that first message) and the
+  remaining sections follow as fresh messages, sequentially in
+  section order — so a single category can be forwarded on its own to
+  someone not using the app. `/summary` emits no closing affordance
+  (§Periodic group digests), so there is no trailer to duplicate
+  across the section messages. `--short` and `--flat` stay a single
+  message. The over-cap degraded reply is delivered per-section as
+  well (fresh sends only — that guard branch never opens a
+  placeholder; `--flat`'s over-cap reply stays single-message);
+  `--short` skips the summarizer-post-cap gate entirely (it makes no
+  per-cluster summarizer call); the other guard replies (no-posts,
+  unknown tag, in-flight, rate-cap) stay single-message. **Summarizer LLM unreachable** (provider down,
   timeout, or schema-violating reply after retry per `llm.md`
   §Failure handling) → `/summary` falls back to the same degraded
   form as a saturated periodic digest (decision D17): headlines +
@@ -1820,11 +1846,13 @@ the assignment and section order are byte-identical — the LLM
 touches only the per-cluster prose, extending the D19
 determinism boundary to the digest's structure. The degraded
 (headlines-only) digest (D17) is unchanged: no category headers,
-no affordance. `/summary` renders the same categorized form by
-default and keeps its flat per-cluster format behind `--full`
-(§Content). It uses its own DM-worded overflow line and emits no
-closing affordance — that one steers group readers to `@mention`,
-which is meaningless in the interactive surface `/summary` serves.
+  no affordance. `/summary` renders the same categorized form by
+  default and keeps its flat per-cluster format behind `--flat`
+  (§Content), with `--full` reclaimed for categorized-uncapped and
+  `--short` adding a roll-up overview (M1-700). It uses its own
+  DM-worded overflow line and emits no closing affordance — that one
+  steers group readers to `@mention`, which is meaningless in the
+  interactive surface `/summary` serves.
 
 **Zero-eligible-posts digest.** When a digest slot fires and there
 are no eligible posts for the group (an empty world, or nothing

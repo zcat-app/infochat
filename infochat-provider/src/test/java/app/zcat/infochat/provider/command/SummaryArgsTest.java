@@ -117,11 +117,70 @@ class SummaryArgsTest {
                 "a leading-hyphen token must produce a failure");
     }
 
+    // ----- M1-700: the four render forms (--short / bare / --full / --flat) --
+    //
+    // --flat is the renamed legacy --full (flat per-cluster blocks). --full
+    // is reclaimed for categorized-uncapped. --short is the roll-up overview.
+    // The three form flags are mutually exclusive: at most one per invocation.
+
     @Test
-    void bareFullFlagIsAcceptedAndLeavesTagAndWindowAtDefaults() {
+    void flatFlagAloneIsAcceptedAndLeavesTagAndWindowAtDefaults() {
+        ParseResult result = SummaryArgs.parse("/summary --flat");
+        Success success = assertInstanceOf(Success.class, result);
+        assertEquals(SummaryArgs.RenderForm.FLAT, success.args().form(),
+                "--flat selects the flat per-cluster render form");
+        assertTrue(success.args().tag().isEmpty());
+        assertEquals(SummaryArgs.DEFAULT_WINDOW, success.args().window());
+    }
+
+    @Test
+    void flatFlagCombinesWithPositionalTag() {
+        ParseResult result = SummaryArgs.parse("/summary security --flat");
+        Success success = assertInstanceOf(Success.class, result);
+        assertEquals(SummaryArgs.RenderForm.FLAT, success.args().form());
+        assertEquals("security", success.args().tag().orElseThrow());
+    }
+
+    @Test
+    void flatFlagCombinesWithExplicitWindow() {
+        ParseResult result = SummaryArgs.parse("/summary --flat -w 7d");
+        Success success = assertInstanceOf(Success.class, result);
+        assertEquals(SummaryArgs.RenderForm.FLAT, success.args().form());
+        assertEquals(Duration.ofDays(7), success.args().window());
+    }
+
+    @Test
+    void shortFlagAloneIsAccepted() {
+        ParseResult result = SummaryArgs.parse("/summary --short");
+        Success success = assertInstanceOf(Success.class, result);
+        assertEquals(SummaryArgs.RenderForm.SHORT, success.args().form(),
+                "--short selects the roll-up render form");
+        assertTrue(success.args().tag().isEmpty());
+        assertEquals(SummaryArgs.DEFAULT_WINDOW, success.args().window());
+    }
+
+    @Test
+    void shortFlagCombinesWithPositionalTag() {
+        ParseResult result = SummaryArgs.parse("/summary security --short");
+        Success success = assertInstanceOf(Success.class, result);
+        assertEquals(SummaryArgs.RenderForm.SHORT, success.args().form());
+        assertEquals("security", success.args().tag().orElseThrow());
+    }
+
+    @Test
+    void shortFlagCombinesWithExplicitWindow() {
+        ParseResult result = SummaryArgs.parse("/summary --short -w 7d");
+        Success success = assertInstanceOf(Success.class, result);
+        assertEquals(SummaryArgs.RenderForm.SHORT, success.args().form());
+        assertEquals(Duration.ofDays(7), success.args().window());
+    }
+
+    @Test
+    void fullFlagAloneIsAccepted() {
         ParseResult result = SummaryArgs.parse("/summary --full");
         Success success = assertInstanceOf(Success.class, result);
-        assertTrue(success.args().full(), "--full must set the flat-render opt-in");
+        assertEquals(SummaryArgs.RenderForm.FULL, success.args().form(),
+                "--full selects the categorized-uncapped render form (M1-700 reclaim)");
         assertTrue(success.args().tag().isEmpty());
         assertEquals(SummaryArgs.DEFAULT_WINDOW, success.args().window());
     }
@@ -130,7 +189,7 @@ class SummaryArgsTest {
     void fullFlagCombinesWithPositionalTag() {
         ParseResult result = SummaryArgs.parse("/summary security --full");
         Success success = assertInstanceOf(Success.class, result);
-        assertTrue(success.args().full());
+        assertEquals(SummaryArgs.RenderForm.FULL, success.args().form());
         assertEquals("security", success.args().tag().orElseThrow());
     }
 
@@ -138,8 +197,29 @@ class SummaryArgsTest {
     void fullFlagCombinesWithExplicitWindow() {
         ParseResult result = SummaryArgs.parse("/summary --full -w 7d");
         Success success = assertInstanceOf(Success.class, result);
-        assertTrue(success.args().full());
+        assertEquals(SummaryArgs.RenderForm.FULL, success.args().form());
         assertEquals(Duration.ofDays(7), success.args().window());
+    }
+
+    /**
+     * The three form flags are mutually exclusive: supplying two is a
+     * Failure (acceptance item 1). The failure folds to the same
+     * window_out_of_range shape every other unknown/excess flag uses, so
+     * the user sees one narrow accepted set.
+     */
+    @Test
+    void twoFormFlagsIsAFailure() {
+        assertEqualsFormFlagFailure("/summary --short --full");
+        assertEqualsFormFlagFailure("/summary --full --flat");
+        assertEqualsFormFlagFailure("/summary --flat --short");
+        assertEqualsFormFlagFailure("/summary --short --short");
+    }
+
+    private static void assertEqualsFormFlagFailure(String input) {
+        ParseResult result = SummaryArgs.parse(input);
+        Failure failure = assertInstanceOf(Failure.class, result, input + " must fail");
+        assertEquals("error.summary.window_out_of_range", failure.bundleKey(),
+                input + ": a second form flag folds to the window_out_of_range shape");
     }
 
     /**
@@ -148,18 +228,18 @@ class SummaryArgsTest {
      * ask for.
      */
     @Test
-    void nearMissOfFullFlagIsRejectedAsUnknownFlag() {
+    void nearMissOfFormFlagIsRejectedAsUnknownFlag() {
         ParseResult result = SummaryArgs.parse("/summary --fully");
         Failure failure = assertInstanceOf(Failure.class, result);
         assertEquals("error.summary.window_out_of_range", failure.bundleKey());
     }
 
     @Test
-    void bareSummaryLeavesFullFlagOff() {
+    void bareSummaryDefaultsToBareForm() {
         ParseResult result = SummaryArgs.parse("/summary");
         Success success = assertInstanceOf(Success.class, result);
-        assertFalse(success.args().full(),
-                "the categorized form is the default; --full is opt-in");
+        assertEquals(SummaryArgs.RenderForm.BARE, success.args().form(),
+                "the categorized-capped form is the default; every form flag is opt-in");
     }
 
     @Test

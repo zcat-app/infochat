@@ -1,0 +1,90 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: DOS
+    SEVERITY: low
+    PROMISE: docs/spec/security.md §Failure handling, Provider-side LLM
+             failures: "**`/summary` (and `/retry --digest`) summarizer
+             unreachable** → fall back to the same degraded form as a
+             saturated periodic digest (decision D17): headlines + URLs +
+             post UIDs degraded form. No prose, deterministic post
+             selection unchanged. The friendly notice is a localization-
+             bundle string (D43); the user is not shown a hung response."
+             The bullet names `/summary` without carving out any render
+             form, so it reads as applying to `/summary --short` (added by
+             this diff) until §Failure handling is amended to say
+             otherwise — and this diff amends commands.md §Content and
+             decisions.md D62 to document --short's normal shape but
+             does NOT amend §Failure handling.
+    GAP: The new `/summary --short` form (and its `/retry` short-anchor
+         replay) honors only the second half of the commitment on a
+         SUMMARIZER outage. CategoryRollupGenerator.generateRollupUnconditional
+         (infochat-provider/.../digest/CategoryRollupGenerator.java:146-172)
+         correctly yields Optional.empty on LLM-unreachable (catch at
+         :169-172), empty text (:153-156), and REFUSAL (:157-165) — that
+         failure containment is sound. But DigestRenderer.renderShortBody
+         (infochat-provider/.../digest/DigestRenderer.java, renderShortBody,
+         added by this diff) then assembles each section as `category
+         header + steering footer` with NO roll-up line AND NO per-cluster
+         headlines/URLs/UIDs. SummaryCommandHandler's --short branch
+         (the `if (shortResult.anyRollupMissing())` block) and
+         RetryCommandHandler's short replay (the matching anyRollupMissing
+         block) prefix only REPLY_SUMMARY_DEGRADED_NOTICE. So the
+         "friendly notice is a localization-bundle string (D43)" and "user
+         is not shown a hung response" halves ARE met, but the "headlines
+         + URLs + post UIDs degraded form" half — the deterministic
+         content the promise names as the actual fallback — is not
+         delivered for --short; the body is a notice + bare headers +
+         `/summary <tag> --full` steering footers. This is the
+         unaddressed half of the r1 kimi finding: r1's GAP explicitly
+         named "no degraded-form fallback AND no localized notice," and
+         the r1 remediation (ShortResult.anyRollupMissing → degraded_notice
+         prefix, covered by shortFormEmitsDegradedNoticeWhenRollupFails
+         and shortAnchorReplayEmitsDegradedNoticeWhenRollupFails) closed
+         only the notice half. The D17 degraded-form half remains open.
+    REPRO: Register a user (or pick a probation-graduated one), subscribe
+           a source carrying >=3 READY posts that share one tag (so they
+           form a real category clearing categoryMinClusters), then take
+           the SUMMARIZER endpoint down — stop the LLM backend, or point
+           infochat's SUMMARIZER base-url at a host that refuses every
+           request, or make every roll-up reply unparseable. Run
+           `/summary --short`. Each generateRollupUnconditional call
+           returns Optional.empty (CategoryRollupGenerator.java:153/157/
+           169-172); renderShortBody sets anyRollupMissing=true and
+           assembles `CATEGORY HEADER\n\n<per-category footer>`; the
+           handler prefixes REPLY_SUMMARY_DEGRADED_NOTICE and delivers.
+           The user receives the notice + a bare uppercased header + a
+           `/summary <tag> --full` steering line — never the headlines +
+           URLs + post UIDs the §Failure handling promise names as the
+           `/summary` degraded form. `/retry` against the resulting
+           `render_form='short'` anchor behaves identically (the
+           RetryCommandHandler short branch emits the same notice prefix
+           over the same header+footer body). No data is leaked and no
+           auth is bypassed — the user has a recovery path (the footer
+           steers to /summary <tag> --full, which renders the full
+           content) — which is why this is low and not higher.
+    SUGGESTED-FIX-CLASS: other
+
+OUT-OF-MODEL:
+  - `/summary --short` deliberately skips the summarizer-post-cap (>50)
+    gate (SummaryCommandHandler.java: the gate is now
+    `if (args.form() != SHORT && result.posts().size() > summarizerPostCap)`),
+    so a wide window (e.g. `-w 4w`) drives one CategoryRollupGenerator
+    roll-up LLM call per category whose prompt (CategoryRollupGenerator.
+    buildPrompt, lines 185-211) concatenates EVERY cluster's title/body/
+    url — unbounded by the 50-post ceiling the other three forms degrade
+    behind. NOT a violation of any §security.md commitment: §Rate
+    limiting bounds the RATE of LLM-triggering ops (the per-user bucket
+    and per-group backstop still apply to --short, which acquires the
+    in-flight slot and draws from the bucket like the other forms), and
+    no spec text bounds the /summary summarizer's per-call prompt
+    magnitude — `summarizer-post-cap` is an implementation detail, not a
+    §security.md promise. The retrieval cluster-cap
+    (`infochat.summary.cluster-cap`) bounds the absolute prompt size, and
+    the roll-up degrades gracefully on context-overflow (catch → empty →
+    routes into the finding above's outage path). Flagged (as r1 opencode
+    already flagged it, accepted-out-of-model in the ticket) only so the
+    operator can decide whether to extend the model to bound summarizer
+    prompt magnitude or apply a roll-up-specific input cap; both candidate
+    fixes contradict pinned acceptance (item 2: the roll-up sees ALL
+    clusters including past-cap ones).

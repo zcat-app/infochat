@@ -123,9 +123,10 @@ class SummaryGroupScopeIT {
                 new String[] { PREFIX + "news" });
         mockLlm.setResponseText("Group flow prose.");
 
-        // --full renders the flat per-cluster blocks whose headline and uid
-        // this test asserts on (M1-694 made the categorized form default).
-        adapter.deliverGroupMention(group, member, "/summary --full");
+        // --flat (renamed from --full by M1-700) renders the flat per-cluster
+        // blocks whose headline and uid this test asserts on (M1-694 made the
+        // categorized form default).
+        adapter.deliverGroupMention(group, member, "/summary --flat");
 
         // /summary runs on an M1-634 worker — drain before the
         // exactly-one bounds and anchor reads.

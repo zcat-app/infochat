@@ -1,0 +1,27 @@
+RED-TEAM VERDICT: CLEAN
+
+OUT-OF-MODEL:
+  - /summary --short deliberately skips the summarizer-post-cap gate
+    (SummaryCommandHandler.java: the gate is now
+    `if (args.form() != SHORT && result.posts().size() > summarizerPostCap)`),
+    so a user whose world holds more than `summarizer-post-cap` (default 50)
+    posts in the window drives a CategoryRollupGenerator roll-up LLM call
+    whose prompt (CategoryRollupGenerator.buildPrompt, lines 185-211)
+    concatenates EVERY cluster's title/body/url — unbounded by the 50-post
+    ceiling the other three forms degrade behind. A probation-graduated
+    user with many high-volume subscriptions and `-w 4w` can therefore
+    trigger one very large summarizer prompt per rate-bucket tick. This is
+    a per-call cost-amplification vector the pre-diff /summary did not
+    expose (bare/full/flat degrade past 50 posts and make no summarizer
+    call at all). It is NOT a violation of any explicit threat-model
+    commitment: §Rate limiting bounds the RATE of LLM-triggering ops
+    (the per-user bucket and per-group backstop still apply to --short,
+    which acquires the in-flight slot and draws from the bucket like the
+    other forms), and no spec text bounds the /summary summarizer's
+    per-call prompt size — the `summarizer-post-cap` is an implementation
+    detail, not a §security.md promise. The roll-up call also degrades
+    gracefully on context-overflow (generateRollupUnconditional's catch
+    returns Optional.empty → section ships header+footer only). Flagged
+    only so the operator can decide whether to extend the model to bound
+    summarizer prompt magnitude, or to apply a roll-up-specific input cap.
+    SUGGESTED-FIX-CLASS (if extended into the model): rate-limit.

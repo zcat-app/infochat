@@ -10,6 +10,7 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
+import app.zcat.infochat.provider.digest.CategoryRollupGenerator;
 import app.zcat.infochat.provider.digest.DigestRenderer;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.InboundContext;
@@ -43,6 +44,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BooleanSupplier;
 
 import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newEnShortCircuitPipeline;
@@ -107,6 +109,7 @@ class SummaryCommandHandlerTest {
     private RecordingSummaryProseGenerator proseGenerator;
     private RecordingSummaryAnchorRepository anchorRepository;
     private RecordingProgressNotifier progressNotifier;
+    private RecordingCategoryRollupGenerator rollupGenerator;
     private BundleLoader bundleLoader;
     private InFlightTracker tracker;
     private UUID userId;
@@ -136,10 +139,16 @@ class SummaryCommandHandlerTest {
         // the cs-scope tests would be asserting against a different
         // collaborator than the one they configure. The cap values mirror the
         // production @ConfigProperty defaults that manual field injection
-        // does not apply (same reason summarizerPostCap is set below).
+        // does not apply (same reason summarizerPostCap is set below). The
+        // 6-arg seam wires a RecordingCategoryRollupGenerator so the --short
+        // test can assert the roll-up call count and capture its cluster
+        // input; the other tests never reach renderShortBody so it is inert
+        // for them.
+        rollupGenerator = new RecordingCategoryRollupGenerator();
         handler.digestRenderer = DigestRenderer.forSummaryRendering(
                 sanitizer, translationPipeline, bundleLoader,
-                /* categoryItemCap */ 12, /* categoryMinClusters */ 3);
+                /* categoryItemCap */ 12, /* categoryMinClusters */ 3,
+                rollupGenerator);
         handler.summaryAnchorRepository = anchorRepository;
         handler.inFlightTracker = tracker;
         handler.llmRateCap = new LlmRateCap(10);
@@ -281,10 +290,11 @@ class SummaryCommandHandlerTest {
 
         // Terminal path: handle() self-delivers via the notifier and
         // returns null; the composed body is the argument to complete().
-        // --full is what renders the flat per-cluster blocks this test
-        // asserts on (M1-694 made the categorized form the default).
+        // --flat is what renders the flat per-cluster blocks this test
+        // asserts on (M1-694 made the categorized form the default;
+        // M1-700 renamed the legacy --full to --flat).
         OutboundMessage reply =
-                handler.handle(new ScopeRef.Dm(PREFIX + "happy"), "/summary --full");
+                handler.handle(new ScopeRef.Dm(PREFIX + "happy"), "/summary --flat");
         assertNull(reply, "terminal /summary self-delivers via the notifier and returns null");
 
         assertEquals(3, proseGenerator.callCount(), "one LLM call per cluster");
@@ -302,13 +312,13 @@ class SummaryCommandHandlerTest {
                 "tags: line reflects the seeded tags, distinct from classification. Got: " + body);
         assertTrue(body.contains("Headline A"));
 
-        // M1-699: the anchor's render_form is the typed /retry dispatch axis.
-        // --full anchors the flat replay ('flat'); the bare default anchors
-        // the categorized replay ('bare').
+        // M1-699/M1-700: the anchor's render_form is the typed /retry
+        // dispatch axis. --flat anchors the flat replay ('flat'); the bare
+        // default anchors the categorized replay ('bare').
         assertEquals(1, anchorRepository.writeCount(),
                 "the terminal /summary path must write one anchor");
         assertEquals("flat", anchorRepository.lastRenderForm(),
-                "a --full /summary must anchor render_form='flat' for /retry dispatch");
+                "a --flat /summary must anchor render_form='flat' for /retry dispatch");
     }
 
     /**
@@ -359,6 +369,218 @@ class SummaryCommandHandlerTest {
                 "the terminal /summary path must write one anchor");
         assertEquals("bare", anchorRepository.lastRenderForm(),
                 "a bare /summary must anchor render_form='bare' for /retry dispatch");
+    }
+
+    // ----- M1-700: --short / --full / --flat render forms -------------------
+
+    /**
+     * Acceptance item 2 — {@code /summary --short} renders ONE
+     * CategoryRollupGenerator roll-up per category header, emits NO
+     * ClusterBlockRenderer per-cluster labels, and makes NO
+     * SummaryProseGenerator call (one CategoryRollupGenerator call per
+     * category instead). The roll-up sees ALL clusters in the category
+     * including past-cap ones: alpha has 14 clusters but categoryItemCap
+     * is 12, yet the roll-up call still receives 14 (the cap is a
+     * render-side switch the {@code --short} path never applies).
+     */
+    @Test
+    void shortFormEmitsRollupPerCategoryNoClusterProse() {
+        Instant now = Instant.now();
+        List<Post> posts = new ArrayList<>();
+        // 14 alpha-tagged posts → 14 singleton clusters; alpha clears
+        // categoryMinClusters (3) so it forms a real category that exceeds
+        // categoryItemCap (12) by exactly 2.
+        for (int i = 0; i < 14; i++) {
+            posts.add(post(PREFIX + "sa" + i, "Alpha headline " + i,
+                    now.minus(Duration.ofMinutes(i + 1L)), List.of(PREFIX + "alpha")));
+        }
+        // 2 beta-tagged posts → 2 singleton clusters; beta misses
+        // categoryMinClusters so it folds into the Other bucket.
+        posts.add(post(PREFIX + "sb1", "Beta one", now.minus(Duration.ofMinutes(20)),
+                List.of(PREFIX + "beta")));
+        posts.add(post(PREFIX + "sb2", "Beta two", now.minus(Duration.ofMinutes(21)),
+                List.of(PREFIX + "beta")));
+        eligiblePostQuery.seedPosts(posts, /* excludedCount */ 0);
+        proseGenerator.setResponseText("Should NOT be called on --short.");
+        rollupGenerator.setResponseText("Alpha themes synthesized.");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "short"), "/summary --short");
+        assertNull(reply, "terminal --short self-delivers via the notifier and returns null");
+
+        assertEquals(0, proseGenerator.callCount(),
+                "--short makes NO SummaryProseGenerator call");
+        assertEquals(2, rollupGenerator.callCount(),
+                "one CategoryRollupGenerator call per category (alpha + Other). Got: "
+                        + rollupGenerator.callCount());
+        // The alpha call saw ALL 14 clusters — past-cap ones included.
+        assertTrue(rollupGenerator.clusterCounts().contains(14),
+                "the roll-up must see ALL clusters including past-cap (14 > cap 12). Got: "
+                        + rollupGenerator.clusterCounts());
+
+        String body = progressNotifier.completedText();
+        assertNotNull(body, "the --short body must reach complete()");
+        assertTrue(body.contains((PREFIX + "alpha news").toUpperCase(Locale.ROOT)),
+                "--short must carry the uppercased category header. Got: " + body);
+        assertTrue(body.contains("Alpha themes synthesized."),
+                "--short must carry the roll-up line. Got: " + body);
+        assertFalse(body.contains("[topic_id="),
+                "--short emits NO flat cluster-block topic id. Got: " + body);
+        assertFalse(body.contains("covered by:"),
+                "--short emits NO flat covered-by line. Got: " + body);
+        assertFalse(body.contains("summary:"),
+                "--short emits NO flat summary: field. Got: " + body);
+        assertFalse(body.contains("classification:"),
+                "--short emits NO flat classification line. Got: " + body);
+        assertFalse(body.contains("tags:"),
+                "--short emits NO flat tags line. Got: " + body);
+        assertFalse(body.contains("more stories"),
+                "--short emits NO '+N more' overflow line. Got: " + body);
+        // The per-category footer steers to /summary <tag> --full for a real
+        // category; the Other footer steers to bare /summary --full.
+        assertTrue(body.contains("/summary " + PREFIX + "alpha --full"),
+                "the real-category footer steers to /summary <tag> --full. Got: " + body);
+        assertTrue(body.contains("/summary --full"),
+                "the Other footer steers to /summary --full. Got: " + body);
+
+        assertEquals(1, anchorRepository.writeCount(),
+                "the terminal --short path must write one anchor");
+        assertEquals("short", anchorRepository.lastRenderForm(),
+                "a --short /summary must anchor render_form='short' for /retry dispatch");
+    }
+
+    /**
+     * Redteam M1-700 kimi r1 — when the summarizer is unreachable and every
+     * category's roll-up comes back empty, {@code --short} must NOT deliver
+     * a silent wall of bare headers + footers. The D43 degraded_notice
+     * ("LLM is unreachable...") rides as a prefix so the user knows
+     * synthesis failed — honoring security.md §Failure handling on the
+     * {@code --short} surface (the inherited optional-prefix containment
+     * alone shipped empty headers with no signal).
+     */
+    @Test
+    void shortFormEmitsDegradedNoticeWhenRollupFails() {
+        Instant now = Instant.now();
+        List<Post> posts = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            posts.add(post(PREFIX + "dn" + i, "Degraded headline " + i,
+                    now.minus(Duration.ofMinutes(i + 1L)), List.of(PREFIX + "alpha")));
+        }
+        eligiblePostQuery.seedPosts(posts, /* excludedCount */ 0);
+        proseGenerator.setResponseText("Should NOT be called on --short.");
+        // Simulate a full summarizer outage: every roll-up returns empty.
+        rollupGenerator.setReturnEmpty(true);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "shdeg"), "/summary --short");
+        assertNull(reply, "terminal --short self-delivers via the notifier and returns null");
+
+        assertEquals(1, rollupGenerator.callCount(),
+                "the roll-up generator was called once for the alpha category");
+        assertEquals(0, proseGenerator.callCount(),
+                "--short makes NO SummaryProseGenerator call even on the degraded path");
+        String body = progressNotifier.completedText();
+        assertNotNull(body);
+        assertTrue(body.contains("LLM is unreachable"),
+                "--short must prefix the degraded_notice when the roll-up fails. Got: " + body);
+        // The D17 degraded FORM half (redteam r2): the deterministic
+        // headlines + URLs + post UIDs must render for each cluster in the
+        // failed category, not just an empty header.
+        assertTrue(body.contains("Degraded headline 0"),
+                "--short degraded path must render the post headline (D17 form). Got: " + body);
+        assertTrue(body.contains("Degraded headline 2"),
+                "--short degraded path must render every cluster's headline. Got: " + body);
+        assertTrue(body.contains("https://example.com/" + PREFIX + "dn0"),
+                "--short degraded path must render the bare URL (D30). Got: " + body);
+        assertTrue(body.contains((PREFIX + "alpha news").toUpperCase(Locale.ROOT)),
+                "the category header still rides so the footer's steering is reachable. Got: " + body);
+        assertFalse(body.contains("Should NOT be called"),
+                "no per-cluster prose leaks onto the --short degraded path. Got: " + body);
+    }
+
+    /**
+     * Acceptance item 3 — {@code /summary --full} renders categorized
+     * sections showing ALL clusters with NO 12-per-section cap and NO
+     * "+N more" overflow line. 14 alpha clusters exceed categoryItemCap
+     * (12), but {@code --full} generates per-cluster prose for ALL 14
+     * (not 12) and renders them all. Per-cluster LLM prose IS generated
+     * (unlike {@code --short}).
+     */
+    @Test
+    void fullFormCategorizedUncappedSkipsSectionCap() {
+        Instant now = Instant.now();
+        List<Post> posts = new ArrayList<>();
+        for (int i = 0; i < 14; i++) {
+            posts.add(post(PREFIX + "fu" + i, "Full headline " + i,
+                    now.minus(Duration.ofMinutes(i + 1L)), List.of(PREFIX + "alpha")));
+        }
+        eligiblePostQuery.seedPosts(posts, /* excludedCount */ 0);
+        proseGenerator.setResponseText("Full prose.");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "fulluncap"), "/summary --full");
+        assertNull(reply, "terminal --full self-delivers per-section via the notifier and returns null");
+
+        assertEquals(14, proseGenerator.callCount(),
+                "--full generates per-cluster prose for ALL clusters, not just the first 12");
+        assertEquals(0, rollupGenerator.callCount(),
+                "--full does not call the roll-up generator (that is --short's path)");
+
+        // --full delivers per-section: the first section finalizes the
+        // placeholder (complete), the rest go out as fresh sends.
+        String first = progressNotifier.completedText();
+        assertNotNull(first, "the first section finalizes the placeholder");
+        String allBody = first + "\n\n" + String.join("\n\n", progressNotifier.freshSends());
+        assertTrue(allBody.contains((PREFIX + "alpha news").toUpperCase(Locale.ROOT)),
+                "--full must carry the uppercased category header. Got: " + allBody);
+        assertFalse(allBody.contains("more stories"),
+                "--full emits NO '+N more' overflow line (cap skipped). Got: " + allBody);
+        assertFalse(allBody.contains("[topic_id="),
+                "--full is categorized, not flat. Got: " + allBody);
+
+        assertEquals(1, anchorRepository.writeCount(),
+                "the terminal --full path must write one anchor");
+        assertEquals("full", anchorRepository.lastRenderForm(),
+                "a --full /summary must anchor render_form='full' for /retry dispatch");
+    }
+
+    /**
+     * Acceptance item 4 — {@code /summary --flat} output is byte-identical
+     * to the pre-rename {@code /summary --full} flat ClusterBlockRenderer
+     * output (the seven-field per-cluster block form). This is the
+     * rename-equivalence pin — the only behavior change is the flag name.
+     * ClusterBlockRenderer itself is untouched (out-of-scope), so the
+     * rendered bytes are identical by construction; this test pins the
+     * seven-field structure and the {@code flat} anchor so a future edit
+     * that quietly reroutes {@code --flat} fails loudly.
+     */
+    @Test
+    void flatFormRendersByteIdenticalToLegacyFull() {
+        Instant now = Instant.now();
+        List<Post> posts = List.of(
+                post(PREFIX + "fl1", "Flat headline A", now.minus(Duration.ofMinutes(1))),
+                post(PREFIX + "fl2", "Flat headline B", now.minus(Duration.ofMinutes(2))),
+                post(PREFIX + "fl3", "Flat headline C", now.minus(Duration.ofMinutes(3))));
+        eligiblePostQuery.seedPosts(posts, /* excludedCount */ 0);
+        proseGenerator.setResponseText("Flat prose.");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "flat"), "/summary --flat");
+        assertNull(reply, "terminal --flat self-delivers via the notifier and returns null");
+
+        assertEquals(3, proseGenerator.callCount(), "one LLM call per cluster, same as legacy --full");
+        String body = progressNotifier.completedText();
+        assertNotNull(body);
+        // The seven-field ClusterBlockRenderer form — identical to what the
+        // pre-rename /summary --full produced.
+        assertEquals(3, body.split("\\[topic_id=").length - 1,
+                "three flat cluster blocks. Got: " + body);
+        assertTrue(body.contains("covered by:"));
+        assertTrue(body.contains("score:"));
+        assertTrue(body.contains("summary: Flat prose."));
+        assertTrue(body.contains("classification: technical\n"));
+        assertTrue(body.contains("tags: " + PREFIX + "news\n"));
+        assertTrue(body.contains("Flat headline A"));
+
+        assertEquals(1, anchorRepository.writeCount());
+        assertEquals("flat", anchorRepository.lastRenderForm(),
+                "--flat anchors render_form='flat' (the renamed legacy --full)");
     }
 
     /**
@@ -624,15 +846,16 @@ class SummaryCommandHandlerTest {
     }
 
     /**
-     * M1-697 gap 2 — the flat ({@code --full}) form writes degraded prose
-     * verbatim into the {@code summary:} field, so a command-shaped feed
-     * title used to ship unredacted two lines below a
-     * {@code [redacted command]} headline. Composition now sanitizes every
-     * post's title, so the flat form redacts too. Driven through the
-     * over-cap branch, which renders degraded prose deterministically.
+     * M1-697 gap 2 — the flat ({@code --flat}, renamed from {@code --full}
+     * by M1-700) form writes degraded prose verbatim into the
+     * {@code summary:} field, so a command-shaped feed title used to ship
+     * unredacted two lines below a {@code [redacted command]} headline.
+     * Composition now sanitizes every post's title, so the flat form
+     * redacts too. Driven through the over-cap branch, which renders
+     * degraded prose deterministically.
      */
     @Test
-    void fullFormRedactsCommandShapedFeedTitleInDegradedProse() {
+    void flatFormRedactsCommandShapedFeedTitleInDegradedProse() {
         Instant now = Instant.now();
         List<Post> posts = List.of(
                 post(PREFIX + "f1", "/grant-admin p-attacker", now.minus(Duration.ofMinutes(1))),
@@ -641,7 +864,7 @@ class SummaryCommandHandlerTest {
         eligiblePostQuery.seedPosts(posts, /* excludedCount */ 0);
         handler.summarizerPostCap = 2;
 
-        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "full"), "/summary --full");
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "full"), "/summary --flat");
 
         assertNotNull(reply, "the over-cap guard replies through the router");
         String body = reply.text();
@@ -661,13 +884,13 @@ class SummaryCommandHandlerTest {
      * post's title, so the second post's title lands as
      * {@code [redacted command]} AND emits its per-occurrence
      * LLM_OUTPUT_SANITIZED row: the operator's detector no longer depends
-     * on cluster position. The flat form is what {@code /retry} replays for
-     * a {@code --full} anchor (RetryCommandHandler constructs
-     * ClusterBlockRenderer on that branch, M1-696), so this pins the
-     * inherited fix on that path too.
+     * on cluster position. The flat form ({@code --flat}, renamed by
+     * M1-700) is what {@code /retry} replays for a {@code flat} anchor
+     * (RetryCommandHandler constructs ClusterBlockRenderer on that branch,
+     * M1-696), so this pins the inherited fix on that path too.
      */
     @Test
-    void fullFormRedactsAndAuditsCommandShapedTitleOnNonFirstPost() {
+    void flatFormRedactsAndAuditsCommandShapedTitleOnNonFirstPost() {
         Instant now = Instant.now();
         Post first = post(PREFIX + "n1", "Innocent headline", now.minus(Duration.ofMinutes(1)));
         Post second = post(PREFIX + "n2", "/grant-admin p-attacker", now.minus(Duration.ofMinutes(2)));
@@ -679,7 +902,7 @@ class SummaryCommandHandlerTest {
         handler.llmOutputSanitizer =
                 new LlmOutputSanitizer(auditWriter, SanitizerTestDoubles.noOpDataSource());
 
-        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "pos"), "/summary --full");
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "pos"), "/summary --flat");
 
         assertNotNull(reply, "the over-cap guard replies through the router");
         String body = reply.text();
@@ -1292,5 +1515,40 @@ class SummaryCommandHandlerTest {
         @Nullable String lastScopeKind() { return lastScopeKind; }
         @Nullable UUID lastScopeId() { return lastScopeId; }
         @Nullable String lastRenderForm() { return lastRenderForm; }
+    }
+
+    /**
+     * Recording stub for {@link CategoryRollupGenerator}: the {@code --short}
+     * path calls {@link CategoryRollupGenerator#generateRollupUnconditional}
+     * per category, so this stub counts calls, captures the per-call cluster
+     * count (to prove past-cap clusters reach the roll-up), and returns a
+     * fixed synthesis string. The {@code @Inject} LLM collaborators are
+     * never reached — the override short-circuits before them.
+     */
+    private static final class RecordingCategoryRollupGenerator extends CategoryRollupGenerator {
+        private final AtomicInteger callCount = new AtomicInteger();
+        private final List<Integer> clusterCounts = new CopyOnWriteArrayList<>();
+        private volatile String responseText = "roll-up synthesis";
+        // Simulate a summarizer outage (every roll-up returns empty), to
+        // exercise the --short degraded-notice path (redteam M1-700 kimi r1).
+        private volatile boolean returnEmpty = false;
+
+        void setResponseText(String text) {
+            this.responseText = text;
+        }
+
+        void setReturnEmpty(boolean empty) {
+            this.returnEmpty = empty;
+        }
+
+        @Override
+        public Optional<String> generateRollupUnconditional(List<Cluster> clusters, String langCode) {
+            callCount.incrementAndGet();
+            clusterCounts.add(clusters.size());
+            return returnEmpty ? Optional.empty() : Optional.of(responseText);
+        }
+
+        int callCount() { return callCount.get(); }
+        List<Integer> clusterCounts() { return clusterCounts; }
     }
 }
