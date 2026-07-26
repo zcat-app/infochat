@@ -157,6 +157,44 @@ with `opencode debug skill` that every workflow skill's `location` is under
 safeguard, not the variable. (Codex is unaffected — it reads `.agents/skills/`
 only and never `.claude/skills/`, so no collision exists there.)
 
+**(d) Task-tool subagents resolve relative paths against the orchestrating
+session's cwd, not the worktree being audited.** Measured on M1-690
+(2026-07-25): the `/m1-tick run` redteam gate ran inside the per-ticket
+worktree `.claude/worktrees/M1-690`, but the opencode session's cwd was the
+primary checkout `/home/infochat/infochat` (on a different ticket's branch).
+The threat-actor subagent was spawned with the stub `Read
+target/redteam-prompt-M1-690.txt …` — a relative path. opencode's Task-tool
+subagent inherited the session cwd (the primary), resolved the relative
+prompt path against the primary's `target/` (where it did not exist), fell
+back to searching, and ultimately read the primary's `ChatPromptBuilder.java`
+(the main-version file) instead of the worktree's modified diff. It returned
+a FINDINGS verdict citing `ChatPromptBuilder.java:38 "Answer any question the
+user asks"` — a line/quote that matches the MAIN version, not the worktree's
+reframed template (where that string spans lines 41-42). The verdict was
+auditing the wrong tree. The §6 contamination check (`git status --porcelain`)
+passed (no tracked-tree changes) because `target/` is gitignored, so the
+contamination was invisible — the only tell was the wrong line numbers in the
+verdict body. The verdict file also landed in the primary's `target/` rather
+than the worktree's.
+
+**Mitigation (binding on opencode gates):** when the orchestrating session is
+NOT parked inside the worktree whose work is being audited, every path handed
+to a gate subagent — both the stub prompt's prompt-file path AND every
+`*_FILE_PATH` / `VERDICT_FILE_PATH` / `@file` placeholder substituted into
+the rendered prompt by `scripts/m1-render-prompt.py` — MUST be absolute.
+Re-rendering with absolute paths and re-spawning produced a CLEAN verdict
+whose file landed in the worktree's `target/` as expected. The line-number
+fingerprint in the verdict body is the post-hoc tell: if the cited
+`file:line` does not match the diff's working-tree version, the subagent read
+the wrong tree and the gate is invalid — discard and re-run with absolute
+paths. (Claude Code subagents inherit the worktree cwd correctly, so this is
+opencode-specific; Codex/kimi headless recipes in §3 take a positional prompt
+and have the same exposure if the prompt carries relative paths — use absolute
+paths there too.) This is the fourth "silently breaks the gates" opencode
+gotcha; the §6 mandatory `git status --porcelain` check catches tracked-tree
+contamination but NOT a verdict written to a gitignored `target/` in the wrong
+worktree, so the line-number fingerprint check is the additional safeguard.
+
 ## 6.2 Codex: verified discovery facts
 
 Measured against codex-cli 0.144.6 with `codex debug prompt-input`, which
