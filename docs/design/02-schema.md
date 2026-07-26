@@ -1324,7 +1324,7 @@ the result into `chat_memory`.
 `/clear` deletes `chat_message` rows and resets `chat_session.token_count`
 and `next_seq`. It does NOT touch `chat_memory` (D25).
 
-### 2.6.5 `summary_anchor` (D19, D36, Invariant 9)
+### 2.6.5 `summary_anchor` (D19, D36, D70, Invariant 9)
 
 ```sql
 CREATE TABLE summary_anchor (
@@ -1335,6 +1335,8 @@ CREATE TABLE summary_anchor (
   command_kind TEXT NOT NULL
     CHECK (command_kind IN ('personal','digest')),
   command_name TEXT NOT NULL,                            -- '/summary', '/digest', etc.
+  render_form  TEXT NOT NULL DEFAULT 'bare'              -- added by successor migration (D70)
+    CHECK (render_form IN ('bare','short','full','flat')), -- typed /retry dispatch axis (see decision below)
   arg_hash     TEXT NOT NULL,                            -- sha256 hex of normalized args
   post_uids    TEXT[] NOT NULL,                          -- ordered selection
   cluster_map  JSONB,                                    -- cluster id → [post_uid, …]
@@ -1425,6 +1427,57 @@ rows with `CASE WHEN user_id = scope_id THEN 'dm' ELSE 'group' END`,
 which is exact under the derivation above (anchors are ephemeral replay
 state, cleared by any non-`/retry` input, so the negligible-probability
 misclassification of a pre-existing colliding row is acceptable).
+
+### summary_anchor render_form decision
+
+**Verdict: add-render_form** — a successor migration (V65) adds a typed
+`render_form` discriminator that `/retry` dispatches on, retiring the
+pre-M1-699 string-match of `command_name` (`hasFlag(commandName,"--full")`).
+
+`command_name` carries the whole command (verb + tag + flags) as free text,
+and `/retry` parsed it back into a dispatch decision. That already smelled:
+anchor values were never normalized, so pre-existing rows read `/summary`
+with a leading slash and the boolean check papered over it by treating
+anything without the exact `--full` marker as the default form. M1-700
+widens `/summary` from two render forms to four (`--short`, bare,
+`--full` reclaimed, `--flat` renamed); extending the string-match inherits
+the fragility at a wider surface. `render_form` is the typed dispatch axis;
+`command_name` stays the human-readable/audit string. The two are
+intentionally separate concerns: `command_name` is what the user typed
+(audit/forensics), `render_form` is what `/retry` switches on (dispatch).
+
+**Why TEXT+CHECK, not a Postgres enum.** `scope_kind` (V37) set the
+precedent on this exact table: TEXT+CHECK. A Postgres enum needs
+`ALTER TYPE ADD VALUE` (a migration) for every future form; TEXT+CHECK
+just needs an altered CHECK. The CHECK lists all four values now
+(`bare`, `short`, `full`, `flat`) so M1-700 adds no migration — only
+code that writes and dispatches on `short`/`full`.
+
+**Backfill determinism.** Pre-M1-700 `command_name` ∈ {`"summary"`,
+`"/summary"`, `"summary --full"`, `"/summary --full"`}, optionally with a
+tag (`"summary ai --full"`). Rule: `command_name LIKE '%--full%'` ⇒ `flat`,
+else ⇒ `bare`. Unambiguous — `--full` is the only form flag today, always
+meaning flat. The leading-slash variant maps to `bare`. The DEFAULT `'bare'`
+is a safety net defaulting to the safest replay shape (categorized); there
+is no NULL-read window (Flyway runs at boot before the new code serves, so
+old rows are backfilled before any `/retry` reads them). The same
+imperfection tolerance V37 applied to `scope_kind` applies here: anchors
+are ephemeral replay state, so a misclassified pre-existing row costs at
+most one stale `/retry` replay.
+
+**Why `render_form` is not redundant with `arg_hash`.** `arg_hash`
+(`computeArgHash`) is `SHA-256(rawText.strip())` — a one-way hash for
+change detection ("did the args change?"). `render_form` is derived from
+`rawText` (the flag is in the text), so `arg_hash` already changes when the
+form changes. But a hash is not recoverable, so the dispatch cannot read
+the form back from it; `render_form` is the separate read-side dispatch
+column. The two serve different purposes on different sides of the
+write/read boundary.
+
+**Applies to personal anchors only.** `render_form` governs `/retry`'s
+replay of a personal `/summary`. Digest anchors (`command_kind='digest'`,
+"/retry --digest" territory) are untouched — their replay path is D65 and
+does not read this column.
 
 ---
 

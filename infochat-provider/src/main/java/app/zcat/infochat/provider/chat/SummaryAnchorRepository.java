@@ -35,11 +35,12 @@ public class SummaryAnchorRepository {
     // command_kind) WHERE user_id IS NOT NULL.
     private static final String UPSERT = """
             INSERT INTO summary_anchor (user_id, scope_kind, scope_id, command_kind,
-                                        command_name, arg_hash, post_uids, cluster_map)
-            VALUES (?, ?, ?, 'personal', ?, ?, ?, ?::jsonb)
+                                        command_name, render_form, arg_hash, post_uids, cluster_map)
+            VALUES (?, ?, ?, 'personal', ?, ?, ?, ?, ?::jsonb)
             ON CONFLICT (user_id, scope_kind, scope_id, command_kind)
                 WHERE user_id IS NOT NULL
             DO UPDATE SET command_name = EXCLUDED.command_name,
+                          render_form  = EXCLUDED.render_form,
                           arg_hash     = EXCLUDED.arg_hash,
                           post_uids    = EXCLUDED.post_uids,
                           cluster_map  = EXCLUDED.cluster_map,
@@ -47,7 +48,7 @@ public class SummaryAnchorRepository {
             """;
 
     private static final String SELECT =
-            "SELECT command_name, arg_hash, post_uids, cluster_map, generated_at "
+            "SELECT command_name, render_form, arg_hash, post_uids, cluster_map, generated_at "
             + "FROM summary_anchor "
             + "WHERE user_id = ? AND scope_kind = ? AND scope_id = ? "
             + "  AND command_kind = 'personal'";
@@ -61,6 +62,7 @@ public class SummaryAnchorRepository {
             UUID userId,
             UUID scopeId,
             String commandName,
+            String renderForm,
             String argHash,
             List<String> postUids,
             @Nullable String clusterMapJson,
@@ -81,7 +83,7 @@ public class SummaryAnchorRepository {
      * count for the same (user, scope) since this is a fresh summary.
      */
     public void write(UUID userId, String scopeKind, UUID scopeId,
-                      String commandName, String argHash,
+                      String commandName, String renderForm, String argHash,
                       List<String> postUids, @Nullable String clusterMapJson) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(UPSERT)) {
@@ -89,11 +91,12 @@ public class SummaryAnchorRepository {
             ps.setString(2, scopeKind);
             ps.setObject(3, scopeId);
             ps.setString(4, commandName);
-            ps.setString(5, argHash);
+            ps.setString(5, renderForm);
+            ps.setString(6, argHash);
             String[] uidStrings = postUids.toArray(new String[0]);
             Array sqlArray = conn.createArrayOf("text", uidStrings);
-            ps.setArray(6, sqlArray);
-            ps.setString(7, clusterMapJson);
+            ps.setArray(7, sqlArray);
+            ps.setString(8, clusterMapJson);
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("SummaryAnchorRepository.write failed", e);
@@ -116,13 +119,14 @@ public class SummaryAnchorRepository {
                     return Optional.empty();
                 }
                 String commandName = rs.getString("command_name");
+                String renderForm = rs.getString("render_form");
                 String argHash = rs.getString("arg_hash");
                 String[] rawUids = (String[]) rs.getArray("post_uids").getArray();
                 List<String> postUids = List.of(rawUids);
                 String clusterMapJson = rs.getString("cluster_map");
                 Instant generatedAt = rs.getTimestamp("generated_at").toInstant();
                 return Optional.of(new AnchorRow(
-                        userId, scopeId, commandName, argHash,
+                        userId, scopeId, commandName, renderForm, argHash,
                         postUids, clusterMapJson, generatedAt));
             }
         } catch (SQLException e) {

@@ -45,12 +45,14 @@ class SummaryAnchorRepositoryTest {
         List<String> postUids = List.of("p-test-uid-1", "p-test-uid-2");
         String clusterMapJson = "[{\"topicId\":\"t-abc\",\"postUids\":[]}]";
 
-        repo.write(USER_A, "dm", SCOPE_A, "summary", "hash123", postUids, clusterMapJson);
+        repo.write(USER_A, "dm", SCOPE_A, "summary", "bare", "hash123", postUids, clusterMapJson);
 
         assertEquals(1, dataSource.executedUpdateCount,
                 "write must issue one SQL update (UPSERT)");
         assertTrue(dataSource.lastSql.contains("INSERT INTO summary_anchor"),
                 "write must use the UPSERT SQL. Got: " + dataSource.lastSql);
+        assertTrue(dataSource.lastSql.contains("render_form"),
+                "UPSERT must carry the render_form dispatch column (M1-699). Got: " + dataSource.lastSql);
 
         dataSource.resetCounters();
         repo.clear(USER_A, "dm", SCOPE_A);
@@ -82,7 +84,7 @@ class SummaryAnchorRepositoryTest {
         repo.incrementAndGetRetryCount(USER_A, "dm", SCOPE_A);
 
         List<String> postUids = List.of("p-test-uid-3");
-        repo.write(USER_A, "dm", SCOPE_A, "summary", "hash", postUids, null);
+        repo.write(USER_A, "dm", SCOPE_A, "summary", "bare", "hash", postUids, null);
 
         assertEquals(1, repo.incrementAndGetRetryCount(USER_A, "dm", SCOPE_A),
                 "write must reset the retry count");

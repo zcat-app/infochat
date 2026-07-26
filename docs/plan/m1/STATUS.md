@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 712 |
+| done | 713 |
 | deferred | 0 |
 | abandoned | 20 |
-| **total** | **733** |
+| **total** | **736** |
 
 ---
 
@@ -26,6 +26,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-698 — Guard the outbound chokepoint routing invariant (complexity: low, risk: low)
+- M1-700 — summary render forms --short/--full/--flat (4-mode) (complexity: medium, risk: medium)
 
 ---
 
@@ -42,7 +43,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-701 — blocked_by: M1-700 (pending)
 
 ---
 
@@ -61,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-699 | summary_anchor render_form column + typed /retry dispatch | 2026-07-26 | round 1 APPROVE |
 | M1-696 | /retry replays the render form its anchored /summary produced | 2026-07-26 | round 1 APPROVE |
 | M1-697 | Scope every feed-bytes sanitize call to one author's field | 2026-07-25 | round 1 APPROVE |
 | M1-695 | Deliver the default /summary as one message per category section | 2026-07-25 | round 1 APPROVE |
@@ -70,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-691 | Carry the markdown-link guarantee at the outbound delivery chokepoint | 2026-07-25 | round 1 APPROVE |
 | M1-690 | Chat prompt stops declining off-feed questions | 2026-07-25 | round 1 APPROVE |
 | M1-689 | Key post-retrieval windows on ready_at, not published_at | 2026-07-25 | round 1 APPROVE |
-| M1-688 | Fix digest first-run collection window | 2026-07-25 | round 1 APPROVE |
 
 ---
 
@@ -935,4 +936,7 @@ M1-694 (done)
   └── M1-696 (done)
 M1-697 (done)
 M1-698 (pending) ← runnable
+M1-699 (done)
+  └── M1-700 (pending) ← runnable
+        └── M1-701 (pending)
 ```

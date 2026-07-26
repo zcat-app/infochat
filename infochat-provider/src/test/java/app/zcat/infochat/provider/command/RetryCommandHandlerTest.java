@@ -107,7 +107,7 @@ class RetryCommandHandlerTest {
     void retriesFromAnchor() {
         List<String> postUids = List.of(PREFIX + "r1");
         String clusterMapJson = "[{\"topicId\":\"t-abc\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
-        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, clusterMapJson);
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "bare", "hash", postUids, clusterMapJson);
 
         // Stub the DataSource to return the posts as READY
         Post readyPost = post(PREFIX + "r1", "Retry headline", Instant.now());
@@ -126,7 +126,7 @@ class RetryCommandHandlerTest {
     @Test
     void rejectsWhenCapExhausted() {
         List<String> postUids = List.of(PREFIX + "cap1");
-        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, null);
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "bare", "hash", postUids, null);
 
         // Provide READY posts so handler reaches the cap check
         Post readyPost = post(PREFIX + "cap1", "Cap headline", Instant.now());
@@ -154,7 +154,7 @@ class RetryCommandHandlerTest {
         // re-roll the cap already forbids.
         List<String> postUids = List.of(PREFIX + "atcap1");
         String json = "[{\"topicId\":\"t-atcap\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
-        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, json);
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "bare", "hash", postUids, json);
         Post readyPost = post(postUids.get(0), "AtCap headline", Instant.now());
         handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
 
@@ -193,7 +193,7 @@ class RetryCommandHandlerTest {
         String json = "[{\"topicId\":\"t-x\",\"postUids\":[\""
                 + postUids.get(0) + "\",\"" + postUids.get(1) + "\",\""
                 + postUids.get(2) + "\",\"" + postUids.get(3) + "\"]}]";
-        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, json);
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "bare", "hash", postUids, json);
 
         // Only one post is READY
         Post readyPost = post(postUids.get(0), "Surviving post", Instant.now());
@@ -212,7 +212,7 @@ class RetryCommandHandlerTest {
     @Test
     void filtersToEmptyReturnsError() {
         List<String> postUids = List.of(PREFIX + "gone1");
-        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, null);
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "bare", "hash", postUids, null);
 
         // No posts are READY
         handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of());
@@ -243,7 +243,7 @@ class RetryCommandHandlerTest {
     void outputPassesThroughSanitizer() {
         List<String> postUids = List.of(PREFIX + "s1");
         String json = "[{\"topicId\":\"t-san\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
-        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, json);
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "bare", "hash", postUids, json);
 
         Post readyPost = post(PREFIX + "s1", "San headline", Instant.now());
         handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
@@ -259,13 +259,18 @@ class RetryCommandHandlerTest {
                 "sanitizer must replace with [redacted command]. Got: " + reply.text());
     }
 
-    // ----- M1-696: the anchor's command_name picks the replay form ------
+    // ----- M1-699: render_form column is the /retry dispatch axis --------
+    //
+    // Pre-M1-699 the form was recovered by string-matching command_name
+    // (RetryCommandHandler.isFullFormAnchor did hasFlag(commandName,"--full")).
+    // M1-699 moves the dispatch axis to a typed column; these tests seed
+    // render_form on the anchor row directly (not via command_name matching).
 
     @Test
     void fullFormAnchorReplaysFlatBlocks() {
         List<String> postUids = List.of(PREFIX + "full1");
         String json = "[{\"topicId\":\"t-full\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
-        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary --full", "hash", postUids, json);
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary --full", "flat", "hash", postUids, json);
 
         Post readyPost = post(PREFIX + "full1", "Full-form headline", Instant.now());
         handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
@@ -275,7 +280,7 @@ class RetryCommandHandlerTest {
                 new ScopeRef.Dm(PREFIX + "full"), "/retry");
 
         assertTrue(reply.text().contains("[topic_id=t-full]"),
-                "a --full anchor must replay the flat per-cluster blocks. Got: " + reply.text());
+                "a render_form='flat' anchor must replay the flat per-cluster blocks. Got: " + reply.text());
         assertTrue(reply.text().contains("Full-form headline"),
                 "the flat form renders the headline. Got: " + reply.text());
         assertTrue(reply.text().contains("Full-form prose."),
@@ -286,7 +291,7 @@ class RetryCommandHandlerTest {
     void defaultAnchorReplaysCategorized() {
         List<String> postUids = List.of(PREFIX + "cat1");
         String json = "[{\"topicId\":\"t-cat\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
-        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, json);
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "bare", "hash", postUids, json);
 
         Post readyPost = post(PREFIX + "cat1", "Categorized headline", Instant.now());
         handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
@@ -298,7 +303,7 @@ class RetryCommandHandlerTest {
         // A single cluster falls into the Other bucket (categoryMinClusters
         // is wired to the production default 3 in setUp).
         assertTrue(reply.text().contains("OTHER NEWS"),
-                "a default anchor must replay the categorized sections. Got: " + reply.text());
+                "a render_form='bare' anchor must replay the categorized sections. Got: " + reply.text());
         assertTrue(reply.text().contains("Categorized prose."),
                 "the categorized form renders the re-generated prose. Got: " + reply.text());
         assertFalse(reply.text().contains("[topic_id="),
@@ -306,26 +311,76 @@ class RetryCommandHandlerTest {
     }
 
     @Test
-    void unnormalizedSlashAnchorReplaysCategorized() {
-        // Pre-existing rows were never normalized: they read '/summary'
-        // with a leading slash (OutboundDeliveryCleanupIT,
-        // ChatMemoryPrunerTest). The dispatch must treat anything without
-        // the exact --full marker as the default form.
-        List<String> postUids = List.of(PREFIX + "slash1");
-        String json = "[{\"topicId\":\"t-slash\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
-        anchorRepo.seedAnchor(USER_ID, USER_ID, "/summary", "hash", postUids, json);
+    void replaysFromRenderFormColumnNotCommandName() {
+        // The dispatch axis moved from command_name string-matching to the
+        // typed render_form column (M1-699). Prove render_form WINS over
+        // command_name by seeding MISMATCHED pairs: a command_name that
+        // legacy string-matching would read as one form, with a render_form
+        // that says the other. The replay must follow render_form in both
+        // directions, and the replayed bytes are byte-identical to the
+        // pre-refactor output for each form (the form shapes did not move
+        // — only the dispatch axis did).
+        //
+        // Flat direction: command_name carries NO --full, but render_form='flat'.
+        List<String> flatUids = List.of(PREFIX + "rf-flat");
+        String flatJson = "[{\"topicId\":\"t-rf-flat\",\"postUids\":[\"" + flatUids.get(0) + "\"]}]";
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "flat", "hash", flatUids, flatJson);
+        Post flatPost = post(PREFIX + "rf-flat", "RF flat headline", Instant.now());
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(flatPost));
+        proseGenerator.responseText = "RF flat prose.";
+        OutboundMessage flatReply = handler.handle(new ScopeRef.Dm(PREFIX + "rf-flat"), "/retry");
+        assertTrue(flatReply.text().contains("[topic_id=t-rf-flat]"),
+                "render_form='flat' must win over a non-'--full' command_name and replay flat. Got: " + flatReply.text());
+        assertFalse(flatReply.text().contains("OTHER NEWS"),
+                "render_form='flat' must not fall through to categorized despite the bare command_name. Got: " + flatReply.text());
 
-        Post readyPost = post(PREFIX + "slash1", "Legacy headline", Instant.now());
-        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
-        proseGenerator.responseText = "Legacy prose.";
+        // Bare direction: command_name carries --full, but render_form='bare'.
+        List<String> bareUids = List.of(PREFIX + "rf-bare");
+        String bareJson = "[{\"topicId\":\"t-rf-bare\",\"postUids\":[\"" + bareUids.get(0) + "\"]}]";
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary --full", "bare", "hash", bareUids, bareJson);
+        Post barePost = post(PREFIX + "rf-bare", "RF bare headline", Instant.now());
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(barePost));
+        proseGenerator.responseText = "RF bare prose.";
+        OutboundMessage bareReply = handler.handle(new ScopeRef.Dm(PREFIX + "rf-bare"), "/retry");
+        assertTrue(bareReply.text().contains("OTHER NEWS"),
+                "render_form='bare' must win over a '--full' command_name and replay categorized. Got: " + bareReply.text());
+        assertFalse(bareReply.text().contains("[topic_id="),
+                "render_form='bare' must not replay flat despite the --full command_name. Got: " + bareReply.text());
+    }
 
-        OutboundMessage reply = handler.handle(
-                new ScopeRef.Dm(PREFIX + "slash"), "/retry");
+    @Test
+    void oldAnchorBackfilledToFlatForm() {
+        // V65 backfills render_form from command_name: LIKE '%--full%' ⇒
+        // 'flat', else ⇒ 'bare' (SummaryAnchorRenderFormBackfillIT proves the
+        // migration itself). This test proves /retry reads the BACKFILLED
+        // column: a pre-V65 anchor whose command_name contains '--full' is
+        // backfilled to render_form='flat' and replays flat; a pre-V65
+        // anchor with command_name 'summary' or '/summary' backfills to
+        // 'bare' and replays categorized. The leading-slash '/summary'
+        // variant is the exact unnormalized fragility the typed column
+        // retires (OutboundDeliveryCleanupIT, ChatMemoryPrunerTest).
+        List<String> fullUids = List.of(PREFIX + "bf-full");
+        String fullJson = "[{\"topicId\":\"t-bf-full\",\"postUids\":[\"" + fullUids.get(0) + "\"]}]";
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary --full", "flat", "hash", fullUids, fullJson);
+        Post fullPost = post(PREFIX + "bf-full", "Backfill flat headline", Instant.now());
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(fullPost));
+        proseGenerator.responseText = "Backfill flat prose.";
+        OutboundMessage fullReply = handler.handle(new ScopeRef.Dm(PREFIX + "bf-full"), "/retry");
+        assertTrue(fullReply.text().contains("[topic_id=t-bf-full]"),
+                "a backfilled '--full' anchor (render_form='flat') must replay flat. Got: " + fullReply.text());
 
-        assertTrue(reply.text().contains("OTHER NEWS"),
-                "a '/summary' (leading-slash) anchor must replay categorized. Got: " + reply.text());
-        assertFalse(reply.text().contains("[topic_id="),
-                "a '/summary' (leading-slash) anchor must not replay flat. Got: " + reply.text());
+        List<String> bareUids = List.of(PREFIX + "bf-bare");
+        String bareJson = "[{\"topicId\":\"t-bf-bare\",\"postUids\":[\"" + bareUids.get(0) + "\"]}]";
+        // The leading-slash '/summary' variant backfills to 'bare'.
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "/summary", "bare", "hash", bareUids, bareJson);
+        Post barePost = post(PREFIX + "bf-bare", "Backfill bare headline", Instant.now());
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(barePost));
+        proseGenerator.responseText = "Backfill bare prose.";
+        OutboundMessage bareReply = handler.handle(new ScopeRef.Dm(PREFIX + "bf-bare"), "/retry");
+        assertTrue(bareReply.text().contains("OTHER NEWS"),
+                "a backfilled '/summary' anchor (render_form='bare') must replay categorized. Got: " + bareReply.text());
+        assertFalse(bareReply.text().contains("[topic_id="),
+                "a backfilled '/summary' anchor must not replay flat. Got: " + bareReply.text());
     }
 
     // ----- M1-183: LLM rate cap + in-flight no-leak --------------------
@@ -337,7 +392,7 @@ class RetryCommandHandlerTest {
     void retryRejectedWithRateLimitReplyWhenLlmBucketExhausted() {
         List<String> postUids = List.of(PREFIX + "rl1");
         String json = "[{\"topicId\":\"t-rl\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
-        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, json);
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "bare", "hash", postUids, json);
         Post readyPost = post(postUids.get(0), "Rate headline", Instant.now());
         handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
         // Exhaust the per-user LLM bucket: a single-token bucket whose
@@ -362,7 +417,7 @@ class RetryCommandHandlerTest {
     void rejectedRetryLeavesSlotAndBucketUsableForNextRequest() {
         List<String> postUids = List.of(PREFIX + "nl1");
         String json = "[{\"topicId\":\"t-nl\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
-        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, json);
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "bare", "hash", postUids, json);
         Post readyPost = post(postUids.get(0), "NoLeak headline", Instant.now());
         handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
         proseGenerator.responseText = "Recovered re-roll.";
@@ -395,7 +450,7 @@ class RetryCommandHandlerTest {
     void retryWhileRequestInFlightRepliesWithInFlightMessageNotNoAnchor() throws Exception {
         List<String> postUids = List.of(PREFIX + "if1");
         String json = "[{\"topicId\":\"t-if\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
-        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, json);
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "bare", "hash", postUids, json);
         Post readyPost = post(postUids.get(0), "InFlight headline", Instant.now());
         handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
         // The caller's previous request is still running.
@@ -425,9 +480,9 @@ class RetryCommandHandlerTest {
         private AnchorRow seeded = null;
         int incrementCallCount = 0;
 
-        void seedAnchor(UUID userId, UUID scopeId, String commandName,
+        void seedAnchor(UUID userId, UUID scopeId, String commandName, String renderForm,
                         String argHash, List<String> postUids, String clusterMapJson) {
-            seeded = new AnchorRow(userId, scopeId, commandName, argHash,
+            seeded = new AnchorRow(userId, scopeId, commandName, renderForm, argHash,
                     postUids, clusterMapJson, Instant.now());
         }
 
@@ -439,8 +494,9 @@ class RetryCommandHandlerTest {
 
         @Override
         public void write(UUID userId, String scopeKind, UUID scopeId, String commandName,
-                          String argHash, List<String> postUids, String clusterMapJson) {
-            seeded = new AnchorRow(userId, scopeId, commandName, argHash,
+                          String renderForm, String argHash,
+                          List<String> postUids, String clusterMapJson) {
+            seeded = new AnchorRow(userId, scopeId, commandName, renderForm, argHash,
                     postUids, clusterMapJson, Instant.now());
             clearRetryCount(userId, scopeKind, scopeId);
         }

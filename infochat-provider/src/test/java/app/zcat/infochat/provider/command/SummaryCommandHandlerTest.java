@@ -301,6 +301,14 @@ class SummaryCommandHandlerTest {
         assertTrue(body.contains("tags: " + PREFIX + "news\n"),
                 "tags: line reflects the seeded tags, distinct from classification. Got: " + body);
         assertTrue(body.contains("Headline A"));
+
+        // M1-699: the anchor's render_form is the typed /retry dispatch axis.
+        // --full anchors the flat replay ('flat'); the bare default anchors
+        // the categorized replay ('bare').
+        assertEquals(1, anchorRepository.writeCount(),
+                "the terminal /summary path must write one anchor");
+        assertEquals("flat", anchorRepository.lastRenderForm(),
+                "a --full /summary must anchor render_form='flat' for /retry dispatch");
     }
 
     /**
@@ -343,6 +351,14 @@ class SummaryCommandHandlerTest {
                 "default form must not emit the flat tags line. Got: " + body);
         assertFalse(body.contains("Headline A"),
                 "the categorized form renders prose only — no per-post headline. Got: " + body);
+
+        // M1-699: the bare (default) /summary anchors render_form='bare' for
+        // /retry dispatch — the typed column counterpart to the 'flat' assertion
+        // in the --full sibling above.
+        assertEquals(1, anchorRepository.writeCount(),
+                "the terminal /summary path must write one anchor");
+        assertEquals("bare", anchorRepository.lastRenderForm(),
+                "a bare /summary must anchor render_form='bare' for /retry dispatch");
     }
 
     /**
@@ -1246,16 +1262,18 @@ class SummaryCommandHandlerTest {
         private volatile @Nullable UUID lastUserId;
         private volatile @Nullable String lastScopeKind;
         private volatile @Nullable UUID lastScopeId;
+        private volatile @Nullable String lastRenderForm;
 
         @Override
         public void write(UUID userId, String scopeKind, UUID scopeId,
-                          String commandName, String argHash,
+                          String commandName, String renderForm, String argHash,
                           List<String> postUids, String clusterMapJson) {
             writes.incrementAndGet();
             lastPostUids = List.copyOf(postUids);
             lastUserId = userId;
             lastScopeKind = scopeKind;
             lastScopeId = scopeId;
+            lastRenderForm = renderForm;
         }
 
         @Override
@@ -1273,5 +1291,6 @@ class SummaryCommandHandlerTest {
         @Nullable UUID lastUserId() { return lastUserId; }
         @Nullable String lastScopeKind() { return lastScopeKind; }
         @Nullable UUID lastScopeId() { return lastScopeId; }
+        @Nullable String lastRenderForm() { return lastRenderForm; }
     }
 }

@@ -274,22 +274,32 @@ public class RetryCommandHandler implements CommandHandler {
             }
 
             // Replay in the render form the anchored /summary produced
-            // (M1-696): a --full anchor replays the flat per-cluster blocks;
-            // the default anchor replays the categorized sections, joined
-            // back into the single OutboundMessage /retry has always
-            // returned (per-section delivery is /summary's shape, M1-695,
-            // not /retry's).
-            if (isFullFormAnchor(anchor.commandName())) {
-                ClusterBlockRenderer clusterBlockRenderer =
-                        new ClusterBlockRenderer(llmOutputSanitizer, translationPipeline, bundleLoader);
-                for (ClusterProse cp : prose) {
-                    clusterBlockRenderer.appendClusterBlock(out, cp, scopeLanguage);
+            // (M1-696, M1-699): render_form is the typed dispatch axis.
+            // 'flat' replays the flat per-cluster blocks; 'bare' replays
+            // the categorized sections, joined back into the single
+            // OutboundMessage /retry has always returned (per-section
+            // delivery is /summary's shape, M1-695, not /retry's). The
+            // switch is structured so M1-700 can add 'short' and 'full'
+            // arms without restructuring; the default throws so a future
+            // form written without its dispatch arm fails loudly rather
+            // than silently replaying the wrong shape.
+            switch (anchor.renderForm()) {
+                case "flat" -> {
+                    ClusterBlockRenderer clusterBlockRenderer =
+                            new ClusterBlockRenderer(llmOutputSanitizer, translationPipeline, bundleLoader);
+                    for (ClusterProse cp : prose) {
+                        clusterBlockRenderer.appendClusterBlock(out, cp, scopeLanguage);
+                    }
                 }
-            } else {
-                out.append(String.join("\n\n",
-                        digestRenderer.renderSummarySections(prose, scopeLanguage).stream()
-                                .map(RenderedSection::text)
-                                .toList()));
+                case "bare" -> {
+                    out.append(String.join("\n\n",
+                            digestRenderer.renderSummarySections(prose, scopeLanguage).stream()
+                                    .map(RenderedSection::text)
+                                    .toList()));
+                }
+                default -> throw new IllegalStateException(
+                        "Unhandled summary_anchor.render_form: " + anchor.renderForm()
+                                + " ('short'/'full' are M1-700)");
             }
 
             return reply(scope, out.toString().stripTrailing());
@@ -548,19 +558,6 @@ public class RetryCommandHandler implements CommandHandler {
             if (part.equals(flag)) return true;
         }
         return false;
-    }
-
-    /**
-     * Form dispatch on the anchor's {@code command_name} (M1-696). Only the
-     * exact {@code --full} marker selects the flat replay; EVERYTHING else
-     * takes the default categorized form. Equality against {@code "summary"}
-     * is deliberately NOT the test: anchor values were never normalized, so
-     * pre-existing rows read {@code '/summary'} with a leading slash
-     * (OutboundDeliveryCleanupIT, ChatMemoryPrunerTest), and those must
-     * replay categorized like any other default anchor.
-     */
-    private static boolean isFullFormAnchor(String commandName) {
-        return hasFlag(commandName, "--full");
     }
 
     private record ActorRow(UUID id, boolean isAdmin) {

@@ -1,0 +1,88 @@
+RED-TEAM VERDICT: CLEAN
+
+# Audit notes (not findings — recorded for traceability)
+
+M1-699 moves /retry's render-form dispatch axis off the string-matched
+`summary_anchor.command_name` (`RetryCommandHandler.isFullFormAnchor` did
+`hasFlag(commandName, "--full")`) onto a new typed `summary_anchor.render_form`
+column added by the V65 migration. It is staged as a pure refactor with
+zero intended user-visible behavior change; the four-value CHECK
+(`bare`,`short`,`full`,`flat`) lists the M1-700 forms ahead of time so the
+widening ticket needs no further migration.
+
+Threat-model commitments audited and found DELIVERED by the diff:
+
+1. Per-(user, scope) isolation (§Authorization model, §Tool surface D28).
+   The read path (`SummaryAnchorRepository.SELECT`, diff lines 423-428)
+   is still keyed `WHERE user_id = ? AND scope_kind = ? AND scope_id = ?
+   AND command_kind = 'personal'`. `render_form` is returned alongside
+   the existing columns; it adds no cross-user/cross-scope reach.
+
+2. No user-controlled free text reaches a dispatch decision (§Prompt-
+   injection defenses — "Every argument is type-checked and bound";
+   §LLM output sanitizer delivery-ordering contract). The only writer
+   (`SummaryCommandHandler`, diff lines 378-382) derives `render_form`
+   entirely from the already-parsed `args.full()` boolean and emits one
+   of two hardcoded literals (`"flat"` / `"bare"`). It is bound as a SQL
+   parameter in the UPSERT (diff line 451, `ps.setString(5, renderForm)`)
+   — no string concatenation, no injection surface. An attacker cannot
+   coerce an arbitrary `render_form`: the column CHECK plus the single
+   derived-from-boolean writer bound the value to the closed set, and
+   the dispatch `default` arm throws on any other value.
+
+3. LLM output sanitizer coverage on /retry (§LLM output sanitizer —
+   "the sanitizer applies to the full set of LLM-authored output
+   surfaces: ... /retry re-rolls"). Both switch arms are byte-identical
+   to the pre-diff code: the `"flat"` arm still constructs a
+   `ClusterBlockRenderer(llmOutputSanitizer, ...)` and appends per
+   cluster (diff lines 287-293); the `"bare"` arm still routes through
+   `digestRenderer.renderSummarySections(...)` (diff lines 294-299).
+   The §"Sanitizer output never contains `](`" OutboundDelivery
+   chokepoint (M1-691) is not touched by this diff, so the whole-
+   delivered-message adjacency guarantee still covers whatever the
+   switch assembles. Per-title redaction on the flat replay
+   (§"/retry replays the flat form and inherits the same per-title
+   redaction with no handler change") is unchanged — the handler change
+   the spec refers to is exactly this kind of dispatch-axis move, and
+   the renderer call is unchanged.
+
+4. SQL parameterization / no injection (§Trust boundaries item 5; §DB
+   roles). The UPSERT binds `render_form` as `?` (position 5); the
+   SELECT reads it back as a typed column. The V65 backfill is a
+   one-time deterministic `CASE WHEN command_name LIKE '%--full%' THEN
+   'flat' ELSE 'bare' END` with no user input. No new injectable
+   statement.
+
+5. Authorization ordering (§Authorization model steps 1-9 never call the
+   LLM; permission check step 7 precedes execution step 9). The diff
+   touches neither the identity/ban/probation gates nor the permission
+   matrix. The admin-tier gate at RetryCommandHandler:457-458
+   (referenced in the sensitive-surface inventory) is pre-existing and
+   not part of this diff's hunks.
+
+6. Fail-loud on unexpected dispatch values. The `default -> throw new
+   IllegalStateException(...)` (diff lines 300-302) fires only for
+   `'short'`/`'full'`, which the CHECK permits but no write path emits
+   today (they are M1-700-reserved). The thrown token is a member of a
+   closed four-value enum set by CHECK, not user-authored prose, so it
+   does not violate the §Secrets handling "exception messages MUST NOT
+   contain user-authored prose" rule. Reachability is also bounded:
+   only the calling user's own anchored /summary (scoped to their
+   `(user_id, scope_id)`) can drive the switch, so even a future
+   misplaced value would self-DoS the caller, not amplify.
+
+7. Backfill / migration safety (§Failure handling — Stage 1/2 framing
+   is N/A here; the relevant property is "no NULL-read window"). V65
+   adds the column nullable, backfills from `command_name`, then sets
+   `DEFAULT 'bare'` + `NOT NULL` + the CHECK. The design note records
+   Flyway runs at boot before the new code serves, so pre-existing
+   rows are backfilled before any /retry reads them; the DEFAULT is a
+   safety net for any insert path that omits the column. No TOCTOU or
+   NULL-NPE window in the read path.
+
+No threat-model commitment is failed by this diff. The dispatch axis
+moves from an unnormalized free-text column to a typed, CHECK-bounded,
+parameter-bound column whose only writer derives it from a parsed
+boolean — a strict narrowing of the input surface, with byte-identical
+sanitizer coverage on both arms and unchanged per-(user, scope)
+isolation.

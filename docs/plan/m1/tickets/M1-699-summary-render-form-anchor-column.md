@@ -1,7 +1,7 @@
 ---
 id: M1-699
 title: "summary_anchor render_form column + typed /retry dispatch"
-status: pending
+status: done
 created: 2026-07-26
 last_updated: 2026-07-26
 blocked_by: []
@@ -102,6 +102,25 @@ spec_refs:
   - docs/spec/commands.md §Conversation control
 decision_refs:
   - D70
+clarity_check:
+  date: 2026-07-26
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 13
+      added: 507
+      removed: 94
 ---
 
 # M1-699: summary_anchor render_form column + typed /retry dispatch

@@ -363,20 +363,22 @@ public class SummaryCommandHandler implements CommandHandler {
                 List<ClusterProse> prose = summaryProseGenerator.generate(clusters, "en");
 
                 // Write the summary anchor — enables /retry to replay the prose
-                // layer with the same deterministic post selection (D19, D36).
-                // Written on both normal and degraded paths: spec says "/retry
-                // against this degraded run regenerates the prose if the LLM
-                // has recovered."
+                // layer with the same deterministic post selection (D19, D36,
+                // D70). Written on both normal and degraded paths: spec says
+                // "/retry against this degraded run regenerates the prose if
+                // the LLM has recovered."
                 List<String> postUids = result.posts().stream().map(Post::uid).toList();
                 String argHash = computeArgHash(rawText);
                 String clusterMapJson = serializeClusterMap(clusters);
-                // command_name carries the render form for /retry (M1-696):
-                // "summary --full" replays flat, anything else replays
-                // categorized. The column is TEXT with no CHECK (V19:10), so
-                // the marker needs no migration.
+                // render_form is the typed /retry dispatch axis (M1-699, D70):
+                // --full anchors the flat per-cluster replay, anything else
+                // anchors the categorized replay. command_name remains the
+                // human-readable/audit string; render_form is what /retry
+                // switches on.
                 summaryAnchorRepository.write(
                         actorId, scopeKind, scopeId.get(),
                         args.full() ? "summary --full" : "summary",
+                        args.full() ? "flat" : "bare",
                         argHash, postUids, clusterMapJson);
 
                 // Only publish TRANSLATING when the scope actually translates —

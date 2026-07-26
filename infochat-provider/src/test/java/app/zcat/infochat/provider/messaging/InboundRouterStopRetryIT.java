@@ -101,7 +101,7 @@ class InboundRouterStopRetryIT {
         // the EligiblePostQuery subscription logic which is not this
         // ticket's concern).
         String postUid = seedReadyPost(userId, "retry-it-post-1", "Bitcoin hits new high");
-        summaryAnchorRepository.write(userId, "dm", userId, "summary", "hash1",
+        summaryAnchorRepository.write(userId, "dm", userId, "summary", "bare", "hash1",
                 List.of(postUid), "[{\"topicId\":\"t-retry\",\"postUids\":[\"" + postUid + "\"]}]");
 
         testLlmProvider.setResponseText("Retried summary prose.");
@@ -125,7 +125,7 @@ class InboundRouterStopRetryIT {
 
         // Write an anchor directly
         String postUid = seedReadyPost(userId, "retry-it-post-2", "Monero update");
-        summaryAnchorRepository.write(userId, "dm", userId, "summary", "hash2",
+        summaryAnchorRepository.write(userId, "dm", userId, "summary", "bare", "hash2",
                 List.of(postUid), null);
 
         // Any non-/retry input clears the anchor (/help replies inline)
