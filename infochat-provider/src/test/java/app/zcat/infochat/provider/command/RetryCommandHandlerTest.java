@@ -9,6 +9,7 @@ import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository.AnchorRow;
+import app.zcat.infochat.provider.digest.DigestRenderer;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
@@ -79,6 +80,15 @@ class RetryCommandHandlerTest {
         handler.summaryProseGenerator = proseGenerator;
         handler.llmOutputSanitizer = SanitizerTestDoubles.noAuditSanitizer();
         handler.translationPipeline = newEnShortCircuitPipeline(bundleLoader);
+        // The default (categorized) replay form runs inside DigestRenderer
+        // (M1-696), so the renderer must hold THIS test's sanitizer and
+        // pipeline — same wiring rule as SummaryCommandHandlerTest. The cap
+        // values mirror the production @ConfigProperty defaults that manual
+        // field injection does not apply.
+        handler.digestRenderer = DigestRenderer.forSummaryRendering(
+                SanitizerTestDoubles.noAuditSanitizer(),
+                handler.translationPipeline, bundleLoader,
+                /* categoryItemCap */ 12, /* categoryMinClusters */ 3);
         handler.inFlightTracker = tracker;
         handler.llmRateCap = new LlmRateCap(10);
         handler.retryCap = 3;
@@ -247,6 +257,75 @@ class RetryCommandHandlerTest {
                 "sanitizer must strip /grant-admin. Got: " + reply.text());
         assertTrue(reply.text().contains("[redacted command]"),
                 "sanitizer must replace with [redacted command]. Got: " + reply.text());
+    }
+
+    // ----- M1-696: the anchor's command_name picks the replay form ------
+
+    @Test
+    void fullFormAnchorReplaysFlatBlocks() {
+        List<String> postUids = List.of(PREFIX + "full1");
+        String json = "[{\"topicId\":\"t-full\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary --full", "hash", postUids, json);
+
+        Post readyPost = post(PREFIX + "full1", "Full-form headline", Instant.now());
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
+        proseGenerator.responseText = "Full-form prose.";
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(PREFIX + "full"), "/retry");
+
+        assertTrue(reply.text().contains("[topic_id=t-full]"),
+                "a --full anchor must replay the flat per-cluster blocks. Got: " + reply.text());
+        assertTrue(reply.text().contains("Full-form headline"),
+                "the flat form renders the headline. Got: " + reply.text());
+        assertTrue(reply.text().contains("Full-form prose."),
+                "the flat form renders the re-generated prose. Got: " + reply.text());
+    }
+
+    @Test
+    void defaultAnchorReplaysCategorized() {
+        List<String> postUids = List.of(PREFIX + "cat1");
+        String json = "[{\"topicId\":\"t-cat\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, json);
+
+        Post readyPost = post(PREFIX + "cat1", "Categorized headline", Instant.now());
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
+        proseGenerator.responseText = "Categorized prose.";
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(PREFIX + "cat"), "/retry");
+
+        // A single cluster falls into the Other bucket (categoryMinClusters
+        // is wired to the production default 3 in setUp).
+        assertTrue(reply.text().contains("OTHER NEWS"),
+                "a default anchor must replay the categorized sections. Got: " + reply.text());
+        assertTrue(reply.text().contains("Categorized prose."),
+                "the categorized form renders the re-generated prose. Got: " + reply.text());
+        assertFalse(reply.text().contains("[topic_id="),
+                "the categorized form renders no flat cluster blocks. Got: " + reply.text());
+    }
+
+    @Test
+    void unnormalizedSlashAnchorReplaysCategorized() {
+        // Pre-existing rows were never normalized: they read '/summary'
+        // with a leading slash (OutboundDeliveryCleanupIT,
+        // ChatMemoryPrunerTest). The dispatch must treat anything without
+        // the exact --full marker as the default form.
+        List<String> postUids = List.of(PREFIX + "slash1");
+        String json = "[{\"topicId\":\"t-slash\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "/summary", "hash", postUids, json);
+
+        Post readyPost = post(PREFIX + "slash1", "Legacy headline", Instant.now());
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
+        proseGenerator.responseText = "Legacy prose.";
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(PREFIX + "slash"), "/retry");
+
+        assertTrue(reply.text().contains("OTHER NEWS"),
+                "a '/summary' (leading-slash) anchor must replay categorized. Got: " + reply.text());
+        assertFalse(reply.text().contains("[topic_id="),
+                "a '/summary' (leading-slash) anchor must not replay flat. Got: " + reply.text());
     }
 
     // ----- M1-183: LLM rate cap + in-flight no-leak --------------------

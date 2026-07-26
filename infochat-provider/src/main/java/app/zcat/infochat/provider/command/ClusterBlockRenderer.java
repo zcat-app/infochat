@@ -17,7 +17,9 @@ import java.util.Set;
 /**
  * Renders one summary cluster block — the six deterministic fields plus the
  * single LLM-authored {@code summary:} field — shared verbatim by
- * {@code /summary} (terminal compose) and {@code /retry} (anchored replay).
+ * {@code /summary --full} (terminal compose) and {@code /retry} (anchored
+ * replay of a {@code --full} anchor; default-form anchors replay categorized
+ * via {@code DigestRenderer.renderSummarySections} instead, M1-696).
  *
  * <p>The byte-identical-replay property (D19/D36) requires both call sites to
  * emit the same bytes for the same cluster; collapsing the two former copies

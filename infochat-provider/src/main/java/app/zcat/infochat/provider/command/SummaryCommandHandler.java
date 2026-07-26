@@ -370,8 +370,13 @@ public class SummaryCommandHandler implements CommandHandler {
                 List<String> postUids = result.posts().stream().map(Post::uid).toList();
                 String argHash = computeArgHash(rawText);
                 String clusterMapJson = serializeClusterMap(clusters);
+                // command_name carries the render form for /retry (M1-696):
+                // "summary --full" replays flat, anything else replays
+                // categorized. The column is TEXT with no CHECK (V19:10), so
+                // the marker needs no migration.
                 summaryAnchorRepository.write(
-                        actorId, scopeKind, scopeId.get(), "summary",
+                        actorId, scopeKind, scopeId.get(),
+                        args.full() ? "summary --full" : "summary",
                         argHash, postUids, clusterMapJson);
 
                 // Only publish TRANSLATING when the scope actually translates —
@@ -525,7 +530,8 @@ public class SummaryCommandHandler implements CommandHandler {
     /**
      * Render the flat ({@code --full}) per-cluster body:
      * {@link ClusterBlockRenderer}'s seven-field block per cluster, which
-     * is what {@code /retry} replays and what the {@code --full}-retargeted
+     * is what {@code /retry} replays for a {@code --full} anchor (M1-696)
+     * and what the {@code --full}-retargeted
      * tests assert on. Takes prose the CALLER already generated (or
      * composed degraded), so it makes no LLM call and the summarizer call
      * count is identical in both forms — the property

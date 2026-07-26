@@ -645,9 +645,10 @@ class SummaryCommandHandlerTest {
      * post's title, so the second post's title lands as
      * {@code [redacted command]} AND emits its per-occurrence
      * LLM_OUTPUT_SANITIZED row: the operator's detector no longer depends
-     * on cluster position. The flat form is what {@code /retry} replays
-     * (RetryCommandHandler constructs ClusterBlockRenderer unconditionally),
-     * so this pins the inherited fix on that path too.
+     * on cluster position. The flat form is what {@code /retry} replays for
+     * a {@code --full} anchor (RetryCommandHandler constructs
+     * ClusterBlockRenderer on that branch, M1-696), so this pins the
+     * inherited fix on that path too.
      */
     @Test
     void fullFormRedactsAndAuditsCommandShapedTitleOnNonFirstPost() {

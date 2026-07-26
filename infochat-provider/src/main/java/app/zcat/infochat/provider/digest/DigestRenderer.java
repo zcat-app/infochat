@@ -162,7 +162,8 @@ public class DigestRenderer {
 
     /**
      * Render ALREADY-GENERATED per-cluster prose into category sections —
-     * the {@code /summary} entry point (M1-694). Makes no LLM call of any
+     * the {@code /summary} entry point (M1-694), reused by {@code /retry}
+     * for the default-form anchored replay (M1-696). Makes no LLM call of any
      * kind: the caller owns prose generation, so this method is safe on
      * {@code /summary}'s over-cap branch, whose whole purpose is to render
      * a degraded reply without reaching the summarizer.

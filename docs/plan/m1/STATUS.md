@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 711 |
+| done | 712 |
 | deferred | 0 |
 | abandoned | 20 |
 | **total** | **733** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-696 — /retry replays the render form its anchored /summary produced (complexity: low, risk: low)
 - M1-698 — Guard the outbound chokepoint routing invariant (complexity: low, risk: low)
 
 ---
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-696 | /retry replays the render form its anchored /summary produced | 2026-07-26 | round 1 APPROVE |
 | M1-697 | Scope every feed-bytes sanitize call to one author's field | 2026-07-25 | round 1 APPROVE |
 | M1-695 | Deliver the default /summary as one message per category section | 2026-07-25 | round 1 APPROVE |
 | M1-694 | /summary renders the categorized form by default; --full keeps the flat form | 2026-07-25 | round 2 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-690 | Chat prompt stops declining off-feed questions | 2026-07-25 | round 1 APPROVE |
 | M1-689 | Key post-retrieval windows on ready_at, not published_at | 2026-07-25 | round 1 APPROVE |
 | M1-688 | Fix digest first-run collection window | 2026-07-25 | round 1 APPROVE |
-| M1-685 | Chat model text can contradict the appended curated answer | 2026-07-25 | round 2 APPROVE |
 
 ---
 
@@ -933,7 +932,7 @@ M1-691 (done)
 M1-693 (done)
 M1-694 (done)
   ├── M1-695 (done)
-  └── M1-696 (pending) ← runnable
+  └── M1-696 (done)
 M1-697 (done)
 M1-698 (pending) ← runnable
 ```

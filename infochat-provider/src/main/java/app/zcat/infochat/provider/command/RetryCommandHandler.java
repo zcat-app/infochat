@@ -13,6 +13,8 @@ import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository.AnchorRow;
+import app.zcat.infochat.provider.digest.DigestRenderer;
+import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
 import app.zcat.infochat.provider.digest.DigestRetryService;
 import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
@@ -57,7 +59,13 @@ import java.util.UUID;
  * Implements {@code /retry} per docs/spec/commands.md §Conversation control.
  * The personal path replays the prose layer of the last summary-producing
  * command using the frozen post selection and cluster mapping stored in
- * {@code summary_anchor} (D19, D36). The {@code --digest} path delegates
+ * {@code summary_anchor} (D19, D36). The replay comes back in the render
+ * form the anchored {@code /summary} produced (M1-696): an anchor whose
+ * {@code command_name} carries the exact {@code --full} marker replays the
+ * flat per-cluster blocks ({@link ClusterBlockRenderer}), anything else
+ * replays the default categorized sections
+ * ({@link DigestRenderer#renderSummarySections}) — still as a single
+ * {@link OutboundMessage}. The {@code --digest} path delegates
  * to {@link DigestRetryService} for per-group serialized digest
  * re-generation (M1-080c).
  */
@@ -99,6 +107,9 @@ public class RetryCommandHandler implements CommandHandler {
 
     @Inject
     SummaryProseGenerator summaryProseGenerator;
+
+    @Inject
+    DigestRenderer digestRenderer;
 
     @Inject
     LlmOutputSanitizer llmOutputSanitizer;
@@ -262,10 +273,23 @@ public class RetryCommandHandler implements CommandHandler {
                 out.append("\n\n");
             }
 
-            ClusterBlockRenderer clusterBlockRenderer =
-                    new ClusterBlockRenderer(llmOutputSanitizer, translationPipeline, bundleLoader);
-            for (ClusterProse cp : prose) {
-                clusterBlockRenderer.appendClusterBlock(out, cp, scopeLanguage);
+            // Replay in the render form the anchored /summary produced
+            // (M1-696): a --full anchor replays the flat per-cluster blocks;
+            // the default anchor replays the categorized sections, joined
+            // back into the single OutboundMessage /retry has always
+            // returned (per-section delivery is /summary's shape, M1-695,
+            // not /retry's).
+            if (isFullFormAnchor(anchor.commandName())) {
+                ClusterBlockRenderer clusterBlockRenderer =
+                        new ClusterBlockRenderer(llmOutputSanitizer, translationPipeline, bundleLoader);
+                for (ClusterProse cp : prose) {
+                    clusterBlockRenderer.appendClusterBlock(out, cp, scopeLanguage);
+                }
+            } else {
+                out.append(String.join("\n\n",
+                        digestRenderer.renderSummarySections(prose, scopeLanguage).stream()
+                                .map(RenderedSection::text)
+                                .toList()));
             }
 
             return reply(scope, out.toString().stripTrailing());
@@ -524,6 +548,19 @@ public class RetryCommandHandler implements CommandHandler {
             if (part.equals(flag)) return true;
         }
         return false;
+    }
+
+    /**
+     * Form dispatch on the anchor's {@code command_name} (M1-696). Only the
+     * exact {@code --full} marker selects the flat replay; EVERYTHING else
+     * takes the default categorized form. Equality against {@code "summary"}
+     * is deliberately NOT the test: anchor values were never normalized, so
+     * pre-existing rows read {@code '/summary'} with a leading slash
+     * (OutboundDeliveryCleanupIT, ChatMemoryPrunerTest), and those must
+     * replay categorized like any other default anchor.
+     */
+    private static boolean isFullFormAnchor(String commandName) {
+        return hasFlag(commandName, "--full");
     }
 
     private record ActorRow(UUID id, boolean isAdmin) {

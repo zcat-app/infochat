@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -43,8 +44,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <ol>
  *   <li>{@link #groupRetryReReadsTheGroupAnchor} — acceptance item 1+2: a
  *       group member's {@code /retry} re-renders their own group summary
- *       (cites the group's post) instead of the NO_ANCHOR reply, proving
- *       the read key now matches the {@code /summary} write key.</li>
+ *       (re-generated prose, categorized form per M1-696) instead of the
+ *       NO_ANCHOR reply, proving the read key now matches the
+ *       {@code /summary} write key.</li>
  *   <li>{@link #dmRetryStillReReadsTheDmAnchor} — acceptance item 2: the
  *       existing DM-scope {@code /retry} path is unchanged and still
  *       re-renders the caller's DM summary.</li>
@@ -143,8 +145,16 @@ class RetryCommandHandlerGroupScopeIT {
                 "group /retry must re-render the member's group summary, "
                         + "not the NO_ANCHOR reply (the read key now matches "
                         + "what /summary wrote). Got: " + retryBody);
-        assertTrue(retryBody.contains("GROUP RETRY HEADLINE"),
-                "the retried group summary must cite the group's post. Got: " + retryBody);
+        // M1-696: a bare /summary writes a default anchor, so /retry replays
+        // the CATEGORIZED form — section header + re-generated prose, no
+        // flat cluster block (no headline, no [topic_id=] marker).
+        assertTrue(retryBody.contains("OTHER NEWS"),
+                "the retried group summary must replay in the categorized "
+                        + "form the anchored /summary produced. Got: " + retryBody);
+        assertTrue(retryBody.contains("Group retry prose."),
+                "the retried group summary must re-generate the prose. Got: " + retryBody);
+        assertFalse(retryBody.contains("[topic_id="),
+                "a default anchor must not replay the flat cluster blocks. Got: " + retryBody);
     }
 
     @Test
@@ -175,8 +185,14 @@ class RetryCommandHandlerGroupScopeIT {
         assertNotEquals(noAnchorText(), retryBody,
                 "DM /retry must stay unchanged and re-render the caller's "
                         + "DM summary. Got: " + retryBody);
-        assertTrue(retryBody.contains("DM RETRY HEADLINE"),
-                "the retried DM summary must cite the DM-subscribed post. Got: " + retryBody);
+        // M1-696: same categorized replay as the group case (default anchor).
+        assertTrue(retryBody.contains("OTHER NEWS"),
+                "the retried DM summary must replay in the categorized form. "
+                        + "Got: " + retryBody);
+        assertTrue(retryBody.contains("DM retry prose."),
+                "the retried DM summary must re-generate the prose. Got: " + retryBody);
+        assertFalse(retryBody.contains("[topic_id="),
+                "a default anchor must not replay the flat cluster blocks. Got: " + retryBody);
     }
 
     @Test
@@ -214,8 +230,11 @@ class RetryCommandHandlerGroupScopeIT {
         String retryBody = sent.get(0).text();
         assertNotEquals(noAnchorText(), retryBody,
                 "the anchor /summary wrote must still be readable. Got: " + retryBody);
-        assertTrue(retryBody.contains("UNDATED RETRY HEADLINE"),
-                "the replayed summary must cite the undated post, so the absent "
+        // M1-696: the replay is categorized (default anchor); the NPE guard
+        // itself is the re-fetch mapper surviving published_at=null, which
+        // reaching this assertion at all proves.
+        assertTrue(retryBody.contains("Undated retry prose."),
+                "the replayed summary must re-generate the prose, so the absent "
                         + "publication date survives the re-fetch as null rather than "
                         + "throwing. Got: " + retryBody);
     }
