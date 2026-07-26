@@ -14,7 +14,20 @@ risk: low
 round_cap: 2
 security_relevant: false
 migration_touch: false
-out_of_scope: []
+out_of_scope:
+  - >-
+    The /summary render itself (M1-694, done): DigestRenderer output bytes,
+    bundle keys, and section-splitting logic are untouched — this ticket
+    changes which render form /retry replays, not how sections are built.
+  - >-
+    Per-section delivery of /summary (M1-695, done): /retry keeps returning a
+    single OutboundMessage; its delivery shape does not change.
+  - >-
+    /retry --digest (DigestRetryService) is untouched.
+  - >-
+    Any Flyway migration: the form is carried in the existing
+    summary_anchor.command_name column (TEXT NOT NULL, no CHECK constraint) —
+    no schema change is needed or permitted (no V63; V64 is already merged).
 acceptance: []
 test_plan:
   adds: []
@@ -84,10 +97,14 @@ TO BE WRITTEN. Carried forward from M1-687:
 
 ## Out-of-scope
 
-TO BE WRITTEN. At minimum: the `/summary` render itself (M1-694), per-section
-delivery (M1-695), `/retry --digest` (`DigestRetryService`), and any Flyway
-migration — the whole point of the `command_name` encoding is that none is
-needed.
+- The `/summary` render itself (M1-694, done): `DigestRenderer` output bytes,
+  bundle keys, and section-splitting logic are untouched — this ticket changes
+  which render form `/retry` replays, not how sections are built.
+- Per-section delivery of `/summary` (M1-695, done): `/retry` keeps returning a
+  single `OutboundMessage`; its delivery shape does not change.
+- `/retry --digest` (`DigestRetryService`) is untouched.
+- Any Flyway migration — the whole point of the `command_name` encoding is that
+  none is needed (no V63; V64 is already merged).
 
 ## Notes
 
