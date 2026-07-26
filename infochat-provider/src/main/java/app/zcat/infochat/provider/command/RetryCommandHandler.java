@@ -286,14 +286,26 @@ public class RetryCommandHandler implements CommandHandler {
             if ("short".equals(anchor.renderForm())) {
                 DigestRenderer.ShortResult shortResult =
                         digestRenderer.renderShortBody(clusters, scopeLanguage);
-                // --short failure reporting (redteam M1-700 kimi r1): emit
-                // the D43 degraded_notice when any roll-up came back empty,
-                // mirroring the /summary --short path — a silent wall of
-                // empty headers on replay is the same §Failure handling gap.
-                if (shortResult.anyRollupMissing()) {
-                    out.append(bundleLoader.get(
-                            BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE,
-                            inboundContext.effectiveLanguage()));
+                // --short failure reporting (redteam M1-700 kimi r1 +
+                // M1-703 honesty): mirror the /summary --short partial-vs-
+                // total distinction on replay — emit the degraded_notice on
+                // a total outage, the partial_degraded_notice naming the
+                // degraded subset on a partial one, so a /retry --short
+                // replay never contradicts the /summary the user just saw.
+                int shortDegraded = shortResult.clustersDegraded();
+                int shortTotal = shortResult.clustersTotal();
+                if (shortDegraded > 0) {
+                    if (shortDegraded == shortTotal) {
+                        out.append(bundleLoader.get(
+                                BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE,
+                                inboundContext.effectiveLanguage()));
+                    } else {
+                        out.append(MessageFormat.format(
+                                bundleLoader.get(BundleKeys.REPLY_SUMMARY_PARTIAL_DEGRADED_NOTICE,
+                                        inboundContext.effectiveLanguage()),
+                                String.valueOf(shortDegraded),
+                                String.valueOf(shortTotal)));
+                    }
                     out.append("\n\n");
                 }
                 out.append(shortResult.body());
@@ -301,9 +313,23 @@ public class RetryCommandHandler implements CommandHandler {
                 // Re-run the LLM prose layer (flat/full/bare).
                 List<ClusterProse> prose = summaryProseGenerator.generate(clusters, "en");
 
-                boolean anyDegraded = prose.stream().anyMatch(ClusterProse::degraded);
-                if (anyDegraded) {
-                    out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE, inboundContext.effectiveLanguage()));
+                // M1-703: mirror the /summary per-cluster partial-vs-total
+                // distinction on replay so /retry reports degradation
+                // identically to the /summary the user just saw.
+                int clustersTotal = prose.size();
+                int degradedClusters = (int) prose.stream().filter(ClusterProse::degraded).count();
+                if (degradedClusters > 0) {
+                    if (degradedClusters == clustersTotal) {
+                        out.append(bundleLoader.get(
+                                BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE,
+                                inboundContext.effectiveLanguage()));
+                    } else {
+                        out.append(MessageFormat.format(
+                                bundleLoader.get(BundleKeys.REPLY_SUMMARY_PARTIAL_DEGRADED_NOTICE,
+                                        inboundContext.effectiveLanguage()),
+                                String.valueOf(degradedClusters),
+                                String.valueOf(clustersTotal)));
+                    }
                     out.append("\n\n");
                 }
 

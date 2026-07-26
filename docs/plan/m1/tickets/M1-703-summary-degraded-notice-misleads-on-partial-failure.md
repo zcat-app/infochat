@@ -1,10 +1,36 @@
 ---
 id: M1-703
 title: "Summary degraded notice misleads when only some topics fail"
-status: pending
+status: done
 created: 2026-07-26
 last_updated: 2026-07-26
 blocked_by: []
+clarity_check:
+  date: 2026-07-26
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-07-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 384
+      removed: 61
+redteam_audits:
+  - date: 2026-07-26
+    gate: redteam-multi (user override; security_relevant: false)
+    auditors: [kimi, opencode]
+    verdict: CLEAN
+    findings: 0
+    evidence: docs/plan/m1/redteam-multi/M1-703-2026-07-26/
 files_budget: 8
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SummaryCommandHandler.java

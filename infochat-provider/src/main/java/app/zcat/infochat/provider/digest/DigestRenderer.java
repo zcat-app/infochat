@@ -313,20 +313,26 @@ public class DigestRenderer {
      * not per-section (the bare form's M1-695 per-section delivery is for
      * long sections). Acceptance pins content, not message count.
      *
-     * <p>Failure reporting: {@link ShortResult#anyRollupMissing()} is true
-     * when at least one category's roll-up came back empty (LLM outage,
-     * empty response, or REFUSAL marker). The caller prefixes the D43
-     * degraded_notice in that case so the user is NOT shown a silent wall
-     * of empty headers — the security.md §Failure handling promise that
-     * {@code --short}'s inherited optional-prefix containment alone did
-     * not honor (redteam M1-700 kimi r1).
+     * <p>Failure reporting: {@link ShortResult#clustersDegraded()} counts
+     * the clusters whose category roll-up came back empty (LLM outage,
+     * empty response, or REFUSAL marker) — every cluster in a failed
+     * category renders the deterministic degraded form, so the count is the
+     * subset of {@link ShortResult#clustersTotal()} the caller must be honest
+     * about. The caller distinguishes none / partial / total
+     * ({@code clustersDegraded() == clustersTotal()}) to emit the right
+     * notice: no notice, the partial one, or the D43 degraded_notice — so
+     * the user is NOT shown a silent wall of empty headers OR a "no prose"
+     * banner above a mostly-prose reply (security.md §Failure handling;
+     * redteam M1-700 kimi r1, M1-703).
      */
     public ShortResult renderShortBody(List<Cluster> clusters, String langCode) {
         List<CategorySection> sections = digestCategorizer.categorize(clusters);
         StringBuilder out = new StringBuilder();
-        boolean anyRollupMissing = false;
+        int clustersTotal = 0;
+        int clustersDegraded = 0;
         for (int sectionIdx = 0; sectionIdx < sections.size(); sectionIdx++) {
             CategorySection section = sections.get(sectionIdx);
+            clustersTotal += section.clusters().size();
             if (sectionIdx > 0) {
                 out.append("\n\n");
             }
@@ -345,7 +351,7 @@ public class DigestRenderer {
                 // per-cluster degradedProseFor carries the M1-697 title
                 // redaction (one author's field per sanitize call), so a
                 // command-shaped feed title is redacted here too.
-                anyRollupMissing = true;
+                clustersDegraded += section.clusters().size();
                 for (Cluster c : section.clusters()) {
                     out.append("\n\n").append(
                             SummaryProseGenerator.degradedProseFor(c, llmOutputSanitizer));
@@ -353,17 +359,19 @@ public class DigestRenderer {
             }
             out.append("\n\n").append(shortFooter(section, langCode));
         }
-        return new ShortResult(out.toString(), anyRollupMissing);
+        return new ShortResult(out.toString(), clustersTotal, clustersDegraded);
     }
 
     /**
-     * Result of {@link #renderShortBody}: the rendered body plus whether any
-     * category's roll-up came back empty (the caller's signal to emit the
-     * degraded_notice). The body is always complete enough to deliver
-     * (headers + footers ride even when a roll-up failed); the flag is the
-     * honesty signal, not a delivery gate.
+     * Result of {@link #renderShortBody}: the rendered body plus the cluster
+     * counts the caller uses to pick the honesty signal. The body is always
+     * complete enough to deliver (headers + footers ride even when a roll-up
+     * failed); {@code clustersDegraded == 0} means every roll-up succeeded,
+     * {@code clustersDegraded == clustersTotal} means a total outage, and
+     * anything between is a partial outage (M1-703): the caller emits the
+     * partial notice rather than the total "no prose" banner.
      */
-    public record ShortResult(String body, boolean anyRollupMissing) {}
+    public record ShortResult(String body, int clustersTotal, int clustersDegraded) {}
 
     /**
      * The {@code --short} per-category footer. Real categories steer to

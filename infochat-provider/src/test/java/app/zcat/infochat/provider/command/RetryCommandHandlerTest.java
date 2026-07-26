@@ -461,6 +461,116 @@ class RetryCommandHandlerTest {
     }
 
     /**
+     * M1-703 acceptance item 3 — {@code /retry} against a per-cluster anchor
+     * (bare/full/flat) with SOME clusters degraded on the re-roll must NOT
+     * claim total degradation. The replay mirrors the {@code /summary}
+     * partial-vs-total distinction so {@code /retry} never contradicts the
+     * {@code /summary} the user just saw.
+     */
+    @Test
+    void perClusterReplayPartialDegradationShowsPartialNoticeNotTotalNotice() {
+        // 3 clusters in the anchored map; the re-roll degrades only the first.
+        List<String> postUids = new ArrayList<>();
+        StringBuilder json = new StringBuilder("[");
+        for (int i = 0; i < 3; i++) {
+            String uid = PREFIX + "pcrep" + i;
+            postUids.add(uid);
+            if (i > 0) json.append(",");
+            json.append("{\"topicId\":\"t-pcrep").append(i).append("\",\"postUids\":[\"").append(uid).append("\"]}");
+        }
+        json.append("]");
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "bare", "hash", postUids, json.toString());
+
+        Instant now = Instant.now();
+        List<Post> readyPosts = new ArrayList<>();
+        for (int i = 0; i < postUids.size(); i++) {
+            String uid = postUids.get(i);
+            readyPosts.add(post(uid, "Replay headline " + uid, now.minus(Duration.ofMinutes(i + 1L))));
+        }
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, readyPosts);
+        proseGenerator.responseText = "Healthy replay prose.";
+        proseGenerator.setDegradeFirstN(1);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(PREFIX + "pcretry"), "/retry");
+
+        assertEquals(3, proseGenerator.callCount,
+                "the per-cluster replay re-rolls prose for all 3 anchored clusters");
+
+        String text = reply.text();
+        assertFalse(text.contains("no prose"),
+                "a partial per-cluster replay must NOT claim 'no prose'. Got: " + text);
+        assertFalse(text.contains("LLM is unreachable"),
+                "a partial per-cluster replay must NOT prefix the total degraded_notice. Got: " + text);
+        assertTrue(text.contains("1 of 3 topics"),
+                "a partial per-cluster replay must name the degraded subset honestly. Got: " + text);
+        assertTrue(text.contains("Healthy replay prose."),
+                "the healthy clusters carry their re-rolled prose. Got: " + text);
+    }
+
+    /**
+     * M1-703 acceptance item 3 ({@code --short} arm) — {@code /retry} against
+     * a {@code short} anchor with SOME categories' roll-ups failing on the
+     * re-roll must NOT claim total degradation. Mirrors the {@code /summary
+     * --short} partial-vs-total distinction so the replay stays in lockstep
+     * with the original {@code /summary}.
+     */
+    @Test
+    void shortReplayPartialDegradationShowsPartialNoticeNotTotalNotice() {
+        // Two categories (alpha + beta), each with 3 clusters. The cluster
+        // map carries all 6; the re-roll fails only the first roll-up call.
+        List<String> postUids = new ArrayList<>();
+        StringBuilder json = new StringBuilder("[");
+        String[] tags = {PREFIX + "alpha", PREFIX + "beta"};
+        for (int t = 0; t < tags.length; t++) {
+            for (int i = 0; i < 3; i++) {
+                String uid = PREFIX + "shr" + t + i;
+                postUids.add(uid);
+                if (!(t == 0 && i == 0)) json.append(",");
+                json.append("{\"topicId\":\"t-shr").append(t).append(i)
+                        .append("\",\"postUids\":[\"").append(uid).append("\"]}");
+            }
+        }
+        json.append("]");
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary --short", "short", "hash", postUids, json.toString());
+
+        Instant now = Instant.now();
+        List<Post> readyPosts = new ArrayList<>();
+        int idx = 0;
+        int minOffset = 0;
+        for (String tag : tags) {
+            for (int i = 0; i < 3; i++) {
+                String uid = postUids.get(idx++);
+                readyPosts.add(post(uid, "Short-replay headline " + uid,
+                        now.minus(Duration.ofMinutes(++minOffset)), List.of(tag)));
+            }
+        }
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, readyPosts);
+        proseGenerator.responseText = "Should NOT be called on --short replay.";
+        rollupGenerator.setResponseText("Roll-up replay synthesis.");
+        // Fail ONLY the first category's roll-up; the second succeeds.
+        rollupGenerator.setReturnEmptyForFirstCalls(1);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(PREFIX + "shrretry"), "/retry");
+
+        assertEquals(0, proseGenerator.callCount,
+                "a 'short' anchor replay must NOT call SummaryProseGenerator");
+        assertEquals(2, rollupGenerator.callCount(),
+                "one roll-up call per category (alpha + beta). Got: " + rollupGenerator.callCount());
+
+        String text = reply.text();
+        assertFalse(text.contains("no prose"),
+                "a partial --short replay must NOT claim 'no prose'. Got: " + text);
+        assertFalse(text.contains("LLM is unreachable"),
+                "a partial --short replay must NOT prefix the total degraded_notice. Got: " + text);
+        assertTrue(text.contains("3 of 6 topics"),
+                "a partial --short replay must name the degraded subset honestly. Got: " + text);
+        assertTrue(text.contains("Roll-up replay synthesis."),
+                "the successful category still carries its roll-up. Got: " + text);
+    }
+
+    /**
      * Acceptance item 6 — {@code /retry} against a {@code render_form='full'}
      * anchor replays categorized sections with ALL clusters (no 12-cap),
      * matching the {@code /summary --full} shape. 14 clusters exceed
@@ -597,6 +707,14 @@ class RetryCommandHandlerTest {
                 publishedAt, List.of("test-tag"), List.of("unknown"));
     }
 
+    /** Tag-parameterized variant so the M1-703 --short replay test can seed distinct category tags. */
+    private static Post post(String uid, String title, Instant publishedAt, List<String> tags) {
+        return new Post(
+                UUID.randomUUID(), uid, UUID.randomUUID(), "TestSrc",
+                title, "https://example.com/" + uid, "Body for " + title,
+                publishedAt, tags, List.of("unknown"));
+    }
+
     private static class StubAnchorRepository extends SummaryAnchorRepository {
         private AnchorRow seeded = null;
         int incrementCallCount = 0;
@@ -637,13 +755,19 @@ class RetryCommandHandlerTest {
     private static class RecordingProseGenerator extends SummaryProseGenerator {
         int callCount = 0;
         String responseText = "default retry prose";
+        // M1-703: degrade only the first N clusters (partial outage).
+        int degradeFirstN = 0;
+
+        void setDegradeFirstN(int n) { this.degradeFirstN = n; }
 
         @Override
         public List<ClusterProse> generate(List<Cluster> clusters, String scopeLanguage) {
             List<ClusterProse> out = new ArrayList<>();
-            for (Cluster c : clusters) {
+            for (int i = 0; i < clusters.size(); i++) {
+                Cluster c = clusters.get(i);
                 callCount++;
-                out.add(new ClusterProse(c, responseText, false));
+                boolean degraded = degradeFirstN > 0 && i < degradeFirstN;
+                out.add(new ClusterProse(c, degraded ? "degraded replay prose" : responseText, degraded));
             }
             return out;
         }
@@ -662,6 +786,8 @@ class RetryCommandHandlerTest {
         private volatile String responseText = "roll-up synthesis";
         // Simulate a summarizer outage (redteam M1-700 kimi r1).
         private volatile boolean returnEmpty = false;
+        // M1-703: return empty for only the first N roll-up calls (partial).
+        private volatile int returnEmptyForFirstCalls = 0;
 
         void setResponseText(String text) {
             this.responseText = text;
@@ -671,11 +797,19 @@ class RetryCommandHandlerTest {
             this.returnEmpty = empty;
         }
 
+        /** M1-703: empty roll-up for the first N calls only (partial outage). */
+        void setReturnEmptyForFirstCalls(int n) {
+            this.returnEmptyForFirstCalls = n;
+        }
+
         @Override
         public Optional<String> generateRollupUnconditional(List<Cluster> clusters, String langCode) {
-            callCount.incrementAndGet();
+            int n = callCount.incrementAndGet();
             clusterCounts.add(clusters.size());
-            return returnEmpty ? Optional.empty() : Optional.of(responseText);
+            if (returnEmpty || (returnEmptyForFirstCalls > 0 && n <= returnEmptyForFirstCalls)) {
+                return Optional.empty();
+            }
+            return Optional.of(responseText);
         }
 
         int callCount() { return callCount.get(); }

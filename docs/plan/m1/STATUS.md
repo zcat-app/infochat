@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 716 |
+| done | 717 |
 | deferred | 0 |
 | abandoned | 20 |
 | **total** | **738** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-702 — Ban infochat-messaging-adapter from infochat-core (complexity: low, risk: low)
-- M1-703 — Summary degraded notice misleads when only some topics fail (complexity: low, risk: low)
 
 ---
 
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-703 | Summary degraded notice misleads when only some topics fail | 2026-07-26 | round 1 APPROVE |
 | M1-701 | digest overflow line steers to /summary --full, not @mention | 2026-07-26 | round 1 APPROVE |
 | M1-700 | summary render forms --short/--full/--flat (4-mode) | 2026-07-26 | round 1 APPROVE |
 | M1-699 | summary_anchor render_form column + typed /retry dispatch | 2026-07-26 | round 1 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-695 | Deliver the default /summary as one message per category section | 2026-07-25 | round 1 APPROVE |
 | M1-694 | /summary renders the categorized form by default; --full keeps the flat form | 2026-07-25 | round 2 APPROVE |
 | M1-693 | Normalize post.title at ingest: empty, content-as-title, and unbounded length | 2026-07-25 | round 1 APPROVE |
-| M1-692 | Pin the NULL-ordering property at the three uncovered sort sites | 2026-07-25 | round 1 APPROVE |
 
 ---
 
@@ -940,5 +939,5 @@ M1-699 (done)
   └── M1-700 (done)
         └── M1-701 (done)
 M1-702 (pending) ← runnable
-M1-703 (pending) ← runnable
+M1-703 (done)
 ```

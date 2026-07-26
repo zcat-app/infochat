@@ -416,18 +416,28 @@ public class SummaryCommandHandler implements CommandHandler {
                             actorId, scopeKind, scopeId.get(),
                             "summary --short", args.form().anchorValue(),
                             argHash, postUids, clusterMapJson);
-                    // --short failure reporting (redteam M1-700 kimi r1):
-                    // when a category's roll-up came back empty (LLM outage,
-                    // empty response, REFUSAL), the body carries that
-                    // category's header + footer but no roll-up line. Emit
-                    // the D43 degraded_notice so the user is NOT shown a
-                    // silent wall of empty headers — the security.md
-                    // §Failure handling promise the inherited
-                    // optional-prefix containment alone did not honor.
-                    if (shortResult.anyRollupMissing()) {
-                        prefixes.append(bundleLoader.get(
-                                BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE,
-                                inboundContext.effectiveLanguage()));
+                    // --short failure reporting (redteam M1-700 kimi r1 +
+                    // M1-703 honesty): when a category's roll-up came back
+                    // empty (LLM outage, empty response, REFUSAL), the body
+                    // carries that category's header + the per-cluster
+                    // degraded form but no roll-up line. Emit the D43
+                    // degraded_notice on a TOTAL outage so the user is NOT
+                    // shown a silent wall of empty headers — but on a PARTIAL
+                    // outage emit the partial_degraded_notice naming the
+                    // degraded subset, so a mostly-roll-up reply is not led
+                    // by a "no prose" banner. security.md §Failure handling.
+                    int shortDegraded = shortResult.clustersDegraded();
+                    int shortTotal = shortResult.clustersTotal();
+                    if (shortDegraded > 0) {
+                        if (shortDegraded == shortTotal) {
+                            prefixes.append(bundleLoader.get(
+                                    BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE,
+                                    inboundContext.effectiveLanguage()));
+                        } else {
+                            prefixes.append(format(
+                                    BundleKeys.REPLY_SUMMARY_PARTIAL_DEGRADED_NOTICE,
+                                    shortDegraded, shortTotal));
+                        }
                         prefixes.append("\n\n");
                     }
                     progressNotifier.publish(scope, ProgressStage.FINALIZING);
@@ -458,9 +468,24 @@ public class SummaryCommandHandler implements CommandHandler {
                         progressNotifier.publish(scope, ProgressStage.TRANSLATING);
                     }
 
-                    boolean anyDegraded = prose.stream().anyMatch(ClusterProse::degraded);
-                    if (anyDegraded) {
-                        prefixes.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE, inboundContext.effectiveLanguage()));
+                    // M1-703: distinguish partial from total degradation.
+                    // The degraded_notice copy ("...no prose") is honest only
+                    // when EVERY cluster degraded; a partial outage (some
+                    // prose, some degraded) gets the partial_degraded_notice
+                    // naming the degraded subset, so the reply does not claim
+                    // "no prose" above a body that is mostly prose.
+                    int clustersTotal = prose.size();
+                    int degradedClusters = (int) prose.stream().filter(ClusterProse::degraded).count();
+                    if (degradedClusters > 0) {
+                        if (degradedClusters == clustersTotal) {
+                            prefixes.append(bundleLoader.get(
+                                    BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE,
+                                    inboundContext.effectiveLanguage()));
+                        } else {
+                            prefixes.append(format(
+                                    BundleKeys.REPLY_SUMMARY_PARTIAL_DEGRADED_NOTICE,
+                                    degradedClusters, clustersTotal));
+                        }
                         prefixes.append("\n\n");
                     }
 

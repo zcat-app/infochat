@@ -608,6 +608,17 @@ public final class BundleKeys {
     public static final String REPLY_SUMMARY_DEGRADED_NOTICE = "reply.summary.degraded_notice";
 
     /**
+     * Partial degradation (M1-703): SOME clusters' prose degraded while the
+     * rest returned full synthesized prose. Reply prefix naming the degraded
+     * subset honestly, so a mostly-prose reply is not preceded by a
+     * "no prose" banner (the {@link #REPLY_SUMMARY_DEGRADED_NOTICE} copy is
+     * accurate only when ALL clusters degrade). Two interpolation tokens:
+     * {@code {0}} = degraded count, {@code {1}} = total cluster count.
+     */
+    public static final String REPLY_SUMMARY_PARTIAL_DEGRADED_NOTICE =
+            "reply.summary.partial_degraded_notice";
+
+    /**
      * Window over the summarizer post cap (M1-623): reply prefix
      * announcing the explicit-decision degraded form + the narrow-with--w
      * steer. Two interpolation tokens: {@code {0}} = total eligible posts

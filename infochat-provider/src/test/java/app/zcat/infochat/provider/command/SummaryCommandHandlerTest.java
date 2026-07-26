@@ -497,6 +497,57 @@ class SummaryCommandHandlerTest {
     }
 
     /**
+     * M1-703 — {@code /summary --short} PARTIAL outage (some categories'
+     * roll-ups fail, the rest succeed) must NOT prefix the total
+     * "no prose" degraded_notice. The partial_degraded_notice names the
+     * degraded subset (clusters in the failed categories) honestly instead.
+     * The total case is pinned by
+     * {@link #shortFormEmitsDegradedNoticeWhenRollupFails}; this pins the
+     * partial case the ANY-degraded predicate used to misrepresent.
+     */
+    @Test
+    void shortFormPartialDegradationShowsPartialNoticeNotTotalNotice() {
+        Instant now = Instant.now();
+        List<Post> posts = new ArrayList<>();
+        // 3 alpha posts clear categoryMinClusters (3) → real alpha category;
+        // 3 beta posts → real beta category. Two roll-up calls total.
+        for (int i = 0; i < 3; i++) {
+            posts.add(post(PREFIX + "spa" + i, "Alpha headline " + i,
+                    now.minus(Duration.ofMinutes(i + 1L)), List.of(PREFIX + "alpha")));
+            posts.add(post(PREFIX + "spb" + i, "Beta headline " + i,
+                    now.minus(Duration.ofMinutes(i + 10L)), List.of(PREFIX + "beta")));
+        }
+        eligiblePostQuery.seedPosts(posts, /* excludedCount */ 0);
+        proseGenerator.setResponseText("Should NOT be called on --short.");
+        rollupGenerator.setResponseText("Roll-up synthesis.");
+        // Fail ONLY the first category's roll-up; the second succeeds.
+        rollupGenerator.setReturnEmptyForFirstCalls(1);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "shpdeg"), "/summary --short");
+        assertNull(reply, "terminal --short self-delivers via the notifier and returns null");
+
+        assertEquals(2, rollupGenerator.callCount(),
+                "one roll-up call per category (alpha + beta). Got: " + rollupGenerator.callCount());
+        assertEquals(0, proseGenerator.callCount(),
+                "--short makes NO SummaryProseGenerator call even on the partial-degraded path");
+
+        String body = progressNotifier.completedText();
+        assertNotNull(body);
+        assertFalse(body.contains("no prose"),
+                "partial --short degradation must NOT claim 'no prose'. Got: " + body);
+        assertFalse(body.contains("LLM is unreachable"),
+                "partial --short degradation must NOT prefix the total degraded_notice. Got: " + body);
+        assertTrue(body.contains("3 of 6 topics"),
+                "partial --short degradation must name the degraded subset honestly. Got: " + body);
+        // The failed category's clusters render the D17 degraded form
+        // (headline + URL); the successful category carries the roll-up.
+        assertTrue(body.contains("Alpha headline 0"),
+                "the failed-category clusters still render their headlines (D17 form). Got: " + body);
+        assertTrue(body.contains("Roll-up synthesis."),
+                "the successful category still carries its roll-up. Got: " + body);
+    }
+
+    /**
      * Acceptance item 3 — {@code /summary --full} renders categorized
      * sections showing ALL clusters with NO 12-per-section cap and NO
      * "+N more" overflow line. 14 alpha clusters exceed categoryItemCap
@@ -986,6 +1037,48 @@ class SummaryCommandHandlerTest {
                 "degraded prose includes the headline");
     }
 
+    /**
+     * M1-703 acceptance item 1 — a {@code /summary} (bare, --full, --flat)
+     * with SOME clusters degraded and the rest carrying full synthesized
+     * prose must NOT prefix the total "no prose" degraded_notice. The
+     * partial_degraded_notice names the degraded subset honestly. The total
+     * case (all degraded) is pinned by
+     * {@link #llmUnreachableYieldsDegradedFallbackReply} above; this pins
+     * the partial case the ANY-degraded predicate used to misrepresent as
+     * a total outage.
+     */
+    @Test
+    void partialClusterDegradationShowsPartialNoticeNotTotalNotice() {
+        Instant now = Instant.now();
+        List<Post> posts = List.of(
+                post(PREFIX + "pd1", "Degraded headline", now.minus(Duration.ofMinutes(1))),
+                post(PREFIX + "pd2", "Healthy headline B", now.minus(Duration.ofMinutes(2))),
+                post(PREFIX + "pd3", "Healthy headline C", now.minus(Duration.ofMinutes(3))));
+        eligiblePostQuery.seedPosts(posts, /* excludedCount */ 0);
+        proseGenerator.setResponseText("Full prose for the cluster.");
+        // Degrade ONLY the first cluster; the other two keep full prose.
+        proseGenerator.setDegradeFirstN(1);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "pdeg"), "/summary");
+        assertNull(reply, "terminal /summary self-delivers and returns null");
+
+        String body = progressNotifier.completedText();
+        assertNotNull(body);
+        assertFalse(body.contains("no prose"),
+                "partial degradation must NOT claim 'no prose'. Got: " + body);
+        assertFalse(body.contains("LLM is unreachable"),
+                "partial degradation must NOT prefix the total degraded_notice. Got: " + body);
+        assertTrue(body.contains("1 of 3 topics"),
+                "partial degradation must name the degraded subset honestly. Got: " + body);
+        // The degraded cluster rides its headline (D17 form); the healthy
+        // clusters carry their synthesized prose — proving the body is NOT
+        // "no prose" as the old banner claimed.
+        assertTrue(body.contains("Degraded headline"),
+                "the degraded cluster still renders its headline. Got: " + body);
+        assertTrue(body.contains("Full prose for the cluster."),
+                "the healthy clusters carry full synthesized prose. Got: " + body);
+    }
+
     @Test
     void errorEscapingGenerationStillFinalizesNotifierAndReleasesSlot() {
         eligiblePostQuery.seedPosts(
@@ -1334,6 +1427,10 @@ class SummaryCommandHandlerTest {
         private final AtomicInteger callCount = new AtomicInteger();
         private String responseText = "default test summary";
         private boolean degradedMode = false;
+        // M1-703: degrade only the first N clusters (partial outage), so a
+        // test can assert the partial-degradation path that all-degraded
+        // mode cannot exercise.
+        private int degradeFirstN = 0;
         private boolean throwErrorOnGenerate = false;
         private boolean throwRuntimeOnGenerate = false;
         private @Nullable Runnable beforeGenerate;
@@ -1349,6 +1446,11 @@ class SummaryCommandHandlerTest {
 
         void setDegradedMode(boolean degraded) {
             this.degradedMode = degraded;
+        }
+
+        /** M1-703: degrade only the first N clusters (partial outage). */
+        void setDegradeFirstN(int n) {
+            this.degradeFirstN = n;
         }
 
         /**
@@ -1405,13 +1507,13 @@ class SummaryCommandHandlerTest {
                 throw new OutOfMemoryError("test-injected error during generate");
             }
             List<ClusterProse> out = new ArrayList<>(clusters.size());
-            for (Cluster c : clusters) {
+            for (int i = 0; i < clusters.size(); i++) {
+                Cluster c = clusters.get(i);
                 callCount.incrementAndGet();
-                if (degradedMode) {
-                    out.add(new ClusterProse(c, SummaryProseGenerator.degradedProseFor(c, degradedSanitizer), true));
-                } else {
-                    out.add(new ClusterProse(c, responseText, false));
-                }
+                boolean degraded = degradedMode || (degradeFirstN > 0 && i < degradeFirstN);
+                out.add(new ClusterProse(c,
+                        degraded ? SummaryProseGenerator.degradedProseFor(c, degradedSanitizer) : responseText,
+                        degraded));
             }
             return out;
         }
@@ -1532,6 +1634,10 @@ class SummaryCommandHandlerTest {
         // Simulate a summarizer outage (every roll-up returns empty), to
         // exercise the --short degraded-notice path (redteam M1-700 kimi r1).
         private volatile boolean returnEmpty = false;
+        // M1-703: return empty for only the first N roll-up calls, so a test
+        // can exercise the PARTIAL --short outage (some categories degrade,
+        // the rest succeed).
+        private volatile int returnEmptyForFirstCalls = 0;
 
         void setResponseText(String text) {
             this.responseText = text;
@@ -1541,11 +1647,19 @@ class SummaryCommandHandlerTest {
             this.returnEmpty = empty;
         }
 
+        /** M1-703: empty roll-up for the first N calls only (partial outage). */
+        void setReturnEmptyForFirstCalls(int n) {
+            this.returnEmptyForFirstCalls = n;
+        }
+
         @Override
         public Optional<String> generateRollupUnconditional(List<Cluster> clusters, String langCode) {
-            callCount.incrementAndGet();
+            int n = callCount.incrementAndGet();
             clusterCounts.add(clusters.size());
-            return returnEmpty ? Optional.empty() : Optional.of(responseText);
+            if (returnEmpty || (returnEmptyForFirstCalls > 0 && n <= returnEmptyForFirstCalls)) {
+                return Optional.empty();
+            }
+            return Optional.of(responseText);
         }
 
         int callCount() { return callCount.get(); }
