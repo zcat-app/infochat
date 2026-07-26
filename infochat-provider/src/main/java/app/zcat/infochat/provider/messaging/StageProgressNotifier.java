@@ -271,6 +271,26 @@ public class StageProgressNotifier implements ProgressNotifier {
         terminate(inboundContext.operationId(), scope, failedText());
     }
 
+    /**
+     * Deliver a standalone fresh message on the bound adapter — the
+     * follow-on messages of a multi-message terminal delivery (M1-695:
+     * {@code /summary}'s default form goes out as one message per category
+     * section; the placeholder is finalized with the first section via
+     * {@link #complete}, and the remaining sections ride this method).
+     * Touches no placeholder state: the send goes straight through the
+     * outbound chokepoint, which absorbs transport failures (retry/abort)
+     * internally, exactly like {@link #terminate}'s no-handle branch.
+     * Not part of the {@link ProgressNotifier} SPI — same precedent as
+     * {@link #completeDelivered}.
+     *
+     * @return whether the send was accepted by the chokepoint (a handle
+     *         came back), {@code false} on a permanent/exhausted abort.
+     */
+    public boolean deliverFresh(ScopeRef scope, String text) {
+        MessagingAdapter adapter = resolveAdapter();
+        return outboundDelivery.deliver(adapter, outbound(scope, text)) != null;
+    }
+
     private String failedText() {
         return bundleLoader.get(BundleKeys.PROGRESS_FAILED, inboundContext.effectiveLanguage());
     }

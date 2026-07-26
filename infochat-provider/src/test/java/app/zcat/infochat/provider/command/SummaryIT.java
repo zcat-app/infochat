@@ -21,6 +21,7 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -164,8 +165,9 @@ class SummaryIT {
         // zero-finalize negative asserts.
         awaitDispatchIdle();
 
-        // The gate branch is a plain guard reply through the router —
-        // no ProgressNotifier placeholder lifecycle.
+        // M1-695: the default-form gate branch self-delivers its single
+        // category section as one fresh send via the notifier — still no
+        // placeholder lifecycle on the over-cap path.
         List<OutboundMessage> sent = adapter.sentMessages();
         assertEquals(1, sent.size(), "exactly one direct guard reply");
         assertEquals(0, adapter.finalizedBodies().size(),
@@ -212,6 +214,64 @@ class SummaryIT {
                 "degraded prose includes the headline");
         assertTrue(body.contains(PREFIX + "p1"),
                 "degraded prose includes the post UID");
+    }
+
+    /**
+     * M1-695 end-to-end: the default /summary is delivered as ONE
+     * outbound message per category section. Three news posts clear
+     * {@code infochat.digest.category-min-clusters} (3) and form a real
+     * NEWS section; the two tech posts fold into Other (Other always
+     * last). The placeholder is finalized with the first section and the
+     * remaining section arrives as a fresh send — so the adapter records
+     * two sends and one in-place finalize, and no section's bytes leak
+     * into another section's message.
+     */
+    @Test
+    void defaultSummaryDeliversOneMessagePerCategorySection() throws Exception {
+        UUID userId = insertUser(USER_CONTACT_ID);
+        UUID source1Id = insertSource(PREFIX + "src-1", "MvpNews");
+        UUID source2Id = insertSource(PREFIX + "src-2", "MvpTech");
+        insertSubscription(userId, source1Id);
+        insertSubscription(userId, source2Id);
+
+        Instant now = Instant.now();
+        insertPost(PREFIX + "p1", source1Id, "MVP headline 1", now.minus(Duration.ofMinutes(1)),
+                "READY", new String[] { PREFIX + "news" });
+        insertPost(PREFIX + "p2", source1Id, "MVP headline 2", now.minus(Duration.ofMinutes(2)),
+                "READY", new String[] { PREFIX + "news" });
+        insertPost(PREFIX + "p3", source1Id, "MVP headline 3", now.minus(Duration.ofMinutes(3)),
+                "READY", new String[] { PREFIX + "news" });
+        insertPost(PREFIX + "p4", source2Id, "MVP headline 4", now.minus(Duration.ofMinutes(4)),
+                "READY", new String[] { PREFIX + "tech" });
+        insertPost(PREFIX + "p5", source2Id, "MVP headline 5", now.minus(Duration.ofMinutes(5)),
+                "READY", new String[] { PREFIX + "tech" });
+
+        mockLlm.setResponseText("Fixed prose blob per cluster.");
+
+        adapter.deliverDm(USER_CONTACT_ID, "/summary -w 24h");
+        awaitDispatchIdle();
+
+        List<OutboundMessage> sent = adapter.sentMessages();
+        assertEquals(2, sent.size(),
+                "two category sections → placeholder send + one fresh section send");
+        List<String> finalized = adapter.finalizedBodies();
+        assertEquals(1, finalized.size(),
+                "the placeholder is finalized with the FIRST section");
+        assertEquals(5, mockLlm.callCount(),
+                "one LLM call per singleton cluster, unchanged by the delivery split");
+
+        String first = finalized.get(0);
+        String newsHeader = (PREFIX + "news news").toUpperCase(Locale.ROOT);
+        String otherHeader = "OTHER NEWS";
+        assertTrue(first.contains(newsHeader),
+                "the finalized first message is the NEWS category section. Got: " + first);
+        assertFalse(first.contains(otherHeader),
+                "sections never merge — the first message carries no Other content. Got: " + first);
+        String second = sent.get(1).text();
+        assertTrue(second.contains(otherHeader),
+                "the follow-on fresh send is the Other section. Got: " + second);
+        assertFalse(second.contains(newsHeader),
+                "sections never merge — the second message carries no NEWS content. Got: " + second);
     }
 
     // ----- helpers ------------------------------------------------------

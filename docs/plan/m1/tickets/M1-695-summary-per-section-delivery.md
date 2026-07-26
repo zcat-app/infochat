@@ -1,7 +1,7 @@
 ---
 id: M1-695
 title: "Deliver the default /summary as one message per category section"
-status: pending
+status: done
 created: 2026-07-25
 last_updated: 2026-07-25
 blocked_by:
@@ -36,17 +36,37 @@ acceptance:
     (M1-334 / M1-611) must not regress, and no placeholder is left dangling.
   - The over-cap degraded form is delivered per-section too.
 test_plan:
-  adds: []
+  adds:
+    - SummaryCommandHandlerTest#defaultSummaryDeliversOneMessagePerCategorySection
+    - SummaryCommandHandlerTest#overCapDefaultFormDeliversPerSectionViaFreshSends
+    - SummaryIT#defaultSummaryDeliversOneMessagePerCategorySection
   preserves:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 411
+      removed: 104
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-25
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 
@@ -96,6 +116,22 @@ Verify per fixture; do not assume in either direction.
 matching if any one matches — verified unaffected by per-section delivery,
 but give it a row.
 
+Disposition (re-verified 2026-07-25 on branch m1/M1-695):
+
+- `SummaryIT`: the MVP flow uses `--full` (single message, unchanged);
+  the over-cap fixture's 6 posts share one tag → one section → one fresh
+  send, so `sentMessages==1` / `finalizedBodies==0` hold; the
+  degraded-fallback fixture is one post → one section. A new
+  two-section test pins the per-section shape end to end.
+- `TranslationPipelineIT:134-135,186-187`: 2 posts sharing one tag
+  (< min-clusters 3) → single Other section; counts hold.
+- `SummaryAdapterScopeIT:113-116`: `--full` flow; unchanged.
+- `SummaryGroupScopeIT:138`: `--full` flow; unchanged.
+- `GoldenPathJourneyIT:245-246`: one seeded READY post → one section;
+  the single finalized body holds.
+- `InMemoryConversationBackend`: watermark helper; per-section delivery
+  only adds more match candidates since the mark — no change.
+
 ## Acceptance
 
 Carried forward from M1-687 (now in frontmatter):
@@ -141,3 +177,18 @@ whole reason this is its own ticket:
   seam.
 - The obvious shape is: finalize the placeholder with the first section, send
   the rest as fresh messages.
+
+Implementation records (2026-07-25):
+
+- **Seam chosen: option 2** — the handler injects the concrete
+  `StageProgressNotifier` and delivers follow-on sections via a new public
+  non-SPI `deliverFresh(scope, text)`, the `completeDelivered` precedent
+  (also `InboundRouter`'s concrete injection). Option 1 would widen the
+  messaging-module SPI for one caller; option 3 would duplicate
+  `StageProgressNotifier.resolveAdapter`. `RecordingProgressNotifier`
+  became a `StageProgressNotifier` subclass, as budgeted.
+- **Closing-affordance acceptance item, resolved:** it predates M1-694,
+  which settled that `/summary` emits NO closing affordance (commands.md
+  §Periodic group digests). The item is satisfied as the no-duplication
+  invariant: the leading prefixes ride on the first message exactly once
+  and no trailer repeats per message.

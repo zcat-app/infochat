@@ -346,6 +346,100 @@ class SummaryCommandHandlerTest {
     }
 
     /**
+     * M1-695 acceptance: the default form is delivered as ONE outbound
+     * message per category section — the placeholder is finalized with
+     * the first section and each remaining section goes out as a fresh
+     * send, in section order (assigned-cluster count descending, Other
+     * last). Three alpha posts clear categoryMinClusters (3) and form a
+     * real category; the two beta posts fold into Other.
+     */
+    @Test
+    void defaultSummaryDeliversOneMessagePerCategorySection() {
+        Instant now = Instant.now();
+        List<Post> posts = List.of(
+                post(PREFIX + "sa1", "Alpha one", now.minus(Duration.ofMinutes(1)),
+                        List.of(PREFIX + "alpha")),
+                post(PREFIX + "sa2", "Alpha two", now.minus(Duration.ofMinutes(2)),
+                        List.of(PREFIX + "alpha")),
+                post(PREFIX + "sa3", "Alpha three", now.minus(Duration.ofMinutes(3)),
+                        List.of(PREFIX + "alpha")),
+                post(PREFIX + "sb1", "Beta one", now.minus(Duration.ofMinutes(4)),
+                        List.of(PREFIX + "beta")),
+                post(PREFIX + "sb2", "Beta two", now.minus(Duration.ofMinutes(5)),
+                        List.of(PREFIX + "beta")));
+        eligiblePostQuery.seedPosts(posts, /* excludedCount */ 0);
+        proseGenerator.setResponseText("Section prose.");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "sect"), "/summary");
+        assertNull(reply, "terminal /summary self-delivers via the notifier and returns null");
+
+        assertEquals(5, proseGenerator.callCount(), "one LLM call per cluster");
+        String first = progressNotifier.completedText();
+        assertNotNull(first, "the placeholder is finalized with the FIRST section");
+        assertEquals(1, progressNotifier.freshSends().size(),
+                "two sections → exactly one follow-on fresh send");
+        String second = progressNotifier.freshSends().get(0);
+        String alphaHeader = (PREFIX + "alpha news").toUpperCase(Locale.ROOT);
+        String otherHeader = bundleLoader.get(BundleKeys.REPLY_DIGEST_CATEGORY_OTHER, "en")
+                .toUpperCase(Locale.ROOT);
+        assertTrue(first.contains(alphaHeader),
+                "the first message is the alpha category section. Got: " + first);
+        assertFalse(first.contains(otherHeader),
+                "sections never merge — the first message carries no Other content. Got: " + first);
+        assertTrue(second.contains(otherHeader),
+                "the second message is the Other section (Other always last). Got: " + second);
+        assertFalse(second.contains(alphaHeader),
+                "sections never merge — the second message carries no alpha content. Got: " + second);
+    }
+
+    /**
+     * M1-695 acceptance: the over-cap degraded form is delivered
+     * per-section too — every section is a fresh send (the over-cap
+     * branch runs before any publish, so there is no placeholder to
+     * finalize), the too-large notice rides on the first message, and
+     * the guard's other properties (no LLM call, no anchor) hold.
+     */
+    @Test
+    void overCapDefaultFormDeliversPerSectionViaFreshSends() {
+        Instant now = Instant.now();
+        List<Post> posts = List.of(
+                post(PREFIX + "oa1", "Over alpha one", now.minus(Duration.ofMinutes(1)),
+                        List.of(PREFIX + "alpha")),
+                post(PREFIX + "oa2", "Over alpha two", now.minus(Duration.ofMinutes(2)),
+                        List.of(PREFIX + "alpha")),
+                post(PREFIX + "oa3", "Over alpha three", now.minus(Duration.ofMinutes(3)),
+                        List.of(PREFIX + "alpha")),
+                post(PREFIX + "ob1", "Over beta one", now.minus(Duration.ofMinutes(4)),
+                        List.of(PREFIX + "beta")),
+                post(PREFIX + "ob2", "Over beta two", now.minus(Duration.ofMinutes(5)),
+                        List.of(PREFIX + "beta")));
+        eligiblePostQuery.seedPosts(posts, /* excludedCount */ 0);
+        handler.summarizerPostCap = 4;
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "osect"), "/summary");
+
+        assertNull(reply, "the default-form over-cap reply self-delivers per-section and returns null");
+        assertEquals(0, proseGenerator.callCount(),
+                "the over-cap guard must not reach the summarizer");
+        assertEquals(0, anchorRepository.writeCount(),
+                "the over-cap guard must write no summary anchor");
+        assertNull(progressNotifier.completedText(),
+                "no placeholder finalize on the over-cap path");
+        assertEquals(2, progressNotifier.freshSends().size(),
+                "one fresh send per category section");
+        String first = progressNotifier.freshSends().get(0);
+        assertTrue(first.contains("more than the 4-post summarizer limit"),
+                "the too-large notice rides on the first section message. Got: " + first);
+        assertTrue(first.contains((PREFIX + "alpha news").toUpperCase(Locale.ROOT)),
+                "the first message is the alpha category section. Got: " + first);
+        assertTrue(progressNotifier.freshSends().get(1).contains(
+                        bundleLoader.get(BundleKeys.REPLY_DIGEST_CATEGORY_OTHER, "en")
+                                .toUpperCase(Locale.ROOT)),
+                "the second message is the Other section. Got: "
+                        + progressNotifier.freshSends().get(1));
+    }
+
+    /**
      * The over-cap branch (M1-623) is the one production actually hits, so
      * it must categorize too — while keeping every guarantee that made it a
      * guard in the first place: no LLM call, no anchor, and the too-large
@@ -366,8 +460,15 @@ class SummaryCommandHandlerTest {
 
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "over"), "/summary");
 
-        assertNotNull(reply, "the over-cap guard replies through the router, not the notifier");
-        String body = reply.text();
+        // M1-695: the default-form over-cap reply is delivered per-section
+        // through the notifier's fresh sends — no router reply and no
+        // placeholder lifecycle (this branch runs before any publish).
+        assertNull(reply, "the default-form over-cap reply self-delivers per-section and returns null");
+        assertNull(progressNotifier.completedText(),
+                "no placeholder finalize on the over-cap path");
+        assertEquals(1, progressNotifier.freshSends().size(),
+                "one category section → exactly one fresh send");
+        String body = progressNotifier.freshSends().get(0);
         assertEquals(0, proseGenerator.callCount(),
                 "the over-cap guard must not reach the summarizer");
         assertEquals(0, anchorRepository.writeCount(),
@@ -409,8 +510,8 @@ class SummaryCommandHandlerTest {
 
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "redact"), "/summary");
 
-        assertNotNull(reply, "the over-cap guard replies through the router");
-        String body = reply.text();
+        assertNull(reply, "the default-form over-cap reply self-delivers per-section and returns null");
+        String body = String.join("\n\n", progressNotifier.freshSends());
         assertFalse(body.contains("/grant-admin"),
                 "a command-shaped feed title MUST NOT reach the reader verbatim on the "
                         + "default form. Got: " + body);
@@ -487,8 +588,8 @@ class SummaryCommandHandlerTest {
 
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "span"), "/summary");
 
-        assertNotNull(reply, "the over-cap guard replies through the router");
-        String body = reply.text();
+        assertNull(reply, "the default-form over-cap reply self-delivers per-section and returns null");
+        String body = String.join("\n\n", progressNotifier.freshSends());
         assertTrue(body.contains("Legitimate headline"),
                 "the innocent post's headline MUST survive — the span must not cross post "
                         + "boundaries. Got: " + body);
@@ -903,6 +1004,11 @@ class SummaryCommandHandlerTest {
     // ----- fixtures + collaborator stubs --------------------------------
 
     private static Post post(String uid, String title, Instant publishedAt) {
+        return post(uid, title, publishedAt, List.of(PREFIX + "news"));
+    }
+
+    /** Tag-parameterized variant so multi-section fixtures can seed distinct category tags (M1-695). */
+    private static Post post(String uid, String title, Instant publishedAt, List<String> tags) {
         return new Post(
                 UUID.randomUUID(),
                 uid,
@@ -912,7 +1018,7 @@ class SummaryCommandHandlerTest {
                 "https://example.com/" + uid,
                 "Body for " + title,
                 publishedAt,
-                List.of(PREFIX + "news"),
+                tags,
                 // classification seeded DISTINCT from tags so the summary
                 // assertion can prove the classification: line is not the tag copy.
                 List.of("technical"));

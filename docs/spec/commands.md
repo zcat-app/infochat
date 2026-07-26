@@ -350,7 +350,19 @@ them to the marked region — doing so would red the build.
   topic id, headline, covering sources with post UIDs, score,
   prose, classification and tags. Both forms apply to the degraded
   and over-cap replies below; the form changes only the rendering,
-  never which posts are selected. **Summarizer LLM unreachable** (provider down,
+  never which posts are selected. **Delivery**: the default
+  categorized form is delivered as **one outbound message per
+  category section** — the progress placeholder is finalized with
+  the first section (the leading top-3 / cap-excess / degraded
+  notices ride on that first message) and the remaining sections
+  follow as fresh messages, sequentially in section order — so a
+  single category can be forwarded on its own to someone not using
+  the app. `/summary` emits no closing affordance (§Periodic group
+  digests), so there is no trailer to duplicate across the section
+  messages. `--full` stays a single message. The over-cap degraded
+  reply is delivered per-section as well (fresh sends only — that
+  guard branch never opens a placeholder); the other guard replies
+  (no-posts, unknown tag, in-flight, rate-cap) stay single-message. **Summarizer LLM unreachable** (provider down,
   timeout, or schema-violating reply after retry per `llm.md`
   §Failure handling) → `/summary` falls back to the same degraded
   form as a saturated periodic digest (decision D17): headlines +

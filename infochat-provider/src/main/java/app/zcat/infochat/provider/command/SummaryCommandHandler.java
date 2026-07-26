@@ -3,7 +3,6 @@ package app.zcat.infochat.provider.command;
 import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.util.JsonEscaper;
 import app.zcat.infochat.messaging.OutboundMessage;
-import app.zcat.infochat.messaging.ProgressNotifier;
 import app.zcat.infochat.messaging.ProgressStage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
@@ -19,6 +18,7 @@ import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.messaging.StageProgressNotifier;
 import app.zcat.infochat.provider.summary.ClusterTraversal;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
@@ -80,9 +80,12 @@ import java.util.UUID;
  *   <li>Run {@link SummaryProseGenerator#generate} (one LLM call per
  *       cluster).</li>
  *   <li>For each prose, run {@link LlmOutputSanitizer#sanitize}.</li>
- *   <li>Compose the per-cluster output blocks (6 deterministic fields +
- *       sanitized {@code summary:} field) + optional cap-excess /
- *       top-3 prefix into a single {@link OutboundMessage}.</li>
+ *   <li>Compose the leading prefixes (optional top-3 / cap-excess /
+ *       degraded notices) plus the rendered body and deliver: the default
+ *       (categorized) form goes out as ONE outbound message per category
+ *       section (M1-695) — the placeholder finalized with the first
+ *       section, the rest as fresh sends — while {@code --full} keeps the
+ *       single flat body.</li>
  * </ol>
  */
 @ApplicationScoped
@@ -176,8 +179,15 @@ public class SummaryCommandHandler implements CommandHandler {
     @Inject
     LlmRateCap llmRateCap;
 
+    /**
+     * The concrete notifier, not the {@code ProgressNotifier} SPI: the
+     * default-form per-section delivery (M1-695) needs
+     * {@link StageProgressNotifier#deliverFresh}, which — like
+     * {@code completeDelivered} — is a public non-SPI terminal. Same
+     * concrete-injection precedent as {@code InboundRouter}.
+     */
     @Inject
-    ProgressNotifier progressNotifier;
+    StageProgressNotifier progressNotifier;
 
     @Override
     public String name() {
@@ -189,12 +199,13 @@ public class SummaryCommandHandler implements CommandHandler {
      *
      * <p>Returns a non-null {@link OutboundMessage} for every guard /
      * error branch (parse failure, no-posts, unknown tag, in-flight,
-     * rate-cap) — the router sends those. For the terminal
-     * summary path the handler owns its own message lifecycle through
-     * {@link ProgressNotifier} (placeholder &rarr; coalesced
-     * {@code update} &rarr; {@code complete}/{@code fail}) and returns
-     * {@code null}, so the router performs no send and the user gets
-     * exactly one visibly-evolving message rather than a duplicate.</p>
+     * rate-cap) and for the {@code --full} over-cap reply — the router
+     * sends those. For the terminal summary path (and the default-form
+     * over-cap path, M1-695) the handler owns its own message lifecycle
+     * through {@link StageProgressNotifier} (placeholder &rarr; coalesced
+     * {@code update} &rarr; {@code complete}/{@code fail}, plus
+     * {@code deliverFresh} for the follow-on section messages) and
+     * returns {@code null}, so the router performs no send.</p>
      */
     @Override
     public @Nullable OutboundMessage handle(ScopeRef scope, String rawText) {
@@ -263,17 +274,43 @@ public class SummaryCommandHandler implements CommandHandler {
         // post cap never reaches the LLM — the doomed call would only
         // burn the timeout and mislabel the outcome "unreachable".
         // Render the same degraded form the LLM-failure path uses
-        // (headlines + bare URLs + UIDs via ClusterBlockRenderer, which
-        // bypasses sanitize/translate for degraded prose) plus an honest
-        // too-large notice steering the user to narrow with -w. Like the
-        // other guard branches this path is deterministic and makes no
-        // LLM call, so it consumes no rate-cap token and holds no
-        // in-flight slot. No summary anchor is written either: a written
-        // anchor would let /retry replay the over-cap set straight into
-        // the doomed per-cluster calls this gate exists to prevent.
+        // (headlines + bare URLs + UIDs, in the caller's chosen render
+        // form) plus an honest too-large notice steering the user to
+        // narrow with -w. Like the other guard branches this path is
+        // deterministic and makes no LLM call, so it consumes no
+        // rate-cap token and holds no in-flight slot. No summary anchor
+        // is written either: a written anchor would let /retry replay
+        // the over-cap set straight into the doomed per-cluster calls
+        // this gate exists to prevent.
         if (result.posts().size() > summarizerPostCap) {
             String scopeLanguage = readScopeLanguage(scopeKind, scopeId.get());
-            return reply(scope, composeWindowTooLargeReply(result, scopeLanguage, args.full()));
+            if (args.full()) {
+                return reply(scope, composeWindowTooLargeReply(result, scopeLanguage));
+            }
+            // M1-695: the default (categorized) over-cap form is delivered
+            // per-section like the terminal path. This branch runs before
+            // the in-flight slot and any publish, so there is no
+            // placeholder to finalize — every section goes out as a fresh
+            // send and the handler returns null (self-delivered, so the
+            // router performs no send).
+            List<Cluster> overCapClusters = clusterTraversal.cluster(result.posts());
+            // Degraded prose is composed here, not by the summarizer —
+            // that is the whole point of this branch — so the categorized
+            // render below reaches no LLM either (renderSummarySections
+            // takes prose, it does not generate it).
+            List<ClusterProse> overCapProse = overCapClusters.stream()
+                    .map(cluster -> new ClusterProse(
+                            cluster, SummaryProseGenerator.degradedProseFor(cluster, llmOutputSanitizer), true))
+                    .toList();
+            StringBuilder overCapPrefixes = new StringBuilder();
+            appendWindowPrefixes(overCapPrefixes, result);
+            overCapPrefixes.append(format(BundleKeys.REPLY_SUMMARY_WINDOW_TOO_LARGE_NOTICE,
+                    result.totalBeforeCap(), summarizerPostCap));
+            overCapPrefixes.append("\n\n");
+            deliverPerSection(scope, overCapPrefixes.toString(),
+                    digestRenderer.renderSummarySections(overCapProse, scopeLanguage),
+                    /* finalizePlaceholder */ false);
+            return null;
         }
 
         // At most one in-flight interruptible request per (user, scope)
@@ -345,29 +382,14 @@ public class SummaryCommandHandler implements CommandHandler {
                     progressNotifier.publish(scope, ProgressStage.TRANSLATING);
                 }
 
-                StringBuilder out = new StringBuilder();
-
-                if (result.topTagRestriction().isPresent()) {
-                    out.append(format(BundleKeys.REPLY_SUMMARY_TOP_3_OF_N_PREFIX,
-                            result.topTagRestriction().get().followedTagCount()));
-                    out.append("\n\n");
-                }
-                if (result.excludedCount() > 0) {
-                    out.append(format(BundleKeys.REPLY_SUMMARY_CAP_EXCESS_NOTICE,
-                            result.posts().size(),
-                            result.totalBeforeCap(),
-                            result.profileLabel(),
-                            result.excludedCount()));
-                    out.append("\n\n");
-                }
+                StringBuilder prefixes = new StringBuilder();
+                appendWindowPrefixes(prefixes, result);
 
                 boolean anyDegraded = prose.stream().anyMatch(ClusterProse::degraded);
                 if (anyDegraded) {
-                    out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE, inboundContext.effectiveLanguage()));
-                    out.append("\n\n");
+                    prefixes.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE, inboundContext.effectiveLanguage()));
+                    prefixes.append("\n\n");
                 }
-
-                out.append(renderBody(prose, scopeLanguage, args.full()));
 
                 // Degraded prose is still a successful terminal delivery
                 // (the composed body carries the degraded notice). Only a
@@ -381,8 +403,18 @@ public class SummaryCommandHandler implements CommandHandler {
                     // render the D35 stopped terminal instead of delivering a
                     // result as if /stop never happened.
                     progressNotifier.complete(scope, stoppedTerminal());
+                } else if (args.full()) {
+                    progressNotifier.complete(scope,
+                            (prefixes.toString() + renderFlatBody(prose, scopeLanguage)).stripTrailing());
                 } else {
-                    progressNotifier.complete(scope, out.toString().stripTrailing());
+                    // M1-695: the default (categorized) form is delivered as
+                    // one outbound message per category section — the
+                    // placeholder is finalized with the first section (the
+                    // leading prefixes ride on it), the rest go out as
+                    // fresh sends in section order.
+                    deliverPerSection(scope, prefixes.toString(),
+                            digestRenderer.renderSummarySections(prose, scopeLanguage),
+                            /* finalizePlaceholder */ true);
                 }
                 delivered = true;
             } catch (RuntimeException e) {
@@ -419,17 +451,39 @@ public class SummaryCommandHandler implements CommandHandler {
     }
 
     /**
-     * Compose the window-too-large reply (M1-623): the same prefix
-     * ordering as the terminal path (top-3 restriction, cap-excess),
-     * then the too-large notice in the slot the degraded notice
-     * occupies on the LLM-failure path, then one degraded block per
-     * cluster. Clustering still runs — it is deterministic DB+memory
-     * work — so the degraded blocks are byte-identical to what the
-     * LLM-failure path would have rendered for the same posts.
+     * Compose the window-too-large reply (M1-623) for the FLAT
+     * ({@code --full}) form, which stays a single router-sent message:
+     * the same prefix ordering as the terminal path (top-3 restriction,
+     * cap-excess), then the too-large notice in the slot the degraded
+     * notice occupies on the LLM-failure path, then one degraded block
+     * per cluster. The default (categorized) over-cap form is NOT composed
+     * here — it is delivered per-section at the call site (M1-695).
+     * Clustering still runs — it is deterministic DB+memory work — so the
+     * degraded blocks are byte-identical to what the LLM-failure path
+     * would have rendered for the same posts.
      */
-    private String composeWindowTooLargeReply(Result result, String scopeLanguage, boolean full) {
+    private String composeWindowTooLargeReply(Result result, String scopeLanguage) {
         List<Cluster> clusters = clusterTraversal.cluster(result.posts());
         StringBuilder out = new StringBuilder();
+        appendWindowPrefixes(out, result);
+        out.append(format(BundleKeys.REPLY_SUMMARY_WINDOW_TOO_LARGE_NOTICE,
+                result.totalBeforeCap(), summarizerPostCap));
+        out.append("\n\n");
+        // Degraded prose is composed here, not by the summarizer, which is
+        // the whole point of this branch.
+        List<ClusterProse> degradedProse = clusters.stream()
+                .map(cluster -> new ClusterProse(
+                        cluster, SummaryProseGenerator.degradedProseFor(cluster, llmOutputSanitizer), true))
+                .toList();
+        out.append(renderFlatBody(degradedProse, scopeLanguage));
+        return out.toString().stripTrailing();
+    }
+
+    /**
+     * The leading top-3-restriction and cap-excess prefixes, in the order
+     * both the terminal path and the over-cap branch emit them.
+     */
+    private void appendWindowPrefixes(StringBuilder out, Result result) {
         if (result.topTagRestriction().isPresent()) {
             out.append(format(BundleKeys.REPLY_SUMMARY_TOP_3_OF_N_PREFIX,
                     result.topTagRestriction().get().followedTagCount()));
@@ -443,40 +497,42 @@ public class SummaryCommandHandler implements CommandHandler {
                     result.excludedCount()));
             out.append("\n\n");
         }
-        out.append(format(BundleKeys.REPLY_SUMMARY_WINDOW_TOO_LARGE_NOTICE,
-                result.totalBeforeCap(), summarizerPostCap));
-        out.append("\n\n");
-        // Degraded prose is composed here, not by the summarizer, which is
-        // the whole point of this branch — so the categorized render below
-        // reaches no LLM either (renderSummarySections takes prose, it does
-        // not generate it).
-        List<ClusterProse> degradedProse = clusters.stream()
-                .map(cluster -> new ClusterProse(
-                        cluster, SummaryProseGenerator.degradedProseFor(cluster, llmOutputSanitizer), true))
-                .toList();
-        out.append(renderBody(degradedProse, scopeLanguage, full));
-        return out.toString().stripTrailing();
     }
 
     /**
-     * Render the per-cluster body in the caller's chosen form. The DEFAULT
-     * (categorized) form groups clusters under category headers with a
-     * per-category cap; {@code --full} emits {@link ClusterBlockRenderer}'s
-     * flat seven-field block per cluster, which is what {@code /retry}
-     * replays and what the {@code --full}-retargeted tests assert on.
-     *
-     * <p>Both branches take prose the CALLER already generated, so neither
-     * makes an LLM call and the summarizer call count is identical in both
-     * forms — the property {@code TranslationPipelineIT}'s exact
-     * {@code mockLlm.callCount()} assertions rest on.
+     * Per-section delivery (M1-695): one outbound message per category
+     * section, sequentially in section order (D63's digest shape applied
+     * to the {@code /summary} scope). {@code prefixes} (the leading
+     * top-3 / cap-excess / degraded / too-large notices) ride on the
+     * FIRST section's message, so the message count equals the section
+     * count. On the terminal path the first message finalizes the
+     * placeholder ({@code complete}); on the over-cap path no placeholder
+     * was ever published, so every message is a fresh send.
      */
-    private String renderBody(List<ClusterProse> prose, String scopeLanguage, boolean full) {
-        if (!full) {
-            return String.join("\n\n",
-                    digestRenderer.renderSummarySections(prose, scopeLanguage).stream()
-                            .map(RenderedSection::text)
-                            .toList());
+    private void deliverPerSection(ScopeRef scope, String prefixes,
+                                   List<RenderedSection> sections, boolean finalizePlaceholder) {
+        String first = (prefixes + sections.get(0).text()).stripTrailing();
+        if (finalizePlaceholder) {
+            progressNotifier.complete(scope, first);
+        } else {
+            progressNotifier.deliverFresh(scope, first);
         }
+        for (int i = 1; i < sections.size(); i++) {
+            progressNotifier.deliverFresh(scope, sections.get(i).text().stripTrailing());
+        }
+    }
+
+    /**
+     * Render the flat ({@code --full}) per-cluster body:
+     * {@link ClusterBlockRenderer}'s seven-field block per cluster, which
+     * is what {@code /retry} replays and what the {@code --full}-retargeted
+     * tests assert on. Takes prose the CALLER already generated (or
+     * composed degraded), so it makes no LLM call and the summarizer call
+     * count is identical in both forms — the property
+     * {@code TranslationPipelineIT}'s exact {@code mockLlm.callCount()}
+     * assertions rest on.
+     */
+    private String renderFlatBody(List<ClusterProse> prose, String scopeLanguage) {
         StringBuilder out = new StringBuilder();
         ClusterBlockRenderer clusterBlockRenderer =
                 new ClusterBlockRenderer(llmOutputSanitizer, translationPipeline, bundleLoader);
