@@ -212,7 +212,7 @@
                                                                                                                                                                                                                                                         
   `AdminLifecycleIT`:                                                                                                                                                                                                                                   
                                                                                    
-  - Bootstrap: `infochat.admin.contact-id` set; first inbound from that contact flips `is_admin=true`; audit row written.                                                                                                                               
+  - Bootstrap: a per-adapter bootstrap path set (`infochat.adapters.<name>.admin`, or SimpleX's `infochat.adapters.simplex.admin-token`, D50); the pre-seeded or claiming contact ends up `is_admin=true`; audit row written.                                                                                                                               
   - `/grant-admin` / `/revoke-admin` with last-admin protection.
   - First `@mention` in a fresh group auto-promotes that user to group admin; audit row written.                                                                                                                                                        
   - `/promote` / `/demote` callable only by bot admin.                                                                                                                                                                                                  

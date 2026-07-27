@@ -364,14 +364,14 @@ them to the marked region — doing so would red the build.
     prose IS generated (unlike `--short`). The summarizer-post-cap
     (50) degraded fallback still applies beyond 50 posts. Delivered
     per-section like the bare form. (`--full` is reclaimed for
-    categorized-uncapped by M1-700; the legacy flat meaning moved to
+    categorized-uncapped; the legacy flat meaning moved to
     `--flat`.)
   - `--flat` — the renamed legacy `--full`: flat per-cluster blocks,
     one block per cluster carrying topic id, headline, covering
     sources with post UIDs, score, prose, classification and tags.
     No category headers, no cap, single message. The output is
     byte-identical to what the pre-rename `/summary --full` produced
-    (M1-700 renamed the flag only; `ClusterBlockRenderer` is
+    (the rename changed the flag only; `ClusterBlockRenderer` is
     unchanged).
   All four forms apply to the degraded and over-cap replies below.
   **Delivery**: the bare and `--full` categorized forms are delivered
@@ -1250,7 +1250,11 @@ contacts and contradict the registration-state model
 (`schema.md` §Identity and access — User entity).
 
 - `/promote <contact>` / `/demote <contact>` — group admin
-  promote/demote, used inside a group. **The target must have an
+  promote/demote, used inside a group. **A group holds at most one
+  group admin** (`schema.md` §Identity and access, enforced by the
+  `one_admin_per_group` partial unique index), so `/promote`
+  **replaces** the incumbent: it demotes the current holder and
+  promotes the target in one transaction. **The target must have an
   active `group_membership` row (`removed_at IS NULL`) in the
   group.** A contact with no active membership (never joined, or
   soft-cleared via left-group event) cannot be promoted; the
@@ -1855,7 +1859,7 @@ determinism boundary to the digest's structure. The degraded
   no affordance. `/summary` renders the same categorized form by
   default and keeps its flat per-cluster format behind `--flat`
   (§Content), with `--full` reclaimed for categorized-uncapped and
-  `--short` adding a roll-up overview (M1-700). It uses its own
+  `--short` adding a roll-up overview. It uses its own
   DM-worded overflow line and emits no closing affordance — that one
   steers group readers to `@mention`, which is meaningless in the
   interactive surface `/summary` serves.

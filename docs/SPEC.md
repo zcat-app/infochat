@@ -3,7 +3,7 @@
 This file is the **map**. It tells you what infochat is, where every part of                                                                                                                                                                          
 the spec lives, and how the documentation is organized.
 
-The full specification is split across three layers:
+The full specification is split across two layers, mapped by this file:
 
 - **`docs/spec/`** — *what & why*. Durable, slow-changing. The authoritative
   source for every behavior the system must exhibit.
@@ -99,7 +99,8 @@ choices that shape every section.
   operations are blocked until the period elapses or a bot admin issues
   `/vouch`.
 - OpenAI-compatible LLM provider (covers Ollama, llama.cpp, OpenAI,                                                                                                                                                                                   
-  OpenRouter, NanoGPT) and an Anthropic provider.
+  OpenRouter, NanoGPT), a dedicated DeepSeek provider (its own wire
+  dialect, reasoning disabled), and an Anthropic provider.
 - Hardware profiles: `laptop`, `vps`, `pi`, `remote-llm`.
 - Bootstrap source loader (idempotent, seeds the controlled vocabulary).
 - Hybrid Tier 2 linking (entities + pgvector embeddings, profile-aware                                                                                                                                                                                
@@ -214,7 +215,8 @@ choices that shape every section.
   scope).
 - **Summary anchor**: persistent record of the deterministic
   cluster-mapping computed by the most recent summary-producing
-  command in a scope (`/summary`, `/digest`, periodic digests).
+  command in a scope (`/summary` and the periodic digests;
+  `/digest on|off` is a delivery toggle and writes no anchor).
   Used by `/retry` to reuse the cluster set so re-rolled prose
   describes the same posts as the original run. Stored as a
   `summary_anchor` row keyed by `(scope_id, user_id, command_kind)`

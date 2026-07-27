@@ -151,12 +151,24 @@ quarkus.profile=laptop                           # laptop|vps|pi|remote-llm
 #              quarkus.datasource.password=${INFOCHAT_PROVIDER_PASSWORD}
 quarkus.datasource.db-kind=postgresql
 quarkus.datasource.jdbc.url=jdbc:postgresql://localhost:5432/infochat
-# Per-service pool sizes — provider holds connections across LLM calls and
-# needs more headroom; collector is mostly short writes. SET PER-SERVICE,
-# NOT SHARED — see the per-service application.properties blocks below for
-# where each value belongs.
-#   provider:  quarkus.datasource.jdbc.max-size=30
-#   collector: quarkus.datasource.jdbc.max-size=15
+# Per-service pool sizes. SET PER-SERVICE, NOT SHARED — see the per-service
+# application.properties blocks below for where each value belongs. Both are
+# profile-driven, and each is derived from explicit demand arithmetic spelled
+# out in that service's own application.properties (the authoritative
+# derivation; reproduced here only as the shipped totals):
+#   collector: max-size=24 base (laptop 20, vps 16)
+#              = 1 pinned advisory-lock session + up to
+#                infochat.embeddings.max-concurrency embedding-write
+#                connections + 13 single-connection @Scheduled jobs
+#   provider:  max-size=16 base (laptop 12, vps 16)
+#              = 2 pinned sessions (advisory lock + LISTEN/NOTIFY)
+#                + 3 @Scheduled jobs + concurrent inbound handling,
+#                itself bounded by the per-user rate caps
+# The collector's ceiling is the larger of the two: it has more scheduled
+# jobs and the concurrent embedding writers. The provider's inbound demand
+# is bounded rather than pool-bound precisely BECAUSE it releases its
+# connection before every LLM call (see "Connection-release discipline"
+# below).
 
 # Named `owner` datasource — COLLECTOR ONLY. Flyway migrations and
 # partition DDL run as the schema owner; the named Flyway config below
@@ -220,15 +232,18 @@ infochat.adapters.signal.admin=${INFOCHAT_SIGNAL_ADMIN_CONTACT_ID}
 # infochat.llm.security.model=llama3.2:3b
 # infochat.llm.summarizer.provider=ollama
 # infochat.llm.summarizer.model=llama3.1:8b
-# infochat.llm.chat-agent.provider=ollama
-# infochat.llm.chat-agent.model=llama3.1:8b
-# infochat.embeddings.provider=ollama
+# infochat.llm.chat.provider=ollama
+# infochat.llm.chat.model=llama3.1:8b
+# Embeddings have no provider-name key — one EmbeddingProvider impl per
+# deployment, selected by endpoint. base-url NEVER inherits the LLM shared
+# default (D54: embeddings are always local nomic-768).
+# infochat.embeddings.base-url=http://localhost:11434/v1
 # infochat.embeddings.model=nomic-embed-text
 
 # Remote provider example (NanoGPT — the generic openai-compatible dialect)
 # infochat.llm.summarizer.provider=openai-compatible
 # infochat.llm.summarizer.base-url=https://nano-gpt.com/api/v1
-# infochat.llm.summarizer.api-key=${NANOGPT_API_KEY}
+# infochat.llm.summarizer.api-key=${INFOCHAT_LLM_API_KEY}
 # infochat.llm.summarizer.model=llama-3.1-70b-instruct
 
 # Remote provider example (DeepSeek — the dedicated `deepseek` dialect).
@@ -251,8 +266,16 @@ infochat.adapters.signal.admin=${INFOCHAT_SIGNAL_ADMIN_CONTACT_ID}
 # (defaults reuse llm.translator.* which falls back to summarizer)
 
 # ── Scheduler ──────────────────────────────────────────────────────────
-infochat.collector.fetch-interval=PT5M           # per-source default
-infochat.collector.linking-interval=PT5M
+# Fetch cadence is PER SOURCE KIND (architecture.md §Ingest SPIs: no
+# per-source override in v1), not one global interval.
+infochat.fetch.rss.interval=5m
+infochat.fetch.bluesky.interval=10m
+infochat.fetch.nitter.interval=10m
+infochat.fetch.reddit.interval=15m
+infochat.fetch.odysee.interval=30m
+infochat.fetch.youtube.interval=30m
+infochat.fetch.host-min-interval=20s             # per-host politeness floor
+infochat.linking.interval=5m                     # LinkingJob tick (profile-driven)
 infochat.partitions.check-interval=24h           # PartitionCreator: current+next month
 infochat.partitions.prune-interval=24h           # PartitionPruner: aged-partition drop
 # Per-table partition retention horizons in days (02-schema.md §2.4.4);
@@ -263,8 +286,9 @@ infochat.partitions.retention-days.post-embedding=4
 infochat.partitions.retention-days.post-entity=4
 infochat.partitions.retention-days.post-reference=4
 infochat.partitions.retention-days.price-snapshot=7
-infochat.collector.ttl-prune-cron=0 0 4 * * ?
-infochat.provider.digest-tick-cron=0 * * * * ?   # checks every minute for due groups
+# Partition-drop TTL is driven by infochat.partitions.prune-interval above
+# (PartitionPruner); there is no separate ttl-prune cron key.
+infochat.digest.tick-interval=60s                # DigestScheduler: due-group check cadence
 
 # ── Single-instance enforcement (D41; §7.8.5) ──────────────────────────
 # Heartbeat tick interval written by the lock-holding instance to
@@ -277,7 +301,15 @@ infochat.provider.digest-tick-cron=0 * * * * ?   # checks every minute for due g
 # Default timezone assigned to a newly-created group row (spec/deployment.md
 # §Configuration surface — Groups). IANA tzdb name; per-group override is the
 # /group-timezone command (03-commands.md §3.10).
-infochat.groups.default-timezone=UTC
+#
+# GAP (audit 2026-07-27, .scratch/doc-audit.md §A): the operator-override key
+# is NOT implemented. `infochat.groups.default-timezone` is read by nothing;
+# the value comes solely from the DDL default
+# (`groups.timezone TEXT NOT NULL DEFAULT 'UTC'`, V5), so an operator cannot
+# currently change it. The spec commitment stands; the key is owed.
+# infochat.groups.default-timezone=UTC
+infochat.groups.global-max-groups=10             # profile-driven (pi 5, vps 50, remote-llm 100)
+infochat.groups.per-user-activation-cap=3        # profile-driven (vps 5, remote-llm 10)
 
 # ── HTTP / observability ───────────────────────────────────────────────
 # quarkus.http.port is service-specific and lives in each service's own
@@ -297,9 +329,22 @@ quarkus.management.host=127.0.0.1                # health/metrics reachable on l
 quarkus.log.level=INFO
 
 # ── Limits ─────────────────────────────────────────────────────────────
-infochat.rate.user-commands-per-min=30
-infochat.rate.user-add-source-per-hour=5
-infochat.rate.user-chat-per-min=60
+# These are the keys that EXIST. §4.9's table is the designed rate-limit
+# set and marks which of its rows are not yet implemented (notably the
+# separate per-command bucket, the per-user /add-source-per-hour cap, and
+# the lower-not-raise clamp); do not infer from this block that the
+# designed set has shrunk.
+#
+# Per-user inbound transport cap — one bucket over ALL inbound, commands
+# and chat alike.
+infochat.rate-cap.inbound-per-minute=60
+# Per-user LLM-triggering cap (chat replies + /summary + /retry re-rolls);
+# profile-driven (pi 5, remote-llm 20).
+infochat.chat.llm-rate-cap-per-minute=10
+# Per-group backstops (D47); all three profile-driven.
+infochat.ratelimit.group-reply-per-15min=10
+infochat.ratelimit.group-llm-per-15min=5
+infochat.ratelimit.group-commands-per-15min=20
 ```
 
 ### Per-service `application.properties`
@@ -312,7 +357,7 @@ Collector (`infochat-collector/src/main/resources/application.properties`):
 # Inherits keys from the canonical file above; only service-specific overrides here.
 quarkus.http.port=8080
 quarkus.application.name=infochat-collector
-quarkus.datasource.jdbc.max-size=15
+quarkus.datasource.jdbc.max-size=24
 ```
 
 Provider (`infochat-provider/src/main/resources/application.properties`):
@@ -321,12 +366,12 @@ Provider (`infochat-provider/src/main/resources/application.properties`):
 # Inherits keys from the canonical file above; only service-specific overrides here.
 quarkus.http.port=8081
 quarkus.application.name=infochat-provider
-quarkus.datasource.jdbc.max-size=30
+quarkus.datasource.jdbc.max-size=16
 ```
 
 ### Connection-release discipline (Provider)
 
-The Provider's pool size is intentionally larger than the Collector's because chat-mode and `/summary` invocations call the LLM, and LLM round-trips take 5–30 s. Even at 30 connections, holding a JDBC connection across an LLM call would let ~10 concurrent chats starve every other DB consumer (including the Collector's writes).
+The Provider's pool is deliberately modest (16) even though chat-mode and `/summary` invocations call the LLM and LLM round-trips take 5–30 s. That sizing is only sound because the connection is released before the call: holding a JDBC connection across an LLM call would let ~16 concurrent chats exhaust the pool outright and starve every other DB consumer.
 
 **The Provider MUST release the JDBC connection before any LLM call.** The required pattern:
 
@@ -359,16 +404,21 @@ Notes:
 
 | Variable | Required? | Read by | Purpose |
 |---|---|---|---|
-| `INFOCHAT_PROFILE` | optional | both | Override `infochat.profile` |
-| `INFOCHAT_DB_PASSWORD` | yes | collector (owner datasource: migrations + partition DDL) | Migration-owner DB-role password (`infochat`; CREATEROLE, not superuser — see §7.7 "Database role bootstrap") |
-| `INFOCHAT_COLLECTOR_PASSWORD` | yes | collector | Collector DB role password |
-| `INFOCHAT_PROVIDER_PASSWORD` | yes | provider | Provider DB role password |
+| `QUARKUS_PROFILE` | optional | both | Selects the infochat profile (`laptop`/`vps`/`pi`/`remote-llm`). There is **no** `INFOCHAT_PROFILE` / `infochat.profile` key — the profile is Quarkus' own mechanism (`InfochatProfile`, §7.2); the wizard writes `quarkus.profile` into the runtime properties file instead of setting this var |
+| `INFOCHAT_DB_PASSWORD` | yes | collector (owner datasource: migrations + partition DDL); `docker/postgres-init.sh` | Migration-owner DB-role password (`infochat`; CREATEROLE, not superuser — see §7.7 "Database role bootstrap") |
+| `INFOCHAT_COLLECTOR_PASSWORD` | yes | collector; `docker/postgres-init.sh` | Collector DB role password |
+| `INFOCHAT_PROVIDER_PASSWORD` | yes | provider; `docker/postgres-init.sh` | Provider DB role password |
+| `INFOCHAT_LLM_API_KEY` | optional (required for a remote LLM backend) | both | The one remote-provider credential. Referenced from the runtime properties as `infochat.llm.default.api-key=${INFOCHAT_LLM_API_KEY}` (D56 shared default); written by `4-llm.sh` / `switch-llm.sh` into `secrets.env`. There are **no** per-vendor key vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `NANOGPT_API_KEY` are not read by anything) |
 | `INFOCHAT_SIMPLEX_ADMIN_TOKEN` | optional per-adapter; union across enabled adapters MUST be non-empty (§7.6.3) | provider | Bootstrap bot-admin CLAIM-TOKEN on the SimpleX adapter (D50): a secret; first DM whose body equals it becomes admin. Unset once claimed (§7.6.3) |
 | `INFOCHAT_SIGNAL_ADMIN_CONTACT_ID` | optional per-adapter; union across enabled adapters MUST be non-empty (§7.6.3) | provider | Bootstrap bot-admin contact id on the Signal adapter (Signal ACI) |
-| `OLLAMA_URL` | optional | both | Override default `http://localhost:11434` |
-| `ANTHROPIC_API_KEY` | yes (if Anthropic provider used) | both | Anthropic auth |
-| `OPENAI_API_KEY` | optional | both | Used by `openai-compatible` provider when targeting OpenAI |
-| `NANOGPT_API_KEY` | optional | both | Used by `openai-compatible` provider when targeting NanoGPT |
+| `INFOCHAT_SIMPLEX_DATA_DIR` / `INFOCHAT_SIGNAL_DATA_DIR` | optional | `docker-compose.yml` | Host paths bind-mounted at the same in-container path for each adapter's identity data-dir; default `/var/lib/infochat/simplex` and `/var/lib/infochat/signal-cli`. The wizard points them at `prod/runtime/<adapter>` |
+| `INFOCHAT_LLAMACPP_GGUF` / `INFOCHAT_LLAMACPP_EMBED_GGUF` | required for the `llamacpp` / `llamacpp-embeddings` compose profiles | `docker-compose.yml` | GGUF filenames inside the model-cache volume, passed to `llama-server` as `LLAMA_ARG_MODEL` |
+| `INFOCHAT_BACKUP_DIR` | optional | `prod/scripts/backup.sh` | Backup destination when no positional argument is given; default `prod/runtime/backups` (§7.10) |
+
+There is no `OLLAMA_URL` override: the Ollama/llama.cpp endpoint is an ordinary
+config value (`infochat.llm.default.base-url`, per-task `base-url` overrides,
+and `infochat.embeddings.base-url`), written into the runtime properties by the
+wizard.
 
 Per-adapter identity material (e.g., the `signal-cli` account directory and the SimpleX queue keypair file) lives **on disk** under `infochat.adapters.<name>.data-dir`, not in env vars; the operator owns its lifecycle (see [06-messaging.md §6.4.1, §6.5.4](06-messaging.md)). Each adapter validates its own identity material at adapter startup and refuses to start that adapter if the directory is missing or unreadable; per-adapter resilience ([06-messaging.md §6.7](06-messaging.md)) means one adapter's identity-store failure does not abort Provider.
 
@@ -1350,11 +1400,11 @@ Quarkus structured JSON logs (`quarkus.log.console.json=true`) recommended in pr
 - `AdminBootstrap` — once at startup, per enabled adapter that has a configured bootstrap admin
 - `AdapterRegistry` — adapter activated, connection events, per-adapter resilience retries
 - `BootstrapLoader` — sources file loaded; entry count and SHA; assets file state (loaded / not configured / fatal)
-- `Stage1Sanitizer` / `Stage2Judge` — flagged spans (with redacted previews)
-- `LinkingJob` / `PartitionPruner` / `TtlPruner` — scheduled jobs with row counts
+- `Stage1Pipeline` / `Stage1Worker` / `Stage2Worker` — flagged spans (with redacted previews)
+- `LinkingJob` / `PartitionPruner` / `ChatMemoryPruner` — scheduled jobs with row counts
 - `LlmRouter` — provider chosen for each task at startup
-- `RateLimiter` — overflow events with redacted contact id
-- `Heartbeat` — heartbeat tick from the lock-holding instance (DEBUG); fatal-conflict log on rejected acquire (ERROR)
+- `LlmRateCap` / `RateCapBucket` / `OutboundRateLimiter` — overflow events with redacted contact id
+- `HeartbeatScheduler` — heartbeat tick from the lock-holding instance (DEBUG); fatal-conflict log on rejected acquire (ERROR)
 
 Log retention: 14 days local; ship to centralized log store at operator's discretion (the recommended target is Loki — see §7.13.2).
 
@@ -1367,12 +1417,12 @@ The stack is operator-deployed alongside Provider/Collector. Nothing in this sub
 - **Prometheus** for metrics scrape and storage. The pull model fits a single-host topology — no agent on Provider/Collector beyond the existing `/q/metrics` endpoint. Scrape interval 15 s is fine; v1 cardinality is small (per-adapter, per-source, per-task labels — no per-user labels). Footprint ~100 MB RAM. Local TSDB retention 15–30 days is plenty for a single-operator deployment; longer retention is a remote-write concern, not a v1 default.
 - **Alertmanager** for alert routing, grouping, throttling, and silences. Native Prometheus pair. Routes to PagerDuty / Slack / email / webhook depending on what the operator already runs. The `LlmDown`, `AdapterDown`, `BootstrapAssetsBroken`, and `SignalAdapterAuthFailed` rules in §7.12 are the v1 starter set; group on `alertname` and route operator-must-act alerts (`for: 0m`) to the same channel an oncall person actually reads.
 - **Grafana** for dashboards, ad-hoc queries, and log↔metric correlation. File-provisioned dashboards check into the operator's config repo alongside `application.properties` and `bootstrap-sources.json` (§7.10) so they version-control with the rest of the deployment. Grafana's native Postgres datasource lets operators query `audit_log` directly from the same UI as metrics — a single pane for "what alerted, what the user did, what the bot did". The dashboards themselves (suggested panels per metric) are out of scope for this file; a starter pack belongs in the operator's repo, not in the spec.
-- **Loki** for log aggregation and LogQL queries. Indexes labels only (not full text), so storage cost is roughly 10× cheaper than ELK on the same volume — important on the `pi` profile, where the bot, the LLM, and Postgres already share 8 GB. LogQL syntax mirrors PromQL, lowering the cognitive cost of correlating an alert with the underlying log spans. Single binary, ~256 MB RAM. The Provider's stdout JSON stream goes in via Promtail/Vector/the operator's existing shipper; the JSON event-category names listed in §7.13.1 (`AdminBootstrap`, `AdapterRegistry`, `Stage1Sanitizer`, `Stage2Judge`, …) make natural Loki labels.
+- **Loki** for log aggregation and LogQL queries. Indexes labels only (not full text), so storage cost is roughly 10× cheaper than ELK on the same volume — important on the `pi` profile, where the bot, the LLM, and Postgres already share 8 GB. LogQL syntax mirrors PromQL, lowering the cognitive cost of correlating an alert with the underlying log spans. Single binary, ~256 MB RAM. The Provider's stdout JSON stream goes in via Promtail/Vector/the operator's existing shipper; the JSON event-category names listed in §7.13.1 (`AdminBootstrap`, `AdapterRegistry`, `Stage1Pipeline`, `Stage2Worker`, …) make natural Loki labels.
 
 **Why not the alternatives.**
 
 - **vs ELK.** Elasticsearch alone needs ≥ 4 GB heap. That doesn't fit on the `pi` profile (8 GB total host) or the `vps` profile (typically 8 GB) without crowding out the bot, the LLM, and Postgres. Loki indexes labels only, which is the right tradeoff for v1 log volume.
-- **vs journald + manual `journalctl`.** Fine for `laptop` dev only. Does not correlate with metrics, does not survive `journalctl --vacuum-time` cleanly, does not allow alerting on log patterns (e.g., a sudden burst of `Stage2Judge` `MALWARE` verdicts). Logs that no one reads until something is on fire are not observability.
+- **vs journald + manual `journalctl`.** Fine for `laptop` dev only. Does not correlate with metrics, does not survive `journalctl --vacuum-time` cleanly, does not allow alerting on log patterns (e.g., a sudden burst of `Stage2Worker` `MALWARE` verdicts). Logs that no one reads until something is on fire are not observability.
 - **vs cloud-managed (Datadog / New Relic / Honeycomb).** Pulls bot logs and `audit_log` spans across a third-party trust boundary. An operator who has chosen self-hosted SimpleX/Signal probably wants self-hosted observability too; the threat profile in [04-security.md](04-security.md) §Per-adapter admin threat profile is harder to reason about once metrics and logs leave the host. Cloud-managed remains a fine **operator override** for teams whose security model already accepts the boundary; it is just not a fit as the recommended *default*.
 - **vs Vector + ClickHouse / OpenObserve / SigNoz.** Newer, smaller community, less battle-tested operator runbooks. Prometheus + Loki + Grafana is the boring choice that just works and that any operator who has done observability before already knows. v1 optimizes for "an operator can stand this up in an afternoon", not for "an operator can save 20% on storage".
 

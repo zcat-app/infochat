@@ -75,7 +75,7 @@ optional. Run `/help` to see the ones available to *you* right now.
 
 | Command | What it does |
 |---|---|
-| `/summary [topic]` | Summarises the latest posts (optionally just one topic/tag) |
+| `/summary [topic]` | Summarises the latest posts, grouped into topic categories (optionally just one topic/tag). `--short` / `--full` / `--flat` change the shape — see [Worked examples](#worked-examples) |
 | `/zcash` · `/monero` | Cryptocurrency price/market data — a cached snapshot stamped with its capture time and cache age (if your admin enabled them) |
 | *(plain question)* | Ask the bot anything about your news — see [Chatting](#chatting-in-plain-english) |
 
@@ -87,11 +87,15 @@ optional. Run `/help` to see the ones available to *you* right now.
 | `/saved [topic]` | List your saved posts |
 | `/unsave <id>` | Remove a bookmark |
 
-> Each post the bot shows you has an **id** — a long hexadecimal string shown in
-> the `covered by:` line of a summary. That's what you pass to `/save` and
-> `/unsave` (your messaging app lets you tap-and-hold to copy it). Your library
-> is **yours alone** and follows you everywhere (a post saved in a group shows up
-> when you list saves in a DM).
+> Each post has an **id** — a long hexadecimal string. That's what you pass to
+> `/save` and `/unsave` (your messaging app lets you tap-and-hold to copy it).
+> The reliable way to get one is **`/summary --flat`**, whose per-story blocks
+> carry a `covered by:` line listing each post's source and id. The other forms
+> normally show prose without ids — though they fall back to a plain
+> `title — link (uid …)` listing when the window holds too many posts to write
+> up, or when the write-up step is unavailable, and those lines do carry ids.
+> Your library is **yours alone** and follows you everywhere (a post saved in a
+> group shows up when you list saves in a DM).
 
 ### News sources
 
@@ -155,11 +159,43 @@ Good to know:
 /summary
 ```
 
-The bot groups recent posts by topic and replies with something like:
+The bot groups recent posts into **topic categories** and sends **one message
+per category**, each a short prose write-up per story:
 
 ```text
-News (last 24h)
+AI NEWS
 
+Anthropic announced Fable 5, its new Mythos-class model, claiming...
+
+A new architecture from DeepSeek aims to replace the transformer for...
+
++3 more stories — narrow with a tag or -w to see them
+```
+
+```text
+OTHER NEWS
+
+A privacy-tech roundup covering...
+```
+
+Want just one topic?
+
+```text
+/summary ai-safety
+```
+
+**Four ways to render it.** Same posts, different shape:
+
+| Form | What you get |
+|---|---|
+| `/summary` *(default)* | Category sections, prose per story, up to 12 stories per section |
+| `/summary --short` | One roll-up paragraph per category — no per-story prose |
+| `/summary --full` | Like the default, but **every** story — no per-section cap |
+| `/summary --flat` | One flat block per story, **including post ids** — the form to use when you want an id to `/save` |
+
+`--flat` is the form that always prints ids, one block per story:
+
+```text
 [topic_id=t-3f8b2c1d]
 Anthropic releases Fable 5, a Mythos-class model
 covered by: TechCrunch (uid 9d4e1ac0f23b7e8516a0c4d9f7b2e3018a5c6d7e0f1928374655a4b3c2d1e0f9), @anthropic on Bluesky (uid 3f8b2c1d0e9a7654b1c2d3e4f5061728394a5b6c7d8e9f001122334455667788)
@@ -177,16 +213,10 @@ classification: ai
 tags: ai
 ```
 
-The **`covered by:`** line is the useful part: it lists the **exact posts**
+The **`covered by:`** line is the useful part there: it lists the **exact posts**
 behind each topic, each with its source and its **id** — the long hex string in
-parentheses after `uid`. Those ids are what you use to open a post in full or
-save it (next example).
-
-Want just one topic?
-
-```text
-/summary ai-safety
-```
+parentheses after `uid`. Those ids are what you use to save a post
+(next example).
 
 ### 2. Dig into one story from the summary
 
@@ -206,7 +236,7 @@ Tell me more about the second story.
 ```
 
 Keep asking follow-ups to go deeper, and bookmark anything worth keeping using
-the id from the summary's `covered by:` line:
+the id from a `/summary --flat` block's `covered by:` line:
 
 ```text
 /save 9d4e1ac0f23b7e8516a0c4d9f7b2e3018a5c6d7e0f1928374655a4b3c2d1e0f9

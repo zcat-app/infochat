@@ -362,7 +362,7 @@ connect with (see decision D34 and `security.md`).
     per-source reconnect cursor `MAX(published_at)` past now.
     The clamp can only bound a date the source *supplied*; it cannot
     invent an absent one, and `published_at` is nullable. Since
-    retrieval windows key on `ready_at` (M1-689), date-less posts do
+    retrieval windows key on `ready_at`, date-less posts do
     reach those result sets, so the defense is extended to the sort
     side: every window-bounded query orders on
     `COALESCE(published_at, fetched_at)`, never a bare `published_at
@@ -379,7 +379,7 @@ connect with (see decision D34 and `security.md`).
     so every consumer (`/summary`, the digest, `searchPosts`, the chat
     tools) sees the same value. `PostPersister` normalizes it once at
     the sole write path: null → `""`, bidi/zero-width/control strip
-    (`IngestTextNormalizer.stripMetadataField`, M1-433), blank
+    (`IngestTextNormalizer.stripMetadataField`), blank
     replacement — a title empty or whitespace-only after the strip
     becomes the literal `untitled` (so a titleless Bluesky/Nostr post
     no longer renders a blank headline) — then length-cap truncation
@@ -389,7 +389,7 @@ connect with (see decision D34 and `security.md`).
     inside a surrogate pair. The render sites print `title` verbatim;
     the cap belongs at ingest, where the value is written once, not at
     three renderers that would each need their own cap and would still
-    disagree with `searchPosts` and the chat tools (M1-693).
+    disagree with `searchPosts` and the chat tools.
 - **Post entity.** Named entities extracted from a post; used for Tier-2
   cross-source linking (decision D6: hybrid named-entity match for
   precision plus cosine similarity over embeddings for recall).

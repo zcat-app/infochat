@@ -62,9 +62,14 @@ infochat.llm.chat.provider=ollama
 infochat.llm.chat.model=llama3.1:8b                                                                                                                                                                                                             
 infochat.llm.translator.provider=ollama
 infochat.llm.translator.model=llama3.1:8b                                                                                                                                                                                                             
-infochat.embeddings.provider=ollama                                              
+infochat.embeddings.base-url=http://localhost:11434/v1
 infochat.embeddings.model=nomic-embed-text                                                                                                                                                                                                            
-```                                                                                                                                                                                                                                                        
+```
+
+There is no `infochat.embeddings.provider` key: one `EmbeddingProvider` impl
+ships per deployment and it is selected by endpoint, not by provider name
+(`llm.md` §SPI shape — "`EmbeddingProvider` has no `ModelTask` axis"). Per D54
+that endpoint is always local.                                                                                                                                                                                                                                                        
 Profiles ship sane defaults (see §5.7 below); operator only overrides what they need.                                                                                                                                                                 
                                                                                                                                                                                                                                                       
 ---                                                                                                                                                                                                                                                   
@@ -807,6 +812,39 @@ For direct-generation summarizer, English-translation is skipped entirely.
 ## 5.7 Profile defaults table (canonical)                                           
                                                                                                                                                                                                                                                       
 This table is the authoritative source. Profiles select all defaults at once; operator overrides individual settings if needed.
+
+**v1 status — rows whose key is not implemented** (audit 2026-07-27,
+`.scratch/doc-audit.md` §A). These stay in the table as design; they are work
+owed, not retired intent:
+
+- `infochat.eval.queue-size` — no such key, and the shipped **overflow
+  behavior is not the designed one**. The eval queue is an in-memory SmallRye
+  channel (`@Channel("eval-queue")`) running on SmallRye's **default 128-item
+  buffer**; it is not unbounded, but the depth is neither per-profile nor
+  operator-set. More consequentially, a full buffer makes the next
+  `Emitter.send` **throw** (`SRMSG00034`) — it does not block the producer, so
+  the "if full, fetcher blocks (back-pressure)" contract in
+  [01-architecture.md](01-architecture.md) §1.6 is not what runs. This is not
+  theoretical: two mid-drain `SRMSG00034` failures on 2026-07-03/04 are what
+  drove the per-emit readiness poll in `OutboxRehydrator`, and that guard
+  covers the rehydrator's own emits only — `Stage1Worker` and `Kind6Handler`
+  emit unguarded. The spec lists eval queue depth in the profile bundle
+  (`../spec/architecture.md` §Hardware profiles), so the commitment stands;
+  what is owed is the key **and** the back-pressure semantics.
+- `infochat.summary.workers` — no such key. Summary/digest work has no
+  per-profile worker-count bound. Same spec commitment as above.
+- `infochat.context-hard-limit` — no such key, and no ceiling above
+  `infochat.context-compress-at` is enforced anywhere. This row has no
+  matching spec commitment either; if the hard ceiling was dropped
+  deliberately, delete the row in a design edit that says so.
+- `infochat.llm.summarizer.max-concurrency` / `infochat.llm.chat.max-concurrency`
+  — these two keys do not exist; the per-task `max-concurrency` keys are
+  collector-side eval workers only (`security`, `tagger`, `entity`,
+  `classifier`, plus `infochat.embeddings.max-concurrency`). The Provider's
+  equivalent bound is a single shared worker pool,
+  `infochat.chat.dispatch.max-concurrency` (default 4), which covers
+  chat turns, user `/summary` and user `/retry` alike
+  ([06-messaging.md](06-messaging.md) §6.6 `InterruptibleDispatcher`).
 
 **v1 status — embeddings rows.** The `infochat.embeddings.model` and `infochat.embeddings.index-type` rows below show the *intended* per-profile design. v1 ships 768-d `nomic-embed-text` with an HNSW index on **every** profile (see §5.5); the per-profile embedding model / dimension / index are deferred beyond v1, and `infochat.embeddings.allow-model-change=false` keeps the dimension fixed. The `remote-llm` `infochat.embeddings.model` cell (`text-embedding-3-small`) is **permanently superseded by D54** — embeddings always run on a local nomic-768 backend (the `remote` wizard backend co-starts a local Ollama nomic embedder), never a remote provider.
                                                                                                                                                                                                                                                       

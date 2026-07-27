@@ -233,7 +233,7 @@ adversarial input kit — see
 |---|---|
 | `infochat-core` | Shared domain types, persistence, and cross-service code |
 | `infochat-ssrf` | SSRF-guarded HTTP client (egress hardening) |
-| `infochat-llm-adapter` | Pluggable LLM / embedding SPI (Ollama, OpenAI-compatible, Anthropic) |
+| `infochat-llm-adapter` | Pluggable LLM / embedding SPI (OpenAI-compatible — which covers Ollama and llama.cpp — plus DeepSeek and Anthropic) |
 | `infochat-messaging-adapter` | Pluggable messaging SPI (SimpleX, Signal, in-memory) |
 | `infochat-collector` | Headless ingest service — fetch, evaluate, store; owns migrations |
 | `infochat-provider` | The only user-facing service — messaging, commands, digests |

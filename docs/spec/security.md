@@ -323,7 +323,7 @@ considered untrusted (decision D21):
 
   | Name | Inputs | Output | Notes |
   |---|---|---|---|
-  | `searchPosts` | `tags: list<Tier-1 tag>` (each value validated against the controlled vocabulary), `window: duration`, `limit: int ≤ profile-driven cap` | list of `{uid, title, url, ready_at, tags}` | Returns `READY` posts visible in the calling `(user, scope)`'s world only (D59: live, non-excluded bootstrap sources OR the scope's subscriptions). The requested tag filter applies as-is (validated against the controlled vocabulary); the scope's `tag_mode`/`scope_tag` preferences intentionally do NOT apply — tag preferences narrow the digests only (commands.md §Per-scope tag preferences, D59). The `window` filter binds to `ready_at` (the pipeline's READY-transition time): the result is the posts that became readable within the window, so a post with an old `published_at` but a recent `ready_at` DOES surface in a short window — it arrived in that window (M1-689; commands.md §Content, *What the window measures*). Results are ordered `COALESCE(published_at, fetched_at)` descending. The ordering falls back to `fetched_at` rather than sorting on a bare `published_at` because that column is source-supplied AND nullable, and Postgres sorts NULLs first under `DESC`: a bare key would let any feed seize the head of every result — the position re-injected first into the chat prompt — by simply omitting its publication date, which is strictly easier than the future-dating the ingest clamp already denies (schema.md §"`published_at` clamp"). The fallback is `fetched_at`, **not** `ready_at`: `ready_at` is stamped at the READY promotion (always later than the row's own fetch) and is re-stamped by `approve_quarantine` and re-evaluation, so keying on it would rank an undated post above the ceiling the clamp imposes on dated ones and let a released post jump to a position no dated post can reach. `fetched_at` is the partition key and is never re-stamped. **The bound this gives is precise, and is worth stating exactly rather than over-promising:** an undated post sorts at the top of *its own fetch cycle* — level with the ceiling a dated post from that same fetch could claim — and no higher, and it cannot move on release. That bound is stated against its own fetch, not against the corpus, and the difference matters: a **later** fetch does not automatically displace it, because the clamp bounds `published_at` from above only and an honest backfilled item can key arbitrarily far in the past. What the bound denies is any position a dated post from the same fetch could not already have taken. Omitting a date therefore buys a bounded, self-decaying position, not the unconditional head a bare `published_at DESC` would grant. |
+  | `searchPosts` | `tags: list<Tier-1 tag>` (each value validated against the controlled vocabulary), `window: duration`, `limit: int ≤ profile-driven cap` | list of `{uid, title, url, ready_at, tags}` | Returns `READY` posts visible in the calling `(user, scope)`'s world only (D59: live, non-excluded bootstrap sources OR the scope's subscriptions). The requested tag filter applies as-is (validated against the controlled vocabulary); the scope's `tag_mode`/`scope_tag` preferences intentionally do NOT apply — tag preferences narrow the digests only (commands.md §Per-scope tag preferences, D59). The `window` filter binds to `ready_at` (the pipeline's READY-transition time): the result is the posts that became readable within the window, so a post with an old `published_at` but a recent `ready_at` DOES surface in a short window — it arrived in that window (commands.md §Content, *What the window measures*). Results are ordered `COALESCE(published_at, fetched_at)` descending. The ordering falls back to `fetched_at` rather than sorting on a bare `published_at` because that column is source-supplied AND nullable, and Postgres sorts NULLs first under `DESC`: a bare key would let any feed seize the head of every result — the position re-injected first into the chat prompt — by simply omitting its publication date, which is strictly easier than the future-dating the ingest clamp already denies (schema.md §"`published_at` clamp"). The fallback is `fetched_at`, **not** `ready_at`: `ready_at` is stamped at the READY promotion (always later than the row's own fetch) and is re-stamped by `approve_quarantine` and re-evaluation, so keying on it would rank an undated post above the ceiling the clamp imposes on dated ones and let a released post jump to a position no dated post can reach. `fetched_at` is the partition key and is never re-stamped. **The bound this gives is precise, and is worth stating exactly rather than over-promising:** an undated post sorts at the top of *its own fetch cycle* — level with the ceiling a dated post from that same fetch could claim — and no higher, and it cannot move on release. That bound is stated against its own fetch, not against the corpus, and the difference matters: a **later** fetch does not automatically displace it, because the clamp bounds `published_at` from above only and an honest backfilled item can key arbitrarily far in the past. What the bound denies is any position a dated post from the same fetch could not already have taken. Omitting a date therefore buys a bounded, self-decaying position, not the unconditional head a bare `published_at DESC` would grant. |
   | `semanticSearch` | `query: string` (free text, length-capped), `limit: int ≤ profile-driven cap` | list of `{uid, title, url, similarity}` (`similarity` null for lexical-only rows) | **Hybrid** semantic + lexical retrieval over the post corpus, fused by Reciprocal Rank Fusion (D58): a pgvector cosine-distance arm over the post-embedding store and a full-text arm over `post.search_tsv` (`plainto_tsquery`, query bound as a parameter — never string-concatenated). Returns `READY` posts visible in the calling `(user, scope)`'s world only — **both** arms carry the same D59 world + `READY` predicate as `searchPosts` inside the arm before its limit, so a post outside the caller's world (a private custom the scope never subscribed, an excluded bootstrap source, or not yet `READY`) can never surface through either arm or the fused result. The query is embedded on the **local** embedding backend (embeddings never leave the deployment, D54); the fused candidate set and its order are decided entirely by SQL (per-arm `ORDER BY` + RRF, tie-broken by `post_id`), reproducible on unchanged DB state and never chosen by the LLM (D19). A configured cosine-distance relevance threshold gates the **semantic arm**; the lexical arm surfaces keyword-exact matches the semantic arm's threshold would exclude. When both arms return nothing → empty result → the agent answers from general knowledge. The scope's per-tag preferences (`tag_mode`, commands.md §Per-scope tag preferences) intentionally do **not** apply to either arm — under D59 tag preferences narrow the digests only (no chat retrieval surface applies them); this tool is scoped by the world predicate only. `similarity` (= 1 − distance) is a display value only, emitted `null` for a lexical-only row that has no embedding; the raw embedding vector is never exposed (D5). Besides being model-callable, the chat agent dispatches this tool **deterministically on every chat turn** (the D28 pre-fetch pattern) and re-injects the result through the untrusted-content wrapper — retrieved titles/URLs are attacker-influenced content. The deterministic pre-fetch shares the tool loop's per-turn dispatch context, so the fixed per-turn call cap and the identical-call cache hold turn-wide. The turn's retrieval outcome also drives a deterministic, bundle-localized provenance notice on the reply (grounded-with-count vs general-knowledge; count only, no feed-derived text interpolated — the D31/D43 constraint; commands.md §Chat mode, D58). |
   | `getPost` | `uid: string` | `{uid, title, body, url, ready_at, tags}` or `null` | Scope-filtered: returns null for a UID not visible in the calling scope (the same path as a UID that does not exist; the existence-vs-no-access distinction is never exposed). |
   | `getReferences` | `uid: string`, `limit: int ≤ profile-driven cap` | list of `{uid, title, url, link_type, score}` | Edges from the `post_reference` graph. Scope-filtered the same way as `searchPosts`. |
@@ -372,13 +372,13 @@ return. The **reply/success** surface is not yet fully guaranteed. Two
 live instances are known, both now **CLOSED** — but they did **not**
 close the same way, and the difference is the lesson:
 
-- the `/add-source` `--name` display-name echo (M1-659) is closed at
+- the `/add-source` `--name` display-name echo is closed at
   the **write boundary alone**: the override is discarded if the
   NFKC-folded name contains a slash, and because a display name has no
   legitimate slash, constraining the single produced value covers every
   surface that later renders it.
 - the `/save -t` personal-tag echo into the group-visible `/saved`
-  reply (M1-675) needed **both** a write-side reject **and** render-side
+  reply needed **both** a write-side reject **and** render-side
   redaction. The whole `/save` is rejected if any NFKC-folded tag
   contains a slash — but that only bounds NEW tag writes. The *same*
   reply line interpolates the post **title**, which is upstream-
@@ -392,7 +392,7 @@ close the same way, and the difference is the lesson:
   title on every render form (`commands.md` §Content): degraded prose
   (`title — url (uid)` per post) is derived from the cluster at render
   and sanitized per title
-  (`SummaryProseGenerator.degradedProseFor`, M1-697), so the default
+  (`SummaryProseGenerator.degradedProseFor`), so the default
   categorized form — which renders no headline — redacts every feed
   title that reaches the reader, and the `--full` flat form redacts both
   its headline and every title inside its `summary:` field. `/retry`
@@ -404,8 +404,8 @@ close the same way, and the difference is the lesson:
   parser's own scan" below): neither redacted nor audited, accepted
   because dispatch still requires `is_admin=true` and the multi-author
   sanitize unit that would catch it is the content-suppression vector
-  M1-697 removed. This is distinct from the degraded digest's `](`
-  adjacency residual, which M1-691 closed at the outbound chokepoint
+  the per-field narrowing removed. This is distinct from the degraded
+  digest's `](` adjacency residual, closed at the outbound chokepoint
   (see §"Sanitizer output never contains `](`" below). The surface is
   therefore **closed** on all render forms. This
   instance sits at the **same attacker tier**
@@ -417,7 +417,7 @@ close the same way, and the difference is the lesson:
 
 The write-boundary rejects carry no **mechanical guard** (the reflection
 guard's census is error-scoped, and both of these are `reply.*` keys)
-and other `reply.*` echoes remain unreviewed; the M1-675 render-side
+and other `reply.*` echoes remain unreviewed; the `/save -t` render-side
 redaction, by contrast, emits the per-occurrence `LLM_OUTPUT_SANITIZED`
 audit row on every hit. So for now this exemption carries a **residual
 risk** on non-error deterministic output, not a proven-safe blanket.
@@ -516,8 +516,8 @@ Whitespace is read the way the parser's `split("\s+")` reads it — every
 ASCII `\s` character is a token separator, so `/list-sources` and
 `--all` separated by a bare `\r` or by newlines match, mirroring the
 dispatch. **The span's justification holds because every caller's unit of input is
-one author's field** (M1-697, restoring the invariant M1-694 briefly
-widened). The argument below — that a collapsed span only ever swallows
+one author's field** (restoring the invariant the categorized-render
+work briefly widened). The argument below — that a collapsed span only ever swallows
 bot-authored bytes — requires every sanitize call over feed-derived text
 to be scoped to a *single* author's field, and every call site is built
 that way: `ClusterBlockRenderer` passes one post title,
@@ -526,7 +526,7 @@ row's title and one row's tags, and degraded prose is DERIVED from the
 cluster at render and sanitized per post title
 (`SummaryProseGenerator.degradedProseFor`) — the renderers never trust
 the prose bytes a `ClusterProse` record carries, so a hand-assembled
-record cannot smuggle unsanitized titles past them (M1-697 redteam,
+record cannot smuggle unsanitized titles past them (redteam,
 2026-07-25) — so no caller hands the sanitizer a multi-post
 concatenation. The whole-message
 span guarantee is therefore scoped **within one author's field**: a
@@ -535,12 +535,12 @@ the same field. The converse residual is accepted and deliberate: a
 privileged command split ACROSS two posts' fields — `/list-sources` in
 one title, `--all` in another — is **neither redacted nor audited**,
 because the two tokens never share one sanitize input. That is the
-pre-M1-694 posture on the flat renders, and it is bounded by dispatch
+original posture on the flat renders, and it is bounded by dispatch
 still requiring `is_admin=true`; the alternative — one sanitize call
 over assembled multi-author prose — is strictly worse, because the span
 then swallows *other publishers'* bytes and a co-clustered attacker can
-delete a third party's post (the content-suppression vector M1-694's
-redteam round 3 caught). The detector narrows only for that split case:
+delete a third party's post (the content-suppression vector the
+categorized-render redteam caught). The detector narrows only for that split case:
 within one field, per-occurrence `LLM_OUTPUT_SANITIZED` rows fire at
 least as often as before the narrowing.
 
@@ -573,7 +573,7 @@ otherwise leave the sanitizer emitting link syntax it manufactured
 itself.
 
 **Sanitizer output never contains `](`.** The guarantee is now an
-OUTBOUND property, carried once at `OutboundDelivery` (M1-691): every
+OUTBOUND property, carried once at `OutboundDelivery`: every
 outbound body — chat reply, progress placeholder/finalize, periodic
 digest, group announcement — has its `](` adjacency broken before it
 reaches the transport, regardless of how it was assembled. It therefore
@@ -588,15 +588,15 @@ through the sanitizer, and the assembled message used to sit outside
 the guarantee. The mechanism is the single
 `LlmOutputSanitizer.breakLinkAdjacency` declaration, called both inside
 the sanitizer's own passes (so a redaction or canonicalization cannot
-manufacture link syntax it then emits — M1-676) and at the outbound
+manufacture link syntax it then emits) and at the outbound
 chokepoint; it is idempotent, so the two call sites stack. The
 closed-list command redaction is a SEPARATE control and does NOT move
 to the chokepoint — its unit is one author's free-text field, and
 running it over a URL would rewrite ordinary feed paths like `/audit`
 or `/pending` to `[redacted command]` — so it stays at each sanitize
-call site, with the unit everywhere narrowed to one author's field
-(M1-697): degraded prose is sanitized per post title at composition, so
-the `/summary --full` and `/retry` flat renders — whose `summary:`
+call site, with the unit everywhere narrowed to one author's field:
+degraded prose is sanitized per post title at composition, so
+the `/summary --flat` and `/retry` flat renders — whose `summary:`
 field carries degraded prose verbatim — now deliver per-title redaction
 instead of a raw command-shaped title, and the default categorized
 `/summary` form relies on the same per-title redaction, derived from
@@ -630,7 +630,7 @@ audit-logged and WARNed whether or not any flattening succeeded.
 property above rests on every outbound path routing through
 `OutboundDelivery`'s entry points; that routing was a convention
 enforced by census, not a structural property. It is now build-guarded:
-an ArchUnit test (`OutboundChokepointArchTest`, M1-698) fails the build
+an ArchUnit test (`OutboundChokepointArchTest`) fails the build
 if any class in the provider main source other than `OutboundDelivery`
 and `DigestDelivery.RecordingAdapter` holds a direct call OR a
 method-reference edge (`adapter::send`) to `MessagingAdapter.send`,

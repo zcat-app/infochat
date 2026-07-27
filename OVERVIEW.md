@@ -270,11 +270,15 @@ choices read as inevitable.
 
 ## 7. Hardware profiles
 
-A single setting — `infochat.profile=laptop | vps | pi | remote-llm` — picks a
-bundle of defaults (context window, default chat/embedding models, eval
-concurrency, vector-index type). `remote-llm` means local DB + services with a
-remote LLM API; `vps` means everything on a VPS. Any individual value can still
-be overridden per-property.
+A single setting — the *infochat profile*, one of
+`laptop | vps | pi | remote-llm` — picks a bundle of defaults (context-window
+size, default chat / embedding model, eval concurrency, vector-index choice,
+summary worker count, eval queue depth). It is selected through Quarkus' own
+profile mechanism (`quarkus.profile` / `QUARKUS_PROFILE`); there is no separate
+`infochat.profile` key — see
+[docs/spec/architecture.md](docs/spec/architecture.md) §Hardware profiles.
+`remote-llm` means local DB + services with a remote LLM API; `vps` means
+everything on a VPS. Any individual value can still be overridden per-property.
 
 > **Privacy note.** The local profiles keep all content on your own
 > infrastructure. `remote-llm` — or routing any individual task to a cloud API —

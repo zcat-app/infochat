@@ -172,8 +172,8 @@ The refresh interval is a Collector property keyed per host
 (`infochat.assets.refresh.<host>`); the freshness window is a single
 Provider property (`infochat.assets.freshness-window`). The window
 values were calibrated to 2x the then-current cadence so the effective
-staleness threshold did not move, but the two are independent since
-M1-340: the Provider has no fetch loop and does not read the
+staleness threshold did not move, but the two are independent: the
+Provider has no fetch loop and does not read the
 Collector's cadence keys, so overriding one side does not move the
 other. `commands.md` §Asset commands states that contract and
 delegates the value here.
@@ -204,7 +204,7 @@ no `%profile` override exists), so a burst of identical commands does
 not take a pool connection each. A miss is not cached, so a snapshot
 landing just after one is visible on the next read. The TTL sits well
 below every profile's cadence, so the cached staleness verdict cannot
-drift meaningfully from a live read (M1-365).
+drift meaningfully from a live read.
 
 ## 10.5 Reply layout
 
@@ -308,7 +308,7 @@ to a percentage. Only Kraken's public ticker has no delta at all.
   there is one, and are the only 24h lines where there is not.
 - Any field absent from the snapshot row is silently omitted — the
   renderer never invents zeros. This is field-by-field, not in groups:
-  the 24h delta and the spread are gated independently (M1-678), so a
+  the 24h delta and the spread are gated independently, so a
   snapshot carrying a 24h delta but no `high_24h` / `low_24h` still
   renders the delta line.
 - `change_7d_pct` and `volume_24h` are stored but reach no reply line
@@ -409,7 +409,7 @@ The `--vs` `Available:` list is the SELECTED pair's
 `asset_config.default_quote_currency` — the only currency that pair
 fetches — so it is always exactly one value, and a `--vs` the pair does
 not serve is refused here rather than falling through to the no-data
-reply (M1-671).
+reply.
 
 ## 10.8b Asset feed recovery (operator-side)
 
@@ -460,8 +460,8 @@ feeds are operator-curated and the failure surface is small.
   coingecko the BTC/EUR/CZK figures are already in the response body
   the fetcher stores in `raw_payload`, so it is near-free; Kraken and
   Bitfinex need one extra request per currency, against the rate-limit
-  budget `AssetSnapshotFetcher`'s javadoc guards. M1-671 recorded the
-  fetch change as out of scope.
+  budget `AssetSnapshotFetcher`'s javadoc guards. The fetch change is
+  out of scope here.
 
 ## 10.10 Rate limiting
 
@@ -469,6 +469,16 @@ Asset commands are **cheap**: one SQL read, no LLM, no fetch in the
 hot path. They share the parser-only command bucket                                                                                                                                                                                                   
 (`security.md` §Rate limiting). They do **not** consume the                                                                                                                                                                                           
 LLM-triggering bucket.
+
+**GAP** (audit 2026-07-27, `.scratch/doc-audit.md` §A1): the parser-only
+bucket does not exist as a distinct bucket. `AssetHandler` consults no
+bucket of its own, so asset commands draw on the single shared inbound
+cap (`RateCapBucket`, `infochat.rate-cap.inbound-per-minute`, 60/min)
+alongside every other command and chat message. The "cheap commands share
+one bucket, LLM work draws on another" intent above still holds — asset
+commands genuinely never touch the LLM bucket — but the cost-profile
+*partition* the spec describes is not built. See
+[04-security.md](04-security.md) §4.9.
 
 The fetcher side has its own per-source budget (already part of the                                                                                                                                                                                   
 asset-fetch tick scheduling) — a misbehaving exchange does not

@@ -68,9 +68,11 @@ CREATE TABLE users (
   -- and access). Set on INSERT, mutated only by the closed transition set
   -- in spec/schema.md §Registration-state transitions.
   --   'preban'      row minted by /ban against unknown contact; deleted on /unban
-  --   'group_only'  auto-registered via group @mention; DM blocked until invite or /vouch
-  --   'invited'     registered via invite-code consume (or group_only advanced by /invite create --contact)
-  --   'vouched'     group_only advanced by /vouch <contact>, OR bootstrap-seeded admin row
+  --   'invited'     registered via invite-code consume
+  --   'vouched'     bootstrap-seeded admin row
+  -- ('group_only' was removed by D47 / V27 — the group auto-registration
+  --  path is gone, so no row is ever minted in it again. V27 converted any
+  --  surviving rows to 'preban' + is_banned=TRUE, NOT to 'invited'.)
   registration_state TEXT NOT NULL,
   probation_until    TIMESTAMPTZ,                    -- D45 slow-start; NULL = full access
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -82,7 +84,7 @@ CREATE TABLE users (
   CONSTRAINT users_adapter_contact_unique
     UNIQUE (adapter, contact_id),                    -- D46: same human on two adapters is two rows
   CONSTRAINT users_registration_state_chk
-    CHECK (registration_state IN ('preban','group_only','invited','vouched'))
+    CHECK (registration_state IN ('preban','invited','vouched'))   -- narrowed by V27 (D47)
 );
 
 CREATE INDEX idx_users_admin   ON users(is_admin)  WHERE is_admin;
@@ -694,12 +696,12 @@ CREATE TABLE post (
                                                       --   the sole write path) so every consumer sees
                                                       --   one value: null/blank → 'untitled' (no blank
                                                       --   Bluesky/Nostr headline), bidi/zero-width/
-                                                      --   control strip (M1-433), then length-cap
+                                                      --   control strip, then length-cap
                                                       --   truncation at IngestTextNormalizer.
                                                       --   TITLE_MAX_LENGTH (200 chars + '…'; the cut
                                                       --   runs AFTER the strip and is surrogate-aware).
                                                       --   Render sites print title verbatim; the cap
-                                                      --   is at ingest, not per-renderer (M1-693).
+                                                      --   is at ingest, not per-renderer.
   body                TEXT,                           -- always plain text (HTML stripped at ingest)
   body_summary        TEXT,                           -- LLM abstract; populated when body length
                                                       --   exceeds the body-summary threshold
@@ -771,8 +773,8 @@ CREATE TABLE post (
 -- Indexes are created on the parent and propagated to partitions.
 CREATE INDEX idx_post_status_fetched ON post(status, fetched_at DESC);
 CREATE INDEX idx_post_source         ON post(source_id, fetched_at DESC);
--- Provider startup reconciler scan (architecture.md §Catch-up), and since
--- M1-689 the retrieval window for /summary, the periodic digest, and the
+-- Provider startup reconciler scan (architecture.md §Catch-up), and the
+-- retrieval window for /summary, the periodic digest, and the
 -- chat searchPosts tool — all of which filter `status='READY' AND
 -- ready_at >= ?`, which this partial index serves exactly. The former
 -- idx_post_published ON post(published_at DESC) was dropped by
@@ -1432,14 +1434,14 @@ misclassification of a pre-existing colliding row is acceptable).
 
 **Verdict: add-render_form** — a successor migration (V65) adds a typed
 `render_form` discriminator that `/retry` dispatches on, retiring the
-pre-M1-699 string-match of `command_name` (`hasFlag(commandName,"--full")`).
+prior string-match of `command_name` (`hasFlag(commandName,"--full")`).
 
 `command_name` carries the whole command (verb + tag + flags) as free text,
 and `/retry` parsed it back into a dispatch decision. That already smelled:
 anchor values were never normalized, so pre-existing rows read `/summary`
 with a leading slash and the boolean check papered over it by treating
-anything without the exact `--full` marker as the default form. M1-700
-widens `/summary` from two render forms to four (`--short`, bare,
+anything without the exact `--full` marker as the default form. The
+four-render-form widening takes `/summary` from two forms to four (`--short`, bare,
 `--full` reclaimed, `--flat` renamed); extending the string-match inherits
 the fragility at a wider surface. `render_form` is the typed dispatch axis;
 `command_name` stays the human-readable/audit string. The two are
@@ -1450,10 +1452,10 @@ intentionally separate concerns: `command_name` is what the user typed
 precedent on this exact table: TEXT+CHECK. A Postgres enum needs
 `ALTER TYPE ADD VALUE` (a migration) for every future form; TEXT+CHECK
 just needs an altered CHECK. The CHECK lists all four values now
-(`bare`, `short`, `full`, `flat`) so M1-700 adds no migration — only
+(`bare`, `short`, `full`, `flat`) so the widening adds no migration — only
 code that writes and dispatches on `short`/`full`.
 
-**Backfill determinism.** Pre-M1-700 `command_name` ∈ {`"summary"`,
+**Backfill determinism.** Before the widening, `command_name` ∈ {`"summary"`,
 `"/summary"`, `"summary --full"`, `"/summary --full"`}, optionally with a
 tag (`"summary ai --full"`). Rule: `command_name LIKE '%--full%'` ⇒ `flat`,
 else ⇒ `bare`. Unambiguous — `--full` is the only form flag today, always

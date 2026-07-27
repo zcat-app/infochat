@@ -622,10 +622,22 @@ quarantine-review commands.
 - **Eval channel**: bounded queue size (configurable, profile-driven). If
   full, fetcher blocks (back-pressure to feed schedulers, which is the
   desired behavior — avoids unbounded memory growth on LLM slowness).
+  **GAP** (audit 2026-07-27, `.scratch/doc-audit.md` §A5): neither half
+  ships. The depth is SmallRye's default 128-item buffer — not configurable,
+  not profile-driven (`infochat.eval.queue-size` does not exist) — and a
+  full buffer makes the next `Emitter.send` **throw** `SRMSG00034` rather
+  than block, so there is no back-pressure to the feed schedulers. Two
+  mid-drain occurrences (2026-07-03/04) drove `OutboxRehydrator`'s per-emit
+  readiness poll, which guards only its own emits. The design stands; the
+  depth key and the blocking semantics are both owed.
+  See [05-llm-and-embeddings.md](05-llm-and-embeddings.md) §5.7.
 - **Periodic-digest worker**: count is profile-driven —
   `laptop=4`, `vps=2`, `pi=1`, `remote-llm=8` (see §1.7 table). Generation
   requests are enqueued with stagger and processed serially per worker.
   Operators can override via `infochat.digest.workers`.
+  **GAP** (audit 2026-07-27, `.scratch/doc-audit.md` §A5): the key does not
+  exist and no per-profile digest worker count is enforced. The design
+  stands; the knob is owed.
 - **Progress edits**: `ProgressNotifier` enforces
   `max(adapter.minEditInterval, 600ms)` between edits per
   `(scope, requestId)`. Excess events are coalesced; only the latest
@@ -637,10 +649,11 @@ quarantine-review commands.
 
 **Adapter configuration** is per-adapter (decision D46): each enabled
 adapter has its own property namespace
-(`infochat.adapter.simplex.*`, `infochat.adapter.signal.*`, etc.). Concrete
+(`infochat.adapters.simplex.*`, `infochat.adapters.signal.*`, etc.). Concrete
 property keys live in the adapter's design notes (06-messaging.md). The
 Provider does not assume a single adapter at runtime; `AdapterRegistry`
-resolves every adapter whose `enabled=true` flag is set.
+activates exactly the adapters named in the `infochat.adapters` list, which
+is closed at startup (there is no per-adapter `enabled` flag).
 
 ## 1.7 Hardware profiles
 

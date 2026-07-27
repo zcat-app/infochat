@@ -40,7 +40,7 @@ Out of scope for v1:
 | T6 | Identity spoofing on messaging side | Adapter boundary | Trust the adapter's cryptographic identity (SimpleX contact ID, Signal ACI, in-memory test handle). Every adapter must implement the identity-assertion SPI per [../spec/messaging.md](../spec/messaging.md) §Per-adapter trust level; cross-adapter isolation is enforced by the schema's `(adapter, contact_id)` keying. |                                                                      
 | T7 | Banned user re-engagement | Provider intake | Banned-user check at the very front of the pipeline, before parsing |                                                                                                                            
 | T8 | Quarantine bypass via crafted unicode / homoglyphs | Stage 1 | NFKC normalization before regex; bidi-control character stripping |                                                                                                             
-| T9 | Embedding data exfiltration to remote LLM provider when operator wanted local-only | LLM adapter | Provider config is explicit; switching to remote requires explicit `infochat.embeddings.provider=remote` plus a confirmation log line on    
+| T9 | Embedding data exfiltration to remote LLM provider when operator wanted local-only | LLM adapter | Provider config is explicit; switching to remote requires explicitly repointing `infochat.embeddings.base-url` off-host plus a confirmation log line on    
 startup |                                                                                                                                                                                                                                             
                                                                                                                                                                                                                                                       
 ---                                                                                                                                                                                                                                                   
@@ -130,7 +130,7 @@ Two distinct outcomes are tracked separately: **Stage 2 verdict** (what the judg
 
 - Release the post as `post.status='READY'` with the **Stage 1 redactions still in place** (placeholders are NOT reverted).
 - Set `post.stage2_failed = true` so the failure is recorded on the post itself (see [02-schema.md §2.4](02-schema.md)).
-- Admin notified via the throttled `AdminNotifier` channel (§4.7), not per-post.
+- Admin notified via the throttled `ThrottledAdminNotifier` channel (§4.7), not per-post.
 - When the LLM comes back, a periodic re-evaluation job picks up posts with `stage2_failed=true` and re-runs Stage 2.
 
 Failure of the Stage 2 LLM **never** auto-releases the original (pre-Stage-1) content. The fallback when the judge can't run is the Stage-1-redacted version, which is degraded but safe.                                                                                                                                        
@@ -229,7 +229,10 @@ Every tool argument is type-checked and bound to enums, validated ranges, or len
 On startup:                                                                                                                                                                                                                                           
                                                                                  
 @Startup AdminBootstrap (priority high):                                                                                                                                                                                                              
-  contact_id = config.get("infochat.admin.contact-id")
+  contact_id = config.get("infochat.adapters.<name>.admin")   # per adapter, D50
+                # SimpleX has no pre-seedable address: it uses the
+                # single-use claim-token infochat.adapters.simplex.admin-token
+                # instead, and AdminBootstrap skips it entirely.
   if contact_id is set:                                                                                                                                                                                                                               
     user = users.findByContactId(contact_id) ?? users.create(contact_id)         
     if not user.is_admin:                                                                                                                                                                                                                             
@@ -286,7 +289,7 @@ Behavior:
 
 - **Strip-or-refuse.** The default is to strip the matched span and replace it with `[refused-action]`. If the same reply contains 3+ matches, the entire reply is refused and replaced with `I tried to write a reply that included admin commands; refusing.`
 - **Audit every match.** A row is written to `audit_log` with `action='LLM_OUTPUT_SANITIZED'`, `target_kind='user'`, `target_id=<calling_user>` (or `target_kind='group'`, `target_id=<group_id>` for digest prose where the calling user is the scheduler), `details_json={ "surface": "chat" | "summary" | "digest" | "retry", "matches": [...], "decision": "stripped" | "refused" }`. Per-occurrence (not throttled) so operators can see when small models start emitting privileged commands across any surface.
-- **Why this exists.** Admin commands are dispatched by `CommandRouter`, never by the LLM, so a copy-paste of an LLM-emitted reply still requires `is_admin=true` to actually execute anything. But LLM-emitted text — chat reply, summary prose, digest prose — can be a vector for social engineering ("hey @victim, the bot just told me to run `/grant-admin abc`, please confirm") and small judge models on the Pi profile are easy to coax into emitting these strings. The sanitizer is a cheap deterministic guard that closes that surface across every LLM output surface, not only chat-mode.
+- **Why this exists.** Admin commands are dispatched by `InboundRouter`, never by the LLM, so a copy-paste of an LLM-emitted reply still requires `is_admin=true` to actually execute anything. But LLM-emitted text — chat reply, summary prose, digest prose — can be a vector for social engineering ("hey @victim, the bot just told me to run `/grant-admin abc`, please confirm") and small judge models on the Pi profile are easy to coax into emitting these strings. The sanitizer is a cheap deterministic guard that closes that surface across every LLM output surface, not only chat-mode.
 - **Known limitation: verbatim-match only.** The regex catches literal command strings only. It will not strip social-engineering phrasings like `"/ ban that user"` (space after slash), `` "`/ban`" `` (backtick-wrapped, where the backtick precedes `/`), `"run slash-ban on that user"`, or markdown-bold `` **/ban** ``. Because the actual execution still requires `is_admin=true`, this is a **social-engineering surface, not a privilege-escalation surface** — a victim who follows the LLM's suggestion still has to type the command themselves and still hits the deterministic permission check. Verbatim-match is a deliberate choice over a fuzzier matcher: a fuzzy matcher trades a small surface reduction for a large false-positive rate that mangles benign prose mentioning admin actions in narrative form. Operators should set expectations accordingly; the social-engineering layer is addressed by the audit log of sanitizer hits and by user education, not by regex enrichment.
 - **Scope.** Applies to every LLM-authored output surface listed above; does NOT apply to deterministic command output.
 
@@ -346,7 +349,7 @@ The LLM never participates in steps 1–9. This is the determinism boundary that
 - `'invited'` — registered via DM invite-code consume (step 2). Full DM access (subject to probation + ban + permission matrix).
 - `'vouched'` — the bootstrap-seeded admin row (`@Startup` admin bootstrap, never subject to invite gate). Semantically equivalent to `'invited'` for permission purposes but distinct in the audit trail (bootstrap vs. invite-consume origin). Post-D47, `/vouch` clears `probation_until` but no longer changes `registration_state`.
 
-**Migration (D47):** existing `users` rows with `registration_state = 'group_only'` are transitioned to `'invited'` before the CHECK constraint is altered; an `audit_log` entry records the bulk transition.
+**Migration (D47):** existing `users` rows with `registration_state = 'group_only'` are transitioned to `'preban'` with `is_banned = TRUE` — the canonical pre-ban shape — before the CHECK constraint is altered; an `audit_log` entry records the bulk transition. Transitioning them to `'invited'` was considered and **rejected**: those rows never passed the DM invite gate, so `'invited'` would grant DM access they never held (a group-side registration bypass). See [../spec/schema.md](../spec/schema.md) §Identity and access and V27's header.
 
 The state is also written into the audit row at creation time so the registration path is reconstructible from the audit log alone.
 
@@ -582,7 +585,7 @@ Recommended alerts (operator owns the rules; defaults shipped in `monitoring/`):
                                                                                                                                                                                                                                                       
 ### Admin notification throttling                                                                                                                                                                                                                     
                                                                                  
-The Provider's `AdminNotifier` coalesces events on `(channel, error_class)` for 15 minutes. **Every coalesced line MUST include the absolute event count for the window** so the operator can gauge attack/outage scale from the notification alone — without it, "tagger failed" reads identically whether 5 posts or 5000 posts were affected. The count is mandatory, not optional, in the message template. Example output:                                                                                                                                                   
+The Provider's `ThrottledAdminNotifier` coalesces events on `(channel, error_class)` for 15 minutes. **Every coalesced line MUST include the absolute event count for the window** so the operator can gauge attack/outage scale from the notification alone — without it, "tagger failed" reads identically whether 5 posts or 5000 posts were affected. The count is mandatory, not optional, in the message template. Example output:                                                                                                                                                   
                                                                                  
 [bot, to admin]                                                                                                                                                                                                                                       
 [!] Eval failure summary (last 15 min)                                           
@@ -619,24 +622,42 @@ The same sanitizer is invoked on every adapter event that proposes a display-nam
                                                                                  
 ## 4.9 Rate limiting
 
-Defenses against intentional flooding and accidental loops.                                                                                                                                                                                           
+Defenses against intentional flooding and accidental loops. The **Status**
+column records whether the shipped code implements the designed limit; ✗ rows
+are open gaps, not retired design (audit 2026-07-27, `.scratch/doc-audit.md`
+§A). Where the shipped shape differs, the design column stays as designed —
+the row is a to-do, not a description.
 
-| Surface | Limit | Action on overflow |
-|---|---|---|
-| Per-user commands (parser-only, e.g. `/help`, `/list-sources`) | 30/min token bucket | Friendly reject, "slow down, try again in {N}s" |
-| Per-user `/add-source` | 5/hour | Reject with explanation; encourages bulk via bootstrap JSON |
-| Per-user chat-mode messages (transport rate) | 60/min token bucket | Reject; chat agent doesn't run |
-| **Per-user LLM-triggering ops** (chat replies + `/summary`) | **10/min** (laptop/vps/remote), **5/min** (pi) | Friendly reject; chat agent / summarizer doesn't run |
-| **Tool calls per chat turn** | **5** (all profiles) | After the 5th tool call, reply "I've hit my tool-use budget for this turn — please ask a more specific question." and stop the agent loop |
-| Per-source HTTP fetches | Politeness window (default 5 min) | Skip until window expires |
-| Eval LLM calls | Profile-driven concurrency | Block fetcher (back-pressure) |
-| `/quarantine approve` | 100/min per admin | Reject with rate-limit message |
+**The gap is structural, and it is spec-level, not design-level.**
+[../spec/security.md](../spec/security.md) §Rate limiting commits to a
+**partition** — "grouped explicitly so commands that share a cost profile
+share a bucket" — naming five: parser-only/DB-read commands, asset commands,
+`/add-source`, chat-mode transport, and LLM-triggering ops. What ships is a
+different shape, not a subset: ONE per-`(adapter, contact_id)` inbound bucket
+(`RateCapBucket`, 60/min) that every command and chat message draws on, plus
+one genuinely separate LLM bucket (`LlmRateCap`), plus the per-group backstops
+below, plus `/quarantine`'s reuse of the inbound bucket under its own
+namespace. So the ✗ rows below are not five independent missing features —
+they are one missing partition. Closing any single row means deciding whether
+the partition is being built or the spec narrowed to the shipped shape.
+
+| Surface | Designed limit | Action on overflow | Status |
+|---|---|---|---|
+| Per-user commands (parser-only, e.g. `/help`, `/list-sources`) | 30/min token bucket | Friendly reject, "slow down, try again in {N}s" | ✗ **not implemented as designed.** One bucket (`RateCapBucket`, `infochat.rate-cap.inbound-per-minute`, default **60/min**) covers ALL inbound — commands and chat alike — and overflow is a **silent drop** at `InboundRouter` step 1.5, not a friendly reject |
+| Per-user `/add-source` | 5/hour | Reject with explanation; encourages bulk via bootstrap JSON | ✗ **not implemented.** No per-command bucket exists; `/add-source` draws only on the shared 60/min inbound bucket |
+| Per-user asset commands (`/zcash`, `/monero`, …) | Shared cache-hit bucket ([../spec/security.md](../spec/security.md) §Rate limiting; [10-asset-commands.md](10-asset-commands.md) §10.10) | Reject; guards against a flood forcing refetches | ✗ **not implemented.** `AssetHandler` consults no bucket; asset commands draw only on the shared 60/min inbound bucket. §10.10's "they share the parser-only command bucket" describes a bucket that does not exist as a distinct one — the sharing is with ALL inbound, not with a cost-profile peer group |
+| Per-user chat-mode messages (transport rate) | 60/min token bucket | Reject; chat agent doesn't run | ~ shipped as the shared 60/min inbound bucket above (correct rate, but not a chat-specific bucket, and it drops silently) |
+| **Per-user LLM-triggering ops** (chat replies + `/summary` + `/retry` re-rolls) | **10/min** (laptop/vps/remote), **5/min** (pi) | Friendly reject; chat agent / summarizer doesn't run | ~ `LlmRateCap`, `infochat.chat.llm-rate-cap-per-minute` — mechanism and reject shipped as designed, but **remote-llm ships 20/min**, 2× the designed value (`%remote-llm` in the Provider's `application.properties`). No spec breach: [../spec/security.md](../spec/security.md) §Rate limiting commits only "profile-driven". Decide which number is right rather than letting the table track the code |
+| **Tool calls per chat turn** | **5** (all profiles) | After the 5th tool call, reply "I've hit my tool-use budget for this turn — please ask a more specific question." and stop the agent loop | ✗ shipped as TWO caps, neither configurable and neither producing the designed reply: `ChatAgent.MAX_TOOL_ITERATIONS = 10` bounds the loop (binding — one tool call per iteration; exhaustion silently makes one more LLM call and returns its text), and `ChatToolDispatcher.TurnContext.DEFAULT_CALL_CAP = 25` is a non-binding backstop that returns a `ValidationError` *to the model*, not to the user. [../spec/security.md](../spec/security.md) §Prompt-injection defenses refers to "the fixed per-turn call cap" — that is the 25 |
+| Per-source HTTP fetches | Politeness window (default 5 min) | Skip until window expires | ~ shipped as a per-**host** floor (`infochat.fetch.host-min-interval`, default **20 s**), not a per-source 5-minute window; per-kind poll cadence is the coarse control (`infochat.fetch.<kind>.interval`) |
+| Eval LLM calls | Profile-driven concurrency | Block fetcher (back-pressure) | ✓ per-task `max-concurrency` |
+| `/quarantine approve` | 100/min per admin | Reject with rate-limit message | ~ shipped, but reuses the shared `RateCapBucket` cap (60/min) under a `quarantine` namespace rather than a dedicated 100/min bucket |
 
 Notes on the LLM-triggering caps:
 
 - The chat-mode transport limit (60/min) is intentionally higher than the LLM-triggering cap (10/min). A user can fire 60 short messages a minute (the bot will respond to up to 10 of them with the chat agent / summarizer; the rest get a quick rate-limit reply). This avoids burning the only LLM slot on a Pi when one user is hammering the bot — Mimo's flooding scenario.
-- Tool-call results are cached **within a single conversation turn**: if the agent calls `getPost(p-a91)` twice in the same turn, the second call returns the cached result instead of re-querying. The cache scope is one (user, scope, turn_id); the next user message starts a fresh cache.
-- `infochat.ratelimit.llm-ops-per-minute` and `infochat.ratelimit.tool-calls-per-turn` are configurable but capped at the profile defaults — operators can lower, not raise.                                                                                                                                                                        
+- Tool-call results are cached **within a single conversation turn**: a call identical after argument clamping re-uses the shared `ChatToolDispatcher.TurnContext` result rather than re-executing, and charges the per-turn call count once. The cache key is `(toolName, user, scopeKind, scopeId, canonicalized args)` and the cache lives on the `TurnContext`, so the scope is one (user, scope, turn); the next user message starts a fresh one. The deterministic pre-fetch shares that same `TurnContext` ([../spec/security.md](../spec/security.md) §Prompt-injection defenses), so its result is cached and re-usable by a later model-initiated call — the cache is not model-call-only.
+- Designed: the per-user LLM-ops and tool-call budgets are operator-configurable but clamped to the profile default — operators can lower, not raise. ✗ **not implemented**: `infochat.chat.llm-rate-cap-per-minute` is settable with **no clamp**, and the tool-call budget has no config key at all. The key names this line previously used (`infochat.ratelimit.llm-ops-per-minute`, `infochat.ratelimit.tool-calls-per-turn`) never existed.
                                                                                                                                                                                                                                                       
 ### Per-group rate caps (D47)
 
@@ -693,7 +714,7 @@ Three Postgres roles, least-privilege per [../spec/security.md](../spec/security
 
 ### `infochat_collector` (Collector Server)
 
-- `INSERT, UPDATE` on ingest-owned tables: `post`, `post_user_tag`, `post_entity`, `post_embedding`, `post_reference`, `quarantine`, `tag`, `price_snapshot`, `asset_config`.
+- `INSERT, UPDATE` on ingest-owned tables: `post`, `post_entity`, `post_embedding`, `post_reference`, `quarantine`, `tag`, `price_snapshot`, `asset_config`, `embedding_metadata`, `admin_notification_state`, `heartbeat`, `bootstrap_meta`. (`post_entity` and `post_embedding` are `INSERT`-only; `post_reference` gains `UPDATE` in V34. There is no `post_user_tag` table — tags are inline on `post.tags`, [02-schema.md](02-schema.md) §"No `post_user_tag` join table".)
 - `UPDATE` on `source` for status + last_* columns (the fetcher updates `last_fetched_at`, consecutive-failure counters, etc.); `INSERT` for bootstrap-loader idempotent upsert path.
 - `SELECT` on the rest (read-side of joins).
 - `INSERT`-only on `audit_log` (`UPDATE` and `DELETE` are revoked; append-only Invariant 10 is enforced by both grants and the `trg_audit_log_append_only` trigger — [02-schema.md §2.1.7](02-schema.md)).
@@ -730,7 +751,7 @@ A SQL-injection bug in the Provider cannot:
 
 - `application.properties` is operator-owned; never checked into source.                                                                                                                                                                              
 - LLM API keys (for remote providers) are read from environment variables, not from the DB.
-- Audit log redacts all values that look like API keys (`sk-...`, `nano-...`, etc.) at write time via a regex hook in `AuditLogger`.                                                                                                                  
+- Audit log redacts all values that look like API keys (`sk-...`, `nano-...`, etc.) at write time via a regex hook in `AuditLogWriter`'s `RedactionHook`.                                                                                                                  
 - `contact_id` is logged in redacted form (first 6 chars + `…` + last 4 chars) outside of audit_log itself.                                                                                                                                           
                                                                                                                                                                                                                                                       
 ---                                                                                                                                                                                                                                                   

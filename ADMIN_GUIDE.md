@@ -217,7 +217,12 @@ pending.
 | `/approve-group <group_id>` | Turn the bot on for a pending group. Digests start; the first eligible member to @mention the bot afterward is auto-promoted to group admin. |
 | `/reject-group <group_id>` | Turn the bot off for a group. Stops digests and interaction. Asks to confirm. |
 | `/list-groups [--page N]` | See every group the bot knows, with its status and member count. |
-| `/promote <contact>` / `/demote <contact>` | Inside a group: make/unmake someone a group admin. The person must be an active member. |
+| `/promote <contact>` / `/demote <contact>` | Inside a group: make/unmake someone a group admin. The person must be an active member (and not banned). |
+
+> **A group has at most one group admin.** `/promote` *replaces* the
+> incumbent — it demotes whoever currently holds the slot and installs the
+> target, in one transaction. There is no way to have two group admins in the
+> same group.
 
 > The `<group_id>` is the internal ID shown in the pending-group notification and
 > in `/list-groups`.

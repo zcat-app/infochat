@@ -166,7 +166,7 @@ This is the explicit deferred list. Each item below is fully specified elsewhere
 The MVP is "done" when, on a fresh `docker-compose up` with the laptop profile:
 
 1. The bootstrap loader seeds `source` rows and the controlled-vocab `tag` rows from `bootstrap-sources.json`.
-2. The bot admin (from `infochat.admin.contact-id`) exists in `user` with `is_admin=true` and an `audit_log` row records the bootstrap.
+2. The bot admin (from the per-adapter bootstrap path — `infochat.adapters.<name>.admin` for Signal, or the `infochat.adapters.simplex.admin-token` claim-token for SimpleX, D50) exists in `users` with `is_admin=true` and an `audit_log` row records the bootstrap.
 3. A non-admin user, sending their first DM via `InMemoryAdapter`, is auto-registered and receives `/help`.
 4. `/add-source <rss-url> --tags news,tech` inserts a `source` row, a `source_subscription`, and emits a `LISTEN/NOTIFY` event the Collector picks up.
 5. The Collector fetches the RSS feed, runs Stage 1 → (Stage 2 only on hits) → tagger → embedding, persists `post` rows with `status='READY'` (or `QUARANTINED` for malicious fixtures), and notifies the Provider.

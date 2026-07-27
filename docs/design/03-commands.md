@@ -374,8 +374,7 @@ probation" annotations would contradict the probation reply text the user
 receives if they try to invoke a blocked command.
 
 A bot admin can issue `/vouch <contact>` at any time to immediately graduate
-the user from probation (and lift the DM invite gate for `group_only` users).
-See §3.10 `/vouch`.
+the user from probation. See §3.10 `/vouch`.
 
 The probation gate is implemented as a single permission step on
 `users.probation_until` (`probation_until IS NULL OR probation_until < NOW()`,
@@ -446,7 +445,7 @@ traversal of the `post_reference` graph **before any LLM call**; the LLM
 writes prose per pre-computed cluster, so the cluster set is reproducible
 (determinism boundary D19).
 
-**Render form (M1-694; four modes M1-700).** `SummaryArgs.form` selects
+**Render form (four modes).** `SummaryArgs.form` selects
 between four mutually-exclusive renderers; it changes nothing about post
 selection, so all four forms are equally reproducible.
 
@@ -468,8 +467,8 @@ selection, so all four forms are equally reproducible.
   opt-in). One LLM call per category; zero `SummaryProseGenerator` calls.
 - **`--full`** — `DigestRenderer.renderSummarySections(..., Integer.MAX_VALUE)`:
   the categorized form with NO per-category cap and NO overflow line (all
-  clusters render). Per-cluster prose IS generated. M1-700 reclaimed
-  `--full` for categorized-uncapped (the legacy flat meaning moved to
+  clusters render). Per-cluster prose IS generated. `--full` was reclaimed
+  for categorized-uncapped (the legacy flat meaning moved to
   `--flat`).
 - **`--flat`** — `ClusterBlockRenderer.appendClusterBlock`: the flat
   seven-field block per cluster (`[topic_id=…]`, headline, `covered by:`,
@@ -485,7 +484,7 @@ overload additionally wires a `CategoryRollupGenerator` for the `--short`
 tests.
 
 **Window column.** The `-w` predicate is `post.ready_at >= cutoff`, not
-`published_at` (M1-689). `published_at` is source-supplied, nullable
+`published_at`. `published_at` is source-supplied, nullable
 (`V7__joins_post.sql`), and lags arbitrarily behind the instant the post
 actually reached readers, so keying on it dropped slow-fetched posts
 entirely and made NULL-dated posts permanently unreachable. `ready_at` is
@@ -797,7 +796,7 @@ The two soft-deleted rows are the `UPSERT_SOURCE_SQL` `CASE WHEN ? AND
 source.deleted_at IS NULL` guard made visible to the caller: the guard already
 skipped the tag replacement, so neither reply may claim one and neither writes
 an `ADD_SOURCE` audit row. They differ only in the remedy they can name —
-`/source-enable` is bot-admin-only (M1-669).
+`/source-enable` is bot-admin-only.
 
 The caller's `source_subscription` is upserted in the same transaction in
 every case.
@@ -1175,7 +1174,7 @@ turn at the LLM-call boundary as it does for the semantic pre-fetch.
 The trigger's match never reaches the LLM context — its sole consumer
 is the post-sanitize usage-block composition step (D67).
 
-The topic-delivery trigger (D69, M1-666) rides the same shape: the SAME
+The topic-delivery trigger (D69) rides the same shape: the SAME
 embed round-trip's vector probes `doc_kind='topic'` FIRST via
 `CommandIntentIndex.lookupTopic` — at the pinned
 `CommandIntentIndex.TOPIC_SIMILARITY_THRESHOLD` (0.60; no tier filter,
@@ -1192,8 +1191,8 @@ commands) and never through `TranslationPipeline` (D43 two-path rule).
 The threshold is the tool-parity 0.60 rather than the command trigger's
 conservative 0.70 because there is no lower-threshold tool path to
 distinguish from: this trigger is the topic corpus's only consumer, and
-the M1-649 pinned starting value applies directly (recalibration is a
-named follow-up, the M1-619 pattern).
+the pinned starting value applies directly (recalibration is a named
+follow-up, matching how the chat confidence cutoff was handled).
 
 | Profile | `statement_timeout` for interruptible queries |
 |---|---|
@@ -1460,29 +1459,30 @@ Immediately transitions a `PENDING` code to `REVOKED`. Audit-logged.
 ### `/vouch <contact>`
 
 Immediately graduates a user from the slow-start probation tier to
-full access (decision D45) **and** lifts the DM invite gate for
-`group_only` users. The single command performs both effects in one
-transaction:
+full access (decision D45). Since **D47** removed the `group_only`
+registration state from the enum (V27 narrowed the CHECK to
+`{preban, invited, vouched}` and no user is ever minted in it again),
+`/vouch` has exactly one effect and touches exactly one column:
 
 1. `probation_until = NULL` (immediate graduation).
-2. If the row's prior `registration_state = 'group_only'`, advance to
-   `'vouched'` so the next DM is no longer rejected by the permission
-   step ([../spec/security.md](../spec/security.md) §Invite-code
-   registration — "Group-registered users do not get free DM access").
 
-For a row already in `invited` or `vouched` state, `registration_state`
-is left unchanged.
+`registration_state` is **not** advanced — the pre-D47 second effect
+("lift the DM invite gate for `group_only` users") no longer has a
+state to act on, and the DM invite gate is now the universal
+registration path.
 
 **Scoped to the inbound adapter** (same convention as `/grant-admin`):
 the targeted row is `(inbound_adapter, contact_id)`. Vouching the same
 human on a second adapter requires running `/vouch` from that adapter.
 
-Audit-logged (the row carries both transitions under `details_json`).
+Audit-logged. `details_json` carries `probation_cleared` on the success
+leg and `target_registered` on the refusal legs — one transition, not the
+two the pre-D47 wording described.
 
-**No-op cases.** Already past probation **and** the row is not
-`group_only` → friendly no-op reply. A `group_only` user past probation
-but still DM-gated is a valid `/vouch` target (the command's purpose
-there is to lift the gate, not to clear probation).
+**No-op case.** Already past probation → friendly no-op reply, no
+`UPDATE` and no audit row. Since D47 removed `group_only`, probation is
+the only thing `/vouch` acts on, so "past probation" is the whole no-op
+condition.
 
 ### `/quarantine list [--all [-w …]] [--page N]`
 
@@ -1600,10 +1600,10 @@ processing. The drop is counted in the per-`(adapter, contact_id)`
 brute-force counter ([../spec/security.md](../spec/security.md) §Invite-code
 registration) but not individually audit-logged.
 
-A `group_only` user (auto-registered via group `@mention`, no invite
-consumed) hitting the bot in DM is rejected by the same fixed reply
-until a bot admin issues `/invite create --contact <id>` or `/vouch
-<contact>` — see §3.10 `/vouch`.
+There is no group-side registration path to fall back on: D47 removed
+group auto-registration, so an unregistered contact in DM is rejected by
+the fixed reply until a bot admin issues an invite they consume
+(`/invite create`) — see §3.10.
 
 ### Welcome messages
 
@@ -1707,13 +1707,13 @@ appears in the next digest. The bound is compared against `ready_at`
 for a post whose feed date predates the boundary but which only finished
 evaluating after it. It is also what makes a zero-post slot lossless: the
 empty slot still advances the boundary, and anything that becomes READY
-afterwards satisfies the next period (M1-689). A group's **first-ever** digest has no
+afterwards satisfies the next period. A group's **first-ever** digest has no
 previous boundary and falls back **one inter-slot period**, derived from
 the gap between the two configured centre hours above (12h at the
 defaults, complemented for the morning slot whose predecessor is the
 previous day's evening slot). It does not fall back to the slot window:
 a ~30-minute lower bound made a new group's opening digest report "no
-posts yet" against a full corpus (M1-688). A missed slot's sentinel row
+posts yet" against a full corpus. A missed slot's sentinel row
 counts as a boundary — its period is skipped, not folded into the next
 digest.
 
