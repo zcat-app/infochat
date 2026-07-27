@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 717 |
 | deferred | 0 |
 | abandoned | 20 |
-| **total** | **743** |
+| **total** | **744** |
 
 ---
 
@@ -31,6 +31,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-706 — Profile bundle: eval queue depth and summary worker count (complexity: high, risk: medium)
 - M1-707 — Operator-settable default timezone for new groups (complexity: low, risk: medium)
 - M1-708 — Gate docs against nonexistent infochat.* config keys (complexity: medium, risk: low)
+- M1-709 — SSRF body-cap comment names a config key that never existed (complexity: low, risk: low)
 
 ---
 
@@ -950,4 +951,5 @@ M1-705 (pending) ← runnable
 M1-706 (pending) ← runnable
 M1-707 (pending) ← runnable
 M1-708 (pending) ← runnable
+M1-709 (pending) ← runnable
 ```

@@ -40,7 +40,7 @@ out_of_scope:
     narrowed to say the caps are deliberately compile-time constants, so
     the comment now contradicts the design too. Fixing it is a one-line
     edit in a `src/main` file, which this test-only ticket must not
-    make; it is owed as a follow-up.
+    make; M1-709 owns it.
   - >-
     `INFOCHAT_*` environment variables. The env-var surface has a
     different ground truth (compose files, wizard scripts, systemd
