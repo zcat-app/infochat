@@ -15,7 +15,7 @@
   },
   {
     "kind": "nitter",
-    "identifier": "https://rss.xcancel.com/ClaudeDevs/rss",
+    "identifier": "https://nitter.net/ClaudeDevs/rss",
     "name": "ClaudeDevs (Twitter)",
     "category": "social",
     "tags": ["AI", "Claude", "Development"]
