@@ -1808,7 +1808,7 @@ exist.
 | `/summary {tag} -w 24h` (scope-aware)              | `idx_post_tags_gin` → `idx_post_status_fetched`                |
 | Cluster lookup by post graph                       | `idx_post_ref_from` and `idx_post_ref_to`                      |
 | Tier-2 entity match                                | `idx_post_entity_text` (within 4-day partition)                |
-| Tier-2 semantic kNN                                | profile-specific (HNSW or IVFFlat) on `post_embedding.embedding` |
+| Tier-2 semantic kNN                                | `idx_post_embedding_hnsw` on `post_embedding.embedding` (HNSW on every profile in v1; the profile-specific IVFFlat variant is deferred — §2.4.2) |
 | `/saved` filter by personal tag                    | `idx_saved_user_personal_tags` (GIN)                           |
 | Memory pre-fetch by keyword                        | `idx_chat_memory_keywords` (GIN)                               |
 | Admin `/audit` scan by actor                       | `idx_audit_actor` (read through `audit_log_view`)              |

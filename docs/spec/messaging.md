@@ -175,6 +175,17 @@ Every adapter implements:
   does not synthesise membership events from inactivity, and the
   permanent-delivery-failure-driven cleanup path covers only the
   bot-removed / group-deleted cases, not per-user leaves.
+- `maxInboundMessageBytes` — transport-layer first-defense cap on
+  inbound message size. Tighter than the application-level chat-mode
+  body cap (§Required SPI surface — Receive discusses the inbound cap;
+  this flag is where its value is negotiated): the adapter drops an
+  over-size message before it reaches Provider, so the transport bound
+  is enforced by the component that owns the transport.
+- `maxSendsPerSecond` — token-bucket cap on outbound `send` calls per
+  second, averaged over a one-second window. Adapters pace their own
+  transmits to this. Outbound *concurrency* is bounded separately by
+  the transport's one-outstanding-send rule, not by a capability
+  field.
 
 Future flags (richer attachments, voice, reactions, etc.) extend this                                                                                                                                                                                 
 list; v1 ships only the above. Provider must treat an unknown flag as                                                                                                                                                                                 

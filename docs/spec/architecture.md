@@ -359,6 +359,15 @@ intentionally describes the data flow without restating the trust rules.
 A named profile (`laptop`, `vps`, `pi`, `remote-llm`) drives a bundle of
 defaults: context-window size, default chat / embedding model, eval
 concurrency, vector-index choice, summary worker count, eval queue depth.
+
+Two members of that bundle are not yet delivered, recorded here rather
+than quietly dropped (audit 2026-07-27). **Vector-index choice** is
+deferred beyond v1: the migrations create HNSW unconditionally on every
+profile and no index-type property exists (`docs/spec/llm.md` §Embedding
+pipeline, `docs/design/01-architecture.md` §1.7). **Summary worker count
+and eval queue depth** are owed as implementation, not deferred — neither
+key exists today.
+
 The `remote-llm` profile is named to distinguish it from the `vps` profile:
 `vps` is "run everything on a VPS"; `remote-llm` is "local DB and services,
 remote LLM API (OpenAI, Anthropic, OpenRouter, etc.)".

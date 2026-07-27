@@ -7,6 +7,32 @@
                                                                                                                                                                                                                                                         
   # 08 — Verification and testing
                                                                                                                                                                                                                                                         
+  > **Status: original test plan, superseded by the shipped suite.**
+  > This file is the plan that was written before the suite existed and it
+  > was never reconciled with what got built (audit 2026-07-27). Roughly 30
+  > class names below — `AdapterContractTest`, `LlmProviderContractTest`,
+  > `EmbeddingProviderContractTest`, `TranslationProviderContractTest`,
+  > `FakeLlmProvider`, `FakeEmbeddingProvider`, `MigrationsIT`,
+  > `IsolationIT`, `QuarantineIT`, `EvalPipelineIT`, `GroupDigestIT`,
+  > `ChatMemoryIT`, `ChatConcurrencyIT`, `ConnectionPoolIT`, `SavedPostIT`,
+  > `SourceLifecycleIT`, `TranslationIT`, `AdminLifecycleIT`,
+  > `LinkingJobUnitTest`, `PermissionEvaluatorTest`, `PromptBuilderTest`,
+  > `CommandParserTest`, `Stage1SanitizerTest`, and the production types
+  > `ConfirmationStore`, `SimplexAdapter`, `TimeWindowParser`,
+  > `SourceJsonValidator`, `RedactingLogger`, `ChunkingTextSplitter` —
+  > **do not exist under those names**, and §8.1's layer counts and CI
+  > wall-clock targets do not match the built suite (659 test source files
+  > under `infochat-*/src/test`, distributed provider 339 / collector 150 /
+  > messaging-adapter 77 / core 52 / llm-adapter 30 / ssrf 11).
+  >
+  > **Read it as intent, never as an index of the suite.** The suite itself
+  > is the ground truth: `find infochat-*/src/test -name '*.java'`. The
+  > spec-level obligations this plan exists to serve are in
+  > `docs/spec/verification.md`, which is current. Renaming the entries to
+  > shipped classes would be guesswork about which planned suite maps to
+  > which built one, so the names are left standing as history rather than
+  > silently rewritten.
+
   This file specifies the test strategy: what we test, at which level, with what fixtures, and what signals we look at to declare a release ready. The goal is reproducible verification — running the suite against a fresh checkout produces the same 
   verdict every time.
                                                                                                                                                                                                                                                         
@@ -431,7 +457,9 @@
   `SELECT post_id FROM post_embedding ORDER BY embedding <=> $1 LIMIT 10` with a warm HNSW index over 50K vectors:                                                                                                                                        
   - laptop: < 50 ms median.                                                                                                                                                                                                                             
   - vps: < 100 ms.                                                                                                                                                                                                                                      
-  - pi: with IVFFlat over 10K vectors: < 150 ms.                                   
+  - pi: < 150 ms over 10K vectors. (The IVFFlat index this target was
+    written against is deferred beyond v1 — v1 measures HNSW on every
+    profile; see `01-architecture.md` §1.7.)
                                                                                                                                                                                                                                                         
   ### 8.8.4 Memory ceiling
                                                                                                                                                                                                                                                         

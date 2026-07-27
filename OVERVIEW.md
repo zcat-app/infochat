@@ -280,6 +280,11 @@ profile mechanism (`quarkus.profile` / `QUARKUS_PROFILE`); there is no separate
 `remote-llm` means local DB + services with a remote LLM API; `vps` means
 everything on a VPS. Any individual value can still be overridden per-property.
 
+Three members of that bundle are not delivered yet: the **vector-index
+choice** is deferred beyond v1 (HNSW ships on every profile), and **summary
+worker count** and **eval queue depth** have no property today. The spec keeps
+all three as requirements — see `docs/spec/architecture.md` §Hardware profiles.
+
 > **Privacy note.** The local profiles keep all content on your own
 > infrastructure. `remote-llm` — or routing any individual task to a cloud API —
 > is an explicit opt-in to send the content being processed (public post bodies

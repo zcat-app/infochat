@@ -248,9 +248,14 @@ Adding a fallback chain is a v2 candidate.
 - **Dimensionality mismatch at runtime is fatal.** Storing vectors of mixed
   dimensions in the same pgvector column silently corrupts cosine similarity
   scores. The only safe recovery is a full re-embed.
-- The pgvector index type is profile-driven (decision D27): HNSW for the                                                                                                                                                                              
-  laptop / vps / remote profiles; IVFFlat for Pi (cheaper build,
-  acceptable recall at the small live-set size).
+- The pgvector index type is a **post-v1** profile-driven choice
+  (decision D27). The intended shape is HNSW for the laptop / vps /
+  remote profiles and IVFFlat for Pi (cheaper build, acceptable recall
+  at the small live-set size). **v1 ships HNSW unconditionally on every
+  profile** — the migrations create it with no profile branch and no
+  index-type property exists. `docs/design/01-architecture.md` §1.7
+  records the same deferral (amended 2026-07-27 from a shipped-tense
+  claim — the requirement is deferred, not retired).
 - **Second embedded corpus — command intents** (decision D66).
   The `doc_embedding` table ships a second embedded corpus alongside
   `post_embedding`: one row per catalogue command, ~41 documents of a

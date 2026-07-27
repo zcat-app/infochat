@@ -312,9 +312,14 @@ priorities live in design notes.
 The spec commits to *categories* of configurable settings; specific                                                                                                                                                                                   
 property keys live in design notes:
 
-- **Profile.** One name selects context window, model defaults, eval                                                                                                                                                                                  
-  concurrency, vector index type, summary worker count, eval queue                                                                                                                                                                                    
-  depth.
+- **Profile.** One name selects context window, model defaults, eval
+  concurrency, vector index type, summary worker count, eval queue
+  depth. Three of those are not yet delivered (audit 2026-07-27):
+  **vector index type** is deferred beyond v1 (HNSW ships on every
+  profile, no index-type property exists — `llm.md` §Embedding
+  pipeline); **summary worker count** and **eval queue depth** are
+  owed as implementation, with no key today. The requirements stand;
+  only the shipped-tense reading was wrong.
 - **LLM routing.** Per-task provider + model overrides; embedding                                                                                                                                                                                     
   provider; translator provider.
 - **Messaging adapters.** A non-empty list of enabled adapter ids,
@@ -407,8 +412,13 @@ procedures are operator concerns and live in design notes / runbook.
 
 ## Local development
 
-A `docker-compose.yml` brings up Postgres+pgvector, an Ollama instance,                                                                                                                                                                               
-the Collector, the Provider, and the in-memory test messaging adapter.           
+A `docker-compose.yml` brings up Postgres+pgvector, an Ollama instance,
+the Collector and the Provider, with the llama.cpp backends as opt-in
+compose profiles (the D49 local-backend choice). The in-memory test
+messaging adapter is **not** a compose service — it is an in-process CDI
+bean inside the Provider, activated by configuration in the test-time
+deployment shape (§Deployment scenarios). Corrected 2026-07-27; the prior
+wording listed the adapter as a container.
 The bootstrap sources file points at a small set of feeds suitable for                                                                                                                                                                                
 a laptop. The MVP exit criteria (`docs/design/00-mvp.md`) define
 the smallest end-to-end slice that proves the topology works.
@@ -428,7 +438,8 @@ Operator picks one of:
 - **VPS.** Single host, smaller models, production-like Stage-2-failure                                                                                                                                                                               
   handling. Default profile: `vps`.
 - **Raspberry Pi.** Single host, tiny models, more aggressive degraded                                                                                                                                                                                
-  fallbacks (digest fallback, IVFFlat vector index). Default profile:            
+  fallbacks (digest fallback; the IVFFlat vector index is deferred
+  beyond v1 — see §Configuration surface). Default profile:
   `pi`.
 - **Remote LLM.** Local DB and services, remote LLM provider. Default                                                                                                                                                                                 
   profile: `remote-llm`.
