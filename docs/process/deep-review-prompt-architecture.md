@@ -1,6 +1,6 @@
 # Senior-developer subagent prompt template — architecture lens
 
-Used when `/deep-code-review architecture` spawns the senior-developer subagent (also used for the architecture pass within `/deep-code-review full`). The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` (substituting only metadata, paths, and the seed inventories) and spawns `Agent(subagent_type: "senior-developer", ...)` with a short stub pointing at the rendered file. The agent's identity and tool allowlist are declared in [`.claude/agents/senior-developer.md`](../../.claude/agents/senior-developer.md); the model is inherited from the main conversation.
+Used when `/deep-code-review architecture` spawns the senior-developer subagent (also used for the architecture pass within `/deep-code-review full`). The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` (substituting only metadata, paths, and the seed inventories) and spawns `Agent(subagent_type: "senior-developer", ...)` with a short stub pointing at the rendered file. The agent's identity and tool allowlist are declared in [`.claude/agents/senior-developer.md`](../../.claude/agents/senior-developer.md); the model is chosen per run by the skill (§"Model selection") and substituted as {{REVIEWER_MODEL}}.
 
 This lens differs from module and diff lenses: the reviewer focuses on the cross-module contract surface — SPI interfaces, schema, NOTIFY channel payloads, capability flags, property-key shape, the 6-module DAG, layering. Module-internal smells belong to the module lens, not this one.
 
@@ -215,7 +215,7 @@ Required structure:
 **Target:** architecture
 **Lens:** architecture
 **Date:** <YYYY-MM-DD HH:MM>
-**Reviewer:** senior-developer (opus)
+**Reviewer:** senior-developer ({{REVIEWER_MODEL}})
 
 ## Headline findings
 
@@ -318,6 +318,7 @@ the seven surfaces above. Then write the report to {{REPORT_PATH}}.
 | `{{CAPABILITY_INVENTORY}}` | `git grep -nE 'supports(MarkdownLinks|CodeFormatting|MembershipEvents|MentionByContactId|MessageEdit)' -- '*.java'` results. `(none yet)` if empty. |
 | `{{PROPERTY_INVENTORY}}` | `git ls-files '*application*.properties'` + `git grep -nE '@ConfigProperty' -- '*.java'` results. `(none yet)` if empty. |
 | `{{POM_INVENTORY}}` | `git ls-files 'pom.xml' '*/pom.xml'` results. |
+| `{{REVIEWER_MODEL}}` | The model the skill selected for this run (skill §"Model selection"). Rendered into the report header so a report always records what produced it. |
 
 Each inventory is redirected to its own file under `<run-dir>/inputs/` and passed via the render script's `@file` form. The engineering rules are NOT substituted — the template instructs the agent to Read `docs/process/engineering-rules-verbatim.md` in its own context.
 

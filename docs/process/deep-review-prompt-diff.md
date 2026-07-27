@@ -1,6 +1,6 @@
 # Senior-developer subagent prompt template — diff lens
 
-Used when `/deep-code-review uncommitted | ticket <id> | range <a>..<b>` spawns the senior-developer subagent. The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` (substituting only metadata and paths) and spawns `Agent(subagent_type: "senior-developer", ...)` with a short stub pointing at the rendered file. The agent's identity and tool allowlist are declared in [`.claude/agents/senior-developer.md`](../../.claude/agents/senior-developer.md); the model is inherited from the main conversation.
+Used when `/deep-code-review uncommitted | ticket <id> | range <a>..<b>` spawns the senior-developer subagent. The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` (substituting only metadata and paths) and spawns `Agent(subagent_type: "senior-developer", ...)` with a short stub pointing at the rendered file. The agent's identity and tool allowlist are declared in [`.claude/agents/senior-developer.md`](../../.claude/agents/senior-developer.md); the model is chosen per run by the skill (§"Model selection") and substituted as {{REVIEWER_MODEL}}.
 
 The reviewer starts with **zero conversation context**. It receives the paths to the diff and the engineering rules (Reading both in its own context — their bytes never enter the main-session transcript), the path it must write to, and is told it may read the rest of the codebase / spec / design notes via Read/Grep/Glob to verify claims and gather context.
 
@@ -155,7 +155,7 @@ Required structure:
 **Base:** {{BASE_REF}}
 **Head:** {{HEAD_REF}}
 **Date:** <YYYY-MM-DD HH:MM>
-**Reviewer:** senior-developer (opus)
+**Reviewer:** senior-developer ({{REVIEWER_MODEL}})
 
 ## Headline findings
 
@@ -246,6 +246,7 @@ When the skill prepares this prompt:
 | `{{BASE_REF}}` / `{{HEAD_REF}}` | Resolved per target form (see SKILL.md §Diff range resolution) |
 | `{{DIFF_FILE_PATH}}` | Path of the diff file the skill captured via shell redirection: `git diff <BASE_REF>...<HEAD_REF> > <run-dir>/inputs/diff.patch` (for uncommitted: `git diff HEAD` plus `git status --short`, both redirected into the same file) |
 | `{{REPORT_PATH}}` | `.reviews/deep-review/<target-slug>-<YYYY-MM-DD-HHmm>/report.md` |
+| `{{REVIEWER_MODEL}}` | The model the skill selected for this run (skill §"Model selection"). Rendered into the report header so a report always records what produced it. |
 
 The engineering rules are NOT substituted — the template instructs the agent to Read `docs/process/engineering-rules-verbatim.md` in its own context.
 

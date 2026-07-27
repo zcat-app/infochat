@@ -12,9 +12,17 @@ is single-sourced at `.claude/skills/deep-code-review/SKILL.md`.
    - "spawn the senior-developer / review-synthesizer subagent" → mapping §2
      (fresh-context gate agent; §3 for the headless form), then the §6
      contamination check
-   - `full`-mode parallel fan-out → run the per-target reviews sequentially
+   - `full`-mode parallel fan-out → run the per-slice reviews sequentially
      if your tool cannot run agents concurrently; the reports are
-     independent, so ordering does not matter
+     independent, so ordering does not matter. Do NOT reduce the slice
+     count to save wall-clock — the complete cover is the point of the
+     mode, and a partial cover reported as `full` is the failure it
+     exists to prevent.
+   - "use the fast/cheap tier" (skill §"Model selection") → your tool's
+     configured fast model. The agent definitions deliberately carry no
+     hardcoded model, because `model:` frontmatter binds Claude Code only
+     (mapping §6); if you cannot select a model, run your default and say
+     so in the printed summary rather than leaving it unstated.
 3. Everything else — prompt rendering via `scripts/m1-render-prompt.py`,
    report files under `.reviews/deep-review/` — is plain bash/python; run it
    as written.

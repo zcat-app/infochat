@@ -1,6 +1,6 @@
 # Review-synthesizer subagent prompt template
 
-Used when `/deep-code-review full` completes the parallel per-target reviews and spawns the synthesizer to produce the consolidated summary. The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` and spawns `Agent(subagent_type: "review-synthesizer", ...)` with a short stub pointing at the rendered file. The agent's identity and tool allowlist (Read/Write only — no Grep, no Glob, no shell) are declared in [`.claude/agents/review-synthesizer.md`](../../.claude/agents/review-synthesizer.md); the model is inherited from the main conversation.
+Used when `/deep-code-review full` completes the parallel per-target reviews and spawns the synthesizer to produce the consolidated summary. The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` and spawns `Agent(subagent_type: "review-synthesizer", ...)` with a short stub pointing at the rendered file. The agent's identity and tool allowlist (Read/Write only — no Grep, no Glob, no shell) are declared in [`.claude/agents/review-synthesizer.md`](../../.claude/agents/review-synthesizer.md); the model is chosen per run by the skill (§"Model selection") and substituted as {{REVIEWER_MODEL}}.
 
 The synthesizer starts with **zero conversation context, zero source code access, zero spec access**. It sees only the per-target review reports and this prompt. The framing — "you organize, you do not review" — is what makes this different from the senior-developer subagent.
 
@@ -109,7 +109,7 @@ Required structure (use exactly these section names, in this order):
 
 **Run directory:** {{RUN_DIR}}
 **Date:** <YYYY-MM-DD HH:MM>
-**Synthesizer:** review-synthesizer (opus)
+**Synthesizer:** review-synthesizer ({{REVIEWER_MODEL}})
 
 ## Coverage
 
@@ -240,8 +240,9 @@ in order. Then write the summary to {{RUN_DIR}}/00-summary.md.
 | Placeholder | Source |
 |---|---|
 | `{{RUN_DIR}}` | The absolute path of the run directory (`.reviews/deep-review/full-<YYYY-MM-DD-HHmm>/`) |
-| `{{REPORT_FILES}}` | Newline-separated `<role>:<path>` pairs for every report that completed successfully. Roles: `architecture`, `module-<name>`. Paths are relative to repo root. |
+| `{{REPORT_FILES}}` | Newline-separated `<role>:<path>` pairs for every report that completed successfully. Roles: `architecture`, `<module>-<prod\|test\|other>-<NN>` (one per slice — a `full` run produces tens of these, not one per module). Paths are relative to repo root. |
 | `{{FAILED_TARGETS}}` | Newline-separated `<role>:<reason>` pairs for any per-target agent that errored or did not produce a report. Empty (literal empty string) if all succeeded. |
+| `{{REVIEWER_MODEL}}` | The model the skill selected for this run (skill §"Model selection"). Rendered into the report header so a report always records what produced it. |
 
 If `{{REPORT_FILES}}` is empty (all agents failed), the skill refuses to spawn the synthesizer at all and surfaces the failure to the user instead — a synthesis over zero reports has no value.
 

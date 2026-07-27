@@ -287,6 +287,15 @@ prompt-rendering debug command.
 - **`model: inherit` has no cross-tool equivalent.** The per-tool agent defs
   omit `model`, so each tool uses its configured default. Use a strong model
   for gates — a weak reviewer is worse than none, because it APPROVEs.
+  **This rule is about gates, not about every subagent.** It binds
+  `/m1-tick review` and `/redteam`, which emit a verdict that gates a commit.
+  Advisory fan-outs that gate nothing invert the trade: their failure mode is
+  a missed finding, and cost is what pushes them toward a sampling shape that
+  misses far more. `/deep-code-review` therefore runs its reviewers on the
+  fast/cheap tier and spends the saving on complete coverage — see that
+  skill's §"Model selection". Selection there lives in the skill procedure,
+  not in `model:` frontmatter, precisely because frontmatter would bind
+  Claude Code alone and let the two paths diverge unseen.
 
 ## 7. Cross-harness gate (multi-auditor red-team)
 

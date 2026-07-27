@@ -14,8 +14,46 @@ This skill is the procedure. The prompt templates are at:
 
 If any of those is absent, the skill refuses with an explicit error.
 
-The reviewer subagent is `senior-developer` (see [`.claude/agents/senior-developer.md`](../../agents/senior-developer.md)) — model: inherited from the main conversation, tools: Read/Grep/Glob/Write.
-The synthesizer subagent is `review-synthesizer` (see [`.claude/agents/review-synthesizer.md`](../../agents/review-synthesizer.md)) — model: inherited from the main conversation, tools: Read/Write.
+The reviewer subagent is `senior-developer` (see [`.claude/agents/senior-developer.md`](../../agents/senior-developer.md)) — tools: Read/Grep/Glob/Write.
+The synthesizer subagent is `review-synthesizer` (see [`.claude/agents/review-synthesizer.md`](../../agents/review-synthesizer.md)) — tools: Read/Write.
+
+## Model selection
+
+**Default: the fast/cheap tier, not the session model.** On Claude Code that is
+`sonnet`, passed as the `model` parameter on each `Agent(...)` call. Both agent
+definitions keep `model: inherit` in their frontmatter on purpose — a hardcoded
+model there would bind only Claude Code and be silently inert on
+opencode/Codex/kimi (`docs/process/harness-mapping.md` §6, "`model: inherit`
+has no cross-tool equivalent"), so the two paths would diverge with no visible
+signal. The policy lives here, in the procedure every harness reads.
+
+Non-Claude harnesses: use your tool's configured fast model. If you cannot
+select one, run the session default and say so in the printed summary.
+
+**Why cheap is correct here, when gates demand a strong model.** The
+harness-mapping rule "use a strong model for gates — a weak reviewer is worse
+than none, because it APPROVEs" governs `/m1-tick review` and `/redteam`, which
+*emit a verdict that gates a commit*. This skill emits no verdict and gates
+nothing; its failure mode is a missed finding, not a false APPROVE. The
+binding constraint here is cost, because cost is what pushes a run toward the
+sampling shape that does not work (see §5a). Do not "fix" this inconsistency by
+raising the model — raise the coverage instead.
+
+**Choosing at invocation:**
+
+- Single-target forms (`uncommitted`, `ticket`, `range`, `module`, `path`,
+  `architecture`): use the fast tier without asking. These are one spawn; a
+  prompt costs more friction than the run costs money.
+- `full`: offer the choice at the cost-confirm gate in §5b, with the fast tier
+  marked `(recommended)`. One prompt already exists there, so this adds no new
+  interruption.
+- If the requested model is unavailable in the current harness, fall back to
+  the session default, **announce the fallback in the printed summary and in
+  the report header**, and continue. Never substitute a model silently.
+
+The model actually used is substituted into every rendered prompt as
+`{{REVIEWER_MODEL}}` and appears in each report's `**Reviewer:**` header line,
+so a report always records what produced it.
 
 This skill is intentionally decoupled from `/m1-tick` and `/redteam`. It does not gate commits, does not write to ticket frontmatter, does not invoke the workflow's escalation menu. The user reads the reports and decides what to act on.
 
@@ -105,8 +143,11 @@ Per lens:
     <run-dir>/inputs/prompt.txt \
     TARGET=<target> BASE_REF=<base> HEAD_REF=<head> \
     DIFF_FILE_PATH=<run-dir>/inputs/diff.patch \
-    REPORT_PATH=<run-dir>/report.md
+    REPORT_PATH=<run-dir>/report.md \
+    REVIEWER_MODEL=<the model this run will use>
   ```
+
+**`REVIEWER_MODEL` is substituted on every render, in every lens.** The render script only WARNs on an unfilled placeholder, so omitting it does not fail the run — it ships a report whose header reads `senior-developer ({{REVIEWER_MODEL}})`. Treat that string appearing in a report as a skill bug, not a cosmetic one: it means the run cannot say what reviewed the code.
 
 - **module lens** — capture the file inventory (command below) to `<run-dir>/inputs/inventory.txt`, then render `docs/process/deep-review-prompt-module.md` with `TARGET`, `MODULE_PATH`, `REPORT_PATH`, and `MODULE_FILE_INVENTORY=@<run-dir>/inputs/inventory.txt`.
 
@@ -161,40 +202,111 @@ After the agent returns:
 
 When `target = full`:
 
-#### 5a. Enumerate modules
+#### 5a. Partition every reviewable file into slices (complete cover)
 
-Read the parent `pom.xml`. Extract `<module>` entries from `<modules>`. Build the list `[infochat-core, infochat-ssrf, infochat-llm-adapter, ...]` (whatever exists at the time).
+`full` is **exhaustive by construction, never sampling.** One agent per *module*
+does not work: a 492-file module cannot be read in one context, so the agent
+reads a cross-section and the report still reads like a verdict. Measured on
+this repo (2026-06-27, same commit): the per-module shape produced **8 findings
+/ 0 highs**; the partitioned shape below produced **~75 findings / 2 highs**,
+including a stranded-RAW-post correctness bug and a future partition
+build-break. The unit of fan-out is therefore a **slice**, sized so the module
+template's "read every file in this list" is literally achievable.
 
-Filter to modules that have at least one source file under `<module>/src/`. Modules declared in the parent pom but not yet implemented are skipped (and noted in the run's manifest).
+1. **Enumerate the full reviewable set.** From the repo root:
+
+   ```
+   git ls-files '*/src/main/java/**/*.java' '*/src/main/kotlin/**/*.kt' > <run-dir>/inputs/all-prod.txt
+   git ls-files '*/src/test/java/**/*.java' '*/src/test/kotlin/**/*.kt' > <run-dir>/inputs/all-test.txt
+   git ls-files '*/src/main/resources/db/migration/*.sql' \
+                '*/src/test/resources/**/*.sql' \
+                '*/src/**/*.properties' '*/src/**/*.json' '*/src/**/*.xml' > <run-dir>/inputs/all-other.txt
+   ```
+
+   **Watch the resources glob.** `.sql` under `src/test/resources` is missed by a
+   java/kt/properties/json/xml glob — it is listed above deliberately. Any glob
+   you add must be added to the union check in step 4 as well, or the cover
+   silently stops being complete.
+
+2. **Slice.** Split each list into slices, grouped by module and by package
+   where possible so each slice is coherent rather than alphabetically
+   arbitrary:
+   - production: **≤ 22 files** per slice
+   - test: **≤ 40 files** per slice (test files are more repetitive per line)
+   - other (migrations, resources): **≤ 40 files** per slice
+
+   Write each slice to `<run-dir>/inputs/slice-<NN>-<module>-<prod|test|other>.txt`.
+
+3. **Verify the partition is a complete cover BEFORE spawning.** This is the
+   step that makes the run exhaustive rather than merely intended-to-be:
+
+   ```
+   cat <run-dir>/inputs/slice-*.txt | sort > <run-dir>/inputs/cover.txt
+   cat <run-dir>/inputs/all-*.txt   | sort > <run-dir>/inputs/expected.txt
+   comm -3 <run-dir>/inputs/cover.txt <run-dir>/inputs/expected.txt
+   ```
+
+   `comm -3` must print **nothing** — zero files missing, zero duplicated.
+   Also check `wc -l` matches between the two. If either check fails, **refuse
+   to spawn** and print the offending paths. A partial cover reported as a
+   `full` run is the exact false-confidence failure this mode exists to
+   prevent.
+
+4. Modules declared in the parent pom with no file under `<module>/src/` are
+   skipped and noted in the run manifest.
+
+The architecture pass (one agent, the six seed inventories) is unchanged — it
+is genuinely cross-cutting and does not partition.
 
 #### 5b. Print cost estimate and confirm
 
 ```
-/deep-code-review full will spawn N+1 subagents in parallel
+/deep-code-review full — EXHAUSTIVE run (complete cover, no sampling)
+
   - 1 architecture-lens review
-  - <N> module-lens reviews (one per implemented module: <list>)
+  - <S> slice reviews covering <total-file-count> files:
+      <P> production slices (<prod-count> files, <=22 each)
+      <T> test slices        (<test-count> files, <=40 each)
+      <O> other slices       (<other-count> migrations/resources)
 followed by 1 synthesizer pass.
 
-Estimated work:
-  - <total-file-count> source files will be read across all agents
-  - approximate completion: <slowest agent's expected duration>
-  - reports written to .reviews/deep-review/full-<slug>/
+Cover verified: <total-file-count>/<total-file-count> files, 0 missing, 0 duplicated.
+
+Model: sonnet (recommended — this is what makes the exhaustive form
+       affordable; the sampling form it replaces is what produced
+       false-clean reports)
+       Reply "yes" to accept, or "yes <model>" to override.
+
+Reports written to .reviews/deep-review/full-<slug>/
 
 Proceed? (yes/no)
 ```
 
-Wait for the user to type `yes` (case-insensitive, exact match) before continuing. Any other response aborts cleanly without spawning agents.
+Wait for the user to reply. `yes` (case-insensitive) proceeds with the recommended model. `yes <model>` proceeds with the named model. Any other response aborts cleanly without spawning agents. Print the cover-verification line only after step 5a's `comm` check has actually passed — never as a fixed string.
 
 #### 5c. Render all prompts, then spawn all reviewer agents in parallel
 
-First render N+1 prompt files per step 3's mechanics (inputs and rendered prompts all under `<run-dir>/inputs/`):
+First render S+1 prompt files per step 3's mechanics (inputs and rendered prompts all under `<run-dir>/inputs/`):
 
 - 1 architecture prompt → `<run-dir>/inputs/prompt-01-architecture.txt` (REPORT_PATH = `<run-dir>/01-architecture.md`; the six inventories captured once, shared by this render)
-- N module prompts → `<run-dir>/inputs/prompt-<NN>-module-<name>.txt` (REPORT_PATH = `<run-dir>/<NN>-module-<name>.md` with NN starting at 02; per-module inventory at `<run-dir>/inputs/inventory-<name>.txt`)
+- S slice prompts → `<run-dir>/inputs/prompt-<NN>-<module>-<prod|test|other>.txt` (REPORT_PATH = `<run-dir>/<NN>-<module>-<prod|test|other>.md` with NN starting at 02), each rendered from the module template with `MODULE_FILE_INVENTORY=@<run-dir>/inputs/slice-<NN>-....txt` and `MODULE_PATH` = the slice's module root
 
-Then, in ONE message, spawn N+1 Agent calls in a single tool-use batch — each a one-line stub pointing at its rendered prompt file (same stub form as step 4). All agents share the same `senior-developer` subagent type. Each gets its own fresh-context spawn — they cannot see each other.
+Every render also substitutes `REVIEWER_MODEL=<the model chosen at 5b>`.
 
-Wait for all to complete. Track which succeeded (report file exists and is non-empty) and which failed (no report, or empty report).
+Then spawn S+1 Agent calls — each a one-line stub pointing at its rendered prompt file (same stub form as step 4), each carrying the chosen model:
+
+```
+Agent(
+  subagent_type: "senior-developer",
+  model: "<chosen model>",
+  description: "Deep-review slice <NN> <module>/<kind>",
+  prompt: "Read <run-dir>/inputs/prompt-<NN>-....txt and execute the instructions in that file."
+)
+```
+
+Batch them across as few messages as the harness allows; the harness queues beyond its concurrency cap, so a large S is fine. All agents share the same `senior-developer` subagent type. Each gets its own fresh-context spawn — they cannot see each other.
+
+Wait for all to complete, then **verify every slice landed**: for each rendered prompt there must be a non-empty report file. Missing reports are the silent way a "complete cover" run degrades back into a sample, so this check is mandatory and its result is reported to the user, not just tracked internally. Re-spawn missing slices once; if a slice fails twice, record it in `failed-targets.txt` and state it in the final summary.
 
 #### 5d. Build the synthesizer manifest
 
@@ -238,15 +350,19 @@ Foreground. Wait for completion. Verify `<run-dir>/00-summary.md` exists and is 
 #### 5f. Print full-mode summary
 
 ```
-/deep-code-review full complete.
+/deep-code-review full complete (exhaustive).
 
 Run directory: <RUN_DIR>
+Model:         <model used><, or " (FALLBACK — <requested> unavailable)">
+
+Coverage:      <files-reviewed>/<files-expected> files across <S> slices
+               <"complete cover verified" | "INCOMPLETE — N slices failed, see below">
 
 Reports:
   - 00-summary.md   ← read this first
   - 01-architecture.md
-  - 02-module-<name>.md
-  - 03-module-<name>.md
+  - 02-<module>-prod.md
+  - 03-<module>-test.md
   - ...
 
 <if FAILED_TARGETS non-empty:>
@@ -276,7 +392,8 @@ for line-precise detail.
 - **Honesty is enforced in the prompt, not by the skill.** The skill cannot verify whether a report is honest. The prompt templates and agent personas embed the "don't soften, don't invent" rule. If a future user complaint surfaces that reports are sycophantic or padded, fix the prompt template, not the skill.
 - **Reports are local-only.** `.reviews/` is gitignored. Reports do not become part of the repo history. If the user wants a permanent record, they can copy specific reports into `docs/` themselves.
 - **Never delete prior reports.** The `.reviews/deep-review/` directory accumulates. The user can `rm -rf .reviews/deep-review/` themselves if they want a clean slate; the skill never does so.
-- **Cost-confirm only for `full`.** Single-target forms run without confirmation — they are cheap enough that prompting would be more friction than the actual cost. `full` is the only form that fans out N+1 spawns.
+- **Cost-confirm only for `full`.** Single-target forms run without confirmation — they are cheap enough that prompting would be more friction than the actual cost. `full` is the only form that fans out S+1 spawns.
+- **Never report a partial cover as `full`.** `full` means every reviewable file was in some agent's inventory. If the §5a `comm` check fails, refuse to spawn; if slices fail at runtime, the printed summary and the synthesizer header must both say `INCOMPLETE` and name the uncovered files. A `full` report that reads clean because nobody looked is the specific failure this mode was rebuilt to prevent — it is worse than no run, because it manufactures confidence.
 - **If a per-target agent fails in `full` mode, the run continues.** The synthesizer runs on the successes and flags the failure in its header. The user re-runs the failed target individually.
 - **Refuse rather than substitute empty.** If a required input file is empty (no diff for the diff lens, no module files for the module lens), refuse with a clear message rather than spawning an agent against nothing. Architecture seed inventories may be individually empty (`(none yet)` fallback per step 3); the architecture-too-thin case is governed by the preconditions, not this rule.
 - **Never spawn the threat-actor or code-reviewer subagents.** Those belong to `/redteam` and `/m1-tick review` respectively. This skill spawns only senior-developer and review-synthesizer.

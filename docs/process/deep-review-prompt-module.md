@@ -1,8 +1,10 @@
 # Senior-developer subagent prompt template — module lens
 
-Used when `/deep-code-review module <name>` or `/deep-code-review path <path>` spawns the senior-developer subagent. The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` (substituting only metadata, paths, and the file inventory) and spawns `Agent(subagent_type: "senior-developer", ...)` with a short stub pointing at the rendered file. The agent's identity and tool allowlist are declared in [`.claude/agents/senior-developer.md`](../../.claude/agents/senior-developer.md); the model is inherited from the main conversation.
+Used when `/deep-code-review module <name>` or `/deep-code-review path <path>` spawns the senior-developer subagent. The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` (substituting only metadata, paths, and the file inventory) and spawns `Agent(subagent_type: "senior-developer", ...)` with a short stub pointing at the rendered file. The agent's identity and tool allowlist are declared in [`.claude/agents/senior-developer.md`](../../.claude/agents/senior-developer.md); the model is chosen per run by the skill (§"Model selection") and substituted as `{{REVIEWER_MODEL}}`.
 
-This lens differs from the diff lens: there is no `BASE..HEAD` diff. The reviewer reads the entire module/directory top-to-bottom and evaluates every file as it stands today. The expected output is line-precise findings across the module.
+This lens differs from the diff lens: there is no `BASE..HEAD` diff. The reviewer reads every file in the supplied inventory top-to-bottom and evaluates it as it stands today. The expected output is line-precise findings.
+
+The inventory is **authoritative and may be a slice** of a module rather than the whole of it — in `full` mode the skill partitions every reviewable file into slices small enough that "read every file" is achievable (skill §5a). The agent must not infer that files absent from its inventory are out of scope for the *run*; they belong to a sibling slice. `{{MODULE_PATH}}` still bounds where findings may be located.
 
 ---
 
@@ -151,7 +153,7 @@ Required structure:
 **Lens:** module
 **Module path:** {{MODULE_PATH}}
 **Date:** <YYYY-MM-DD HH:MM>
-**Reviewer:** senior-developer (opus)
+**Reviewer:** senior-developer ({{REVIEWER_MODEL}})
 
 ## Headline findings
 
@@ -233,6 +235,7 @@ file in the inventory, then write the report to {{REPORT_PATH}}.
 | `{{MODULE_PATH}}` | For `module <name>`: `<name>/` (Maven module root). For `path <p>`: `<p>` |
 | `{{MODULE_FILE_INVENTORY}}` | Newline-separated list of every Java/Kotlin/SQL/`.properties`/`.json` file under MODULE_PATH (use `git ls-files`, redirected to a file under `<run-dir>/inputs/` and passed via the render script's `@file` form). Each line: `<path>` (relative to repo root). |
 | `{{REPORT_PATH}}` | `.reviews/deep-review/<target-slug>-<YYYY-MM-DD-HHmm>/report.md` (for standalone runs) OR `.reviews/deep-review/full-<YYYY-MM-DD-HHmm>/<NN>-module-<name>.md` (when invoked as part of `full` mode) |
+| `{{REVIEWER_MODEL}}` | The model the skill selected for this run (skill §"Model selection"). Rendered into the report header so a report always records what produced it. |
 
 The engineering rules are NOT substituted — the template instructs the agent to Read `docs/process/engineering-rules-verbatim.md` in its own context.
 
