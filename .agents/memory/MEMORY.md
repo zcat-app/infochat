@@ -62,7 +62,7 @@ and this store is the shared one both worlds read.
 
 ## Open TODOs
 
-- [Recheck mutation testing (pitest) after this batch](mutation-testing-recheck-after-batch.md) — user-requested 2026-07-25, research deliberately deferred; motivated by M1-689's vacuous-pass tests that stayed green while asserting nothing.
+- [Mutation testing (pitest) — DISCHARGED](mutation-testing-recheck-after-batch.md) — spiked 2026-07-27: opt-in `-Pmutation` over the 4 pure-Java modules (M1-713), 14 min, 82-89% test strength; found 3 real defects (M1-710/711/712), all adapter-parity gaps or refuse-legs. Read test STRENGTH not score; it would NOT have caught M1-689.
 
 ## Known nits awaiting a passing ticket
 

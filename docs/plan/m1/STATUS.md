@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 717 |
 | deferred | 0 |
 | abandoned | 20 |
-| **total** | **744** |
+| **total** | **748** |
 
 ---
 
@@ -32,6 +32,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-707 — Operator-settable default timezone for new groups (complexity: low, risk: medium)
 - M1-708 — Gate docs against nonexistent infochat.* config keys (complexity: medium, risk: low)
 - M1-709 — SSRF body-cap comment names a config key that never existed (complexity: low, risk: low)
+- M1-710 — SimpleX outbound rate-limit draws are untested; the Signal twin is pinned (complexity: low, risk: low)
+- M1-713 — Opt-in -Pmutation profile: PIT over the four pure-Java modules (complexity: low, risk: low)
 
 ---
 
@@ -48,7 +50,8 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-711 — blocked_by: M1-713 (pending)
+- M1-712 — blocked_by: M1-713 (pending)
 
 ---
 
@@ -952,4 +955,8 @@ M1-706 (pending) ← runnable
 M1-707 (pending) ← runnable
 M1-708 (pending) ← runnable
 M1-709 (pending) ← runnable
+M1-710 (pending) ← runnable
+M1-713 (pending) ← runnable
+  ├── M1-711 (pending)
+  └── M1-712 (pending)
 ```
