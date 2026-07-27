@@ -18,6 +18,9 @@ CLI escape hatches are (correctly) inert.
 
 **How to apply:** for fast feedback on new tests, skip filtering and run
 the whole module: `mvn -pl <module> -am verify` (~9 min for provider;
-this is also M1-tickets' own acceptance command). Cost of not knowing:
+this is also M1-tickets' own acceptance command). The `-am` is not
+optional — without it Maven resolves sibling modules from `~/.m2` instead
+of building them, so a just-edited `messaging-adapter` silently tests as
+its last-installed version. Cost of not knowing:
 3 failed invocations on M1-636. Full-suite round logs still go through
 `scripts/verify-serialized.sh` per [[clean-verify-monitoring]].

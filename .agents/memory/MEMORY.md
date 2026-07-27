@@ -20,6 +20,8 @@ and this store is the shared one both worlds read.
 
 ## Process and workflow
 
+- [Relocated controls don't travel](relocated-controls-dont-travel.md) — a diff that reroutes a path drops that path's INCIDENTAL controls (sanitize, audit row, the unit they operate on, tests that pinned a security property); invisible to the suite and to review, so enumerate them in `acceptance:` at authoring time. Engineering-rules §10.
+- [Enumerate a census by invocation, not output token](census-enumerate-by-invocation.md) — a label-based grep misses bare-content fields, so each plan pass finds a different subset; two passes finding different file sets means decompose, not refine again.
 - [Reviewer is a conformance gate, not a correctness gate](reviewer-is-conformance-not-correctness.md) — measured over 670 tickets: review APPROVEs 88% first-pass and 61% of its rejections are bookkeeping; redteam found real bugs in 13 already-APPROVEd diffs. An APPROVE means "matches its ticket", not "is correct".
 - [Redteam remediation needs a re-audit](redteam-remediation-needs-reaudit.md) — an in-branch fix invalidates the audit it answers; re-audit the NEW diff and explicitly permit a CLEAN verdict or the auditor manufactures findings.
 - [Redteam diff-range gap](redteam-diffrange-refine-uncommitted-gap.md) — the `--in-progress` range is EMPTY at every pre-commit redteam gate (branch has 0 commits); a CLEAN verdict from an empty diff is the silent failure. Audit the working-tree diff vs fork point.
@@ -46,6 +48,7 @@ and this store is the shared one both worlds read.
 - [A green suite can be an environmental accident](green-suite-can-be-environmental-accident.md) — an unstubbed SPI passes while a real local service happens to answer; the tell is a stub with zero calls.
 - [Scan-window fixture time-bombs](scan-window-fixture-timebombs.md) — absolute fixture dates age out of pickup windows and go vacuously green; a guard test blocks new ones, SQL-literal seeds still evade it.
 - [IT stranger-bucket silent drop](it-stranger-bucket-silent-drop.md) — an IT seeding users via direct SQL is a stranger at intake and gets silently dropped late in the full suite; mark the contact registered after the INSERT.
+- [switch-llm.sh stdin is positional](switch-llm-stdin-is-positional.md) — `SwitchLlmWiringTest` feeds the real script raw newline-positional stdin, so adding an `LLM_TASKS` entry shifts every later answer and fails far from the edit; the task list also lives in two files.
 - [Bundle keys need a cs twin](bundle-key-needs-cs-twin.md) — an en-only bundle key fails the build (bilateral keyset parity); scope both files up front.
 
 ## Codebase couplings and design facts
