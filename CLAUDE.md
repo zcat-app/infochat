@@ -50,7 +50,7 @@ amendment.
 - **English by default**, per-scope `/lang <code>` opts into translation via `TranslationProvider` SPI. Source post bodies are never translated.
 - **Outbox pattern** for the evaluation queue: posts are persisted with `status='RAW'` before being enqueued; a startup rehydrator re-enqueues unfinished work.
 - **PostgreSQL LISTEN/NOTIFY** for collector→provider events (no Kafka dependency in v1).
-- **Hardware profile** drives sizing: `infochat.profile=laptop|vps|pi|remote-llm` picks context window, default chat/embedding models, eval concurrency, and pgvector index type (`hnsw` or `ivfflat`). `remote-llm` means local DB/services + remote LLM API; `vps` means everything on a VPS. Individual settings can still be overridden per-property.
+- **Hardware profile** drives sizing: `quarkus.profile` / `QUARKUS_PROFILE` set to `laptop|vps|pi|remote-llm` picks context window, default chat/embedding models and eval concurrency (there is no separate `infochat.profile` key — `InfochatProfile`'s javadoc explains why). The spec's bundle also names the pgvector index type, summary worker count and eval queue depth; **none of those three ships** — v1 creates HNSW on every profile and the other two keys do not exist (`docs/spec/architecture.md` §Hardware profiles). `remote-llm` means local DB/services + remote LLM API; `vps` means everything on a VPS. Individual settings can still be overridden per-property.
 - **Asset commands are not posts.** `/zcash`, `/monero` and future per-asset commands store snapshots in a dedicated `price_snapshot` table outside the ingest pipeline — no Stage 1/2, no tagging, no embedding. Every reply names its data source   
   and includes the source URL bare (per-source ToS attribution). Public no-auth endpoints only in v1.
 
@@ -94,7 +94,7 @@ mvn -pl infochat-collector quarkus:dev
 mvn -pl infochat-provider quarkus:dev
 ```
 
-A `docker-compose.yml` will start Postgres+pgvector, Ollama (default LLM), and the in-memory test adapter for local development. Production deployments enable one or more of SimpleX / Signal in the same Provider; the in-memory adapter is exercised in a separate test-time deployment shape and never alongside production adapters (decision D46, `docs/spec/deployment.md` §Deployment scenarios).
+A `docker-compose.yml` starts Postgres+pgvector, Ollama (default LLM) and both services for local development, with the llama.cpp backends as opt-in compose profiles. The in-memory test adapter is **not** a compose service — it is an in-process CDI bean in the Provider. Production deployments enable one or more of SimpleX / Signal in the same Provider; the in-memory adapter is exercised in a separate test-time deployment shape and never alongside production adapters (decision D46, `docs/spec/deployment.md` §Deployment scenarios).
 
 ## Engineering rules (universal — apply to all work in this repo)
 
