@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 717 |
 | deferred | 0 |
 | abandoned | 20 |
-| **total** | **739** |
+| **total** | **743** |
 
 ---
 
@@ -27,6 +27,10 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-702 — Ban infochat-messaging-adapter from infochat-core (complexity: low, risk: low)
 - M1-704 — Outbound User-Agent: single-sourced, single-valued, non-rotting (complexity: low, risk: medium)
+- M1-705 — Rate limiting: build the per-cost-profile bucket partition (complexity: high, risk: high)
+- M1-706 — Profile bundle: eval queue depth and summary worker count (complexity: high, risk: medium)
+- M1-707 — Operator-settable default timezone for new groups (complexity: low, risk: medium)
+- M1-708 — Gate docs against nonexistent infochat.* config keys (complexity: medium, risk: low)
 
 ---
 
@@ -942,4 +946,8 @@ M1-699 (done)
 M1-702 (pending) ← runnable
 M1-703 (done)
 M1-704 (pending) ← runnable
+M1-705 (pending) ← runnable
+M1-706 (pending) ← runnable
+M1-707 (pending) ← runnable
+M1-708 (pending) ← runnable
 ```
