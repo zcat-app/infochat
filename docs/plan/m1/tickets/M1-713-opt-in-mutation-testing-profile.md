@@ -1,9 +1,9 @@
 ---
 id: M1-713
 title: "Opt-in -Pmutation profile: PIT over the four pure-Java modules"
-status: pending
+status: done
 created: 2026-07-27
-last_updated: 2026-07-27
+last_updated: 2026-07-28
 blocked_by: []
 files_budget: 2
 files_scope:
@@ -78,12 +78,76 @@ test_plan:
 spec_refs:
   - docs/spec/verification.md §Test layers
 decision_refs: []
-reviews: {}
-overrides: []
+reviews:
+  - round: 1
+    date: 2026-07-27
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: FAIL
+    diff_stats:
+      files: 4
+      added: 127
+      removed: 11
+  - round: 2
+    date: 2026-07-27
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 204
+      removed: 12
+  - round: 3
+    date: 2026-07-28
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 229
+      removed: 13
+overrides:
+  - date: 2026-07-28
+    by: user
+    what: >-
+      Authorized a third review round beyond `round_cap: 2`. Round 2 returned
+      APPROVE with one INFORMATIONAL note — the pom.xml comment still carried
+      the naive-grep figure "294 of the repo's 299 Quarkus-bootstrapped test
+      classes" that the same diff had already corrected in the design note.
+      Rather than ship the claim fixed in one file and wrong in another, or
+      spend a follow-up ticket on two numbers in a comment, the user directed
+      fix-then-re-review. `round_cap` is left at 2 deliberately: this records
+      an explicit one-off authorization, not a silent widening of the cap.
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-27
+  verdict: WARN
+  warnings:
+    - >-
+      CENSUS-PRESENT-IF-CLASS-SCOPED (lint WARN) — false positive, dispositioned
+      in §Notes: the diff is one profile block plus one design-note paragraph and
+      the module list is named in full in the acceptance invocation.
+    - >-
+      Self-check: verified on disk that InstanceLockLivenessTest and
+      ThrottledAdminNotifierTest are the only genuine @QuarkusTest classes in the
+      four modules (the other grep hits are javadoc/string literals in guard
+      tests), that all four modules exist, that pom.xml has no <profiles> block,
+      and that §8.11 line 507 lists mutation testing as deferred.
+  blockers: []
 escalation_reason:
 ---
 
@@ -235,3 +299,46 @@ version did.
   `TIMED_OUT` minions, which PIT counts as killed; that is a weaker
   signal than an assertion failure and is worth remembering when reading
   its 71%.
+
+## Round 1 rework
+
+Reviewer verdict REWORK, ACCEPTANCE-CHECK FAIL on the container-free
+criterion. Both named items addressed:
+
+1. **`<excludedTestClasses>` did not make the sweep container-free.** The
+   list covered `*IT` and the two `@QuarkusTest` classes but missed a
+   third shape: the 17 plain `*Test` classes in
+   `app.zcat.infochat.core.schema` that inherit `PostgresSchemaTestBase`,
+   whose static initializer calls `POSTGRES.start()` and runs Flyway.
+   They run on the **surefire** tier, so neither the `*IT` glob nor an
+   `@QuarkusTest` filter catches them, and PIT runs every non-excluded
+   target test in its coverage pass. Fixed by adding
+   `<param>app.zcat.infochat.core.schema.*</param>`.
+
+   Confirmed empirically, not by argument: a `docker events` watch over
+   the round-1 configuration recorded `create`/`start` for
+   `testcontainers/ryuk:0.12.0` and `pgvector/pgvector:pg16`; the same
+   watch over the fixed configuration recorded nothing. **The ticket's own
+   stated verification method — `docker ps` before and after — cannot
+   detect this**, which is why the gap reached review: the base never
+   stops its container, so Ryuk reaps it at minion-JVM exit and a
+   before/after comparison comes back clean. Corroborating signals: core's
+   coverage pass fell from 16s to 3s and its classes-sent-to-minion from
+   75 to 57, while the module's score stayed identical at 305 mutants /
+   60% — those schema tests kill no Java mutants (they exercise DDL,
+   triggers and constraints through SQL), so excluding them costs no
+   measurement, only a container.
+
+2. **Two prose statements asserted the incomplete exclusion set was
+   complete** — the POM comment and the "Container-free" bullet in §8.11.
+   Both rewritten to enumerate all three container-starting shapes and to
+   record that `docker events` **during** a sweep is the only valid check.
+
+Also corrected an orphan the round-1 diff introduced: the design note had
+repeated this ticket's "294 of the repo's 299 Quarkus-bootstrapped test
+classes". That figure is a naive-string-grep artifact — `grep -rl
+"@QuarkusTest"` counts javadoc mentions and guard-test literals, giving
+309 here. The annotation-accurate count (`^\s*@Quarkus(Test|IntegrationTest)`)
+is 271 total, 269 of them in collector + provider, so the note now says
+"all but two" instead of a brittle pair of numbers. The §Context table
+above is left as the spike recorded it.

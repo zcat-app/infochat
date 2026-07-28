@@ -255,4 +255,113 @@
             </plugins>
         </pluginManagement>
     </build>
+
+    <!--
+         Opt-in mutation-testing profile (M1-713). Advisory tier, beside
+         /deep-code-review and /redteam — deliberately NOT a build gate.
+         Documented invocation:
+
+           mvn -Pmutation \
+               -pl infochat-core,infochat-ssrf,infochat-llm-adapter,infochat-messaging-adapter \
+               -am test-compile org.pitest:pitest-maven:mutationCoverage
+
+         Reports land in each module's target/pit-reports/ (HTML to read, XML
+         to grep). Override the thread count with -Dpitest.threads=N.
+
+         WHY no <activation> on the profile and no <executions> on the plugin:
+         `mvn verify` must not be able to reach this. PIT re-runs the covering
+         tests once per mutant, so any lifecycle binding would multiply the
+         build's test time by the mutant count.
+
+         WHY no <mutationThreshold>: a score gate rewards assertions written to
+         kill mutants over assertions that state intent, which cuts against the
+         test-integrity rules in CLAUDE.md §Engineering rules. Equivalent
+         mutants make the number noisy by construction. Mutation score is meant
+         to be read by a human, occasionally, not enforced.
+
+         WHY the documented -pl list omits infochat-collector and
+         infochat-provider: all but two of the repo's @QuarkusTest classes live
+         in those two modules, so there every mutant would pay a Quarkus boot.
+         The plugin is declared reactor-wide so they CAN still be measured
+         deliberately; the routine sweep just must not include them.
+    -->
+    <profiles>
+        <profile>
+            <id>mutation</id>
+            <properties>
+                <pitest.threads>4</pitest.threads>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.pitest</groupId>
+                        <artifactId>pitest-maven</artifactId>
+                        <version>1.25.8</version>
+                        <dependencies>
+                            <dependency>
+                                <groupId>org.pitest</groupId>
+                                <artifactId>pitest-junit5-plugin</artifactId>
+                                <version>1.2.3</version>
+                            </dependency>
+                        </dependencies>
+                        <configuration>
+                            <targetClasses><param>app.zcat.infochat.*</param></targetClasses>
+                            <targetTests><param>app.zcat.infochat.*</param></targetTests>
+                            <!--
+                                 Load-bearing, not tidiness: PIT runs every
+                                 non-excluded target test in its coverage pass, so
+                                 anything left in here starts a container and the
+                                 sweep stops being safe to run beside the live
+                                 stack. THREE distinct container-starting shapes
+                                 exist in these four modules, and they are easy to
+                                 mistake for one:
+                                   1. *IT — the failsafe tier (Testcontainers /
+                                      Quarkus Dev Services).
+                                   2. The two named classes — the only genuine
+                                      @QuarkusTest classes here, each booting Dev
+                                      Services. (Every other @QuarkusTest string
+                                      in these modules is javadoc or a guard
+                                      test's literal, so a grep for the
+                                      annotation over-reports.)
+                                   3. app.zcat.infochat.core.schema.* — plain
+                                      *Test classes on the surefire tier that
+                                      inherit PostgresSchemaTestBase, whose static
+                                      initializer calls POSTGRES.start() and runs
+                                      Flyway. Nothing in the class name or
+                                      annotations marks these as container-backed,
+                                      which is exactly why an @QuarkusTest-only
+                                      audit misses them (M1-713 review round 1).
+                                 Verify a change here with `docker events` DURING
+                                 a sweep, never `docker ps` before and after: the
+                                 base never stops its container, so Ryuk reaps it
+                                 at minion-JVM exit and a before/after comparison
+                                 comes back clean even when a container ran.
+                            -->
+                            <excludedTestClasses>
+                                <param>*IT</param>
+                                <param>app.zcat.infochat.core.startup.InstanceLockLivenessTest</param>
+                                <param>app.zcat.infochat.core.notifier.ThrottledAdminNotifierTest</param>
+                                <param>app.zcat.infochat.core.schema.*</param>
+                            </excludedTestClasses>
+                            <threads>${pitest.threads}</threads>
+                            <outputFormats>
+                                <param>HTML</param>
+                                <param>XML</param>
+                            </outputFormats>
+                            <timestampedReports>false</timestampedReports>
+                            <!--
+                                 PIT's default is to fail when a module yields no
+                                 mutants. That never fires on the documented sweep
+                                 (the reactor parent is skipped earlier, for POM
+                                 packaging), so this only keeps an ad-hoc -pl
+                                 selection over an empty module from reading as a
+                                 build failure. Advisory tool, advisory exit code.
+                            -->
+                            <failWhenNoMutations>false</failWhenNoMutations>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

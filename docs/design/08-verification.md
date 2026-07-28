@@ -504,11 +504,26 @@
   ## 8.11 What's intentionally NOT in v1 testing                                                                                                                                                                                                           
                                                                                                                                                                                                                                                         
   - Property-based fuzz testing — JQwik etc. nice-to-have; targeted fuzzing in IsolationIT is enough for v1.
-  - Mutation testing — PIT etc. deferred.                                                                                                                                                                                                               
   - Chaos / network-partition tests — out of scope; the system is colocated.                                                                                                                                                                            
   - Live LLM benchmarks — not in CI; ad-hoc only.                                                                                                                                                                                                       
   - UI tests — there's no UI.                                                                                                                                                                                                                           
   - Penetration testing — operator's responsibility before public exposure; this spec lists the threat model and defenses (04-security.md) but doesn't claim security audit.                                                                            
   - Cross-version DB upgrade tests — only forward migrations within one minor version are tested. Major-version upgrades use the documented restore-from-backup path.                                                                                   
+
+  **Mutation testing was on this list and no longer is** — it ships as an opt-in advisory profile (M1-713). A 2026-07-27 spike ran PIT to settle the question with numbers rather than argument, and it surfaced three real defects (M1-710, M1-711, M1-712) that the green suite, code review and `/redteam` had all missed. The reactor `pom.xml` carries a `mutation` profile; the documented sweep is:
+
+  ```
+  mvn -Pmutation \
+      -pl infochat-core,infochat-ssrf,infochat-llm-adapter,infochat-messaging-adapter \
+      -am test-compile org.pitest:pitest-maven:mutationCoverage
+  ```
+
+  HTML and XML reports land in each module's `target/pit-reports/`. Three limits are deliberate, and each is enforced by the POM rather than by convention:
+
+  - **Not a gate.** No `mutationThreshold`, no `verify` binding, no `/m1-tick` hook. A score gate rewards assertions written to kill mutants over assertions that state intent, and equivalent mutants make the number noisy by construction. Mutation score belongs in the advisory tier with `/deep-code-review` and `/redteam`: occasional, deliberate, human-read.
+  - **Not run over the Quarkus-bootstrapped tier.** All but two of the repo's `@QuarkusTest` classes live in `infochat-collector` and `infochat-provider`, and PIT re-runs the covering tests once per mutant — every mutant there would pay a Quarkus boot. The plugin is declared reactor-wide so those modules *can* be measured deliberately; the documented invocation omits them.
+  - **Container-free.** PIT runs every non-excluded target test in its coverage pass, so the exclusion list is what keeps a sweep safe beside a live stack. It must cover three distinct shapes, not one: `*IT` (the failsafe tier); the two genuine `@QuarkusTest` classes (`InstanceLockLivenessTest`, `ThrottledAdminNotifierTest`); and `app.zcat.infochat.core.schema.*` — plain surefire-tier `*Test` classes that inherit `PostgresSchemaTestBase`, whose static initializer starts a raw pgvector container and runs Flyway. That third shape carries no annotation and no `IT` suffix, so an `@QuarkusTest`-only audit misses it; it is the spec's layer-2 persistence tier (`docs/spec/verification.md` §Test layers). Verify any change to the list with `docker events` **during** a sweep — `docker ps` before and after cannot see it, because the base never stops its container and Ryuk reaps it at minion-JVM exit.
+
+  `mvn verify` is unaffected: the profile carries no `<activation>` and the plugin declares no `<executions>`, so the default build cannot reach it. When reading a report, **test strength** is the meaningful figure rather than mutation score — the two differ by mutants with no covering test at all, which the `*IT` exclusion inflates.
                                                                                                                                                                                                                                                         
   --- 
