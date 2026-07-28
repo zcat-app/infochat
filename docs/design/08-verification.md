@@ -518,7 +518,7 @@
       -am test-compile org.pitest:pitest-maven:mutationCoverage
   ```
 
-  HTML and XML reports land in each module's `target/pit-reports/`. Three limits are deliberate, and each is enforced by the POM rather than by convention:
+  HTML and XML reports land in each module's `target/pit-reports/`. Three limits are deliberate. The first and third are enforced by the POM; the second is a property of the documented invocation, because the plugin itself is declared reactor-wide:
 
   - **Not a gate.** No `mutationThreshold`, no `verify` binding, no `/m1-tick` hook. A score gate rewards assertions written to kill mutants over assertions that state intent, and equivalent mutants make the number noisy by construction. Mutation score belongs in the advisory tier with `/deep-code-review` and `/redteam`: occasional, deliberate, human-read.
   - **Not run over the Quarkus-bootstrapped tier.** All but two of the repo's `@QuarkusTest` classes live in `infochat-collector` and `infochat-provider`, and PIT re-runs the covering tests once per mutant — every mutant there would pay a Quarkus boot. The plugin is declared reactor-wide so those modules *can* be measured deliberately; the documented invocation omits them.
