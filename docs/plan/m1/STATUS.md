@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 14 |
+| pending | 15 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 729 |
 | deferred | 1 |
 | abandoned | 20 |
-| **total** | **764** |
+| **total** | **765** |
 
 ---
 
@@ -34,6 +34,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-724 — Digest cluster selection is recency-only: the cap keeps the newest stories, never the most significant (complexity: high, risk: high)
 - M1-726 — Tagger treats a correct \"no topic fits\" as a failure and relabels the post with the source's topic tags (complexity: medium, risk: high)
 - M1-727 — Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other (complexity: medium, risk: medium)
+- M1-730 — /saved renders the ingest \"untitled\" sentinel to a reader (complexity: medium, risk: medium)
 
 ---
 
@@ -985,4 +986,5 @@ M1-723 (done)
 M1-726 (pending) ← runnable
 M1-727 (pending) ← runnable
 M1-729 (done)
+M1-730 (pending) ← runnable
 ```
