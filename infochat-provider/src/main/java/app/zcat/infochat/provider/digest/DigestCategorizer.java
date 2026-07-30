@@ -35,6 +35,22 @@ public class DigestCategorizer {
     int categoryMinClusters;
 
     /**
+     * Max category sections a single non-degraded digest renders (M1-721).
+     * The section count tracks the tag vocabulary, which grows with every
+     * source an operator adds, so without this the digest's length has an
+     * unbounded factor.
+     *
+     * <p>Field-initialized to the same value as {@code defaultValue}, which
+     * CDI overwrites at runtime — the {@link DigestRenderer#categoryRollupGenerator}
+     * pattern in this package. Unlike {@link #categoryMinClusters}, the Java
+     * default of 0 is not a benign starting point here: it would cap every
+     * hand-wired plain-JUnit renderer down to its Other bucket. The
+     * initializer is what keeps those tests wiring only what they care about.
+     */
+    @ConfigProperty(name = "infochat.digest.max-categories", defaultValue = "8")
+    int maxCategories = 8;
+
+    /**
      * One digest section: the category tag with its assigned clusters in
      * digest order, or the Other bucket when {@code tag} is null.
      */
@@ -115,5 +131,43 @@ public class DigestCategorizer {
             sections.add(new CategorySection(null, other));
         }
         return List.copyOf(sections);
+    }
+
+    /**
+     * Bounds an ordered {@link #categorize} result to {@code maxCategories}
+     * sections by dropping from the TAIL (M1-721). Section order is
+     * assigned-cluster count descending, so the tail is the smallest
+     * sections — the cheapest content to omit.
+     *
+     * <p><b>Other is never dropped.</b> A naive tail-drop would evict it
+     * first (it is always last), yet Other holds exactly the clusters with
+     * no qualifying tag — the content with no other route to a reader. When
+     * the cap binds and Other is present it takes the last slot and one
+     * more real category yields in its place.
+     *
+     * <p>Clusters in a dropped section are NOT redistributed into the
+     * survivors or folded into Other: folding them in would inflate Other
+     * precisely when the cap binds, which is the opposite of what the cap
+     * is for. The caller accounts for them with one overflow line.
+     *
+     * <p>Applied ONLY on the digest render path. {@code /summary} is an
+     * interactive pull the reader asked for and keeps every section.
+     */
+    public List<CategorySection> capSections(List<CategorySection> sections) {
+        // Floor of one section: DigestWorker joins whatever this returns into
+        // the broadcast body, so a mistyped cap of 0 would send an empty
+        // message for a slot that had posts — an outage shape, not a setting.
+        int keep = Math.max(maxCategories, 1);
+        if (sections.size() <= keep) {
+            return sections;
+        }
+        if (sections.getLast().tag() != null) {
+            return List.copyOf(sections.subList(0, keep));
+        }
+        // Other present: it consumes the last slot, so keep-1 real categories
+        // survive and the smallest one yields to it.
+        List<CategorySection> capped = new ArrayList<>(sections.subList(0, keep - 1));
+        capped.add(sections.getLast());
+        return List.copyOf(capped);
     }
 }

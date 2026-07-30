@@ -6,17 +6,21 @@ import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Verifies the deterministic tag arithmetic of {@link DigestCategorizer}
  * (D62): highest-count qualifying-tag assignment, alphabetical tie-break,
- * post-assignment fold-back, and the Other bucket.
+ * post-assignment fold-back, and the Other bucket — plus the M1-721 section
+ * cap layered on top of the ordered result.
  */
 class DigestCategorizerTest {
 
@@ -115,11 +119,106 @@ class DigestCategorizerTest {
                 "Other preserves digest order across untagged and below-threshold clusters");
     }
 
+    // ----- section cap (M1-721) ---------------------------------------------
+
+    @Test
+    void capKeepsTheLargestSectionsInOrderAndDropsTheTail() {
+        DigestCategorizer capped = newCategorizer(3, 8);
+        List<CategorySection> sections = capped.categorize(twelveSizedCategories());
+
+        assertEquals(12, sections.size(), "fixture builds 12 real categories, no Other");
+
+        List<CategorySection> result = capped.capSections(sections);
+
+        assertEquals(8, result.size(), "cap 8 keeps 8 sections");
+        assertEquals(List.of("cat00", "cat01", "cat02", "cat03",
+                        "cat04", "cat05", "cat06", "cat07"),
+                result.stream().map(CategorySection::tag).toList(),
+                "the tail (smallest sections) is dropped; surviving order is untouched");
+    }
+
+    @Test
+    void otherSurvivesTheCapAndDisplacesOneRealCategory() {
+        DigestCategorizer capped = newCategorizer(3, 8);
+        List<Cluster> clusters = new ArrayList<>(twelveSizedCategories());
+        clusters.add(cluster("untagged"));
+        List<CategorySection> sections = capped.categorize(clusters);
+
+        assertEquals(13, sections.size(), "12 real categories plus Other");
+        assertNull(sections.getLast().tag(), "Other is last in D62 order");
+
+        List<CategorySection> result = capped.capSections(sections);
+
+        // Other is the bucket for clusters with no qualifying tag — the
+        // content with no other route to a reader — so a naive tail-drop
+        // (which would evict it first) is the bug this pins.
+        assertEquals(8, result.size(), "still 8 sections");
+        assertEquals(Arrays.asList("cat00", "cat01", "cat02", "cat03",
+                        "cat04", "cat05", "cat06", null),
+                result.stream().map(CategorySection::tag).toList(),
+                "7 real categories plus Other: Other takes the last slot and cat07 yields");
+    }
+
+    @Test
+    void capDropsNothingWhenSectionCountEqualsTheCap() {
+        DigestCategorizer capped = newCategorizer(3, 12);
+        List<CategorySection> sections = capped.categorize(twelveSizedCategories());
+
+        assertSame(sections, capped.capSections(sections),
+                "exactly at the cap is not over it — the list is returned untouched");
+    }
+
+    @Test
+    void droppedSectionClustersAreNotRedistributedOrFoldedIntoOther() {
+        DigestCategorizer capped = newCategorizer(3, 8);
+        List<Cluster> clusters = new ArrayList<>(twelveSizedCategories());
+        Cluster untagged = cluster("untagged");
+        clusters.add(untagged);
+        List<CategorySection> sections = capped.categorize(clusters);
+
+        List<CategorySection> result = capped.capSections(sections);
+
+        // Folding dropped clusters into Other would inflate Other exactly
+        // when the cap binds — the opposite of what the cap is for.
+        assertEquals(List.of(untagged), result.getLast().clusters(),
+                "Other still holds only the cluster with no qualifying tag");
+        for (int i = 0; i < result.size() - 1; i++) {
+            assertEquals(sections.get(i).clusters(), result.get(i).clusters(),
+                    "surviving section " + i + " keeps exactly its own clusters");
+        }
+        int renderedClusters = result.stream().mapToInt(s -> s.clusters().size()).sum();
+        assertEquals(14 + 13 + 12 + 11 + 10 + 9 + 8 + 1, renderedClusters,
+                "the dropped sections' clusters are rendered nowhere");
+    }
+
     // ----- helpers ----------------------------------------------------------
+
+    /**
+     * Twelve qualifying categories {@code cat00}..{@code cat11} sized 14 down
+     * to 3 clusters. Distinct sizes make the D62 count-descending order
+     * total, so a cap assertion pins WHICH sections survive, not just how
+     * many.
+     */
+    private static List<Cluster> twelveSizedCategories() {
+        List<Cluster> clusters = new ArrayList<>();
+        for (int categoryIndex = 0; categoryIndex < 12; categoryIndex++) {
+            String tag = String.format("cat%02d", categoryIndex);
+            for (int i = 0; i < 14 - categoryIndex; i++) {
+                clusters.add(cluster(tag + "-" + i, tag));
+            }
+        }
+        return clusters;
+    }
 
     private static DigestCategorizer newCategorizer(int minClusters) {
         DigestCategorizer categorizer = new DigestCategorizer();
         categorizer.categoryMinClusters = minClusters;
+        return categorizer;
+    }
+
+    private static DigestCategorizer newCategorizer(int minClusters, int maxCategories) {
+        DigestCategorizer categorizer = newCategorizer(minClusters);
+        categorizer.maxCategories = maxCategories;
         return categorizer;
     }
 

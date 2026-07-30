@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 18 |
+| pending | 17 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 724 |
+| done | 725 |
 | deferred | 1 |
 | abandoned | 20 |
 | **total** | **763** |
@@ -33,7 +33,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-714 — Summary/digest headline renders a raw post title: unbounded for social sources, blank for Bluesky (complexity: medium, risk: medium)
 - M1-715 — post.body_summary is never written, yet EmbeddingWorker prefers it as embedding input (complexity: low, risk: low)
 - M1-716 — Decouple language enablement from bundle presence (complexity: low, risk: low)
-- M1-721 — Digest length is a function of tag count: nothing bounds how many category sections a digest renders (complexity: medium, risk: medium)
+- M1-722 — Digest categories render a prose paragraph per cluster: replace with count + roll-up + headlines, and add /digest brief|normal|full (complexity: high, risk: high)
 - M1-724 — Digest cluster selection is recency-only: the cap keeps the newest stories, never the most significant (complexity: high, risk: high)
 - M1-726 — Tagger treats a correct \"no topic fits\" as a failure and relabels the post with the source's topic tags (complexity: medium, risk: high)
 - M1-727 — Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other (complexity: medium, risk: medium)
@@ -56,7 +56,6 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-718 — blocked_by: M1-716 (pending), M1-717 (deferred)
 - M1-719 — blocked_by: M1-716 (pending), M1-717 (deferred)
 - M1-720 — blocked_by: M1-716 (pending), M1-717 (deferred)
-- M1-722 — blocked_by: M1-721 (pending)
 - M1-725 — blocked_by: M1-722 (pending), M1-724 (pending)
 - M1-728 — blocked_by: M1-714 (pending), M1-722 (pending)
 
@@ -78,6 +77,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-723 | post.likes / post.reposts / post.social_score are declared, parsed at two fetchers, and never persisted | 2026-07-30 | round 1 APPROVE |
+| M1-721 | Digest length is a function of tag count: nothing bounds how many category sections a digest renders | 2026-07-30 | round 1 APPROVE |
 | M1-712 | encodeJoinGroupCommand's command-injection guard is the one encode entry point no test pins | 2026-07-30 | round 1 APPROVE |
 | M1-711 | SimpleX mention-strip: multi-mention ordering and mid-text whitespace collapse are untested | 2026-07-30 | round 1 APPROVE |
 | M1-710 | SimpleX outbound rate-limit draws are untested; the Signal twin is pinned | 2026-07-30 | round 1 APPROVE |
@@ -86,7 +86,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-713 | Opt-in -Pmutation profile: PIT over the four pure-Java modules | 2026-07-28 | round 3 APPROVE |
 | M1-703 | Summary degraded notice misleads when only some topics fail | 2026-07-26 | round 1 APPROVE |
 | M1-701 | digest overflow line steers to /summary --full, not @mention | 2026-07-26 | round 1 APPROVE |
-| M1-700 | summary render forms --short/--full/--flat (4-mode) | 2026-07-26 | round 1 APPROVE |
 
 ---
 
@@ -978,8 +977,8 @@ M1-717 (deferred)
   ├── M1-718 (pending) [see above]
   ├── M1-719 (pending) [see above]
   └── M1-720 (pending) [see above]
-M1-721 (pending) ← runnable
-  └── M1-722 (pending)
+M1-721 (done)
+  └── M1-722 (pending) ← runnable
         ├── M1-725 (pending)
         └── M1-728 (pending) [see above]
 M1-723 (done)

@@ -166,12 +166,120 @@ class DigestRendererSectionsTest {
                         + sections.stream().map(RenderedSection::text).toList());
     }
 
+    // ----- section cap (M1-721) ---------------------------------------------
+
+    @Test
+    void cappedDigestAppendsOneOverflowLineOnTheLastSection() {
+        renderer.digestCategorizer = newCategorizer(3, 8);
+        proseGenerator.setResponseText("capped prose");
+
+        List<RenderedSection> sections = renderer.renderSections(twelveCategoryPosts(), "en");
+
+        assertEquals(8, sections.size(), "12 categories capped to 8 sections");
+        String overflow = "4 more categories are not shown";
+        long carrying = sections.stream().filter(s -> s.text().contains(overflow)).count();
+        assertEquals(1, carrying,
+                "exactly one overflow line across the whole digest: "
+                        + sections.stream().map(RenderedSection::text).toList());
+        assertTrue(sections.getLast().text().contains(overflow),
+                "the overflow line rides the last section: " + sections.getLast().text());
+    }
+
+    @Test
+    void digestUnderTheCapAppendsNoOverflowLine() {
+        renderer.digestCategorizer = newCategorizer(3, 8);
+        proseGenerator.setResponseText("uncapped prose");
+        List<Post> posts = List.of(
+                post("s1", "Sec 1", List.of("security")),
+                post("s2", "Sec 2", List.of("security")),
+                post("s3", "Sec 3", List.of("security")));
+
+        List<RenderedSection> sections = renderer.renderSections(posts, "en");
+
+        assertEquals(1, sections.size());
+        assertFalse(sections.getFirst().text().contains("not shown"),
+                "no overflow line under the cap: " + sections.getFirst().text());
+    }
+
+    @Test
+    void proseAndRollupsCoverOnlySectionsThatSurviveTheCap() {
+        renderer.digestCategorizer = newCategorizer(3, 8);
+        RecordingRollupGenerator rollupGenerator = new RecordingRollupGenerator();
+        renderer.categoryRollupGenerator = rollupGenerator;
+        proseGenerator.setResponseText("surviving prose");
+
+        renderer.renderSections(twelveCategoryPosts(), "en");
+
+        // D62 already commits that capped-out CLUSTERS waste no LLM calls;
+        // the section cap extends the same property to whole sections. A
+        // dropped section that still paid for prose would be pure waste.
+        assertEquals(8 * 3, proseGenerator.callCount(),
+                "per-cluster prose runs for the 8 surviving sections' 3 clusters each, and no others");
+        assertEquals(8, rollupGenerator.callCount(),
+                "one roll-up attempt per surviving section, none for the dropped four");
+    }
+
+    @Test
+    void summaryEntryPointIsNotSectionCapped() {
+        // The cap is a digest-broadcast bound. /summary is an interactive
+        // pull the reader asked for and shares the same categorizer, so a
+        // cap applied inside categorize() would silently reach it.
+        renderer.digestCategorizer = newCategorizer(3, 8);
+        List<Cluster> clusters = new ClusterTraversal(new EmptyEdgeSource(), 3)
+                .cluster(twelveCategoryPosts());
+        List<ClusterProse> proseList = clusters.stream()
+                .map(c -> new ClusterProse(c, "summary prose", false))
+                .toList();
+
+        List<RenderedSection> sections = renderer.renderSummarySections(proseList, "en");
+
+        assertEquals(12, sections.size(),
+                "/summary renders all 12 categories: "
+                        + sections.stream().map(RenderedSection::tag).toList());
+    }
+
     // ----- helpers ----------------------------------------------------------
+
+    /**
+     * Twelve qualifying categories {@code cat00}..{@code cat11} of exactly 3
+     * clusters each (EmptyEdgeSource → one singleton cluster per post). Equal
+     * sizes mean D62's alphabetical tie-break fixes the order, so which
+     * sections the cap keeps is deterministic.
+     */
+    private static List<Post> twelveCategoryPosts() {
+        List<Post> posts = new ArrayList<>();
+        for (int categoryIndex = 0; categoryIndex < 12; categoryIndex++) {
+            String tag = String.format("cat%02d", categoryIndex);
+            for (int i = 0; i < 3; i++) {
+                posts.add(post(tag + "-" + i, "Story " + tag + " " + i, List.of(tag)));
+            }
+        }
+        return posts;
+    }
 
     private static DigestCategorizer newCategorizer(int minClusters) {
         DigestCategorizer categorizer = new DigestCategorizer();
         categorizer.categoryMinClusters = minClusters;
         return categorizer;
+    }
+
+    private static DigestCategorizer newCategorizer(int minClusters, int maxCategories) {
+        DigestCategorizer categorizer = newCategorizer(minClusters);
+        categorizer.maxCategories = maxCategories;
+        return categorizer;
+    }
+
+    /** Counts {@link CategoryRollupGenerator#generateRollup} calls without reaching an LLM. */
+    private static final class RecordingRollupGenerator extends CategoryRollupGenerator {
+        private int calls;
+
+        int callCount() { return calls; }
+
+        @Override
+        public Optional<String> generateRollup(List<Cluster> categoryClusters, String langCode) {
+            calls++;
+            return Optional.empty();
+        }
     }
 
     private static Post post(String uid, String title, List<String> tags) {

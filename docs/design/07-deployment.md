@@ -289,6 +289,15 @@ infochat.partitions.retention-days.price-snapshot=7
 # Partition-drop TTL is driven by infochat.partitions.prune-interval above
 # (PartitionPruner); there is no separate ttl-prune cron key.
 infochat.digest.tick-interval=60s                # DigestScheduler: due-group check cadence
+# Digest size bound (M1-721). A digest's section count tracks the tag
+# vocabulary, which grows with every source an operator adds, so this key is
+# what bounds how long a digest gets. Sections are dropped off the tail
+# (order is assigned-cluster count descending, so the smallest go first) and
+# the Other bucket is never dropped — when the cap binds it takes the last
+# slot and one more real category yields. Clusters in a dropped section are
+# not redistributed; one overflow line names how many categories were
+# omitted. Digest broadcast only: /summary caps no sections.
+infochat.digest.max-categories=8
 
 # ── Single-instance enforcement (D41; §7.8.5) ──────────────────────────
 # Heartbeat tick interval written by the lock-holding instance to

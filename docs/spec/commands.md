@@ -1847,7 +1847,26 @@ appends a localized "+N more" line steering readers to
 category's raw controlled-vocabulary tag, e.g. `ai`), or to bare
 `/summary --full` for the Other bucket whose tag is not in the
 controlled vocabulary; per-cluster LLM prose is generated only
-for the clusters actually shown. Every digest ends with **one**
+for the clusters actually shown. The **number of sections** is
+bounded too, by a separate operator-configurable **section cap**
+(default 8): a digest's section count tracks the tag vocabulary,
+which grows with every source an operator adds, so without this
+the digest's length has an unbounded factor. Sections are dropped
+off the **tail** of the order above — the smallest first — with
+one carve-out: **Other is never dropped by the cap.** It holds
+exactly the clusters with no qualifying tag, the content with no
+other route to a reader, so when the cap binds and Other is
+present it takes the last slot and one more real category yields
+in its place. Clusters in a dropped section are **not**
+redistributed into the surviving sections and **not** folded into
+Other — folding them in would inflate Other precisely when the
+cap binds. They are simply not rendered, and per-cluster prose
+and per-category roll-ups are generated only for the sections
+that survive the cap. A capped digest appends **one** localized
+overflow line, on its last section, naming how many categories
+are not shown and steering readers to `/summary`, which caps no
+sections; a digest under the cap appends no such line. Every
+digest ends with **one**
 localized closing affordance line steering readers to `@mention`
 the bot for exploratory chat-mode questions (a distinct purpose
 from the overflow line's capped-category promise). Given the same

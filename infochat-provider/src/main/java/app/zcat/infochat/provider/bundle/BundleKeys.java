@@ -1993,6 +1993,9 @@ public final class BundleKeys {
     /** Capped-section overflow line for the Other bucket ({@code tag == null}, not in the controlled vocabulary). Token {@code {0}} = the count of clusters not shown; the cs value carries a {@code {0,choice,...}} plural shape. Steers to bare {@code /summary --full} (no tag — "other" would hit {@code error.summary.unknown_tag}). */
     public static final String REPLY_DIGEST_CATEGORY_MORE_OTHER = "reply.digest.category.more_other";
 
+    /** Section-cap overflow line, appended ONCE to the last section of a digest whose category count exceeded {@code infochat.digest.max-categories} (M1-721). Token {@code {0}} = the number of categories not shown; both values carry a {@code {0,choice,...}} plural shape. Names no tags — it steers to {@code /summary}, which caps no sections. */
+    public static final String REPLY_DIGEST_CATEGORIES_MORE = "reply.digest.categories.more";
+
     /** One closing affordance line ending every non-degraded digest (group scope, so it steers to @mention). No tokens; resolved via the 2-arg accessor. */
     public static final String REPLY_DIGEST_CLOSING_AFFORDANCE = "reply.digest.closing_affordance";
 

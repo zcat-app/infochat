@@ -28,8 +28,8 @@ import org.jspecify.annotations.Nullable;
 /**
  * Renders digest prose via the LLM summarizer with the group's language code,
  * sanitizes and translates each cluster's output, grouped under deterministic
- * category headers with a per-section item cap and one closing affordance
- * line (D62).
+ * category headers with a per-section item cap, a cap on the NUMBER of
+ * sections (M1-721) and one closing affordance line (D62).
  */
 @ApplicationScoped
 public class DigestRenderer {
@@ -87,12 +87,21 @@ public class DigestRenderer {
      *
      * <p>Section order is {@link DigestCategorizer#categorize}'s D62 order
      * (assigned-cluster count descending, alphabetical ties, Other last)
-     * inherited as-is — never sorted or filtered here.
+     * inherited as-is — never sorted here. The only filtering is
+     * {@link DigestCategorizer#capSections}, which drops whole sections
+     * off the tail (M1-721); within the survivors the order is untouched.
      */
     public List<RenderedSection> renderSections(List<EligiblePostQuery.Post> posts,
                                                 String langCode) {
         List<Cluster> clusters = clusterTraversal.cluster(posts);
-        List<CategorySection> sections = digestCategorizer.categorize(clusters);
+        List<CategorySection> allSections = digestCategorizer.categorize(clusters);
+        // The section cap is applied HERE and not inside categorize(), so it
+        // reaches only the digest broadcast: renderSummarySections and
+        // renderShortBody share the categorizer and must keep every section
+        // (M1-721). Everything below runs over the capped list, which is what
+        // keeps prose and roll-ups off the dropped sections.
+        List<CategorySection> sections = digestCategorizer.capSections(allSections);
+        int droppedCategories = allSections.size() - sections.size();
 
         // Prose is generated only for the clusters that will actually render
         // (up to the per-section cap) — a capped-out cluster gets the "+N
@@ -161,6 +170,17 @@ public class DigestRenderer {
             // text already ends with "\n\n" + affordance). Other sections
             // are unaffected.
             if (sectionIdx == sections.size() - 1) {
+                // One section-cap overflow line for the whole digest, ahead
+                // of the affordance: it accounts for the categories the cap
+                // dropped, whose clusters are rendered nowhere (M1-721). It
+                // names no tags — listing eight of them would spend the lines
+                // the cap just saved — so it steers to /summary, which is
+                // uncapped in section count.
+                if (droppedCategories > 0) {
+                    sb.append("\n\n").append(MessageFormat.format(
+                            bundleLoader.get(BundleKeys.REPLY_DIGEST_CATEGORIES_MORE, langCode),
+                            droppedCategories));
+                }
                 sb.append("\n\n").append(
                         bundleLoader.get(BundleKeys.REPLY_DIGEST_CLOSING_AFFORDANCE, langCode));
             }

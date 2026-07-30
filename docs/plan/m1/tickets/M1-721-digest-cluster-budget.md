@@ -1,7 +1,7 @@
 ---
 id: M1-721
 title: "Digest length is a function of tag count: nothing bounds how many category sections a digest renders"
-status: pending
+status: done
 created: 2026-07-30
 last_updated: 2026-07-30
 blocked_by: []
@@ -90,9 +90,10 @@ acceptance:
     against a 12-section fixture at cap 8.
   - >-
     `infochat.digest.max-categories` is documented in
-    `docs/design/07-deployment.md` §Configuration surface alongside the
-    other `infochat.digest.*` keys, so `scripts/lint-config-keys.py`
-    stays green.
+    `docs/design/07-deployment.md` §7.4 Canonical `application.properties`
+    alongside the other `infochat.digest.*` keys, and carries a base
+    declaration in the provider's `application.properties`, so
+    `scripts/lint-config-keys.py` stays green.
   - >-
     `docs/spec/commands.md` §Periodic group digests states the section
     cap, the Other carve-out, and that dropped sections' clusters are
@@ -137,12 +138,36 @@ decision_refs:
   - D62
   - D63
   - D19
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-30
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 12
+      added: 352
+      removed: 18
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-30
+  verdict: PASS
+  warnings:
+    - >-
+      Self-check (prose fix applied inline): acceptance item 6 named
+      `docs/design/07-deployment.md` §Configuration surface, a heading
+      that does not exist in that file (it is in `docs/spec/deployment.md`).
+      The `infochat.digest.*` keys live in §7.4 Canonical
+      `application.properties`; the item now names §7.4 and requires the
+      matching base declaration. Locus only — no scope or intent change.
+  blockers: []
 escalation_reason:
 ---
 
