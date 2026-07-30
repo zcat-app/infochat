@@ -903,7 +903,7 @@ class SsrfGuardedHttpClientTest {
         assertEquals(5L * 1024 * 1024, SsrfGuardedHttpClient.DEFAULT_BODY_CAP,
             "the canonical default body cap is 5 MiB; the no-arg constructor "
             + "inherits exactly DEFAULT_BODY_CAP, which must match the "
-            + "design-note infochat.fetch.max-body-bytes default");
+            + "design-note body-size cap");
 
         byte[] oneByteOverCap = new byte[(int) (SsrfGuardedHttpClient.DEFAULT_BODY_CAP + 1)];
         server.createContext("/atcap", exchange -> {
