@@ -55,8 +55,19 @@ out_of_scope:
     to rank, score, or pick stories violates D19 and is an escalation,
     not a design choice.
   - >-
-    A trained or tuned model, a weighted sum with fitted coefficients,
-    or any per-deployment calibration. See §Why lexicographic.
+    Any FITTED or LEARNED weight. The four weights are operator config
+    keys with hand-chosen defaults, tuned later against the live corpus
+    by a human reading the emitted components (§Tuning). A diff that
+    derives weights from data, adds a training step, or varies them per
+    deployment at runtime has left scope.
+  - >-
+    `post.social_score`'s own `2 * reposts + likes` formula
+    (`docs/design/05-llm-and-embeddings.md:461`). That column exists to
+    feed the summarizer prompt and keeps its canonical shape; the
+    ranking reads `reposts` and `likes` SEPARATELY so their relative
+    weight is tunable. The two are allowed to disagree and a diff that
+    "reconciles" them by rewriting the column has left scope — see
+    §Why the ranking does not use social_score.
   - >-
     Personalization. The group digest is one artifact delivered to every
     member (spec §Conversation control, `/forget`); per-user ranking
@@ -68,81 +79,114 @@ out_of_scope:
   - any other module
 acceptance:
   - >-
-    A new `ClusterProminence` computes a total order over clusters as a
-    LEXICOGRAPHIC tuple, not a weighted sum. Levels, in order: (1) the
-    cluster carries the `urgent` ingest classification; (2) normalized
-    corroboration, bucketed; (3) normalized social signal, bucketed;
-    (4) source scarcity, bucketed; (5) `COALESCE(published_at,
-    fetched_at) DESC, id DESC` — the existing sort key, unchanged, as
-    the final total-order tiebreak. Given the same clusters the order is
-    byte-identical across runs; a test asserts two independent
-    invocations over a shuffled input list produce the identical
+    A new `ClusterProminence` scores each cluster as a WEIGHTED SUM over
+    four percentile-normalized terms — corroboration, reposts, likes,
+    source scarcity — gated by the `urgent` classification and
+    tie-broken by recency. The full ordering is: (1) clusters carrying
+    the `urgent` ingest classification sort ahead of those that do not;
+    (2) within each group, descending weighted score; (3)
+    `COALESCE(published_at, fetched_at) DESC, id DESC` — the existing
+    sort key, unchanged — as the final tiebreak so the order is total.
+  - >-
+    Every term is an INTEGER PERCENTILE 0–100 within its own population,
+    never a raw value. Raw units do not share a scale — distinct-source
+    counts run 1–10 while like counts run to five figures, so a weighted
+    sum over raw values is a like-count ranking with rounding noise from
+    the other terms. A test pins that a cluster with 50 000 likes does
+    not outrank a broadly-corroborated cluster.
+  - >-
+    Percentile is rank-based with ties sharing a value ("percentage of
+    the population scoring strictly below"), computed in integer
+    arithmetic. No float participates in any ordering comparison, so the
+    order cannot drift with floating-point representation across JVMs —
+    this is what preserves the D19 byte-identical-replay property
+    `/retry --digest` depends on. A test asserts the comparator is a
+    valid total order over a 200-cluster fixture (antisymmetric,
+    transitive) by sorting, shuffling and re-sorting to the identical
     sequence.
   - >-
-    Normalized corroboration is `distinct sources in the cluster ÷
-    distinct sources that posted under that cluster's assigned category
-    tag within the digest's window`, NOT the raw source count. A test
-    pins the intent: a 3-source cluster in a tag with 4 active sources
-    outranks a 5-source cluster in a tag with 40 active sources.
+    Populations, one per term, each chosen so the comparison is
+    like-with-like: corroboration ranks against the OTHER CLUSTERS IN
+    THIS DIGEST; reposts and likes rank against clusters of the SAME
+    SOURCE KIND in the window; scarcity ranks against the other clusters
+    in this digest. A test asserts a Bluesky cluster is never ranked
+    against RSS clusters on the reposts or likes term.
   - >-
-    Normalized social is the cluster's max `post.social_score`
-    positioned within the distribution of `social_score` for the SAME
-    source kind in the same window. Posts whose `social_score` is NULL
-    are EXEMPT from this level — it neither raises nor lowers them, and
-    the comparison falls through to level 4. A test asserts an RSS
-    cluster and a Bluesky cluster identical at levels 1, 2 and 4 tie at
-    level 3 and are separated by level 5; a test asserts a NULL
-    social_score is not treated as 0.
+    The corroboration VALUE fed to the percentile is `distinct sources
+    in the cluster ÷ distinct sources that posted under that cluster's
+    assigned category tag within the window`, NOT the raw source count.
+    A test pins the intent: a 3-source cluster in a tag with 4 active
+    sources outranks a 5-source cluster in a tag with 40 active sources.
   - >-
-    Source scarcity is the inverse of the posting volume, in the
-    window, of the cluster's least-prolific member source. A test pins
-    that a single-source cluster from a source with 2 posts in the
-    window outranks a single-source cluster from a source with 300.
+    The scarcity VALUE is the inverse posting volume, in the window, of
+    the cluster's least-prolific member source. A test pins that a
+    single-source cluster from a source with 2 posts in the window
+    outranks a single-source cluster from a source with 300.
   - >-
-    Every continuous level (2, 3, 4) is BUCKETED into a small fixed
-    number of bands (default 5, `infochat.digest.prominence-buckets`)
-    before comparison. Ratios are computed in integer arithmetic against
-    the bucket count — no float ever participates in an ordering
-    comparison, so the order cannot drift with floating-point
-    representation across JVMs. A test asserts the comparator is a valid
-    total order over a 200-cluster fixture (antisymmetric, transitive,
-    no ties outside level 5) by sorting and re-sorting.
+    Weights are config keys — `infochat.digest.weight.corroboration`
+    (default 7), `.reposts` (2), `.likes` (1), `.scarcity` (2) — and the
+    denominator is the sum of the weights of the terms actually PRESENT
+    on that cluster, not the sum of all four. A cluster with NULL
+    reposts and likes is scored out of 9, not given zeros out of 12.
+    This is the property that stops editorial sources being
+    structurally beaten by social ones; a test asserts an RSS cluster
+    and a Bluesky cluster with identical corroboration and scarcity
+    percentiles score identically when the Bluesky cluster's social
+    percentiles are at the population median.
+  - >-
+    NULL and 0 stay distinct end to end (M1-723 §Absent is not zero). A
+    NULL repost count means the term is absent and drops out of the
+    denominator; a repost count of 0 means the term is present with a
+    low percentile. A test pins both, and pins that they produce
+    DIFFERENT scores for otherwise-identical clusters.
+  - >-
+    `ClusterProminence` returns the per-term percentiles, the weights
+    applied, the denominator and the final score alongside the ordering
+    — not an opaque sort. The weights ship uncalibrated and are meant
+    to be tuned against the live corpus, which is impossible if the
+    inputs cannot be read back. A test asserts the components of a
+    known fixture reproduce its score by hand-arithmetic.
   - >-
     The M1-721 budget reserves a configurable fraction
     (`infochat.digest.diversity-reserve`, default one third, rounded
-    down) of its slots for a DIVERSITY pass that ignores levels 1–4 and
-    round-robins over sections in publication order. Prominence claims
-    the remaining slots. A test pins that with budget 15, reserve 1/3
-    and one category holding every high-prominence cluster, the other
-    categories still receive 5 slots between them.
+    down) of its slots for a DIVERSITY pass that ignores the score
+    entirely and round-robins over sections in publication order.
+    Prominence claims the remaining slots. A test pins that with budget
+    15, reserve 1/3 and one category holding every high-scoring
+    cluster, the other categories still receive 5 slots between them.
   - >-
-    A digest whose posts all carry NULL social_score (the state before
-    M1-723 backfills anything, and permanently true for an RSS-only
-    deployment) produces an order determined entirely by levels 1, 2, 4
-    and 5, with no NullPointerException and no silent demotion of every
-    cluster. A test runs the full fixture with the column absent.
+    A digest whose posts all carry NULL reposts and likes (the state
+    before M1-723 ships anything, and permanently true for an RSS-only
+    deployment) is ordered by corroboration and scarcity alone, with no
+    NullPointerException, no division by zero in the denominator, and no
+    silent collapse to a single score. A test runs the full fixture with
+    both columns absent.
   - >-
     `docs/spec/commands.md` §Periodic group digests states that digest
     cluster order within a section is prominence-ordered and that
     `/summary` remains publication-ordered, and a new decision row
-    records the lexicographic-tuple design and the diversity reserve.
-    The spec currently describes only "the existing per-cluster prose +
-    links render unchanged" under each header, which no longer says
-    enough.
+    records the weighted-percentile design, the present-terms
+    denominator and the diversity reserve. The spec currently describes
+    only "the existing per-cluster prose + links render unchanged" under
+    each header, which no longer says enough.
   - mvn verify from the repo root is green.
 test_plan:
   adds:
     - >-
       infochat-provider/src/test/java/app/zcat/infochat/provider/summary/ClusterProminenceTest.java
-      — each level in isolation with the others held equal; the
-      normalization cases named in the acceptance criteria; NULL
-      social_score exemption; determinism over a shuffled input;
-      total-order validity over 200 clusters; all-NULL-social fixture;
-      a cluster with a single post and no signals at all still orders
+      — each term in isolation with the others held equal; the four
+      worked-example clusters in §The design reproduce their stated
+      scores; raw-magnitude immunity (50 000 likes loses to
+      corroboration); percentile ties share a value; population
+      separation by source kind; present-terms denominator; NULL vs 0
+      distinctness; the urgent gate outranks a higher-scoring
+      non-urgent cluster; determinism over a shuffled input;
+      total-order validity over 200 clusters; the all-NULL-social
+      fixture; a single-post cluster with no signals still orders
       deterministically rather than throwing.
     - >-
       infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererSectionsTest.java
-      — the diversity reserve leaves slots for low-prominence sections;
+      — the diversity reserve leaves slots for low-scoring sections;
       reserve 0 gives every slot to prominence; reserve 1 (whole budget)
       reproduces the M1-721 round-robin exactly, which pins that the
       two selection paths compose rather than conflict.
@@ -158,6 +202,10 @@ test_plan:
       the same fixture the digest reorders returns the OLD order.
     - >-
       Every M1-721 budget and allocation assertion.
+    - >-
+      M1-723's `social_score` column value and the tests pinning its
+      `2 * reposts + likes` formula. The ranking reads the two inputs
+      separately; it does not redefine the column.
     - >-
       `EligiblePostQueryTest` / `DigestPostCollectorTest` window
       semantics (`ready_at` membership, M1-689) — this ticket adds
@@ -217,62 +265,102 @@ sources produces 5-source clusters routinely; a tag with 4 sources can
 never produce more than a 4-source cluster. Raw counts rank the tag, not
 the story.
 
-**Social sources beat editorial ones.** Once `social_score` (M1-723)
-carries a value, any scheme that scores an absent signal as zero sinks
-every RSS article beneath every Bluesky post. A blog post has no likes
-because blogs have no like button, not because nobody cared.
+**Social sources beat editorial ones.** Once `reposts` and `likes`
+(M1-723) carry values, any scheme that scores an absent signal as zero
+sinks every RSS article beneath every Bluesky post. A blog post has no
+likes because blogs have no like button, not because nobody cared.
 
 **Single-source reporting never surfaces.** The item that only one
 outlet has is, by construction, the one with no corroboration — and it
 is frequently the one worth reading.
 
-## The design: normalize within population, never across
+## The design: percentile-normalize, then weight
 
-Each level compares like with like, and a missing signal is an
-**exemption from that level**, never a zero on it:
+Ordering is `urgent` gate → weighted score → recency tiebreak.
 
-1. **`urgent` classification** — already assigned at ingest over the
-   closed set `{factual, opinion, technical, urgent, ongoing, unknown}`
-   and currently only displayed. Free to consume.
-2. **Normalized corroboration** — the cluster's distinct sources as a
-   fraction of the sources *reachable for that topic* (distinct sources
-   that posted under the cluster's category tag in the window). Three of
-   four possible sources is near-total coverage; five of forty is noise.
-   This is the level that makes a niche tag comparable to a busy one.
-3. **Normalized social** — `social_score` positioned within the
-   distribution *for the same source kind*. A Bluesky post is compared
-   against Bluesky posts. RSS, YouTube, Odysee, nitter and Nostr posts
-   have NULL and skip the level entirely.
-4. **Source scarcity** — inverse posting volume of the cluster's
-   least-prolific source. A source that publishes twice a month spends
-   more signal per post than one publishing 300 times a week. This is
-   the level that carries a single-source niche article, which by
-   definition scores nothing at levels 2 and 3.
-5. **Recency** — the existing `COALESCE(published_at, fetched_at) DESC,
-   id DESC` key, retained verbatim as the final tiebreak so the order is
-   total.
+The score is a weighted sum over four terms. Each term is an **integer
+percentile within its own population**, and the denominator is the sum
+of the weights of the terms **actually present**:
+
+```
+score = Σ (weight_t × percentile_t) / Σ (weight_t)    over terms t present
+```
+
+| Term | Value ranked | Population | Weight |
+|---|---|---|---|
+| corroboration | distinct sources ÷ distinct sources active under that tag in the window | other clusters in this digest | 7 |
+| reposts | max `post.reposts` in the cluster | clusters of the same source kind | 2 |
+| likes | max `post.likes` in the cluster | clusters of the same source kind | 1 |
+| scarcity | inverse window post volume of the least-prolific member source | other clusters in this digest | 2 |
+
+Three properties do the actual work:
+
+**Percentile IS the non-linearity.** Engagement is power-law
+distributed: 10 → 100 likes is meaningful, 10 000 → 10 100 is noise. A
+percentile compresses exactly that way, and unlike a hand-picked `log`
+curve it adapts to the observed distribution. (Applying `log` before
+taking a percentile would change nothing — percentile depends only on
+order.)
+
+**Populations are never mixed.** Bluesky ranks against Bluesky.
+Corroboration ranks as a *share of the field reachable for that tag*, so
+three of four possible sources beats five of forty.
+
+**A missing term drops out of the denominator, it does not score zero.**
+An RSS cluster is scored out of 7 + 2 = 9. This is the single rule that
+keeps editorial sources competitive, and it is why M1-723 insists NULL
+and 0 stay distinct all the way from the fetcher.
+
+Worked, over a 40-cluster window at the default weights:
+
+| Cluster | corrob. | reposts | likes | scarcity | denom | score |
+|---|---|---|---|---|---|---|
+| A — 4 RSS sources, no social data | 95 | — | — | 50 | 9 | **85** |
+| D — 3 RSS sources, quiet | 70 | — | — | 60 | 9 | **67** |
+| C — 2 sources, viral on Bluesky | 50 | 99 | 99 | 40 | 12 | **60** |
+| B — 1 Bluesky source, 8k likes, 400 reposts | 20 | 99 | 98 | 30 | 12 | **41** |
+
+Broad corroboration leads; a viral single-source post places but does not
+lead; a quiet three-source story still beats a viral one-source story.
 
 And because no scoring function is trustworthy enough to be given the
 whole budget, a **diversity reserve** (default one third of the M1-721
-budget) is allocated by plain round-robin over sections, ignoring levels
-1–4. Prominence cannot starve a category; it can only decide who wins
-the contested slots.
+budget) is allocated by plain round-robin over sections, ignoring the
+score. Prominence cannot starve a category; it only decides who wins the
+contested slots.
 
-## Why lexicographic and not a weighted sum
+## Why a weighted sum and not a lexicographic tuple
 
-A weighted sum needs weights, and weights need labelled data about which
-stories the group actually wanted — which does not exist and would take
-months of feedback to gather. A lexicographic tuple needs no
-calibration: each level is a strict tiebreak on the one above it. It is
-also explainable, which matters for a push artifact — "this led because
-it was marked urgent, then because 3 of the 4 sources covering that tag
-carried it" is a sentence; a 0.73 is not.
+An earlier draft of this ticket ordered by a strict lexicographic tuple
+(urgent → corroboration → social → scarcity → recency), on the argument
+that a weighted sum needs weights and weights need labelled data.
 
-Every continuous level is bucketed into 5 bands before comparison. This
-is not a rounding convenience: it keeps floats out of the comparator
-entirely, so the D19 byte-identical-replay property that `/retry
---digest` depends on cannot be broken by floating-point representation
-differing across JVMs or platforms.
+That argument is wrong about the cost. Lexicographic ordering does not
+avoid a judgement call — it makes the most extreme one available:
+corroboration becomes *infinitely* more important than engagement, so a
+4-of-4-sources story beats a 3-of-4-sources story no matter how much
+larger the second one is. The terms should trade off, and a weighted sum
+is the honest way to say by how much. The weights are hand-chosen and
+uncalibrated, which is stated rather than hidden.
+
+## Why the ranking does not use `social_score`
+
+`post.social_score` is `2 * reposts + likes` and is canonical for the
+summarizer prompt (`05-llm-and-embeddings.md:458-465`). The ranking reads
+`reposts` and `likes` separately instead, for two reasons: the repost-to-
+like ratio becomes a tunable config key rather than a constant frozen
+into a column, and each gets its own percentile against its own
+distribution, which a pre-summed value cannot express. The column and the
+ranking are permitted to disagree; they answer different questions.
+
+## Tuning
+
+The weights ship uncalibrated. `ClusterProminence` therefore returns its
+per-term percentiles, weights, denominator and final score — not just an
+ordering — so a digest's ranking can be dumped against the live-test
+corpus and read by a human before any weight is changed. Retuning is
+then a config edit, not a code change. No feedback loop, no fitting, no
+per-deployment adaptation: those are out of scope above.
 
 ## Notes
 
@@ -280,7 +368,7 @@ Rejected inputs, recorded so they are not re-proposed:
 
 - **Raw like/repost counts as a global axis.** Imports each platform's
   engagement bias into our ranking and is unavailable for four of six
-  fetcher kinds. Level 3 uses them only within source kind.
+  fetcher kinds. The social terms are percentiles within source kind.
 - **Embedding novelty** (distance from the recent corpus as a
   "first report" signal). Genuinely attractive and cuts usefully against
   corroboration, but `post_embedding` is optional — a post reaches READY

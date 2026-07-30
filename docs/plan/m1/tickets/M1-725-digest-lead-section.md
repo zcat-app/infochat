@@ -25,9 +25,11 @@ migration_touch: false
 out_of_scope:
   - >-
     `ClusterProminence` (M1-724). The ordering function is consumed
-    here, not modified. A diff that adjusts a prominence level to make
-    the lead section look better has left scope — that would tune the
-    ranking against one section's appearance.
+    here, not modified. A diff that adjusts a prominence term or one of
+    the four weights to make the lead section look better has left
+    scope — that would tune the ranking against one section's
+    appearance. Weight retuning is a config edit against the live
+    corpus (M1-724 §Tuning), never a side effect of a rendering ticket.
   - >-
     `/summary`. It gains no lead section: it is a pull for a named tag,
     where a "top stories" header above the reader's own query is noise.
