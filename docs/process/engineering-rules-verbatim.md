@@ -70,6 +70,7 @@ The reviewer's `TEST-INTEGRITY-CHECK` fails if the diff introduces any of the fo
 - New `@MockBean` / `@Mock` replacing previously-real wiring inside an integration test (mocks belong in unit tests; integration tests integrate).
 - A test was modified to match a new (wrong) behavior rather than the code being fixed to match the test.
 - A test was deleted or renamed without an accompanying explanation tying it to a deliberate spec change.
+- A command entry deleted from the `docs/spec/commands.md` index, from `HelpCommandHandler.CATALOGUE`, or from the spec's closed privileged-tier list — or `TIER_EXEMPT_BASE_COMMANDS` widened — to green `CommandCatalogueParityTest` (the build gates the production `CommandHandler` bean set against all three, plus the `HelpTier` each privileged-tier bullet implies): a genuinely-retired command leaves the bean, the index and the catalogue together, so silencing one side only hides the drift the guard exists to catch.
 - A documented `infochat.*` config key edited away in `docs/spec/**`, `docs/design/**` or a root guide to green `DocumentedConfigKeyParityTest` (M1-708 — the build gates documented key names against the real `@ConfigProperty` / `application.properties` set): a mis-NAMED key is fixed in the doc, but a doc naming a requirement the code has not built keeps the requirement and gets an entry in `documented-config-key-exemptions.txt` citing the gap that owns it.
 
 ### Test-modification authorization
