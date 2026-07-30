@@ -65,7 +65,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-722 — blocked_by: M1-721 (pending)
 - M1-724 — blocked_by: M1-723 (pending)
 - M1-725 — blocked_by: M1-722 (pending), M1-724 (pending)
-- M1-728 — blocked_by: M1-714 (pending)
+- M1-728 — blocked_by: M1-714 (pending), M1-722 (pending)
 
 ---
 
@@ -986,7 +986,8 @@ M1-717 (pending) ← runnable
   └── M1-720 (pending) [see above]
 M1-721 (pending) ← runnable
   └── M1-722 (pending)
-        └── M1-725 (pending)
+        ├── M1-725 (pending)
+        └── M1-728 (pending) [see above]
 M1-723 (pending) ← runnable
   └── M1-724 (pending)
         └── M1-725 (pending) [see above]

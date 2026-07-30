@@ -6,12 +6,13 @@ created: 2026-07-30
 last_updated: 2026-07-30
 blocked_by:
   - M1-721
-files_budget: 13
+files_budget: 17
 files_scope:
   - infochat-core/src/main/resources/db/migration/V66__group_digest_mode.sql
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/DigestCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRenderer.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/CategoryRollupGenerator.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/bundles/cs.properties
@@ -19,6 +20,9 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/DigestCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererSectionsTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/CategoryRollupGeneratorTest.java
+  - docs/spec/decisions.md
+  - docs/design/03-commands.md
   - docs/design/07-deployment.md
   - docs/spec/commands.md
 complexity: high
@@ -46,11 +50,12 @@ out_of_scope:
     taken from the head of the section's existing order; when M1-724
     lands that order becomes prominence-based with no change here.
   - >-
-    `infochat.digest.category-summary-enabled`. The flag PREFIXED a
-    roll-up onto per-cluster prose; under `normal` the roll-up is no
-    longer a prefix but the body itself. The flag is retired as part of
-    this ticket rather than left meaning something it no longer means —
-    its one behaviour is now unconditional in `normal` and `brief`.
+    `CategoryRollupGenerator.buildPrompt`'s CONTENT — what the roll-up
+    prompt says and how much it sends. That is M1-728. This ticket
+    deletes the flag that gates whether the roll-up runs; it does not
+    touch the prompt text. Both tickets edit
+    `CategoryRollupGenerator.java`, which is why M1-728 is sequenced
+    after this one.
   - >-
     The degraded (D17) fallback and the zero-posts fixed reply. Both are
     already single-message and mode-independent: a saturated slot
@@ -134,6 +139,50 @@ acceptance:
     D63 row in `docs/spec/decisions.md` is amended for the batched
     delivery. Both new config keys are documented in
     `docs/design/07-deployment.md` §Configuration surface.
+  - >-
+    `infochat.digest.category-summary-enabled` and every line that
+    exists only to serve it are DELETED, not left inert. The flag gated
+    a roll-up PREFIX above per-cluster prose; under `normal` the roll-up
+    IS the body, and `full` renders prose for every cluster and gains no
+    prefix, so no caller remains. Enumerated from the census
+    (§Census: retiring the flag), all of these go: the `@ConfigProperty`
+    field (`CategoryRollupGenerator.java:103-104`), the short-circuit
+    branch (`:126`), the gated wrapper `generateRollup` (`:125`) and its
+    sole production call site (`DigestRenderer.java:125`), the two
+    javadoc paragraphs describing the flag (`CategoryRollupGenerator.java:24`,
+    `DigestRenderer.java:307`) and the stale default-instance comment
+    (`DigestRenderer.java:46-47`).
+  - >-
+    `generateRollupUnconditional` is renamed to `generateRollup`,
+    reclaiming the plain name. "Unconditional" only ever distinguished
+    it from the gated sibling being deleted, so leaving it would name a
+    contrast that no longer exists. This is an orphan THIS change
+    creates, so cleaning it up is in scope; it is the only rename in the
+    diff.
+  - >-
+    The five test sites setting `gen.categorySummaryEnabled = true`
+    (`CategoryRollupGeneratorTest.java:42,75,101,116,130`) and the
+    `generateRollup` stub override in
+    `DigestRendererSectionsTest.java:150` are updated, not deleted — the
+    behaviour each asserts (determinism across calls, localization,
+    sanitization, failure handling) still holds; only the flag setup
+    goes. A test that disappears with the flag would be coverage lost,
+    not dead code removed.
+  - >-
+    `docs/spec/commands.md` §Periodic group digests loses its "Optional
+    per-category roll-up" paragraph (`:1962`), which documents the flag,
+    its default and its ship-off rationale, and `docs/design/03-commands.md:466`
+    loses the "bypassing the digest's `category-summary-enabled` flag"
+    aside describing `--short`'s bypass of a gate that no longer exists.
+    The D62/D63 rows in `docs/spec/decisions.md` are checked for the
+    same reference.
+  - >-
+    Verification is a re-runnable grep, not an eyeball:
+    `grep -rn "category-summary-enabled\|categorySummaryEnabled\|generateRollupUnconditional"
+    --include=*.java --include=*.properties --include=*.md . | grep -v
+    '^./.bench' | grep -v '^./docs/plan'` returns ZERO hits. `docs/plan`
+    is excluded because closed tickets (M1-642, M1-700) are a historical
+    record and are not rewritten.
   - mvn verify from the repo root is green.
 test_plan:
   adds:
@@ -217,6 +266,28 @@ grep -rn "renderSections\|renderShortBody\|degradedRenderer.render" \
 
 One production dispatch point.
 
+## Census: retiring the flag
+
+`grep -rn "category-summary-enabled\|categorySummaryEnabled" --include=*.java
+--include=*.properties --include=*.md .` outside `.bench` and `docs/plan`:
+
+| Site | Disposition |
+|---|---|
+| `CategoryRollupGenerator.java:103-104` | **delete** — the `@ConfigProperty` field |
+| `CategoryRollupGenerator.java:126` | **delete** — the short-circuit branch |
+| `CategoryRollupGenerator.java:125` `generateRollup` | **delete** — the gated wrapper |
+| `CategoryRollupGenerator.java:24` | **delete** — javadoc describing the flag |
+| `DigestRenderer.java:125` | **delete** — the prefix call, `generateRollup`'s only production caller |
+| `DigestRenderer.java:46-47`, `:307` | **delete** — comments describing the gate |
+| `CategoryRollupGeneratorTest.java:42,75,101,116,130` | **update** — drop the flag setup, keep every assertion |
+| `DigestRendererSectionsTest.java:140-150` | **update** — the stub override and its comment |
+| `docs/spec/commands.md:1962` | **delete** — the "Optional per-category roll-up" paragraph |
+| `docs/design/03-commands.md:466` | **update** — the `--short` bypass aside |
+| `docs/plan/m1/tickets/M1-642`, `M1-700` | **leave** — closed tickets are a historical record |
+
+After the deletions `generateRollupUnconditional` is the only entry point
+and reclaims the plain name.
+
 ## Context
 
 Today every cluster a digest renders costs a prose paragraph, and a
@@ -275,8 +346,11 @@ calibrated for one message per slot.
 
 ## Notes
 
-`infochat.digest.category-summary-enabled` is retired here. Its purpose
-was to gate a roll-up PREFIX above per-cluster prose; in `normal` the
-roll-up is the body, so a flag that switches it off would leave a
-category with a header and headlines and no synthesis. Leaving a config
-key whose name no longer describes its effect is worse than removing it.
+`infochat.digest.category-summary-enabled` is retired here, and retired
+means deleted — see §Census. Its purpose was to gate a roll-up PREFIX
+above per-cluster prose; in `normal` the roll-up is the body, so a flag
+that switched it off would leave a category with a header, headlines and
+no synthesis, and `full` renders prose for every cluster and wants no
+prefix. That leaves no caller. A config key kept "just in case" after its
+last caller goes is a feature flag by another name, which
+`CLAUDE.md` §"No defensive code" forbids outright in a greenfield M1.

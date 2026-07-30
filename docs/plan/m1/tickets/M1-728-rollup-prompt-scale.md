@@ -6,6 +6,7 @@ created: 2026-07-30
 last_updated: 2026-07-30
 blocked_by:
   - M1-714
+  - M1-722
 files_budget: 8
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/CategoryRollupGenerator.java
@@ -47,9 +48,13 @@ out_of_scope:
     `SummaryProseGenerator.degradedProseFor` (`DigestRenderer.java:344-357`)
     and never blocks the digest. Unchanged.
   - >-
-    `infochat.digest.category-summary-enabled` and whether the roll-up
-    runs at all. This ticket improves the roll-up; the decision to
-    invoke it belongs to the callers.
+    `infochat.digest.category-summary-enabled` and the gated
+    `generateRollup` wrapper. M1-722 DELETES both and renames
+    `generateRollupUnconditional` to `generateRollup`; this ticket runs
+    after that and edits `buildPrompt` only. Both tickets touch
+    `CategoryRollupGenerator.java`, hence `blocked_by: M1-722` — a diff
+    here that re-introduces the flag, or that deletes it a second time,
+    has left scope.
   - >-
     The per-call random UUID delimiter and the treat-as-untrusted
     instruction (`CategoryRollupGenerator.java:186-192`, D21). Load-bearing
