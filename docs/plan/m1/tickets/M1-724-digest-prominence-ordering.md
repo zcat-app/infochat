@@ -5,7 +5,6 @@ status: pending
 created: 2026-07-30
 last_updated: 2026-07-30
 blocked_by:
-  - M1-721
   - M1-723
 files_budget: 11
 files_scope:
@@ -147,13 +146,13 @@ acceptance:
     inputs cannot be read back. A test asserts the components of a
     known fixture reproduce its score by hand-arithmetic.
   - >-
-    The M1-721 budget reserves a configurable fraction
-    (`infochat.digest.diversity-reserve`, default one third, rounded
-    down) of its slots for a DIVERSITY pass that ignores the score
-    entirely and round-robins over sections in publication order.
-    Prominence claims the remaining slots. A test pins that with budget
-    15, reserve 1/3 and one category holding every high-scoring
-    cluster, the other categories still receive 5 slots between them.
+    The score orders clusters WITHIN a section; it never reorders or
+    merges sections, and it never moves a cluster between them. Section
+    membership stays D62 tag arithmetic. A test asserts that reordering
+    by prominence leaves every section's membership set identical, which
+    is what makes a high-scoring cluster unable to starve a small
+    category — each section renders its own head regardless of how it
+    scores against another section's.
   - >-
     A digest whose posts all carry NULL reposts and likes (the state
     before M1-723 ships anything, and permanently true for an RSS-only
@@ -166,7 +165,7 @@ acceptance:
     cluster order within a section is prominence-ordered and that
     `/summary` remains publication-ordered, and a new decision row
     records the weighted-percentile design, the present-terms
-    denominator and the diversity reserve. The spec currently describes
+    denominator and the within-section scope. The spec currently describes
     only "the existing per-cluster prose + links render unchanged" under
     each header, which no longer says enough.
   - mvn verify from the repo root is green.
@@ -186,10 +185,10 @@ test_plan:
       deterministically rather than throwing.
     - >-
       infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererSectionsTest.java
-      — the diversity reserve leaves slots for low-scoring sections;
-      reserve 0 gives every slot to prominence; reserve 1 (whole budget)
-      reproduces the M1-721 round-robin exactly, which pins that the
-      two selection paths compose rather than conflict.
+      — reordering by prominence leaves every section's membership set
+      identical; a section whose clusters all score low still renders
+      its own head; the head of each section is its highest-scoring
+      cluster, not its newest.
   preserves:
     - >-
       `DigestCategorizerTest` in full — section order and category
@@ -201,7 +200,9 @@ test_plan:
       assertions must pass unchanged. A test asserts a `/summary` over
       the same fixture the digest reorders returns the OLD order.
     - >-
-      Every M1-721 budget and allocation assertion.
+      Every M1-721 section-cap and overflow-line assertion. This
+      ticket reorders within sections; it does not change how many
+      sections render.
     - >-
       M1-723's `social_score` column value and the tests pinning its
       `2 * reposts + likes` formula. The ranking reads the two inputs
@@ -323,11 +324,14 @@ Worked, over a 40-cluster window at the default weights:
 Broad corroboration leads; a viral single-source post places but does not
 lead; a quiet three-source story still beats a viral one-source story.
 
-And because no scoring function is trustworthy enough to be given the
-whole budget, a **diversity reserve** (default one third of the M1-721
-budget) is allocated by plain round-robin over sections, ignoring the
-score. Prominence cannot starve a category; it only decides who wins the
-contested slots.
+**The score never crosses a section boundary.** It orders clusters within
+a section and selects the lead (M1-725); it does not reorder sections,
+move clusters between them, or decide which sections render — that is
+D62 assignment and M1-721's cap. So a category full of low-scoring
+stories still renders its own five headlines. An earlier draft added a
+"diversity reserve" to guarantee that, back when a single cluster budget
+was round-robinned across sections; under the hybrid the section
+structure provides it for free, so the reserve is gone.
 
 ## Why a weighted sum and not a lexicographic tuple
 

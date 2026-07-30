@@ -1,166 +1,181 @@
 ---
 id: M1-722
-title: "Groups have no volume control between a full prose digest and no digest at all: add /digest brief"
+title: "Digest categories render a prose paragraph per cluster: replace with count + roll-up + headlines, and add /digest brief|normal|full"
 status: pending
 created: 2026-07-30
 last_updated: 2026-07-30
-blocked_by: []
-files_budget: 11
+blocked_by:
+  - M1-721
+files_budget: 13
 files_scope:
   - infochat-core/src/main/resources/db/migration/V66__group_digest_mode.sql
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/DigestCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRenderer.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/bundles/cs.properties
+  - infochat-provider/src/main/resources/application.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/DigestCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererSectionsTest.java
+  - docs/design/07-deployment.md
   - docs/spec/commands.md
-  - docs/spec/decisions.md
-  - docs/design/03-commands.md
-complexity: medium
-risk: medium
-round_cap: 2
+complexity: high
+risk: high
+round_cap: 3
 security_relevant: true
 migration_touch: true
 out_of_scope:
   - >-
-    `DigestRenderer.renderShortBody` itself (`DigestRenderer.java:328`)
-    and `CategoryRollupGenerator`. Both exist, ship green, and are
-    exercised today by `/summary --short` and `RetryCommandHandler.java:288`.
-    This ticket WIRES the existing renderer to the periodic digest; a
-    diff that modifies the renderer's output has left scope, because
-    that would change `/summary --short` too.
+    `CategoryRollupGenerator`'s prompt. Its input bound and scaled
+    sentence budget are M1-728; this ticket calls the generator, it does
+    not change what it asks for. The two tickets touch different files
+    and compose in either order.
   - >-
-    `/summary`'s `--short` flag, its argument grammar and its render
-    path. Unchanged.
+    `/summary`'s render forms. `--short`, `--full`, `--flat` and the
+    bare default keep today's behaviour exactly. `/summary` is a pull
+    for a named tag; the hybrid shape is a push-surface decision.
+    A diff that changes `SummaryCommandHandler`'s output has left scope.
   - >-
-    The per-digest cluster budget (M1-721). `brief` reduces prose
-    DEPTH — roll-up per category instead of a paragraph per cluster —
-    while the budget reduces cluster COUNT. They compose and neither
-    subsumes the other, but this ticket must not also change how many
-    clusters are selected.
+    The section cap (M1-721) and the lead section (M1-725). This ticket
+    owns the BODY of a category section; those own how many sections
+    render and what sits above them.
   - >-
-    `infochat.digest.category-summary-enabled`. That flag PREFIXES a
-    roll-up onto the existing per-cluster prose, making the digest
-    longer; `brief` REPLACES the per-cluster prose. The flag's default
-    (`false`) and behaviour are untouched, and a diff that repurposes
-    it as the brief switch has left scope — it is a deployment-wide
-    flag and this is a per-group setting.
+    Prominence ordering (M1-724). The headlines this ticket renders are
+    taken from the head of the section's existing order; when M1-724
+    lands that order becomes prominence-based with no change here.
+  - >-
+    `infochat.digest.category-summary-enabled`. The flag PREFIXED a
+    roll-up onto per-cluster prose; under `normal` the roll-up is no
+    longer a prefix but the body itself. The flag is retired as part of
+    this ticket rather than left meaning something it no longer means —
+    its one behaviour is now unconditional in `normal` and `brief`.
   - >-
     The degraded (D17) fallback and the zero-posts fixed reply. Both are
     already single-message and mode-independent: a saturated slot
-    degrades identically whether the group is `normal` or `brief`.
+    degrades identically whatever the mode.
   - >-
     Per-group slot hours, `groups.timezone`, and `/group-timezone`.
-    Still global per deployment (spec §Periodic group digests names
-    per-group hour overrides a v2 candidate); this ticket adds a mode
-    column, not a scheduling column.
+    Still global per deployment; this ticket adds a mode column, not a
+    scheduling column.
   - any other module
 acceptance:
   - >-
     `V66__group_digest_mode.sql` adds
     `groups.digest_mode TEXT NOT NULL DEFAULT 'normal' CHECK (digest_mode
-    IN ('brief','normal','full'))`. Additive nullable-free column with a
-    default is metadata-only on PostgreSQL 11+ (the same argument
-    `V44__group_digest_enabled.sql:15` makes for `digest_enabled`), so
-    no table rewrite. The migration grants no new privileges — `groups`
-    is already Provider-writable.
+    IN ('brief','normal','full'))`. An additive NOT NULL column with a
+    default is metadata-only on PostgreSQL 11+ (the argument
+    `V44__group_digest_enabled.sql:15` makes for `digest_enabled`), so no
+    table rewrite. No new grants — `groups` is already Provider-writable.
   - >-
-    `/digest brief|normal|full` sets the mode; `/digest on|off` keeps
-    its exact current meaning against `digest_enabled` and is NOT
-    folded into the mode column. The two are orthogonal: an `off` group
-    in `brief` mode stays off. A test pins that `/digest off` followed
-    by `/digest brief` leaves the group paused.
+    A category section in `normal` renders, in order: the UPPERCASE
+    category header with the section's TRUE story count; the
+    `CategoryRollupGenerator` synthesis; up to
+    `infochat.digest.category-headline-count` (default 5) bare
+    headlines, each a `DisplayHeadline` title plus its URL and NO prose;
+    and the existing `reply.summary.short.category_footer` expand
+    affordance. Per-cluster prose is NOT generated for category
+    sections.
   - >-
-    Permissions match `/digest on|off` exactly — group admin or bot
-    admin, group scope only, friendly error in DM. The new verbs
-    inherit the existing check rather than introducing a second
-    authorization path; a test asserts a non-admin group member's
-    `/digest brief` is rejected with the same localized error as their
-    `/digest off`.
+    The story count in the header is the section's full cluster count,
+    not the number of headlines shown. A test pins a 13-cluster section
+    rendering "13" while showing 5 headlines — the count is what tells a
+    reader the shape of what they are not being shown.
   - >-
-    Each mode change writes one `audit_log` row in the same shape the
-    handler already emits for `digest_enabled`
-    (`DigestCommandHandler.java:118`), with `detailsJson` carrying the
-    old and new mode. A test pins the row.
+    `brief` renders the same structure with NO headlines (header +
+    count + roll-up + footer). `full` keeps today's per-cluster prose
+    under each header with the item cap lifted to `Integer.MAX_VALUE`.
+    `normal` is the hybrid above and is the default.
   - >-
-    `brief` renders via `DigestRenderer.renderShortBody` and is
-    delivered as ONE message, not one per category — it has no
-    per-category section bytes for D63's delivery loop to split on.
-    `normal` keeps today's per-category delivery unchanged. `full`
-    renders per-category with the item cap lifted
-    (`Integer.MAX_VALUE`), matching `/summary --full`.
+    LLM call counts are asserted per mode against one 8-category /
+    40-cluster fixture: `brief` and `normal` each issue exactly one call
+    per surviving section (the roll-up) and ZERO
+    `SummaryProseGenerator` calls for category sections; `full` issues
+    one per rendered cluster. This is the assertion proving the hybrid
+    is cheaper and not merely shorter.
   - >-
-    A `brief` digest issues exactly one LLM call per category (the
-    roll-up) and ZERO `SummaryProseGenerator` calls. A test asserts
-    both counts against a 4-category / 30-cluster fixture — this is the
-    assertion that proves `brief` is cheaper and not merely shorter.
+    Headlines add no LLM call and no new truncation rule — they reuse
+    M1-714's `DisplayHeadline` helper, so a blank Bluesky title falls
+    back to its body and a 24 000-character nitter title is truncated by
+    the same code path as every other display surface.
   - >-
-    A roll-up failure in `brief` mode degrades that category to its
-    headlines rather than dropping it or failing the digest, mirroring
-    the flag-off behaviour the spec already commits to for
-    `category-summary-enabled` ("a roll-up failure yields that
-    category's message WITHOUT a prefix ... never a degraded or blocked
-    digest"). A test pins a single failing category leaving the other
-    three intact.
+    `/digest brief|normal|full` sets the mode; `/digest on|off` keeps its
+    exact current meaning against `digest_enabled` and is NOT folded into
+    the mode column. A test pins that `/digest off` then `/digest brief`
+    leaves the group paused. Permissions, the DM rejection and the
+    no-op-when-unchanged branch all match `/digest on|off` exactly by
+    reusing its existing checks.
   - >-
-    `/retry --digest` behaves correctly on BOTH of its branches.
+    Each mode change writes one `audit_log` row in the shape the handler
+    already emits for `digest_enabled` (`DigestCommandHandler.java:118`),
+    with `detailsJson` carrying the old and new mode.
+  - >-
+    Delivery is TWO messages, not one per category: the categories are
+    batched into a single outbound message. This narrows D63, whose
+    per-category split exists to stop SimpleX's 4 000-byte chunker
+    breaking mid-cluster — a real risk when a category was twelve prose
+    paragraphs, not when it is five lines. The batched message still
+    runs the existing TRANSIENT-retry / PERMANENT-abort ladder, and one
+    digest slot still contributes at most ONE outcome to the per-group
+    consecutive-permanent-failure counter. `full` keeps per-category
+    delivery, since its sections are still prose-sized.
+  - >-
+    `/retry --digest` behaves correctly on both branches.
     `DigestRetryService` delegates the full re-run to
-    `DigestWorker.execute(slot)` (`DigestRetryService.java:218`), so
-    that branch picks up the mode dispatch for free and re-renders in
-    the group's CURRENT mode against the frozen cluster set (D17). The
-    D65 byte-faithful replay of an undelivered category re-posts the
-    ORIGINALLY-RENDERED bytes and therefore stays in the mode the slot
-    was rendered in — a mode changed between the slot and the retry does
-    NOT rewrite stored bytes. Two tests, one per branch; the replay test
-    pins that a `normal`→`brief` change between slot and retry still
-    replays the stored per-category bytes.
+    `DigestWorker.execute(slot)` (`DigestRetryService.java:218`), which
+    picks up the mode dispatch and re-renders in the group's CURRENT
+    mode against the frozen cluster set (D17). The D65 byte-faithful
+    replay re-posts the ORIGINALLY-RENDERED bytes and therefore stays in
+    the mode the slot was rendered in. Two tests, one per branch.
   - >-
     `docs/spec/commands.md` §Periodic group digests and §Conversation
-    control document the three modes, and the D63 row in
-    `docs/spec/decisions.md` is amended to state that per-category
-    delivery applies to `normal` and `full` only — D63 currently reads
-    as unconditional for any non-degraded digest with at least one
-    post, which `brief` falsifies.
+    control document the three modes and the new category body, and the
+    D63 row in `docs/spec/decisions.md` is amended for the batched
+    delivery. Both new config keys are documented in
+    `docs/design/07-deployment.md` §Configuration surface.
   - mvn verify from the repo root is green.
 test_plan:
   adds:
     - >-
+      infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererSectionsTest.java
+      — a normal-mode section renders header+count+rollup+5
+      headlines+footer in that order; the count is the full cluster
+      count not the headline count; a section with fewer clusters than
+      the headline count renders only what it has and no filler; brief
+      renders no headlines; full renders per-cluster prose; headlines
+      carry no prose and reuse DisplayHeadline for a blank title and an
+      over-long one.
+    - >-
+      infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java
+      — per-mode LLM call counts against one 8-category/40-cluster
+      fixture; normal and brief deliver two messages, full delivers per
+      category; a saturated slot still takes the D17 degraded path in
+      every mode; one failing roll-up degrades only its own section.
+    - >-
       infochat-provider/src/test/java/app/zcat/infochat/provider/command/DigestCommandHandlerTest.java
       — each of brief/normal/full sets the column and emits its audit
       row; an unknown verb yields the localized usage error; `/digest
-      off` then `/digest brief` leaves digest_enabled false; a
-      non-admin group member is rejected; the same command in DM is
-      rejected.
-    - >-
-      infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java
-      — a brief-mode group produces exactly one outbound message; LLM
-      call counts are one-per-category rollup and zero per-cluster
-      prose; a normal-mode group is byte-identical to today; a
-      full-mode group renders every cluster with no overflow line; one
-      failing rollup degrades only its own category; a saturated brief
-      slot still takes the D17 degraded path.
+      off` then `/digest brief` leaves digest_enabled false; a non-admin
+      group member and a DM caller are both rejected.
   preserves:
     - >-
       Every existing `DigestCommandHandlerTest` assertion for `/digest
       on|off`, including the no-op-when-already-in-that-state branch
       (`DigestCommandHandler.java:99`) and its friendly reply.
     - >-
-      Every existing `DigestWorkerTest` and `DigestRoundtripIT`
-      assertion. Groups default to `normal`, so every pre-existing
-      fixture must produce byte-identical output — this is the
-      regression guard for the whole ticket.
-    - >-
-      `DigestRendererTest` and `CategoryRollupGeneratorTest` in full;
-      the renderer is not modified.
-    - >-
-      `/summary --short` assertions in `SummaryCommandHandlerTest` —
-      `generateRollupUnconditional`'s existing callers keep their
-      behaviour.
+      `/summary --short`'s behaviour and its one-call-per-category
+      count — `renderShortBody` and `generateRollupUnconditional` keep
+      their existing callers working unchanged.
     - >-
       `DigestRetryServiceTest`, `DigestRetryConcurrencyIT` and the
       per-group serialization of `/retry --digest`.
+    - >-
+      The D63 partial-failure attribution rule: one slot contributes at
+      most one outcome to the consecutive-permanent-failure counter, so
+      a transport blip cannot soft-remove a healthy group.
+    - >-
+      `DegradedDigestRendererTest` in full.
     - all tests currently green on main
 spec_refs:
   - docs/spec/commands.md §Periodic group digests
@@ -170,6 +185,7 @@ decision_refs:
   - D17
   - D62
   - D63
+  - D65
 reviews: {}
 overrides: []
 aborted_attempts: []
@@ -179,12 +195,12 @@ clarity_check: {}
 escalation_reason:
 ---
 
-# M1-722: `/digest brief` — a volume control that is not a kill switch
+# M1-722: the hybrid digest body
 
 ## Census
 
 The defect class is "a production call site that renders a periodic
-digest body". Enumerated rather than assumed:
+digest body":
 
 ```bash
 grep -rn "renderSections\|renderShortBody\|degradedRenderer.render" \
@@ -194,64 +210,73 @@ grep -rn "renderSections\|renderShortBody\|degradedRenderer.render" \
 | Site | Disposition |
 |---|---|
 | `DigestWorker.java:213` (`renderSections`) | **fix** — dispatch on `groups.digest_mode` |
-| `DigestWorker.java:209`, `:233` (`degradedRenderer.render`) | unchanged — D17 degraded path is mode-independent |
-| `DigestRetryService.java:218` (`digestWorker.execute`) | inherits the dispatch; no separate change |
-| `SummaryCommandHandler.java:332`, `:410`, `:513`, `:522` | out of scope — `/summary`, driven by its own flags |
-| `RetryCommandHandler.java:288`, `:349`, `:355` | out of scope — `/summary` anchor replay, driven by `summary_anchor.render_form` |
+| `DigestWorker.java:209`, `:233` (`degradedRenderer.render`) | unchanged — D17 path is mode-independent |
+| `DigestRetryService.java:218` (`digestWorker.execute`) | inherits the dispatch |
+| `SummaryCommandHandler.java:332`, `:410`, `:513`, `:522` | out of scope — `/summary` |
+| `RetryCommandHandler.java:288`, `:349`, `:355` | out of scope — `/summary` anchor replay |
 
-The single production dispatch point is `DigestWorker.java:213`. That is
-what makes this a wiring ticket: one call site chooses between three
-renderers that all already exist.
+One production dispatch point.
 
 ## Context
 
-A group's only lever over digest volume today is
-`/digest on|off` (`DigestCommandHandler.java:49-53`, toggling
-`groups.digest_enabled`). The spec's own framing of the alternatives is
-`/unfollow-tag` and `/unfollow-source` — both of which narrow what the
-group can *retrieve*, not merely what it is *sent*, because D59 scopes
-`/summary` and chat search to the same subscription world.
+Today every cluster a digest renders costs a prose paragraph, and a
+group's only volume control is `/digest on|off` — the alternatives the
+spec names, `/unfollow-tag` and `/unfollow-source`, narrow what the group
+can *retrieve*, not merely what it is *sent*, because D59 scopes
+`/summary` and chat search to the same world. So a group that finds the
+digest too long can lose topics everywhere, switch it off, or endure it.
 
-So a group that finds the twice-daily digest too long has three options:
-lose topics from every surface, turn the digest off entirely, or put up
-with it. There is nothing in between.
+## The shape
 
-## What already exists
+```
+SECURITY — 13 stories
+  Three supply-chain attacks, an OpenSSL DoS, and a WordPress RCE.
+  · CVE-2026-1234 — OpenSSL heap overflow  <url>
+  · npm chalk/debug compromise  <url>
+  · [3 more headlines]
+  /summary security to expand
+```
 
-`DigestRenderer.renderShortBody(List<Cluster>, String)`
-(`DigestRenderer.java:328`) renders one `CategoryRollupGenerator`
-synthesis per category header — a 1–2 sentence "Three supply-chain
-attacks, an OpenSSL DoS, and a WordPress RCE" per section — with no
-per-cluster prose and no flat blocks. It ships green behind
-`/summary --short` and is already called from
-`RetryCommandHandler.java:288`.
+Roughly five lines and one LLM call per category, whether the category
+holds three stories or three hundred. Depth lives in the lead (M1-725);
+breadth lives in the headlines, which cost a line each and no LLM call at
+all, since a headline is a `DisplayHeadline` title plus a URL already
+carried on the cluster.
 
-The periodic digest never calls it. `DigestWorker.java:213` goes
-straight to `renderSections`. The compact digest is a wiring change, not
-a rendering one.
+Measured against the same 8-category fixture:
 
-## Why a per-group column and not a config key
+| | Lines | LLM calls |
+|---|---|---|
+| today (`full`, cap 12) | ~380 | ~96 |
+| `normal` | ~64 + lead | 8 + lead |
+| `brief` | ~32 | 8 |
 
-`infochat.digest.category-summary-enabled` is deployment-wide, and the
-groups on one deployment differ: a 5-person security group wants every
-paragraph, a 200-person general group wants four lines. The mode belongs
-next to `digest_enabled` on `groups`, set by the same admins, audited
-the same way.
+## Why the count is the full section size
 
-## The D63 interaction
+A reader seeing five headlines under "SECURITY" cannot tell whether that
+is all of it or a fifth of it. The count is the cheapest possible signal
+of what is being withheld, and it is what makes the `/summary` footer an
+informed choice rather than a guess.
 
-D63 commits that a non-degraded digest with at least one post is
-delivered as one message per category. `brief` produces a single body
-with no per-category message boundary, so it is single-message like the
-degraded and zero-posts paths. That is a genuine narrowing of D63 and is
-amended in the decision row rather than left as an undocumented
-exception — a reader of D63 today would predict per-category delivery
-for a brief digest and be wrong.
+## Delivery, and why D63 narrows
+
+D63 delivers one message per category to stop SimpleX's 4 000-byte
+line-based chunker splitting inside a cluster. That was a live concern
+when a category was twelve prose paragraphs. A five-line category cannot
+split mid-cluster, and nine notifications for one digest is worse than
+two. So `normal` and `brief` batch their categories into a single
+message; `full`, whose sections are still prose-sized, keeps the
+per-category split and the reason D63 was written.
+
+The partial-failure attribution rule is unchanged and load-bearing: one
+slot contributes at most one outcome to the per-group
+consecutive-permanent-failure counter, whose threshold of 3 was
+calibrated for one message per slot.
 
 ## Notes
 
-`full` is included because the column's CHECK constraint costs nothing
-to widen now and the renderer already accepts `Integer.MAX_VALUE`
-(`DigestRenderer.java:226`). It is the honest complement to `brief`: a
-group that wants everything should be able to say so rather than
-relying on the per-category cap's default happening to be generous.
+`infochat.digest.category-summary-enabled` is retired here. Its purpose
+was to gate a roll-up PREFIX above per-cluster prose; in `normal` the
+roll-up is the body, so a flag that switches it off would leave a
+category with a header and headlines and no synthesis. Leaving a config
+key whose name no longer describes its effect is worse than removing it.

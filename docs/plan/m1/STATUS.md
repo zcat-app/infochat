@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 24 |
+| pending | 25 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 718 |
 | deferred | 0 |
 | abandoned | 20 |
-| **total** | **762** |
+| **total** | **763** |
 
 ---
 
@@ -39,8 +39,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-715 — post.body_summary is never written, yet EmbeddingWorker prefers it as embedding input (complexity: low, risk: low)
 - M1-716 — Decouple language enablement from bundle presence (complexity: low, risk: low)
 - M1-717 — Swap to a multilingual embedder and recalibrate thresholds (complexity: high, risk: high)
-- M1-721 — Digest length is a function of tag count: the item cap is per-category, so every new category adds up to 12 more clusters (complexity: medium, risk: medium)
-- M1-722 — Groups have no volume control between a full prose digest and no digest at all: add /digest brief (complexity: medium, risk: medium)
+- M1-721 — Digest length is a function of tag count: nothing bounds how many category sections a digest renders (complexity: medium, risk: medium)
 - M1-723 — post.likes / post.reposts / post.social_score are declared, parsed at two fetchers, and never persisted (complexity: medium, risk: medium)
 - M1-726 — Tagger treats a correct \"no topic fits\" as a failure and relabels the post with the source's topic tags (complexity: medium, risk: high)
 - M1-727 — Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other (complexity: medium, risk: medium)
@@ -63,8 +62,10 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-718 — blocked_by: M1-716 (pending), M1-717 (pending)
 - M1-719 — blocked_by: M1-716 (pending), M1-717 (pending)
 - M1-720 — blocked_by: M1-716 (pending), M1-717 (pending)
-- M1-724 — blocked_by: M1-721 (pending), M1-723 (pending)
-- M1-725 — blocked_by: M1-724 (pending)
+- M1-722 — blocked_by: M1-721 (pending)
+- M1-724 — blocked_by: M1-723 (pending)
+- M1-725 — blocked_by: M1-722 (pending), M1-724 (pending)
+- M1-728 — blocked_by: M1-714 (pending)
 
 ---
 
@@ -973,6 +974,7 @@ M1-713 (done)
   ├── M1-711 (pending) ← runnable
   └── M1-712 (pending) ← runnable
 M1-714 (pending) ← runnable
+  └── M1-728 (pending)
 M1-715 (pending) ← runnable
 M1-716 (pending) ← runnable
   ├── M1-718 (pending)
@@ -983,11 +985,11 @@ M1-717 (pending) ← runnable
   ├── M1-719 (pending) [see above]
   └── M1-720 (pending) [see above]
 M1-721 (pending) ← runnable
-  └── M1-724 (pending)
+  └── M1-722 (pending)
         └── M1-725 (pending)
-M1-722 (pending) ← runnable
 M1-723 (pending) ← runnable
-  └── M1-724 (pending) [see above]
+  └── M1-724 (pending)
+        └── M1-725 (pending) [see above]
 M1-726 (pending) ← runnable
 M1-727 (pending) ← runnable
 ```

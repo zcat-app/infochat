@@ -5,6 +5,7 @@ status: pending
 created: 2026-07-30
 last_updated: 2026-07-30
 blocked_by:
+  - M1-722
   - M1-724
 files_budget: 9
 files_scope:
@@ -26,95 +27,106 @@ out_of_scope:
   - >-
     `ClusterProminence` (M1-724). The ordering function is consumed
     here, not modified. A diff that adjusts a prominence term or one of
-    the four weights to make the lead section look better has left
-    scope — that would tune the ranking against one section's
-    appearance. Weight retuning is a config edit against the live
-    corpus (M1-724 §Tuning), never a side effect of a rendering ticket.
+    its weights to make the lead look better has left scope — weight
+    retuning is a config edit against the live corpus (M1-724 §Tuning),
+    never a side effect of a rendering ticket.
   - >-
     `/summary`. It gains no lead section: it is a pull for a named tag,
     where a "top stories" header above the reader's own query is noise.
   - >-
-    The degraded (D17) digest, the zero-posts reply, and `brief` mode
-    (M1-722). The first two have no cluster structure to lead with; the
-    third is already a four-line summary and a lead above it would be
-    longer than the thing it leads.
+    The category body — count, roll-up, headlines, footer. That is
+    M1-722. This ticket adds a section ABOVE the categories.
   - >-
-    `DigestCategorizer`'s assignment arithmetic. The categorizer is in
-    scope only to exclude lead clusters from their home sections
-    (see acceptance); the qualifying threshold, the fold-into-Other
-    pass and section order are D62 and unchanged.
+    The section cap (M1-721). Independent: that bounds how many
+    categories render, this adds one non-category section.
   - >-
-    Per-cluster prose generation. Lead clusters get the same prose from
-    the same generator; the lead is a placement change, not a rendering
-    mode.
+    The degraded (D17) digest, the zero-posts reply, and `brief` mode.
+    The first two have no cluster structure to lead with; `brief` is a
+    few lines per category and a prose lead above it would dominate the
+    thing it introduces.
+  - >-
+    Proportional lead sizing (`min(floor(clusters/2), lead-size)`).
+    Considered and dropped: at `lead-size` 3 with `lead-minimum` 6 the
+    halving never binds, because `floor(6/2)` is already 3. It was only
+    load-bearing for a much larger lead.
+  - >-
+    `DigestCategorizer`'s assignment arithmetic. In scope only to
+    exclude lead clusters from their home sections; the qualifying
+    threshold, fold-into-Other pass and section order are D62 and
+    unchanged.
   - any other module
 acceptance:
   - >-
-    A non-degraded digest with at least `infochat.digest.lead-minimum`
-    (default 6) clusters renders a leading section under a localized
-    UPPERCASE header, holding the top
+    A non-degraded `normal` or `full` digest with at least
+    `infochat.digest.lead-minimum` (default 6) clusters renders a
+    leading section under a localized UPPERCASE header, holding the top
     `infochat.digest.lead-size` (default 3) clusters by
     `ClusterProminence` order across the WHOLE digest, before any
-    category section.
+    category section. Lead clusters render full per-cluster prose and
+    links — the same render the category sections no longer do.
   - >-
-    A digest below the lead minimum renders no lead section at all. A
-    3-cluster digest with a "TOP STORIES" header over 3 of 3 stories is
-    a header over the whole digest; a test pins that the boundary case
-    at `lead-minimum - 1` emits no lead and at `lead-minimum` emits one.
+    A digest below the lead minimum renders no lead at all. A header
+    over 3 of 4 total stories is a header over the whole digest, and it
+    costs an extra message under D63 to say nothing; a test pins the
+    boundary in both directions.
   - >-
     A cluster promoted to the lead is REMOVED from its category section
     — no cluster renders twice in one digest. A test asserts the union
-    of lead clusters and section clusters has no duplicate `topicId`,
-    and that the total rendered cluster count still equals the M1-721
-    budget rather than exceeding it by the lead size.
+    of lead and section clusters contains no duplicate `topicId`.
+  - >-
+    A section's story count (M1-722) reflects the removal: a 13-cluster
+    section that loses one to the lead reports 12. The count must
+    describe what the section actually holds, or it double-counts
+    against the lead above it.
   - >-
     A category left below the D62 qualifying threshold by that removal
     folds into Other, reusing the categorizer's existing second pass
-    rather than a new code path. A test pins a 3-cluster category
-    losing one cluster to the lead and folding into Other at the
-    default threshold of 3.
+    rather than a new code path. A test pins a 3-cluster category losing
+    one to the lead and folding into Other at the default threshold.
   - >-
-    The lead is delivered as its own message under D63, first in the
-    sequence, and the closing affordance stays on the LAST message. A
-    test asserts message count is sections + lead + Other-when-present,
-    and that the affordance appears exactly once and not on the lead.
+    The lead is delivered as its own message, first, and the closing
+    affordance stays on the LAST message of the digest. Under M1-722's
+    batched delivery a `normal` digest is therefore two messages: lead,
+    then all categories. A test asserts the affordance appears exactly
+    once and not on the lead.
   - >-
-    Lead clusters render the same per-cluster prose and links as they
-    would in a section — the lead is a placement, not a second render
-    mode, so the LLM call count for the digest is unchanged. A test
-    pins the call count against the no-lead baseline.
+    Lead prose is generated only for the clusters actually promoted. A
+    test pins the LLM call count at `lead-size` for the lead, on top of
+    M1-722's one-per-section roll-ups.
   - >-
-    `docs/spec/commands.md` §Periodic group digests documents the lead
-    section, its two config keys, its suppression below the minimum,
-    and the no-duplicate-cluster property.
+    `docs/spec/commands.md` §Periodic group digests documents the lead,
+    its two config keys, its suppression below the minimum, the
+    no-duplicate-cluster property and the count adjustment. Both keys are
+    documented in `docs/design/07-deployment.md` §Configuration surface.
   - mvn verify from the repo root is green.
 test_plan:
   adds:
     - >-
       infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererSectionsTest.java
-      — lead holds the top 3 by prominence across all sections; no
-      cluster appears in both the lead and a section; the boundary at
-      lead-minimum in both directions; a category folding into Other
-      after losing a cluster to the lead; total rendered clusters equal
-      the budget; message ordering puts the lead first and the
-      affordance last; LLM call count unchanged versus no-lead.
+      — the lead holds the top 3 by prominence across all sections; no
+      cluster appears in both lead and section; the section count drops
+      by the number of its clusters promoted; the lead-minimum boundary
+      in both directions; a category folding into Other after losing a
+      cluster; the lead renders full prose while categories render
+      headlines; message ordering puts the lead first with the
+      affordance last; brief mode renders no lead; LLM call count equals
+      lead-size plus one per section.
   preserves:
     - >-
       Every M1-724 `ClusterProminenceTest` assertion — the ordering
       function is not modified.
     - >-
-      Every M1-721 budget and round-robin allocation assertion, and the
-      M1-724 diversity-reserve assertions. The lead consumes budget
-      slots; it does not extend the budget.
+      Every M1-722 category-body assertion: header, count, roll-up,
+      headline count and footer, for digests with and without a lead.
     - >-
-      `DigestCategorizerTest` — assignment, threshold, fold-to-Other
-      and section order for inputs with no lead extraction.
+      Every M1-721 section-cap and overflow-line assertion. The lead is
+      not a category and does not consume a section slot.
     - >-
-      `DigestWorkerTest` / `DigestRoundtripIT` D63 delivery assertions,
-      re-pinned for the new message count.
+      `DigestCategorizerTest` — assignment, threshold, fold-to-Other and
+      section order for inputs with no lead extraction.
     - >-
       `/summary` render assertions in `SummaryCommandHandlerTest` — no
-      lead section reaches that path.
+      lead reaches that path.
     - all tests currently green on main
 spec_refs:
   - docs/spec/commands.md §Periodic group digests
@@ -136,39 +148,50 @@ escalation_reason:
 ## Context
 
 `DigestCategorizer.java:109` orders sections by assigned-cluster count
-descending, and within a section clusters render in the order the
-collector returned them — publication order. So the first thing a reader
-sees in the first message of a morning digest is *the most recent item
-belonging to whichever tag happens to have the most stories*.
+descending, and within a section clusters render in collector order —
+publication order. So the first thing a reader sees in the first message
+of a morning digest is *the most recent item belonging to whichever tag
+happens to have the most stories*.
 
 That is not a lead. It is an accident of two sort keys, neither of which
 is about significance.
 
 Every ranked digest that is read rather than skimmed opens with its
 strongest item: Techmeme's top block, Discourse's highest-scoring topic,
-the "big story" slot in curated newsletters. The reason is the same in
-each case — a push artifact must survive being read only partly. Under
-D63 our digest is several messages, and the realistic reader opens the
-first one.
+the "big story" slot in curated newsletters. A push artifact must survive
+being read only partly, and the realistic reader opens the first message.
 
-## Why this is filed after M1-724 and not with it
+## Why three, given the categories lost their prose
 
-A lead section is only as good as the ordering behind it. Building the
-header first would mean leading with the three newest clusters, which is
-worse than no lead at all: it makes an implicit significance claim the
-selection cannot support. M1-724 supplies `ClusterProminence`; this
-ticket places its top three.
+Under M1-722 a category renders a count, a roll-up and five bare
+headlines — no prose. The lead is therefore the only place in the digest
+where anything is described at length, which is an argument for making it
+large.
 
-## The suppression rule
+It is the wrong argument. Breadth is already covered: five headlines per
+category across eight categories names forty stories, for the cost of
+forty lines and no LLM calls. What the digest lacks without a lead is
+*depth on the few things that matter*, and three paragraphs a reader
+finishes beat ten they scroll past. Three is a config key; the default is
+the claim.
 
-Below a threshold the lead is noise: a "TOP STORIES" header over three
-of a total four clusters tells the reader nothing, and it costs a whole
-extra message under D63 to say it. The default minimum of 6 means the
-lead only appears when at least half the digest sits below it.
+## Why this is filed after M1-724
+
+A lead is only as good as the ordering behind it. Leading with the three
+newest clusters would make an implicit significance claim the selection
+cannot support — worse than no lead. M1-724 supplies `ClusterProminence`;
+this ticket places its top three.
+
+## The count interaction
+
+M1-722's section header reports the section's story count. Promoting a
+cluster to the lead removes it from its section, so the count must drop
+with it. Left alone, a story would be counted once in the lead and once
+in the header of the section it no longer appears in — the one place
+where the two tickets can silently disagree, hence an explicit criterion.
 
 ## Notes
 
-The lead draws from the M1-721 budget rather than adding to it. A lead
-section that lengthened the digest would undo the ticket that shortened
-it; the point of leading is that a reader can stop after the first
-message, not that they receive more.
+The lead is a separate message from the batched category message, so a
+`normal` digest is two messages: three prose stories, then everything
+else. A reader who opens only the first gets the day.
