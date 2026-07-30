@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 17 |
+| pending | 16 |
 | in-progress | 0 |
 | in-review | 0 |
-| escalated | 0 |
+| escalated | 1 |
 | done | 730 |
-| deferred | 2 |
+| deferred | 1 |
 | abandoned | 21 |
-| **total** | **770** |
+| **total** | **769** |
 
 ---
 
@@ -35,7 +35,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-728 — Category roll-up sends every post's full body and asks for one or two sentences: it neither fits a large category nor describes one (complexity: medium, risk: medium)
 - M1-730 — /saved renders the ingest \"untitled\" sentinel to a reader (complexity: medium, risk: medium)
 - M1-732 — groups.digest_mode and the hybrid category body: count + roll-up + headlines (complexity: low, risk: low)
-- M1-735 — Amend docs/spec/security.md §Failure handling (complexity: low, risk: low)
 
 ---
 
@@ -65,8 +64,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 | ID | Title | Trigger | Date |
 |---|---|---|---|
-
-_(none)_
+| M1-726 | Tagger treats a correct \"no topic fits\" as a failure and relabels the post with the source's topic tags | redteam-finding | 2026-07-30 |
 
 ---
 
@@ -93,9 +91,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 ### blocked-on-external-measurement (1)
 - M1-717 → unspecified
-
-### spec-amend (1)
-- M1-726 → M1-735
 
 ---
 
@@ -987,6 +982,7 @@ M1-721 (done)
 M1-723 (done)
   └── M1-724 (pending) ← runnable
         └── M1-725 (pending)
+M1-726 (escalated)
 M1-727 (pending) ← runnable
 M1-729 (done)
 M1-730 (pending) ← runnable
@@ -996,6 +992,4 @@ M1-731 (done)
         ├── M1-725 (pending) [see above]
         ├── M1-733 (pending)
         └── M1-734 (pending)
-M1-735 (pending) ← runnable
-  └── M1-726 (deferred)
 ```

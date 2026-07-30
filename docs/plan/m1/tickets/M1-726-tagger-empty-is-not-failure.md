@@ -1,7 +1,7 @@
 ---
 id: M1-726
 title: "Tagger treats a correct \"no topic fits\" as a failure and relabels the post with the source's topic tags"
-status: deferred
+status: escalated
 created: 2026-07-30
 last_updated: 2026-07-30
 blocked_by: []
@@ -273,9 +273,7 @@ clarity_check:
   verdict: PASS
   warnings: []
   blockers: []
-deferred_on: M1-735
-deferred_reason: spec-amend
-escalation_reason:
+escalation_reason: redteam-finding
 ---
 
 # M1-726: a correct "no topic fits" is punished with the source's topic tags
