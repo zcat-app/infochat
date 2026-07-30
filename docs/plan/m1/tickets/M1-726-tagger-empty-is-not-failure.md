@@ -84,13 +84,22 @@ acceptance:
     more often, since the empty-tags path is now a normal outcome
     rather than a rare failure.
   - >-
-    A post with `tags = '{}'` matches no digest or `/summary` tag
-    predicate and therefore does not appear in either. An IT pins this
-    end to end: a post tagged empty by the worker is absent from a
-    group digest whose subscribed source carries `bootstrap_tags` that
-    would previously have been copied onto it. This is the user-visible
-    point of the ticket and the assertion that would catch a fix that
-    changes the worker but leaves the post reachable.
+    A post with `tags = '{}'` stops being retrievable BY TOPIC while
+    remaining retrievable in the untagged-query case. Precisely, per the
+    four retrieval branches that exist today: it is EXCLUDED by a
+    positional `/summary <tag>` (`p.tags @> ARRAY[?]`), by the top-3
+    restriction that fires above 5 followed tags (`p.tags && ?`), and by
+    `tag_mode='EXPLICIT'` in both the digest and `/summary`
+    (`p.tags && (SELECT ... scope_tag ...)`); it is RETRIEVED under
+    `tag_mode='ALL'` with no positional tag and ≤5 followed tags, which
+    applies no tag predicate at all
+    (`EligiblePostQuery.java:246`, `DigestPostCollector` POSTS_ALL_SQL).
+    Where it is retrieved it carries no qualifying tag and therefore
+    renders in the D62 **Other** bucket, never under a topic header.
+    An IT pins the user-visible point: a post the worker tags empty
+    renders under Other rather than under the topic header its source's
+    `bootstrap_tags` would previously have placed it under, and no
+    longer matches `/summary <that-tag>`.
   - >-
     `spec/llm.md` §Failure handling is amended to distinguish the two
     cases. It currently says the bootstrap fallback "fires only when
@@ -117,9 +126,13 @@ test_plan:
       bootstrap; `SCHEMA_VIOLATING` then clean-empty likewise.
     - >-
       infochat-collector/src/test/java/app/zcat/infochat/collector/eval/tagger/TaggerWorkerIT.java
-      — a post the tagger empties is absent from a group digest and from
-      `/summary` for a scope subscribed to the source whose
-      `bootstrap_tags` would previously have been copied onto it.
+      — a post the tagger empties renders under the Other bucket rather
+      than under the topic header its source's `bootstrap_tags` would
+      previously have placed it under; it does NOT match
+      `/summary <that-tag>`; and it IS still retrieved by a bare
+      `/summary` in a `tag_mode='ALL'` scope with ≤5 followed tags,
+      which pins that the ticket narrows topic-keyed reachability
+      without making the post disappear from the corpus.
   preserves:
     - >-
       Every existing `TaggerWorkerTest` assertion for the
@@ -233,11 +246,34 @@ a rare failure and becomes a normal outcome, so the atomic
 `tags + tagger_done + tagger_fallback` write and every downstream tag
 predicate get exercised with `'{}'` far more often than before.
 
-## Notes
+## Where an untagged post actually goes
 
-Posts written with `tags = '{}'` are unreachable by any tag-keyed
-retrieval — digest and `/summary` both. That is inherent to a tag-keyed
-model and is the intended outcome here, not a gap: a post with no topic
-is not retrievable *by topic*. Making such posts separately auditable
-would need a column, and `tagger_fallback` already provides the audit
-trail for the other branch. Not filed.
+Worth stating exactly, because "it gets no tags" does not mean "it
+disappears". Only two of the four retrieval branches carry a tag
+predicate at all:
+
+| Retrieval | Predicate | Untagged post |
+|---|---|---|
+| `/summary <tag>` | `p.tags @> ARRAY[?]` | excluded |
+| bare `/summary`, >5 followed tags | `p.tags && ?` (top-3) | excluded |
+| `tag_mode='EXPLICIT'` (digest and `/summary`) | `p.tags && (SELECT … scope_tag …)` | excluded |
+| **`tag_mode='ALL'`, no positional tag, ≤5 followed** | **none** | **retrieved** |
+
+That last row is the default, and it holds for the digest too:
+`DigestPostCollector`'s `POSTS_ALL_SQL` has no tag predicate — only
+`POSTS_EXPLICIT_SQL` does. So an untagged post is still collected, and
+since it carries no qualifying tag it lands in the D62 **Other** bucket.
+
+That is the right outcome and is what makes this ticket's benefit
+concrete: the change is not "the cat picture vanishes", it is "the cat
+picture stops being filed under SECURITY". It renders in Other, where a
+reader can see it and ignore it, and it stops matching
+`/summary security`.
+
+**Doc divergence surfaced, not fixed here.**
+`docs/design/03-commands.md:940` says "Digest query: `ALL` mode uses the
+union of subscribed-source `bootstrap_tags`". No such predicate exists
+in `POSTS_ALL_SQL`. The two readings agree today only because every post
+inherits its source's tags on the fallback path — which is precisely what
+this ticket stops. Correcting that sentence is a `spec:` commit against
+design notes, not part of this diff.
