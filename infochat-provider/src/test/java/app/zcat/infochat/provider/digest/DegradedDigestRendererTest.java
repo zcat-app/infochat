@@ -106,10 +106,61 @@ class DegradedDigestRendererTest {
                 "the sanitized title is still rendered; got: " + result);
     }
 
+    @Test
+    void render_emptyTitleFallsBackToBody() {
+        // Every Bluesky post has an empty title, so without the fallback the
+        // entry would open with a bare " — SourceName". M1-714.
+        List<EligiblePostQuery.Post> posts = List.of(
+                post("uid-1", "", "Bluesky", "https://bsky.app/p/1", "Body carries the text"));
+
+        String result = renderer.render(posts);
+
+        assertTrue(result.startsWith("Body carries the text — Bluesky"),
+                "an empty title must fall back to the body; got: " + result);
+    }
+
+    @Test
+    void render_emptyTitleAndBodyOmitsHeadlineAndItsSeparator() {
+        // No placeholder is invented; the entry leads with the source display
+        // name and must not open with a dangling separator. M1-714.
+        List<EligiblePostQuery.Post> posts = List.of(
+                post("uid-1", "", "Bluesky", "https://bsky.app/p/1", ""));
+
+        String result = renderer.render(posts);
+
+        assertTrue(result.startsWith("Bluesky"),
+                "a post with no renderable text must lead with the source name; got: " + result);
+        assertFalse(result.startsWith(" — "),
+                "the separator must drop out with the headline; got: " + result);
+        assertTrue(result.contains("https://bsky.app/p/1"),
+                "the url still renders — it is the payload of an image-only post; got: " + result);
+    }
+
+    @Test
+    void render_longTitleTruncatedWithEllipsis() {
+        // A nitter title averages 334 characters and runs to 24,776; unbounded
+        // it buries the entry it labels. M1-714.
+        String longTitle = "y".repeat(400);
+        List<EligiblePostQuery.Post> posts = List.of(
+                post("uid-1", longTitle, "Nitter", "https://nitter.example/1", "body"));
+
+        String result = renderer.render(posts);
+
+        assertFalse(result.contains(longTitle),
+                "an over-long title must not render in full; got length " + result.length());
+        assertTrue(result.contains("…"),
+                "a cut headline must carry the trailing ellipsis; got: " + result);
+    }
+
     private static EligiblePostQuery.Post post(String uid, String title,
                                                String source, String url) {
+        return post(uid, title, source, url, "body");
+    }
+
+    private static EligiblePostQuery.Post post(String uid, String title,
+                                               String source, String url, String body) {
         return new EligiblePostQuery.Post(
                 UUID.randomUUID(), uid, UUID.randomUUID(), source,
-                title, url, "body", Instant.now(), List.of("crypto"), List.of("unknown"));
+                title, url, body, Instant.now(), List.of("crypto"), List.of("unknown"));
     }
 }

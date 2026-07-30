@@ -6,6 +6,7 @@ import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
 import app.zcat.infochat.llm.routing.LlmRouter;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
+import app.zcat.infochat.provider.render.DisplayHeadline;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -17,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Generates per-cluster summary prose by invoking the
@@ -194,9 +196,12 @@ public class SummaryProseGenerator {
      * paragraph (decision D17). The deterministic post selection is
      * unaffected.
      *
-     * <p><b>Sanitize unit: ONE post's title per call (M1-697).</b> Each
-     * title is passed through {@link LlmOutputSanitizer} as it is
-     * composed. This method is the single composition point for degraded
+     * <p><b>Sanitize unit: ONE of a post's fields per call (M1-697).</b> Each
+     * post's headline text — its title, or its body when the title is empty
+     * (M1-714) — is passed through {@link LlmOutputSanitizer} inside
+     * {@link DisplayHeadline} as it is
+     * composed; title and body are never concatenated into one sanitize
+     * input. This method is the single composition point for degraded
      * prose and is called in two roles: producers fill the {@code
      * ClusterProse} record with it, and renderers RE-DERIVE the prose
      * from {@code cp.cluster()} through it rather than trusting the
@@ -221,11 +226,19 @@ public class SummaryProseGenerator {
     public static String degradedProseFor(Cluster cluster, LlmOutputSanitizer llmOutputSanitizer) {
         StringBuilder sb = new StringBuilder();
         for (Post p : cluster.posts()) {
-            sb.append(llmOutputSanitizer.sanitize(p.title()));
-            if (p.url() != null && !p.url().isEmpty()) {
-                sb.append(" — ").append(p.url());
+            // Absent operands drop out together with their separator, so a
+            // post with no renderable text opens the line with its url rather
+            // than a dangling " — " or a blank span (M1-714). The uid always
+            // follows, so the line is identified even when both drop out.
+            String headline = DisplayHeadline.of(p, llmOutputSanitizer);
+            String url = p.url() == null ? "" : p.url();
+            String lead = Stream.of(headline, url)
+                    .filter(operand -> !operand.isEmpty())
+                    .collect(Collectors.joining(" — "));
+            if (!lead.isEmpty()) {
+                sb.append(lead).append(' ');
             }
-            sb.append(" (uid ").append(p.uid()).append(")\n");
+            sb.append("(uid ").append(p.uid()).append(")\n");
         }
         return sb.toString().stripTrailing();
     }

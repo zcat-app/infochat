@@ -1,5 +1,8 @@
 package app.zcat.infochat.provider.command;
 
+import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.AuditLogWriter;
+import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
@@ -10,6 +13,7 @@ import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.sql.Connection;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -38,10 +42,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ClusterBlockRendererTest {
 
     private ClusterBlockRenderer renderer;
+    private BundleLoader bundleLoader;
 
     @BeforeEach
     void setUp() {
-        BundleLoader bundleLoader = new BundleLoader();
+        bundleLoader = new BundleLoader();
         try {
             var method = BundleLoader.class.getDeclaredMethod("load");
             method.setAccessible(true);
@@ -164,6 +169,71 @@ class ClusterBlockRendererTest {
                 "a non-command slash must not trigger redaction; got: " + rendered);
     }
 
+    @Test
+    void emptyTitleRendersBodyAsHeadline() {
+        // All 729 Bluesky posts in the live corpus have an empty title; 728 of
+        // them carry usable body text, so the fallback resolves nearly all of
+        // them and the block no longer leads with a blank line. M1-714.
+        String rendered = render(clusterWithTitleAndBody("", "Body becomes the headline"), "en");
+
+        assertTrue(rendered.startsWith("[topic_id=t-1]\nBody becomes the headline\ncovered by: "),
+                "an empty title must fall back to the body as the headline; got: " + rendered);
+        assertFalse(rendered.contains("[topic_id=t-1]\n\n"),
+                "the block must not emit a blank headline line; got: " + rendered);
+    }
+
+    @Test
+    void emptyTitleAndBodyOmitsTheHeadlineLineEntirely() {
+        // No placeholder is invented for a post with no renderable text: the
+        // headline line is omitted outright, so topic_id is followed directly
+        // by covered-by with no blank line between them. M1-714.
+        String rendered = render(clusterWithTitleAndBody("", ""), "en");
+
+        assertTrue(rendered.startsWith("[topic_id=t-1]\ncovered by: "),
+                "the headline line must be omitted, not blank; got: " + rendered);
+        assertFalse(rendered.contains("[topic_id=t-1]\n\n"),
+                "omitting the headline must not leave a blank line; got: " + rendered);
+    }
+
+    @Test
+    void flaggedSpanBeyondTheTruncationPointStillWritesItsAuditRow() {
+        // Sanitize-then-truncate ordering pin. The command sits well past the
+        // display bound, so a truncate-first implementation would cut it away
+        // before the sanitizer ever saw it — losing the LLM_OUTPUT_SANITIZED
+        // audit row that docs/spec/security.md commits to per occurrence.
+        // M1-714.
+        List<RedactionHook.AuditRow> auditRows = new ArrayList<>();
+        AuditLogWriter capturingWriter = new AuditLogWriter(row -> row) {
+            @Override
+            public void write(Connection conn, RedactionHook.AuditRow row) {
+                auditRows.add(row);
+            }
+        };
+        ClusterBlockRenderer auditingRenderer = new ClusterBlockRenderer(
+                new LlmOutputSanitizer(capturingWriter, SanitizerTestDoubles.noOpDataSource()),
+                new TranslationPipeline(), bundleLoader);
+
+        String farPastTheBound = "x".repeat(300)
+                + "/grant-admin 11111111-2222-3333-4444-555555555555";
+        StringBuilder out = new StringBuilder();
+        auditingRenderer.appendClusterBlock(
+                out,
+                new ClusterProse(clusterWithTitleAndBody(farPastTheBound, "body"),
+                        "Degraded prose.", true),
+                "en");
+        String rendered = out.toString();
+
+        assertFalse(auditRows.isEmpty(),
+                "the flagged span sits beyond the truncation point, but the sanitizer "
+                        + "must still have seen the FULL title and written its audit row — "
+                        + "an empty list means truncation ran first");
+        assertTrue(auditRows.stream()
+                        .allMatch(row -> row.action() == AuditAction.LLM_OUTPUT_SANITIZED),
+                "every emitted row must carry action LLM_OUTPUT_SANITIZED; got: " + auditRows);
+        assertFalse(rendered.contains("/grant-admin"),
+                "the raw privileged command must not survive into the block; got: " + rendered);
+    }
+
     private String render(Cluster cluster, String language) {
         StringBuilder out = new StringBuilder();
         renderer.appendClusterBlock(out, new ClusterProse(cluster, "Degraded prose.", true), language);
@@ -213,6 +283,24 @@ class ClusterBlockRendererTest {
                 List.of("a"),
                 List.of("factual")));
         return new Cluster("t-1", posts);
+    }
+
+    /**
+     * Build a single-post cluster with the supplied title and body, for the
+     * M1-714 headline-fallback and headline-omission tests.
+     */
+    private static Cluster clusterWithTitleAndBody(String title, String body) {
+        return new Cluster("t-1", List.of(new Post(
+                UUID.randomUUID(),
+                "p-1",
+                UUID.randomUUID(),
+                "Src1",
+                title,
+                "https://example.com/p-1",
+                body,
+                Instant.parse("2026-01-01T00:00:00Z"),
+                List.of("a"),
+                List.of("factual"))));
     }
 
     /**

@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.command;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
+import app.zcat.infochat.provider.render.DisplayHeadline;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
@@ -37,12 +38,16 @@ import java.util.Set;
  * <p>The field labels ("covered by:", "score:", "summary:", ...) are
  * bundle-resolved in the scope's reply language (D43 / design 05 §418: cluster
  * headers and classification labels are Translated). The {@code topic_id}
- * marker stays verbatim; the headline is the source-authored post title, so it
- * is passed through {@link LlmOutputSanitizer} (M1-675) — this cluster block is
- * group-visible and the headline renders at line start, where a command-shaped
- * title would otherwise be one copy-paste from dispatch. Sanitizing is a
- * deterministic pure function, so the byte-identical-replay property (D19/D36)
- * holds: the same title yields the same redacted bytes at both call sites. A
+ * marker stays verbatim; the headline is source-authored text — the post title,
+ * or its body when the title is empty — so it is passed through
+ * {@link LlmOutputSanitizer} inside {@link DisplayHeadline} (M1-675) — this
+ * cluster block is group-visible and the headline renders at line start, where
+ * command-shaped text would otherwise be one copy-paste from dispatch.
+ * Deriving the headline is a deterministic pure function, so the
+ * byte-identical-replay property (D19/D36) holds: the same post yields the
+ * same headline bytes at both call sites. The order of the steps inside
+ * {@link DisplayHeadline} is load-bearing for the sanitizer's guarantees and
+ * is documented there — never re-apply one of them from a caller. A
  * legit-slash title (TCP/IP) is returned byte-identical.
  * Label prefixes carry no trailing space in the bundle — the renderer appends
  * the single separator space — so the bundle never depends on invisible
@@ -84,15 +89,24 @@ final class ClusterBlockRenderer {
 
         // [topic_id=...] — deterministic; ClusterTraversal computed it.
         out.append("[topic_id=").append(cluster.topicId()).append("]\n");
-        // headline — first post's title, closed-list-sanitized (M1-675): a
+        // headline — first post's title (or its body when the title is empty,
+        // as it is for every Bluesky post), closed-list-sanitized (M1-675): a
         // group-visible line-start title shaped like a privileged command
         // would otherwise reflect straight into a broadcast reply.
-        // Sanitize-unit invariant (M1-697): the input is ONE post's title —
-        // every sanitize call over feed-derived text takes a single
-        // author's field, never a concatenation of several posts' bytes
-        // (the flag-entry span would otherwise erase whole posts between
-        // a command word in one title and its flag in another).
-        out.append(llmOutputSanitizer.sanitize(first.title())).append("\n");
+        // Sanitize-unit invariant (M1-697) still holds inside the helper: the
+        // input is ONE post's single field — every sanitize call over
+        // feed-derived text takes a single author's field, never a
+        // concatenation of several posts' bytes (the flag-entry span would
+        // otherwise erase whole posts between a command word in one title and
+        // its flag in another), and never title and body concatenated.
+        // An empty result means the post carries no renderable text at all, so
+        // the line is omitted rather than emitted blank (M1-714) — the block
+        // is still identified by the topic_id above and the covered-by line
+        // below.
+        String headline = DisplayHeadline.of(first, llmOutputSanitizer);
+        if (!headline.isEmpty()) {
+            out.append(headline).append("\n");
+        }
         // covered by: source display name (uid p-...), ...
         out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_CLUSTER_COVERED_BY, scopeLanguage))
            .append(' ');

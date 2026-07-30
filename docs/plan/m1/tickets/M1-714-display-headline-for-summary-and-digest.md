@@ -1,11 +1,11 @@
 ---
 id: M1-714
 title: "Summary/digest headline renders a raw post title: unbounded for social sources, blank for Bluesky"
-status: pending
+status: done
 created: 2026-07-29
 last_updated: 2026-07-30
 blocked_by: []
-files_budget: 7
+files_budget: 8
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/render/DisplayHeadline.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/ClusterBlockRenderer.java
@@ -14,6 +14,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/render/DisplayHeadlineTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/ClusterBlockRendererTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DegradedDigestRendererTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/SummaryProseInjectionTest.java
 complexity: medium
 risk: medium
 round_cap: 2
@@ -92,12 +93,64 @@ acceptance:
     nitter titles in the live corpus carry emoji, so this is the common
     case, not an edge case.
   - >-
+    Whitespace flattening happens BEFORE `LlmOutputSanitizer.sanitize`,
+    never after (redteam 2026-07-30, medium/INJECTION). The sanitizer's
+    `isTokenSeparator` is the ASCII whitespace set only and
+    `canonicalizeForMatching` (NFKC + `stripBidiAndZeroWidth`) leaves
+    U+2028/U+2029/U+0085 intact, so a rewrite applied AFTER sanitize can
+    turn a token the sanitizer saw as unsplittable
+    (`/quarantine<U+2028>approve <uuid>`) into a dispatchable multi-word
+    command in the delivered bytes, with no `LLM_OUTPUT_SANITIZED` row.
+    Flattening first means the sanitizer inspects exactly the bytes that
+    are delivered. Runs are still REPLACED with a space, never deleted,
+    so the reverse splice (`/list` + `-sources`) stays impossible. A test
+    pins that a headline carrying U+2028 between a closed-list command
+    word and its second word is redacted and audited.
+  - >-
+    No call-site javadoc states a pipeline order that contradicts
+    `DisplayHeadline`'s (redteam 2026-07-30 round 2, low/INJECTION). The
+    round-1 fix reordered the pipeline, but the same diff added
+    "(sanitize, then flatten, then bound)" to `ClusterBlockRenderer`'s
+    class javadoc — the previously-vulnerable order, asserted with no
+    WHY, in the file carrying the M1-675 group-broadcast rationale a
+    maintainer reads first. Behaviour is correct and pinned by the two
+    U+2028 tests above, so this is a regression channel rather than a
+    live defect: it invites a future change to "restore" the documented
+    order and re-arm the splice, and leaves a maintainer reconciling the
+    two javadocs with nothing to adjudicate on. Each of the three call
+    sites either states the actual order (flatten, then sanitize, then
+    truncate) or states no order at all and defers to `DisplayHeadline`
+    — the load-bearing WHY stays in one place rather than being copied
+    to three that can drift independently.
+  - >-
     Truncation happens AFTER `LlmOutputSanitizer.sanitize`, never before.
     The sanitizer writes one `audit_log` row per hit
     (`LLM_OUTPUT_SANITIZED`, two hits → two rows); truncating first would
     drop the audit rows for the removed tail and narrow the sanitizer's
     input unit. A test pins that a title whose only flagged span sits
     beyond the truncation point still produces its audit row.
+  - >-
+    The body fallback is length-bounded BEFORE it reaches `sanitize`
+    (redteam 2026-07-30, low/DOS). `post.title` is capped at
+    `IngestTextNormalizer.TITLE_MAX_LENGTH` = 200 at the write boundary,
+    but `post.body` has no cap at any write path, so passing a whole body
+    to the sanitizer runs NFKC, the markdown-link regex, 24 closed-list
+    matchers and 10 tokenizer scans over an unbounded input — on the
+    digest scheduler thread, once per post in the window. The pre-bound
+    applies ONLY to the body fallback and is generous relative to the
+    display bound, so a flagged span anywhere near the visible region is
+    still matched and audited; this does not weaken the
+    sanitize-then-truncate rule above, which continues to govern the
+    display cut. A test pins that an over-long body does not reach the
+    sanitizer in full.
+  - >-
+    `truncate` never emits a partially-cut Stage 1 placeholder
+    `[REDACTED:<id>]` (redteam 2026-07-30, out-of-model). Stage 1
+    redactions live in the body, which is now a headline source, and
+    `docs/spec/security.md` §Ingest pipeline commits the brackets and the
+    `REDACTED:` literal as byte-identical so consumers recognise the
+    marker by exact-match. The existing guard for the sanitizer's own
+    `[redacted command]` marker generalises to both markers.
   - >-
     The truncator never emits a partially-cut
     `LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT` marker: if the cut
@@ -134,7 +187,11 @@ test_plan:
       is sanitized, and title and body are never concatenated into one
       sanitize input; emoji at the cut boundary is not split; a
       sanitizer replacement marker straddling the cut is not emitted
-      partially.
+      partially; a Stage 1 `[REDACTED:<id>]` placeholder straddling the
+      cut is not emitted partially either; U+2028 between a closed-list
+      command word and its second word is redacted (flatten runs before
+      sanitize) rather than surviving into a dispatchable line; an
+      over-long body is bounded before it reaches the sanitizer.
     - >-
       infochat-provider/src/test/java/app/zcat/infochat/provider/command/ClusterBlockRendererTest.java
       — an empty-title post renders a non-blank headline line; a post
@@ -143,7 +200,15 @@ test_plan:
       directly by the covered-by line — no blank line between them); a
       flagged span positioned BEYOND the truncation point still yields
       its LLM_OUTPUT_SANITIZED audit row (pins sanitize-then-truncate
-      order); the summarizer prompt still carries the untruncated title.
+      order).
+    - >-
+      infochat-provider/src/test/java/app/zcat/infochat/provider/summary/SummaryProseInjectionTest.java
+      — the summarizer prompt still carries a long title in FULL,
+      untruncated. This assertion cannot live in
+      `ClusterBlockRendererTest` as first drafted:
+      `SummaryProseGenerator.buildPrompt` is package-private in
+      `…provider.summary`, so only a test in that package can call it,
+      and this file already owns the `buildPrompt` harness.
     - >-
       infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DegradedDigestRendererTest.java
       — an empty-title post renders a non-blank headline; a post with
@@ -168,12 +233,246 @@ spec_refs:
   - docs/spec/commands.md §Periodic group digests
   - docs/spec/llm.md §Translation flow
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-30
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: PASS
+      assertion_adequacy: WARN
+    diff_stats:
+      files: 14
+      added: 1778
+      removed: 41
+    note: |
+      ASSERTION-ADEQUACY WARN (advisory, not a rework item): the third
+      consumer of the derived headline —
+      `SummaryProseGenerator.degradedProseFor`'s empty-headline shape —
+      has no end-of-path assertion. Making its `if (!lead.isEmpty())`
+      append unconditional emits a leading space before `(uid …)` for an
+      all-blank post, which the acceptance item forbids, and no test
+      fails. The reviewer WARNed rather than FAILed because the mutation
+      is cosmetic rather than security-bearing (the sanitize call, its
+      one-field unit and its audit row are pinned elsewhere) and
+      `test_plan` never promised a test at that site. The other two
+      consumers DO have end-of-path assertions, so the M1-648
+      assert-only-the-producer failure mode is avoided.
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-07-30
+    category: INJECTION
+    severity: medium
+    promise: |
+      docs/spec/security.md §LLM output sanitizer — the closed-list pass
+      matches against the canonical form, "the same representation the
+      deterministic command parser consumes", and "Every match is
+      audit-logged (per-occurrence, not throttled)."
+    gap: |
+      DisplayHeadline applies its whitespace rewrite AFTER sanitize, so
+      the bytes the sanitizer inspected are not the bytes delivered.
+      LlmOutputSanitizer.isTokenSeparator is the ASCII whitespace set
+      only, and canonicalizeForMatching (NFKC + stripBidiAndZeroWidth)
+      leaves U+2028/U+2029/U+0085 intact, so
+      `/quarantine<U+2028>approve <uuid>` reaches sanitize as ONE token:
+      no match, no LLM_OUTPUT_SANITIZED row. flattenToOneLine then
+      rewrites it to the dispatchable `/quarantine approve <uuid>` at a
+      group-broadcast line start. The helper's javadoc guarded
+      splice-by-DELETION and missed splice-by-REPLACEMENT.
+    repro: |
+      Publish (or use a legacy blank-title row carrying) headline text
+      `/quarantine<U+2028>approve <uuid>` or `/list-sources<U+2028>--all`.
+      Body normalization keeps U+2028; the post goes READY and is
+      selected into a digest or /summary cluster. sanitize matches
+      nothing and writes no audit row; flattenToOneLine converts U+2028
+      to a space; the group receives a copy-paste-dispatchable
+      privileged command with no audit trail for an operator to notice.
+    suggested_fix_class: input-sanitization
+  - date: 2026-07-30
+    category: DOS
+    severity: low
+    promise: |
+      docs/spec/security.md §LLM output sanitizer — the flag tokenizer is
+      "a single left-to-right scan ... linear in the reply length",
+      because §Trust boundaries item 9 puts a hostile endpoint's reply in
+      scope and "an in-cap reply must not be convertible into unbounded
+      CPU."
+    gap: |
+      The linearity argument assumes a bounded input. Before this diff
+      the only sanitize input on this render path was post.title, capped
+      at IngestTextNormalizer.TITLE_MAX_LENGTH = 200 at the write
+      boundary. The body fallback has no length cap at any write path,
+      and the display bound is applied LAST, so the full sanitizer pass
+      (NFKC, markdown-link regex, 24 closed-list matchers, 10 tokenizer
+      scans) plus this diff's own whitespace rewrite run over an
+      unbounded input before anything is truncated. The degraded digest
+      renders every post in the window through the helper.
+    repro: |
+      A blank-title post with a multi-megabyte body enters a group's
+      digest window; each render pays the full sanitizer cost over the
+      whole body before the 200-char display bound is applied.
+    suggested_fix_class: other
+  - date: 2026-07-30
+    category: INJECTION
+    severity: low
+    promise: |
+      docs/spec/security.md §LLM output sanitizer — "the group-visible
+      echo surfaces (`/saved` reply, `/summary`, and the degraded group
+      digest) are additionally passed through the closed-list
+      `LlmOutputSanitizer` at **render**, where a title or tag whose
+      canonical form is a privileged command renders as
+      `[redacted command]`", and §"Canonical-form matching" — the pass
+      matches "the **canonical** form of the candidate output ... which
+      is the same representation the deterministic command parser
+      consumes". Both commitments hold only if no transform runs between
+      the sanitizer and delivery; that ordering is the control the
+      round-1 INJECTION finding was about.
+    gap: |
+      The remediation reordered the pipeline to flatten -> sanitize ->
+      truncate (`DisplayHeadline.java:97`, documented as load-bearing at
+      `DisplayHeadline.java:25`), but the diff simultaneously ADDS a
+      javadoc line at one of the three call sites asserting the
+      opposite, previously-vulnerable order as the design intent:
+      `ClusterBlockRenderer.java:46-47` — "Deriving the headline is a
+      deterministic pure function (sanitize, then flatten, then bound)".
+      That directly contradicts `DisplayHeadline.java:25` in the same
+      diff, in the file carrying the M1-675 group-broadcast rationale a
+      maintainer reads first. The security argument for the ordering —
+      the sanitizer's token separators are ASCII-only and its canonical
+      form preserves U+0085/U+2028/U+2029, so a post-sanitize whitespace
+      rewrite manufactures a dispatchable token the sanitizer never
+      adjudicated and never audited — appears only in `DisplayHeadline`;
+      the caller's javadoc records the wrong order with no WHY at all,
+      so a reader reconciling the two has nothing to adjudicate with.
+    repro: |
+      Not reachable against the code as it stands. The ordering is
+      behaviourally correct and pinned by
+      `DisplayHeadlineTest.unicodeSeparatorInsideAClosedListEntryIsRedactedNotRewrittenIntoACommand`
+      and `...unicodeSeparatorInsideAFlagEntryIsRedacted`, so a reorder
+      fails `mvn verify`. The exposure is a regression channel, not a
+      live attack: a future change that "restores" the order this
+      javadoc documents — e.g. moving `flattenToOneLine` into
+      `truncate`, or applying it at the renderer after
+      `DisplayHeadline.of` returns, which the caller's own javadoc
+      describes as correct — re-arms the round-1 attack verbatim
+      (`/quarantine<U+2028>approve <uuid>` reaches sanitize as ONE
+      token, no match, no `LLM_OUTPUT_SANITIZED` row, then the rewrite
+      emits a dispatchable privileged command at a group-broadcast line
+      start). The two pinning tests would catch it, so the residual is
+      the window in which a maintainer argues from the caller's javadoc
+      that the failing test is the thing that is wrong.
+    suggested_fix_class: other
+redteam_audits:
+  - date: 2026-07-30
+    verdict: FINDINGS
+    base: 5319f3b14b14552b39d3189eea182ac64e157dcb
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-714-2026-07-30.md
+    findings_count: 2
+    out_of_model_count: 2
+    note: |
+      Gate audit ahead of review, against the uncommitted working tree.
+      Both findings independently verified against the source before
+      escalation; both are introduced by this diff rather than
+      pre-existing. The load-bearing out-of-model item is that
+      PostPersister.normalizeTitle already rewrites a blank title to
+      "untitled" and caps titles at 200 chars at the sole post write path
+      (M1-693), so both defects this ticket targets are already closed at
+      ingest for newly written rows and MAX_LENGTH=200 equals
+      TITLE_MAX_LENGTH — the premise holds only for legacy pre-M1-693
+      rows. That bears on whether the body fallback should ship at all,
+      which is a scope decision for the user, not an in-band fix.
+      Not remediated in-branch; any remediation invalidates this audit
+      and requires a re-audit.
+  - date: 2026-07-30
+    verdict: FINDINGS
+    base: 7af31ef9a4f2b43fafb6eeab92187c5214bb8558
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-714-2026-07-30-r2.md
+    findings_count: 1
+    out_of_model_count: 2
+    note: |
+      Round-2 re-audit of the reworked diff, at the same gate. Both
+      round-1 findings verified CLOSED against the current code rather
+      than assumed closed: the pipeline is
+      `truncate(sanitize(flattenToOneLine(source)))`
+      (`DisplayHeadline.java:97`) so the sanitizer inspects the bytes
+      delivered, and the body is pre-bounded at `BODY_SCAN_LIMIT`
+      before sanitize (`DisplayHeadline.java:118-121`). The adversary
+      re-derived both evasions rather than trusting the fix, and checked
+      that neither the post-sanitize `truncate` nor the pre-sanitize
+      body bound can itself be turned into a splice or an escape.
+      One NEW low finding, verified independently in the main session:
+      the diff adds a javadoc line at `ClusterBlockRenderer.java:46-47`
+      documenting the previously-vulnerable order ("sanitize, then
+      flatten, then bound"), contradicting `DisplayHeadline.java:25` in
+      the same diff. Behaviour is correct and pinned by two
+      `DisplayHeadlineTest` cases, so this is a regression channel, not
+      a live attack; the fix is a text-only javadoc correction at the
+      caller. The adversary's diff excluded `docs/plan/` per the
+      fresh-context rule; round-1 findings were supplied via the
+      re-audit prompt section. Line anchors in the verdict body are
+      diff-file offsets — corrected source anchors are in this entry and
+      in `redteam_findings`.
+  - date: 2026-07-30
+    verdict: CLEAN
+    base: 7af31ef9a4f2b43fafb6eeab92187c5214bb8558
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-714-2026-07-30-r3.md
+    out_of_model_count: 2
+    note: |
+      Round-3 re-audit closing the loop the round-2 low/INJECTION
+      finding opened. The only code delta since round 2 is one javadoc
+      hunk at `ClusterBlockRenderer.java:43-51`: the wrong ordering
+      claim is dropped rather than corrected, so the load-bearing WHY
+      lives only at `DisplayHeadline.java:25` and cannot drift across
+      three call-site copies, with a pointer plus a "never re-apply one
+      of them from a caller" clause closing the regression channel.
+      The adversary was pushed to re-derive the pipeline order from the
+      executable statements rather than any javadoc (trusting a comment
+      is the failure this ticket already produced once) and to check
+      that the fix did not delete the security rationale along with the
+      wrong sentence. CLEAN was explicitly authorized in the prompt so
+      an honest CLEAN could terminate the loop. `redteam_findings:` is
+      deliberately NOT reset to `[]` — rounds 1 and 2 are historical
+      record and this entry is the "audit ran, nothing found" signal.
+      Full suite green on the same tree (`target/m1-tick-test-M1-714-r3.log`).
+clarity_check:
+  date: 2026-07-30
+  verdict: WARN
+  warnings:
+    - >-
+      Lint PASS (0 blockers, 0 warnings) both before and after the
+      refine.
+    - >-
+      Census re-run at start: `grep -rn "\.title()" --include=*.java
+      infochat-provider/src/main/java` returns exactly the 6 sites the
+      §Census table disposes, at the cited lines. No seventh site, so
+      the defect class has not grown.
+    - >-
+      Ticket-vs-code spot-check: every cited path:line verified —
+      ClusterBlockRenderer:95, SummaryProseGenerator:179/:224,
+      DegradedDigestRenderer:59, CategoryRollupGenerator:199,
+      TopicCorpusBuilder:280, and the hand-construct sites
+      SummaryCommandHandler:661 / RetryCommandHandler:339.
+    - >-
+      Self-check found the ticket self-contradictory on the all-empty
+      post: §Notes nominated a bundle-keyed placeholder that
+      files_scope did not admit. Resolved by refine commit 5319f3b1
+      (start-gate scope correction) — no placeholder, scope unchanged
+      at 7 files.
+    - >-
+      Control preservation: the body fallback is a NEW input to the
+      sanitize call on a group-broadcast line start. Added as an
+      explicit acceptance item in the same refine; the M1-697
+      one-field-per-call unit is pinned in test_plan.
+  blockers: []
 escalation_reason:
 ---
 
@@ -321,6 +620,36 @@ configuration of the limit, translation of headline text, and
   A blunt filter would therefore discard precisely the
   reply-extensions worth keeping. See out-of-scope; forward-compatible
   either way.
+
+- **Redteam 2026-07-30 (`docs/plan/m1/redteam/M1-714-2026-07-30.md`).**
+  Three of the four items fold into this ticket's acceptance above and
+  are confined to `DisplayHeadline` + its test: flatten before sanitize
+  (medium/INJECTION), pre-bound the body fallback (low/DOS), and guard
+  the Stage 1 placeholder against a partial cut (out-of-model). The
+  fourth does not — see below.
+
+- **What this ticket does NOT fix: the `"untitled"` headline (M1-729).**
+  M1-693 (landed 2026-07-25) normalizes a blank `post.title` to the
+  literal `"untitled"` at `PostPersister`, the sole `post` write path,
+  and `BlueskyResponseParser.java:115` still passes `null`. So every
+  Bluesky post now stores `title="untitled"` with its real text in
+  `body`: the blank-headline defect changed shape rather than closing,
+  and this ticket's `title.isBlank()` fallback cannot fire for any row
+  written after that date. The fallback still serves rows written
+  before it (`post` retention is 30 days, 14 on `pi`), and the shared
+  helper still stops the three render surfaces drifting, so this ticket
+  remains worth shipping on its own.
+  Making the fallback fire for new rows is deliberately NOT done here.
+  Both available routes leave this ticket's altitude: changing what
+  ingest stores would alter the input to three LLM/embedding consumers
+  (`TaggerWorker.java:391`, `ClassifierWorker.java:303`,
+  `EmbeddingWorker.java:486`), which is the exact hazard out-of-scope
+  item 2 fences; and matching the sentinel at display time would span
+  `infochat-core` + `infochat-collector` + `infochat-provider` merely to
+  share a constant, while re-deciding M1-693's stated principle that the
+  chosen representation is applied once at ingest. That is a design
+  decision owed its own acceptance criteria. Filed as M1-729; this
+  ticket does not block on it.
 
 - **Follow-up, not committed to here.** Making the limit a config key is
   genuinely useful for a multi-instance deployment where different

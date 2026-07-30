@@ -4,6 +4,7 @@ import java.util.List;
 
 
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
+import app.zcat.infochat.provider.render.DisplayHeadline;
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -12,13 +13,15 @@ import jakarta.inject.Inject;
  * Produces a headlines-only digest (no LLM call) — the degraded fallback
  * per spec when the LLM does not return within the slot window.
  *
- * <p>The headline is the source-authored post title and each entry renders
- * at line start in a group-broadcast digest, so the title is passed through
- * {@link LlmOutputSanitizer} (M1-675): a title shaped like a privileged
+ * <p>The headline is source-authored text — the post title, or its body when
+ * the title is empty — and each entry renders at line start in a
+ * group-broadcast digest, so it is passed through {@link LlmOutputSanitizer}
+ * inside {@link DisplayHeadline} (M1-675): text shaped like a privileged
  * command would otherwise land a copy-paste-ready admin line in front of
  * every group member. Sanitizing is deterministic string processing, not an
- * LLM call, and is a byte-identical no-op on a title with no closed-list
- * token.
+ * LLM call, and is a byte-identical no-op on text with no closed-list
+ * token. A post with neither title nor body yields no headline at all, and
+ * the entry then leads with its source display name (M1-714).
  *
  * <p><b>The other two operands are deliberately not sanitized (M1-691).</b>
  * The line joins the sanitized title with {@code sourceDisplayName} and a
@@ -56,7 +59,14 @@ public class DegradedDigestRenderer {
             // so this line may return ]( verbatim. See the class javadoc before
             // "fixing" this locally — running the full sanitizer over a url
             // would rewrite ordinary feed paths to [redacted command].
-            sb.append(llmOutputSanitizer.sanitize(p.title())).append(" — ").append(p.sourceDisplayName());
+            // An empty headline means the post carries no renderable text, so
+            // the token AND its separator drop out and the entry leads with
+            // the source display name (M1-714) — never a dangling " — ".
+            String headline = DisplayHeadline.of(p, llmOutputSanitizer);
+            if (!headline.isEmpty()) {
+                sb.append(headline).append(" — ");
+            }
+            sb.append(p.sourceDisplayName());
             if (p.url() != null && !p.url().isEmpty()) {
                 sb.append('\n').append(p.url());
             }

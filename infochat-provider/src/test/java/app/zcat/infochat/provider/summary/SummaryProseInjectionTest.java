@@ -118,6 +118,26 @@ class SummaryProseInjectionTest {
                         + "marker, not forbid it. Got: " + sysPrompt);
     }
 
+    @Test
+    void summarizerPromptCarriesTheFullUntruncatedTitle() {
+        // The display headline is bounded (M1-714), but the PROMPT is not: a
+        // truncated title here would have the model summarize a fragment, and
+        // that failure is silent — no exception, no failing assertion anywhere
+        // else. This test is the pin that keeps the display bound out of the
+        // prompt path.
+        String longTitle = "z".repeat(1200);
+        Cluster cluster = clusterWithBody("p-long", longTitle, "Body");
+
+        String prompt = SummaryProseGenerator.buildPrompt(cluster);
+
+        assertTrue(prompt.contains(longTitle),
+                "the summarizer prompt MUST carry the title in full — a bounded "
+                        + "display headline must never be substituted here; prompt length "
+                        + prompt.length() + ", title length " + longTitle.length());
+        assertFalse(prompt.contains("…"),
+                "no display ellipsis may appear in the prompt; got: " + prompt);
+    }
+
     private static Cluster clusterWithBody(String uid, String title, String body) {
         Post p = new Post(UUID.randomUUID(), uid, UUID.randomUUID(), "TestSrc",
                 title, "https://example.com/" + uid, body, Instant.now(),
