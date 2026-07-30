@@ -206,5 +206,6 @@ The ticket flow exists for code, tests, migrations, and spec changes coordinated
 | `M<N>-NNN:` | Implementation ticket: code, tests, migrations, or spec coordinated with code | `M1-009: Advisory-lock single-instance enforcement + heartbeat` |
 | `spec:` | Pure spec/design edit (`docs/spec/`, `docs/design/`), no code change | `spec: Clarify NOTIFY payload tag schema` |
 | `process:` | `.claude/`, `docs/process/`, `docs/plan/`, or `CLAUDE.md` edit, no code change | `process: Replace status-regenerator subagent with script` |
+| `text:` | Zero-behavior text **inside a source file**: comments, javadoc, and message-only string literals (assertion/log/exception messages). Every `+`/`-` line must sit inside a comment or a string literal — no executable line changes, and never a literal a test asserts on or a user sees | `text: Drop the phantom config key from the body-cap assertion message` |
 
 If a change touches both code and docs, it's a ticket. `git log --grep "^M1-"` keeps cleanly enumerating ticketed work because no non-ticket prefix starts with `M`. Full rules in `docs/process/workflow.md` §Non-ticket commits.

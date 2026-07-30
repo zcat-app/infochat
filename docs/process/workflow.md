@@ -303,16 +303,23 @@ The ticket flow exists for code, tests, migrations, and spec changes coordinated
 | `M<N>-NNN:` | Implementation ticket: code, tests, migrations, or spec changes coordinated with code | (full flow) |
 | `spec:` | Pure spec/design edit under `docs/spec/` or `docs/design/`, no code change | ticket-readiness pre-flight, reviewer, `mvn verify`, STATUS regen |
 | `process:` | Edit under `.claude/`, `docs/process/`, `docs/plan/`, `CLAUDE.md`, or the agent-tooling surface (`AGENTS.md`, `.agents/`, `.opencode/`, `.codex/`, `CONTRIBUTING.md`), no code change | ticket-readiness pre-flight, reviewer, `mvn verify`, STATUS regen |
+| `text:` | **Zero-behavior text inside a source file** — comments, javadoc, and message-only string literals (assertion messages, log messages). Every `+`/`-` line must lie inside a comment or a string literal; no executable line changes. See rule 8 | ticket-readiness pre-flight, reviewer, `mvn verify`, STATUS regen |
 
 ### Rules
 
-1. **Touch code → ticket.** Any commit that adds, deletes, or modifies a file under `infochat-*/`, a module's `src/`, a `pom.xml`, or `db/migration/` is a ticket and uses `M<N>-NNN:`. The `spec:` and `process:` prefixes are pure-doc only.
+1. **Touch code → ticket.** Any commit that adds, deletes, or modifies a file under `infochat-*/`, a module's `src/`, a `pom.xml`, or `db/migration/` is a ticket and uses `M<N>-NNN:` — unless it qualifies for `text:` under rule 8. The `spec:` and `process:` prefixes are pure-doc only.
 2. **Touch spec coordinated with code → ticket.** If a spec amendment is *paired* with the code change it justifies, both land in the same `M<N>-NNN:` commit. The `spec:` prefix is for amendments that stand alone — clarifications, decision-log entries, formatting fixes, refinements with no code consequence yet.
 3. **Dominant-path prefix.** If a `process:` commit incidentally fixes a typo in a spec file, it stays `process:` — pick the prefix that names the load-bearing change. Co-prefixing (`spec+process:`) is forbidden; if the change is genuinely split across both surfaces, make two commits.
 4. **Grep safety.** `git log --grep "^M<N>-"` continues to enumerate implementation-ticket work cleanly because no non-ticket prefix starts with `M`. Tools that build the Done table from `git log` (the status regenerator or its replacement) keep working unchanged.
 5. **Human review present.** The user is the reviewer for `spec:` and `process:` commits. Skipping the reviewer subagent is not a relaxation of the surgical-changes principle — it reflects that the reviewer's automated checks have nothing to bite on for pure-doc edits. Stay surgical.
 6. **STATUS unchanged.** Non-ticket commits do not touch ticket frontmatter, so `STATUS.md` is unaffected and `/<driver> status` is not invoked.
 7. **Revert semantics preserved.** `git revert <commit>` undoes a non-ticket commit cleanly; the one-prefix-per-commit convention keeps history searchable.
+8. **`text:` — zero-behavior text in source.** Rule 1's "touch code → ticket" exists because the reviewer's checks bite on production code. They bite on nothing when the diff cannot change what the program does. A stale comment or a wrong assertion message is exactly that: it misleads a reader, costs a one-line edit, and putting it through pre-flight + a full `mvn verify` + a reviewer subagent + squash-merge is ceremony an order of magnitude more expensive than the defect. `text:` is the escape hatch, and it is narrow:
+   - **Admissible.** Comments and javadoc; string literals that exist only to be *read by a human when something goes wrong* — JUnit assertion messages, log messages, exception messages.
+   - **Not admissible.** Any string a test asserts on, any user-facing bot output or message-bundle value, any string used as a key, identifier, format specifier, SQL fragment, regex, or config value. If a test's expected value would have to change, it is not `text:`. When unsure whether a literal is load-bearing, grep for it; a hit outside its own file means ticket.
+   - **The mechanical gate.** Every `+` and `-` line in the diff lies inside a comment or a string literal, and the file's executable lines are byte-identical. `git diff -w` showing only comment/string hunks is the check; a changed declaration, modifier, value, or control-flow line disqualifies the commit immediately.
+   - **`mvn verify` is not required** (nothing it can catch — the bytecode is unchanged except for constant-pool strings), and no STATUS regen applies. Compilation is still on the author: an unterminated comment or a broken string concatenation is a real break, so eyeball the hunk.
+   - **When the same edit is already inside a ticket's scope, it belongs to the ticket** — `text:` is for standalone text defects, not a side door around an open ticket's `out_of_scope`.
 
 ### When in doubt
 
