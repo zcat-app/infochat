@@ -3,6 +3,7 @@
 .DS_Store
 Thumbs.db
 .claude/scheduled_tasks.lock
+.claude/settings.local.json
 .claude/worktrees/
 .quarkus/
 .idea/
@@ -48,6 +49,10 @@ credentials.json
 prod/runtime/
 !prod/config/secrets.env.example
 .agents/memory-local/
+
+# Device-migration payload: bot addresses, prod runtime state, tier-2 memory.
+# Sensitive by construction (see .migration/**/MIGRATION-README.md) — never commit.
+.migration/
 
 # Redteam-multi regenerable scratch (M1-684). Each /redteam-multi run's durable
 # audit record — verdict-*.txt, cross-examination.md, and any hand-written
