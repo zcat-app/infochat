@@ -1979,24 +1979,6 @@ regenerations and nothing dedups on it (D64) — a full re-run
 fallback still produces fresh bytes, and even the byte-faithful
 replay posts a NEW message (it never edits the original).
 
-**Optional per-category roll-up.** When
-`infochat.digest.category-summary-enabled` (default `false`) is
-on, each category message is prefixed with a 1–2 sentence LLM
-roll-up SYNTHESIS across that category's clusters — a headline-
-level summary naming the themes ("Three supply-chain attacks, an
-OpenSSL DoS, and a WordPress RCE"), NOT a restatement of the
-items. The roll-up is the only NEW LLM stage; one LLM request per
-category, alongside the existing one-request-per-cluster prose.
-Roll-up prose is sanitized and translated like cluster prose
-(`security.md` §LLM output sanitizer is unconditional), generated
-inside the slot-window render budget (the same `windowEnd`
-deadline that bounds cluster prose), and a roll-up failure yields
-that category's message WITHOUT a prefix (exactly the flag-off
-shape) — never a degraded or blocked digest. Category assignment
-stays deterministic (D62); the roll-up is prose only. The flag
-ships off so Phase 2 ships the delivery change first and enables
-roll-ups after evaluation.
-
 ## What lives in design notes
 
 - Exact argument grammar and accepted `-w` forms

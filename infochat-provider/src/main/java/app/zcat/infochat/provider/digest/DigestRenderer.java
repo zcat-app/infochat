@@ -43,15 +43,10 @@ public class DigestRenderer {
     @Inject
     SummaryProseGenerator summaryProseGenerator;
 
-    // Field-initialized to a default instance whose categorySummaryEnabled
-    // stays false (the Java default), so generateRollup() short-circuits
-    // without touching its own null @Inject collaborators. CDI overwrites
-    // this with the deployment-wide bean at runtime — the same pattern
-    // DigestWorker.clock follows (M1-444 reference). The default keeps
-    // pre-existing plain-JUnit tests (DigestRendererTest,
-    // DigestWorkerClockTest) passing UNMODIFIED: render()'s new thin-join
-    // over renderSections() calls generateRollup() per section, and a null
-    // field here would NPE those tests' hand-wired SetUps.
+    // Field-initialized to a default instance so a plain-JUnit construction
+    // that reaches renderShortBody() does not NPE on a null field; CDI
+    // overwrites this with the deployment-wide bean at runtime — the same
+    // pattern DigestWorker.clock follows (M1-444 reference).
     @Inject
     CategoryRollupGenerator categoryRollupGenerator = new CategoryRollupGenerator();
 
@@ -79,9 +74,8 @@ public class DigestRenderer {
      * Render the digest as an ordered list of per-category sections — the
      * EXACT delivery bytes (M1-652 fork closed, arm (b), 2026-07-20). The
      * closing affordance is folded into the LAST section's text inside this
-     * pass, and flag-on roll-up prefixes live inside their sections, so
-     * {@link #render} stays a pure {@code "\n\n"} join over the section
-     * list (byte-identical at the roll-up flag's default) and M1-652 can
+     * pass, so {@link #render} stays a pure {@code "\n\n"} join over the
+     * section list and M1-652 can
      * persist the list at render time and replay a filtered subset on
      * {@code /retry --digest} without re-deriving anything.
      *
@@ -99,7 +93,7 @@ public class DigestRenderer {
         // reaches only the digest broadcast: renderSummarySections and
         // renderShortBody share the categorizer and must keep every section
         // (M1-721). Everything below runs over the capped list, which is what
-        // keeps prose and roll-ups off the dropped sections.
+        // keeps prose off the dropped sections.
         List<CategorySection> sections = digestCategorizer.capSections(allSections);
         int droppedCategories = allSections.size() - sections.size();
 
@@ -122,17 +116,6 @@ public class DigestRenderer {
             CategorySection section = sections.get(sectionIdx);
             StringBuilder sb = new StringBuilder();
             sb.append(sectionHeader(section, langCode));
-            // Optional per-category roll-up prefix (default-off flag). The
-            // roll-up is LLM prose generated inside this renderSections()
-            // pass — the same windowEnd-bounded future cluster prose runs
-            // in — then sanitized and translated by CategoryRollupGenerator
-            // before returning. The prefix folds INSIDE the section's text
-            // (M1-652 fork closed, arm (b): persisted sections replay as the
-            // exact delivery bytes). A roll-up failure yields Optional.empty
-            // and the section ships without a prefix — exactly the flag-off
-            // shape.
-            categoryRollupGenerator.generateRollup(section.clusters(), langCode)
-                    .ifPresent(rollup -> sb.append("\n\n").append(rollup));
             int shownCount = Math.min(section.clusters().size(), categoryItemCap);
             for (int i = 0; i < shownCount; i++) {
                 sb.append("\n\n");
@@ -312,7 +295,7 @@ public class DigestRenderer {
      * {@link CategoryRollupGenerator} roll-up synthesis per category
      * header, NO per-cluster prose, NO {@link ClusterBlockRenderer} flat
      * blocks. The roll-up sees ALL clusters in the category including
-     * past-cap ones ({@link CategoryRollupGenerator#generateRollupUnconditional}'s
+     * past-cap ones ({@link CategoryRollupGenerator#generateRollup}'s
      * existing contract). Each section carries a footer steering the
      * reader to the deeper {@code /summary} paths: a real category names
      * {@code /summary <tag>} and {@code /summary <tag> --full}; the Other
@@ -323,10 +306,7 @@ public class DigestRenderer {
      * {@link SummaryProseGenerator} calls. A roll-up failure yields
      * {@link Optional#empty()} and the section ships with its header and
      * footer but no roll-up line (CategoryRollupGenerator's existing
-     * failure containment). The digest's own
-     * {@code infochat.digest.category-summary-enabled} flag is NOT
-     * consulted — {@code --short} is the explicit opt-in that replaces
-     * the flag's role for this call site.
+     * failure containment).
      *
      * <p>Single-string return: the {@code --short} overview is short
      * enough to ride in one router-sent message (like {@code --flat}),
@@ -358,7 +338,7 @@ public class DigestRenderer {
             }
             out.append(sectionHeader(section, langCode));
             Optional<String> rollup =
-                    categoryRollupGenerator.generateRollupUnconditional(section.clusters(), langCode);
+                    categoryRollupGenerator.generateRollup(section.clusters(), langCode);
             if (rollup.isPresent()) {
                 out.append("\n\n").append(rollup.get());
             } else {
@@ -439,11 +419,11 @@ public class DigestRenderer {
     /**
      * Extended seam that also wires the {@link CategoryRollupGenerator}
      * (M1-700): the {@code --short} path calls
-     * {@link CategoryRollupGenerator#generateRollupUnconditional} per
+     * {@link CategoryRollupGenerator#generateRollup} per
      * category, so a {@code --short} test injects a recording subclass to
      * assert the roll-up call count and stub its output. The 5-arg
      * overload above delegates here with a default
-     * {@code new CategoryRollupGenerator()} (flag-gated, no LLM wiring),
+     * {@code new CategoryRollupGenerator()} (no LLM wiring),
      * which is correct for the categorized/flat tests that never reach the
      * {@code --short} branch.
      */

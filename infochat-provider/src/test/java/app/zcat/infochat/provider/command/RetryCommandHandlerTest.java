@@ -775,7 +775,7 @@ class RetryCommandHandlerTest {
 
     /**
      * Recording stub for {@link CategoryRollupGenerator}: the {@code --short}
-     * replay path calls {@link CategoryRollupGenerator#generateRollupUnconditional}
+     * replay path calls {@link CategoryRollupGenerator#generateRollup}
      * per category, so this stub counts calls and returns a fixed synthesis
      * string. Inert for the flat/bare/full replay tests (they never reach
      * renderShortBody).
@@ -803,7 +803,7 @@ class RetryCommandHandlerTest {
         }
 
         @Override
-        public Optional<String> generateRollupUnconditional(List<Cluster> clusters, String langCode) {
+        public Optional<String> generateRollup(List<Cluster> clusters, String langCode) {
             int n = callCount.incrementAndGet();
             clusterCounts.add(clusters.size());
             if (returnEmpty || (returnEmptyForFirstCalls > 0 && n <= returnEmptyForFirstCalls)) {

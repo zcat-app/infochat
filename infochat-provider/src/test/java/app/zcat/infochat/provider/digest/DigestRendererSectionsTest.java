@@ -16,7 +16,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -134,38 +133,6 @@ class DigestRendererSectionsTest {
                         + "render() is a thin join over renderSections()");
     }
 
-    @Test
-    void rollupPrefixAppearsInRenderedSectionWhenGeneratorReturnsOne() {
-        // End-of-path pin for the renderSections consumer line
-        // `categoryRollupGenerator.generateRollup(...).ifPresent(rollup -> sb.append("\n\n").append(rollup))`
-        // (DigestRenderer.java:121-122). A stub generator that returns a
-        // fixed prefix must cause that prefix to appear INSIDE the rendered
-        // section text; removing the ifPresent append (or the generateRollup
-        // call feeding it) fails this assertion. Every other renderSections
-        // test runs with categorySummaryEnabled at its default false, so the
-        // integration line is a no-op they cannot constrain (round-1 rework
-        // item 1, ASSERTION-ADEQUACY-CHECK).
-        renderer.categoryRollupGenerator = new CategoryRollupGenerator() {
-            @Override
-            public Optional<String> generateRollup(List<Cluster> categoryClusters, String langCode) {
-                return Optional.of("TEST-ROLLUP-PREFIX");
-            }
-        };
-        proseGenerator.setResponseText("section prose");
-        List<Post> posts = List.of(
-                post("s1", "Sec 1", List.of("security")),
-                post("s2", "Sec 2", List.of("security")),
-                post("s3", "Sec 3", List.of("security")));
-
-        List<RenderedSection> sections = renderer.renderSections(posts, "en");
-
-        boolean anySectionCarriesPrefix = sections.stream()
-                .anyMatch(s -> s.text().contains("TEST-ROLLUP-PREFIX"));
-        assertTrue(anySectionCarriesPrefix,
-                "roll-up prefix must appear inside a rendered section when the generator returns one: "
-                        + sections.stream().map(RenderedSection::text).toList());
-    }
-
     // ----- section cap (M1-721) ---------------------------------------------
 
     @Test
@@ -202,10 +169,8 @@ class DigestRendererSectionsTest {
     }
 
     @Test
-    void proseAndRollupsCoverOnlySectionsThatSurviveTheCap() {
+    void proseCoversOnlySectionsThatSurviveTheCap() {
         renderer.digestCategorizer = newCategorizer(3, 8);
-        RecordingRollupGenerator rollupGenerator = new RecordingRollupGenerator();
-        renderer.categoryRollupGenerator = rollupGenerator;
         proseGenerator.setResponseText("surviving prose");
 
         renderer.renderSections(twelveCategoryPosts(), "en");
@@ -215,8 +180,6 @@ class DigestRendererSectionsTest {
         // dropped section that still paid for prose would be pure waste.
         assertEquals(8 * 3, proseGenerator.callCount(),
                 "per-cluster prose runs for the 8 surviving sections' 3 clusters each, and no others");
-        assertEquals(8, rollupGenerator.callCount(),
-                "one roll-up attempt per surviving section, none for the dropped four");
     }
 
     @Test
@@ -267,19 +230,6 @@ class DigestRendererSectionsTest {
         DigestCategorizer categorizer = newCategorizer(minClusters);
         categorizer.maxCategories = maxCategories;
         return categorizer;
-    }
-
-    /** Counts {@link CategoryRollupGenerator#generateRollup} calls without reaching an LLM. */
-    private static final class RecordingRollupGenerator extends CategoryRollupGenerator {
-        private int calls;
-
-        int callCount() { return calls; }
-
-        @Override
-        public Optional<String> generateRollup(List<Cluster> categoryClusters, String langCode) {
-            calls++;
-            return Optional.empty();
-        }
     }
 
     private static Post post(String uid, String title, List<String> tags) {

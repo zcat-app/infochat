@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 18 |
+| pending | 17 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 729 |
+| done | 730 |
 | deferred | 2 |
 | abandoned | 21 |
 | **total** | **770** |
@@ -32,8 +32,9 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-716 — Decouple language enablement from bundle presence (complexity: low, risk: low)
 - M1-724 — Digest cluster selection is recency-only: the cap keeps the newest stories, never the most significant (complexity: high, risk: high)
 - M1-727 — Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other (complexity: medium, risk: medium)
+- M1-728 — Category roll-up sends every post's full body and asks for one or two sentences: it neither fits a large category nor describes one (complexity: medium, risk: medium)
 - M1-730 — /saved renders the ingest \"untitled\" sentinel to a reader (complexity: medium, risk: medium)
-- M1-731 — Retire infochat.digest.category-summary-enabled and reclaim the generateRollup name (complexity: low, risk: low)
+- M1-732 — groups.digest_mode and the hybrid category body: count + roll-up + headlines (complexity: low, risk: low)
 - M1-735 — Amend docs/spec/security.md §Failure handling (complexity: low, risk: low)
 
 ---
@@ -55,8 +56,6 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-719 — blocked_by: M1-716 (pending), M1-717 (deferred)
 - M1-720 — blocked_by: M1-716 (pending), M1-717 (deferred)
 - M1-725 — blocked_by: M1-732 (pending), M1-724 (pending)
-- M1-728 — blocked_by: M1-714 (done), M1-731 (pending)
-- M1-732 — blocked_by: M1-731 (pending)
 - M1-733 — blocked_by: M1-732 (pending)
 - M1-734 — blocked_by: M1-732 (pending)
 
@@ -77,6 +76,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-731 | Retire infochat.digest.category-summary-enabled and reclaim the generateRollup name | 2026-07-30 | round 2 APPROVE |
 | M1-729 | Bluesky posts render a headline of \"untitled\" while their text sits in body | 2026-07-30 | round 1 APPROVE |
 | M1-723 | post.likes / post.reposts / post.social_score are declared, parsed at two fetchers, and never persisted | 2026-07-30 | round 1 APPROVE |
 | M1-721 | Digest length is a function of tag count: nothing bounds how many category sections a digest renders | 2026-07-30 | round 1 APPROVE |
@@ -86,7 +86,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-710 | SimpleX outbound rate-limit draws are untested; the Signal twin is pinned | 2026-07-30 | round 1 APPROVE |
 | M1-709 | SSRF body-cap comment names a config key that never existed | 2026-07-30 | round 1 APPROVE |
 | M1-708 | Gate docs against nonexistent infochat.* config keys | 2026-07-30 | round 1 APPROVE |
-| M1-704 | Outbound User-Agent: single-sourced, single-valued, non-rotting | 2026-07-30 | round 1 APPROVE |
 
 ---
 
@@ -973,7 +972,7 @@ M1-713 (done)
   └── M1-712 (done)
 M1-714 (done)
   ├── M1-722 (abandoned)
-  └── M1-728 (pending)
+  └── M1-728 (pending) ← runnable
 M1-715 (pending) ← runnable
 M1-716 (pending) ← runnable
   ├── M1-718 (pending)
@@ -991,9 +990,9 @@ M1-723 (done)
 M1-727 (pending) ← runnable
 M1-729 (done)
 M1-730 (pending) ← runnable
-M1-731 (pending) ← runnable
+M1-731 (done)
   ├── M1-728 (pending) [see above]
-  └── M1-732 (pending)
+  └── M1-732 (pending) ← runnable
         ├── M1-725 (pending) [see above]
         ├── M1-733 (pending)
         └── M1-734 (pending)

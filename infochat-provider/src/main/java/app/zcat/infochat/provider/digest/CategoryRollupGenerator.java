@@ -11,7 +11,6 @@ import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,10 +19,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Generates ONE 1–2 sentence LLM roll-up synthesis per category when
- * {@code infochat.digest.category-summary-enabled} is on — the "one line
- * that names the day's stories in this topic" from the original operator
- * sketch. The roll-up names themes across the category's clusters (e.g.
+ * Generates ONE 1–2 sentence LLM roll-up synthesis per category — the
+ * "one line that names the day's stories in this topic" from the original
+ * operator sketch. The roll-up names themes across the category's clusters (e.g.
  * "Three supply-chain attacks, an OpenSSL DoS, and a WordPress RCE"), NOT
  * a re-list of items.
  *
@@ -42,7 +40,7 @@ import java.util.UUID;
  *
  * <p>Failure containment: a roll-up LLM failure, an empty response, or a
  * REFUSAL marker yields {@link Optional#empty()} — the caller ships that
- * category's message WITHOUT a prefix (exactly the flag-off shape). The
+ * category's message WITHOUT a prefix. The
  * digest is never degraded or blocked by a roll-up failure. A render-
  * budget overrun still degrades the whole digest to the D17 headlines-
  * only message via {@link DigestWorker}'s {@code windowEnd} future, so
@@ -100,14 +98,10 @@ public class CategoryRollupGenerator {
     @Inject
     TranslationPipeline translationPipeline;
 
-    @ConfigProperty(name = "infochat.digest.category-summary-enabled", defaultValue = "false")
-    boolean categorySummaryEnabled;
-
     /**
      * Generate one roll-up synthesis for a category's clusters. Returns
      * {@link Optional#empty()} when:
      * <ul>
-     *   <li>the flag is off (the flag-off shape);</li>
      *   <li>the LLM call throws (failure containment);</li>
      *   <li>the LLM returns empty text or the {@code [REFUSAL: ...]} marker
      *       (the same per-cluster refusal-detection SummaryProseGenerator
@@ -123,27 +117,6 @@ public class CategoryRollupGenerator {
      *                         and {@link TranslationPipeline#run}
      */
     public Optional<String> generateRollup(List<Cluster> categoryClusters, String langCode) {
-        if (!categorySummaryEnabled) {
-            return Optional.empty();
-        }
-        return generateRollupUnconditional(categoryClusters, langCode);
-    }
-
-    /**
-     * The {@code --short} call site (M1-700): the same roll-up synthesis
-     * {@link #generateRollup} produces for the digest's optional prefix,
-     * but WITHOUT the {@code infochat.digest.category-summary-enabled} gate.
-     * {@code /summary --short} IS the explicit opt-in that replaces the
-     * config flag's role for this call site: the roll-up is the form's
-     * whole content, not an optional prefix, so a flag that defaults off
-     * would silently produce empty categories. The prompt/sanitize/translate
-     * pipeline is reused verbatim (the out_of_scope boundary); only the
-     * flag gate is bypassed. Failure containment is identical to
-     * {@link #generateRollup} — a roll-up LLM failure, empty response, or
-     * REFUSAL marker yields {@link Optional#empty()} and the caller ships
-     * the category header without a roll-up line.
-     */
-    public Optional<String> generateRollupUnconditional(List<Cluster> categoryClusters, String langCode) {
         try {
             LlmProvider provider = llmRouter.forTask(ModelTask.SUMMARIZER, langCode);
             String userPrompt = buildPrompt(categoryClusters);

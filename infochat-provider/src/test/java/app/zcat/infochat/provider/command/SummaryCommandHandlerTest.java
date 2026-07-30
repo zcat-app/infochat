@@ -1621,7 +1621,7 @@ class SummaryCommandHandlerTest {
 
     /**
      * Recording stub for {@link CategoryRollupGenerator}: the {@code --short}
-     * path calls {@link CategoryRollupGenerator#generateRollupUnconditional}
+     * path calls {@link CategoryRollupGenerator#generateRollup}
      * per category, so this stub counts calls, captures the per-call cluster
      * count (to prove past-cap clusters reach the roll-up), and returns a
      * fixed synthesis string. The {@code @Inject} LLM collaborators are
@@ -1653,7 +1653,7 @@ class SummaryCommandHandlerTest {
         }
 
         @Override
-        public Optional<String> generateRollupUnconditional(List<Cluster> clusters, String langCode) {
+        public Optional<String> generateRollup(List<Cluster> clusters, String langCode) {
             int n = callCount.incrementAndGet();
             clusterCounts.add(clusters.size());
             if (returnEmpty || (returnEmptyForFirstCalls > 0 && n <= returnEmptyForFirstCalls)) {

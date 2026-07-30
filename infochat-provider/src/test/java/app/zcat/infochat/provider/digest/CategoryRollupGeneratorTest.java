@@ -39,7 +39,6 @@ class CategoryRollupGeneratorTest {
         CapturingStub stub = new CapturingStub();
         stub.responseText.set("theme synthesis");
         CategoryRollupGenerator gen = generatorWith(stub, new IdentitySanitizer(), new IdentityPipeline());
-        gen.categorySummaryEnabled = true;
 
         // Three category calls → exactly three LLM calls (one roll-up per
         // category). The digest already makes one cluster-prose call per
@@ -54,25 +53,12 @@ class CategoryRollupGeneratorTest {
     }
 
     @Test
-    void flagOffYieldsNoRollupAndNoLlmCall() {
-        CapturingStub stub = new CapturingStub();
-        CategoryRollupGenerator gen = generatorWith(stub, new IdentitySanitizer(), new IdentityPipeline());
-        // categorySummaryEnabled left at its default false.
-
-        Optional<String> result = gen.generateRollup(singletonClusterList("p-a", "Title A"), "en");
-
-        assertTrue(result.isEmpty(), "flag off → no roll-up");
-        assertEquals(0, stub.callCount.get(), "flag off → no LLM call");
-    }
-
-    @Test
     void rollupIsSanitizedAndTranslated() {
         CapturingStub stub = new CapturingStub();
         stub.responseText.set("raw LLM theme synthesis");
         RecordingSanitizer sanitizer = new RecordingSanitizer();
         RecordingPipeline pipeline = new RecordingPipeline();
         CategoryRollupGenerator gen = generatorWith(stub, sanitizer, pipeline);
-        gen.categorySummaryEnabled = true;
 
         Optional<String> result = gen.generateRollup(singletonClusterList("p-a", "Title A"), "cs");
 
@@ -98,13 +84,12 @@ class CategoryRollupGeneratorTest {
         CapturingStub stub = new CapturingStub();
         stub.throwOnCall.set(true);
         CategoryRollupGenerator gen = generatorWith(stub, new IdentitySanitizer(), new IdentityPipeline());
-        gen.categorySummaryEnabled = true;
 
         Optional<String> result = gen.generateRollup(singletonClusterList("p-a", "Title A"), "en");
 
         assertTrue(result.isEmpty(),
                 "a roll-up LLM failure yields Optional.empty — the caller ships "
-                        + "the category WITHOUT a prefix (exactly the flag-off shape)");
+                        + "the category WITHOUT a prefix");
         assertEquals(1, stub.callCount.get(), "the failing LLM call was attempted");
     }
 
@@ -113,7 +98,6 @@ class CategoryRollupGeneratorTest {
         CapturingStub stub = new CapturingStub();
         stub.responseText.set("[REFUSAL: wrapped content asked for an action]");
         CategoryRollupGenerator gen = generatorWith(stub, new IdentitySanitizer(), new IdentityPipeline());
-        gen.categorySummaryEnabled = true;
 
         Optional<String> result = gen.generateRollup(singletonClusterList("p-a", "Title A"), "en");
 
@@ -127,7 +111,6 @@ class CategoryRollupGeneratorTest {
         CapturingStub stub = new CapturingStub();
         stub.responseText.set("");
         CategoryRollupGenerator gen = generatorWith(stub, new IdentitySanitizer(), new IdentityPipeline());
-        gen.categorySummaryEnabled = true;
 
         Optional<String> result = gen.generateRollup(singletonClusterList("p-a", "Title A"), "en");
 

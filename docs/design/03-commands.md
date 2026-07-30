@@ -462,9 +462,8 @@ selection, so all four forms are equally reproducible.
 - **`--short`** — `DigestRenderer.renderShortBody(List<Cluster>, String)`:
   one `CategoryRollupGenerator` roll-up synthesis per category header, NO
   per-cluster prose, NO flat blocks. Calls
-  `CategoryRollupGenerator.generateRollupUnconditional` (bypassing the
-  digest's `category-summary-enabled` flag — `--short` is the explicit
-  opt-in). One LLM call per category; zero `SummaryProseGenerator` calls.
+  `CategoryRollupGenerator.generateRollup`. One LLM call per category; zero
+  `SummaryProseGenerator` calls.
 - **`--full`** — `DigestRenderer.renderSummarySections(..., Integer.MAX_VALUE)`:
   the categorized form with NO per-category cap and NO overflow line (all
   clusters render). Per-cluster prose IS generated. `--full` was reclaimed
