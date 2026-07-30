@@ -22,7 +22,7 @@ files_scope:
 complexity: high
 risk: high
 round_cap: 3
-security_relevant: false
+security_relevant: true
 migration_touch: false
 out_of_scope:
   - >-
