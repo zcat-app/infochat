@@ -7,7 +7,7 @@ last_updated: 2026-07-30
 blocked_by:
   - M1-721
   - M1-714
-files_budget: 17
+files_budget: 19
 files_scope:
   - infochat-core/src/main/resources/db/migration/V66__group_digest_mode.sql
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/DigestCommandHandler.java
@@ -22,6 +22,8 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererSectionsTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/CategoryRollupGeneratorTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryCommandHandlerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
   - docs/spec/decisions.md
   - docs/design/03-commands.md
   - docs/design/07-deployment.md
@@ -161,6 +163,15 @@ acceptance:
     creates, so cleaning it up is in scope; it is the only rename in the
     diff.
   - >-
+    The rename carries to its two SUBCLASS overrides outside the digest
+    package — `RecordingCategoryRollupGenerator` in
+    `RetryCommandHandlerTest.java:806` and in
+    `SummaryCommandHandlerTest.java:1656`, plus each one's javadoc
+    `{@link ...#generateRollupUnconditional}` (`:778`, `:1624`). Both
+    carry `@Override`, so leaving them is a COMPILE break, not a style
+    nit. Mechanical rename only: no assertion, no stub behaviour and no
+    call count in either file changes.
+  - >-
     The five test sites setting `gen.categorySummaryEnabled = true`
     (`CategoryRollupGeneratorTest.java:42,75,101,116,130`) and the
     `generateRollup` stub override in
@@ -170,9 +181,17 @@ acceptance:
     goes. A test that disappears with the flag would be coverage lost,
     not dead code removed.
   - >-
+    The ONE exception is `CategoryRollupGeneratorTest
+    .flagOffYieldsNoRollupAndNoLlmCall` (`:56-66`, including its
+    `// categorySummaryEnabled left at its default false.` comment at
+    `:60`), which is DELETED. Its whole subject is the flag's off-state
+    — "flag off → no roll-up, no LLM call" — so once the gate is gone
+    there is no behaviour left for it to assert. It is dead code removed,
+    not coverage lost; the other five keep every assertion.
+  - >-
     `docs/spec/commands.md` §Periodic group digests loses its "Optional
-    per-category roll-up" paragraph (`:1962`), which documents the flag,
-    its default and its ship-off rationale, and `docs/design/03-commands.md:466`
+    per-category roll-up" paragraph (`:1982`), which documents the flag,
+    its default and its ship-off rationale, and `docs/design/03-commands.md:465-466`
     loses the "bypassing the digest's `category-summary-enabled` flag"
     aside describing `--short`'s bypass of a gate that no longer exists.
     The D62/D63 rows in `docs/spec/decisions.md` are checked for the
@@ -215,7 +234,7 @@ test_plan:
       (`DigestCommandHandler.java:99`) and its friendly reply.
     - >-
       `/summary --short`'s behaviour and its one-call-per-category
-      count — `renderShortBody` and `generateRollupUnconditional` keep
+      count — `renderShortBody` and the renamed `generateRollup` keep
       their existing callers working unchanged.
     - >-
       `DigestRetryServiceTest`, `DigestRetryConcurrencyIT` and the
@@ -269,8 +288,10 @@ One production dispatch point.
 
 ## Census: retiring the flag
 
-`grep -rn "category-summary-enabled\|categorySummaryEnabled" --include=*.java
---include=*.properties --include=*.md .` outside `.bench` and `docs/plan`:
+`grep -rn "category-summary-enabled\|categorySummaryEnabled\|generateRollupUnconditional"
+--include=*.java --include=*.properties --include=*.md .` outside `.bench` and
+`docs/plan` — the same three alternatives the verification acceptance item runs,
+so the table below is exactly what that grep must reduce to zero:
 
 | Site | Disposition |
 |---|---|
@@ -281,8 +302,11 @@ One production dispatch point.
 | `DigestRenderer.java:125` | **delete** — the prefix call, `generateRollup`'s only production caller |
 | `DigestRenderer.java:46-47`, `:307` | **delete** — comments describing the gate |
 | `CategoryRollupGeneratorTest.java:42,75,101,116,130` | **update** — drop the flag setup, keep every assertion |
+| `CategoryRollupGeneratorTest.java:56-66` (incl. `:60`) | **delete** — `flagOffYieldsNoRollupAndNoLlmCall` asserts only the flag's off-state |
 | `DigestRendererSectionsTest.java:140-150` | **update** — the stub override and its comment |
-| `docs/spec/commands.md:1962` | **delete** — the "Optional per-category roll-up" paragraph |
+| `RetryCommandHandlerTest.java:778,806` | **update** — `@Override` renamed with the method |
+| `SummaryCommandHandlerTest.java:1624,1656` | **update** — `@Override` renamed with the method |
+| `docs/spec/commands.md:1982` | **delete** — the "Optional per-category roll-up" paragraph |
 | `docs/design/03-commands.md:466` | **update** — the `--short` bypass aside |
 | `docs/plan/m1/tickets/M1-642`, `M1-700` | **leave** — closed tickets are a historical record |
 
