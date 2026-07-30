@@ -15,9 +15,9 @@
 | in-review | 0 |
 | escalated | 0 |
 | done | 729 |
-| deferred | 1 |
+| deferred | 2 |
 | abandoned | 21 |
-| **total** | **769** |
+| **total** | **770** |
 
 ---
 
@@ -31,10 +31,10 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-715 — post.body_summary is never written, yet EmbeddingWorker prefers it as embedding input (complexity: low, risk: low)
 - M1-716 — Decouple language enablement from bundle presence (complexity: low, risk: low)
 - M1-724 — Digest cluster selection is recency-only: the cap keeps the newest stories, never the most significant (complexity: high, risk: high)
-- M1-726 — Tagger treats a correct \"no topic fits\" as a failure and relabels the post with the source's topic tags (complexity: medium, risk: high)
 - M1-727 — Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other (complexity: medium, risk: medium)
 - M1-730 — /saved renders the ingest \"untitled\" sentinel to a reader (complexity: medium, risk: medium)
 - M1-731 — Retire infochat.digest.category-summary-enabled and reclaim the generateRollup name (complexity: low, risk: low)
+- M1-735 — Amend docs/spec/security.md §Failure handling (complexity: low, risk: low)
 
 ---
 
@@ -94,6 +94,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 ### blocked-on-external-measurement (1)
 - M1-717 → unspecified
+
+### spec-amend (1)
+- M1-726 → M1-735
 
 ---
 
@@ -985,7 +988,6 @@ M1-721 (done)
 M1-723 (done)
   └── M1-724 (pending) ← runnable
         └── M1-725 (pending)
-M1-726 (pending) ← runnable
 M1-727 (pending) ← runnable
 M1-729 (done)
 M1-730 (pending) ← runnable
@@ -995,4 +997,6 @@ M1-731 (pending) ← runnable
         ├── M1-725 (pending) [see above]
         ├── M1-733 (pending)
         └── M1-734 (pending)
+M1-735 (pending) ← runnable
+  └── M1-726 (deferred)
 ```

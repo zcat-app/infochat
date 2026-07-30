@@ -1,7 +1,7 @@
 ---
 id: M1-726
 title: "Tagger treats a correct \"no topic fits\" as a failure and relabels the post with the source's topic tags"
-status: pending
+status: deferred
 created: 2026-07-30
 last_updated: 2026-07-30
 blocked_by: []
@@ -186,11 +186,95 @@ spec_refs:
 decision_refs:
   - D19
 reviews: {}
+redteam_audits:
+  - date: 2026-07-30
+    verdict: FINDINGS
+    base: 96217c955ca1962b7ed066b75b090a190dbc9f41
+    head: working tree (uncommitted branch m1/M1-726-tagger-empty-is-not-failure)
+    verdict_file: docs/plan/m1/redteam/M1-726-2026-07-30.md
+    findings_count: 2
+    out_of_model_count: 2
+    note: |
+      Round 1 at the /m1-tick run gate, ahead of review. Both findings share
+      one root: parseTags drops non-textual JSON array elements before
+      validation, so a wrong-SHAPE tags array is indistinguishable from a
+      deliberate empty list under the invalidCount discriminator this ticket
+      adopts. The medium finding is a conformance gap against security.md
+      §Failure handling (schema-violating output must retry then take the
+      stage failure path); the low finding is the loss of the only
+      spec-committed detector for a wholly non-functioning tagger. Note that
+      security.md is explicitly out_of_scope for this ticket, so the
+      conformance gap cannot be closed by amending the promise.
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-07-30
+    category: AUDIT-EVASION
+    severity: medium
+    promise: |
+      docs/spec/security.md §Failure handling — "Schema-violating LLM output
+      (wrong JSON shape, unexpected label value, missing required field) is
+      treated identically to an unparseable reply at every stage: retry once,
+      then apply the stage-specific failure path below." and "Tagger failure →
+      fall back to source.bootstrap_tags, mark the post, throttled admin
+      notify."
+    gap: |
+      The new SUCCESS-vs-failure split keys entirely on
+      ValidationResult.invalidCount(), but invalidCount cannot see a
+      wrong-TYPED tags array: parseTags silently discards every non-textual
+      array element BEFORE validation, so {"tags":[{"name":"ai"}]},
+      {"tags":[null]} or {"tags":[1,2]} yield parsed=[] → valid=[] →
+      invalidCount=0 → NO_TAGS. A schema-violating reply is therefore
+      classified as the model's deliberate "nothing fits" answer and is
+      neither retried nor routed to the bootstrap fallback. Pre-diff the same
+      reply produced ZERO_VALID → retry → BOOTSTRAP + throttled admin notify,
+      so the diff introduces the regression. The diff's own spec text asserts
+      the invariant the code does not hold ("zero invalid means the model
+      proposed nothing" in both llm.md and 05-llm-and-embeddings.md).
+    repro: |
+      A tagger endpoint answers with the well-formed-JSON but wrong-shape body
+      {"tags":[{"name":"ai"}]} (a shape small local models really do emit).
+      parseTags drops the non-textual element, validate reports valid=[]
+      invalid=0, tryOnce returns NO_TAGS, isAnswered short-circuits on attempt
+      1, and persistCursor writes tags='{}', tagger_done=TRUE,
+      tagger_fallback=FALSE. No second attempt, no
+      tagger.fallback_to_bootstrap WARN, no throttled admin notification.
+    suggested_fix_class: input-sanitization
+  - date: 2026-07-30
+    category: AUDIT-EVASION
+    severity: low
+    promise: |
+      docs/spec/security.md §Failure handling — "Tagger failure → fall back to
+      source.bootstrap_tags, mark the post, throttled admin notify." combined
+      with §Trust boundaries item 9 — everything a generative endpoint returns
+      is endpoint-chosen input, so a hostile or compromised endpoint is in
+      scope.
+    gap: |
+      After the diff a clean {"tags":[]} on every call is a terminal success
+      for every post, so an endpoint that answers empty 100% of the time
+      drives the entire corpus to tags='{}' while emitting zero operational
+      signal: no tagger_fallback row marker, no WARN, no
+      ThrottledAdminNotifier call. The replacement observability the diff
+      cites in llm.md ("sustained high invalid rates surface an operator
+      alert") cannot fire either, because the all-empty case reports N=0 AND
+      M=0. The diff removes the only spec-committed detector for a wholly
+      non-functioning tagger stage and adds none.
+    repro: |
+      The configured TAGGER endpoint degrades (or an operator model swap
+      regresses) and returns {"tags":[]} to every request. Every ingested post
+      is persisted with tags='{}', tagger_fallback=FALSE, one LLM call each.
+      /summary <tag>, follow-tag subscriptions, the searchPosts tool and
+      per-tag digest categorization all return nothing for new content, while
+      the admin notification channel stays silent.
+    suggested_fix_class: audit-log-coverage
+clarity_check:
+  date: 2026-07-30
+  verdict: PASS
+  warnings: []
+  blockers: []
+deferred_on: M1-735
+deferred_reason: spec-amend
 escalation_reason:
 ---
 
