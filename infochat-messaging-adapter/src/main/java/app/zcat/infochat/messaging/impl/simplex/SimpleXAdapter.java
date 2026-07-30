@@ -131,8 +131,10 @@ public final class SimpleXAdapter implements MessagingAdapter {
     // CAPABILITIES.maxSendsPerSecond so the Provider cannot drive
     // simplex-chat fast enough to trip its server-side rate limit. Shared
     // across send / update / finalizeMessage — each frame draws one token.
-    private final OutboundRateLimiter outboundRate =
-            new OutboundRateLimiter(CAPABILITIES.maxSendsPerSecond(), Clock.systemUTC());
+    // Constructor-injected rather than field-initialized so a test can hand
+    // in a limiter and count acquiredCount() draws; production always gets
+    // productionRateLimiter() (M1-710).
+    private final OutboundRateLimiter outboundRate;
     /** Guarded by its own monitor — LinkedHashMap is not thread-safe. */
     private final Map<String, TrackedHandle> handles =
             new LinkedHashMap<>(64, 0.75f, true) {
@@ -202,6 +204,12 @@ public final class SimpleXAdapter implements MessagingAdapter {
         this.httpClient = null;
         this.adminNotifier = null;
         this.wsReconnectBackoff = WS_RECONNECT_BACKOFF;
+        this.outboundRate = productionRateLimiter();
+    }
+
+    /** The pacer every production instance gets: the declared cap on the system clock. */
+    private static OutboundRateLimiter productionRateLimiter() {
+        return new OutboundRateLimiter(CAPABILITIES.maxSendsPerSecond(), Clock.systemUTC());
     }
 
     /**
@@ -227,6 +235,20 @@ public final class SimpleXAdapter implements MessagingAdapter {
                    HttpClient httpClient,
                    Consumer<String> adminNotifier,
                    List<Duration> wsReconnectBackoff) {
+        this(config, httpClient, adminNotifier, wsReconnectBackoff, productionRateLimiter());
+    }
+
+    // Test seam: a limiter the caller holds, so a test can count acquiredCount()
+    // draws across a send / update / finalizeMessage sequence and pin the §6.3.6
+    // "one token per wire frame" contract (M1-710) — the affordance the Signal
+    // side already has via SignalJsonRpcClient's limiter parameter. Production
+    // wiring always takes a public constructor above and with it
+    // productionRateLimiter().
+    SimpleXAdapter(SimpleXConfig config,
+                   HttpClient httpClient,
+                   Consumer<String> adminNotifier,
+                   List<Duration> wsReconnectBackoff,
+                   OutboundRateLimiter outboundRate) {
         if (wsReconnectBackoff.isEmpty()) {
             // An empty ladder would make the recovery campaign's rung lookup
             // throw IndexOutOfBounds on its first attempt, killing the campaign
@@ -238,6 +260,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
         this.httpClient = httpClient;
         this.adminNotifier = adminNotifier;
         this.wsReconnectBackoff = List.copyOf(wsReconnectBackoff);
+        this.outboundRate = outboundRate;
     }
 
     @Override

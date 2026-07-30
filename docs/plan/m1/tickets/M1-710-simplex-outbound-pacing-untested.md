@@ -1,9 +1,9 @@
 ---
 id: M1-710
 title: "SimpleX outbound rate-limit draws are untested; the Signal twin is pinned"
-status: pending
+status: done
 created: 2026-07-27
-last_updated: 2026-07-27
+last_updated: 2026-07-30
 blocked_by: []
 files_budget: 3
 files_scope:
@@ -87,12 +87,29 @@ test_plan:
 spec_refs:
   - docs/spec/messaging.md §Capability flags (minimum set)
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-30
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 260
+      removed: 11
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-30
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 

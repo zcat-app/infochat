@@ -1,5 +1,7 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
+import app.zcat.infochat.messaging.OutboundRateLimiter;
+
 import java.net.http.HttpClient;
 import java.nio.file.Path;
 
@@ -24,6 +26,23 @@ final class SimpleXTestHarness {
                 cfg,
                 HttpClient.newHttpClient(),
                 msg -> { /* admin notifications unused here */ });
+    }
+
+    /**
+     * Same adapter, wired to a caller-supplied {@link OutboundRateLimiter} so a
+     * test can count {@code acquiredCount()} draws (M1-710). Takes the
+     * production reconnect ladder — a pacing test never reconnects.
+     */
+    static SimpleXAdapter newAdapter(FakeSimpleXProcess fake, Path tempDir,
+                                     OutboundRateLimiter outboundRate) {
+        SimpleXConfig cfg = new SimpleXConfig(
+                "/usr/bin/simplex-chat", tempDir.toString(), fake.port());
+        return new SimpleXAdapter(
+                cfg,
+                HttpClient.newHttpClient(),
+                msg -> { /* admin notifications unused here */ },
+                SimpleXAdapter.WS_RECONNECT_BACKOFF,
+                outboundRate);
     }
 
     static String ackFrame(String corrId, int i) {
