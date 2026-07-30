@@ -1,10 +1,11 @@
 ---
 id: M1-717
 title: "Swap to a multilingual embedder and recalibrate thresholds"
-status: pending
+status: deferred
 created: 2026-07-30
 last_updated: 2026-07-30
 blocked_by: []
+deferred_reason: blocked-on-external-measurement
 files_budget: 12
 files_scope:
   - infochat-collector/src/main/resources/application.properties
@@ -125,6 +126,18 @@ scaffold.
 See frontmatter `out_of_scope`.
 
 ## Notes
+
+**Why `status: deferred` and not `pending`.** The gate on this ticket is
+an out-of-repo measurement, not another ticket, so `blocked_by` cannot
+express it and `scripts/regen-status.py` kept listing the ticket under
+"Runnable now" — where a batch scheduler would pick it up and hit the
+`acceptance: SKELETON` wall at `start`. `deferred` is what the board
+understands: it drops out of the runnable set, and M1-718/719/720 (which
+already carry `blocked_by: [M1-716, M1-717]`) now draw the regen-status
+"blocker is deferred" warning instead of silently coming up runnable the
+moment M1-716 lands. Reopen with `/m1-tick reopen M1-717` once the results
+file named in §Context carries measured values in its §1 and §3; its §4
+per-language verdicts are what release M1-718/719/720 individually.
 
 **Spec amendment required.** Four of the six thresholds are hardcoded
 Java constants whose comments state that changing them requires a spec

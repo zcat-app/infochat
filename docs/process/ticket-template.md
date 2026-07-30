@@ -95,6 +95,10 @@ deferred_on: M<N>-XXX          # (status: deferred) the blocker this is paused o
                                # lineage pointer to the superseding/obsoleting ticket on status: abandoned
 deferred_reason:               # (status: deferred — work still intended, will be reopened) one of:
                                #   blocked-on-new-ticket | spec-amend | decomposed (umbrella retains integration work)
+                               #   | blocked-on-external-measurement (gated on an out-of-repo input —
+                               #     a benchmark run, a hardware evaluation, a vendor answer — that no
+                               #     ticket can represent, so `blocked_by` cannot hold it and the board
+                               #     would otherwise list the ticket as runnable)
 abandoned_reason:              # (status: abandoned — decided against, terminal) one of:
                                #   decomposed (fully replaced by children) | superseded | obsoleted-by-spec-amend | wont-do-infeasible
 spec_amend_for: docs/spec/X.md §Y    # set when this ticket exists to amend the cited spec section
