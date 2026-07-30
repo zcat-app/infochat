@@ -158,6 +158,42 @@
     <build>
         <plugins>
             <!--
+                 Module-DAG enforcement (docs/design/09-reference.md §9.1): the
+                 infochat-core row promises no user-facing surface and no
+                 infochat-messaging-adapter dependency, and the DAG diagram puts
+                 core in the leaf row with (none) dependencies. maven-enforcer
+                 bannedDependencies evaluates per running module, so the rule
+                 lives HERE (core only) — a parent-level ban would also break the
+                 Provider, which depends on infochat-messaging-adapter
+                 legitimately. Mirrors the proven collector→messaging-adapter
+                 execution. Version is managed in the parent <pluginManagement>.
+                 Build-time only; no effect on the shipped runtime artifact.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>ban-messaging-adapter-from-core</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <exclude>app.zcat.infochat:infochat-messaging-adapter</exclude>
+                                    </excludes>
+                                    <message>infochat-core must not depend on infochat-messaging-adapter — core promises no user-facing surface and no messaging dependency (module-DAG rule, docs/design/09-reference.md §9.1).</message>
+                                </bannedDependencies>
+                            </rules>
+                            <fail>true</fail>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!--
                  NullAway + Error Prone (decision D48). The full config lives in
                  the parent <pluginManagement> and Maven applies it to the
                  lifecycle compile execution of EVERY module, so infochat-core

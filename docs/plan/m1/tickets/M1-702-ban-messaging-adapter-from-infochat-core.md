@@ -1,9 +1,9 @@
 ---
 id: M1-702
 title: "Ban infochat-messaging-adapter from infochat-core"
-status: pending
+status: done
 created: 2026-07-26
-last_updated: 2026-07-26
+last_updated: 2026-07-30
 blocked_by: []
 remediates: M1-698
 files_budget: 1
@@ -53,12 +53,47 @@ spec_refs:
   - docs/design/09-reference.md §9.1 Module dependency DAG
   - docs/spec/security.md §LLM output sanitizer
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-30
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 161
+      removed: 9
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-07-30
+    verdict: CLEAN
+    base: 5a63ff1a26eb70229139ee9020a0baa767551e93
+    head: "<working tree>"
+    verdict_file: docs/plan/m1/redteam/M1-702-2026-07-30.md
+    out_of_model_count: 3
+    note: |
+      Ran at the /m1-tick run redteam gate, ahead of review, against the
+      uncommitted working-tree diff (branch had zero commits). No findings:
+      the diff is a build-time bannedDependencies rule that only removes a
+      capability, so it opens no new attack surface. Three out-of-model
+      observations, none blocking: (1) docs/spec/security.md's residual list
+      now understates the shipped control, since core's edge is no longer
+      convention-only — a spec: commit could retire that clause; (2)
+      reflective invocation and (3) direct-transport access remain accepted
+      residual risk, unchanged by this diff, as does the messaging-adapter
+      module's own necessary use of the SPI.
+clarity_check:
+  date: 2026-07-30
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 
