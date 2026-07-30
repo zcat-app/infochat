@@ -11,6 +11,9 @@ files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/render/DisplayHeadline.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SavedCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/render/DisplayHeadlineTest.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
+  - infochat-provider/src/main/resources/bundles/en.properties
+  - infochat-provider/src/main/resources/bundles/cs.properties
 complexity: medium
 risk: medium
 round_cap: 2
@@ -65,6 +68,14 @@ acceptance:
   - >-
     A saved post with neither title nor body still renders a stable
     line — no blank where the headline was, and no leaked sentinel.
+    `DisplayHeadline` returns the empty string for such a post and its
+    contract requires the caller to omit the headline token TOGETHER
+    with the separator that would have followed it, which the single
+    fixed `reply.saved.line` template cannot express. A second bundle
+    template (`reply.saved.line.no-headline`) carries the token-less
+    form, declared in `BundleKeys` and present in BOTH `en.properties`
+    and `cs.properties` (D43 bilateral keyset). No hardcoded English
+    stand-in — the line's language is the scope's.
   - >-
     `SavedCommandHandlerTest`'s existing title-rendering assertions are
     updated in step, not deleted.
