@@ -125,14 +125,14 @@ if (!pre || !pre.ok) {
 log(`preflight OK — ${pre.notes}`)
 
 // Model policy (user directive 2026-07-06): security-critical tickets are solved by Fable 5,
-// the rest by Opus 4.7. "Critical" = the ticket's own frontmatter says security_relevant:true
+// the rest by Opus. "Critical" = the ticket's own frontmatter says security_relevant:true
 // OR risk:high (preflight read these into pre.tickets). Deriving from the flags rather than a
 // fixed id list keeps the rule correct even if LINES is overridden via args. For this batch it
 // resolves to: fable → M1-579/580/581/582/583/584 ; opus-4-7 → M1-577/578/585.
 const modelFor = (id) => {
   const meta = pre.tickets && pre.tickets[id]
   const critical = !!meta && (meta.security_relevant === true || meta.risk === 'high')
-  return critical ? 'claude-fable-5' : 'claude-opus-4-7'
+  return critical ? 'claude-fable-5' : 'claude-opus-5'
 }
 
 // ── Two sequential lines, in parallel ────────────────────────────────────
