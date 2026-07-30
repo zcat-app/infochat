@@ -8,6 +8,12 @@ Thumbs.db
 .idea/
 .reviews/
 .scratch/
+# Local-only bulk working data: .bench/ holds unpacked test/migration backups
+# (DB dumps, SimpleX identity DBs, secrets.env) plus the model-evaluation plan and
+# results; .models/ holds LLM weights and .embeddings/ holds embedding-model GGUFs.
+.bench/
+.models/
+.embeddings/
 target/
 docs/deep-code-review/
 docker-compose.override.yml
