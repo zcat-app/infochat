@@ -5,11 +5,12 @@ status: pending
 created: 2026-07-30
 last_updated: 2026-07-30
 blocked_by: []
-files_budget: 6
+files_budget: 7
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/tagger/TaggerWorker.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/tagger/TaggerWorkerTest.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/tagger/TaggerWorkerIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/UntaggedPostRetrievalIT.java
   - docs/spec/llm.md
   - docs/design/05-llm-and-embeddings.md
 complexity: medium
@@ -49,7 +50,18 @@ out_of_scope:
   - >-
     The retry-backoff policy (`retryBackoff.sleepBeforeRetry()` on the
     UNREACHABLE path, M1-221). Unchanged.
-  - any other module
+  - >-
+    Any module other than `infochat-collector`, with ONE exception: the
+    new `UntaggedPostRetrievalIT` under `infochat-provider`'s TEST tree.
+    Acceptance item 5's retrieval and Other-bucket assertions read
+    `EligiblePostQuery`, `DigestPostCollector` and `DigestCategorizer`,
+    all of which live in `infochat-provider`, while
+    `infochat-collector`'s pom depends on core, ssrf and llm-adapter
+    only — so a collector-side test cannot reach them and no collector
+    test imports `app.zcat.infochat.provider` today. No provider MAIN
+    source is touched. The IT must be a NEW file so the provider-side
+    diff stays purely additive while M1-722 / M1-724 / M1-727 own the
+    digest test surface.
 acceptance:
   - >-
     A first-attempt reply that parses cleanly and proposes NO tags at
@@ -96,10 +108,16 @@ acceptance:
     (`EligiblePostQuery.java:246`, `DigestPostCollector` POSTS_ALL_SQL).
     Where it is retrieved it carries no qualifying tag and therefore
     renders in the D62 **Other** bucket, never under a topic header.
-    An IT pins the user-visible point: a post the worker tags empty
-    renders under Other rather than under the topic header its source's
+    `UntaggedPostRetrievalIT`, under `infochat-provider`'s test tree,
+    pins the user-visible point: a post carrying `tags = '{}'` renders
+    under Other rather than under the topic header its source's
     `bootstrap_tags` would previously have placed it under, and no
-    longer matches `/summary <that-tag>`.
+    longer matches `/summary <that-tag>`. It SEEDS that post directly —
+    the tagger does not run in the Provider — so it pins the retrieval
+    consequence of the empty-tags state, while the collector-side tests
+    pin that the tagger is what produces that state. Splitting the
+    assertion across the two modules is forced by the module graph, not
+    a choice: see §out_of_scope.
   - >-
     `spec/llm.md` §Failure handling is amended to distinguish the two
     cases. It currently says the bootstrap fallback "fires only when
@@ -126,13 +144,23 @@ test_plan:
       bootstrap; `SCHEMA_VIOLATING` then clean-empty likewise.
     - >-
       infochat-collector/src/test/java/app/zcat/infochat/collector/eval/tagger/TaggerWorkerIT.java
-      — a post the tagger empties renders under the Other bucket rather
-      than under the topic header its source's `bootstrap_tags` would
-      previously have placed it under; it does NOT match
-      `/summary <that-tag>`; and it IS still retrieved by a bare
-      `/summary` in a `tag_mode='ALL'` scope with ≤5 followed tags,
-      which pins that the ticket narrows topic-keyed reachability
-      without making the post disappear from the corpus.
+      (existing file from M1-034a — coverage added, not created) — end
+      to end through the collector pipeline: a post whose tagger reply
+      is a clean `{"tags": []}` is persisted with `tags = '{}'`,
+      `tagger_done = TRUE` and `tagger_fallback = FALSE`, and its
+      source's `bootstrap_tags` do NOT appear on the row. Collector-side
+      only: it asserts the STORED state, not what retrieval does with
+      it.
+    - >-
+      infochat-provider/src/test/java/app/zcat/infochat/provider/digest/UntaggedPostRetrievalIT.java
+      (new) — seeds a READY post with `tags = '{}'` whose source carries
+      non-empty `bootstrap_tags`, then pins all three reachability legs
+      against the real queries: it renders under the D62 Other bucket
+      rather than under the topic header those `bootstrap_tags` name; it
+      does NOT match `/summary <that-tag>`; and it IS still retrieved by
+      a bare `/summary` in a `tag_mode='ALL'` scope with ≤5 followed
+      tags — which pins that the ticket narrows topic-keyed
+      reachability without making the post disappear from the corpus.
   preserves:
     - >-
       Every existing `TaggerWorkerTest` assertion for the
