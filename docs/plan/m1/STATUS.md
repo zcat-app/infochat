@@ -10,12 +10,12 @@
 
 | Status | Count |
 |---|---|
-| pending | 25 |
+| pending | 24 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 718 |
-| deferred | 0 |
+| deferred | 1 |
 | abandoned | 20 |
 | **total** | **763** |
 
@@ -38,7 +38,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-714 — Summary/digest headline renders a raw post title: unbounded for social sources, blank for Bluesky (complexity: medium, risk: medium)
 - M1-715 — post.body_summary is never written, yet EmbeddingWorker prefers it as embedding input (complexity: low, risk: low)
 - M1-716 — Decouple language enablement from bundle presence (complexity: low, risk: low)
-- M1-717 — Swap to a multilingual embedder and recalibrate thresholds (complexity: high, risk: high)
 - M1-721 — Digest length is a function of tag count: nothing bounds how many category sections a digest renders (complexity: medium, risk: medium)
 - M1-723 — post.likes / post.reposts / post.social_score are declared, parsed at two fetchers, and never persisted (complexity: medium, risk: medium)
 - M1-726 — Tagger treats a correct \"no topic fits\" as a failure and relabels the post with the source's topic tags (complexity: medium, risk: high)
@@ -59,9 +58,9 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-718 — blocked_by: M1-716 (pending), M1-717 (pending)
-- M1-719 — blocked_by: M1-716 (pending), M1-717 (pending)
-- M1-720 — blocked_by: M1-716 (pending), M1-717 (pending)
+- M1-718 — blocked_by: M1-716 (pending), M1-717 (deferred)
+- M1-719 — blocked_by: M1-716 (pending), M1-717 (deferred)
+- M1-720 — blocked_by: M1-716 (pending), M1-717 (deferred)
 - M1-722 — blocked_by: M1-721 (pending)
 - M1-724 — blocked_by: M1-723 (pending)
 - M1-725 — blocked_by: M1-722 (pending), M1-724 (pending)
@@ -99,7 +98,8 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 ## Deferred
 
-_(none)_
+### blocked-on-external-measurement (1)
+- M1-717 → unspecified
 
 ---
 
@@ -980,7 +980,7 @@ M1-716 (pending) ← runnable
   ├── M1-718 (pending)
   ├── M1-719 (pending)
   └── M1-720 (pending)
-M1-717 (pending) ← runnable
+M1-717 (deferred)
   ├── M1-718 (pending) [see above]
   ├── M1-719 (pending) [see above]
   └── M1-720 (pending) [see above]
