@@ -6,7 +6,7 @@ created: 2026-07-30
 last_updated: 2026-07-30
 blocked_by:
   - M1-714
-  - M1-722
+  - M1-731
 files_budget: 8
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/CategoryRollupGenerator.java
@@ -49,10 +49,10 @@ out_of_scope:
     and never blocks the digest. Unchanged.
   - >-
     `infochat.digest.category-summary-enabled` and the gated
-    `generateRollup` wrapper. M1-722 DELETES both and renames
+    `generateRollup` wrapper. M1-731 DELETES both and renames
     `generateRollupUnconditional` to `generateRollup`; this ticket runs
     after that and edits `buildPrompt` only. Both tickets touch
-    `CategoryRollupGenerator.java`, hence `blocked_by: M1-722` — a diff
+    `CategoryRollupGenerator.java`, hence `blocked_by: M1-731` — a diff
     here that re-introduces the flag, or that deletes it a second time,
     has left scope.
   - >-

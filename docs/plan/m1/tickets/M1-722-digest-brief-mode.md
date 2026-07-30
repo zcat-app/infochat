@@ -1,7 +1,8 @@
 ---
 id: M1-722
 title: "Digest categories render a prose paragraph per cluster: replace with count + roll-up + headlines, and add /digest brief|normal|full"
-status: pending
+status: abandoned
+abandoned_reason: decomposed
 created: 2026-07-30
 last_updated: 2026-07-30
 blocked_by:
@@ -403,11 +404,34 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-30
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 
 # M1-722: the hybrid digest body
+
+> **ABANDONED — decomposed 2026-07-30.** Three consecutive plan passes returned
+> `OUTLINE FAILED`, each naming a *different* unenumerated seam
+> (`generateRollupUnconditional`'s `@Override`s → `RecordingDigestRenderer
+> .renderSections` → the six `DigestRendererTest.render()` sites plus
+> `DigestRetryService`). That pattern reads as a ticket too wide for its budget
+> rather than one imprecisely worded, so it was split four ways rather than
+> refined a third time:
+>
+> | Child | Scope | Depends on |
+> |---|---|---|
+> | M1-731 | Retire `category-summary-enabled`; rename `generateRollupUnconditional` | — |
+> | M1-732 | `groups.digest_mode` (V66) + the hybrid category body | M1-731 |
+> | M1-733 | `/digest brief\|normal\|full` + `AuditAction.DIGEST_MODE_SET` | M1-732 |
+> | M1-734 | Narrow D63: batch brief/normal delivery into one message | M1-732 |
+>
+> This file is kept as the audit trail. Its censuses were re-verified live
+> against the tree at `2e47e3ec` and are accurate; each child carries forward
+> the part that applies to it. Nothing here is open work.
 
 ## Census
 
@@ -592,6 +616,113 @@ window — a silent, spec-visible regression on a `security_relevant`
 ticket, and the kind of incidental control §10 of the engineering rules
 exists to catch. `DIGEST_MODE_SET` is a new verb precisely so no existing
 reader's `WHERE` clause changes meaning.
+
+## OUTLINE FAILED (pass 3) — OPEN
+
+Recorded by `/m1-tick start` (plan-writer subagent, 2026-07-30), verbatim.
+Every cited site was independently re-verified in the main session before
+escalating.
+
+REASON: No outline exists that satisfies both `acceptance` and
+`test_plan.preserves`. Acceptance item 4 makes `full` lift the per-section item
+cap to `Integer.MAX_VALUE`, and items 2/5 make `normal`/`brief` render **zero**
+per-cluster prose. `DigestRendererTest` — which `test_plan.preserves` guarantees
+keeps "Every … ASSERTION", with `:206`/`:285` taking "the mode argument and
+nothing else" — contains six *unenumerated* `render(posts, "en")` call sites
+whose assertions are per-cluster-prose and item-cap assertions. Under `normal`
+three of them fail; under `full` two of them still fail, because the cap lift
+deletes the `+N more` line and the prose-call count they assert. There is no
+mode assignment for `DigestRenderer.render` (`DigestRenderer.java:73`, whose
+only callers are these tests plus `DigestRendererSectionsTest:130` — it has
+**no** production caller) under which those tests stay green, so the diff must
+rewrite or delete pre-existing assertions the ticket affirmatively forbids
+touching. This is the same virtual-dispatch/behaviour-inversion census class the
+ticket already refined for twice (the `generateRollupUnconditional`
+`@Override`s, then `RecordingDigestRenderer.renderSections`), and it comes with
+a security-control side effect: under `normal` the sanitize-before-persist pin
+`renderSections_stripsAdminCommandTokens_beforePersistenceAndReplay`
+(`DigestRendererTest.java:183-216`) passes **vacuously**, since the injected
+`/grant-admin` prose never enters a section — the "byte-identity proof"
+`test_plan.preserves` names would keep its name and lose its teeth
+(engineering-rules §10, "Tests are controls too"). Separately, `/retry --digest`
+cannot honour the batched delivery: `DigestRetryService.replayMissing`
+(`:196-197`) calls the per-category `DigestDelivery.deliver`,
+`DigestRetryService.java` is not in `files_scope`, `GroupReplayMeta` carries no
+mode, and `files_scope` already lists exactly 26 paths against
+`files_budget: 26` — zero headroom for a 27th file. So a failed `normal` batch
+(acceptance item 11: "every slug missing and the whole batch re-sends")
+re-sends as N per-category messages, the exact shape acceptance item 10 removes.
+
+SUGGESTED ESCALATION: refine
+
+EVIDENCE:
+
+- **Unenumerated `DigestRendererTest` inversions (hard conflict with
+  `test_plan.preserves`).**
+  - `:102-120` `overflowLineNowSteersToSummaryFull` — sets
+    `renderer.categoryItemCap = 2;` then asserts
+    `result.contains("+2 more — /summary ai --full to see them")` and
+    `assertEquals(2, proseGenerator.callCount())`. `full` (cap
+    `Integer.MAX_VALUE`) emits no overflow line and 4 prose calls;
+    `normal`/`brief` emit no overflow line and 0 prose calls. Fails in every
+    mode.
+  - `:122-141` `overflowForOtherBucketSteersToBareSummaryFull` — same shape
+    (`categoryItemCap = 2`, `+2 more — /summary --full to see them`). Fails in
+    every mode.
+  - `:52-68` `render_producesLocalizedProse` —
+    `assertTrue(result.contains("LLM digest summary for cluster"))` +
+    `assertTrue(proseGenerator.callCount() > 0)`. Fails if `render` delegates
+    with `normal`, which is exactly what §"Census: the dispatch seams" row
+    `DigestRenderer.java:73 (render)` prescribes ("thin join delegates with
+    `normal`").
+  - The refine must (a) pick the mode `render(List,String)` delegates with and
+    say so in `acceptance`, (b) give these inversions their own acceptance item
+    in the same shape item 17 already uses for `DigestRendererSectionsTest:216`
+    and `DigestWorkerTest:363`, and (c) state whether
+    `renderSections_stripsAdminCommandTokensBeforePersistenceAndReplay` (`:206`)
+    and the degraded-arm test (`:285`) pass `full` — they are non-vacuous only
+    in `full`.
+- **Orphaned control the census missed.** With `full`'s cap lifted and
+  `normal`/`brief` rendering no items, `DigestRenderer.java:153-165` is the sole
+  producer of `reply.digest.category.more` / `reply.digest.category.more_other`
+  (`en.properties:836,838`, `cs.properties:634,636`,
+  `BundleKeys.REPLY_DIGEST_CATEGORY_MORE` / `_MORE_OTHER`). Both keys lose their
+  last caller in every mode. The ticket enumerates the `category-summary-enabled`
+  orphans exhaustively but not these; the refine should state delete-or-keep,
+  since all three files are already in `files_scope`.
+- **Replay delivery shape (out-of-scope, no budget).**
+  `DigestRetryService.java:196-197` →
+  `digestDelivery.deliver(adapter, meta.upstreamGroupId(), groupId, coords.slotFiredAt, missing)`;
+  slug filter at `:166-171`; `fallbackRerun` at `:218`.
+  `DigestRetryService.java` is absent from `files_scope`, and `files_scope`
+  holds exactly 26 entries against `files_budget: 26`. Refine must either add
+  `DigestRetryService.java` (+ raise the budget) so replay batches in
+  `normal`/`brief`, or add an acceptance item stating the per-category replay is
+  an accepted residual.
+- **Mode type has no file.** With the budget fully claimed, a `DigestMode` enum
+  cannot be a new file; it must nest in an in-scope class (precedents:
+  `DigestWorker.SlotOutcome` at `DigestWorker.java:127`,
+  `DigestRenderer.RenderedSection` at `DigestRenderer.java:477`). Worth stating
+  so the developer does not create a 27th file.
+- **Two non-resolving doc references (fix while refining).**
+  `docs/design/07-deployment.md` has no §"Configuration surface" heading — its
+  headings are `## 7.3 Configuration sources and precedence` (`:117`) and
+  `## 7.4 Canonical application.properties` (`:131`), and the sibling key
+  `infochat.digest.max-categories` sits at `07-deployment.md:300`. And
+  acceptance item 22's "the retired `infochat.digest.category-summary-enabled`
+  row is removed from the same section" targets a row that does not exist: a
+  `grep` over `docs/` excluding `docs/plan` finds the key only at
+  `docs/spec/commands.md:1983` and `docs/design/03-commands.md:466`, both
+  already owned by acceptance item 24.
+
+Confirmed sound and expected to survive a refine unchanged: `audit_log.action`
+is `TEXT` with no CHECK (`V5__identity_audit.sql:256,272-275`), so
+`DIGEST_MODE_SET` needs no migration; `V66` is free; `DisplayHeadline.of(Post,
+LlmOutputSanitizer)` is `public static`, reachable from `provider.digest`, and
+already carries the M1-697 sanitize-per-author-field control, with
+`DegradedDigestRenderer.java:65-68` as the empty-headline idiom;
+`DigestWorkerClockTest` does stay zero-diff; and `DocumentedConfigKeyParityTest`
+behaves exactly as acceptance item 23 describes.
 
 ## OUTLINE FAILED — RESOLVED by the refine of 2026-07-30
 

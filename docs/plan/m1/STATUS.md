@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 15 |
+| pending | 18 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 729 |
 | deferred | 1 |
-| abandoned | 20 |
-| **total** | **765** |
+| abandoned | 21 |
+| **total** | **769** |
 
 ---
 
@@ -30,11 +30,11 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-707 — Operator-settable default timezone for new groups (complexity: low, risk: medium)
 - M1-715 — post.body_summary is never written, yet EmbeddingWorker prefers it as embedding input (complexity: low, risk: low)
 - M1-716 — Decouple language enablement from bundle presence (complexity: low, risk: low)
-- M1-722 — Digest categories render a prose paragraph per cluster: replace with count + roll-up + headlines, and add /digest brief|normal|full (complexity: high, risk: high)
 - M1-724 — Digest cluster selection is recency-only: the cap keeps the newest stories, never the most significant (complexity: high, risk: high)
 - M1-726 — Tagger treats a correct \"no topic fits\" as a failure and relabels the post with the source's topic tags (complexity: medium, risk: high)
 - M1-727 — Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other (complexity: medium, risk: medium)
 - M1-730 — /saved renders the ingest \"untitled\" sentinel to a reader (complexity: medium, risk: medium)
+- M1-731 — Retire infochat.digest.category-summary-enabled and reclaim the generateRollup name (complexity: low, risk: low)
 
 ---
 
@@ -54,8 +54,11 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-718 — blocked_by: M1-716 (pending), M1-717 (deferred)
 - M1-719 — blocked_by: M1-716 (pending), M1-717 (deferred)
 - M1-720 — blocked_by: M1-716 (pending), M1-717 (deferred)
-- M1-725 — blocked_by: M1-722 (pending), M1-724 (pending)
-- M1-728 — blocked_by: M1-714 (done), M1-722 (pending)
+- M1-725 — blocked_by: M1-732 (pending), M1-724 (pending)
+- M1-728 — blocked_by: M1-714 (done), M1-731 (pending)
+- M1-732 — blocked_by: M1-731 (pending)
+- M1-733 — blocked_by: M1-732 (pending)
+- M1-734 — blocked_by: M1-732 (pending)
 
 ---
 
@@ -98,7 +101,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 Tickets decided against — not implemented as this ticket. Terminal: not reopenable via the driver's `reopen`. `abandoned_reason` records why (`decomposed` = split into shipped children; `superseded` = absorbed by another ticket; `obsoleted-by-spec-amend` = a spec change dropped the requirement; `wont-do-infeasible` = evaluated and judged not worth building). See `docs/process/workflow.md` §Status values.
 
-### decomposed (9)
+### decomposed (10)
 - M1-034 — Tagger + Embedding pipeline + status→READY + new_post NOTIFY
 - M1-318 — Derive per-adapter bot contact id from adapter identity material (SimpleX queue address, Signal ACI)
 - M1-493 — Schema hardening: NOT NULL upstream_identifier + approve_quarantine phantom NOTIFY
@@ -108,6 +111,7 @@ Tickets decided against — not implemented as this ticket. Terminal: not reopen
 - M1-631 — Default /invite create to --open; fix/retire --contact
 - M1-648 — Semantic command-intent index with deterministic answer composition
 - M1-687 — /summary renders the categorized digest form by default
+- M1-722 — Digest categories render a prose paragraph per cluster: replace with count + roll-up + headlines, and add /digest brief|normal|full
 
 ### obsoleted-by-spec-amend (1)
 - M1-314 — Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed
@@ -965,10 +969,8 @@ M1-713 (done)
   ├── M1-711 (done)
   └── M1-712 (done)
 M1-714 (done)
-  ├── M1-722 (pending) ← runnable
-  │     ├── M1-725 (pending)
-  │     └── M1-728 (pending)
-  └── M1-728 (pending) [see above]
+  ├── M1-722 (abandoned)
+  └── M1-728 (pending)
 M1-715 (pending) ← runnable
 M1-716 (pending) ← runnable
   ├── M1-718 (pending)
@@ -979,12 +981,18 @@ M1-717 (deferred)
   ├── M1-719 (pending) [see above]
   └── M1-720 (pending) [see above]
 M1-721 (done)
-  └── M1-722 (pending) [see above]
+  └── M1-722 (abandoned) [see above]
 M1-723 (done)
   └── M1-724 (pending) ← runnable
-        └── M1-725 (pending) [see above]
+        └── M1-725 (pending)
 M1-726 (pending) ← runnable
 M1-727 (pending) ← runnable
 M1-729 (done)
 M1-730 (pending) ← runnable
+M1-731 (pending) ← runnable
+  ├── M1-728 (pending) [see above]
+  └── M1-732 (pending)
+        ├── M1-725 (pending) [see above]
+        ├── M1-733 (pending)
+        └── M1-734 (pending)
 ```

@@ -5,7 +5,7 @@ status: pending
 created: 2026-07-30
 last_updated: 2026-07-30
 blocked_by:
-  - M1-722
+  - M1-732
   - M1-724
 files_budget: 9
 files_scope:
@@ -144,6 +144,14 @@ escalation_reason:
 ---
 
 # M1-725: the digest has no lead
+
+> **M1-722 was decomposed on 2026-07-30 (abandoned, `decomposed`).** This
+> ticket's `blocked_by` now names **M1-732**, which owns the category body
+> (count + roll-up + headlines) that the acceptance items below build on.
+> The prose references to "M1-722" throughout this file still read correctly
+> as *behaviour*, but retarget them when authoring: they mean **M1-732**,
+> EXCEPT the "batched delivery / two messages" item, which is **M1-734**
+> (delivery batching was split out because it needs `DigestRetryService`).
 
 ## Context
 
