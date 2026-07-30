@@ -167,8 +167,12 @@ class BlueskyFetcherTest {
         Map<String, String> meta = first.rawMetadata();
         assertEquals("alice.bsky.social", meta.get("handle"));
         assertEquals("Alice Example", meta.get("displayName"));
-        assertEquals("42", meta.get("likeCount"));
-        assertEquals("7", meta.get("repostCount"));
+        // M1-723: the engagement counts moved off rawMetadata onto typed
+        // columns. Retargeted rather than dropped so the end-to-end fetch
+        // path keeps pinning both.
+        assertEquals(42, first.likes());
+        assertEquals(7, first.reposts());
+        assertEquals(2 * 7 + 42, first.socialScore());
     }
 
     @Test

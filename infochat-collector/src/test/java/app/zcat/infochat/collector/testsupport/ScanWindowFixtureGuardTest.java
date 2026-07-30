@@ -106,6 +106,7 @@ class ScanWindowFixtureGuardTest {
             "app.zcat.infochat.collector.fetcher.reddit.RedditResponseParserItemCapTest",
             "app.zcat.infochat.collector.fetcher.reddit.RedditResponseParserNameValidationTest",
             "app.zcat.infochat.collector.fetcher.reddit.RedditResponseParserPermalinkTest",
+            "app.zcat.infochat.collector.fetcher.reddit.RedditResponseParserSocialSignalTest",
             "app.zcat.infochat.collector.fetcher.rss.RssFeedParserTest",
             "app.zcat.infochat.collector.linking.LinkingJobBehaviorIT",
             "app.zcat.infochat.collector.linking.LinkingJobIT",

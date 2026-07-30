@@ -1,11 +1,11 @@
 ---
 id: M1-723
 title: "post.likes / post.reposts / post.social_score are declared, parsed at two fetchers, and never persisted"
-status: pending
+status: done
 created: 2026-07-30
 last_updated: 2026-07-30
 blocked_by: []
-files_budget: 12
+files_budget: 14
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/outbox/PostPersister.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/bluesky/BlueskyResponseParser.java
@@ -17,6 +17,8 @@ files_scope:
   - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/bluesky/BlueskyFetcherTest.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/reddit/RedditResponseParserSocialSignalTest.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/reddit/RedditFetcherTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/testsupport/ScanWindowFixtureGuardTest.java
+  - docs/plan/m1/scan-window-fixture-census.md
   - docs/design/02-schema.md
   - docs/design/05-llm-and-embeddings.md
 complexity: medium
@@ -160,6 +162,19 @@ test_plan:
       mapped to reposts; a negative score persists negative.
   modifies:
     - >-
+      infochat-collector/src/test/java/app/zcat/infochat/collector/testsupport/ScanWindowFixtureGuardTest.java
+      — the new Reddit suite joins BENIGN_BASELINE alongside the three
+      sibling parser suites already listed there. Its FETCHED_AT is
+      parser input: RedditResponseParser.parse stamps it onto the
+      NormalizedPost and substitutes it for a missing created_utc, never
+      comparing it against now, so there is no pickup gate to detach
+      from (engineering-rules §9's first benign category).
+    - >-
+      docs/plan/m1/scan-window-fixture-census.md — the new suite is added
+      to the existing parser-input bullet that already names
+      RssFeedParserTest and the three sibling Reddit suites, per the
+      guard's "record why" requirement.
+    - >-
       infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/bluesky/BlueskyFetcherTest.java
       — the two rawMetadata assertions at lines 170-171 move onto
       first.likes() / first.reposts(). Retargeted, not dropped: the
@@ -197,11 +212,133 @@ spec_refs:
   - docs/design/05-llm-and-embeddings.md §5.4.5
 decision_refs:
   - D33
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-30
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: PASS
+      assertion_adequacy: PASS
+    diff_stats:
+      files: 18
+      added: 1335
+      removed: 32
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
+redteam_findings:
+  - date: 2026-07-30
+    category: INJECTION
+    severity: low
+    promise: |
+      docs/spec/security.md §Threat model — "The Collector is exposed to
+      arbitrary feed content. Every RSS publisher, Reddit poster, Bluesky
+      user, etc. is untrusted." §Trust boundaries item 9 sets the in-model
+      standard for a wire-derived NUMERIC crossing a trust boundary:
+      provider-reported numeric usage is checked at the boundary so no
+      counter "can be driven backwards or inflated to a magnitude that
+      swamps later honest increments". The diff introduces the ingest-side
+      mirror and asserts the same bound in NormalizedPost's javadoc.
+    gap: |
+      The clamp is applied to an int that has already lost its magnitude
+      and its SIGN. Both parsers admit any JSON numeric node and narrow it
+      with asInt(), which is a truncating cast, not a saturating one, so a
+      JSON integer outside int range wraps modulo 2^32 BEFORE
+      NormalizedPost's compact constructor and clampCount ever see it.
+      likeCount 2147483648 becomes -2147483648, clamps to
+      -MAX_ENGAGEMENT_COUNT and yields socialScore -1610612733 — the exact
+      negative the javadoc says cannot occur. likeCount 4294967296 becomes
+      exactly 0 and is persisted as a non-NULL 0, the precise null-vs-zero
+      conflation the boundary exists to prevent. Both diff tests stop at
+      2147483647, one below the first wrapping value, so nothing pins it.
+    repro: |
+      A hostile or compromised bluesky/reddit upstream (the case the threat
+      model names directly) answers with a well-formed feed entry carrying
+      "likeCount": 2147483648, "repostCount": 2147483648. intOrNull accepts
+      them (isNumber() is true), asInt() wraps each to -2147483648,
+      clampCount floors each at -536870911, and PostPersister stores
+      likes=-536870911, reposts=-536870911, social_score=-1610612733.
+      Repeat with "likeCount": 4294967296 to store a fabricated likes=0 /
+      social_score=0 on a row that should have carried a clamped magnitude
+      or SQL NULL. Developer-confirmed against Jackson 2.21: asInt() yields
+      -2147483648, 0 and 1661992959 for 2147483648, 4294967296 and
+      99999999999999999999 respectively; canConvertToInt() is false for all.
+    suggested_fix_class: input-sanitization
+    remediated: 2026-07-30
+    remediation: |
+      Both parsers' intOrNull now SATURATE instead of narrowing: gated on
+      JsonNode.canConvertToInt(), an out-of-range value becomes
+      Integer.MIN_VALUE / MAX_VALUE by sign (decimalValue().signum())
+      before NormalizedPost's magnitude clamp runs, so the clamp bounds a
+      value that reached int intact. Verified against Jackson 2.21:
+      2147483648 now yields +MAX_ENGAGEMENT_COUNT (was -536870911),
+      4294967296 yields +MAX_ENGAGEMENT_COUNT (was a fabricated 0), and
+      -2147483649 yields -MAX_ENGAGEMENT_COUNT (was +536870911, a sign
+      flip the original finding did not name). Honest in-range values are
+      byte-identical. NormalizedPost's javadoc now states the saturate-
+      never-narrow obligation as part of the record's contract, since the
+      bound is only meaningful for a value that reached int intact. Six
+      new tests pin the wrap boundaries in both parser suites (the prior
+      tests stopped at 2147483647, one below the first wrapping value).
+redteam_audits:
+  - date: 2026-07-30
+    verdict: FINDINGS
+    base: 312e6f46de01327a677aea13cb776d05154ed12f
+    head: "<working tree>"
+    verdict_file: docs/plan/m1/redteam/M1-723-2026-07-30.md
+    findings_count: 1
+    out_of_model_count: 2
+    note: |
+      Ran at the /m1-tick run redteam gate, ahead of review, against the
+      uncommitted working tree (branch carried 0 commits). The skill's
+      step-1 merged-form grep matches the ticket-spec refine commit
+      312e6f46 rather than an implementation commit, which would have
+      produced a vacuous CLEAN over a docs-only diff; the --in-progress
+      uncommitted form was used instead. The one low finding was
+      independently reproduced by the developer against Jackson 2.21 before
+      disposition. It falsifies a bound NormalizedPost's own javadoc
+      asserts and defeats the NULL-vs-zero distinction the ticket exists to
+      establish, so it belongs to M1-723, not a follow-up. Two out-of-model
+      items recorded: in-range engagement inflation (a source claiming
+      MAX_ENGAGEMENT_COUNT dominates any future social ranking — relevant
+      to M1-724, which wires the first consumer), and Jackson number-coercion
+      fidelity loss generally.
+  - date: 2026-07-30
+    verdict: CLEAN
+    base: 312e6f46de01327a677aea13cb776d05154ed12f
+    head: "<working tree, round 2>"
+    verdict_file: docs/plan/m1/redteam/M1-723-2026-07-30-r2.md
+    out_of_model_count: 3
+    note: |
+      Re-audit of the remediated diff. The adversary was given the round-1
+      GAP verbatim, told not to assume it closed merely because
+      remediation was attempted, and explicitly authorized to return
+      CLEAN. It confirmed closure across LongNode/BigIntegerNode and
+      verified Integer.MIN_VALUE hits the clamp's `<` branch with no
+      Math.abs self-negation bug. Recorded an out-of-model note that the
+      new saturate path reached decimalValue(), which throws on a
+      non-finite double — see round 3, where that was fixed.
+  - date: 2026-07-30
+    verdict: CLEAN
+    base: 312e6f46de01327a677aea13cb776d05154ed12f
+    head: "<working tree, round 3>"
+    verdict_file: docs/plan/m1/redteam/M1-723-2026-07-30-r3.md
+    out_of_model_count: 2
+    note: |
+      Final audit, covering the non-finite-double fix (doubleValue() +
+      Double.isFinite, returning null for a value that is not a
+      representable count). CLEAN with zero findings. Independently
+      verified that doubleValue()'s lossiness is sign-preserving, that
+      every numeric node shape isNumber() admits reaches a correct
+      branch, that NaN takes the null branch rather than the ternary's
+      MAX, and that the null-vs-saturate asymmetry grants an adversarial
+      feed no capability it lacks. Both out-of-model items are
+      informational and closed by the auditor's own analysis.
 clarity_check:
   date: 2026-07-30
   verdict: WARN

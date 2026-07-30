@@ -34,11 +34,54 @@ import java.util.Map;
  *       to string by design: richer per-element metadata that sources
  *       want to carry must be serialized (e.g. JSON-in-string) into
  *       one entry rather than smuggled through as {@code Object}.</li>
+ *   <li>{@code likes} / {@code reposts} — engagement counts as reported
+ *       by the source, or null when the source has no such signal.
+ *       <strong>Null is not zero</strong>: an RSS article has no like
+ *       count, while a Bluesky post with {@code likeCount: 0} was seen
+ *       and ignored. Only the bluesky and reddit fetchers populate
+ *       them; nitter, youtube, odysee, RSS and Nostr leave both null,
+ *       which is the common path (M1-723).</li>
+ *   <li>{@code socialScore} — derived, never caller-supplied; see
+ *       below.</li>
  * </ul>
  *
- * <p>The contract is documented, not enforced — internal callers
- * (Fetcher / StreamSource impls) are trusted to satisfy it. Validation
- * belongs at system boundaries, not inside the SPI record.</p>
+ * <h2>Derived {@code socialScore}</h2>
+ * <p>The compact constructor <em>overwrites</em> whatever
+ * {@code socialScore} it is handed with
+ * {@code 2 * coalesce(reposts,0) + coalesce(likes,0)}, the canonical
+ * formula in {@code docs/design/05-llm-and-embeddings.md} §5.4.5. It is
+ * derived here rather than at each call site so the invariant
+ * "socialScore agrees with its two inputs" holds for every instance
+ * regardless of construction path — a fetcher cannot produce a post
+ * whose stored score disagrees with its stored counts. When BOTH inputs
+ * are null the score is null, not 0, so a source with no social signal
+ * stays distinguishable from a social post nobody engaged with.</p>
+ *
+ * <h2>Count bound</h2>
+ * <p>{@code likes} and {@code reposts} arrive from untrusted upstream
+ * JSON and are clamped to ±{@link #MAX_ENGAGEMENT_COUNT} before the
+ * multiply, so an upstream-supplied count cannot overflow
+ * {@code 2 * reposts + likes} into a negative score. This is
+ * system-boundary validation on fetcher input, not internal defensive
+ * code: the record is where an untrusted JSON number first becomes a
+ * typed domain value, and doing it here covers every present and future
+ * fetcher in one place instead of trusting each parser to remember.
+ * Sign is preserved — Reddit's {@code score} is a net vote count and is
+ * legitimately negative, so only magnitude is bounded.</p>
+ *
+ * <p><strong>The bound holds only for a value that reached {@code int}
+ * intact.</strong> A parser reading an untrusted numeric MUST saturate
+ * an out-of-range value, never narrow it: a truncating cast (Jackson's
+ * {@code JsonNode.asInt()} is one) wraps modulo 2^32 and arrives here
+ * already corrupt, and no clamp can then recover it — the sign is
+ * gone ({@code 2147483648} presents as {@code -2147483648}) and, worse,
+ * {@code 4294967296} presents as a clean {@code 0}, indistinguishable
+ * from a genuine "seen and ignored" observation. Both fetchers that
+ * populate these fields saturate on {@code canConvertToInt()} for this
+ * reason (M1-723 redteam finding, 2026-07-30).</p>
+ *
+ * <p>The rest of the contract is documented, not enforced — internal
+ * callers (Fetcher / StreamSource impls) are trusted to satisfy it.</p>
  */
 public record NormalizedPost(
         long dispatchKey,
@@ -48,6 +91,87 @@ public record NormalizedPost(
         @Nullable String url,
         @Nullable Instant publishedAt,
         Instant fetchedAt,
-        Map<String, String> rawMetadata
+        Map<String, String> rawMetadata,
+        @Nullable Integer likes,
+        @Nullable Integer reposts,
+        @Nullable Integer socialScore
 ) {
+
+    /**
+     * Per-count magnitude bound. {@code Integer.MAX_VALUE / 4} leaves
+     * headroom for the {@code 2 * reposts + likes} combination: the
+     * worst case is {@code 2 * MAX/4 + MAX/4 = 3*MAX/4}, still short of
+     * overflow.
+     */
+    public static final int MAX_ENGAGEMENT_COUNT = Integer.MAX_VALUE / 4;
+
+    public NormalizedPost {
+        likes = clampCount(likes);
+        reposts = clampCount(reposts);
+        // Derived, not accepted: see the class javadoc. The incoming
+        // socialScore argument is deliberately discarded so the
+        // invariant cannot be bypassed by a caller.
+        socialScore = deriveSocialScore(likes, reposts);
+    }
+
+    /**
+     * Construct a post from a source that carries no engagement
+     * signals — the nitter, youtube, odysee, RSS and Nostr path. All
+     * three social columns stay null, the documented "no social signal
+     * available" state.
+     */
+    public NormalizedPost(
+            long dispatchKey,
+            String upstreamIdentifier,
+            @Nullable String title,
+            String body,
+            @Nullable String url,
+            @Nullable Instant publishedAt,
+            Instant fetchedAt,
+            Map<String, String> rawMetadata) {
+        this(dispatchKey, upstreamIdentifier, title, body, url, publishedAt, fetchedAt,
+            rawMetadata, null, null, null);
+    }
+
+    /**
+     * Construct a post from a source that reports engagement counts —
+     * the bluesky and reddit path. {@code socialScore} is derived from
+     * the two counts; either may be null when that particular source
+     * does not expose it (Reddit has no repost count).
+     */
+    public NormalizedPost(
+            long dispatchKey,
+            String upstreamIdentifier,
+            @Nullable String title,
+            String body,
+            @Nullable String url,
+            @Nullable Instant publishedAt,
+            Instant fetchedAt,
+            Map<String, String> rawMetadata,
+            @Nullable Integer likes,
+            @Nullable Integer reposts) {
+        this(dispatchKey, upstreamIdentifier, title, body, url, publishedAt, fetchedAt,
+            rawMetadata, likes, reposts, null);
+    }
+
+    private static @Nullable Integer clampCount(@Nullable Integer count) {
+        if (count == null) {
+            return null;
+        }
+        if (count > MAX_ENGAGEMENT_COUNT) {
+            return MAX_ENGAGEMENT_COUNT;
+        }
+        if (count < -MAX_ENGAGEMENT_COUNT) {
+            return -MAX_ENGAGEMENT_COUNT;
+        }
+        return count;
+    }
+
+    private static @Nullable Integer deriveSocialScore(@Nullable Integer likes,
+                                                       @Nullable Integer reposts) {
+        if (likes == null && reposts == null) {
+            return null;
+        }
+        return 2 * (reposts == null ? 0 : reposts) + (likes == null ? 0 : likes);
+    }
 }

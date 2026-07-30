@@ -748,8 +748,18 @@ CREATE TABLE post (
                                                      --   <@ {factual,opinion,technical,urgent,ongoing,
                                                      --   unknown} AND cardinality >= 1 (V57).
   social_score    INT,                               -- 2 * reposts + likes; see docs/design/05-llm.md §5.4
-  likes           INT,
-  reposts         INT,
+                                                     --   Written at ingest by the bluesky and reddit
+                                                     --   fetchers only. NULL = "no social signal
+                                                     --   available" (rss, nitter, youtube, odysee,
+                                                     --   nostr — the majority of the corpus), which
+                                                     --   is DISTINCT from 0 = "seen and not engaged
+                                                     --   with". Consumers must not COALESCE the NULL
+                                                     --   to 0: that sinks every non-social source
+                                                     --   below every social one (M1-723).
+  likes           INT,                               -- source-reported; NULL when unreported.
+  reposts         INT,                               -- source-reported; NULL when unreported or
+                                                     --   when the source has no repost concept
+                                                     --   (reddit). Never derived from a reply count.
   search_tsv      tsvector
     GENERATED ALWAYS AS (
       to_tsvector('english',

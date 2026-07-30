@@ -130,16 +130,59 @@ final class RedditResponseParser {
             url,
             publishedAt,
             fetchedAt,
-            buildRawMetadata(data)
+            buildRawMetadata(data),
+            // Reddit's "score" is the net vote count, which maps to
+            // likes. Reddit exposes no repost count — "num_comments" is
+            // a reply count, not a repost, so reposts stays null rather
+            // than being fabricated from it (M1-723).
+            intOrNull(data, "score"),
+            null
         );
     }
 
     private static Map<String, String> buildRawMetadata(JsonNode data) {
         Map<String, String> metadata = new LinkedHashMap<>(4);
         metadata.put("author", data.path("author").asText(""));
-        metadata.put("score", String.valueOf(data.path("score").asInt(0)));
         metadata.put("num_comments", String.valueOf(data.path("num_comments").asInt(0)));
         metadata.put("subreddit", data.path("subreddit").asText(""));
         return Map.copyOf(metadata);
+    }
+
+    /**
+     * Read a count as a nullable {@link Integer}. Absent, null and
+     * non-numeric all yield null, NOT 0 — this is an untrusted upstream
+     * boundary where "the listing carried no score" and "the post nets
+     * zero votes" are different facts, and the ingest columns must keep
+     * them apart (M1-723). A negative score is a real, heavily
+     * downvoted post and passes through unchanged.
+     *
+     * <p>An out-of-{@code int}-range value SATURATES rather than
+     * narrowing, for the reason spelled out on the sibling helper in
+     * {@code BlueskyResponseParser}: {@link JsonNode#asInt()} is a
+     * truncating cast, so {@code 4294967296} would become exactly
+     * {@code 0} and be persisted as a non-NULL zero the upstream never
+     * reported, while {@code 2147483648} would become negative. Both
+     * defeat bounds {@link NormalizedPost} states in its own contract,
+     * and neither is recoverable after the narrowing.
+     *
+     * <p>A non-finite value degrades to null rather than throwing, for
+     * the reason given on the sibling helper: {@code 1e400} parses into
+     * a double holding infinity, which is not a representable count, and
+     * letting a coercion failure escape would discard every well-formed
+     * entry in the same listing over one malformed field.
+     */
+    private static @Nullable Integer intOrNull(JsonNode data, String field) {
+        JsonNode child = data.path(field);
+        if (!child.isNumber()) {
+            return null;
+        }
+        if (!child.canConvertToInt()) {
+            double magnitude = child.doubleValue();
+            if (!Double.isFinite(magnitude)) {
+                return null;
+            }
+            return magnitude < 0 ? Integer.MIN_VALUE : Integer.MAX_VALUE;
+        }
+        return child.asInt();
     }
 }

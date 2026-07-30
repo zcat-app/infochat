@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -183,9 +184,14 @@ class RedditFetcherTest {
         // rawMetadata
         Map<String, String> meta = first.rawMetadata();
         assertEquals("user1", meta.get("author"));
-        assertEquals("42", meta.get("score"));
         assertEquals("10", meta.get("num_comments"));
         assertEquals("testsub", meta.get("subreddit"));
+        // M1-723: score moved off rawMetadata onto the typed likes column.
+        // Retargeted rather than dropped so the end-to-end fetch path keeps
+        // pinning it. Reddit reports no repost count, so reposts stays null.
+        assertEquals(42, first.likes());
+        assertNull(first.reposts());
+        assertEquals(42, first.socialScore());
 
         // Link-only post: selftext is empty
         assertEquals("", posts.get(1).body());

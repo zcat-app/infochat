@@ -23,6 +23,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -96,7 +97,8 @@ class PostPersisterIT {
                  "SELECT uid, source_id, upstream_identifier, url, title, body, "
                  + "       author, published_at, fetched_at, status, "
                  + "       stage1_done, stage2_done, tagger_done, embedding_done, "
-                 + "       stage1_flagged, stage2_failed, tagger_fallback, tags "
+                 + "       stage1_flagged, stage2_failed, tagger_fallback, tags, "
+                 + "       likes, reposts, social_score "
                  + "FROM post WHERE id = ?")) {
             ps.setObject(1, key.get().id());
             try (ResultSet rs = ps.executeQuery()) {
@@ -134,6 +136,112 @@ class PostPersisterIT {
                 assertNotNull(tagsArray, "tags must be the empty array, not NULL");
                 Object[] tags = (Object[]) tagsArray.getArray();
                 assertEquals(0, tags.length, "tags default is the empty array");
+
+                // M1-723: this fixture is an RSS-shaped post with no
+                // engagement signals. All three social columns must be
+                // SQL NULL — "no social signal available" — and NOT 0,
+                // which would be indistinguishable from a social post
+                // nobody engaged with. getObject, not getInt: getInt
+                // maps SQL NULL to 0 and would pass either way.
+                assertNull(rs.getObject("likes"), "no-signal source persists NULL likes, not 0");
+                assertNull(rs.getObject("reposts"),
+                    "no-signal source persists NULL reposts, not 0");
+                assertNull(rs.getObject("social_score"),
+                    "no-signal source persists NULL social_score, not 0");
+            }
+        }
+    }
+
+    @Test
+    @Order(8)
+    void persistRoundTripsSocialSignalColumns() throws Exception {
+        // M1-723: the three columns were declared in V7, parsed by two
+        // fetchers, and never written. Pins that the INSERT's widened
+        // column list and its bind-index sequence stay consistent — a
+        // mis-numbered bind would surface here as a wrong or missing
+        // value rather than as a silent NULL.
+        UUID sourceUuid = seedRssSource(
+            "https://persister-it.example.test/feed-social.xml",
+            "Persister IT social source");
+
+        NormalizedPost social = new NormalizedPost(
+            /* sourceId dispatch key */ 1L,
+            /* upstreamIdentifier */ "urn:persister-it:post:social",
+            /* title */ "Social title",
+            /* body */ "Social body",
+            /* url */ "https://persister-it.example.test/posts/social",
+            /* publishedAt */ PUBLISHED_AT,
+            /* fetchedAt */ FETCHED_AT,
+            /* rawMetadata */ Map.of(),
+            /* likes */ 42,
+            /* reposts */ 7
+        );
+        assertEquals(2 * 7 + 42, social.socialScore(),
+            "the record derives the score before the persister ever sees it");
+
+        Optional<PostPersister.PersistedPostKey> key =
+            postPersister.persist(sourceUuid, social);
+        assertTrue(key.isPresent(), "social-signal persist must INSERT");
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT likes, reposts, social_score, title, body, status "
+                 + "FROM post WHERE id = ?")) {
+            ps.setObject(1, key.get().id());
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "persisted social post row must exist");
+                assertEquals(42, rs.getInt("likes"));
+                assertEquals(7, rs.getInt("reposts"));
+                assertEquals(2 * 7 + 42, rs.getInt("social_score"),
+                    "social_score round-trips the canonical 2*reposts + likes");
+                // The three new binds sit between tags and the uid
+                // pre-filter probe; assert neighbours to catch an
+                // off-by-one that shifted every later placeholder.
+                assertEquals("Social title", rs.getString("title"));
+                assertEquals("Social body", rs.getString("body"));
+                assertEquals("RAW", rs.getString("status"));
+            }
+        }
+    }
+
+    @Test
+    @Order(9)
+    void persistStoresNegativeSocialScoreUnclamped() throws Exception {
+        // Reddit's score is a NET vote count. A heavily-downvoted post
+        // must reach the column negative rather than being floored at 0,
+        // which would make it indistinguishable from an unengaged post.
+        UUID sourceUuid = seedRssSource(
+            "https://persister-it.example.test/feed-negative.xml",
+            "Persister IT negative-score source");
+
+        NormalizedPost downvoted = new NormalizedPost(
+            1L,
+            "urn:persister-it:post:negative",
+            "Downvoted title",
+            "Downvoted body",
+            "https://persister-it.example.test/posts/negative",
+            PUBLISHED_AT,
+            FETCHED_AT,
+            Map.of(),
+            /* likes */ -250,
+            /* reposts */ null
+        );
+
+        Optional<PostPersister.PersistedPostKey> key =
+            postPersister.persist(sourceUuid, downvoted);
+        assertTrue(key.isPresent(), "negative-score persist must INSERT");
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT likes, reposts, social_score FROM post WHERE id = ?")) {
+            ps.setObject(1, key.get().id());
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals(-250, rs.getInt("likes"), "a negative net score survives to the column");
+                assertNull(rs.getObject("reposts"),
+                    "Reddit reports no repost count; the column stays NULL");
+                assertEquals(-250, rs.getInt("social_score"),
+                    "the formula is applied unchanged, not clamped at zero");
             }
         }
     }

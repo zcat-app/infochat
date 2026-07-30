@@ -16,6 +16,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.sql.Types;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -57,7 +58,11 @@ import java.util.UUID;
  * explicitly. {@code status} is the literal {@code 'RAW'}; every
  * per-stage {@code *_done} / {@code *_flagged} / {@code *_failed} /
  * {@code *_fallback} flag defaults FALSE; {@code tags} is the empty
- * array. A {@code WHERE NOT EXISTS} uid pre-filter dedups re-fetches
+ * array. {@code likes} / {@code reposts} / {@code social_score} bind
+ * straight from the {@link NormalizedPost} and are SQL NULL for the
+ * sources that report no engagement — NULL there means "no social
+ * signal available", which is NOT the same as 0 (M1-723). A
+ * {@code WHERE NOT EXISTS} uid pre-filter dedups re-fetches
  * of the same item across ticks and partitions (the uid is the
  * cross-refetch dedup key per {@code docs/spec/schema.md} §UID
  * derivation, decision D38); {@code ON CONFLICT (source_id,
@@ -145,10 +150,12 @@ public class PostPersister {
                 + "  id, uid, source_id, upstream_identifier, url, title, body, "
                 + "  author, published_at, fetched_at, status, "
                 + "  stage1_done, stage2_done, tagger_done, embedding_done, "
-                + "  stage1_flagged, stage2_failed, tagger_fallback, tags"
+                + "  stage1_flagged, stage2_failed, tagger_fallback, tags, "
+                + "  likes, reposts, social_score"
                 + ") SELECT "
                 + "  gen_random_uuid(), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RAW', "
-                + "  FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, '{}'::text[] "
+                + "  FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, '{}'::text[], "
+                + "  ?, ?, ? "
                 + "WHERE NOT EXISTS (SELECT 1 FROM post WHERE uid = ?) "
                 + "ON CONFLICT (source_id, upstream_identifier, fetched_at) DO NOTHING "
                 + "RETURNING id, fetched_at";
@@ -198,8 +205,18 @@ public class PostPersister {
                 publishedAt != null && publishedAt.isAfter(fetchedAt) ? fetchedAt : publishedAt;
             ps.setTimestamp(8, clampedPublishedAt == null ? null : Timestamp.from(clampedPublishedAt));
             ps.setTimestamp(9, Timestamp.from(fetchedAt));
+            // Social signals. setObject with an explicit type binds SQL
+            // NULL for a null Integer, keeping "this source reports no
+            // engagement" (NULL) distinct from "nobody engaged" (0) all
+            // the way into the column — the distinction the whole
+            // NormalizedPost contract exists to carry (M1-723).
+            // socialScore is derived inside NormalizedPost, so the
+            // three columns cannot disagree with each other.
+            ps.setObject(10, normalized.likes(), Types.INTEGER);
+            ps.setObject(11, normalized.reposts(), Types.INTEGER);
+            ps.setObject(12, normalized.socialScore(), Types.INTEGER);
             // The NOT EXISTS pre-filter's uid probe.
-            ps.setString(10, uid);
+            ps.setString(13, uid);
 
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {

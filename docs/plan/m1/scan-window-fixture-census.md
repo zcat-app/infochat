@@ -123,7 +123,8 @@ tests seed `flagged_at` relative, `Instant.now()-48h`).
   bypassed `drainPending`)
 - `fetcher/` + `assets/`: `BlueskyFetcherTest`, `BlueskyResponseParserTest`,
   `RssFeedParserTest`, `RedditResponseParserItemCapTest`,
-  `RedditResponseParserNameValidationTest`, `RedditResponseParserPermalinkTest`
+  `RedditResponseParserNameValidationTest`, `RedditResponseParserPermalinkTest`,
+  `RedditResponseParserSocialSignalTest`
   (fetched_at is an explicit `parse()` argument; other instants are expected
   values), `AssetSnapshotFetcherSupportGateTest`, `AssetSnapshotFetcherTest`,
   `PriceSnapshotStoreTest` (captured_at is stored output routed against STATIC
