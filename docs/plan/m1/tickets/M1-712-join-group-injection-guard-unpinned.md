@@ -1,9 +1,9 @@
 ---
 id: M1-712
 title: "encodeJoinGroupCommand's command-injection guard is the one encode entry point no test pins"
-status: pending
+status: done
 created: 2026-07-27
-last_updated: 2026-07-27
+last_updated: 2026-07-30
 blocked_by: [M1-713]
 files_budget: 1
 files_scope:
@@ -76,12 +76,41 @@ test_plan:
 spec_refs:
   - docs/spec/messaging.md §Failure handling
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-30
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 141
+      removed: 9
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-07-30
+    verdict: CLEAN
+    base: e0710a44
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-712-2026-07-30.md
+    out_of_model_count: 0
+    note: |
+      Pre-review gate audit (/m1-tick run step 4) over the uncommitted
+      branch diff. Test-only change: adds the refuse-leg assertion for
+      encodeJoinGroupCommand and touches no main-source file, so it adds
+      no attack surface. The guard it pins remains present and enforcing.
+clarity_check:
+  date: 2026-07-30
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 

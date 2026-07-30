@@ -1202,6 +1202,29 @@ class SimpleXMessageCodecTest {
                 "the join command targets the group by numeric id");
     }
 
+    @Test
+    void encodeJoinGroupCommandRejectsAdapterGroupIdWithCommandInjectionChars() {
+        // The refuse-leg of the join encode path. adapterGroupId is
+        // concatenated straight into the verb ("/_join #" + id), so the
+        // encode-time validator is the only thing standing between a forged
+        // id and a second command on the wire. The happy-path test above
+        // exercises the accept leg only: with
+        // requireValidQueueAddressId(adapterGroupId, …) deleted it still
+        // passes, which is how the 2026-07-27 mutation sweep found this call
+        // site unpinned while its three siblings were killed (M1-712).
+        // Inputs mirror encodeRejectsContactIdWithCommandInjectionChars:
+        // newline-plus-forged-verb, space-separated forged verb, and the
+        // empty id the validator rejects on length alone.
+        assertEquals(FailureCategory.PERMANENT, assertThrows(MessagingException.class,
+                () -> SimpleXMessageCodec.encodeJoinGroupCommand(
+                        "corr-join", "group\n/_set_contact_typing @v on")).category());
+        assertEquals(FailureCategory.PERMANENT, assertThrows(MessagingException.class,
+                () -> SimpleXMessageCodec.encodeJoinGroupCommand(
+                        "corr-join", "2 /_send @victim json {}")).category());
+        assertEquals(FailureCategory.PERMANENT, assertThrows(MessagingException.class,
+                () -> SimpleXMessageCodec.encodeJoinGroupCommand("corr-join", "")).category());
+    }
+
     /** The JSON content of a SimpleX command string — everything after " json ". */
     private static String jsonPayload(String cmd) {
         int marker = cmd.indexOf(" json ");
