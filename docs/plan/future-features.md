@@ -177,6 +177,46 @@ is cross-lingual *matching*, which partitioning actively works against.
 **Verdict: `needs-analysis`** (evaluate a multilingual embedding model + re-embed
 cost/quality trade-off).
 
+**Update 2026-07-30 — actioned, do not re-analyze from scratch.** Measured against
+the live embedder: `nomic-embed-text` cannot represent Cyrillic at all (0/7 ranking
+within a Russian-only pool; random Cyrillic characters score 0.710 against a real
+Russian sentence versus 0.805 for a genuine paraphrase — the vector encodes script,
+not meaning, because the English WordPiece vocab tokenizes Russian at 1.13
+chars/token versus 5.46 for English). Three multilingual replacements score 7/7
+across en/fr/ru/cs. The re-embed and threshold recalibration are now ticket
+**M1-717**; the evaluation instructions and results scaffold are
+`/home/infochat/EMBEDDER-HANDOFF-PROMPT.md` and
+`EMBEDDER-MEASUREMENT-RESULTS.md`. This entry's framing above was correct on both
+counts — it is an embedding-model question, and partitioning works against the goal.
+
+### D3. Per-language full-text search config (lexical arm)
+**What:** the lexical half of hybrid retrieval stems with the target language's
+rules, so an inflected Spanish/Russian/Turkish query matches its document forms.
+
+**Current state / tension.** `post.search_tsv` is a **STORED generated column**
+pinned to `to_tsvector('english', …)` (`V58__post_search_tsv.sql`), and the query
+side pins `plainto_tsquery('english', …)` in `SemanticSearchTool`. Both sides must
+share a regconfig or matching degrades — different stemmers emit different lexemes —
+so changing only the query side to the scope's language makes results *worse*, not
+better. Doing it properly needs a `post.language` column (does not exist; language
+is recorded only on `scope_preferences`), ingest-time language detection, and a
+rewritten generated column, which `V58`'s own cost note flags as a full partition
+rewrite plus a whole-corpus GIN rebuild. Postgres ships snowball configs for
+`spanish`/`russian`/`turkish`/`arabic`/`hindi` but **not** Thai/Japanese/Chinese/
+Korean — those have no word-boundary notion in the default parser and would need a
+tokenizer extension (pgroonga, pg_bigm, MeCab-based), i.e. a new dependency in the
+Postgres image. Separately, making the regconfig an input to the fused query needs a
+D19 answer: `SemanticSearchTool` pins it deliberately so the retrieved set cannot
+become session- or GUC-dependent.
+
+**Contingent on ingesting non-English *sources*.** With a ~100% English corpus (2 of
+9,259 post titles carry non-Latin script as of 2026-07-30) the document side must
+stay `english` no matter how many *output* languages ship, so this buys nothing
+today. Explicitly deferred out of M1-717.
+
+**Verdict: `parked`** (understood, no current effect; revisit when non-English
+sources are ingested).
+
 ---
 
 ## E. Smaller polish (data mostly exists)
