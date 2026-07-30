@@ -1,0 +1,82 @@
+# Documented-config-key exemptions — read by DocumentedConfigKeyParityTest (M1-708).
+#
+# Format: <pattern> | <reason>
+#   `*` matches one or more characters within a single dot segment. An entry
+#   must be bounded (>= 2 literal segments); `infochat.*` and friends are
+#   rejected by exemptionEntriesCannotBeUnboundedWildcards so a catch-all can
+#   never silently disable the gate.
+#
+# This is a LEDGER, not a suppression list. Every entry states why the key is
+# absent from the real key set, and an exemption whose reason has expired must
+# come out with the change that expires it — an exemption outliving its gap is
+# the failure mode this file is most at risk of. In particular: a doc that
+# states a REQUIREMENT the code has not built keeps the requirement and gets an
+# exemption citing the gap. Never edit the doc to match the code to green this
+# test.
+
+# --- PostgreSQL GUCs: set via set_config/current_setting, not Quarkus config.
+infochat.actor_id | PostgreSQL GUC read with current_setting() by the audit trigger, never a Quarkus config key (docs/spec/security.md §Audit log).
+infochat.request_id | PostgreSQL GUC read with current_setting() by the audit trigger, never a Quarkus config key (docs/design/02-schema.md).
+
+# --- Advisory-lock names: built by concatenation, so no literal exists.
+infochat.collector | Single-instance advisory-lock name, hashtext('infochat.<service>') in AbstractInstanceLockGuard — a lock id, not a config key.
+infochat.provider | Single-instance advisory-lock name, hashtext('infochat.<service>') in AbstractInstanceLockGuard — a lock id, not a config key.
+
+# --- Prose prefixes: the doc names a family with `.*` or a `{a,b}` brace list,
+#     and the extraction stops at the last key-shaped character. The concrete
+#     keys under each prefix are in the real key set.
+infochat.adapters.signal | Prose prefix from `infochat.adapters.signal.*`; the concrete keys (binary, data-dir, account, endpoint) are real.
+infochat.adapters.simplex | Prose prefix from `infochat.adapters.simplex.*`; the concrete keys (binary, data-dir, ws-port, admin-token) are real.
+infochat.assets.refresh | Prose prefix from `infochat.assets.refresh.*`; the concrete per-host keys (coingecko, kraken, bitfinex) are real.
+infochat.bootstrap | Prose prefix from the brace list `infochat.bootstrap.{sources,assets}-file`; both expansions are real.
+infochat.embeddings | Prose prefix from `infochat.embeddings.*`; the concrete keys (model, dimension, base-url, ...) are real.
+infochat.llm.breaker | Prose prefix from `infochat.llm.breaker.*`; both concrete keys (failure-threshold, cooldown-ms) are real.
+infochat.messaging.retry | Prose prefix from the brace list `infochat.messaging.retry.{max-attempts,base-delay-ms,growth-factor}`; all three expansions are real.
+
+# --- Dynamic per-adapter keys: composed at runtime from the adapter name, so
+#     no literal key exists for the placeholder or for adapters whose defaults
+#     ship commented out.
+infochat.adapters.*.admin | Per-adapter bootstrap-admin key composed from the adapter name; the real set holds only the profile-scoped %test.infochat.adapters.inmemory.admin.
+infochat.adapters.*.allow-low-trust | Per-adapter trust opt-in composed from the adapter name; the real set holds only %test.infochat.adapters.inmemory.allow-low-trust.
+infochat.adapters.*.binary | Per-adapter placeholder; the concrete infochat.adapters.{signal,simplex}.binary keys are real.
+infochat.adapters.*.data-dir | Per-adapter placeholder; the concrete infochat.adapters.{signal,simplex}.data-dir keys are real.
+
+# --- Dynamic per-task LLM keys: every one is read as
+#     ModelTask.configPrefix() + "<leaf>", so the key never appears as a
+#     literal anywhere in main sources.
+infochat.llm.*.provider | Read as ModelTask.configPrefix() + "provider" (ModelTask.providerKey); no literal per-task key exists.
+infochat.llm.*.base-url | Read as ModelTask.configPrefix() + "base-url" (ModelTask.baseUrlKey); no literal per-task key exists.
+infochat.llm.*.api-key | Read as ModelTask.configPrefix() + "api-key" (LlmRouterStartupGuard); no literal per-task key exists.
+infochat.llm.*.max-tokens | Read as ModelTask.configPrefix() + "max-tokens" (MeteredLlmProvider); no literal per-task key exists.
+infochat.llm.*.timeout-ms | Read as ModelTask.configPrefix() + "timeout-ms"; only the profile-tuned literals (security, chat) sit in application.properties.
+infochat.llm.*.reasoning-effort | Read as ModelTask.configPrefix() + REASONING_EFFORT_LEAF (DeepSeekProvider); no literal per-task key exists.
+infochat.llm.<task>.max-concurrency | Per-task template; the shipped keys are the collector-side eval workers (security, tagger, entity, classifier), each a literal in the real set.
+
+# --- Templates over key families that do exist under concrete names.
+infochat.fetch.<kind>.interval | Per-kind template; the concrete infochat.fetch.{rss,bluesky,nitter,odysee,reddit,youtube}.interval keys are real.
+infochat.partitions.retention-days.<table> | Per-table template; the concrete infochat.partitions.retention-days.{post,post-embedding,post-entity,post-reference,price-snapshot} keys are real.
+infochat.assets.refresh.<host> | Per-host template; the concrete infochat.assets.refresh.{coingecko,kraken,bitfinex} keys are real.
+
+# --- Deliberate "this key does not exist" statements. The doc is asserting
+#     absence on purpose; the gate must not read the assertion as a claim.
+infochat.adapter.bot-mention-name | docs/design/06-messaging.md §6.2.3 records this as the PRIOR key, retired with the operator-typed mention name; mention recognition is anchored to the contact id.
+infochat.embeddings.provider | docs/design/05-llm-and-embeddings.md §5.2 states outright "There is no infochat.embeddings.provider key" — one EmbeddingProvider impl, no routing.
+infochat.fetch.max-body-bytes | docs/design/04-security.md §SSRF item 5 states the 5 MiB cap is a compile-time constant, deliberately not operator-tunable, and that this key never existed.
+infochat.fetch.connect-timeout | docs/design/04-security.md §SSRF item 6 states the timeouts are compile-time constants and that this key never existed.
+infochat.fetch.read-timeout | docs/design/04-security.md §SSRF item 6 states the timeouts are compile-time constants and that this key never existed.
+infochat.ratelimit.llm-ops-per-minute | docs/design/04-security.md §Rate limiting records this name as one the table previously used and that never existed; the shipped key is infochat.chat.llm-rate-cap-per-minute.
+infochat.ratelimit.tool-calls-per-turn | docs/design/04-security.md §Rate limiting records this name as never having existed; the tool-call budget has no config key at all.
+
+# --- GAP-marked keys the 2026-07-27 audit left standing. Each names a control
+#     the design still commits to; the exemption comes out with the ticket that
+#     closes the gap, NOT by deleting the design row.
+infochat.context-hard-limit | GAP: docs/design/05-llm-and-embeddings.md §5.7 marks "no such key" — no ceiling above infochat.context-compress-at is enforced.
+infochat.digest.workers | GAP (audit §A5, docs/design/01-architecture.md §1.6): no per-profile digest worker count is enforced; the knob is owed.
+infochat.embeddings.index-type | GAP: docs/design/05-llm-and-embeddings.md §5.7 shows the intended per-profile index; v1 ships HNSW on every profile and the per-profile index is deferred beyond v1.
+infochat.eval.queue-size | GAP (audit §A5, docs/design/01-architecture.md §1.6): the eval queue depth is SmallRye's default 128 buffer, neither configurable nor profile-driven; the key is owed.
+infochat.groups.default-timezone | GAP: docs/design/07-deployment.md §7.4 records the per-group timezone default as NOT implemented — "read by nothing".
+infochat.llm.chat.max-concurrency | GAP: docs/design/05-llm-and-embeddings.md §5.7 states this key does not exist; the Provider's bound is the shared infochat.chat.dispatch.max-concurrency.
+infochat.llm.summarizer.max-concurrency | GAP: docs/design/05-llm-and-embeddings.md §5.7 states this key does not exist; the Provider's bound is the shared infochat.chat.dispatch.max-concurrency.
+infochat.summary.workers | GAP: docs/design/05-llm-and-embeddings.md §5.7 marks "no such key" — summary/digest work has no per-profile worker-count bound.
+infochat.user.display-name-max-chars | GAP (audit §A2, docs/design/04-security.md §Display-name sanitization): the whole sanitizer is deferred by decision and the doc states this is not a real key.
+infochat.asset.<asset>.<sub_verb>.refresh-interval | GAP: docs/design/01-architecture.md §1.6 commits to per-(asset, sub_verb) cadence; what ships is the coarser per-HOST infochat.assets.refresh.<host>. The granularity, not just the name, is what is owed.

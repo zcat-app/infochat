@@ -1,9 +1,9 @@
 ---
 id: M1-708
 title: "Gate docs against nonexistent infochat.* config keys"
-status: pending
+status: done
 created: 2026-07-27
-last_updated: 2026-07-27
+last_updated: 2026-07-30
 blocked_by: []
 files_budget: 3
 files_scope:
@@ -103,12 +103,36 @@ test_plan:
 spec_refs:
   - docs/spec/deployment.md §Configuration surface (spec level)
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-30
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 478
+      removed: 9
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-30
+  verdict: PASS
+  warnings:
+    - >-
+      Census re-run at start yields 55 literal survivors, not the body's
+      "~18". Not an extraction defect: the body counts exemption ENTRIES,
+      and the 55 literals collapse into ~20 families (dynamic
+      `infochat.llm.<task>.*` and `infochat.adapters.<name>.*` keys, bare
+      prose prefixes, the two GUCs, deliberate-absence statements, GAP
+      keys) — exactly the families the acceptance item enumerates.
+  blockers: []
 escalation_reason:
 ---
 

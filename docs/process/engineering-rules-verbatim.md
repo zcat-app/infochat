@@ -70,6 +70,7 @@ The reviewer's `TEST-INTEGRITY-CHECK` fails if the diff introduces any of the fo
 - New `@MockBean` / `@Mock` replacing previously-real wiring inside an integration test (mocks belong in unit tests; integration tests integrate).
 - A test was modified to match a new (wrong) behavior rather than the code being fixed to match the test.
 - A test was deleted or renamed without an accompanying explanation tying it to a deliberate spec change.
+- A documented `infochat.*` config key edited away in `docs/spec/**`, `docs/design/**` or a root guide to green `DocumentedConfigKeyParityTest` (M1-708 — the build gates documented key names against the real `@ConfigProperty` / `application.properties` set): a mis-NAMED key is fixed in the doc, but a doc naming a requirement the code has not built keeps the requirement and gets an entry in `documented-config-key-exemptions.txt` citing the gap that owns it.
 
 ### Test-modification authorization
 

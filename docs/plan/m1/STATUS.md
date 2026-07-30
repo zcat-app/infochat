@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 16 |
+| pending | 15 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 727 |
+| done | 728 |
 | deferred | 1 |
 | abandoned | 20 |
 | **total** | **764** |
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-705 — Rate limiting: build the per-cost-profile bucket partition (complexity: high, risk: high)
 - M1-706 — Profile bundle: eval queue depth and summary worker count (complexity: high, risk: medium)
 - M1-707 — Operator-settable default timezone for new groups (complexity: low, risk: medium)
-- M1-708 — Gate docs against nonexistent infochat.* config keys (complexity: medium, risk: low)
 - M1-715 — post.body_summary is never written, yet EmbeddingWorker prefers it as embedding input (complexity: low, risk: low)
 - M1-716 — Decouple language enablement from bundle presence (complexity: low, risk: low)
 - M1-722 — Digest categories render a prose paragraph per cluster: replace with count + roll-up + headlines, and add /digest brief|normal|full (complexity: high, risk: high)
@@ -82,9 +81,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-711 | SimpleX mention-strip: multi-mention ordering and mid-text whitespace collapse are untested | 2026-07-30 | round 1 APPROVE |
 | M1-710 | SimpleX outbound rate-limit draws are untested; the Signal twin is pinned | 2026-07-30 | round 1 APPROVE |
 | M1-709 | SSRF body-cap comment names a config key that never existed | 2026-07-30 | round 1 APPROVE |
+| M1-708 | Gate docs against nonexistent infochat.* config keys | 2026-07-30 | round 1 APPROVE |
 | M1-704 | Outbound User-Agent: single-sourced, single-valued, non-rotting | 2026-07-30 | round 1 APPROVE |
 | M1-702 | Ban infochat-messaging-adapter from infochat-core | 2026-07-30 | round 1 APPROVE |
-| M1-713 | Opt-in -Pmutation profile: PIT over the four pure-Java modules | 2026-07-28 | round 3 APPROVE |
 
 ---
 
@@ -959,7 +958,7 @@ M1-704 (done)
 M1-705 (pending) ← runnable
 M1-706 (pending) ← runnable
 M1-707 (pending) ← runnable
-M1-708 (pending) ← runnable
+M1-708 (done)
 M1-709 (done)
 M1-710 (done)
 M1-713 (done)
