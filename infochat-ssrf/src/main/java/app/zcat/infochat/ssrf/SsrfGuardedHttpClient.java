@@ -130,7 +130,16 @@ public final class SsrfGuardedHttpClient {
 
     private static final Set<String> WEBSOCKET_SCHEMES = Set.of("ws", "wss");
 
-    private static final String USER_AGENT = "infochat/1.0.0-SNAPSHOT";
+    // The ONE outbound product token for the whole deployment — every
+    // fetcher inherits it, no caller declares its own (M1-704). The
+    // version is deliberately a stable major.minor with no patch level
+    // and no -SNAPSHOT qualifier: nothing couples this literal to the
+    // Maven project version, so a patch-precise token silently rots on
+    // every release (and advertising a pre-release build to every host
+    // we fetch from is wrong the moment a release ships). A major.minor
+    // token only moves on a deliberate bump, which the exact-value test
+    // in SsrfGuardedHttpClientTest turns into an explicit edit.
+    private static final String USER_AGENT = "infochat/1.0 (news aggregator)";
 
     private static final String ACCEPT_HEADER = "*/*";
 

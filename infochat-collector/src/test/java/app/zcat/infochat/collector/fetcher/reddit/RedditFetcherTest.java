@@ -240,6 +240,38 @@ class RedditFetcherTest {
     }
 
     @Test
+    void redditFetchCarriesExactlyOneUserAgent() {
+        // M1-704 regression guard. RedditFetcher used to pass its own
+        // User-Agent through the extraHeaders map, and
+        // HttpRequest.Builder.header APPENDS rather than replaces — so
+        // every Reddit request went out with two values, the wrapper's
+        // default and the fetcher's. Now the fetcher supplies none and
+        // inherits the wrapper's. The context is registered here (not in
+        // startServer) so the pre-existing fixture methods stay
+        // untouched.
+        AtomicReference<List<String>> userAgents = new AtomicReference<>();
+        byte[] body = EMPTY_LISTING_JSON.getBytes(StandardCharsets.UTF_8);
+        server.createContext("/r/useragent/new.json", exchange -> {
+            userAgents.set(List.copyOf(exchange.getRequestHeaders().get("User-Agent")));
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(body);
+            }
+        });
+
+        RedditFetcher fetcher = testModeFetcher(1);
+        fetcher.fetch(42L, baseUrl() + "/r/useragent/new");
+
+        assertEquals(1, userAgents.get().size(),
+            "a Reddit fetch must carry exactly one User-Agent value, not the "
+            + "wrapper default plus a fetcher-supplied duplicate: " + userAgents.get());
+        assertTrue(userAgents.get().get(0).startsWith("infochat/"),
+            "the single value must be the wrapper's product token, not the "
+            + "default JDK User-Agent Reddit blocks: " + userAgents.get());
+    }
+
+    @Test
     void afterCursorWithSpecialCharsIsEncodedNotInterpreted() {
         RedditFetcher fetcher = testModeFetcher(5);
         fetcher.fetch(42L, baseUrl() + "/r/inject/new");

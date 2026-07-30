@@ -49,6 +49,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class SsrfGuardedHttpClientTest {
 
+    // Deliberately a COPY of the wrapper's private USER_AGENT literal,
+    // not a reference to it (M1-704). Referencing the constant would
+    // make every assertion below track whatever the wrapper emits, so
+    // the value could drift silently — which is exactly the state this
+    // ticket closed. Duplicating it means changing the outbound product
+    // token is a two-file, deliberate edit.
+    private static final String EXPECTED_USER_AGENT = "infochat/1.0 (news aggregator)";
+
     private HttpServer server;
 
     private int port;
@@ -726,6 +734,40 @@ class SsrfGuardedHttpClientTest {
     }
 
     // -----------------------------------------------------------------
+    // Outbound User-Agent (M1-704). The wrapper's default is the one
+    // product token the deployment advertises; pin its exact value and
+    // its single-valuedness so neither can drift unnoticed.
+    // -----------------------------------------------------------------
+
+    @Test
+    void emittedUserAgentIsTheExactWrapperDefaultAndSingleValued() throws Exception {
+        AtomicReference<List<String>> userAgents = new AtomicReference<>();
+        server.createContext("/ua", exchange -> {
+            userAgents.set(List.copyOf(exchange.getRequestHeaders().get("User-Agent")));
+            byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(body);
+            }
+        });
+
+        SsrfGuardedHttpClient client = testModeClient();
+        HttpResponse<byte[]> response =
+            client.get(URI.create("http://127.0.0.1:" + port + "/ua"));
+
+        assertEquals(200, response.statusCode());
+        // One assertion covers both properties: the list equality pins
+        // the exact literal AND that exactly one value arrived. A second
+        // value (the pre-M1-704 duplicate-header defect, which the
+        // additive HttpRequest.Builder.header produces when a caller
+        // supplies its own User-Agent) fails this, and so does a bare
+        // presence check's blind spot.
+        assertEquals(List.of(EXPECTED_USER_AGENT), userAgents.get(),
+            "the wrapper must emit exactly one User-Agent with the exact "
+            + "product token; no -SNAPSHOT qualifier, no patch level");
+    }
+
+    // -----------------------------------------------------------------
     // Cross-origin header scrub (C-EXTRAHEADERS-REDIRECT, widened by
     // M1-277 M-S3). A redirect to a different host/port/scheme must NOT
     // replay ANY caller-supplied header injected for the original
@@ -771,8 +813,10 @@ class SsrfGuardedHttpClientTest {
             assertNull(authOnSecond.get(),
                 "Authorization must be stripped on the cross-origin redirect hop "
                 + "(it was injected for the first origin only)");
-            assertNotNull(userAgentOnSecond.get(),
-                "non-credential headers (User-Agent) must still ride cross-origin");
+            assertEquals(EXPECTED_USER_AGENT, userAgentOnSecond.get(),
+                "the wrapper's own User-Agent default must still ride cross-origin, "
+                + "with its exact value — presence alone would pass even if the "
+                + "token had drifted");
         } finally {
             second.stop(0);
         }
@@ -817,9 +861,9 @@ class SsrfGuardedHttpClientTest {
                 "Range must NOT cross origins — every caller-supplied "
                 + "header is origin-scoped; the cross-origin safe set "
                 + "is empty");
-            assertNotNull(userAgentOnSecond.get(),
+            assertEquals(EXPECTED_USER_AGENT, userAgentOnSecond.get(),
                 "the wrapper's own User-Agent default must still ride "
-                + "every hop");
+                + "every hop, with its exact value");
         } finally {
             second.stop(0);
         }

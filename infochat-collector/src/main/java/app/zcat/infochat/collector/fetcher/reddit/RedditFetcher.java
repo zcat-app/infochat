@@ -19,7 +19,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Fetcher for Reddit subreddits via the public {@code .json} endpoint.
@@ -28,8 +27,12 @@ import java.util.Map;
  * profile-driven page cap per {@code docs/design/01-architecture.md}
  * &sect;1.6 (5 on laptop/vps/remote-llm, 2 on pi).
  *
- * <p>Reddit blocks requests with the default JDK User-Agent, so every
- * request carries a descriptive {@code User-Agent} header.
+ * <p>Reddit blocks requests with the default JDK User-Agent. No
+ * override is needed here: {@link SsrfGuardedHttpClient} already sets a
+ * descriptive {@code User-Agent} on every hop of every request, so this
+ * fetcher inherits it. Declaring one locally would not replace that
+ * default — {@code HttpRequest.Builder.header} appends — it would send
+ * two values (M1-704).
  *
  * <p>{@code fetchedAt} is captured once before the first HTTP call —
  * all posts from one {@code fetch()} invocation share the same
@@ -43,8 +46,6 @@ import java.util.Map;
 @FetcherKind("reddit")
 @ApplicationScoped
 public class RedditFetcher implements Fetcher {
-
-    static final String USER_AGENT = "infochat/1.0 (news aggregator)";
 
     private final SsrfGuardedHttpClient client;
     private final int pageCap;
@@ -72,7 +73,7 @@ public class RedditFetcher implements Fetcher {
 
             HttpResponse<byte[]> response;
             try {
-                response = client.get(uri, Map.of("User-Agent", USER_AGENT));
+                response = client.get(uri);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new RedditFetchException(

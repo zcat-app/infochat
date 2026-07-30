@@ -1,9 +1,9 @@
 ---
 id: M1-704
 title: "Outbound User-Agent: single-sourced, single-valued, non-rotting"
-status: pending
+status: done
 created: 2026-07-27
-last_updated: 2026-07-27
+last_updated: 2026-07-30
 blocked_by: []
 files_budget: 4
 files_scope:
@@ -95,12 +95,37 @@ spec_refs:
   - docs/spec/security.md §SSRF
   - docs/design/04-security.md §4.4
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-30
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 116
+      removed: 20
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-30
+  verdict: PASS
+  warnings:
+    - >-
+      Self-check note: the Context section cites
+      SsrfGuardedHttpClient.java:131 for the USER_AGENT constant; the
+      constant is at :133. Two-line drift only — the constant name and
+      value quoted are correct, as are RedditFetcher.java:47/:75 and
+      SsrfGuardedHttpClientTest.java:747/:792. Acceptance item 1's
+      "only one UA literal in infochat-*/src/main" grep re-run live:
+      RedditFetcher is the sole other site.
+  blockers: []
 escalation_reason:
 ---
 
