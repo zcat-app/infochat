@@ -412,6 +412,95 @@ class SimpleXGroupHandlerTest {
     }
 
     /**
+     * Multi-mention ordering: the handler deletes bot spans right-to-left so
+     * that a span's recorded offset still addresses the same characters after
+     * an earlier span has been removed. Two bot mentions in one body is the
+     * smallest case that can tell the two orders apart — left-to-right, the
+     * second delete lands on offsets the first deletion already shifted and
+     * eats the wrong run of characters.
+     */
+    @Test
+    void twoBotMentionsStrippedRegardlessOfOffsetShift() {
+        String formattedText = """
+                [{"text":"@bot","format":{"type":"mention","memberName":"bot"}},\
+                {"text":" ping "},\
+                {"text":"@bot","format":{"type":"mention","memberName":"bot"}},\
+                {"text":" pong"}]""";
+        var candidate = decodeGroupFrame(groupFrame(
+                "group-7",
+                "alice-queue-addr",
+                "Alice",
+                "@bot ping @bot pong",
+                mentionsObject(BOT_DISPLAY, BOT_MEMBER_ID),
+                formattedText,
+                "msg-multi-mention"));
+
+        handler.onGroupCandidate(candidate);
+
+        assertEquals(1, delivered.size());
+        assertEquals("ping pong", delivered.get(0).text(),
+                "both bot mentions are stripped; deleting right-to-left keeps the "
+                        + "earlier span's offsets valid");
+    }
+
+    /**
+     * A mention in the middle of the body leaves the spaces on both of its
+     * sides adjacent once the span is deleted. The handler collapses that
+     * junction to one space, so "hey @bot do x" delivers as "hey do x" and
+     * not "hey  do x". Every other strip test mentions the bot at offset 0,
+     * where there is no left-hand side and the collapse never runs.
+     */
+    @Test
+    void midTextMentionCollapsesWhitespaceJunction() {
+        String formattedText = """
+                [{"text":"hey "},\
+                {"text":"@bot","format":{"type":"mention","memberName":"bot"}},\
+                {"text":" do x"}]""";
+        var candidate = decodeGroupFrame(groupFrame(
+                "group-7",
+                "alice-queue-addr",
+                "Alice",
+                "hey @bot do x",
+                mentionsObject(BOT_DISPLAY, BOT_MEMBER_ID),
+                formattedText,
+                "msg-midtext-mention"));
+
+        handler.onGroupCandidate(candidate);
+
+        assertEquals(1, delivered.size());
+        assertEquals("hey do x", delivered.get(0).text(),
+                "the two spaces left adjacent by the removed mention collapse to one");
+    }
+
+    /**
+     * A mention that ends the body deletes to the very end of the buffer, so
+     * the junction sits one past the last character — there is no right-hand
+     * character to collapse against. The bounds half of the junction guard is
+     * what keeps that case from reading off the end; the space the mention
+     * left behind is dropped by the final trim instead.
+     */
+    @Test
+    void trailingMentionStrippedWithoutReadingPastTheEnd() {
+        String formattedText = """
+                [{"text":"ping "},\
+                {"text":"@bot","format":{"type":"mention","memberName":"bot"}}]""";
+        var candidate = decodeGroupFrame(groupFrame(
+                "group-7",
+                "alice-queue-addr",
+                "Alice",
+                "ping @bot",
+                mentionsObject(BOT_DISPLAY, BOT_MEMBER_ID),
+                formattedText,
+                "msg-trailing-mention"));
+
+        handler.onGroupCandidate(candidate);
+
+        assertEquals(1, delivered.size());
+        assertEquals("ping", delivered.get(0).text(),
+                "a body-final mention leaves no dangling whitespace");
+    }
+
+    /**
      * Reconstruction guard: when the formattedText segments do NOT
      * reconstruct the message text (the mention segment "@m" never
      * appears in the body), no protocol span can be located inside the

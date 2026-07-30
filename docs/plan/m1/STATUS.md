@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 22 |
+| pending | 21 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 720 |
+| done | 721 |
 | deferred | 1 |
 | abandoned | 20 |
 | **total** | **763** |
@@ -31,7 +31,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-706 — Profile bundle: eval queue depth and summary worker count (complexity: high, risk: medium)
 - M1-707 — Operator-settable default timezone for new groups (complexity: low, risk: medium)
 - M1-708 — Gate docs against nonexistent infochat.* config keys (complexity: medium, risk: low)
-- M1-711 — SimpleX mention-strip: multi-mention ordering and mid-text whitespace collapse are untested (complexity: low, risk: low)
 - M1-712 — encodeJoinGroupCommand's command-injection guard is the one encode entry point no test pins (complexity: low, risk: low)
 - M1-714 — Summary/digest headline renders a raw post title: unbounded for social sources, blank for Bluesky (complexity: medium, risk: medium)
 - M1-715 — post.body_summary is never written, yet EmbeddingWorker prefers it as embedding input (complexity: low, risk: low)
@@ -81,6 +80,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-711 | SimpleX mention-strip: multi-mention ordering and mid-text whitespace collapse are untested | 2026-07-30 | round 1 APPROVE |
 | M1-710 | SimpleX outbound rate-limit draws are untested; the Signal twin is pinned | 2026-07-30 | round 1 APPROVE |
 | M1-709 | SSRF body-cap comment names a config key that never existed | 2026-07-30 | round 1 APPROVE |
 | M1-713 | Opt-in -Pmutation profile: PIT over the four pure-Java modules | 2026-07-28 | round 3 APPROVE |
@@ -90,7 +90,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-699 | summary_anchor render_form column + typed /retry dispatch | 2026-07-26 | round 1 APPROVE |
 | M1-698 | Guard the outbound chokepoint routing invariant | 2026-07-26 | round 1 APPROVE |
 | M1-696 | /retry replays the render form its anchored /summary produced | 2026-07-26 | round 1 APPROVE |
-| M1-697 | Scope every feed-bytes sanitize call to one author's field | 2026-07-25 | round 1 APPROVE |
 
 ---
 
@@ -969,7 +968,7 @@ M1-708 (pending) ← runnable
 M1-709 (done)
 M1-710 (done)
 M1-713 (done)
-  ├── M1-711 (pending) ← runnable
+  ├── M1-711 (done)
   └── M1-712 (pending) ← runnable
 M1-714 (pending) ← runnable
   └── M1-728 (pending)
