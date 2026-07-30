@@ -24,7 +24,8 @@ out_of_scope:
   - >-
     Making any of those caps operator-configurable. That was considered
     and rejected in the 2026-07-27 audit: `docs/design/04-security.md`
-    §4.4 items 5-6 now record them as deliberately not operator-tunable,
+    §"SSRF protection on `/add-source` and outbound fetches" items 5-6
+    now record them as deliberately not operator-tunable,
     on the same rationale as the scheme and IP allowlists. Adding a
     config key here would contradict the design note this ticket exists
     to align with.
@@ -47,7 +48,8 @@ acceptance:
     "the `infochat.fetch.max-body-bytes` default". It states what is
     true: the cap is a compile-time constant, deliberately not
     operator-tunable, kept in lockstep with
-    `docs/design/04-security.md` §4.4 item 5.
+    `docs/design/04-security.md` §"SSRF protection on `/add-source` and
+    outbound fetches" item 5.
   - >-
     Re-running the §Census enumeration after the change yields no row in
     the "fix" disposition: no `infochat.*` token in a `src/main` comment
@@ -114,7 +116,8 @@ site takes the no-arg constructor.
 
 The comment was merely stale when the 2026-07-27 doc-drift audit found
 it (`.scratch/doc-audit.md` §A3). It is now actively contradictory: that
-audit's follow-up narrowed `docs/design/04-security.md` §4.4 items 5-6 to
+audit's follow-up narrowed `docs/design/04-security.md` §"SSRF protection
+on `/add-source` and outbound fetches" items 5-6 to
 record the caps as **compile-time constants, deliberately not
 operator-tunable**, and removed the three phantom key names from the
 design note. The comment claims lockstep with a design section that now
@@ -164,7 +167,8 @@ class grew and this ticket's scope is wrong.
 
 - The `DEFAULT_BODY_CAP` comment describes the cap as a compile-time
   constant that is deliberately not operator-tunable, in lockstep with
-  `docs/design/04-security.md` §4.4 item 5, and names no config key.
+  `docs/design/04-security.md` §"SSRF protection on `/add-source` and
+  outbound fetches" item 5, and names no config key.
 - Re-running the §Census enumeration leaves no site in the "fix"
   disposition.
 - The diff touches comment text only — no value, no modifier, no code.
@@ -174,7 +178,8 @@ class grew and this ticket's scope is wrong.
 
 Nothing in the file's behavior changes: every cap keeps its value,
 visibility and enforcement. Making the caps configurable is explicitly
-rejected — §4.4 now records the opposite decision. The guard's
+rejected — §"SSRF protection on `/add-source` and outbound fetches" now
+records the opposite decision. The guard's
 allowlists, DNS pinning, redirect cap and header scoping are untouched,
 as is the `USER_AGENT` work owned by M1-704.
 

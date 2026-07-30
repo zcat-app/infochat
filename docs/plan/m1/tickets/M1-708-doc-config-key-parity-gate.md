@@ -36,7 +36,8 @@ out_of_scope:
     javadoc. One such stale reference is known and still open:
     `SsrfGuardedHttpClient.java:111` describes `DEFAULT_BODY_CAP` as "the
     `infochat.fetch.max-body-bytes` default", a key that has never
-    existed — and `docs/design/04-security.md` §4.4 has since been
+    existed — and `docs/design/04-security.md` §"SSRF protection on
+    `/add-source` and outbound fetches" has since been
     narrowed to say the caps are deliberately compile-time constants, so
     the comment now contradicts the design too. Fixing it is a one-line
     edit in a `src/main` file, which this test-only ticket must not
