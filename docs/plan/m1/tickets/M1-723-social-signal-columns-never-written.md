@@ -5,16 +5,20 @@ status: pending
 created: 2026-07-30
 last_updated: 2026-07-30
 blocked_by: []
-files_budget: 8
+files_budget: 12
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/outbox/PostPersister.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/bluesky/BlueskyResponseParser.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/reddit/RedditResponseParser.java
   - infochat-core/src/main/java/app/zcat/infochat/core/ingest/NormalizedPost.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/outbox/PostPersisterTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/outbox/PostPersisterIT.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/bluesky/BlueskyResponseParserTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/bluesky/BlueskyFetcherTest.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/reddit/RedditResponseParserSocialSignalTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/reddit/RedditFetcherTest.java
   - docs/design/02-schema.md
+  - docs/design/05-llm-and-embeddings.md
 complexity: medium
 risk: medium
 round_cap: 2
@@ -85,11 +89,17 @@ acceptance:
     field, not 0 — `asInt(0)`'s current defaulting is replaced by an
     explicit missing-node check, because this is a system boundary
     (untrusted upstream JSON) where absent and zero are different facts.
+    `BlueskyFetcherTest`'s `meta.get("likeCount")` / `meta.get("repostCount")`
+    assertions are **retargeted** onto the typed fields, not deleted —
+    the end-to-end fetch path keeps pinning both counts.
   - >-
     `RedditResponseParser` populates `likes` from `score` and leaves
     `reposts` null (Reddit exposes no repost count; `num_comments` is
     not a repost and must not be mapped to one). It stops writing
-    `score` into `rawMetadata`. Reddit's `score` is a net value and can
+    `score` into `rawMetadata`; `num_comments`, `author` and `subreddit`
+    stay in the map untouched. `RedditFetcherTest`'s `meta.get("score")`
+    assertion is **retargeted** onto `likes`, not deleted.
+    Reddit's `score` is a net value and can
     be NEGATIVE; it is persisted as-is and the `socialScore` formula is
     applied unchanged, so a heavily-downvoted post yields a negative
     social score rather than being clamped. A test pins a negative
@@ -98,9 +108,11 @@ acceptance:
     `PostPersister`'s INSERT lists `likes, reposts, social_score` and
     binds them from the `NormalizedPost`. The column count in the
     statement and the bind-index sequence stay consistent — a test
-    asserts a round-trip through `PostPersisterTest` reads back the
+    asserts a round-trip through `PostPersisterIT` reads back the
     three values it wrote, and that the pre-existing 19 columns keep
-    their current values.
+    their current values. The round-trip lives in `PostPersisterIT`,
+    not `PostPersisterTest`: the latter is a no-database unit test of
+    the pure `normalizeTitle` helper and cannot read a row back.
   - >-
     The three columns are bounded at the ingest boundary: a value whose
     magnitude exceeds `Integer.MAX_VALUE / 4` is clamped, so the
@@ -113,15 +125,28 @@ acceptance:
     `docs/design/02-schema.md` §2.3.1's `social_score` column comment
     (line 750) states which fetchers populate it and that NULL means "no
     social signal available", distinct from 0.
+  - >-
+    `docs/design/05-llm-and-embeddings.md` §5.4.5's "`social score`
+    computation" paragraph no longer asserts that posts without social
+    signals have `social_score = 0` — it states they carry NULL and that
+    the `{{#has_social}}` block is suppressed on NULL. Without this the
+    two design docs contradict each other on the exact point the ticket
+    establishes: `02-schema.md` would say NULL-is-not-zero one file away
+    from the canonical-formula paragraph saying the no-signal case is 0.
+    The `social_score = 2 * COALESCE(reposts, 0) + COALESCE(likes, 0)`
+    formula line itself is unchanged, and the prompt block stays
+    unimplemented per out_of_scope — this is a doc-consistency edit, not
+    consumer work.
   - mvn verify from the repo root is green.
 test_plan:
   adds:
     - >-
-      infochat-collector/src/test/java/app/zcat/infochat/collector/outbox/PostPersisterTest.java
+      infochat-collector/src/test/java/app/zcat/infochat/collector/outbox/PostPersisterIT.java
       — a NormalizedPost carrying likes/reposts/socialScore round-trips
       all three; a NormalizedPost with all three null persists NULL (not
       0) in all three columns; the 19 pre-existing columns are unchanged
-      in both cases.
+      in both cases. The IT, not PostPersisterTest: reading a row back
+      needs the database.
     - >-
       infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/bluesky/BlueskyResponseParserTest.java
       — likeCount/repostCount land on the typed fields; an absent
@@ -133,6 +158,17 @@ test_plan:
       infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/reddit/RedditResponseParserSocialSignalTest.java
       — score lands on likes; reposts stays null; num_comments is NOT
       mapped to reposts; a negative score persists negative.
+  modifies:
+    - >-
+      infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/bluesky/BlueskyFetcherTest.java
+      — the two rawMetadata assertions at lines 170-171 move onto
+      first.likes() / first.reposts(). Retargeted, not dropped: the
+      end-to-end fetch path must keep pinning both counts.
+    - >-
+      infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/reddit/RedditFetcherTest.java
+      — the meta.get("score") assertion at line 186 moves onto
+      first.likes(). The sibling author / num_comments / subreddit
+      assertions stay on rawMetadata unchanged.
   preserves:
     - >-
       Every Nostr test. `NostrStreamSourceTest`, `NostrEventTest`,
@@ -150,9 +186,11 @@ test_plan:
       go in a fourth per-concern suite matching that naming convention,
       not appended to one of them.
     - >-
-      Every existing `PostPersisterTest` assertion, including the
+      Every existing `PostPersisterIT` assertion, including the
       outbox `status='RAW'` invariant, the `WHERE NOT EXISTS` uid guard
-      and the `ON CONFLICT ... DO NOTHING` dedup behaviour.
+      and the `ON CONFLICT ... DO NOTHING` dedup behaviour. Also every
+      existing `PostPersisterTest` case (the `normalizeTitle` unit
+      suite), which this ticket does not touch.
     - all tests currently green on main
 spec_refs:
   - docs/design/02-schema.md §2.3.1
@@ -164,7 +202,30 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-30
+  verdict: WARN
+  warnings:
+    - >-
+      lint: PASS (0 blockers, 0 warnings). Census grep re-run live at
+      start; 3 hits, all in V7__joins_post.sql, matching the §Census
+      table.
+    - >-
+      Self-check found three false ticket-vs-code claims; user chose
+      "widen to 12" on the blocking question and the ticket was refined
+      before start. (1) PostPersisterTest.java is a 72-line no-database
+      unit test of normalizeTitle — it cannot host the round-trip
+      read-back acceptance 5 asks for, and the status='RAW' /
+      WHERE NOT EXISTS / ON CONFLICT assertions test_plan credits it
+      with actually live in PostPersisterIT.java. (2) Dropping the
+      rawMetadata keys breaks BlueskyFetcherTest.java:170-171 and
+      RedditFetcherTest.java:186, neither in the original files_scope.
+      (3) docs/design/05-llm-and-embeddings.md:463 states no-signal
+      posts have social_score = 0, contradicting the ticket's central
+      NULL-is-not-zero rule. files_budget 8 -> 12; acceptance 5 and
+      test_plan retargeted onto the IT; acceptance 8 added for the
+      design-doc contradiction.
+  blockers: []
 escalation_reason:
 ---
 
