@@ -646,10 +646,12 @@ documented residual risk rather than claimed closed: helper indirection
 (a static helper in another module wrapping `adapter.send`, called from
 provider — an interprocedural shape a static edge guard cannot trace);
 a sender compiled in a sibling module (scoped to the provider module
-today, bounded by the module DAG — collector, llm-adapter, ssrf, and
-messaging-adapter are enforcer-blocked from the messaging-adapter
-dependency, though infochat-core's edge is convention-only and tracked
-as a follow-up); reflective invocation (`Method.invoke` /
+today, bounded by the module DAG — core, collector, llm-adapter, ssrf,
+and messaging-adapter are enforcer-blocked from the messaging-adapter
+dependency, core's rule having landed with M1-702, so the DAG bound is
+structural for every one of them; infochat-messaging-adapter's own
+classes still reach the SPI it defines, which no dependency ban can
+express); reflective invocation (`Method.invoke` /
 `MethodHandle` / dynamic proxy), a deliberate-evasion shape outside the
 threat model's external-adversary scope; a body-delivering overload
 reusing a non-body method name (the drift check classifies the SPI by
