@@ -3,14 +3,14 @@ id: M1-707
 title: "Operator-settable default timezone for new groups"
 status: pending
 created: 2026-07-27
-last_updated: 2026-07-27
+last_updated: 2026-07-30
 blocked_by: []
 files_budget: 6
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/group/GroupRepository.java
   - infochat-provider/src/main/resources/application.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/group/GroupRepositoryTest.java
-  - infochat-core/src/main/resources/db/migration/V66__provider_groups_timezone_insert_grant.sql
+  - infochat-core/src/main/resources/db/migration/V68__provider_groups_timezone_insert_grant.sql
   - docs/design/07-deployment.md
 complexity: low
 risk: medium
@@ -53,7 +53,7 @@ acceptance:
     would surface later as a digest scheduling failure. Config parsing
     is a system boundary, so this validation belongs here.
   - >-
-    Migration V66 widens the Provider's column-scoped INSERT grant on
+    Migration V68 widens the Provider's column-scoped INSERT grant on
     `groups` to include `timezone` and nothing else; it applies cleanly
     on a fresh database and the existing V62 grant tests stay green.
   - >-
@@ -125,7 +125,7 @@ GAP note.
 - `GroupRepositoryTest` proves a group created under a non-UTC setting
   persists that zone, and that the default path still yields `UTC`.
 - A non-resolvable zone id refuses boot with a message naming the key.
-- Migration V66 adds `timezone` — and only `timezone` — to the
+- Migration V68 adds `timezone` — and only `timezone` — to the
   Provider's column-scoped INSERT grant on `groups`, applies cleanly on
   a fresh database, and leaves the rest of the V62 grant surface intact.
 - `docs/design/07-deployment.md` §7.4 carries the real key instead of
@@ -140,6 +140,17 @@ last resort. Digest window/stagger arithmetic is untouched. The grant
 change adds one column to one table for one role — no other widening.
 
 ## Notes
+
+- **Why V68 and not the next free number.** Three pending tickets each
+  carry a migration: this one, M1-722 (`V66__group_digest_mode.sql`) and
+  M1-727 (`V67__classification_personal_label.sql`, whose body pins V67
+  to "M1-722's V66 has landed"). No `flyway.out-of-order` is configured,
+  so Flyway's default `outOfOrder=false` applies and versions must land
+  in ascending order — which makes the number and the landing order one
+  decision, not two. This ticket claimed V66 as well; it is the one with
+  no dependents, so it renumbered to V68 and lands last of the three.
+  Landing it before M1-722 or M1-727 would leave Flyway refusing their
+  lower-numbered migrations on any database this one has already touched.
 
 - **The hidden coupling that makes this a migration ticket.** V62 line
   587 is `GRANT INSERT (adapter, upstream_group_id, activated_by) ON
