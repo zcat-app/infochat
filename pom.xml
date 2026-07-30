@@ -119,9 +119,15 @@
                 <!--
                      maven-enforcer-plugin: version managed here (M1-001
                      BOM-managed-versions invariant); the module-DAG ban
-                     execution + bannedDependencies rule is activated in
-                     infochat-collector/pom.xml only. Build-time plugin —
-                     no effect on shipped runtime artifacts.
+                     executions + bannedDependencies rules are activated
+                     per module — infochat-core, infochat-collector,
+                     infochat-ssrf, infochat-llm-adapter and
+                     infochat-messaging-adapter — and deliberately NOT
+                     here, because bannedDependencies evaluates per
+                     running module and a parent-level ban would also
+                     break infochat-provider, which depends on
+                     infochat-messaging-adapter legitimately. Build-time
+                     plugin — no effect on shipped runtime artifacts.
                 -->
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
