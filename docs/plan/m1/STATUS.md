@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 15 |
+| pending | 14 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 728 |
+| done | 729 |
 | deferred | 1 |
 | abandoned | 20 |
 | **total** | **764** |
@@ -34,7 +34,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-724 — Digest cluster selection is recency-only: the cap keeps the newest stories, never the most significant (complexity: high, risk: high)
 - M1-726 — Tagger treats a correct \"no topic fits\" as a failure and relabels the post with the source's topic tags (complexity: medium, risk: high)
 - M1-727 — Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other (complexity: medium, risk: medium)
-- M1-729 — Bluesky posts render a headline of \"untitled\" while their text sits in body (complexity: medium, risk: medium)
 
 ---
 
@@ -74,6 +73,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-729 | Bluesky posts render a headline of \"untitled\" while their text sits in body | 2026-07-30 | round 1 APPROVE |
 | M1-723 | post.likes / post.reposts / post.social_score are declared, parsed at two fetchers, and never persisted | 2026-07-30 | round 1 APPROVE |
 | M1-721 | Digest length is a function of tag count: nothing bounds how many category sections a digest renders | 2026-07-30 | round 1 APPROVE |
 | M1-714 | Summary/digest headline renders a raw post title: unbounded for social sources, blank for Bluesky | 2026-07-30 | round 1 APPROVE |
@@ -83,7 +83,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-709 | SSRF body-cap comment names a config key that never existed | 2026-07-30 | round 1 APPROVE |
 | M1-708 | Gate docs against nonexistent infochat.* config keys | 2026-07-30 | round 1 APPROVE |
 | M1-704 | Outbound User-Agent: single-sourced, single-valued, non-rotting | 2026-07-30 | round 1 APPROVE |
-| M1-702 | Ban infochat-messaging-adapter from infochat-core | 2026-07-30 | round 1 APPROVE |
 
 ---
 
@@ -985,5 +984,5 @@ M1-723 (done)
         └── M1-725 (pending) [see above]
 M1-726 (pending) ← runnable
 M1-727 (pending) ← runnable
-M1-729 (pending) ← runnable
+M1-729 (done)
 ```

@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.render;
 
+import app.zcat.infochat.core.ingest.IngestTextNormalizer;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
@@ -60,6 +61,45 @@ class DisplayHeadlineTest {
 
         assertEquals("Body wins", headline,
                 "a whitespace-only title carries no headline and must fall back to the body");
+    }
+
+    @Test
+    void storedUntitledSentinelFallsBackToBody() {
+        // The shape every titleless-by-design source produces once the ingest
+        // write path has run: Bluesky and Nostr pass a null title, an absent
+        // Reddit title arrives as "", and all three are stored as the
+        // sentinel. Matching only on blank left this dead for every row
+        // written since M1-693 (M1-729).
+        String headline = DisplayHeadline.of(
+                post(IngestTextNormalizer.UNTITLED_TITLE, "The actual post text"), sanitizer);
+
+        assertEquals("The actual post text", headline,
+                "the stored sentinel means 'no title' and must fall back to the body");
+    }
+
+    @Test
+    void storedUntitledSentinelWithNoBodyYieldsEmptyString() {
+        // Sentinel title AND no body: the post still resolves to the stable
+        // no-renderable-text representation rather than leaking the storage
+        // placeholder to a reader.
+        String headline = DisplayHeadline.of(
+                post(IngestTextNormalizer.UNTITLED_TITLE, ""), sanitizer);
+
+        assertEquals("", headline,
+                "the sentinel must never reach a render surface, even with no body");
+    }
+
+    @Test
+    void titleThatMerelyStartsWithTheSentinelWordRendersAsItself() {
+        // The sentinel match is exact equality. A contains/startsWith or
+        // case-insensitive test would swallow real titles like these and
+        // replace them with body text the author did not write.
+        assertEquals("untitled draft #4",
+                DisplayHeadline.of(post("untitled draft #4", "BODYMARKER"), sanitizer),
+                "a real title that only starts with the sentinel word must survive");
+        assertEquals("Untitled",
+                DisplayHeadline.of(post("Untitled", "BODYMARKER"), sanitizer),
+                "the match is case-sensitive: only the byte-exact sentinel is a placeholder");
     }
 
     @Test

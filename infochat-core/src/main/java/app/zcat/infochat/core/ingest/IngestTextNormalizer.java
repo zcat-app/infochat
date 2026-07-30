@@ -128,6 +128,29 @@ public final class IngestTextNormalizer {
     public static final int TITLE_MAX_LENGTH = 200;
 
     /**
+     * The value stored in {@code post.title} when the upstream carries no
+     * title at all. Bluesky and Nostr have no title concept and pass null;
+     * an absent Reddit title arrives as {@code ""}; and {@code post.title}
+     * is NOT NULL per V7, so something has to be written.
+     *
+     * <p>Declared here rather than at the write path because the value is a
+     * two-party contract across module boundaries: whoever writes it and
+     * whoever renders a post must agree on it byte-exactly, the writer to
+     * store it and the reader to recognise it as "no title" so a body
+     * fallback still fires. A literal duplicated across those modules drifts
+     * silently — the reader's fallback stops firing with no failing test to
+     * say so, which is precisely how M1-693 (which introduced the sentinel
+     * at ingest) and M1-714 (which added the display-side body fallback,
+     * conditioned on a blank title) collided. See M1-729.
+     *
+     * <p>A post whose upstream title is genuinely the word "untitled" is
+     * indistinguishable from this sentinel and is treated as titleless. That
+     * is accepted: such a post falls back to its body, which is a better
+     * headline than the word itself.
+     */
+    public static final String UNTITLED_TITLE = "untitled";
+
+    /**
      * Truncate a single-line metadata field to at most {@code maxLength}
      * UTF-16 {@code char} units, appending the {@code "…"} ellipsis
      * marker when truncation fires so the cut is visible to a reader.

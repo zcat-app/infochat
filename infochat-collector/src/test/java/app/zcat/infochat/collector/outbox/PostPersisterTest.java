@@ -42,14 +42,26 @@ class PostPersisterTest {
 
     @Test
     void nullTitleBecomesUntitledPlaceholder() {
-        assertEquals("untitled", PostPersister.normalizeTitle(null),
-            "a null title no longer produces a blank headline downstream");
+        assertEquals(IngestTextNormalizer.UNTITLED_TITLE, PostPersister.normalizeTitle(null),
+            "a null title stores the shared sentinel, satisfying the V7 NOT NULL column");
     }
 
     @Test
     void whitespaceOnlyTitleBecomesUntitledPlaceholder() {
-        assertEquals("untitled", PostPersister.normalizeTitle("   \t  "),
-            "a whitespace-only title no longer produces a blank headline");
+        assertEquals(IngestTextNormalizer.UNTITLED_TITLE, PostPersister.normalizeTitle("   \t  "),
+            "a whitespace-only title stores the shared sentinel");
+    }
+
+    @Test
+    void untitledSentinelIsWrittenByteExactSoDisplayCanRecogniseIt() {
+        // The sentinel is a two-party contract: the display layer matches it
+        // with String.equals to know the post is titleless. Any transformation
+        // on the way out — a strip, a cap, a trailing space — would break that
+        // match silently and leave the body fallback dead (M1-729). Asserting
+        // the literal, not the constant, is deliberate: comparing the constant
+        // to itself would pass no matter what the write path did to it.
+        assertEquals("untitled", PostPersister.normalizeTitle(null),
+            "the stored sentinel must be byte-exact for the display-side match");
     }
 
     @Test

@@ -177,9 +177,9 @@ public class PostPersister {
             ps.setString(4, normalizeUrlForStorage(normalized.url()));
             // post.title is normalized once at this sole write path so
             // every consumer (/summary, the digest, searchPosts, the
-            // chat tools) sees the same value: null/blank -> the
-            // "untitled" placeholder (no more blank Bluesky headline),
-            // then bidi/zero-width/control strip, then length-cap
+            // chat tools) sees the same value: null/blank ->
+            // IngestTextNormalizer.UNTITLED_TITLE, then
+            // bidi/zero-width/control strip, then length-cap
             // truncation. The cap runs AFTER the strip so an obfuscation
             // sequence can never be split mid-strip; the V7 NOT NULL
             // constraint holds because normalizeTitle never returns null.
@@ -283,9 +283,12 @@ public class PostPersister {
      *   <li>bidi/zero-width/control strip via
      *       {@link IngestTextNormalizer#stripMetadataField};</li>
      *   <li>blank replacement — a title that is empty or whitespace-only
-     *       after the strip becomes the literal {@code "untitled"} so a
-     *       titleless post (Bluesky, Nostr) no longer renders a blank
-     *       headline downstream;</li>
+     *       after the strip becomes
+     *       {@link IngestTextNormalizer#UNTITLED_TITLE}, which satisfies
+     *       the V7 NOT NULL constraint for a titleless-by-design source
+     *       (Bluesky, Nostr). Display surfaces recognise that sentinel as
+     *       "no title" and substitute the post's body (M1-729); it is a
+     *       storage placeholder, not a value intended to be rendered;</li>
      *   <li>length-cap truncation via
      *       {@link IngestTextNormalizer#truncateMetadataField}, which
      *       runs AFTER the strip so an obfuscation sequence can never be
@@ -300,7 +303,7 @@ public class PostPersister {
         String stripped = IngestTextNormalizer.stripMetadataField(
             rawTitle == null ? "" : rawTitle);
         if (stripped.isBlank()) {
-            return "untitled";
+            return IngestTextNormalizer.UNTITLED_TITLE;
         }
         return IngestTextNormalizer.truncateMetadataField(
             stripped, IngestTextNormalizer.TITLE_MAX_LENGTH);

@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.render;
 
+import app.zcat.infochat.core.ingest.IngestTextNormalizer;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 
@@ -102,10 +103,19 @@ public final class DisplayHeadline {
      * skipped rather than sanitized: a closed-list entry always begins with
      * {@code /}, so whitespace alone can never produce a hit, and skipping it
      * therefore costs no audit row.
+     *
+     * <p>{@link IngestTextNormalizer#UNTITLED_TITLE} counts as "no title"
+     * alongside blank. The ingest write path substitutes that sentinel for a
+     * titleless-by-design source to satisfy the {@code NOT NULL} column, so
+     * matching only on blank would leave the fallback dead for every row
+     * written since M1-693 — the sentinel is not blank. Exact equality, not a
+     * contains or case-insensitive test: only the byte-exact value is the
+     * storage placeholder, and a real title that merely mentions the word must
+     * still render as itself. (M1-729.)
      */
     private static String headlineSource(Post post) {
         String title = post.title();
-        if (!title.isBlank()) {
+        if (!title.isBlank() && !IngestTextNormalizer.UNTITLED_TITLE.equals(title)) {
             return title;
         }
         // Nullable in the DDL (`body TEXT`) even though the record's type is
