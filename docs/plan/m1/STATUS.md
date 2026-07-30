@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 24 |
+| pending | 23 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 718 |
+| done | 719 |
 | deferred | 1 |
 | abandoned | 20 |
 | **total** | **763** |
@@ -31,7 +31,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-706 — Profile bundle: eval queue depth and summary worker count (complexity: high, risk: medium)
 - M1-707 — Operator-settable default timezone for new groups (complexity: low, risk: medium)
 - M1-708 — Gate docs against nonexistent infochat.* config keys (complexity: medium, risk: low)
-- M1-709 — SSRF body-cap comment names a config key that never existed (complexity: low, risk: low)
 - M1-710 — SimpleX outbound rate-limit draws are untested; the Signal twin is pinned (complexity: low, risk: low)
 - M1-711 — SimpleX mention-strip: multi-mention ordering and mid-text whitespace collapse are untested (complexity: low, risk: low)
 - M1-712 — encodeJoinGroupCommand's command-injection guard is the one encode entry point no test pins (complexity: low, risk: low)
@@ -83,6 +82,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-709 | SSRF body-cap comment names a config key that never existed | 2026-07-30 | round 1 APPROVE |
 | M1-713 | Opt-in -Pmutation profile: PIT over the four pure-Java modules | 2026-07-28 | round 3 APPROVE |
 | M1-703 | Summary degraded notice misleads when only some topics fail | 2026-07-26 | round 1 APPROVE |
 | M1-701 | digest overflow line steers to /summary --full, not @mention | 2026-07-26 | round 1 APPROVE |
@@ -92,7 +92,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-696 | /retry replays the render form its anchored /summary produced | 2026-07-26 | round 1 APPROVE |
 | M1-697 | Scope every feed-bytes sanitize call to one author's field | 2026-07-25 | round 1 APPROVE |
 | M1-695 | Deliver the default /summary as one message per category section | 2026-07-25 | round 1 APPROVE |
-| M1-694 | /summary renders the categorized form by default; --full keeps the flat form | 2026-07-25 | round 2 APPROVE |
 
 ---
 
@@ -968,7 +967,7 @@ M1-705 (pending) ← runnable
 M1-706 (pending) ← runnable
 M1-707 (pending) ← runnable
 M1-708 (pending) ← runnable
-M1-709 (pending) ← runnable
+M1-709 (done)
 M1-710 (pending) ← runnable
 M1-713 (done)
   ├── M1-711 (pending) ← runnable

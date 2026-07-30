@@ -107,11 +107,13 @@ public final class SsrfGuardedHttpClient {
     private static final Duration DEFAULT_BODY_READ_DEADLINE = Duration.ofMinutes(2);
 
     // 5 MiB — the canonical outbound body cap, kept in lockstep with
-    // docs/design/04-security.md §"Body size cap" (the
-    // infochat.fetch.max-body-bytes default). Every no-arg consumer
-    // inherits exactly this value via the no-arg constructor; code and
-    // design state the same number so the documented exposure matches
-    // the enforced one. Package-private so the test can pin the value.
+    // docs/design/04-security.md §"Body size cap". A compile-time
+    // constant, deliberately not operator-tunable — a cap that bounds
+    // the blast radius of a hostile response is not a tuning knob.
+    // Every no-arg consumer inherits exactly this value via the no-arg
+    // constructor; code and design state the same number so the
+    // documented exposure matches the enforced one. Package-private so
+    // the test can pin the value.
     static final long DEFAULT_BODY_CAP = 5L * 1024 * 1024;
 
     private static final int DEFAULT_REDIRECT_CAP = 3;
