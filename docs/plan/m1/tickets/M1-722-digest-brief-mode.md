@@ -6,6 +6,7 @@ created: 2026-07-30
 last_updated: 2026-07-30
 blocked_by:
   - M1-721
+  - M1-714
 files_budget: 17
 files_scope:
   - infochat-core/src/main/resources/db/migration/V66__group_digest_mode.sql

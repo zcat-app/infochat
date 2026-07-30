@@ -33,7 +33,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-714 — Summary/digest headline renders a raw post title: unbounded for social sources, blank for Bluesky (complexity: medium, risk: medium)
 - M1-715 — post.body_summary is never written, yet EmbeddingWorker prefers it as embedding input (complexity: low, risk: low)
 - M1-716 — Decouple language enablement from bundle presence (complexity: low, risk: low)
-- M1-722 — Digest categories render a prose paragraph per cluster: replace with count + roll-up + headlines, and add /digest brief|normal|full (complexity: high, risk: high)
 - M1-724 — Digest cluster selection is recency-only: the cap keeps the newest stories, never the most significant (complexity: high, risk: high)
 - M1-726 — Tagger treats a correct \"no topic fits\" as a failure and relabels the post with the source's topic tags (complexity: medium, risk: high)
 - M1-727 — Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other (complexity: medium, risk: medium)
@@ -56,6 +55,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-718 — blocked_by: M1-716 (pending), M1-717 (deferred)
 - M1-719 — blocked_by: M1-716 (pending), M1-717 (deferred)
 - M1-720 — blocked_by: M1-716 (pending), M1-717 (deferred)
+- M1-722 — blocked_by: M1-721 (done), M1-714 (pending)
 - M1-725 — blocked_by: M1-722 (pending), M1-724 (pending)
 - M1-728 — blocked_by: M1-714 (pending), M1-722 (pending)
 
@@ -967,7 +967,10 @@ M1-713 (done)
   ├── M1-711 (done)
   └── M1-712 (done)
 M1-714 (pending) ← runnable
-  └── M1-728 (pending)
+  ├── M1-722 (pending)
+  │     ├── M1-725 (pending)
+  │     └── M1-728 (pending)
+  └── M1-728 (pending) [see above]
 M1-715 (pending) ← runnable
 M1-716 (pending) ← runnable
   ├── M1-718 (pending)
@@ -978,9 +981,7 @@ M1-717 (deferred)
   ├── M1-719 (pending) [see above]
   └── M1-720 (pending) [see above]
 M1-721 (done)
-  └── M1-722 (pending) ← runnable
-        ├── M1-725 (pending)
-        └── M1-728 (pending) [see above]
+  └── M1-722 (pending) [see above]
 M1-723 (done)
   └── M1-724 (pending) ← runnable
         └── M1-725 (pending) [see above]
