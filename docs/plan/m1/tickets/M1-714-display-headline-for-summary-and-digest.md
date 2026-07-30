@@ -3,7 +3,7 @@ id: M1-714
 title: "Summary/digest headline renders a raw post title: unbounded for social sources, blank for Bluesky"
 status: pending
 created: 2026-07-29
-last_updated: 2026-07-29
+last_updated: 2026-07-30
 blocked_by: []
 files_budget: 7
 files_scope:
@@ -53,13 +53,37 @@ out_of_scope:
   - >-
     `TopicCorpusBuilder.java:280`. That `title()` is a help `Topic`, not
     a `Post` — same method name, unrelated type.
+  - >-
+    Discarding a text-less post from retrieval instead of rendering it.
+    A post with neither title nor body (1 of 9,236 in the live corpus)
+    may still be an image-only or link-only Bluesky post whose url is
+    the payload, and the reply-extension case that would justify
+    keeping it is not representable: `post_reference.link_type` is
+    `CHECK (link_type IN ('entity','semantic','repost'))` (V29) with no
+    `reply` edge, and no fetcher emits one. Filtering here would drop
+    exactly the reply-extensions worth keeping, with nothing in the
+    data to tell them apart. Eligibility lives in `EligiblePostQuery` /
+    `DigestPostCollector`, outside this presentation-only change; the
+    omit-the-token behaviour above is forward-compatible with a later
+    filter (the branch simply stops being reachable). Follow-up.
   - any other module
 acceptance:
   - >-
     A new `DisplayHeadline` helper derives a one-line headline from a
     `Post`: the title when non-blank, else the body. The result is
     truncated to a bounded length with a trailing ellipsis when it was
-    cut, and returned unchanged when it already fits.
+    cut, and returned unchanged when it already fits. When title AND
+    body are both blank the helper returns the empty string — there is
+    no headline to render and no placeholder is invented.
+  - >-
+    The body fallback is sanitized on the same terms as the title:
+    `LlmOutputSanitizer.sanitize` runs over whichever single field the
+    helper selected. The body is source-authored text that reaches a
+    group-broadcast line start for the first time via this change, so
+    it inherits the M1-675 threat the title already carries. The
+    sanitize unit stays ONE author's field per call (M1-697): the
+    helper selects title OR body and sanitizes that, and must never
+    concatenate the two into one sanitize input.
   - >-
     Truncation is codepoint-safe: cutting never splits a surrogate pair.
     A title whose cut point falls inside an astral-plane character (an
@@ -87,6 +111,15 @@ acceptance:
     `DegradedDigestRenderer` (`:59`) render via the same helper, so the
     three display surfaces cannot drift.
   - >-
+    On an empty helper result each of the three sites omits the headline
+    token AND the separator that would have followed it, so no site
+    emits a blank line or a dangling separator. The remaining operands
+    are non-empty at every site, so each line still leads with real
+    content: the cluster block keeps `[topic_id=…]`, covered-by, score,
+    summary, classification and tags; `degradedProseFor` yields
+    `<url> (uid <uid>)`; `DegradedDigestRenderer` yields
+    `<sourceDisplayName>` with the url on the following line.
+  - >-
     `SummaryProseGenerator.java:179` and `CategoryRollupGenerator.java:199`
     still append the FULL title. A test asserts the summarizer prompt
     contains a long title in full.
@@ -96,20 +129,27 @@ test_plan:
     - >-
       infochat-provider/src/test/java/app/zcat/infochat/provider/render/DisplayHeadlineTest.java
       — short title unchanged; long title truncated with ellipsis; empty
-      title falls back to body; empty title AND empty body yields a
-      stable non-blank placeholder rather than an empty line; emoji at
-      the cut boundary is not split; a sanitizer replacement marker
-      straddling the cut is not emitted partially.
+      title falls back to body; empty title AND empty body yields the
+      empty string (no invented placeholder); a blank-title post's body
+      is sanitized, and title and body are never concatenated into one
+      sanitize input; emoji at the cut boundary is not split; a
+      sanitizer replacement marker straddling the cut is not emitted
+      partially.
     - >-
       infochat-provider/src/test/java/app/zcat/infochat/provider/command/ClusterBlockRendererTest.java
-      — an empty-title post renders a non-blank headline line; a flagged
-      span positioned BEYOND the truncation point still yields its
-      LLM_OUTPUT_SANITIZED audit row (pins sanitize-then-truncate order);
-      the summarizer prompt still carries the untruncated title.
+      — an empty-title post renders a non-blank headline line; a post
+      with empty title AND empty body emits no headline line at all
+      (the block still opens with `[topic_id=…]` and is followed
+      directly by the covered-by line — no blank line between them); a
+      flagged span positioned BEYOND the truncation point still yields
+      its LLM_OUTPUT_SANITIZED audit row (pins sanitize-then-truncate
+      order); the summarizer prompt still carries the untruncated title.
     - >-
       infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DegradedDigestRendererTest.java
-      — an empty-title post renders a non-blank headline; a long title is
-      truncated with an ellipsis.
+      — an empty-title post renders a non-blank headline; a post with
+      empty title AND empty body renders the source display name with no
+      leading ` — ` separator; a long title is truncated with an
+      ellipsis.
   preserves:
     - >-
       Every existing `ClusterBlockRendererTest` assertion, including the
@@ -215,13 +255,18 @@ wrong.
 ## Acceptance
 
 - `DisplayHeadline` derives a bounded one-line headline: title when
-  non-blank, else body, ellipsis when cut.
+  non-blank, else body, ellipsis when cut, empty string when neither
+  field has text.
+- Whichever single field is selected is sanitized; title and body are
+  never concatenated into one sanitize input (M1-697 unit invariant).
 - Codepoint-safe cutting — no split surrogate pairs (15.4% of nitter
   titles carry emoji).
 - Truncation runs after `sanitize`, so per-hit `LLM_OUTPUT_SANITIZED`
   audit rows survive, and never emits a half-cut replacement marker.
 - The three display sites use the helper; the empty-title case no longer
   renders a blank line.
+- On an empty helper result each site drops the headline token and its
+  separator, leaving the line to lead with its remaining operands.
 - The two prompt sites still pass the full title, pinned by a test.
 - `mvn verify` from the repo root is green.
 
@@ -249,11 +294,33 @@ configuration of the limit, translation of headline text, and
   shrink what the sanitizer sees, which is a control regression. The
   order in the acceptance criteria is the deliberate one.
 
-- **The all-empty case.** One Bluesky post has neither title nor body.
-  The helper must return something stable and non-blank for it rather
-  than reintroducing the empty line this ticket exists to remove; a
-  bundle-keyed placeholder is the natural fit, and the bundle needs the
-  `cs` twin (D43 bilateral keyset) if a new key is added.
+- **The all-empty case — no placeholder (revised 2026-07-30).** One
+  Bluesky post has neither title nor body. This ticket originally
+  nominated a bundle-keyed placeholder, and that is now rejected on two
+  counts. First, cost: the placeholder has to reach
+  `degradedProseFor`, a public static with 10 main + 3 test call sites,
+  so threading `BundleLoader` + language through it takes the ticket
+  from 7 files to 17 and pulls in `SummaryCommandHandler.java` — the
+  very file out-of-scope item 3 argues to keep out. Second, and
+  decisive on merit: a placeholder carries no information the omission
+  does not. `(untitled)` tells the reader nothing except that the
+  renderer wanted to print something. The helper returns empty and each
+  site drops the token plus its separator; every affected line still
+  leads with real content, so this is not the blank line the ticket
+  exists to remove. No new bundle key means D43's bilateral-keyset
+  obligation is not engaged at all.
+
+- **Why the post is still rendered rather than discarded.** Empty title
+  + empty body does not mean an empty post: an image-only or link-only
+  Bluesky post has both fields blank while its url is the payload.
+  Discarding is also not this ticket's altitude (eligibility lives in
+  `EligiblePostQuery`), and the case that would justify keeping such a
+  post — it is a reply extending an original — cannot be detected
+  today: `post_reference.link_type` admits only
+  `entity | semantic | repost` (V29) and no fetcher emits a reply edge.
+  A blunt filter would therefore discard precisely the
+  reply-extensions worth keeping. See out-of-scope; forward-compatible
+  either way.
 
 - **Follow-up, not committed to here.** Making the limit a config key is
   genuinely useful for a multi-instance deployment where different
