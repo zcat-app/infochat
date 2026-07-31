@@ -59,6 +59,7 @@ and this store is the shared one both worlds read.
 - [D59 world predicate and bundle-copy gotchas](d59-world-predicate-and-bundle-copy-gotchas.md) — the periodic digest is `DigestPostCollector` (9 predicate sites); bootstrap-origin fixtures leak to every scope; change copy by editing a key's VALUE.
 - [Quarkus fast-jar live debugging](quarkus-fastjar-live-debug.md) — transformed-bytecode.jar shadows lib/main so jar overlays silently no-op; adapter dispatch threads carry a foreign context classloader.
 - [git add with a stale pathspec stages nothing](git-add-stale-pathspec-silent-nostage.md) — all-or-nothing pathspecs; `RM` in status means your rewrite is UNSTAGED.
+- [CDI proxy field writes hit the proxy](cdi-proxy-field-writes-hit-the-proxy.md) — `bean.field = x` through an injected reference writes the proxy's slot, not the bean's (tests must `ClientProxy.unwrap`); and a test driving `onTick()` directly must neutralize other IT classes' standing pickup-ready rows or they eat the stub's FIFO responses.
 
 ## Open TODOs
 
