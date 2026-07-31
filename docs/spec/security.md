@@ -418,8 +418,9 @@ close the same way, and the difference is the lesson:
 The write-boundary rejects carry no **mechanical guard** (the reflection
 guard's census is error-scoped, and both of these are `reply.*` keys)
 and other `reply.*` echoes remain unreviewed; the `/save -t` render-side
-redaction, by contrast, emits the per-occurrence `LLM_OUTPUT_SANITIZED`
-audit row on every hit. So for now this exemption carries a **residual
+redaction, by contrast, is audit-logged on every hit — rows aggregate
+per distinct token per call and carry the exact occurrence count. So
+for now this exemption carries a **residual
 risk** on non-error deterministic output, not a proven-safe blanket.
 
 **Delivery-ordering contract.** Command-usage or help text delivered
@@ -451,7 +452,9 @@ Admin commands are dispatched only by the deterministic command path,
 so a copy-pasted reply still requires `is_admin=true` to do anything;
 the sanitizer closes the social-engineering surface where a small LLM
 emits plausible-looking admin commands across any of the surfaces above.
-Every match is audit-logged (per-occurrence, not throttled).
+Every match is audit-logged; rows aggregate per distinct token per
+sanitize call and carry the exact occurrence count — counted, never
+throttled.
 
 **Canonical-form matching.** The closed-list pass matches against the
 **canonical** form of the candidate output — NFKC normalization
@@ -522,7 +525,8 @@ bot-authored bytes — requires every sanitize call over feed-derived text
 to be scoped to a *single* author's field, and every call site is built
 that way: `ClusterBlockRenderer` passes one post title,
 `DegradedDigestRenderer` one title per post, the `/saved` reply one
-row's title and one row's tags, and degraded prose is DERIVED from the
+row's title OR up to `BODY_SCAN_LIMIT` chars of its body, plus one
+row's tags, and degraded prose is DERIVED from the
 cluster at render and sanitized per post title
 (`SummaryProseGenerator.degradedProseFor`) — the renderers never trust
 the prose bytes a `ClusterProse` record carries, so a hand-assembled
@@ -541,8 +545,9 @@ over assembled multi-author prose — is strictly worse, because the span
 then swallows *other publishers'* bytes and a co-clustered attacker can
 delete a third party's post (the content-suppression vector the
 categorized-render redteam caught). The detector narrows only for that split case:
-within one field, per-occurrence `LLM_OUTPUT_SANITIZED` rows fire at
-least as often as before the narrowing.
+within one field, `LLM_OUTPUT_SANITIZED` rows fire at
+least as often as before the narrowing (aggregated per distinct token
+per call, carrying the exact occurrence count).
 
 The cost of the whole-message bound is that a genuine mention
 of the command and a later, unrelated admin flag in the bot's own

@@ -1,5 +1,9 @@
 package app.zcat.infochat.provider.llm;
 
+import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.AuditLogWriter;
+import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -8,6 +12,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.sql.Connection;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -34,7 +39,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       stripped and replaced with {@code [redacted command]}.</li>
  *   <li>The markdown-link strip pass.</li>
  *   <li>The both-passes ordering (markdown FIRST, closed-list SECOND).</li>
- *   <li>The per-occurrence WARN logging captured via JUL.</li>
+ *   <li>The aggregated WARN logging (one WARN per distinct token per
+ *       call, carrying the exact occurrence count) captured via JUL,
+ *       and the aggregated audit-row shape driven through a capturing
+ *       {@link AuditLogWriter}.</li>
  *   <li>The {@code matchSetEqualsSpecClosedList} CI completeness
  *       {@code @Test} that parses {@code docs/spec/commands.md} at
  *       test tier and compares to {@link LlmOutputSanitizer#CLOSED_LIST}.</li>
@@ -717,7 +725,7 @@ class LlmOutputSanitizerTest {
                 "ordering must be markdown FIRST then closed-list SECOND");
     }
 
-    // ----- per-occurrence WARN logging ----------------------------------
+    // ----- aggregated WARN logging + audit-row shape (M1-737) ----------
 
     @Test
     void threeMatchesProduceThreeWarnRecords() {
@@ -732,8 +740,129 @@ class LlmOutputSanitizerTest {
                 .filter(r -> r.getLevel().intValue() == Level.WARNING.intValue())
                 .toList();
         assertEquals(3, warnRecords.size(),
-                "exactly 3 WARN records — one per match, no throttling. Captured: "
+                "exactly 3 WARN records — one per distinct token, no throttling. Captured: "
                         + logCapture.formatted());
+    }
+
+    @Test
+    void repeatedTokenCollapsesToOneWarnCarryingCount() {
+        // M1-737 acceptance: the one-WARN-per-match log line at the
+        // strip loop collapses to one WARN per distinct token per call,
+        // carrying the count — N occurrences of one token cost one log
+        // line, and the count keeps the signal lossless.
+        String input = "Run /audit now, then /audit again, and /audit thrice.";
+        LlmOutputSanitizer.applyClosedListStrip(input);
+        List<LogRecord> warnRecords = logCapture.records.stream()
+                .filter(r -> r.getLevel().intValue() == Level.WARNING.intValue())
+                .toList();
+        assertEquals(1, warnRecords.size(),
+                "three occurrences of ONE token must collapse to one WARN. Captured: "
+                        + logCapture.formatted());
+        String rendered = renderLogMessage(warnRecords.get(0));
+        assertTrue(rendered.contains("token=/audit"),
+                "the collapsed WARN must name the token; got: " + rendered);
+        assertTrue(rendered.contains("count=3"),
+                "the collapsed WARN must carry the exact occurrence count; got: " + rendered);
+    }
+
+    @Test
+    void sameTokenOccurrencesAggregateToOneAuditRowCarryingExactCount() {
+        // M1-737 acceptance: one sanitize call over a field carrying N
+        // occurrences of the SAME closed-list token writes ONE
+        // LLM_OUTPUT_SANITIZED audit_log row for that token whose
+        // detailsJson.match_count is exactly N — no occurrence
+        // suppressed, no per-occurrence rows.
+        List<RedactionHook.AuditRow> rows = new ArrayList<>();
+        LlmOutputSanitizer sanitizer = new LlmOutputSanitizer(
+                capturingAuditWriter(rows), SanitizerTestDoubles.noOpDataSource());
+
+        sanitizer.sanitize("Run /audit now, then /audit again, and /audit thrice.");
+
+        assertEquals(1, rows.size(),
+                "N occurrences of one token must land ONE aggregated row, not N; got: " + rows);
+        RedactionHook.AuditRow row = rows.get(0);
+        assertEquals(AuditAction.LLM_OUTPUT_SANITIZED, row.action(),
+                "the aggregated row must carry action LLM_OUTPUT_SANITIZED");
+        String detailsJson = row.detailsJson();
+        assertNotNull(detailsJson, "the aggregated row must carry detailsJson");
+        assertTrue(detailsJson.contains("\"match_count\":3"),
+                "match_count must be exactly the occurrence count 3; got: " + detailsJson);
+        assertTrue(detailsJson.contains("\"match_kind\":\"/audit\""),
+                "match_kind must name the token; got: " + detailsJson);
+    }
+
+    @Test
+    void distinctTokensGetOneRowEachAndRewriteIsByteIdentical() {
+        // M1-737 acceptance: DISTINCT tokens still get one row each, and
+        // the redacted output text is byte-identical to the
+        // per-occurrence implementation's — the rewrite is unchanged;
+        // only the emission aggregates.
+        List<RedactionHook.AuditRow> rows = new ArrayList<>();
+        LlmOutputSanitizer sanitizer = new LlmOutputSanitizer(
+                capturingAuditWriter(rows), SanitizerTestDoubles.noOpDataSource());
+
+        String output = sanitizer.sanitize("First /ban one, then /audit them, then /ban two.");
+
+        assertEquals("First " + LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT + " one, then "
+                        + LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT + " them, then "
+                        + LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT + " two.",
+                output,
+                "the rewrite must be byte-identical to the per-occurrence implementation's");
+        assertEquals(2, rows.size(),
+                "distinct tokens still get one row each; got: " + rows);
+        for (RedactionHook.AuditRow row : rows) {
+            assertEquals(AuditAction.LLM_OUTPUT_SANITIZED, row.action(),
+                    "every row must carry action LLM_OUTPUT_SANITIZED");
+        }
+        String banJson = detailsJsonOf(rows, "/ban");
+        assertTrue(banJson.contains("\"match_count\":2"),
+                "the /ban row must carry the exact count 2; got: " + banJson);
+        String auditJson = detailsJsonOf(rows, "/audit");
+        assertTrue(auditJson.contains("\"match_count\":1"),
+                "the /audit row must carry the exact count 1; got: " + auditJson);
+    }
+
+    /**
+     * An {@link AuditLogWriter} that appends each row to {@code sink} —
+     * the unit-tier seam for pinning the audit-row shape without a
+     * database (the {@link SanitizerTestDoubles#noOpDataSource()}
+     * connection satisfies the transaction calls).
+     */
+    private static AuditLogWriter capturingAuditWriter(List<RedactionHook.AuditRow> sink) {
+        return new AuditLogWriter(row -> row) {
+            @Override
+            public void write(Connection conn, RedactionHook.AuditRow row) {
+                sink.add(row);
+            }
+        };
+    }
+
+    /** The {@code detailsJson} of the one row naming {@code token}. */
+    private static String detailsJsonOf(List<RedactionHook.AuditRow> rows, String token) {
+        List<String> jsons = rows.stream()
+                .map(RedactionHook.AuditRow::detailsJson)
+                .filter(json -> json != null && json.contains(token))
+                .toList();
+        assertEquals(1, jsons.size(),
+                "exactly one aggregated row must name " + token + "; got: " + rows);
+        return jsons.get(0);
+    }
+
+    /**
+     * Render a captured log record the way the log backend would: JBoss
+     * Logging's {@code warnf} may leave the message as a printf format
+     * with parameters, so apply them when present.
+     */
+    private static String renderLogMessage(LogRecord record) {
+        Object[] params = record.getParameters();
+        if (params == null || params.length == 0) {
+            return record.getMessage();
+        }
+        try {
+            return String.format(record.getMessage(), params);
+        } catch (RuntimeException e) {
+            return record.getMessage();
+        }
     }
 
     // ----- spec-vs-runtime completeness ---------------------------------
@@ -869,10 +998,11 @@ class LlmOutputSanitizerTest {
      * Assert that a Unicode-obfuscated {@code token} — one that reaches the
      * sanitizer in a representation the raw-byte match could not see, but
      * that canonicalizes into a real closed-list entry — is redacted, and
-     * that it yields exactly ONE audit-row-worthy match recorded under the
-     * token's canonical form. One match element is one
-     * {@code LLM_OUTPUT_SANITIZED} row (LlmOutputSanitizer.emitAuditRows),
-     * so this is the per-occurrence durability commitment at unit tier.
+     * that it yields exactly ONE match recorded under the token's
+     * canonical form. Each match element feeds the per-token aggregation
+     * behind the {@code LLM_OUTPUT_SANITIZED} row
+     * (LlmOutputSanitizer.emitAuditRows), so a single element here is the
+     * count-1 case of the aggregated durability commitment at unit tier.
      */
     private void assertCanonicalEvasionRedacted(String input, String canonicalToken) {
         LlmOutputSanitizer.ClosedListStripResult result =

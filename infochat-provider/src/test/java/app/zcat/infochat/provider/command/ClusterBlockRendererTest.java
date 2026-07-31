@@ -200,8 +200,9 @@ class ClusterBlockRendererTest {
         // Sanitize-then-truncate ordering pin. The command sits well past the
         // display bound, so a truncate-first implementation would cut it away
         // before the sanitizer ever saw it — losing the LLM_OUTPUT_SANITIZED
-        // audit row that docs/spec/security.md commits to per occurrence.
-        // M1-714.
+        // audit row that docs/spec/security.md commits to (counted, never
+        // throttled: one row per distinct token per call carrying the exact
+        // occurrence count). M1-714; aggregated shape per M1-737.
         List<RedactionHook.AuditRow> auditRows = new ArrayList<>();
         AuditLogWriter capturingWriter = new AuditLogWriter(row -> row) {
             @Override
@@ -230,6 +231,12 @@ class ClusterBlockRendererTest {
         assertTrue(auditRows.stream()
                         .allMatch(row -> row.action() == AuditAction.LLM_OUTPUT_SANITIZED),
                 "every emitted row must carry action LLM_OUTPUT_SANITIZED; got: " + auditRows);
+        assertTrue(auditRows.stream()
+                        .allMatch(row -> row.detailsJson() != null
+                                && row.detailsJson().contains("\"match_count\":1")),
+                "one row per distinct token per call carrying the exact count — each "
+                        + "sanitize call saw the single /grant-admin occurrence once; got: "
+                        + auditRows);
         assertFalse(rendered.contains("/grant-admin"),
                 "the raw privileged command must not survive into the block; got: " + rendered);
     }

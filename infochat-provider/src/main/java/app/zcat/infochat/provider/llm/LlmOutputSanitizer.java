@@ -15,7 +15,9 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -46,14 +48,16 @@ import java.util.regex.Pattern;
  *       output, not its raw bytes — see that method for why.</li>
  * </ol>
  *
- * <p>Every match emits one structured log line at level WARN AND
- * one {@code audit_log} row with action {@code LLM_OUTPUT_SANITIZED} —
- * the docs/spec/security.md per-occurrence (not throttled) commitment.
- * Two hits in one {@code sanitize()} call land two audit rows, not
- * one coalesced row. The audit row's {@code details_json} carries the
+ * <p>Every match is audit-logged, with emission AGGREGATED per distinct
+ * token per {@code sanitize()} call — the docs/spec/security.md
+ * counted-never-throttled commitment. N occurrences of the same
+ * closed-list token in one call land ONE structured WARN line and ONE
+ * {@code audit_log} row with action {@code LLM_OUTPUT_SANITIZED} whose
+ * {@code details_json.match_count} is exactly N; distinct tokens still
+ * get one row each. The audit row's {@code details_json} carries the
  * matched token under {@code match_kind} (the closed-list entry, e.g.
- * {@code /ban}) plus {@code match_count = 1} per row; the user-visible
- * LLM output text is never copied into the row.
+ * {@code /ban}); the user-visible LLM output text is never copied into
+ * the row.
  *
  * <p>{@link #CLOSED_LIST} is hand-maintained in code to mirror
  * docs/spec/commands.md §Permission model §Closed list of
@@ -80,7 +84,7 @@ public class LlmOutputSanitizer {
 
     /**
      * Sole constructor. Both audit collaborators are non-null and final, so
-     * {@link #sanitize(String)} ALWAYS emits the per-occurrence
+     * {@link #sanitize(String)} ALWAYS emits the aggregated
      * {@code LLM_OUTPUT_SANITIZED} rows the spec commits to — there is no
      * constructor that can build an audit-bypassing instance, so the
      * durability commitment is structural rather than discipline-enforced.
@@ -102,8 +106,8 @@ public class LlmOutputSanitizer {
      * the list and replaces every occurrence per entry — a single
      * matcher pass over the union via alternation would be
      * indistinguishable from this loop semantically, but a per-entry
-     * loop keeps the per-entry observability promise (one log line
-     * per matched token).
+     * loop keeps the per-entry observability promise (one aggregated
+     * log line per matched token).
      */
     static final List<String> CLOSED_LIST = List.of(
             // Bot-admin only:
@@ -260,9 +264,9 @@ public class LlmOutputSanitizer {
      * followed anywhere later in the message by the flag as a
      * whitespace-delimited token. Each redaction spans the command word
      * through the flag and is replaced with
-     * {@value #REDACTED_COMMAND_REPLACEMENT}; one WARN and one
-     * {@code matches} entry are emitted per occurrence, matching the
-     * regex path's per-occurrence audit semantics.
+     * {@value #REDACTED_COMMAND_REPLACEMENT}; one {@code matches} entry
+     * is recorded per occurrence, feeding the same per-token
+     * aggregation (WARN + audit row) as the regex path.
      *
      * <p><b>Why code and not a regex.</b> See
      * {@link #compileClosedListPattern}: no regex matches a flag at any
@@ -322,7 +326,6 @@ public class LlmOutputSanitizer {
                 continue;
             }
             out.append(input, appended, command).append(REDACTED_COMMAND_REPLACEMENT);
-            LOG.warnf("LLM_OUTPUT_SANITIZED token=%s position=%d", token, command);
             matches.add(token);
             appended = flagEnd;
             commandSearch = flagEnd;
@@ -406,8 +409,9 @@ public class LlmOutputSanitizer {
      * Run both passes in order. The output is plain text, with
      * privileged commands replaced by {@value #REDACTED_COMMAND_REPLACEMENT}
      * and markdown links flattened to {@code text (url)}. Every
-     * closed-list match emits one {@code audit_log} row with action
-     * {@code LLM_OUTPUT_SANITIZED}.
+     * closed-list match is audit-logged; the {@code audit_log} emission
+     * aggregates per distinct token per call (one row carrying the
+     * exact occurrence count) with action {@code LLM_OUTPUT_SANITIZED}.
      *
      * @throws IllegalStateException if the audit-row INSERT fails
      *         (DB outage, lock contention, role grant revoked, etc.).
@@ -511,11 +515,12 @@ public class LlmOutputSanitizer {
      * words, internal whitespace as {@code \s+}), or, for a flag-bearing
      * entry whose pattern slot is the {@link #FLAG_ENTRY_TOKENIZED}
      * sentinel, via {@link #redactFlagEntry}; every occurrence is replaced with
-     * {@value #REDACTED_COMMAND_REPLACEMENT}. Emits one WARN log line per
-     * match. Used by tests that want the rewrite without driving the
+     * {@value #REDACTED_COMMAND_REPLACEMENT}. Emits one aggregated WARN
+     * log line per distinct matched token. Used by tests that want the
+     * rewrite without driving the
      * audit emission; the production path is
      * {@link #applyClosedListStripWithMatches(String)} which also
-     * captures the match list for per-occurrence audit rows.
+     * captures the match list for the aggregated audit rows.
      */
     static String applyClosedListStrip(String input) {
         return applyClosedListStripWithMatches(input).rewritten();
@@ -524,16 +529,18 @@ public class LlmOutputSanitizer {
     /**
      * Carrier for the closed-list pass: the rewritten text plus the
      * list of matched tokens (one entry per occurrence, in input
-     * order). The instance {@link #sanitize(String)} writes one
-     * {@code audit_log} row per element of {@link #matches()} —
-     * the spec's per-occurrence promise.
+     * order). The instance {@link #sanitize(String)} aggregates
+     * {@link #matches()} per distinct token and writes one
+     * {@code audit_log} row per token carrying the exact occurrence
+     * count — the spec's counted-never-throttled promise.
      */
     record ClosedListStripResult(String rewritten, List<String> matches) {}
 
     /**
      * Closed-list strip pass that ALSO records the matched tokens for
-     * downstream per-occurrence audit emission. Emits the WARN log
-     * line per match here (so the WARN-vs-row count stays 1:1).
+     * downstream aggregated audit emission. Emits the WARN log lines
+     * here, one per distinct matched token carrying the exact
+     * occurrence count (so the WARN-vs-row count stays 1:1).
      *
      * <p>Matching runs on the {@linkplain #canonicalizeForMatching
      * canonical} form. On zero matches the caller's ORIGINAL bytes are
@@ -574,8 +581,6 @@ public class LlmOutputSanitizer {
                 if (rewritten == null) {
                     rewritten = new StringBuilder();
                 }
-                // Emit one WARN per match — per-occurrence, not throttled.
-                LOG.warnf("LLM_OUTPUT_SANITIZED token=%s position=%d", token, m.start());
                 matches.add(token);
                 m.appendReplacement(rewritten, Matcher.quoteReplacement(REDACTED_COMMAND_REPLACEMENT));
             }
@@ -586,6 +591,13 @@ public class LlmOutputSanitizer {
         }
         if (matches.isEmpty()) {
             return new ClosedListStripResult(input, matches);
+        }
+        // One WARN per distinct token per call, carrying the exact
+        // occurrence count — counted, never throttled. Emitted after
+        // the loop so N occurrences of one token cost one log line.
+        for (Map.Entry<String, Integer> aggregated : aggregateMatchCounts(matches).entrySet()) {
+            LOG.warnf("LLM_OUTPUT_SANITIZED token=%s count=%d",
+                    aggregated.getKey(), aggregated.getValue());
         }
         // Re-run after the replacement, not just before it: the marker is
         // created here, so it is the one piece of bracketed text neither
@@ -621,10 +633,28 @@ public class LlmOutputSanitizer {
     }
 
     /**
-     * Write one {@code audit_log} row per matched token via
-     * {@link AuditLogWriter}, all in a single transaction. The spec
-     * §LLM output sanitizer commits to durability — "Every match is
-     * audit-logged (per-occurrence, not throttled)" — so a partial
+     * Aggregate the per-occurrence match list into per-token counts,
+     * preserving first-seen order so the WARN stream and the audit
+     * rows enumerate tokens in the order they first matched.
+     * Aggregation is the DOS bound from docs/spec/security.md §LLM
+     * output sanitizer: a field of N repeated tokens costs one WARN
+     * line and one audit row, while the exact count keeps the audit
+     * signal lossless — no occurrence is suppressed or capped.
+     */
+    static LinkedHashMap<String, Integer> aggregateMatchCounts(List<String> matches) {
+        LinkedHashMap<String, Integer> counts = new LinkedHashMap<>();
+        for (String token : matches) {
+            counts.merge(token, 1, Integer::sum);
+        }
+        return counts;
+    }
+
+    /**
+     * Write one {@code audit_log} row per distinct matched token via
+     * {@link AuditLogWriter}, all in a single transaction, the row's
+     * {@code details_json.match_count} carrying the exact occurrence
+     * count. The spec §LLM output sanitizer commits to durability —
+     * "Every match is audit-logged" — so a partial
      * write must NOT leave the caller free to send the sanitized
      * reply. Either every row commits or none do and the method
      * throws; the caller's response build aborts.
@@ -638,9 +668,9 @@ public class LlmOutputSanitizer {
         }
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
-            for (String token : matches) {
-                String detailsJson = "{\"match_count\":1,\"match_kind\":\""
-                        + JsonEscaper.escape(token) + "\"}";
+            for (Map.Entry<String, Integer> aggregated : aggregateMatchCounts(matches).entrySet()) {
+                String detailsJson = "{\"match_count\":" + aggregated.getValue()
+                        + ",\"match_kind\":\"" + JsonEscaper.escape(aggregated.getKey()) + "\"}";
                 RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
                         .action(AuditAction.LLM_OUTPUT_SANITIZED)
                         .targetKind(TargetKind.SYSTEM)
@@ -652,11 +682,11 @@ public class LlmOutputSanitizer {
             conn.commit();
         } catch (SQLException e) {
             // Spec §LLM output sanitizer is a durability commitment:
-            // "Every match is audit-logged (per-occurrence, not
-            // throttled)." A partial write or a failed INSERT means
-            // the user-visible reply must NOT be emitted with the
-            // closed-list tokens stripped — the audit trail is the
-            // load-bearing operator signal for those events.
+            // "Every match is audit-logged." A partial write or a
+            // failed INSERT means the user-visible reply must NOT be
+            // emitted with the closed-list tokens stripped — the audit
+            // trail is the load-bearing operator signal for those
+            // events.
             // try-with-resources closes the connection; PgConnection
             // rolls back an active transaction on close, so the
             // partial-write case leaves audit_log unchanged.

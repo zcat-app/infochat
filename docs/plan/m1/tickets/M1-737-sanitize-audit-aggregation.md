@@ -1,7 +1,7 @@
 ---
 id: M1-737
 title: "Aggregate sanitize audit rows per distinct token per call"
-status: pending
+status: done
 created: 2026-07-31
 last_updated: 2026-07-31
 blocked_by: [M1-730]
@@ -70,6 +70,16 @@ acceptance:
     the post-M1-730 unit (one row's title OR up to `BODY_SCAN_LIMIT`
     chars of its body, plus one row's tags) — the out-of-model
     spec-text drift from the same audit.
+  - >-
+    The two residual per-occurrence commitments in the same section are
+    amended to the aggregated shape in the same diff (M1-737 redteam
+    finding 1, 2026-07-31): "the `/save -t` render-side redaction ...
+    emits the per-occurrence `LLM_OUTPUT_SANITIZED` audit row on every
+    hit" (~:421) and "within one field, per-occurrence
+    `LLM_OUTPUT_SANITIZED` rows fire at least as often as before the
+    narrowing" (~:547). New wording keeps every-hit audit coverage but
+    states the aggregated cardinality (rows aggregate per distinct
+    token per call, carrying the exact occurrence count).
   - mvn verify from the repo root is green.
 test_plan:
   adds:
@@ -84,12 +94,56 @@ spec_refs:
   - docs/spec/security.md §LLM output sanitizer
   - docs/spec/security.md §Rate limiting
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-31
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 404
+      removed: 70
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-07-31
+    verdict: FINDINGS
+    base: 2e6b7a6c
+    head: working tree (pre-commit branch tip, /m1-tick run gate)
+    verdict_file: docs/plan/m1/redteam/M1-737-2026-07-31.md
+    findings_count: 2
+    out_of_model_count: 0
+    note: |
+      Two low findings, both spec-text. Finding 1 (stale per-occurrence
+      sentences at security.md:421/:547) remediated via the
+      redteam-finding refine (80e64b43) — folded into acceptance.
+      Finding 2 falsified against main (M1-730, e9bd3fc0): a
+      worktree-staleness artifact. Auditor: kimi threat-actor via
+      run-gate.sh, contamination=none.
+  - date: 2026-07-31
+    verdict: CLEAN
+    base: 2e6b7a6c
+    head: working tree + refine commit 80e64b43 (re-audit, round 2)
+    verdict_file: docs/plan/m1/redteam/M1-737-2026-07-31-r2.md
+    out_of_model_count: 0
+    note: |
+      Re-audit of the post-refine diff with explicit re-audit framing.
+      Round-1 finding 1 verified remediated; finding 2 not re-reported
+      (falsified against main). CLEAN. Auditor: kimi threat-actor via
+      run-gate.sh, contamination=none.
+clarity_check:
+  date: 2026-07-31
+  verdict: PASS
+  warnings:
+    - "self-check: flag-bearing entries emit their per-occurrence WARN inside redactFlagEntry (LlmOutputSanitizer.java:325), not only at the regex strip loop (:578); implementing acceptance item 3 as one WARN per distinct token per call across BOTH paths, since the item's own wording is per-token-per-call and the Notes require uniform amplification capping"
+  blockers: []
 escalation_reason:
 ---
 
@@ -132,6 +186,16 @@ No schema change. The sibling INFO-LEAK residual landed in M1-730.
 
 ## Notes
 
+- Redteam 2026-07-31 (kimi threat-actor, FINDINGS low=2): finding 1
+  (residual per-occurrence sentences at security.md ~:421/~:547) is
+  folded into this ticket via the refine — see the acceptance list.
+  Finding 2 (`/saved` body-scan claim undelivered) was FALSIFIED
+  against main: M1-730 landed at e9bd3fc0 after this branch's fork
+  point, and on main `SavedCommandHandler.java:328` sanitizes via
+  `DisplayHeadline.of(row.title, row.body, ...)` with the
+  `BODY_SCAN_LIMIT` bound repeated in its SELECT (:123) — the claimed
+  unit exists in the merge result; the gap was a worktree-staleness
+  artifact. Re-audit must not re-report it.
 - Falsified alternatives, for the record: (a) capping occurrences per
   field with an overflow marker IS throttling — an attacker pads benign
   hits to push later ones past the cap, degrading the audit signal

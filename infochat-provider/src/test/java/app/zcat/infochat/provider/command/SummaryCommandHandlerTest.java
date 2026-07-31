@@ -933,7 +933,7 @@ class SummaryCommandHandlerTest {
      * {@code posts.get(0)}, so a command-shaped title on a NON-first post
      * was neither redacted nor audited. Composition now sanitizes every
      * post's title, so the second post's title lands as
-     * {@code [redacted command]} AND emits its per-occurrence
+     * {@code [redacted command]} AND emits its aggregated
      * LLM_OUTPUT_SANITIZED row: the operator's detector no longer depends
      * on cluster position. The flat form ({@code --flat}, renamed by
      * M1-700) is what {@code /retry} replays for a {@code flat} anchor
@@ -965,9 +965,13 @@ class SummaryCommandHandlerTest {
                 "the redaction marker must be present. Got: " + body);
         assertEquals(2, auditWriter.rows(),
                 "one LLM_OUTPUT_SANITIZED row at producer composition and one at renderer "
-                        + "derivation — two sanitize calls, two truthful per-occurrence rows "
-                        + "(M1-697 derive-at-render); the key property is that the non-first "
+                        + "derivation — two sanitize calls, one aggregated row per distinct "
+                        + "token per call (M1-737); the key property is that the non-first "
                         + "post's title is redacted AND audited at all");
+        assertTrue(auditWriter.detailsJsons().stream()
+                        .allMatch(json -> json.contains("\"match_count\":1")),
+                "each call saw the token once, so each aggregated row must carry the "
+                        + "exact count 1; got: " + auditWriter.detailsJsons());
     }
 
     @Test
@@ -1556,12 +1560,14 @@ class SummaryCommandHandlerTest {
     }
 
     /**
-     * {@link AuditLogWriter} that counts rows instead of discarding them
-     * (the {@link SanitizerTestDoubles} no-op variant with a counter) so a
-     * test can pin the per-occurrence LLM_OUTPUT_SANITIZED emission.
+     * {@link AuditLogWriter} that records each row's {@code detailsJson}
+     * instead of discarding it (the {@link SanitizerTestDoubles} no-op
+     * variant with a memory) so a test can pin the aggregated
+     * LLM_OUTPUT_SANITIZED emission — one row per distinct token per
+     * call, carrying the exact occurrence count (M1-737).
      */
     private static final class RecordingAuditLogWriter extends AuditLogWriter {
-        private final AtomicInteger rows = new AtomicInteger();
+        private final List<String> detailsJsons = new CopyOnWriteArrayList<>();
 
         RecordingAuditLogWriter() {
             super(row -> row);
@@ -1569,11 +1575,16 @@ class SummaryCommandHandlerTest {
 
         @Override
         public void write(Connection conn, RedactionHook.AuditRow row) {
-            rows.incrementAndGet();
+            String json = row.detailsJson();
+            detailsJsons.add(json == null ? "<null detailsJson>" : json);
         }
 
         int rows() {
-            return rows.get();
+            return detailsJsons.size();
+        }
+
+        List<String> detailsJsons() {
+            return detailsJsons;
         }
     }
 
