@@ -188,10 +188,12 @@ probe_kimi() {
         printf 'UNAVAILABLE\tno provider/default model (kimi login, or kimi provider add)\n'
         return 0
     fi
-    # No agent-definition check: kimi reads no repo-shippable agent definition
-    # (harness-mapping §6.3), so the adversary persona arrives entirely from
-    # the rendered prompt — there is no per-agent file for this slot to depend
-    # on.
+    # No agent-definition check: this slot deliberately stays generic. kimi
+    # DOES ship repo agent profiles now (.agents/agents/, harness-mapping
+    # §6.3), but the adversary persona arrives entirely from the rendered
+    # prompt by design — passing --agent threat-actor would narrow the slot
+    # to Read/Grep/Glob/Write, a behavior change not yet validated for the
+    # cross-auditor comparison.
     printf 'AVAILABLE\tkimi %s\n' "$(kimi --version 2>/dev/null | head -1)"
 }
 
@@ -362,8 +364,9 @@ dispatch_auditor() {
             fi
             ;;
         kimi)
-            # Same shape as the codex slot: kimi reads no repo-shippable agent
-            # definition (§6.3), so the persona comes wholly from the rendered
+            # Same shape as the codex slot: no --agent profile is passed (the
+            # .agents/agents/ profiles exist — §6.3 — but this slot stays
+            # generic by design), so the persona comes wholly from the rendered
             # prompt. `-p` is the headless form — it prints the reply on stdout
             # and auto-approves tool calls, which is why no permission flag is
             # passed (`--auto` is REJECTED alongside `-p`).

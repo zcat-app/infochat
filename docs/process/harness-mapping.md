@@ -10,7 +10,8 @@ require a different procedure, this file is wrong and the procedure wins.
 
 Every tool column was verified empirically against the real binary — **opencode
 1.18.3** and **codex-cli 0.144.6** on 2026-07-19, **kimi-code 0.29.0** on
-2026-07-22. Discovery, agent resolution, config loading, and the gotchas in
+2026-07-22, **kimi-code 0.31.1** on 2026-07-31 (§6.3 refresh: agent profiles,
+`run-gate.sh`). Discovery, agent resolution, config loading, and the gotchas in
 §6.1/§6.2/§6.3 were measured, not read from docs. Two published claims turned
 out false against the real binaries (noted in place). The step not yet run on
 every tool is a live end-to-end gate (§8), which costs a real model call.
@@ -46,7 +47,7 @@ five:
 | Claude Code (native) | `.claude/agents/<name>.md` | the skill spawns the agent with the stub prompt below — status quo |
 | opencode | `.opencode/agent/<name>.md` (**`mode: all`** — see §6.1(c)) | Task-tool routing or `@<name>` mention with the stub prompt, or headless (§3) |
 | Codex CLI | **none — no repo-shippable agent definition exists** (§6.2) | `spawn_agent` with the stub prompt, or headless `codex exec` (§3) |
-| Kimi Code | **none — `.claude/agents/` is not a path it reads** (§6.3) | headless `kimi -p` with the stub prompt (§3) |
+| Kimi Code | `.agents/agents/<name>.md` (thin pointer + `tools` allowlist — §6.3) | headless `kimi -p` via `scripts/run-gate.sh` (§3) |
 | Generic (any agent) | none needed | any FRESH session/process of a capable model, given the stub prompt |
 
 Codex has no per-agent definition because its spawned agents are deliberately
@@ -83,28 +84,48 @@ opencode:
       "Read <rendered-prompt-path> and follow it exactly. It names every input file and the output path. Write the required artifact to that path and reply only in the format the prompt specifies." \
       > target/<gate>-reply.txt
 
-Kimi Code (`-p` is the headless form: it prints the reply on stdout — there is
-no output-file flag — and auto-approves tool calls, so no permission flag is
-passed; `--auto` is in fact REJECTED alongside `-p`. `--skills-dir <empty-dir>`
-switches project skill discovery off, which a gate agent never needs — §6.3):
+Kimi Code — single-sourced in `scripts/run-gate.sh` since 2026-07-31. The
+script builds the stub below, aims `--skills-dir` at a fresh empty directory
+(§6.3), REFUSES relative prompt/verdict paths (the §6.1(d) wrong-tree hazard),
+runs under `timeout 900`, then performs the verdict-artifact check (primitive
+3) and the §6 contamination check itself:
+
+    scripts/run-gate.sh --prompt <abs-rendered-prompt-path> \
+      --verdict <abs-verdict-path> --reply target/<gate>-reply.txt \
+      --agent code-reviewer
+
+A gate run takes minutes (~4 min measured for a 12 KB diff), past typical
+foreground shell caps — from an interactive session, invoke `run-gate.sh` as
+a BACKGROUND task; its own `timeout` bounds the run.
+
+The raw recipe the script wraps (kept for debugging): `-p` is the headless
+form — it prints the reply on stdout (there is no output-file flag) and
+auto-approves tool calls, so no permission flag is passed; `--auto` is in
+fact REJECTED alongside `-p`:
 
     kimi -p "Read <rendered-prompt-path> and follow it exactly. It names every input file and the output path. Write the required artifact to that path and reply only in the format the prompt specifies." \
       --skills-dir <empty-dir> > target/<gate>-reply.txt
 
-After any of these: read the verdict/outline/report file back from disk
+After the codex/opencode recipes above (run-gate.sh does this for kimi):
+read the verdict/outline/report file back from disk
 (primitive 3) and run the §6 contamination check. If CI or repeated headless
-use materializes, extract these recipes into `scripts/run-gate.sh`; until
-then this section is their single source.
+use materializes for codex/opencode, extend `run-gate.sh --tool`; until
+then their recipes above are the single source.
 
 ## 4. Blocking-menu degradation
 
 Claude Code uses the AskUserQuestion widget at exactly three sites (`start`
 grounding-confirm, `start` ambiguity question, `commit` test-freshness
 Skip/Run). Every other human gate in the workflow — `escalate`'s six-way
-menu, `abort`'s confirmation, `reopen` — ALREADY uses the degraded form. On
-any other harness, use that same form at all sites: print the options as
-numbered lines plus one line saying what to reply, then STOP and wait for the
-human's reply. Never auto-pick an option.
+menu, `abort`'s confirmation, `reopen` — ALREADY uses the degraded form.
+Per-tool binding for the three widget sites: **Kimi Code HAS a native
+blocking AskUserQuestion tool — use it.** The printed form is the documented
+failure mode `start.md` warns about (a printed grounding line buried among
+tool output and silently scrolled past); kimi's widget blocks like Claude's.
+opencode and Codex CLI have no such widget: use the degraded form at all
+sites — print the options as numbered lines plus one line saying what to
+reply, then STOP and wait for the human's reply. Never auto-pick an option
+on any harness.
 
 ## 5. Parallelism degradation
 
@@ -231,17 +252,32 @@ cheapest way to confirm any of this.
 
 ## 6.3 Kimi Code: verified discovery facts
 
-Measured against kimi-code 0.29.0 on 2026-07-22. Unlike §6.2, most of these
+Measured against kimi-code 0.29.0 on 2026-07-22, **re-measured against
+0.31.1 on 2026-07-31** (the `--agent`/`--agent-file` gating claim from the
+first measurement turned out stale and is corrected below). Unlike §6.2, most of these
 cost a (small) model call to establish, because kimi ships no local
 prompt-rendering debug command.
 
-- ❌ **`.claude/agents/` is NOT read.** Agent profiles are discovered from
-  `.agents/agents/` and `~/.kimi-code/agents/` only, and the `--agent` /
-  `--agent-file` flags that would load one are gated behind the experimental v2
-  engine (`KIMI_CODE_EXPERIMENTAL_FLAG=1`; without it both flags are refused
-  outright). No repo-shippable agent definition is therefore written for kimi:
-  as with Codex (§2), the persona travels in the rendered prompt, which carries
-  the full "You are an adversary…" framing on its own.
+- ❌ **`.claude/agents/` is NOT auto-discovered** — but agent profiles ARE,
+  from `.agents/agents/` and `~/.kimi-code/agents/`, and the repo SHIPS thin
+  pointers there (`.agents/agents/<name>.md` for all five gate agents,
+  mirroring the `.opencode/agent/` pattern). The 0.29.0 note that `--agent` /
+  `--agent-file` are refused without `KIMI_CODE_EXPERIMENTAL_FLAG=1` is STALE:
+  re-measured on 0.31.1 (2026-07-31), both flags work with no env flag, and a
+  probe profile in `.agents/agents/` loaded and ran via `--agent`. Per the
+  official agents docs, kimi's profile frontmatter supports `tools`,
+  `disallowedTools` and `subagents` allowlists — enforced before execution —
+  and ignores other tools' fields (Claude's `model`, opencode's `mode`), so
+  the shipped profiles carry `tools: Read, Grep, Glob, Write` (no Bash) and
+  `subagents: []` (no delegation). That restores per-TOOL capability scoping
+  for kimi gates — stronger than opencode's (where `write` drags in `edit`,
+  §6.1(a)) — though still not per-PATH, so the §6 porcelain check stays as
+  backstop. Neither opencode nor Codex consumes `.agents/agents/` (opencode's
+  agent path is `.opencode/agent/`; Codex's measured discovery is §6.2), and
+  kimi's docs explicitly design the `~/.agents/agents/` form as shareable
+  across tools — re-check on first use with a new codex/opencode version. The
+  persona still travels in the rendered prompt regardless: the profiles are
+  thin pointers that tell the agent to Read `.claude/agents/<name>.md`.
 - ⚠ **Project skills are discovered from BOTH `.claude/skills/` and
   `.agents/skills/`** — the same two-tree collision that makes opencode
   nondeterministic (§6.1(b)). Measured in a scratch repo carrying a same-named
@@ -250,7 +286,11 @@ prompt-rendering debug command.
   pointing it at an EMPTY directory suppresses every project and user skill
   (verified: 0 of the probe skills survived; only kimi's own built-ins remain).
   That is the binding the red-team wrapper uses — a gate agent needs no skill,
-  so the safest resolution is none at all.
+  so the safest resolution is none at all. For an INTERACTIVE kimi session
+  that runs the workflow skills (e.g. `/m1-tick`), pin the wrapper tree at
+  launch instead: `kimi --skills-dir .agents/skills` (AGENTS.md carries this
+  instruction; §8 step 6b). `-p` + `--skills-dir` re-verified on 0.31.1
+  (2026-07-31).
 - ✅ **Headless writes work with no permission flag.** `kimi -p '<stub>'` runs
   one prompt non-interactively and auto-approves tool calls; a verified probe
   wrote its file and replied in the requested format. `--auto` is rejected in
@@ -274,12 +314,17 @@ prompt-rendering debug command.
   On Claude Code the gate agents' `tools:` allowlist plus prompt constrain them
   to Write only their artifact. opencode's permissions are per-tool (and
   `write` drags `edit` in with it, §6.1(a)); Codex's spawned agents are generic
-  and share the session's `workspace-write` sandbox (§6.2). Neither restricts
+  and share the session's `workspace-write` sandbox (§6.2). Kimi's
+  `.agents/agents/` profiles restore per-TOOL scoping (Read/Grep/Glob/Write,
+  no Bash, no sub-agent delegation — enforced before execution, §6.3), but
+  still not per-PATH. None of the three restricts
   WHICH path, so there the constraint is prompt discipline alone. Mitigation,
-  MANDATORY on non-Claude harnesses: after a gate agent returns, run
+  MANDATORY on non-Claude harnesses (kimi included, as backstop): after a gate
+  agent returns, run
   `git status --porcelain` and compare against the expected artifact path. ANY
   other new or changed path means a contaminated gate — discard the artifact,
-  revert the contamination, re-run the gate.
+  revert the contamination, re-run the gate. (`scripts/run-gate.sh` performs
+  this check itself for kimi gates.)
 - **Fresh context is a process property.** In-session subagents on
   opencode/Codex are fresh by construction, like Claude's. Hand-running a
   gate inside your MAIN session forfeits the independence guarantee; treat
@@ -492,6 +537,13 @@ Kimi Code (steps 6a–6d VERIFIED on 0.29.0, 2026-07-22):
     Evidence: `docs/plan/m1/redteam-multi/M1-668-2026-07-22/`. Wall clock
     ~4 min for a 12 KB diff at the configured default effort — well inside
     the wrapper's `timeout 900`, but a large diff will need watching.
+6e. ✅ Agent profiles + gate runner (2026-07-31, 0.31.1): `.agents/agents/`
+    ships thin-pointer profiles for all five gate agents with `tools`
+    allowlists; `scripts/run-gate.sh` is the single-sourced kimi gate recipe
+    (§3). Verified end-to-end: a toy gate prompt run as
+    `run-gate.sh --agent code-reviewer` loaded the profile, wrote the verdict
+    to the exact absolute path, and reported `contamination=none`; a relative
+    `--prompt` is refused with exit 1.
 
 Any tool:
 7. Drive `/m1-tick start` (via the `.agents/skills/m1-tick` wrapper) on a

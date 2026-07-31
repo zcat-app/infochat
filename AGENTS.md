@@ -32,6 +32,13 @@ the repo root. Setup: [DEVELOPER.md](DEVELOPER.md).
 | Contribution walk-through | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | Domain spec | [docs/SPEC.md](docs/SPEC.md) (map) → `docs/spec/*` |
 
+Kimi Code launch note: start interactive sessions as
+`kimi --skills-dir .agents/skills`. kimi auto-discovers skills from BOTH
+`.claude/skills/` and `.agents/skills/` with no kill switch, and the pin
+guarantees the wrapper copies (not the raw Claude procedures) win — see
+harness-mapping §6.3. Gate agents are spawned headlessly via
+`scripts/run-gate.sh` (harness-mapping §3).
+
 One convention worth a literal line because every agent commits: commit
 prefixes are `M1-NNN:` (ticket work), `spec:` (pure spec/design edit),
 `process:` (process/tooling/plan edit) — full rules in

@@ -12,9 +12,12 @@ is single-sourced at `.claude/skills/m1-tick/SKILL.md` (dispatch router) and
 2. Wherever it names a Claude Code primitive, apply the binding for YOUR
    tool from `docs/process/harness-mapping.md`:
    - "spawn the <name> subagent" → mapping §2 (fresh-context gate agent; §3
-     for the headless form), then the §6 contamination check
-   - "AskUserQuestion" → mapping §4 (print the menu as numbered text, stop,
-     wait for a typed reply — the same pattern the escalate menu already uses)
+     for the headless form — on kimi that is `scripts/run-gate.sh`), then
+     the §6 contamination check
+   - "AskUserQuestion" → mapping §4 (per-tool binding: kimi uses its native
+     AskUserQuestion tool; tools without one print the menu as numbered
+     text, stop, wait for a typed reply — the same pattern the escalate menu
+     already uses)
    - `--parallel` / git worktrees → mapping §5 (degrade to sequential if your
      tool cannot operate in another working directory)
 3. Everything else — `scripts/*`, prompt rendering via
