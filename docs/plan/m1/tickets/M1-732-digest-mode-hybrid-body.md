@@ -8,7 +8,7 @@ blocked_by:
   - M1-731
 files_budget: 12
 files_scope:
-  - infochat-core/src/main/resources/db/migration/V66__group_digest_mode.sql
+  - infochat-core/src/main/resources/db/migration/V67__group_digest_mode.sql
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRenderer.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
@@ -34,7 +34,7 @@ out_of_scope:
   - /summary's render forms
   - the D17 degraded fallback and the zero-posts fixed reply (already single-message and mode-independent)
 acceptance:
-  - "V66__group_digest_mode.sql adds groups.digest_mode TEXT NOT NULL DEFAULT 'normal' CHECK (digest_mode IN ('brief','normal','full')) — additive NOT NULL with a default, metadata-only on PostgreSQL 11+ (same argument V44__group_digest_enabled.sql:15 makes for digest_enabled), so no table rewrite"
+  - "V67__group_digest_mode.sql adds groups.digest_mode TEXT NOT NULL DEFAULT 'normal' CHECK (digest_mode IN ('brief','normal','full')) — additive NOT NULL with a default, metadata-only on PostgreSQL 11+ (same argument V44__group_digest_enabled.sql:15 makes for digest_enabled), so no table rewrite"
   - "A normal category section renders, in order: UPPERCASE header with the section's TRUE cluster count; the CategoryRollupGenerator synthesis; up to infochat.digest.category-headline-count (default 5) bare headlines, each a DisplayHeadline title plus its URL and NO prose; and the existing reply.summary.short.category_footer affordance"
   - "brief drops the headlines (header + roll-up + footer only); full keeps today's per-cluster prose with categoryItemCap lifted to Integer.MAX_VALUE"
   - "The header count is the section's FULL cluster count, not the number of headlines shown — a test pins a 13-cluster section rendering '13' while showing 5"
@@ -75,7 +75,7 @@ escalation_reason:
 > `reply.digest.category.more` / `_more_other` keys are **deleted** (en+cs,
 > D43 pair). Both are acceptance items.
 >
-> Sizing set at authoring: `migration_touch: true` (adds `V66`),
+> Sizing set at authoring: `migration_touch: true` (adds `V67`),
 > `complexity: high` / `round_cap: 3` — the largest child and the one M1-722's
 > three plan passes kept failing on — and `security_relevant: true`: the
 > render path carries the M1-697 sanitize control (see §Notes), so the
@@ -189,11 +189,11 @@ fails.
 Authored 2026-07-31 into the frontmatter; the decompose's carried-forward
 commitments behind them:
 
-- `V66__group_digest_mode.sql` adds `groups.digest_mode TEXT NOT NULL DEFAULT
+- `V67__group_digest_mode.sql` adds `groups.digest_mode TEXT NOT NULL DEFAULT
   'normal' CHECK (digest_mode IN ('brief','normal','full'))`. Additive NOT NULL
   with a default is metadata-only on PostgreSQL 11+ (the argument
   `V44__group_digest_enabled.sql:15` makes for `digest_enabled`), so no table
-  rewrite. `V66` was free as of 2026-07-31 (`V65` is the latest).
+  rewrite. Renumbered `V66` → `V67` on 2026-07-31: M1-736 merged `V66__post_tagger_sweep.sql` first; `V67` is free as of 2026-07-31.
 - A `normal` category section renders, in order: UPPERCASE header with the
   section's TRUE cluster count; the `CategoryRollupGenerator` synthesis; up to
   `infochat.digest.category-headline-count` (default 5) bare headlines, each a
