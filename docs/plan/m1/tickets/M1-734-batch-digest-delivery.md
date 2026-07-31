@@ -7,20 +7,64 @@ last_updated: 2026-07-30
 blocked_by:
   - M1-732
 files_budget: 8
-files_scope: []
+files_scope:
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestDelivery.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRetryService.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestDeliveryTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRetryServiceTest.java
+  - docs/spec/decisions.md
 complexity: low
 risk: low
 round_cap: 2
 security_relevant: false
 migration_touch: false
-out_of_scope: []
-acceptance: []
+out_of_scope:
+  - "the render shape and the groups.digest_mode column itself (M1-732)"
+  - "the /digest verb (M1-733)"
+  - "the D17 degraded fallback and the zero-posts fixed reply, which never enter DigestDelivery and keep today's OutboundDelivery.deliverToGroup call"
+  - "any Flyway migration or schema change — the replay branch reads the mode from the EXISTING groups.digest_mode column (V67)"
+acceptance:
+  - >-
+    Delivery in `normal` and `brief` is ONE outbound message: the sections
+    are joined on `"\n\n"` (the same join `DigestWorker.executeSlot`
+    performs for the cache content, `DigestWorker.java:226-227`) into a
+    single `OutboundMessage`. `full` keeps per-category delivery.
+  - >-
+    `renderSections` still RETURNS the per-category `List<RenderedSection>`
+    in every mode, so `digest_section` persistence and its D65
+    byte-faithful replay are untouched. Batching is a DELIVERY change only.
+  - >-
+    On the adapter's accept, the batched send records a
+    `digest_category_delivery` row for EVERY section slug in the batch.
+    All-slugs-or-none is what keeps `DigestRetryService.replayMissing`'s
+    slug filter (`DigestRetryService.java:166-171`) correct: a delivered
+    batch leaves nothing missing (the no-op-retry branch), a failed batch
+    leaves every slug missing and the whole batch re-sends.
+  - >-
+    The batched message runs the existing TRANSIENT-retry /
+    PERMANENT-abort ladder unchanged, and one digest slot still contributes
+    at most ONE outcome to the per-group consecutive-permanent-failure
+    counter (trivially so — there is one message). That threshold of 3 was
+    calibrated for one message per slot.
+  - >-
+    `/retry --digest` behaves correctly on BOTH branches:
+    `DigestRetryService` delegates the full re-run to
+    `DigestWorker.execute(slot)` (`DigestRetryService.java:218`), which
+    re-renders in the group's CURRENT mode against the frozen cluster set
+    (D17); the D65 byte-faithful replay re-posts the ORIGINALLY-RENDERED
+    bytes and stays in the mode the slot was rendered in. Two tests, one
+    per branch.
+  - "The D63 row in `docs/spec/decisions.md` is amended for the batched delivery."
 test_plan:
   adds: []
   preserves:
     - all tests currently green on main
 spec_refs: []
-decision_refs: []
+decision_refs:
+  - D63
+  - D65
 decomposed_from: M1-722
 reviews: {}
 overrides: []
@@ -33,12 +77,9 @@ escalation_reason:
 
 # M1-734: batched digest delivery
 
-> **Skeleton from the M1-722 decompose (2026-07-30).** `acceptance`,
-> `out_of_scope` and the sizing fields still need authoring.
->
-> **Sizing note:** this ticket exists as its own child mainly because it needs
-> `DigestRetryService.java`, which M1-722 had zero budget headroom for. Make
-> sure `files_scope` lists it.
+> **Skeleton from the M1-722 decompose (2026-07-30); frontmatter authored
+> 2026-07-31** (acceptance, out_of_scope, files_scope — `files_scope`
+> carries `DigestRetryService.java` per the decompose's sizing note).
 
 ## Context
 
@@ -56,7 +97,8 @@ is the lead, which is M1-725.
 
 ## Acceptance
 
-*To author.* Core commitments the decompose carried forward:
+Core commitments the decompose carried forward, mirrored from the YAML
+`acceptance:` list:
 
 - Delivery in `normal` and `brief` is ONE outbound message: the sections are
   joined on `"\n\n"` (the same join `DigestRenderer.render` already performs)
@@ -84,10 +126,10 @@ is the lead, which is M1-725.
 
 ## Out-of-scope
 
-*To author.* At minimum: the render shape and mode column (M1-732); the
-`/digest` verb (M1-733); the D17 degraded fallback and the zero-posts fixed
-reply, which never enter `DigestDelivery` and keep today's
-`OutboundDelivery.deliverToGroup` call.
+Mirrors the YAML `out_of_scope:` list: the render shape and mode column
+(M1-732); the `/digest` verb (M1-733); the D17 degraded fallback and the
+zero-posts fixed reply, which never enter `DigestDelivery` and keep today's
+`OutboundDelivery.deliverToGroup` call; and any schema change.
 
 ## Notes
 
@@ -97,6 +139,17 @@ reply, which never enter `DigestDelivery` and keep today's
 `DigestRetryService.java` in scope, a failed `normal` batch re-sends as N
 per-category messages — the exact shape this ticket removes. Either batch the
 replay too, or state the per-category replay as an accepted residual.
+
+**Resolution (authored 2026-07-31): batch the replay too.** The replay's mode
+comes from the EXISTING `groups.digest_mode` column (V67) — `GroupReplayMeta`
+gains it via `SELECT_GROUP_FOR_REPLAY`, no migration (`migration_touch:
+false` holds). Absent a mode change between render and retry, that IS the
+mode the slot was rendered in, and all-slugs-or-none keeps the flip corner
+safe: a `normal`/`brief` slot's replay set is always either empty (no-op
+branch) or the full section list, so joining it reproduces the original
+batched message byte-for-byte. After a mid-window flip the framing follows
+the group's CURRENT preference while the bytes stay byte-faithful (D65) —
+accepted residual, bounded by the 24h replay-retention horizon.
 
 **Two controls the batched path must carry across (engineering-rules §10).**
 
