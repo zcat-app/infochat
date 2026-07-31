@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 18 |
+| pending | 20 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 1 |
 | done | 730 |
 | deferred | 1 |
 | abandoned | 21 |
-| **total** | **771** |
+| **total** | **773** |
 
 ---
 
@@ -35,6 +35,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-728 — Category roll-up sends every post's full body and asks for one or two sentences: it neither fits a large category nor describes one (complexity: medium, risk: medium)
 - M1-730 — /saved renders the ingest \"untitled\" sentinel to a reader (complexity: medium, risk: medium)
 - M1-732 — groups.digest_mode and the hybrid category body: count + roll-up + headlines (complexity: low, risk: low)
+- M1-738 — Re-hidden posts bypass the admin review queue (complexity: medium, risk: medium)
 
 ---
 
@@ -59,6 +60,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-734 — blocked_by: M1-732 (pending)
 - M1-735 — blocked_by: M1-726 (escalated)
 - M1-736 — blocked_by: M1-726 (escalated)
+- M1-737 — blocked_by: M1-730 (pending)
 
 ---
 
@@ -990,10 +992,12 @@ M1-726 (escalated)
 M1-727 (pending) ← runnable
 M1-729 (done)
 M1-730 (pending) ← runnable
+  └── M1-737 (pending)
 M1-731 (done)
   ├── M1-728 (pending) [see above]
   └── M1-732 (pending) ← runnable
         ├── M1-725 (pending) [see above]
         ├── M1-733 (pending)
         └── M1-734 (pending)
+M1-738 (pending) ← runnable
 ```
