@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.digest;
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.OutboundMessage;
+import app.zcat.infochat.provider.digest.DigestRenderer.DigestMode;
 import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
 import app.zcat.infochat.provider.digest.DigestRetryService.RetryResult;
 import org.junit.jupiter.api.BeforeEach;
@@ -247,6 +248,61 @@ class DigestRetryServiceTest {
                         + "counter-safety short-circuit (OutboundDelivery is frozen)");
     }
 
+    @Test
+    void replayBatchesOriginalBytesInNormalMode() {
+        // M1-734 acceptance item 5, replay branch: the D65 byte-faithful
+        // replay re-posts the ORIGINALLY-RENDERED bytes and stays in the
+        // mode the slot was rendered in — for a normal-mode slot that means
+        // ONE batched re-send, not N per-category messages. The mode travels
+        // from the groups row (SELECT_GROUP_FOR_REPLAY) into
+        // DigestDelivery.deliver; the missing set is the full section list
+        // (a failed batch leaves every slug missing), so the joined re-send
+        // reproduces the original batched message byte-for-byte.
+        // (The fallback branch's half of the pair is pinned by
+        // retryDigest_replacesCacheRow: DigestWorker.execute re-renders in
+        // the group's current mode via its own readGroupMetadata.)
+        pinClockToLiveRow();
+        sectionRepository.seedSections(List.of(
+                new RenderedSection("security", "section A bytes"),
+                new RenderedSection("crypto", "section B bytes"),
+                new RenderedSection(null, "section Other bytes")));
+
+        RetryResult result = service.retryDigest(GROUP_ID);
+
+        assertEquals(RetryResult.REPLAYED_MISSING, result);
+        assertEquals(0, digestWorker.executeCount,
+                "the replay branch never re-renders");
+        assertEquals(1, digestDelivery.deliverCalls.size());
+        RecordingDigestDelivery.DeliverCall call = digestDelivery.deliverCalls.get(0);
+        assertEquals(DigestMode.NORMAL, call.mode(),
+                "a normal-mode slot replays BATCHED — one re-send, not N per-category messages");
+        assertEquals(List.of(
+                new RenderedSection("security", "section A bytes"),
+                new RenderedSection("crypto", "section B bytes"),
+                new RenderedSection(null, "section Other bytes")),
+                call.sections(),
+                "the full section list re-sends — the join reproduces the original bytes");
+    }
+
+    @Test
+    void replayKeepsPerCategoryDeliveryInFullMode() {
+        // M1-734 acceptance item 5, replay branch twin: a full-mode slot
+        // keeps the D63 per-category replay — DigestDelivery receives FULL,
+        // so the missing categories go out as individual messages.
+        service.dataSource = stubDataSource(false, "full");
+        pinClockToLiveRow();
+        sectionRepository.seedSections(List.of(
+                new RenderedSection("security", "section A bytes"),
+                new RenderedSection("crypto", "section B bytes")));
+
+        RetryResult result = service.retryDigest(GROUP_ID);
+
+        assertEquals(RetryResult.REPLAYED_MISSING, result);
+        assertEquals(1, digestDelivery.deliverCalls.size());
+        assertEquals(DigestMode.FULL, digestDelivery.deliverCalls.get(0).mode(),
+                "a full-mode slot replays PER-CATEGORY — the D63 framing is preserved");
+    }
+
     // ----- helpers ----------------------------------------------------------
 
     /**
@@ -287,14 +343,14 @@ class DigestRetryServiceTest {
         @Override
         public void deliver(MessagingAdapter adapter, String upstreamGroupId,
                             UUID internalGroupId, Instant windowStart,
-                            List<RenderedSection> sections) {
+                            List<RenderedSection> sections, DigestMode mode) {
             deliverCalls.add(new DeliverCall(adapter, upstreamGroupId,
-                    internalGroupId, windowStart, List.copyOf(sections)));
+                    internalGroupId, windowStart, List.copyOf(sections), mode));
         }
 
         record DeliverCall(MessagingAdapter adapter, String upstreamGroupId,
                            UUID internalGroupId, Instant windowStart,
-                           List<RenderedSection> sections) {}
+                           List<RenderedSection> sections, DigestMode mode) {}
     }
 
     static final class StubAdapterRegistry extends app.zcat.infochat.provider.messaging.AdapterRegistry {
@@ -330,9 +386,13 @@ class DigestRetryServiceTest {
     /**
      * Stub DataSource for DigestRetryService. Handles two SQL patterns:
      * 1. SELECT slot_kind, slot_fired_at, expires_at FROM summary_cache ...
-     * 2. SELECT timezone, adapter, upstream_group_id FROM groups ...
+     * 2. SELECT timezone, adapter, upstream_group_id, digest_mode FROM groups ...
      */
     private static DataSource stubDataSource(boolean isDegraded) {
+        return stubDataSource(isDegraded, "normal");
+    }
+
+    private static DataSource stubDataSource(boolean isDegraded, String digestMode) {
         return new DataSource() {
             @Override
             public Connection getConnection() {
@@ -342,7 +402,7 @@ class DigestRetryServiceTest {
                         (proxy, method, args) -> switch (method.getName()) {
                             case "prepareStatement" -> {
                                 String sql = (String) args[0];
-                                yield stubPs(sql, isDegraded);
+                                yield stubPs(sql, isDegraded, digestMode);
                             }
                             case "close" -> null;
                             default -> throw new UnsupportedOperationException(
@@ -361,7 +421,7 @@ class DigestRetryServiceTest {
         };
     }
 
-    private static PreparedStatement stubPs(String sql, boolean isDegraded) {
+    private static PreparedStatement stubPs(String sql, boolean isDegraded, String digestMode) {
         boolean isCacheQuery = sql.contains("summary_cache") && sql.contains("SELECT");
         boolean isGroupQuery = sql.contains("FROM groups");
         return (PreparedStatement) Proxy.newProxyInstance(
@@ -371,7 +431,7 @@ class DigestRetryServiceTest {
                     case "setString", "setObject", "setTimestamp" -> null;
                     case "executeQuery" -> {
                         if (isCacheQuery) yield cacheResultSet(isDegraded);
-                        if (isGroupQuery) yield groupResultSet();
+                        if (isGroupQuery) yield groupResultSet(digestMode);
                         yield emptyResultSet();
                     }
                     case "executeUpdate" -> 1;
@@ -407,7 +467,7 @@ class DigestRetryServiceTest {
                 });
     }
 
-    private static ResultSet groupResultSet() {
+    private static ResultSet groupResultSet(String digestMode) {
         boolean[] consumed = { false };
         return (ResultSet) Proxy.newProxyInstance(
                 ResultSet.class.getClassLoader(),
@@ -424,6 +484,7 @@ class DigestRetryServiceTest {
                             case "timezone" -> GROUP_TIMEZONE;
                             case "adapter" -> ADAPTER_NAME;
                             case "upstream_group_id" -> UPSTREAM_GROUP_ID;
+                            case "digest_mode" -> digestMode;
                             default -> throw new UnsupportedOperationException("col: " + col);
                         };
                     }

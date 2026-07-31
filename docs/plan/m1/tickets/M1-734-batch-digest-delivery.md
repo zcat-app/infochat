@@ -1,9 +1,9 @@
 ---
 id: M1-734
 title: "Narrow D63: batch brief/normal digest categories into one outbound message"
-status: pending
+status: done
 created: 2026-07-30
-last_updated: 2026-07-30
+last_updated: 2026-07-31
 blocked_by:
   - M1-732
 files_budget: 8
@@ -66,12 +66,29 @@ decision_refs:
   - D63
   - D65
 decomposed_from: M1-722
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-31
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 409
+      removed: 114
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-31
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 

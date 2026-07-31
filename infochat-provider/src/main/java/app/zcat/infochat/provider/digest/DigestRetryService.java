@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.digest;
 
 import app.zcat.infochat.messaging.MessagingAdapter;
+import app.zcat.infochat.provider.digest.DigestRenderer.DigestMode;
 import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
 import app.zcat.infochat.provider.messaging.AdapterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -49,7 +50,7 @@ public class DigestRetryService {
                     + " ORDER BY slot_fired_at DESC LIMIT 1";
 
     private static final String SELECT_GROUP_FOR_REPLAY =
-            "SELECT timezone, adapter, upstream_group_id"
+            "SELECT timezone, adapter, upstream_group_id, digest_mode"
                     + " FROM groups WHERE id = ?";
 
     // Provider-instance-local lock: cleared on restart per spec
@@ -193,8 +194,16 @@ public class DigestRetryService {
         // DigestRendererTest.renderSections_stripsAdminCommandTokens_
         // beforePersistenceAndReplay and documented at the persist site
         // in DigestWorker.executeSlot.
+        // The mode passed here is the group's CURRENT digest_mode (M1-734).
+        // Absent a mid-window mode flip it equals the render-time mode, and
+        // all-slugs-or-none keeps a batched slot's missing set either empty
+        // (handled above) or the full section list, so the re-send
+        // reproduces the original batched message byte-for-byte. After a
+        // flip the framing follows the group's current preference while the
+        // bytes stay byte-faithful (D65) — accepted residual, bounded by
+        // the replay-retention horizon.
         digestDelivery.deliver(adapter, meta.upstreamGroupId(), groupId,
-                coords.slotFiredAt, missing);
+                coords.slotFiredAt, missing, meta.digestMode());
         lastRetryAt.put(groupId, now);
         return RetryResult.REPLAYED_MISSING;
     }
@@ -267,7 +276,10 @@ public class DigestRetryService {
                 return new GroupReplayMeta(
                         rs.getString("timezone"),
                         rs.getString("adapter"),
-                        rs.getString("upstream_group_id"));
+                        rs.getString("upstream_group_id"),
+                        // Same SQL-deserialization boundary rule as the
+                        // worker's render path — one shared parse (M1-734).
+                        DigestWorker.digestModeOrNormal(rs.getString("digest_mode"), groupId));
             }
         } catch (SQLException e) {
             throw new IllegalStateException(
@@ -293,6 +305,7 @@ public class DigestRetryService {
     record GroupReplayMeta(
             String timezone,
             String adapterName,
-            String upstreamGroupId) {
+            String upstreamGroupId,
+            DigestMode digestMode) {
     }
 }

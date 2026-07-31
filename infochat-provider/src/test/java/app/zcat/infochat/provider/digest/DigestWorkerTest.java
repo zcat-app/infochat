@@ -356,7 +356,31 @@ class DigestWorkerTest {
     }
 
     @Test
+    void execute_multiSectionRenderProducesOneBatchedSendInNormalMode() {
+        // M1-734: the default normal mode batches the whole digest into ONE
+        // outbound message — the "\n\n" join of the section texts, with the
+        // D62 section order surviving inside the joined body.
+        postCollector.seed(testPosts(), 1, 1);
+        digestRenderer.setMultiSections(List.of(
+                new RenderedSection("security", "section A prose"),
+                new RenderedSection("crypto", "section B prose"),
+                new RenderedSection(null, "section Other prose")));
+        DigestSlot slot = futureSlot();
+
+        worker.execute(slot);
+
+        assertEquals(1, recordingAdapter.sendCount(),
+                "normal mode produces ONE batched send through the chokepoint");
+        assertEquals("section A prose\n\nsection B prose\n\nsection Other prose",
+                recordingAdapter.sent.get(0).text(),
+                "the batched body is the \"\\n\\n\" join of the sections, in section order");
+    }
+
+    @Test
     void execute_multiSectionRenderProducesOneSendPerSection() {
+        // FULL mode keeps the D63 per-category framing this test was written
+        // for: one send per section, in section order.
+        worker.dataSource = new StubGroupDataSource(ADAPTER_NAME, UPSTREAM_GROUP_ID, "en", "full");
         postCollector.seed(testPosts(), 1, 1);
         digestRenderer.setMultiSections(List.of(
                 new RenderedSection("security", "section A prose"),
@@ -367,7 +391,7 @@ class DigestWorkerTest {
         worker.execute(slot);
 
         assertEquals(3, recordingAdapter.sendCount(),
-                "an N-section render produces N sends through the chokepoint");
+                "an N-section render produces N sends through the chokepoint in full mode");
         // Sequential section order: the adapter's recorded sends preserve the
         // section order DigestDelivery received.
         assertEquals("section A prose", recordingAdapter.sent.get(0).text());

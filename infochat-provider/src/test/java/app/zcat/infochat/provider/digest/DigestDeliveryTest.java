@@ -9,6 +9,7 @@ import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.provider.digest.DigestRenderer.DigestMode;
 import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
 import app.zcat.infochat.provider.group.GroupRepository;
 import app.zcat.infochat.provider.messaging.OutboundDelivery;
@@ -35,8 +36,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Plain-JUnit tests for {@link DigestDelivery}. Drives the full
  * {@link OutboundDelivery} chokepoint (real retry, real counter, real
- * soft-remove logic) against a scriptable adapter, so the per-category
- * delivery contract is pinned without a transport or database.
+ * soft-remove logic) against a scriptable adapter, so the delivery
+ * contract is pinned without a transport or database. The per-category
+ * tests run in {@link DigestMode#FULL} (the framing D63 was written for);
+ * the batched {@code normal}/{@code brief} framing (M1-734) has its own
+ * tests below.
  *
  * <p>Configuration mirrors the {@code laptop}/base profile: 3 attempts
  * (original + two retries), permanent-failure threshold 3 — the threshold
@@ -69,10 +73,14 @@ class DigestDeliveryTest {
 
     @Test
     void splitsOnCategoryBoundariesNotSize() {
-        // A non-degraded digest produces one OutboundMessage per category,
-        // bounded at categories+1 (the +1 is the Other bucket, present only
-        // when non-empty). DigestDelivery never merges two categories into
-        // one message and never splits a category across two.
+        // FULL mode (D63 as written): a non-degraded digest produces one
+        // OutboundMessage per category, bounded at categories+1 (the +1 is
+        // the Other bucket, present only when non-empty). In full mode
+        // DigestDelivery never merges two categories into one message and
+        // never splits a category across two — the per-category split
+        // exists to keep SimpleX's 4 000-byte chunker from splitting
+        // mid-cluster, and full-mode sections are still prose-sized.
+        // normal/brief intentionally batch (M1-734) — see the batch tests.
         ScriptedAdapter adapter = new ScriptedAdapter(ADAPTER_NAME);
         DigestDelivery digestDelivery = wiredDelivery(new RecordingRepo());
         UUID groupId = UUID.randomUUID();
@@ -82,7 +90,7 @@ class DigestDeliveryTest {
                 section("crypto", "b".repeat(10_000)),
                 section(null, "other-text"));
 
-        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, sections);
+        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, sections, DigestMode.FULL);
 
         assertEquals(3, adapter.sent.size(),
                 "one OutboundMessage per category — bounded at categories+1, never size-merged");
@@ -108,7 +116,7 @@ class DigestDeliveryTest {
                 section("ai", "section C"),
                 section(null, "section Other"));
 
-        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, sections);
+        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, sections, DigestMode.FULL);
 
         assertEquals(List.of("section A", "section B", "section C", "section Other"),
                 adapter.sent.stream().map(OutboundMessage::text).toList(),
@@ -132,7 +140,7 @@ class DigestDeliveryTest {
         digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
                 section("security", "section A"),
                 section("crypto", "section B"),
-                section(null, "section Other")));
+                section(null, "section Other")), DigestMode.FULL);
 
         assertEquals(3, adapter.sent.size(),
                 "all three categories delivered — the transient failure retried, not aborted");
@@ -167,7 +175,7 @@ class DigestDeliveryTest {
                 section("crypto", "B"),
                 section("ai", "C"),
                 section("news", "D"),
-                section(null, "Other")));
+                section(null, "Other")), DigestMode.FULL);
 
         assertTrue(repo.removed.isEmpty(),
                 "one slot of N permanent failures must NOT soft-remove the group — "
@@ -190,8 +198,8 @@ class DigestDeliveryTest {
                 section("crypto", "B"),
                 section(null, "Other"));
 
-        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, sections);
-        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, sections);
+        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, sections, DigestMode.FULL);
+        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, sections, DigestMode.FULL);
 
         assertEquals(6, adapter.sent.size(),
                 "two /retry --digest calls re-post every category each time — no dedup");
@@ -213,7 +221,7 @@ class DigestDeliveryTest {
         digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
                 section("security", "section A"),
                 section("crypto", "section B"),
-                section(null, "section Other")));
+                section(null, "section Other")), DigestMode.FULL);
 
         assertEquals(List.of("section B", "section Other"),
                 adapter.sent.stream().map(OutboundMessage::text).toList(),
@@ -241,7 +249,7 @@ class DigestDeliveryTest {
                 section("security", "section A"),
                 section("crypto", "section B"),
                 section("ai", "section C"),
-                section(null, "section Other")));
+                section(null, "section Other")), DigestMode.FULL);
 
         assertEquals(Set.of("crypto", "ai", "other"),
                 deliveryRepo.recordedSlugs(groupId, windowStart),
@@ -265,7 +273,7 @@ class DigestDeliveryTest {
         DigestDelivery digestDelivery = wiredDelivery(new RecordingRepo(), deliveryRepo);
 
         digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
-                section("security", "section A")));
+                section("security", "section A")), DigestMode.FULL);
 
         assertEquals(1, deliveryRepo.recordCount(groupId, windowStart, "security"),
                 "a retried-then-successful category records exactly once");
@@ -287,7 +295,7 @@ class DigestDeliveryTest {
         Instant windowStart = Instant.now();
 
         digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
-                section("security", "headline ](https://evil.example/x")));
+                section("security", "headline ](https://evil.example/x")), DigestMode.FULL);
 
         // The chokepoint rewrote the body — proving the rewrite is live, so the
         // correlationId re-keying is load-bearing (an identity map would miss).
@@ -313,7 +321,7 @@ class DigestDeliveryTest {
         digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
                 section("security", "A"),
                 section("crypto", "B"),
-                section(null, "Other")));
+                section(null, "Other")), DigestMode.FULL);
 
         assertEquals(3, adapter.sent.size(),
                 "all three categories still delivered — a record-write failure must NOT "
@@ -340,7 +348,7 @@ class DigestDeliveryTest {
                 section("crypto", "section B"),
                 section(null, "section Other\n\n" + affordance));
 
-        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, sections);
+        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, sections, DigestMode.FULL);
 
         assertEquals(3, adapter.sent.size());
         for (int i = 0; i < adapter.sent.size() - 1; i++) {
@@ -350,6 +358,116 @@ class DigestDeliveryTest {
         }
         assertTrue(adapter.sent.getLast().text().endsWith(affordance),
                 "the final category message carries the affordance, folded into the section text");
+    }
+
+    // ----- batched delivery (normal/brief, M1-734) --------------------------
+
+    /** Build the correlationId {@link DigestDelivery} mints for a batched message. */
+    private static String batchCorrelationId(UUID groupId, Instant windowStart) {
+        return "digest-" + groupId + "-" + windowStart + "-batch";
+    }
+
+    @Test
+    void normalModeJoinsSectionsIntoOneMessage() {
+        // M1-734 narrowing D63: in normal mode the whole digest is ONE
+        // outbound message — the section texts joined on "\n\n" (the same
+        // join DigestWorker stores in summary_cache, so delivered bytes ==
+        // cached bytes), preserving D62 section order inside the body.
+        RecordingDeliveryRepo deliveryRepo = new RecordingDeliveryRepo();
+        ScriptedAdapter adapter = new ScriptedAdapter(ADAPTER_NAME);
+        DigestDelivery digestDelivery = wiredDelivery(new RecordingRepo(), deliveryRepo);
+        UUID groupId = UUID.randomUUID();
+        Instant windowStart = Instant.now();
+
+        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
+                section("security", "section A"),
+                section("crypto", "section B"),
+                section(null, "section Other")), DigestMode.NORMAL);
+
+        assertEquals(1, adapter.sent.size(),
+                "normal mode batches the whole digest into ONE outbound message");
+        assertEquals("section A\n\nsection B\n\nsection Other", adapter.sent.get(0).text(),
+                "the batched body is the \"\\n\\n\" join of the section texts, in section order");
+        assertEquals(batchCorrelationId(groupId, windowStart),
+                adapter.sent.get(0).correlationId(),
+                "the batched message carries the -batch correlationId (no slug component)");
+        // All-slugs-or-none: the accepted batch records a delivery row for
+        // EVERY section slug, so replayMissing's slug filter finds nothing
+        // missing (the no-op-retry branch).
+        assertEquals(Set.of("security", "crypto", "other"),
+                deliveryRepo.recordedSlugs(groupId, windowStart),
+                "an accepted batch records a delivery row for EVERY section slug in the batch");
+    }
+
+    @Test
+    void briefModeJoinsSectionsIntoOneMessage() {
+        // brief is the second batched mode — same single-message framing.
+        ScriptedAdapter adapter = new ScriptedAdapter(ADAPTER_NAME);
+        DigestDelivery digestDelivery = wiredDelivery(new RecordingRepo());
+        UUID groupId = UUID.randomUUID();
+        Instant windowStart = Instant.now();
+
+        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
+                section("security", "section A"),
+                section("crypto", "section B")), DigestMode.BRIEF);
+
+        assertEquals(1, adapter.sent.size(),
+                "brief mode batches the whole digest into ONE outbound message");
+        assertEquals("section A\n\nsection B", adapter.sent.get(0).text());
+    }
+
+    @Test
+    void failedBatchRecordsNothingAndAttributesOneSlotOutcome() {
+        // The all-or-none twin: a PERMANENT-failing batch records NO slug,
+        // so a later replay finds every slug missing and re-sends the whole
+        // batch. The slot still contributes at most ONE aggregate outcome
+        // to the per-group permanent-failure counter (threshold 3 stays
+        // "always > 1" — the value the one-message calibration assumed).
+        RecordingRepo repo = new RecordingRepo();
+        RecordingDeliveryRepo deliveryRepo = new RecordingDeliveryRepo();
+        DigestDelivery digestDelivery = wiredDelivery(repo, deliveryRepo);
+        UUID groupId = UUID.randomUUID();
+        Instant windowStart = Instant.now();
+        ScriptedAdapter adapter = ScriptedAdapter.allFailing(
+                ADAPTER_NAME, FailureCategory.PERMANENT);
+
+        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
+                section("security", "A"),
+                section("crypto", "B"),
+                section(null, "Other")), DigestMode.NORMAL);
+
+        assertTrue(adapter.sent.isEmpty(), "the failing batch never lands");
+        assertTrue(deliveryRepo.recordedSlugs(groupId, windowStart).isEmpty(),
+                "a failed batch records NOTHING — every slug stays missing for replay");
+        assertTrue(repo.removed.isEmpty(),
+                "one failed batch must NOT soft-remove the group — one slot, one "
+                        + "aggregate counter outcome, threshold 3 preserved");
+    }
+
+    @Test
+    void batchTransientRetryRepostsWholeBatch() {
+        // The batched message runs the existing TRANSIENT-retry ladder
+        // unchanged: a TRANSIENT failure retries the ONE message, and the
+        // successful retry records every slug exactly once.
+        RecordingDeliveryRepo deliveryRepo = new RecordingDeliveryRepo();
+        ScriptedAdapter adapter = new ScriptedAdapter(ADAPTER_NAME);
+        UUID groupId = UUID.randomUUID();
+        Instant windowStart = Instant.now();
+        adapter.script(batchCorrelationId(groupId, windowStart), FailureCategory.TRANSIENT);
+        DigestDelivery digestDelivery = wiredDelivery(new RecordingRepo(), deliveryRepo);
+
+        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
+                section("security", "section A"),
+                section("crypto", "section B")), DigestMode.NORMAL);
+
+        assertEquals(2, adapter.attemptsByCorrelationId.get(
+                batchCorrelationId(groupId, windowStart)).get(),
+                "the batched message was attempted twice (one TRANSIENT, one success)");
+        assertEquals(1, adapter.sent.size(),
+                "the retry reposts the whole batch as one message");
+        assertEquals(1, deliveryRepo.recordCount(groupId, windowStart, "security"));
+        assertEquals(1, deliveryRepo.recordCount(groupId, windowStart, "crypto"),
+                "each slug records exactly once — on the accepted attempt only");
     }
 
     // ----- helpers and test doubles -----------------------------------------

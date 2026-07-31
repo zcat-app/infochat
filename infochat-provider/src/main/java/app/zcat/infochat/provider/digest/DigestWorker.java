@@ -308,12 +308,13 @@ public class DigestWorker {
         }
 
         if (renderedSections != null) {
-            // Per-category delivery: one OutboundMessage per section,
-            // sequentially in section order, through deliverSequenceToGroup
-            // (one aggregate counter outcome per slot). The single-message
-            // paths below stay on deliverToGroup.
+            // Mode-framed delivery (M1-734): normal/brief batch the sections
+            // into ONE message, full keeps one OutboundMessage per section,
+            // sequentially in section order, both through
+            // deliverSequenceToGroup (one aggregate counter outcome per
+            // slot). The single-message paths below stay on deliverToGroup.
             digestDelivery.deliver(adapter, meta.upstreamGroupId(), slot.groupId(),
-                    slot.windowStart(), renderedSections);
+                    slot.windowStart(), renderedSections, meta.digestMode());
         } else {
             String correlationId = "digest-" + slot.groupId() + "-" + slot.windowStart();
             OutboundMessage msg = new OutboundMessage(
@@ -386,8 +387,12 @@ public class DigestWorker {
      * {@link DigestMode#NORMAL} — the value every pre-V67 group renders
      * with — logged once at WARN per fallback event. The render path never
      * sees an unvalidated storage string.
+     *
+     * <p>Package-private so {@link DigestRetryService} reuses the ONE parse
+     * rule at its own {@code digest_mode} read boundary (M1-734) — two
+     * hand-written copies of a deserialization rule would drift.
      */
-    private static DigestMode digestModeOrNormal(@Nullable String raw, UUID groupId) {
+    static DigestMode digestModeOrNormal(@Nullable String raw, UUID groupId) {
         if (raw != null) {
             try {
                 return DigestMode.valueOf(raw.trim().toUpperCase(Locale.ROOT));
