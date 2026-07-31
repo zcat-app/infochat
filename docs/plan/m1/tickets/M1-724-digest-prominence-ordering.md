@@ -3,15 +3,16 @@ id: M1-724
 title: "Digest cluster selection is recency-only: the cap keeps the newest stories, never the most significant"
 status: pending
 created: 2026-07-30
-last_updated: 2026-07-30
+last_updated: 2026-07-31
 blocked_by:
   - M1-723
-files_budget: 11
+files_budget: 12
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/summary/ClusterProminence.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/summary/EligiblePostQuery.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRenderer.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestPostCollector.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestPostCollectorTest.java
   - infochat-provider/src/main/resources/application.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/ClusterProminenceTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererSectionsTest.java
@@ -114,7 +115,10 @@ acceptance:
     The corroboration VALUE fed to the percentile is `distinct sources
     in the cluster ÷ distinct sources that posted under that cluster's
     assigned category tag within the window`, NOT the raw source count.
-    A test pins the intent: a 3-source cluster in a tag with 4 active
+    Clusters folded into Other have no qualifying assigned tag by
+    construction (D62 fold), so their denominator is the digest-wide
+    count of distinct sources that posted within the window. A test
+    pins the intent: a 3-source cluster in a tag with 4 active
     sources outranks a 5-source cluster in a tag with 40 active sources.
   - >-
     The scarcity VALUE is the inverse posting volume, in the window, of
@@ -208,10 +212,14 @@ test_plan:
       `2 * reposts + likes` formula. The ranking reads the two inputs
       separately; it does not redefine the column.
     - >-
-      `EligiblePostQueryTest` / `DigestPostCollectorTest` window
+      `EligiblePostQueryIT` / `DigestPostCollectorIT` window
       semantics (`ready_at` membership, M1-689) — this ticket adds
-      selected columns, not predicates. A test asserts the row SET
-      returned is unchanged.
+      selected columns, not predicates. `DigestPostCollectorIT`
+      carries the pin that the row SET returned is unchanged.
+      `DigestPostCollectorTest` is in `files_scope`: its JDBC-proxy
+      stub (DigestPostCollectorTest.java:197-206) is extended to
+      serve the new columns; its window-semantics assertions are
+      unchanged.
     - >-
       `DigestWorkerTest` per-category delivery (D63) message counts.
     - all tests currently green on main
@@ -242,7 +250,7 @@ keep-or-drop decision and all three key on time:
 | Site | Decision | Key |
 |---|---|---|
 | `DigestPostCollector.java:88` | which posts enter the digest | `LIMIT clusterCap`, DESC — "keeps the freshest posts and drops the oldest" |
-| `DigestRenderer.java:105,127` | which clusters render under a header | `Math.min(size, categoryItemCap)` — takes the head of a publication-ordered list |
+| `DigestRenderer.java` (`renderSections`) | which clusters render under a header | takes the head of a publication-ordered list (`categoryHeadlineCount` headlines in brief/normal; M1-732) |
 | `DigestCategorizer.java:109` | which sections come first | assigned-cluster count, alphabetical tie |
 
 Section order is the only one that is not purely temporal, and it ranks
@@ -250,7 +258,7 @@ Section order is the only one that is not purely temporal, and it ranks
 
 The corroboration signal exists and is displayed but never used: the
 `score:` line is computed at render time as a distinct-source count
-(`ClusterBlockRenderer.java:105-115`, comment: "placeholder shape for
+(`command/ClusterBlockRenderer.java:119`, comment: "placeholder shape for
 MVP") and only appears in `--flat`, which is not the digest's form. So
 the digest computes cross-source clustering — the expensive part — and
 then throws away what the cluster shape tells it.
