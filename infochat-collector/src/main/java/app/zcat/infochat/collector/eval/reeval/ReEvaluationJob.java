@@ -2,6 +2,7 @@ package app.zcat.infochat.collector.eval.reeval;
 
 import app.zcat.infochat.collector.eval.PartitionScan;
 import app.zcat.infochat.collector.eval.TransactionHelper;
+import app.zcat.infochat.collector.eval.stage1.QuarantineDao;
 import app.zcat.infochat.collector.eval.stage2.Stage2VerdictHandler;
 import app.zcat.infochat.collector.eval.stage2.Stage2Worker;
 import app.zcat.infochat.collector.notify.QuarantineNotifyEmitter;
@@ -31,6 +32,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -66,7 +68,10 @@ import java.util.UUID;
  * verdict, increment the counter, and re-hide a released post to
  * QUARANTINED per {@code docs/spec/security.md} §Re-evaluation job —
  * a post the judge now classifies hostile must not stay user-visible
- * for the rest of the attempt budget. Cap exhaustion transitions to
+ * for the rest of the attempt budget. A re-hide of a post carrying no
+ * open quarantine row also inserts one whole-body
+ * {@code flagged_by='stage2'} PENDING row so the post enters the
+ * admin review queue (M1-738). Cap exhaustion transitions to
  * NEEDS_REVIEW and emits the quarantine_review NOTIFY; the Provider's
  * consumer owns the throttled admin page for that transition.
  */
@@ -87,6 +92,9 @@ public class ReEvaluationJob {
 
     @Inject
     QuarantineNotifyEmitter quarantineNotifyEmitter;
+
+    @Inject
+    QuarantineDao quarantineDao;
 
     @Inject
     ThrottledAdminNotifier throttledAdminNotifier;
@@ -202,7 +210,7 @@ public class ReEvaluationJob {
                 candidate.postId());
             return true;
         } else {
-            applyNonBenignReEval(candidate, verdict);
+            applyNonBenignReEval(candidate, verdict, originalBody);
             return false;
         }
     }
@@ -319,14 +327,33 @@ public class ReEvaluationJob {
      * lower-UNKNOWN-cap rationale. The re-hide and its NOTIFYs run in
      * ONE transaction so the announce can never outlive a rolled-back
      * transition.
+     *
+     * <p>A re-hide with no open quarantine row additionally INSERTs
+     * one whole-body {@code flagged_by='stage2'} PENDING row via
+     * {@link QuarantineDao#insertReEvalRow} (M1-738): a post released
+     * READY during a Stage 2 outage never had a Stage 1 row, and
+     * {@code quarantine_review_view} projects {@code quarantine} rows
+     * only — without the insert the re-hidden post would sit
+     * QUARANTINED yet invisible to the admin review queue,
+     * contradicting §Quarantine workflow's "stays QUARANTINED until
+     * admin review." When a PENDING row already exists the re-hide
+     * keeps today's bump-and-re-announce and inserts nothing.
+     * {@code originalBody} (the reconstructed body the judge saw) is
+     * what the insert stores as {@code original_html}.
      */
-    private void applyNonBenignReEval(ReEvalCandidate candidate, Stage2VerdictHandler.Verdict verdict) {
+    private void applyNonBenignReEval(ReEvalCandidate candidate, Stage2VerdictHandler.Verdict verdict,
+                                      String originalBody) {
         Instant now = clock.instant();
         boolean reHidden = TransactionHelper.inTransactionReturning(dataSource, "ReEvaluationJob.applyNonBenign", conn -> {
             recordVerdictAndIncrementCounter(conn, candidate, verdict, now);
             boolean hidden = reHideToQuarantined(conn, candidate, now);
             if (hidden) {
-                reAnnouncePendingQuarantineRows(conn, candidate.postId(), now);
+                int reAnnounced = reAnnouncePendingQuarantineRows(conn, candidate.postId(), now);
+                if (reAnnounced == 0) {
+                    quarantineDao.insertReEvalRow(conn, candidate.postId(), candidate.postUid(),
+                        candidate.fetchedAt(),
+                        "reeval_" + verdict.name().toLowerCase(Locale.ROOT), originalBody);
+                }
             }
             return hidden;
         });
@@ -378,22 +405,30 @@ public class ReEvaluationJob {
      * idempotent. The {@code updated_at} bump is load-bearing: the
      * Provider catch-up scan cursors on {@code quarantine.updated_at},
      * so without it a missed NOTIFY could never be recovered.
+     *
+     * <p>Returns the number of PENDING rows bumped; the caller
+     * inserts a fresh {@code flagged_by='stage2'} row when the count
+     * is zero, so a re-hidden row-less post still reaches the admin
+     * review queue (M1-738).
      */
-    private void reAnnouncePendingQuarantineRows(Connection conn, UUID postId, Instant now) throws SQLException {
+    private int reAnnouncePendingQuarantineRows(Connection conn, UUID postId, Instant now) throws SQLException {
         final String sql =
             "UPDATE quarantine SET updated_at = ? "
                 + "WHERE post_id = ? AND status = 'PENDING' RETURNING id";
+        int bumped = 0;
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setTimestamp(1, Timestamp.from(now));
             ps.setObject(2, postId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
+                    bumped++;
                     UUID quarantineId = (UUID) rs.getObject(1);
                     quarantineNotifyEmitter.emit(conn, QuarantineNotifyEmitter.TargetKind.QUARANTINE,
                         quarantineId, QuarantineNotifyEmitter.NewStatus.PENDING);
                 }
             }
         }
+        return bumped;
     }
 
     /**
@@ -470,15 +505,20 @@ public class ReEvaluationJob {
      * verdict never re-fire. Runs on the caller's connection inside
      * applyBenignReEval's transaction (same-transaction NOTIFY rule).
      *
-     * <p>Only Stage 1 rows are touched ({@code flagged_by='stage1'}),
-     * matching {@code Stage2VerdictHandler}'s BENIGN-close twin: a
-     * future non-stage1 quarantine writer (none in M1) must not be
-     * auto-closed by a re-eval BENIGN release.
+     * <p>Both machine writers are covered — Stage 1 rows
+     * ({@code flagged_by='stage1'}) and the re-eval job's own re-hide
+     * rows ({@code flagged_by='stage2'},
+     * {@link QuarantineDao#insertReEvalRow}, M1-738): a re-eval
+     * BENIGN release reverses exactly the judgments those rows
+     * record, so leaving one PENDING would keep the admin queue
+     * asserting "awaiting review" about a post the system just
+     * released (the M1-738 redteam finding). The V10 CHECK admits no
+     * third writer, so the predicate is exhaustive for M1.
      */
     private void closeQuarantineRows(Connection conn, UUID postId, Instant now) throws SQLException {
         final String sql =
             "UPDATE quarantine SET status = 'BENIGN_CLOSED', updated_at = ? "
-                + "WHERE post_id = ? AND flagged_by = 'stage1' AND status = 'PENDING' RETURNING id";
+                + "WHERE post_id = ? AND flagged_by IN ('stage1', 'stage2') AND status = 'PENDING' RETURNING id";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setTimestamp(1, Timestamp.from(now));
             ps.setObject(2, postId);

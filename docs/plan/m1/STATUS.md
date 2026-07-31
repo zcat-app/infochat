@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 13 |
+| pending | 12 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 738 |
+| done | 739 |
 | deferred | 1 |
 | abandoned | 21 |
 | **total** | **773** |
@@ -33,7 +33,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-724 — Digest cluster selection is recency-only: the cap keeps the newest stories, never the most significant (complexity: high, risk: high)
 - M1-727 — Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other (complexity: medium, risk: medium)
 - M1-728 — Category roll-up sends every post's full body and asks for one or two sentences: it neither fits a large category nor describes one (complexity: medium, risk: medium)
-- M1-738 — Re-hidden posts bypass the admin review queue (complexity: medium, risk: medium)
 
 ---
 
@@ -72,6 +71,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-738 | Re-hidden posts bypass the admin review queue | 2026-08-01 | round 1 APPROVE |
 | M1-737 | Aggregate sanitize audit rows per distinct token per call | 2026-07-31 | round 1 APPROVE |
 | M1-736 | Posts tagged '{}' are never re-evaluated when the vocabulary or model improves | 2026-07-31 | round 1 APPROVE |
 | M1-735 | A tagger that answers empty to every post emits no operational signal | 2026-07-31 | round 1 APPROVE |
@@ -81,7 +81,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-730 | /saved renders the ingest \"untitled\" sentinel to a reader | 2026-07-31 | round 1 APPROVE |
 | M1-726 | Tagger treats a correct \"no topic fits\" as a failure and relabels the post with the source's topic tags | 2026-07-31 | round 1 APPROVE |
 | M1-731 | Retire infochat.digest.category-summary-enabled and reclaim the generateRollup name | 2026-07-30 | round 2 APPROVE |
-| M1-729 | Bluesky posts render a headline of \"untitled\" while their text sits in body | 2026-07-30 | round 1 APPROVE |
 
 ---
 
@@ -993,5 +992,5 @@ M1-731 (done)
         ├── M1-725 (pending) [see above]
         ├── M1-733 (done)
         └── M1-734 (done)
-M1-738 (pending) ← runnable
+M1-738 (done)
 ```

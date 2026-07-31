@@ -17,7 +17,10 @@ import java.util.UUID;
  * table in M1. Every Stage 1 regex hit lands one row via this DAO;
  * every Stage 1 watchdog abort lands one whole-body row via this
  * DAO. The future Stage 2 (M1-033) BENIGN-verdict UPDATE on a prior
- * Stage 1 row also routes through this DAO.
+ * Stage 1 row also routes through this DAO. The re-evaluation job's
+ * re-hide of a row-less post lands one whole-body
+ * {@code flagged_by='stage2'} row via {@link #insertReEvalRow}
+ * (M1-738).
  *
  * <h2>Why a dedicated DAO</h2>
  * <p>Centralizing the INSERT/UPDATE shape here means the reviewer's
@@ -101,6 +104,71 @@ public class QuarantineDao {
             throw new IllegalStateException(
                 "QuarantineDao.insert: INSERT INTO quarantine failed for post_id="
                     + row.postId() + " rule_id=" + row.ruleId(), e);
+        }
+    }
+
+    /**
+     * INSERT one whole-body quarantine row for a re-evaluation
+     * re-hide ({@code flagged_by='stage2'}, {@code status='PENDING'})
+     * and emit the same PENDING {@code quarantine_review} NOTIFY the
+     * Stage 1 insert emits, on the caller's {@link Connection} so the
+     * insert commits or rolls back together with the parent
+     * {@code post} re-hide UPDATE (the same atomicity rule
+     * {@link #insert} documents for Stage 1). (M1-738)
+     *
+     * <p>Why this row exists: {@code quarantine_review_view} (V10)
+     * projects {@code quarantine} rows only, so a post released READY
+     * during a Stage 2 outage (no Stage 1 hits, hence no row) and
+     * later re-hidden to QUARANTINED by the re-evaluation job would
+     * otherwise never enter the admin review queue, contradicting
+     * {@code docs/spec/security.md} §Quarantine workflow's "Every
+     * Stage 1 or Stage 2 hit creates a quarantine row" and its
+     * "stays QUARANTINED until admin review."
+     *
+     * <p>Row shape mirrors the Stage 1 fail-closed whole-body rows
+     * ({@code regex_timeout} / {@code match_overflow} /
+     * {@code sanitizer_exception}): the span covers the entire judged
+     * body and {@code original_html} holds it verbatim. Unlike those
+     * rows the {@code placeholder_id} is NOT woven into
+     * {@code post.body} — the re-hide deliberately leaves the body
+     * alone — so the id exists only to satisfy the NOT NULL column;
+     * nothing ever splices it.
+     *
+     * @param ruleId        a stable per-source id in the
+     *                      {@code reeval_<verdict>} shape, supplied by
+     *                      the caller.
+     * @param originalHtml  the exact body the Stage 2 re-judge saw
+     *                      (the reconstructed original); never null.
+     */
+    public void insertReEvalRow(Connection conn, UUID postId, String postUid,
+                                Instant postFetchedAt, String ruleId, String originalHtml) {
+        final String sql =
+            "INSERT INTO quarantine ("
+                + "  post_id, post_uid, post_fetched_at,"
+                + "  flagged_by, rule_id, span_start, span_end,"
+                + "  original_html, placeholder_id, status"
+                + ") VALUES ("
+                + "  ?, ?, ?, 'stage2', ?, 0, ?, ?, ?, 'PENDING'"
+                + ") RETURNING id";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setObject(1, postId);
+            ps.setString(2, postUid);
+            ps.setTimestamp(3, Timestamp.from(postFetchedAt));
+            ps.setString(4, ruleId);
+            ps.setInt(5, originalHtml.length());
+            ps.setString(6, originalHtml);
+            ps.setString(7, PlaceholderIds.next());
+            UUID quarantineId;
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                quarantineId = (UUID) rs.getObject(1);
+            }
+            quarantineNotifyEmitter.emit(conn, QuarantineNotifyEmitter.TargetKind.QUARANTINE,
+                quarantineId, QuarantineNotifyEmitter.NewStatus.PENDING);
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                "QuarantineDao.insertReEvalRow: INSERT INTO quarantine failed for post_id="
+                    + postId + " rule_id=" + ruleId, e);
         }
     }
 

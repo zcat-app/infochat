@@ -78,14 +78,15 @@ class ReEvaluationJobTest {
     }
 
     @Test
-    void benignReEval_closesOnlyStage1QuarantineRows_leavesNonStage1Pending() throws Exception {
-        // U-25: closeQuarantineRows carries the flagged_by='stage1'
-        // predicate its Stage2VerdictHandler twin has. A BENIGN re-eval
-        // must close the post's Stage 1 PENDING rows but leave a
-        // (hypothetical future) non-stage1 quarantine row untouched.
-        // 'stage2' is the only non-'stage1' value the quarantine.flagged_by
-        // CHECK admits (V10) — and is exactly the future Stage-2 quarantine
-        // writer the predicate guards against.
+    void benignReEval_closesStage1AndReEvalStage2Rows() throws Exception {
+        // U-25, retargeted by M1-738 (test-modification authorized in the
+        // ticket body §Redteam refine): the "future non-stage1 writer" the
+        // stage1-only predicate guarded against now exists and IS the
+        // re-evaluation job (QuarantineDao.insertReEvalRow). A BENIGN
+        // re-eval reverses the judgments both machine writers recorded,
+        // so it must close the post's stage1 AND stage2 PENDING rows —
+        // a stage2 row left PENDING would keep the admin queue asserting
+        // "awaiting review" about the post this release just made visible.
         stub().setNextResponse("BENIGN");
         SeededPost post = seedInfraFailurePost("u25-predicate");
         seedQuarantineRow(post, "placeholder-1", "original content"); // flagged_by='stage1'
@@ -95,8 +96,41 @@ class ReEvaluationJobTest {
 
         assertEquals("BENIGN_CLOSED", readQuarantineStatusByFlaggedBy(post.id, "stage1"),
             "the Stage 1 quarantine row must close on a BENIGN re-eval");
-        assertEquals("PENDING", readQuarantineStatusByFlaggedBy(post.id, "stage2"),
-            "a non-stage1 quarantine row must NOT be closed by the re-eval BENIGN path");
+        assertEquals("BENIGN_CLOSED", readQuarantineStatusByFlaggedBy(post.id, "stage2"),
+            "the re-eval job's own stage2 row must close on the job's BENIGN release (M1-738)");
+    }
+
+    @Test
+    void reHiddenPostBenignRelease_closesReEvalStage2Row() throws Exception {
+        // M1-738 end-to-end lifecycle: a row-less READY post is re-hidden
+        // (stage2 row inserted), then a later re-eval rolls BENIGN — the
+        // post auto-releases (QUARANTINED→RAW, RE_EVAL_RELEASED audited)
+        // AND the inserted row transitions PENDING→BENIGN_CLOSED with its
+        // NOTIFY, so it drops out of the PENDING admin queue.
+        SeededPost post = seedInfraFailurePost("rehide-then-benign");
+        setPostBody(post, "released during the outage, re-judged twice");
+        setPostStatus(post, "READY");
+
+        try (Connection listenConn = dataSource.getConnection()) {
+            PGConnection pg = listenTo(listenConn, "quarantine_review");
+
+            stub().setNextResponse("INJECTION");
+            reEvaluationJob.processOne(candidateFor(post, true, 0));
+            assertPostStatus(post.id, "QUARANTINED");
+            UUID quarantineId = readSoleQuarantineId(post.id);
+            assertQuarantineReviewNotify(pg, "quarantine", quarantineId, "PENDING");
+
+            // Roll 2 mirrors what enumerateCandidates now reads: verdict
+            // recorded, counter incremented, stage2_failed preserved.
+            stub().setNextResponse("BENIGN");
+            reEvaluationJob.processOne(candidateFor(post, true, 1, "INJECTION"));
+
+            assertPostStatus(post.id, "RAW");
+            assertEquals("BENIGN_CLOSED", readQuarantineStatusByFlaggedBy(post.id, "stage2"),
+                "the inserted stage2 row must close when the re-hidden post releases");
+            assertReEvalReleasedCount(post.id, 1);
+            assertQuarantineReviewNotify(pg, "quarantine", quarantineId, "BENIGN_CLOSED");
+        }
     }
 
     @Test
@@ -158,6 +192,67 @@ class ReEvaluationJobTest {
         // "alongside the new verdict" — the re-eval verdict is recorded,
         // not just counted (docs/spec/security.md §Re-evaluation job).
         assertPostField(post.id, "stage2_verdict", "INJECTION");
+    }
+
+    @Test
+    void reHideWithNoQuarantineRow_insertsPendingStage2RowVisibleInReviewView_andNotifies()
+            throws Exception {
+        // M1-738: a post released READY during a Stage 2 outage carries no
+        // quarantine row (Stage 1 found nothing), so a re-hide to
+        // QUARANTINED must INSERT one whole-body flagged_by='stage2'
+        // PENDING row — quarantine_review_view projects quarantine rows
+        // only, and without the row the hidden post never enters the
+        // /quarantine list admin queue. The insert emits the same
+        // quarantine_review PENDING NOTIFY the Stage 1 insert emits.
+        stub().setNextResponse("INJECTION");
+        SeededPost post = seedInfraFailurePost("rehide-no-row");
+        String body = "fully visible body the judge re-judged";
+        setPostBody(post, body);
+        setPostStatus(post, "READY");
+
+        try (Connection listenConn = dataSource.getConnection()) {
+            PGConnection pg = listenTo(listenConn, "quarantine_review");
+
+            reEvaluationJob.processOne(candidateFor(post, true, 0));
+
+            assertPostStatus(post.id, "QUARANTINED");
+            assertEquals(1, countQuarantineRows(post.id),
+                "the re-hide must insert exactly one quarantine row");
+            // Read through the redacted Provider view — the surface
+            // /quarantine list actually queries — so the assertion pins
+            // queue membership, not just the base-table write.
+            UUID quarantineId = assertReviewViewRow(post.id, body.length());
+            assertOriginalHtmlAndPlaceholder(quarantineId, body);
+            assertQuarantineReviewNotify(pg, "quarantine", quarantineId, "PENDING");
+        }
+    }
+
+    @Test
+    void reHideWithPendingRow_bumpsAndReannounces_insertsNoDuplicate() throws Exception {
+        // M1-738: the open-row path is unchanged — a re-hide with an
+        // existing PENDING quarantine row keeps the updated_at bump +
+        // PENDING re-announce and inserts NO duplicate row.
+        stub().setNextResponse("INJECTION");
+        SeededPost post = seedInfraFailurePost("rehide-existing-row");
+        seedQuarantineRow(post, "placeholder-1", "original content");
+        setPostStatus(post, "READY");
+        UUID existingId = readSoleQuarantineId(post.id);
+        ageQuarantineRows(post.id);
+
+        try (Connection listenConn = dataSource.getConnection()) {
+            PGConnection pg = listenTo(listenConn, "quarantine_review");
+
+            reEvaluationJob.processOne(candidateFor(post, true, 0));
+
+            assertPostStatus(post.id, "QUARANTINED");
+            assertEquals(1, countQuarantineRows(post.id),
+                "the re-hide must NOT insert a duplicate row when a PENDING row exists");
+            assertEquals(existingId, readSoleQuarantineId(post.id));
+            assertEquals("PENDING", readQuarantineStatusByFlaggedBy(post.id, "stage1"),
+                "the existing Stage 1 row stays PENDING (bumped, not replaced)");
+            assertQuarantineUpdatedAtAdvanced(post.id);
+            assertQuarantineReviewNotify(pg, "quarantine", existingId, "PENDING");
+        }
     }
 
     @Test
@@ -483,6 +578,103 @@ class ReEvaluationJobTest {
             try (ResultSet rs = ps.executeQuery()) {
                 assertTrue(rs.next(), "expected a quarantine row with flagged_by=" + flaggedBy);
                 return rs.getString(1);
+            }
+        }
+    }
+
+    private int countQuarantineRows(UUID postId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT COUNT(*) FROM quarantine WHERE post_id = ?")) {
+            ps.setObject(1, postId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getInt(1);
+            }
+        }
+    }
+
+    private UUID readSoleQuarantineId(UUID postId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT id FROM quarantine WHERE post_id = ?")) {
+            ps.setObject(1, postId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "expected a quarantine row for post " + postId);
+                return (UUID) rs.getObject(1);
+            }
+        }
+    }
+
+    // The re-announce bump stamp (the injected Clock's "now") must beat a
+    // known old updated_at; aging flagged_at too would make the row a TTL
+    // candidate, so only updated_at is moved.
+    private static final Timestamp AGED_UPDATED_AT = Timestamp.from(Instant.parse("2026-05-20T10:00:00Z"));
+
+    private void ageQuarantineRows(UUID postId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "UPDATE quarantine SET updated_at = ? WHERE post_id = ?")) {
+            ps.setTimestamp(1, AGED_UPDATED_AT);
+            ps.setObject(2, postId);
+            ps.executeUpdate();
+        }
+    }
+
+    private void assertQuarantineUpdatedAtAdvanced(UUID postId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT updated_at > ? FROM quarantine WHERE post_id = ?")) {
+            ps.setTimestamp(1, AGED_UPDATED_AT);
+            ps.setObject(2, postId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertTrue(rs.getBoolean(1),
+                    "the re-hide must bump the existing PENDING row's updated_at (Provider cursor)");
+            }
+        }
+    }
+
+    /**
+     * Read the re-hide-inserted row through {@code quarantine_review_view}
+     * — the redacted projection {@code /quarantine list} queries — and
+     * assert the shape the admin queue surfaces: {@code flagged_by='stage2'},
+     * {@code status='PENDING'}, the {@code reeval_injection} rule id, and a
+     * whole-body span {@code [0, bodyLength)}. Returns the row's id for the
+     * NOTIFY assertion. (M1-738)
+     */
+    private UUID assertReviewViewRow(UUID postId, int bodyLength) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT id, flagged_by, status, rule_id, span_start, span_end "
+                     + "FROM quarantine_review_view WHERE post_id = ?")) {
+            ps.setObject(1, postId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(),
+                    "the inserted row must be visible through quarantine_review_view (the admin queue)");
+                UUID quarantineId = (UUID) rs.getObject(1);
+                assertEquals("stage2", rs.getString(2), "flagged_by must name the re-evaluation actor");
+                assertEquals("PENDING", rs.getString(3));
+                assertEquals("reeval_injection", rs.getString(4));
+                assertEquals(0, rs.getInt(5), "whole-body span start");
+                assertEquals(bodyLength, rs.getInt(6), "whole-body span end");
+                return quarantineId;
+            }
+        }
+    }
+
+    private void assertOriginalHtmlAndPlaceholder(UUID quarantineId, String expectedBody) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT original_html, placeholder_id FROM quarantine WHERE id = ?")) {
+            ps.setObject(1, quarantineId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals(expectedBody, rs.getString(1),
+                    "original_html must hold the exact body the re-judge saw");
+                String placeholderId = rs.getString(2);
+                assertNotNull(placeholderId, "placeholder_id is NOT NULL in V10");
+                assertFalse(placeholderId.isEmpty(), "placeholder_id must be a real id");
             }
         }
     }

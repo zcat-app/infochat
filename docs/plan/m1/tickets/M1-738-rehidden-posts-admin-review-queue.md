@@ -1,9 +1,9 @@
 ---
 id: M1-738
 title: "Re-hidden posts bypass the admin review queue"
-status: pending
+status: done
 created: 2026-07-31
-last_updated: 2026-07-31
+last_updated: 2026-08-01
 blocked_by: []
 files_budget: 8
 files_scope:
@@ -32,6 +32,13 @@ out_of_scope:
   - >-
     infochat-provider/** — the `/quarantine list` read side
     (`QuarantineCommandHandler`) is correct.
+  - >-
+    The analogous first-pass gap: `Stage2VerdictHandler` inserts no
+    quarantine row on a first-pass INJECTION/MALWARE verdict for a
+    post with no Stage 1 rows (same admin-queue invisibility, first
+    flagged in this ticket's 2026-08-01 redteam round-table). Owned
+    by the follow-up ticket filed after this ticket merges; this
+    ticket touches only the re-evaluation path.
 acceptance:
   - >-
     Premise re-verified at start: `quarantine_review_view`
@@ -55,6 +62,16 @@ acceptance:
     The insert emits the same quarantine-review NOTIFY the Stage 1
     path emits on PENDING insert, so a live Provider sees the row
     without waiting for the catch-up scan.
+  - >-
+    The inserted row's lifecycle is symmetric with Stage 1 rows: a
+    re-hidden post whose re-eval later rolls BENIGN auto-releases AND
+    its stage2 row transitions PENDING→BENIGN_CLOSED (with the
+    BENIGN_CLOSED NOTIFY) — `ReEvaluationJob.closeQuarantineRows`
+    covers `flagged_by='stage2'` rows, so the admin queue never holds
+    a PENDING "judge said hostile" row for a released post. Pinned by
+    a named test (re-hide → insert → later BENIGN → row closed) and
+    by the updated U-25 predicate test (see ## Notes for the
+    test-modification authorization).
   - mvn verify from the repo root is green.
 test_plan:
   adds:
@@ -65,12 +82,74 @@ spec_refs:
   - docs/spec/security.md §Quarantine workflow
   - docs/spec/security.md §Failure handling
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 538
+      removed: 31
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-08-01
+    verdict: FINDINGS
+    base: ed5fd36a2aea625204c063dee7ecdf528b581172
+    head: working tree (uncommitted, branch m1/M1-738-re-hidden-posts-bypass-the-adm)
+    verdict_file: docs/plan/m1/redteam/M1-738-2026-08-01.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      One low AUDIT-EVASION finding: the inserted stage2 row stayed
+      PENDING after a later BENIGN re-eval auto-released the post.
+      Remediated via the redteam-finding refine (f0b75017) — folded
+      into acceptance as the close-symmetry item, superseding the
+      start-time deferral. The finding's stale-comment sub-point was
+      fixed on the branch (comment-only). The out-of-model
+      UTF-16-vs-Postgres span-unit note is forwarded to the follow-up
+      ticket as a design note. Auditor: kimi threat-actor via
+      run-gate.sh, contamination=none.
+  - date: 2026-08-01
+    verdict: CLEAN
+    base: ed5fd36a2aea625204c063dee7ecdf528b581172
+    head: working tree + refine commit f0b75017 (re-audit, round 2)
+    verdict_file: docs/plan/m1/redteam/M1-738-2026-08-01-r2.md
+    out_of_model_count: 0
+    note: |
+      Re-audit of the post-refine diff with explicit re-audit
+      framing. The round-1 finding is verified remediated
+      (closeQuarantineRows covers stage1+stage2; U-25 retargeted;
+      lifecycle test added); the adjudicated out-of-model note was
+      not re-reported. CLEAN. Auditor: kimi threat-actor via
+      run-gate.sh, contamination=none.
+clarity_check:
+  date: 2026-07-31
+  verdict: WARN
+  warnings:
+    - >-
+      lint: clean (0 blockers, 0 warnings).
+    - >-
+      Self-check: V10's flagged_by CHECK admits only 'stage1'/'stage2',
+      so "the re-evaluation actor" lands as flagged_by='stage2' (the
+      re-judge runs through stage2Worker.judgeBody) — no migration,
+      consistent with migration_touch: false.
+    - >-
+      Self-check: a re-hidden post that later rolls BENIGN auto-releases
+      while its new stage2 row stays PENDING until TTL auto-reject
+      (ReEvaluationJobTest U-25 pins stage1-only close). User decision
+      2026-07-31: keep this ticket insert-only; the stage2-row lifecycle
+      and the analogous first-pass Stage2VerdictHandler insert gap go to
+      a follow-up ticket filed after merge.
+  blockers: []
 escalation_reason:
 ---
 
@@ -123,3 +202,28 @@ YAML list.
   re-hide path updates only `status = 'PENDING'` rows. The view
   definition was checked from the migration file — acceptance item 1
   makes the developer re-confirm it before implementing.
+
+## Redteam refine (2026-08-01)
+
+The `/m1-tick run` redteam gate returned FINDINGS (1 low
+AUDIT-EVASION): the inserted stage2 row stayed PENDING after a later
+BENIGN re-eval auto-released the post, leaving the admin queue
+asserting "awaiting review" about a live post. The user chose
+**refine and fix**: the close-symmetry acceptance item above was
+added (the earlier start-time decision to defer this to a follow-up
+is superseded; only the first-pass `Stage2VerdictHandler` gap remains
+deferred, per the out_of_scope entry).
+
+**Test-modification authorization** (engineering rules §8): this
+ticket changes the behavior of `ReEvaluationJob.closeQuarantineRows`
+— it now closes `flagged_by='stage2'` rows written by the re-eval
+job's own re-hide insert, not only `flagged_by='stage1'` rows. That
+requires updating the pre-existing test
+`benignReEval_closesOnlyStage1QuarantineRows_leavesNonStage1Pending`
+in `ReEvaluationJobTest`: the "future non-stage1 quarantine writer"
+its stage1-only predicate guarded against (U-25) now exists and IS
+the re-evaluation job itself, so a re-eval BENIGN release must close
+the re-eval job's own rows. The test is rewritten to seed one
+`flagged_by='stage2'` PENDING row alongside the stage1 row and to
+assert BOTH transition to BENIGN_CLOSED on a BENIGN re-eval (the
+stage1 assertion is unchanged).
