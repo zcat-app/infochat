@@ -452,6 +452,11 @@ class TaggerWorkerTest {
         worker.noTagsRateMonitor = monitor;
         worker.partitionScan = partitionScan;
         worker.maxConcurrency = 1;
+        // Hand-wired workers only ever call processOne — the sweep tail
+        // (onTick) is never exercised here, so disable it explicitly and
+        // give init()'s validation a valid attempts value (M1-736).
+        worker.sweepBatchSize = 0;
+        worker.sweepMaxAttempts = 1;
         worker.init();
         return worker;
     }

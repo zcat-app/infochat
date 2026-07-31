@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 18 |
+| pending | 17 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 733 |
+| done | 734 |
 | deferred | 1 |
 | abandoned | 21 |
 | **total** | **773** |
@@ -33,8 +33,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-724 — Digest cluster selection is recency-only: the cap keeps the newest stories, never the most significant (complexity: high, risk: high)
 - M1-727 — Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other (complexity: medium, risk: medium)
 - M1-728 — Category roll-up sends every post's full body and asks for one or two sentences: it neither fits a large category nor describes one (complexity: medium, risk: medium)
-- M1-732 — groups.digest_mode and the hybrid category body: count + roll-up + headlines (complexity: low, risk: low)
-- M1-736 — Posts tagged '{}' are never re-evaluated when the vocabulary or model improves (complexity: medium, risk: medium)
+- M1-732 — groups.digest_mode and the hybrid category body: count + roll-up + headlines (complexity: high, risk: low)
 - M1-737 — Aggregate sanitize audit rows per distinct token per call (complexity: medium, risk: medium)
 - M1-738 — Re-hidden posts bypass the admin review queue (complexity: medium, risk: medium)
 
@@ -77,6 +76,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-736 | Posts tagged '{}' are never re-evaluated when the vocabulary or model improves | 2026-07-31 | round 1 APPROVE |
 | M1-735 | A tagger that answers empty to every post emits no operational signal | 2026-07-31 | round 1 APPROVE |
 | M1-730 | /saved renders the ingest \"untitled\" sentinel to a reader | 2026-07-31 | round 1 APPROVE |
 | M1-726 | Tagger treats a correct \"no topic fits\" as a failure and relabels the post with the source's topic tags | 2026-07-31 | round 1 APPROVE |
@@ -86,7 +86,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-721 | Digest length is a function of tag count: nothing bounds how many category sections a digest renders | 2026-07-30 | round 1 APPROVE |
 | M1-714 | Summary/digest headline renders a raw post title: unbounded for social sources, blank for Bluesky | 2026-07-30 | round 1 APPROVE |
 | M1-712 | encodeJoinGroupCommand's command-injection guard is the one encode entry point no test pins | 2026-07-30 | round 1 APPROVE |
-| M1-711 | SimpleX mention-strip: multi-mention ordering and mid-text whitespace collapse are untested | 2026-07-30 | round 1 APPROVE |
 
 ---
 
@@ -987,7 +986,7 @@ M1-723 (done)
         └── M1-725 (pending)
 M1-726 (done)
   ├── M1-735 (done)
-  └── M1-736 (pending) ← runnable
+  └── M1-736 (done)
 M1-727 (pending) ← runnable
 M1-729 (done)
 M1-730 (done)

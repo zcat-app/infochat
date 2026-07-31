@@ -25,6 +25,8 @@ import javax.sql.DataSource;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.sql.Array;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -34,9 +36,11 @@ import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -161,6 +165,39 @@ import java.util.regex.Pattern;
  * post. The model is stateless across calls (Tagger has no memory
  * per {@code docs/spec/llm.md} §Determinism boundary) so re-issuing
  * the same prompt is safe.
+ *
+ * <h2>Re-evaluation sweep (M1-736)</h2>
+ *
+ * <p>A {@code tags='{}'} first-pass outcome (M1-726) is terminal only
+ * for the inputs that produced it: the controlled vocabulary grows
+ * (TagVocabulary's refresh path) and the configured tagger model can
+ * change. After the live batch each tick, the worker re-runs the SAME
+ * chain ({@link #processOne}) over posts with {@code tags='{}' AND
+ * tagger_done=TRUE AND tagger_fallback=FALSE} that have not yet been
+ * swept for the current input generation. Live first-pass pickup always
+ * wins: the sweep only ever fills the tick's leftover batch capacity
+ * ({@code maxConcurrency - live}, further capped by
+ * {@code infochat.llm.tagger.sweep.batch-size}), so the single-in-flight
+ * LLM bound above holds unchanged and a live backlog starves the sweep
+ * to zero, never the reverse.
+ *
+ * <p>The generation marker lives in the singleton
+ * {@code tagger_sweep_state} row (V66) and bumps when a SHA-256
+ * fingerprint of the tagger's cheaply-identifiable inputs — the sorted
+ * normalized vocabulary names plus the configured
+ * {@code infochat.llm.tagger.model} string — changes. The baseline is
+ * recorded as generation 0 on the first sweep-capable tick and existing
+ * rows default {@code tagger_swept_generation=0}, so a deploy alone
+ * never triggers a backlog sweep; only the first real input change
+ * does. Spend is bounded twice: a per-sweep batch cap
+ * ({@code sweep.batch-size}, 0 disables the sweep entirely) and a
+ * per-post attempt cap ({@code sweep.max-attempts}) counted across ALL
+ * generations in {@code post.tagger_sweep_attempts}. A swept row's
+ * outcome resolves through the normal chain — tags found are written by
+ * the same atomic cursor UPDATE, still-nothing stays {@code tags='{}'},
+ * and a double failure takes the same bootstrap-fallback path (which
+ * also removes the row from sweep eligibility via
+ * {@code tagger_fallback=TRUE}).
  */
 @ApplicationScoped
 public class TaggerWorker {
@@ -230,6 +267,24 @@ public class TaggerWorker {
     @ConfigProperty(name = "infochat.llm.tagger.max-concurrency")
     int maxConcurrency;
 
+    // Package-visible (not private) so the sweep IT can opt the shared bean
+    // in explicitly: the test profile sets batch-size=0 so background ticks
+    // never sweep (test application.properties, M1-736). The IT writes this
+    // via ClientProxy.unwrap — a field write through the injected CDI client
+    // proxy hits the proxy's slot, not the contextual instance's.
+    @ConfigProperty(name = "infochat.llm.tagger.sweep.batch-size", defaultValue = "4")
+    int sweepBatchSize;
+
+    @ConfigProperty(name = "infochat.llm.tagger.sweep.max-attempts", defaultValue = "3")
+    int sweepMaxAttempts;
+
+    // The cheaply-identifiable half of the model-change bump trigger: the
+    // configured model STRING, woven into the sweep input fingerprint. An
+    // operator swapping what answers behind the same endpoint URL is not
+    // detectable and deliberately out of scope (M1-736 Notes).
+    @ConfigProperty(name = "infochat.llm.tagger.model", defaultValue = "")
+    String taggerModel;
+
     @SuppressWarnings("NullAway.Init")
     private String primaryPromptTemplate;
     @SuppressWarnings("NullAway.Init")
@@ -243,6 +298,15 @@ public class TaggerWorker {
             throw new IllegalStateException(
                 "TaggerWorker: infochat.llm.tagger.max-concurrency must be >= 1; got " + maxConcurrency);
         }
+        if (sweepBatchSize < 0) {
+            throw new IllegalStateException(
+                "TaggerWorker: infochat.llm.tagger.sweep.batch-size must be >= 0 (0 disables the sweep); got "
+                    + sweepBatchSize);
+        }
+        if (sweepMaxAttempts < 1) {
+            throw new IllegalStateException(
+                "TaggerWorker: infochat.llm.tagger.sweep.max-attempts must be >= 1; got " + sweepMaxAttempts);
+        }
         this.primaryPromptTemplate = loadResource(PRIMARY_PROMPT_RESOURCE);
         this.fallbackPromptTemplate = loadResource(FALLBACK_PROMPT_RESOURCE);
         this.objectMapper = new ObjectMapper();
@@ -251,7 +315,9 @@ public class TaggerWorker {
     /**
      * Scheduled tick. Picks up posts whose Stage 1 (and Stage 2 when
      * flagged) have completed, runs the tagger on each, and writes
-     * the per-stage cursor advance.
+     * the per-stage cursor advance. Live first-pass work always wins:
+     * the re-evaluation sweep (M1-736) runs only on the batch capacity
+     * the live pickup left unused.
      */
     @Scheduled(every = "{infochat.llm.tagger.poll-interval}",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
@@ -273,6 +339,47 @@ public class TaggerWorker {
                 // tick. Log and keep going so the rest of the batch
                 // gets its chance.
                 SafeLog.warn(LOG, "TaggerWorker: processing failed for post_id=" + row.id()
+                    + "; will retry next tick", e);
+            }
+        }
+        int sweepSlots = Math.min(maxConcurrency - pending.size(), sweepBatchSize);
+        if (sweepSlots > 0) {
+            runSweep(sweepSlots);
+        }
+    }
+
+    /**
+     * The sweep tail of {@link #onTick()}: bump the generation marker if
+     * the tagger's inputs changed, then re-run the normal chain on up to
+     * {@code slots} eligible {@code tags='{}'} posts. Package-private so
+     * the sweep IT can drive it without waiting on the scheduler clock.
+     */
+    void runSweep(int slots) {
+        final int generation;
+        try {
+            generation = currentSweepGeneration();
+        } catch (SQLException e) {
+            SafeLog.warn(LOG,
+                "TaggerWorker: failed to read/bump the sweep generation marker; skipping sweep", e);
+            return;
+        }
+        final List<PostRow> candidates;
+        try {
+            candidates = enumerateSweepCandidates(generation, slots);
+        } catch (SQLException e) {
+            SafeLog.warn(LOG, "TaggerWorker: failed to enumerate sweep candidates; skipping sweep", e);
+            return;
+        }
+        for (PostRow row : candidates) {
+            try {
+                processOne(row);
+                // Bookkeeping is a separate statement from the cursor write
+                // (the cursor stays the single atomic UPDATE per Invariant
+                // 5). A crash between the two re-sweeps the post next tick —
+                // benign, and bounded by the attempt cap.
+                markSwept(row, generation);
+            } catch (RuntimeException e) {
+                SafeLog.warn(LOG, "TaggerWorker: sweep failed for post_id=" + row.id()
                     + "; will retry next tick", e);
             }
         }
@@ -628,6 +735,155 @@ public class TaggerWorker {
             }
         }
         return rows;
+    }
+
+    /**
+     * Enumerate the next batch of sweep candidates: posts whose first pass
+     * ended in the M1-726 no-tags outcome ({@code tags='{}' AND
+     * tagger_done=TRUE}), excluding bootstrap-fallback rows (their source
+     * tags are by design), posts already swept at {@code generation}, and
+     * posts that reached the per-post attempt cap
+     * ({@code infochat.llm.tagger.sweep.max-attempts}, counted across ALL
+     * generations). No {@code status} filter: eligibility is defined by the
+     * tagger outcome, not the pipeline stage — a quarantined post never
+     * passed the tagger in the first place ({@code tagger_done=FALSE}), so
+     * the first-pass exclusion carries over. The {@code fetched_at} floor
+     * keeps the partition pruning of {@link #enumeratePending(int)}.
+     */
+    List<PostRow> enumerateSweepCandidates(int generation, int limit) throws SQLException {
+        final String sql =
+            "SELECT p.id, p.fetched_at, p.title, p.body, "
+                + "       COALESCE(s.bootstrap_tags, '{}'::text[]) AS bootstrap_tags "
+                + "  FROM post p "
+                + "  JOIN source s ON s.id = p.source_id "
+                + " WHERE p.tagger_done = TRUE "
+                + "   AND p.tagger_fallback = FALSE "
+                + "   AND p.tags = '{}'::text[] "
+                + "   AND p.tagger_swept_generation < ? "
+                + "   AND p.tagger_sweep_attempts < ? "
+                + "   AND p.fetched_at >= ? "
+                + " ORDER BY p.fetched_at, p.id "
+                + " LIMIT ?";
+        List<PostRow> rows = new ArrayList<>();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, generation);
+            ps.setInt(2, sweepMaxAttempts);
+            ps.setTimestamp(3, Timestamp.from(partitionScan.scanWindowFloor(clock.instant())));
+            ps.setInt(4, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    UUID id = (UUID) rs.getObject(1);
+                    Instant fetchedAt = rs.getTimestamp(2).toInstant();
+                    String title = rs.getString(3);
+                    String body = rs.getString(4);
+                    String[] bootstrap = (String[]) rs.getArray(5).getArray();
+                    rows.add(new PostRow(id, fetchedAt, title, body, List.of(bootstrap)));
+                }
+            }
+        }
+        return rows;
+    }
+
+    /**
+     * Read the singleton generation marker, creating or bumping it as
+     * needed, and return the current generation. The first call records
+     * the baseline fingerprint as generation 0 — every existing row
+     * defaults {@code tagger_swept_generation=0}, so nothing becomes
+     * eligible until the FIRST real input change bumps the marker to 1
+     * (a deploy alone never triggers a backlog sweep). The row lock
+     * ({@code FOR UPDATE}) makes the read-compare-bump sequence atomic
+     * against a second collector instance racing the same tick.
+     */
+    private int currentSweepGeneration() throws SQLException {
+        String fingerprint = sweepFingerprint(tagVocabulary.names(), taggerModel);
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                int generation;
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT generation, input_fingerprint FROM tagger_sweep_state"
+                            + " WHERE id = 1 FOR UPDATE");
+                     ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) {
+                        try (PreparedStatement ins = conn.prepareStatement(
+                                "INSERT INTO tagger_sweep_state (generation, input_fingerprint)"
+                                    + " VALUES (0, ?)")) {
+                            ins.setString(1, fingerprint);
+                            ins.executeUpdate();
+                        }
+                        conn.commit();
+                        return 0;
+                    }
+                    generation = rs.getInt(1);
+                    if (!fingerprint.equals(rs.getString(2))) {
+                        try (PreparedStatement upd = conn.prepareStatement(
+                                "UPDATE tagger_sweep_state SET generation = generation + 1,"
+                                    + " input_fingerprint = ?, updated_at = now()"
+                                    + " WHERE id = 1 RETURNING generation")) {
+                            upd.setString(1, fingerprint);
+                            try (ResultSet urs = upd.executeQuery()) {
+                                urs.next();
+                                generation = urs.getInt(1);
+                            }
+                        }
+                        LOG.info("TaggerWorker: tagger inputs changed;"
+                            + " sweep generation bumped to {}", generation);
+                    }
+                }
+                conn.commit();
+                return generation;
+            } catch (SQLException | RuntimeException e) {
+                conn.rollback();
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * Record that {@code row} was swept at {@code generation}: pin the
+     * generation so the post is not re-tried until the next input change,
+     * and increment the cross-generation attempt counter the cap reads.
+     */
+    private void markSwept(PostRow row, int generation) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "UPDATE post SET tagger_swept_generation = ?,"
+                     + " tagger_sweep_attempts = tagger_sweep_attempts + 1 "
+                     + "WHERE id = ? AND fetched_at = ?")) {
+            ps.setInt(1, generation);
+            ps.setObject(2, row.id());
+            ps.setTimestamp(3, Timestamp.from(row.fetchedAt()));
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                "TaggerWorker: sweep bookkeeping UPDATE failed for post_id=" + row.id(), e);
+        }
+    }
+
+    /**
+     * SHA-256 hex over the tagger's cheaply-identifiable inputs: the
+     * configured model string, then the normalized vocabulary names SORTED
+     * (the vocabulary is an unordered {@link Set}, so the fingerprint must
+     * not depend on iteration order). NUL separators keep the
+     * (model, names) boundary unambiguous. Package-private so the sweep
+     * IT can assert the model leg changes the fingerprint.
+     */
+    static String sweepFingerprint(Set<String> vocabularyNames, @Nullable String model) {
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is a JRE-mandated algorithm; unreachable in practice.
+            throw new IllegalStateException("TaggerWorker: SHA-256 not available", e);
+        }
+        digest.update((model == null ? "" : model).getBytes(StandardCharsets.UTF_8));
+        digest.update((byte) 0);
+        for (String name : new TreeSet<>(vocabularyNames)) {
+            digest.update(name.getBytes(StandardCharsets.UTF_8));
+            digest.update((byte) 0);
+        }
+        return HexFormat.of().formatHex(digest.digest());
     }
 
     // Package-private (not private) so a foreign-TCCL test can invoke it

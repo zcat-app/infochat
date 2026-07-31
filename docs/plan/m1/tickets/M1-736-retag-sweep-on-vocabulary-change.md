@@ -1,7 +1,7 @@
 ---
 id: M1-736
 title: "Posts tagged '{}' are never re-evaluated when the vocabulary or model improves"
-status: pending
+status: done
 created: 2026-07-31
 last_updated: 2026-07-31
 blocked_by: [M1-726]
@@ -12,11 +12,13 @@ files_scope:
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/tagger/**
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/**
   - docs/design/05-llm-and-embeddings.md
+  - infochat-core/src/main/resources/db/migration/**
+  - infochat-collector/src/test/resources/application.properties
 complexity: medium
 risk: medium
 round_cap: 2
 security_relevant: false
-migration_touch: false
+migration_touch: true
 out_of_scope:
   - >-
     Re-tagging posts that HAVE tags. Vocabulary drift on tagged posts
@@ -85,12 +87,34 @@ spec_refs:
   - docs/spec/llm.md §Failure handling
 decision_refs:
   - D19
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-31
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 897
+      removed: 10
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-07-31
+  verdict: PASS
+  warnings:
+    - >-
+      budget-breach refine applied at start (ticket-body pre-authorized):
+      migration_touch flipped to true and the Flyway migration dir added to
+      files_scope — no existing storage fits the generation marker or the
+      per-post swept-generation/attempt-count bookkeeping.
+  blockers: []
 ---
 
 # M1-736: posts tagged '{}' are never re-evaluated when the vocabulary or model improves
