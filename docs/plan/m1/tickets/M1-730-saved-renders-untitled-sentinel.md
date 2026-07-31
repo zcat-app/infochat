@@ -1,9 +1,9 @@
 ---
 id: M1-730
 title: "/saved renders the ingest \"untitled\" sentinel to a reader"
-status: pending
+status: done
 created: 2026-07-30
-last_updated: 2026-07-30
+last_updated: 2026-07-31
 blocked_by: []
 files_budget: 8
 files_scope:
@@ -79,6 +79,39 @@ acceptance:
   - >-
     `SavedCommandHandlerTest`'s existing title-rendering assertions are
     updated in step, not deleted.
+  - >-
+    REDTEAM REMEDIATION (audit 2026-07-30, DOS/medium). `saved_post.body`
+    has no write-boundary cap, so promoting it to the headline would let
+    an unbounded column cross JDBC for all 20 rows of a page before any
+    Java-side bound applies. The SELECT must bound it at the SQL
+    boundary, expressed in terms of `DisplayHeadline.BODY_SCAN_LIMIT` so
+    the two bounds cannot drift. The rendered headline must be
+    byte-identical with and without the cap — Postgres `left()` counts
+    code points and Java counts UTF-16 units, so the SQL pre-bound always
+    hands the helper at least as many chars as its own cut consumes —
+    and a test pins that a body far past the limit still renders the same
+    headline.
+  - >-
+    REDTEAM REMEDIATION (audit 2026-07-30, INFO-LEAK/medium — fixed
+    in-ticket after the r2 disposition showed the audit's cost premise
+    wrong; see §Notes item 3). A post re-hidden to `QUARANTINED` after
+    being saved must not keep rendering through `/saved`: in group
+    scope the reply is broadcast to every member, and for a
+    titleless-by-design source the promoted body IS the post. Both
+    listing SELECTs (rows and count, so the header total stays honest)
+    carry a visibility predicate: a saved row appears iff NO `post`
+    row carries its uid — the aged-out case the D13/D33 snapshot
+    exists for — OR at least one `post` row with its uid has
+    `status = 'READY'`. That is the same visibility rule `/summary`,
+    search and `getPost` apply, so an admin approve or a BENIGN
+    requeue makes the bookmark reappear with nothing destroyed, and a
+    multi-window duplicate uid behaves identically across surfaces.
+    The predicate probes existence and status only — no `post` content
+    column crosses into the reply. Tests pin: a QUARANTINED post's
+    save is hidden (listing and count), a READY post's save renders, a
+    save whose post has aged out still renders its snapshot (the
+    pre-existing tests seed exactly this shape), and a re-hidden post
+    that returns to READY reappears.
   - mvn verify from the repo root is green.
 test_plan:
   adds:
@@ -91,19 +124,116 @@ test_plan:
       callers holding a title/body pair rather than an
       `EligiblePostQuery.Post`, but must not change the derivation.
     - >-
-      The `saved_post` snapshot contract (Invariant 6): `/saved` reads
-      the snapshot columns and never re-resolves against `post`.
+      The `saved_post` snapshot contract (`schema.md` §Per-user state,
+      D13/D33 — NOT Invariant 6, which is TTL by partitioning): `/saved`
+      renders only the snapshot content columns and never re-resolves
+      CONTENT against `post`. The r2 rework adds one narrow exception:
+      a visibility predicate on `post.status` (an existence + status
+      probe — no content column) decides whether the row is listed at
+      all. Refined here from the clause's original "never re-resolves"
+      framing, which was this ticket's own scope constraint, not a spec
+      invariant — see §Notes item 3.
     - all tests currently green on main
 spec_refs:
   - docs/spec/commands.md §Command catalogue
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-31
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 12
+      added: 1120
+      removed: 50
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-07-30
+    verdict: FINDINGS
+    base: 4e5de9f2ff2abe2d9a23fa3cc277ac8b1d0aeae6
+    head: working-tree (uncommitted branch m1/M1-730-saved-renders-untitled-sentinel)
+    verdict_file: docs/plan/m1/redteam/M1-730-2026-07-30.md
+    findings_count: 2
+    out_of_model_count: 3
+    note: |
+      Round 1. Gate audit at /m1-tick run step 4, ahead of review. Both findings are
+      widenings this diff introduces by promoting saved_post.body into the
+      /saved render path — the sanitize unit grows 10x on a command the spec
+      files under the cheap rate-limit bucket, and the frozen-snapshot read
+      path carries no post.status predicate so a re-quarantined post's body
+      keeps reaching readers. Three out-of-model items: a BODY_SCAN_LIMIT
+      pre-cut that lacks the Stage-1-placeholder guard `truncate` has
+      (pre-existing M1-729 code, fourth caller); a privileged command split
+      across the headline and tag fields of one line (an accepted §"Flag
+      position" residual, equally reachable pre-diff via the title); and the
+      larger quantity of DM-world content one group `/saved` now reveals.
+  - date: 2026-07-30
+    verdict: FINDINGS
+    base: 4e5de9f2ff2abe2d9a23fa3cc277ac8b1d0aeae6
+    head: working-tree-r2 (post-remediation, branch m1/M1-730-saved-renders-untitled-sentinel)
+    verdict_file: docs/plan/m1/redteam/M1-730-2026-07-30-r2.md
+    findings_count: 2
+    out_of_model_count: 4
+    note: |
+      Round 2, the mandatory re-audit of the remediated diff. The adversary
+      verified round 1's JDBC/materialisation leg CLOSED against all four
+      failure modes it was asked to attack — the SQL bound cannot change a
+      headline (Postgres left() counts code points, Java counts UTF-16 units,
+      so the Java cut is always the binding one), left() never splits a code
+      point, the interpolated BODY_SCAN_LIMIT is a compile-time int with no
+      inbound-derived input, and text_left is TOAST-slice aware so the backend
+      partially detoasts. The two residuals are re-reported: the audit-INSERT
+      leg (fix class rate-limit — the sanitize UNIT is M1-729's shipped
+      contract, but the REACHABILITY from a user-pulled command in the cheap
+      bucket is this diff's) and the quarantine interlock. The audit held
+      both to be follow-up tickets, the interlock on a cost premise (no
+      uid-only index on the partitioned post table → unbounded
+      cross-partition lookups) that did not survive measurement — see §Notes
+      item 3. The user's disposition (2026-07-31): the interlock is fixed IN
+      this ticket (new acceptance item), the audit-INSERT leg is filed as
+      M1-737, and a side-discovery from the disposition review (re-hidden
+      posts never enter the admin review queue) is filed as M1-738. One
+      new out-of-model item over round 1: security.md §"Flag position mirrors
+      the parser's own scan" now under-describes the /saved sanitize unit —
+      spec-text drift only, the one-field-per-call invariant still holds.
+  - date: 2026-07-31
+    verdict: CLEAN
+    base: 4e5de9f2ff2abe2d9a23fa3cc277ac8b1d0aeae6
+    head: working-tree-r3 (post-r2-rework, branch m1/M1-730-saved-renders-untitled-sentinel)
+    verdict_file: docs/plan/m1/redteam/M1-730-2026-07-31.md
+    out_of_model_count: 3
+    note: |
+      Round 3, the mandatory re-audit of the r2-rework diff (the visibility
+      interlock). CLEAN — the interlock held against every failure mode the
+      brief named: count/rows split, tag/window filter and pagination paths,
+      precedence, NULL handling, second code paths, post content crossing,
+      and multi-window "any READY window" divergence vs /summary,
+      searchPosts, semanticSearch and getPost (all status='READY'-gated).
+      Round 2's DOS residual stayed dispositioned as M1-737 (not re-reported;
+      the interlock cannot aggravate it — hidden rows reduce sanitize work).
+      Three out-of-model items: aged-out-QUARANTINED revival via the NOT
+      EXISTS TTL branch (spec silent on whether a hostile verdict outlives
+      retention); ListSavesTool's pre-existing title-only bypass (the
+      chat-tool surface this ticket's out_of_scope excludes); the carried
+      --page int overflow from round 2 (pre-existing).
+clarity_check:
+  date: 2026-07-30
+  verdict: PASS
+  warnings:
+    - >-
+      Self-check: acceptance item 5 was unsatisfiable within the
+      original four-path files_scope — resolved by the
+      start-gate refine at 4e5de9f2 (no-headline bundle template;
+      files_scope 4 → 7, files_budget unchanged at 8).
+  blockers: []
 escalation_reason:
 ---
 
@@ -202,3 +332,81 @@ a provider-scoped ticket.
 
 - M1-729's commit message (`3737adb4`) records the full route analysis
   and the consumer split this census refines.
+
+- **What the 2026-07-30 redteam audit found, and what this ticket can
+  and cannot answer.** Both findings survived falsification; the audit
+  files are `docs/plan/m1/redteam/M1-730-2026-07-30.md` and `-r2.md`.
+  Of the three legs, two are fixed inside this ticket (items 1 and 3);
+  the third is filed as a follow-up. All are recorded here rather than
+  silently absorbed:
+
+  1. *Fixed here (new acceptance item above).* The unbounded body column
+     crossing JDBC. `DisplayHeadline` applies `BODY_SCAN_LIMIT` only
+     after the whole column is materialised, so the SQL read is where
+     the bound belongs for a 20-row page.
+
+  2. *Not fixable here — shared-derivation property.* The sanitizer's
+     per-occurrence `audit_log` INSERT count scales with the 2000-char
+     `BODY_SCAN_LIMIT` sanitize unit rather than the write-capped
+     200-char title. That unit is M1-729's, and is already live on the
+     three digest surfaces; narrowing it for `/saved` alone would make
+     one caller audit fewer spans than the others for the same post, and
+     narrowing it for all four changes M1-729's shipped contract. What
+     M1-730 genuinely adds is that the cost is now reachable from a
+     user-pulled command that `security.md` §Rate limiting files under
+     "one bucket; high cap; cheap". Deciding whether that bucket still
+     fits is a spec question, not a render-path edit. Filed as M1-737:
+     aggregate the audit emission per distinct token per call — the
+     `match_count` field `emitAuditRows` already writes as the literal
+     `1` is the vehicle, and the spec's "per-occurrence" wording plus
+     the §"Flag position" enumeration drift ride that ticket's diff.
+
+  3. *Fixed here after all (r2 rework; user disposition 2026-07-31).*
+     `saved_post` carries no `post.status`, so a post re-hidden to
+     `QUARANTINED` after being saved kept rendering. For a
+     titleless-by-design source the escape is diff-INTRODUCED, not
+     merely widened: pre-diff that line printed the `untitled` sentinel
+     and disclosed no post content at all; post-diff it prints up to
+     200 chars of the body, which for a social source IS the post.
+     `schema.md` §Per-user state justifies the snapshot by **retention
+     TTL** only ("so retention TTL on the underlying post does not break
+     the bookmark", D13/D33) and does not extend the carve-out to a
+     moderation decision, so this was a real gap rather than a
+     documented exemption.
+
+     Both audit rounds held it unfixable in-ticket on cost: "`post` is
+     `PARTITION BY RANGE (fetched_at)` with `UNIQUE (uid, fetched_at)`
+     and no uid-only index, so a status interlock joining by `uid`
+     needs an unbounded cross-partition lookup — 20 of them per
+     `/saved` page." That premise does not survive measurement: the
+     partitions are MONTHLY (V7__joins_post.sql:175) and post retention
+     is ~30 days, so at most ~2 partitions are live at once, each
+     carrying the local index its UNIQUE constraint implies — the
+     EXISTS probes are bounded index seeks, not an unbounded scan, and
+     no migration is needed. The fix is a visibility predicate in the
+     two existing SELECTs: a row renders iff no `post` row carries its
+     uid (the aged-out TTL case the snapshot exists for) or some row
+     does with `status = 'READY'` — the same rule `/summary`, search
+     and `getPost` apply, so moderation reversals (admin approve,
+     BENIGN requeue) restore the bookmark for free and multi-window
+     duplicate uids behave identically across surfaces. The
+     `test_plan.preserves` clause was refined to match: the
+     never-re-resolve rule was this ticket's own framing, never a spec
+     invariant, and it now reads "content never re-resolves; visibility
+     consults `post.status`".
+
+     Tracing the re-hide path for this fix surfaced a pre-existing gap
+     worse than the finding itself: a post released READY during a
+     Stage 2 outage and later re-hidden has NO quarantine row, so it
+     never enters `quarantine_review_view` / the admin review queue.
+     Filed as M1-738.
+
+- **Spec-text drift the audit surfaced (out-of-model, not a control
+  gap).** `security.md` §"Flag position mirrors the parser's own scan"
+  enumerates the per-caller sanitize units and names "the `/saved` reply
+  one row's title and one row's tags". After this ticket the unit is one
+  row's title OR up to `BODY_SCAN_LIMIT` chars of its body, plus one
+  row's tags. The load-bearing invariant is unaffected — `DisplayHeadline`
+  selects title XOR body, so it is still one author's field per sanitize
+  call — only the enumeration is stale. A spec file is outside
+  `files_scope`; recorded here for a follow-up.

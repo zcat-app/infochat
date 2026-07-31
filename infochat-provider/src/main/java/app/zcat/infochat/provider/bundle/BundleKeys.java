@@ -1088,8 +1088,23 @@ public final class BundleKeys {
     /** {@code /saved} reply header — MUST disclose per-user-global semantics. {@code {0}} = displayed-count, {@code {1}} = total-count, {@code {2}} = current page, {@code {3}} = total pages, {@code {4}} = optional filter clause. */
     public static final String REPLY_SAVED_HEADER_GLOBAL = "reply.saved.header.global";
 
-    /** {@code /saved} per-row template. {@code {0}} = post UID, {@code {1}} = title, {@code {2}} = saved_at relative, {@code {3}} = tag list (comma-joined). */
+    /** {@code /saved} per-row template. {@code {0}} = post UID, {@code {1}} = headline, {@code {2}} = saved_at relative, {@code {3}} = tag list (comma-joined). */
     public static final String REPLY_SAVED_LINE = "reply.saved.line";
+
+    /**
+     * {@code /saved} per-row template for a save whose snapshot carries neither
+     * title nor body, so {@code DisplayHeadline} yields no headline at all.
+     * Its contract is that the caller drops the headline token TOGETHER with
+     * the separator that would have followed it, which the fixed
+     * {@link #REPLY_SAVED_LINE} shape cannot express — an empty {@code {1}}
+     * there leaves a doubled separator where the headline was. Hence a second
+     * template rather than a hardcoded stand-in: the line's language is the
+     * scope's (D43), so the token-less form has to be bundle-resolved too.
+     * {@code {0}} = post UID, {@code {1}} = saved_at relative, {@code {2}} =
+     * tag list (comma-joined) — note the placeholders shift down by one.
+     * (M1-730.)
+     */
+    public static final String REPLY_SAVED_LINE_NO_HEADLINE = "reply.saved.line.no-headline";
 
     /** {@code /saved} empty-library reply. */
     public static final String REPLY_SAVED_EMPTY = "reply.saved.empty";

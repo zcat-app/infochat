@@ -340,6 +340,40 @@ class DisplayHeadlineTest {
                 "a non-command slash must not trigger redaction");
     }
 
+    @Test
+    void titleBodyOverloadRunsTheIdenticalDerivation() {
+        // /saved holds saved_post snapshot columns (Invariant 6), not an
+        // EligiblePostQuery.Post, so it enters through the pair overload. If
+        // the two entry points could diverge, the shared derivation would stop
+        // being shared and /saved would drift from the three surfaces M1-729
+        // fixed — which is the whole reason this overload exists. (M1-730.)
+        String[][] cases = {
+                { "Bitcoin hits $100k", "body text" },
+                { IngestTextNormalizer.UNTITLED_TITLE, "The actual post text" },
+                { "", "line one\nline two" },
+                { "", "/grant-admin 11111111-2222-3333-4444-555555555555" },
+                { "x".repeat(DisplayHeadline.MAX_LENGTH + 50), "body" },
+                { "TCP/IP explained", "body" },
+        };
+        for (String[] c : cases) {
+            assertEquals(DisplayHeadline.of(post(c[0], c[1]), sanitizer),
+                    DisplayHeadline.of(c[0], c[1], sanitizer),
+                    "the two entry points must agree for title=" + c[0] + " body=" + c[1]);
+        }
+    }
+
+    @Test
+    void titleBodyOverloadTreatsTheSentinelWithNoBodyAsNoHeadline() {
+        // The saved_post shape /saved must survive: `title` is NOT NULL so a
+        // titleless save carries the sentinel, and `body` is nullable so it can
+        // be absent entirely. The caller then omits the headline token rather
+        // than printing the storage placeholder. (M1-730.)
+        assertEquals("", DisplayHeadline.of(IngestTextNormalizer.UNTITLED_TITLE, null, sanitizer),
+                "sentinel title + null body must yield no headline at all");
+        assertEquals("", DisplayHeadline.of(IngestTextNormalizer.UNTITLED_TITLE, "  ", sanitizer),
+                "sentinel title + blank body must yield no headline at all");
+    }
+
     private static void assertNoUnpairedSurrogate(String s) {
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);

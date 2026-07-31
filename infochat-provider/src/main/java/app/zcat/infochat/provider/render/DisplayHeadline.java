@@ -3,12 +3,14 @@ package app.zcat.infochat.provider.render;
 import app.zcat.infochat.core.ingest.IngestTextNormalizer;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
+import org.jspecify.annotations.Nullable;
 
 /**
- * Derives the bounded one-line headline that labels a post in the three
+ * Derives the bounded one-line headline that labels a post in the four
  * user-visible render surfaces ({@code ClusterBlockRenderer}, {@code
- * SummaryProseGenerator.degradedProseFor}, {@code DegradedDigestRenderer}).
- * Sharing one derivation is what keeps those three from drifting.
+ * SummaryProseGenerator.degradedProseFor}, {@code DegradedDigestRenderer},
+ * {@code SavedCommandHandler}). Sharing one derivation is what keeps those
+ * four from drifting.
  *
  * <p><b>Not for prompt input.</b> The summarizer prompt
  * ({@code SummaryProseGenerator.buildPrompt}) and the rollup prompt
@@ -73,8 +75,15 @@ public final class DisplayHeadline {
      * flagged span remotely near the visible region is still matched and still
      * audited, so the sanitize-then-truncate rule keeps governing what the
      * reader sees.
+     *
+     * <p>Public because a caller may need to bound the body BEFORE it reaches
+     * Java at all. This guard runs after the column is materialised, which is
+     * fine for one post but not for a paginated read: {@code /saved} lists 20
+     * rows per page, so it repeats the bound in its {@code SELECT} and has to
+     * name the same number here to keep the two from drifting. (M1-730,
+     * redteam 2026-07-30 medium/DOS.)
      */
-    static final int BODY_SCAN_LIMIT = MAX_LENGTH * 10;
+    public static final int BODY_SCAN_LIMIT = MAX_LENGTH * 10;
 
     private DisplayHeadline() {
     }
@@ -91,7 +100,32 @@ public final class DisplayHeadline {
      *         an untranslated token to a line the scope's language governs.
      */
     public static String of(Post post, LlmOutputSanitizer llmOutputSanitizer) {
-        String source = headlineSource(post);
+        // post.body() is nullable in the DDL (`body TEXT`) even though the
+        // record's type is not marked, which is why it may cross into the
+        // @Nullable parameter below. 728 of the 729 empty-title Bluesky posts
+        // resolve through that body branch.
+        return of(post.title(), post.body(), llmOutputSanitizer);
+    }
+
+    /**
+     * The same headline for a caller holding a title/body pair rather than an
+     * {@link Post} — {@code /saved} renders its own {@code saved_post}
+     * snapshot content columns and never re-resolves CONTENT against
+     * {@code post} (only the row's visibility consults {@code post.status},
+     * inside the handler's SELECT), so it has no {@link Post} to hand over.
+     * Both entry points run the identical derivation, which is the whole
+     * point of sharing this class: {@code /saved} cannot drift from the
+     * three surfaces M1-729 fixed. (M1-730.)
+     *
+     * @param body the snapshot body, nullable — {@code saved_post.body} and
+     *             {@code post.body} are both nullable in the DDL
+     * @return as {@link #of(Post, LlmOutputSanitizer)}: the empty string when
+     *         neither field carries renderable text, and the caller must then
+     *         omit the headline token together with its separator
+     */
+    public static String of(String title, @Nullable String body,
+                            LlmOutputSanitizer llmOutputSanitizer) {
+        String source = headlineSource(title, body);
         if (source.isEmpty()) {
             return "";
         }
@@ -113,14 +147,10 @@ public final class DisplayHeadline {
      * storage placeholder, and a real title that merely mentions the word must
      * still render as itself. (M1-729.)
      */
-    private static String headlineSource(Post post) {
-        String title = post.title();
+    private static String headlineSource(String title, @Nullable String body) {
         if (!title.isBlank() && !IngestTextNormalizer.UNTITLED_TITLE.equals(title)) {
             return title;
         }
-        // Nullable in the DDL (`body TEXT`) even though the record's type is
-        // not marked — 728 of the 729 empty-title Bluesky posts resolve here.
-        String body = post.body();
         if (body == null || body.isBlank()) {
             return "";
         }

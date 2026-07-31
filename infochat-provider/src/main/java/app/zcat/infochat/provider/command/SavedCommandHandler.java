@@ -8,6 +8,7 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.render.DisplayHeadline;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.Nullable;
@@ -74,12 +75,54 @@ public class SavedCommandHandler implements CommandHandler {
     private static final String SELECT_ACTOR_SQL =
             "SELECT id FROM users WHERE adapter = ? AND contact_id = ?";
 
-    private static final String SELECT_COUNT_BASE_SQL =
-            "SELECT COUNT(*) FROM saved_post WHERE user_id = ?";
+    // Visibility interlock (M1-730; redteam 2026-07-30, medium/INFO-LEAK):
+    // saved_post is a frozen snapshot with no status column, so without this
+    // predicate a post re-hidden to QUARANTINED after being saved keeps
+    // rendering — and in group scope the reply is broadcast to every member.
+    // A row is listed iff NO post row carries its uid (the post aged out of
+    // retention — the D13/D33 TTL-bookmark case the snapshot exists for) OR
+    // at least one does with status = 'READY'. That is the same rule
+    // /summary, search and getPost apply, so an admin approve or a BENIGN
+    // requeue makes the bookmark reappear with nothing destroyed, and a
+    // multi-window duplicate uid behaves identically across surfaces.
+    //
+    // The probe reads EXISTENCE and STATUS only — no post content column
+    // crosses into the reply, so the snapshot contract (content never
+    // re-resolves against post) is untouched. Cost is bounded: post is
+    // partitioned monthly by fetched_at with ~2 partitions live under the
+    // 30-day retention, each carrying the local index its
+    // UNIQUE(uid, fetched_at) constraint implies, so each probe is an index
+    // seek over at most two partitions.
+    private static final String VISIBILITY_INTERLOCK_SQL =
+            " AND (NOT EXISTS (SELECT 1 FROM post p WHERE p.uid = saved_post.post_uid)"
+                    + " OR EXISTS (SELECT 1 FROM post p WHERE p.uid = saved_post.post_uid"
+                    + " AND p.status = 'READY'))";
 
+    private static final String SELECT_COUNT_BASE_SQL =
+            "SELECT COUNT(*) FROM saved_post WHERE user_id = ?" + VISIBILITY_INTERLOCK_SQL;
+
+    // `body` is selected for the headline fallback only (M1-730): a save taken
+    // from a titleless-by-design source snapshots the ingest
+    // IngestTextNormalizer.UNTITLED_TITLE sentinel into `title`, so without the
+    // body column the line has nothing to show but that storage placeholder.
+    // Still a pure snapshot read of CONTENT — nothing the line renders
+    // re-resolves against `post`; only the row's VISIBILITY consults it (the
+    // interlock above).
+    //
+    // It is read through left() rather than bare because `saved_post.body` has
+    // no write-boundary cap anywhere (unlike `title`, capped at ingest by
+    // IngestTextNormalizer.TITLE_MAX_LENGTH): DisplayHeadline's own
+    // BODY_SCAN_LIMIT guard runs only after the whole column has crossed JDBC,
+    // which for a 20-row page means 20 unbounded columns materialised to reach
+    // 20 bounded headlines. Bounding in SQL cannot change a headline: left()
+    // counts code points while Java counts UTF-16 units, so the truncated
+    // value always carries at least BODY_SCAN_LIMIT Java chars whenever the
+    // full body would have, and the helper's own cut consumes no more than
+    // that. (Redteam 2026-07-30, medium/DOS.)
     private static final String SELECT_ROWS_BASE_SQL =
-            "SELECT post_uid, title, url, snapshot_tags, personal_tags, saved_at "
-                    + "FROM saved_post WHERE user_id = ?";
+            "SELECT post_uid, title, left(body, " + DisplayHeadline.BODY_SCAN_LIMIT + ") AS body, "
+                    + "url, snapshot_tags, personal_tags, saved_at "
+                    + "FROM saved_post WHERE user_id = ?" + VISIBILITY_INTERLOCK_SQL;
 
     @Inject
     BundleLoader bundleLoader;
@@ -91,16 +134,18 @@ public class SavedCommandHandler implements CommandHandler {
     InboundContext inboundContext;
 
     // M1-675: the /saved reply echoes attacker-influenceable stored values
-    // (the post title and the personal/snapshot tags) and, in an approved
+    // (the post title, its body since M1-730 promoted the body to the
+    // headline, and the personal/snapshot tags) and, in an approved
     // group, is broadcast to every member. A stored value shaped like a
     // privileged command would put a syntactically valid admin line in
     // front of every reader, including any bot admin who copy-pastes it —
     // the deterministic-reply reflection class of M1-656 / M1-659. The
     // write-side slash reject in SaveCommandHandler stops NEW slash tags,
-    // but the title is upstream-controlled (PostPersister stores it with
-    // no slash gate) and pre-existing rows predate the reject, so the
-    // group-visible echo is redacted here at render via the same
-    // closed-list sanitizer the LLM-output surfaces use.
+    // but the title and body are upstream-controlled (PostPersister stores
+    // them with no slash gate) and pre-existing rows predate the reject, so
+    // the group-visible echo is redacted here at render via the same
+    // closed-list sanitizer the LLM-output surfaces use — for the headline
+    // inside DisplayHeadline, for the tags at the interpolation below.
     @Inject
     LlmOutputSanitizer llmOutputSanitizer;
 
@@ -236,6 +281,7 @@ public class SavedCommandHandler implements CommandHandler {
         return new Row(
                 rs.getString("post_uid"),
                 rs.getString("title"),
+                rs.getString("body"),
                 rs.getString("url"),
                 snapshotArr == null ? List.of() : Arrays.asList((String[]) snapshotArr.getArray()),
                 personalArr == null ? List.of() : Arrays.asList((String[]) personalArr.getArray()),
@@ -261,20 +307,40 @@ public class SavedCommandHandler implements CommandHandler {
                 filterClause);
 
         String lineTemplate = bundleLoader.get(BundleKeys.REPLY_SAVED_LINE, inboundContext.effectiveLanguage());
+        String noHeadlineTemplate = bundleLoader.get(
+                BundleKeys.REPLY_SAVED_LINE_NO_HEADLINE, inboundContext.effectiveLanguage());
         StringBuilder body = new StringBuilder(header);
         for (Row row : rows) {
             String tagJoined = joinTags(row.personalTags, row.snapshotTags);
-            // Redact the two attacker-influenceable placeholders ({1} title,
-            // {3} tags) before interpolation. sanitize() is a no-op on a
-            // value with no closed-list token (byte-identical passthrough of
-            // a legit-slash title like TCP/IP), and opens no DB connection
-            // unless it actually redacts. The bot-authored {0} uid and {2}
-            // relative age are not sanitized.
-            String line = MessageFormat.format(lineTemplate,
-                    row.postUid,
-                    llmOutputSanitizer.sanitize(row.title == null ? "" : row.title),
-                    relativeAge(row.savedAt),
-                    llmOutputSanitizer.sanitize(tagJoined));
+            // Both attacker-influenceable placeholders stay redacted, each by
+            // its own call over its own field. The headline's sanitize now
+            // lives inside DisplayHeadline (M1-730) — which selects title OR
+            // body and sanitizes that ONE field, never the concatenation
+            // (M1-697: a flag-bearing closed-list entry deletes the span from
+            // command word to flag token, so a widened input would let a
+            // command word in the title and a flag in the body erase
+            // everything between them). The tags are a SECOND author field and
+            // keep their own separate call here. sanitize() is a no-op on a
+            // value with no closed-list token (byte-identical passthrough of a
+            // legit-slash title like TCP/IP), and opens no DB connection
+            // unless it actually redacts. The bot-authored uid and relative
+            // age are not sanitized.
+            String headline = DisplayHeadline.of(row.title, row.body, llmOutputSanitizer);
+            // An empty headline means the snapshot carries no renderable text
+            // at all; DisplayHeadline's contract is that the caller drops the
+            // token together with its separator, which needs the second
+            // template — interpolating "" into lineTemplate would leave a
+            // doubled separator where the headline was.
+            String line = headline.isEmpty()
+                    ? MessageFormat.format(noHeadlineTemplate,
+                            row.postUid,
+                            relativeAge(row.savedAt),
+                            llmOutputSanitizer.sanitize(tagJoined))
+                    : MessageFormat.format(lineTemplate,
+                            row.postUid,
+                            headline,
+                            relativeAge(row.savedAt),
+                            llmOutputSanitizer.sanitize(tagJoined));
             body.append('\n').append(line);
         }
         return body.toString();
@@ -384,6 +450,9 @@ public class SavedCommandHandler implements CommandHandler {
     private record Row(
             String postUid,
             String title,
+            // `saved_post.body` is nullable in the DDL (V15) — a save taken
+            // from a body-less source snapshots NULL here.
+            @Nullable String body,
             String url,
             List<String> snapshotTags,
             List<String> personalTags,
