@@ -8,6 +8,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -32,6 +33,7 @@ import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.digest.DigestPostCollector.CollectionResult;
+import app.zcat.infochat.provider.digest.DigestRenderer.DigestMode;
 import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
 import app.zcat.infochat.provider.messaging.AdapterRegistry;
 import app.zcat.infochat.provider.messaging.OutboundDelivery;
@@ -189,8 +191,9 @@ public class DigestWorker {
 
         // The non-degraded, non-zero-posts path renders to a per-category
         // section list (the exact delivery bytes — M1-652 fork closed, arm
-        // (b)); the cache stores the "\n\n" join of that list (the same join
-        // DigestRenderer.render() performs). The single-message paths
+        // (b)); the cache stores the "\n\n" join of that list (the join the
+        // pre-M1-732 DigestRenderer.render() performed, before its deletion).
+        // The single-message paths
         // (zero-posts fixed reply, degraded headlines-only) keep a plain
         // String — they have no per-category structure and deliver via
         // deliverToGroup, not DigestDelivery. `content` is always definitely
@@ -210,15 +213,16 @@ public class DigestWorker {
                 isDegraded = true;
             } else {
                 CompletableFuture<List<RenderedSection>> renderFuture = CompletableFuture.supplyAsync(
-                        () -> digestRenderer.renderSections(collection.posts(), meta.language()),
+                        () -> digestRenderer.renderSections(
+                                collection.posts(), meta.language(), meta.digestMode()),
                         renderExecutor);
                 try {
                     renderedSections = renderFuture.get(remaining.toMillis(), TimeUnit.MILLISECONDS);
-                    // NEVER call render() after renderSections() — that re-runs
-                    // the whole LLM pass and lets the cached prose silently
-                    // diverge from the delivered bytes (the hand-wired stubs
-                    // cannot catch it). The cache stores the join of the
-                    // section list already in hand.
+                    // NEVER re-render after renderSections() — a second render
+                    // pass re-runs the whole LLM pipeline and lets the cached
+                    // prose silently diverge from the delivered bytes (the
+                    // hand-wired stubs cannot catch it). The cache stores the
+                    // join of the section list already in hand.
                     content = String.join("\n\n", renderedSections.stream()
                             .map(RenderedSection::text).toList());
                 } catch (TimeoutException | ExecutionException | InterruptedException e) {
@@ -263,15 +267,18 @@ public class DigestWorker {
             // mistake would pass every happy-path test but lose the window.
             //
             // SECURITY INVARIANT: these bytes are POST-SANITIZE. The
-            // sanitizer runs inside DigestRenderer.renderSections() (:131)
-            // before the sections are returned, so the persisted
-            // digest_section.content is already clean. The replay path
+            // sanitizer runs inside DigestRenderer.renderSections() (the
+            // prose loop in full mode; DisplayHeadline.of on the normal-mode
+            // headline path, M1-732) before the sections are returned, so
+            // the persisted digest_section.content is already clean. The
+            // replay path
             // (DigestRetryService.replayMissing) delivers these bytes
             // verbatim WITHOUT re-sanitizing — that is correct by design,
             // not an oversight. If a future change persists pre-sanitize
             // bytes, replay would deliver unsanitized content; the test
             // DigestRendererTest.renderSections_stripsAdminCommandTokens_
-            // beforePersistenceAndReplay pins this boundary.
+            // beforePersistenceAndReplay pins this boundary (at mode full,
+            // the only mode that still renders per-cluster prose).
             // A persist failure logs and continues — the digest still
             // delivers; a later retry falls back to the full re-run path
             // (no sections found → fallback), so the system degrades
@@ -351,7 +358,8 @@ public class DigestWorker {
 
     record GroupMetadata(String adapterName,
                          String upstreamGroupId,
-                         String language) {}
+                         String language,
+                         DigestMode digestMode) {}
 
     GroupMetadata readGroupMetadata(UUID groupId) throws SQLException {
         try (Connection conn = dataSource.getConnection();
@@ -364,9 +372,32 @@ public class DigestWorker {
                 return new GroupMetadata(
                         rs.getString("adapter"),
                         rs.getString("upstream_group_id"),
-                        rs.getString("language"));
+                        rs.getString("language"),
+                        digestModeOrNormal(rs.getString("digest_mode"), groupId));
             }
         }
+    }
+
+    /**
+     * The {@code digest_mode} SQL-deserialization boundary (M1-732). The
+     * V67 CHECK constraint pins the closed set in the real schema, but a
+     * stubbed or out-of-band write can still yield NULL or garbage, so the
+     * parse defends anyway: anything unreadable resolves to
+     * {@link DigestMode#NORMAL} — the value every pre-V67 group renders
+     * with — logged once at WARN per fallback event. The render path never
+     * sees an unvalidated storage string.
+     */
+    private static DigestMode digestModeOrNormal(@Nullable String raw, UUID groupId) {
+        if (raw != null) {
+            try {
+                return DigestMode.valueOf(raw.trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException unrecognized) {
+                // fall through to the WARN + default below
+            }
+        }
+        LOG.warn("Group {} has NULL or unrecognized digest_mode '{}' — falling back to normal",
+                groupId, raw);
+        return DigestMode.NORMAL;
     }
 
     private @Nullable MessagingAdapter findAdapter(String adapterName) {
@@ -379,7 +410,7 @@ public class DigestWorker {
     }
 
     private static final String GROUP_META_SQL = """
-            SELECT g.adapter, g.upstream_group_id,
+            SELECT g.adapter, g.upstream_group_id, g.digest_mode,
                    COALESCE(sp.language, 'en') AS language
               FROM groups g
               LEFT JOIN scope_preferences sp

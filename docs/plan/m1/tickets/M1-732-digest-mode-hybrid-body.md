@@ -1,7 +1,7 @@
 ---
 id: M1-732
 title: "groups.digest_mode and the hybrid category body: count + roll-up + headlines"
-status: pending
+status: done
 created: 2026-07-30
 last_updated: 2026-07-31
 blocked_by:
@@ -41,7 +41,7 @@ acceptance:
   - "Per-mode LLM call counts against one 8-category/40-cluster fixture: brief and normal issue exactly one CategoryRollupGenerator call per surviving section and ZERO SummaryProseGenerator calls; full issues one prose call per rendered cluster"
   - "DigestWorker.readGroupMetadata is a SQL-deserialization boundary: a digest_mode that is NULL or unrecognized resolves to normal, logged once at WARN — a test pins the fallback"
   - "StubGroupDataSource gains a digest_mode column, keeping its existing 3-arg constructor defaulting to normal so DigestWorkerClockTest needs no edit"
-  - "DigestRenderer.render(List,String) is DELETED (no production caller — verified 2026-07-31: DigestWorker:213 uses renderSections; the only callers are tests); the 7 test call sites (DigestRendererTest x6, DigestRendererSectionsTest x1) are retargeted to the mode-aware renderSections"
+  - "DigestRenderer.render(List,String) is DELETED (no production caller — verified 2026-07-31: DigestWorker:213 uses renderSections; the only callers are tests); the 8 test call sites (DigestRendererTest x7, DigestRendererSectionsTest x1) are retargeted to the mode-aware renderSections"
   - "reply.digest.category.more and reply.digest.category.more_other are DELETED from en.properties AND cs.properties (D43 bilateral keyset — BundleLoaderTest) together with their BundleKeys constants REPLY_DIGEST_CATEGORY_MORE / _MORE_OTHER; their sole producer (DigestRenderer.java:153-165) goes with the lifted full cap"
   - "DigestRendererTest.renderSections_stripsAdminCommandTokensBeforePersistenceAndReplay runs at mode full, so the sanitize-before-persist pin stays non-vacuous under the mode that still renders per-cluster prose"
   - "The ONE new config key infochat.digest.category-headline-count (default 5) is documented in docs/design/03-commands.md in the SAME diff as the @ConfigProperty (DocumentedConfigKeyParityTest, M1-708)"
@@ -56,12 +56,40 @@ test_plan:
 spec_refs: []
 decision_refs: []
 decomposed_from: M1-722
-reviews: {}
+outline_file: target/m1-tick-outline-M1-732.md
+reviews:
+  - round: 1
+    date: 2026-07-31
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 15
+      added: 735
+      removed: 192
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-07-31
+    verdict: CLEAN
+    base: 98b2be6c8d6563a819ae2e0dcd48c02d06d0a11d
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-732-2026-07-31.md
+    out_of_model_count: 0
+    note: |
+      Standing /m1-tick run gate (security_relevant: true — the render path
+      carries the M1-697 sanitize control). Round 1 CLEAN; no remediation.
+clarity_check:
+  date: 2026-07-31
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 
@@ -133,10 +161,10 @@ grep -rn "renderSections(\|renderer.render(" --include=*.java infochat-provider/
 |---|---|---|
 | `DigestRenderer.renderSections(List,String)` → 3-arg | `RecordingDigestRenderer.java:46-47` (`@Override`) | **fix** — take the mode param |
 | ″ | `DigestWorker.java:213` | **fix** — pass the group's mode |
-| ″ | `DigestRenderer.java:73` (`render`) | **fix** — thin join; the mode it delegates with must be STATED (see below) |
+| ″ | `DigestRenderer.java:66-71` (`render`) | **delete** — decided 2026-07-31 (see the blocker below) |
 | ″ | `DigestRendererTest.java:206,285` | **fix** — call sites, mode arg added |
-| ″ | `DigestRendererSectionsTest.java:75,95,127,160,176,197,211` | **fix** — call sites, mode arg added |
-| `DigestRenderer.render(List,String)` | `DigestRendererTest.java:60,89,112,135,151,175,176` | **DECIDE** — see the blocker below |
+| ″ | `DigestRendererSectionsTest.java:74,94,126,143,164,176` | **fix** — call sites, mode arg added (:197 is `renderSummarySections`, the /summary path — NO mode param) |
+| `DigestRenderer.render(List,String)` | `DigestRendererTest.java:60,89,112,135,151,175,176` (x7) | **DELETE** — decided 2026-07-31, see the blocker below |
 
 **The signature is REPLACED, never overloaded.** An overload leaves every
 `@Override` silently bound to a method nothing calls, and the resulting
@@ -145,7 +173,7 @@ not as compile errors.
 
 ## The blocker that failed M1-722's third plan pass
 
-`DigestRendererTest` has **six** `renderer.render(posts, "en")` call sites,
+`DigestRendererTest` has **seven** `renderer.render(posts, "en")` call sites,
 none of which M1-722 enumerated, and their assertions are exactly what the
 mode change inverts:
 
@@ -162,12 +190,12 @@ mode change inverts:
 `Integer.MAX_VALUE`) emits no `+N more` line. **There is no mode assignment for
 `render()` under which all three stay green**, and `render(List,String)` has no
 production caller at all — its only callers are these tests plus
-`DigestRendererSectionsTest:130` (verified again 2026-07-31:
+`DigestRendererSectionsTest:129` (verified again 2026-07-31:
 `DigestWorker:213` calls `renderSections` directly, and `DigestWorker:217`
 carries a "NEVER call render() after renderSections()" comment).
 
-**DECIDED 2026-07-31 (user): `render(List,String)` is DELETED.** The seven
-test call sites are retargeted to the mode-aware `renderSections` — the
+**DECIDED 2026-07-31 (user): `render(List,String)` is DELETED.** The eight
+test call sites (DigestRendererTest x7, DigestRendererSectionsTest:129) are retargeted to the mode-aware `renderSections` — the
 three inverted assertions above are rewritten in their M1-722-item-17 shape
 against `full` (prose uncapped, no overflow line) or dropped where `normal`
 coverage supersedes them. Pinned in `acceptance`.
@@ -175,14 +203,18 @@ coverage supersedes them. Pinned in `acceptance`.
 ## Also orphaned by this change
 
 With `full`'s cap lifted and `normal`/`brief` rendering no items,
-`DigestRenderer.java:153-165` is the sole producer of
+`DigestRenderer.java:136-148` is the sole producer of
 `reply.digest.category.more` / `reply.digest.category.more_other`
-(`en.properties:836,838`, `cs.properties:634,636`,
+(`en.properties:840,842`, `cs.properties:635,637`,
 `BundleKeys.REPLY_DIGEST_CATEGORY_MORE` / `_MORE_OTHER`). Both keys lose their
 last caller in every mode. **DECIDED 2026-07-31 (user): DELETE both keys and
 their `BundleKeys` constants in this diff.** D43 bilateral keyset: the
 `en.properties` deletion needs its `cs.properties` twin or `BundleLoaderTest`
-fails.
+fails. **Do NOT touch `DigestRenderer.java:153-165`** — that is the M1-721
+`reply.digest.categories.more` section-cap overflow (a different key, still
+live), which an earlier draft of this section miscited as the producer. The
+dangling `{@link #REPLY_DIGEST_CATEGORY_MORE}` javadoc at `BundleKeys.java:672`
+goes with the deletion.
 
 ## Acceptance
 

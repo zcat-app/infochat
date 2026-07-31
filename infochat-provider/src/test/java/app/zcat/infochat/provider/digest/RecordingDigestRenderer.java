@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.digest;
 
+import app.zcat.infochat.provider.digest.DigestRenderer.DigestMode;
 import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 
@@ -12,12 +13,12 @@ import java.util.concurrent.CountDownLatch;
  * block so overlap scenarios can hold an execution mid-render.
  *
  * <p>Overrides {@link DigestRenderer#renderSections} — the entry point
- * {@link DigestWorker} now calls — so the latch, the {@code calls}
- * counter, and the canned-response return all live there. The inherited
- * {@link DigestRenderer#render} is a thin {@code "\n\n"} join over
- * {@code renderSections()}, so calls to either entry point increment the
- * counter and a single-section list makes the join equal the configured
- * response verbatim (the property {@code DigestWorkerClockTest:86}
+ * {@link DigestWorker} calls — so the latch, the {@code calls}
+ * counter, and the canned-response return all live there. The stub ignores
+ * the {@link DigestMode} argument: worker tests pin orchestration, not
+ * per-mode rendering (that is DigestRendererTest/SectionsTest's surface).
+ * A single-section list makes the worker's {@code "\n\n"} join equal the
+ * configured response verbatim (the property {@code DigestWorkerClockTest:86}
  * asserts).
  */
 final class RecordingDigestRenderer extends DigestRenderer {
@@ -44,7 +45,7 @@ final class RecordingDigestRenderer extends DigestRenderer {
     }
 
     @Override
-    public List<RenderedSection> renderSections(List<Post> posts, String langCode) {
+    public List<RenderedSection> renderSections(List<Post> posts, String langCode, DigestMode mode) {
         calls++;
         if (entered != null) {
             entered.countDown();

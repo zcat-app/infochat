@@ -16,11 +16,18 @@ final class StubGroupDataSource implements DataSource {
     private final String adapter;
     private final String upstreamGroupId;
     private final String language;
+    private final String digestMode;
 
+    /** Defaults digest_mode to {@code normal} (M1-732), so pre-mode callers need no edit. */
     StubGroupDataSource(String adapter, String upstreamGroupId, String language) {
+        this(adapter, upstreamGroupId, language, "normal");
+    }
+
+    StubGroupDataSource(String adapter, String upstreamGroupId, String language, String digestMode) {
         this.adapter = adapter;
         this.upstreamGroupId = upstreamGroupId;
         this.language = language;
+        this.digestMode = digestMode;
     }
 
     @Override
@@ -66,6 +73,7 @@ final class StubGroupDataSource implements DataSource {
                             case "adapter" -> adapter;
                             case "upstream_group_id" -> upstreamGroupId;
                             case "language" -> language;
+                            case "digest_mode" -> digestMode;
                             default -> null;
                         };
                     }

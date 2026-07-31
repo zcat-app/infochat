@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 16 |
+| pending | 15 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 735 |
+| done | 736 |
 | deferred | 1 |
 | abandoned | 21 |
 | **total** | **773** |
@@ -33,7 +33,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-724 — Digest cluster selection is recency-only: the cap keeps the newest stories, never the most significant (complexity: high, risk: high)
 - M1-727 — Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other (complexity: medium, risk: medium)
 - M1-728 — Category roll-up sends every post's full body and asks for one or two sentences: it neither fits a large category nor describes one (complexity: medium, risk: medium)
-- M1-732 — groups.digest_mode and the hybrid category body: count + roll-up + headlines (complexity: high, risk: low)
+- M1-733 — Add /digest brief|normal|full and the DIGEST_MODE_SET audit verb (complexity: low, risk: low)
+- M1-734 — Narrow D63: batch brief/normal digest categories into one outbound message (complexity: low, risk: low)
 - M1-738 — Re-hidden posts bypass the admin review queue (complexity: medium, risk: medium)
 
 ---
@@ -54,9 +55,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-718 — blocked_by: M1-716 (pending), M1-717 (deferred)
 - M1-719 — blocked_by: M1-716 (pending), M1-717 (deferred)
 - M1-720 — blocked_by: M1-716 (pending), M1-717 (deferred)
-- M1-725 — blocked_by: M1-732 (pending), M1-724 (pending)
-- M1-733 — blocked_by: M1-732 (pending)
-- M1-734 — blocked_by: M1-732 (pending)
+- M1-725 — blocked_by: M1-732 (done), M1-724 (pending)
 
 ---
 
@@ -78,13 +77,13 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-737 | Aggregate sanitize audit rows per distinct token per call | 2026-07-31 | round 1 APPROVE |
 | M1-736 | Posts tagged '{}' are never re-evaluated when the vocabulary or model improves | 2026-07-31 | round 1 APPROVE |
 | M1-735 | A tagger that answers empty to every post emits no operational signal | 2026-07-31 | round 1 APPROVE |
+| M1-732 | groups.digest_mode and the hybrid category body: count + roll-up + headlines | 2026-07-31 | round 1 APPROVE |
 | M1-730 | /saved renders the ingest \"untitled\" sentinel to a reader | 2026-07-31 | round 1 APPROVE |
 | M1-726 | Tagger treats a correct \"no topic fits\" as a failure and relabels the post with the source's topic tags | 2026-07-31 | round 1 APPROVE |
 | M1-731 | Retire infochat.digest.category-summary-enabled and reclaim the generateRollup name | 2026-07-30 | round 2 APPROVE |
 | M1-729 | Bluesky posts render a headline of \"untitled\" while their text sits in body | 2026-07-30 | round 1 APPROVE |
 | M1-723 | post.likes / post.reposts / post.social_score are declared, parsed at two fetchers, and never persisted | 2026-07-30 | round 1 APPROVE |
 | M1-721 | Digest length is a function of tag count: nothing bounds how many category sections a digest renders | 2026-07-30 | round 1 APPROVE |
-| M1-714 | Summary/digest headline renders a raw post title: unbounded for social sources, blank for Bluesky | 2026-07-30 | round 1 APPROVE |
 
 ---
 
@@ -992,9 +991,9 @@ M1-730 (done)
   └── M1-737 (done)
 M1-731 (done)
   ├── M1-728 (pending) [see above]
-  └── M1-732 (pending) ← runnable
+  └── M1-732 (done)
         ├── M1-725 (pending) [see above]
-        ├── M1-733 (pending)
-        └── M1-734 (pending)
+        ├── M1-733 (pending) ← runnable
+        └── M1-734 (pending) ← runnable
 M1-738 (pending) ← runnable
 ```

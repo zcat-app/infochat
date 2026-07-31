@@ -12,7 +12,9 @@ import app.zcat.infochat.provider.group.GroupRepository;
 import app.zcat.infochat.provider.messaging.AdapterRegistry;
 import app.zcat.infochat.provider.messaging.OutboundDelivery;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
+import app.zcat.infochat.provider.digest.DigestRenderer.DigestMode;
 import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
+import org.jboss.logmanager.LogContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -23,8 +25,12 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -428,6 +434,57 @@ class DigestWorkerTest {
                 "SQLException is an expected operational failure — logged, not rethrown");
     }
 
+    @Test
+    void readGroupMetadata_nullOrUnrecognizedDigestModeFallsBackToNormalWithOneWarn() {
+        // M1-732 acceptance: digest_mode is a SQL-deserialization boundary.
+        // The V67 CHECK constraint pins the closed set in the real schema,
+        // but a stubbed or out-of-band write can still yield NULL or
+        // garbage — both resolve to normal, each logging exactly one WARN.
+        CapturingHandler logCapture = new CapturingHandler();
+        org.jboss.logmanager.Logger jbossLogger =
+                LogContext.getLogContext().getLogger(DigestWorker.class.getName());
+        java.util.logging.Logger julLogger =
+                java.util.logging.Logger.getLogger(DigestWorker.class.getName());
+        jbossLogger.addHandler(logCapture);
+        julLogger.addHandler(logCapture);
+        try {
+            worker.dataSource = new StubGroupDataSource(ADAPTER_NAME, UPSTREAM_GROUP_ID, "en", null);
+            DigestWorker.GroupMetadata nullMode =
+                    assertDoesNotThrow(() -> worker.readGroupMetadata(GROUP_ID));
+            assertEquals(DigestMode.NORMAL, nullMode.digestMode(),
+                    "a NULL digest_mode resolves to normal");
+
+            worker.dataSource =
+                    new StubGroupDataSource(ADAPTER_NAME, UPSTREAM_GROUP_ID, "en", "verbose");
+            DigestWorker.GroupMetadata garbageMode =
+                    assertDoesNotThrow(() -> worker.readGroupMetadata(GROUP_ID));
+            assertEquals(DigestMode.NORMAL, garbageMode.digestMode(),
+                    "an unrecognized digest_mode resolves to normal");
+
+            long warns = logCapture.records.stream()
+                    .filter(r -> r.getLevel().intValue() >= Level.WARNING.intValue())
+                    .filter(r -> r.getMessage().contains("digest_mode"))
+                    .count();
+            assertEquals(2, warns,
+                    "exactly one WARN per fallback event (NULL + unrecognized): "
+                            + logCapture.records);
+        } finally {
+            jbossLogger.removeHandler(logCapture);
+            julLogger.removeHandler(logCapture);
+        }
+    }
+
+    @Test
+    void readGroupMetadata_recognizedDigestModePassesThrough() {
+        worker.dataSource = new StubGroupDataSource(ADAPTER_NAME, UPSTREAM_GROUP_ID, "en", "brief");
+
+        DigestWorker.GroupMetadata meta =
+                assertDoesNotThrow(() -> worker.readGroupMetadata(GROUP_ID));
+
+        assertEquals(DigestMode.BRIEF, meta.digestMode(),
+                "a stored mode parses case-insensitively to its enum value");
+    }
+
     // ----- helpers ----------------------------------------------------------
 
     private DigestSlot futureSlot() {
@@ -459,6 +516,28 @@ class DigestWorkerTest {
     }
 
     // ----- recording/stub collaborators -------------------------------------
+
+    /**
+     * JUL capturing handler — SLF4J in Quarkus routes through
+     * jboss-logmanager, which IS a JUL implementation, so attaching to the
+     * {@link DigestWorker} logger captures the records the production code
+     * emits (the DigestSchedulerTest idiom).
+     */
+    private static final class CapturingHandler extends Handler {
+        private final ConcurrentLinkedQueue<LogRecord> records = new ConcurrentLinkedQueue<>();
+
+        CapturingHandler() {
+            setLevel(Level.ALL);
+        }
+
+        @Override
+        public void publish(LogRecord record) {
+            records.add(record);
+        }
+
+        @Override public void flush() {}
+        @Override public void close() {}
+    }
 
     private static final class StubBundleLoader extends BundleLoader {
         static final String NO_POSTS_TEXT = "No posts yet for this period.";

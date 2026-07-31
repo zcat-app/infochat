@@ -1697,6 +1697,21 @@ fires when the window-end is reached without the digest having started.
 Results are cached briefly in `summary_cache` so a follow-up `/summary`
 during the cache TTL is served from cache (no second LLM call).
 
+**Digest verbosity (`groups.digest_mode`, M1-732).** The V67 column
+selects how each category body renders: `brief` — a header carrying the
+section's TRUE cluster count plus one `CategoryRollupGenerator` roll-up;
+`normal` (the default) — the same plus up to
+`infochat.digest.category-headline-count` (default 5) bare headlines
+(sanitized `DisplayHeadline` title + URL, no prose); `full` — the
+pre-M1-732 per-cluster prose with `infochat.digest.category-item-cap`
+lifted (a render-local effective cap, not a re-tune of the key).
+`brief` and `normal` make one LLM call per surviving category (the
+roll-up) and zero `SummaryProseGenerator` calls. A NULL or unrecognized
+value resolves to `normal` with one WARN at the SQL-deserialization
+boundary (`DigestWorker.readGroupMetadata`). The user-facing
+`/digest brief|normal|full` command is M1-733; delivery batching is
+M1-734.
+
 **Collection window.** The slot window above decides *when* a digest
 fires; it is not the period the digest covers. The collection lower bound
 is the **previous digest boundary** — the group's latest `summary_cache`

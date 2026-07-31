@@ -668,11 +668,11 @@ public final class BundleKeys {
     /**
      * Capped-section overflow line for the categorized {@code /summary} form
      * (M1-694). Token {@code {0}} = the count of clusters not shown; the cs
-     * value carries a {@code {0,choice,...}} plural shape. Distinct from
-     * {@link #REPLY_DIGEST_CATEGORY_MORE} because that one is group-worded
-     * ("@mention me to see them") — {@code /summary} is a DM-first
-     * interactive surface where the caller narrows with {@code -w} or a tag
-     * instead.
+     * value carries a {@code {0,choice,...}} plural shape. Distinct from the
+     * digest broadcast's {@code reply.digest.category.more} (group-worded,
+     * "@mention me to see them" — deleted in M1-732 when {@code full} mode
+     * lifted the cap) — {@code /summary} is a DM-first interactive surface
+     * where the caller narrows with {@code -w} or a tag instead.
      */
     public static final String REPLY_SUMMARY_CATEGORY_MORE = "reply.summary.category.more";
 
@@ -2002,11 +2002,11 @@ public final class BundleKeys {
     /** Header for the Other bucket (clusters with no qualifying category tag); uppercased in code. No tokens; resolved via the 2-arg accessor. */
     public static final String REPLY_DIGEST_CATEGORY_OTHER = "reply.digest.category.other";
 
-    /** Capped-section overflow line for a real category. Token {@code {0}} = the count of clusters not shown, {@code {1}} = the category's controlled-vocabulary tag (the raw token {@code /summary} parses, e.g. {@code ai}); the cs value carries a {@code {0,choice,...}} plural shape. Steers to {@code /summary <tag> --full}. */
-    public static final String REPLY_DIGEST_CATEGORY_MORE = "reply.digest.category.more";
+    /** brief/normal digest category header with the section's TRUE cluster count (M1-732). Token {@code {0}} = the category tag, {@code {1}} = the section's full cluster count (not the number of headlines shown); the values carry a {@code {1,choice,...}} plural shape. Digest-only: the count must not leak into the shared {@link #REPLY_DIGEST_CATEGORY_HEADER} bytes /summary renders. Uppercased in code. */
+    public static final String REPLY_DIGEST_CATEGORY_HEADER_COUNT = "reply.digest.category.header_count";
 
-    /** Capped-section overflow line for the Other bucket ({@code tag == null}, not in the controlled vocabulary). Token {@code {0}} = the count of clusters not shown; the cs value carries a {@code {0,choice,...}} plural shape. Steers to bare {@code /summary --full} (no tag — "other" would hit {@code error.summary.unknown_tag}). */
-    public static final String REPLY_DIGEST_CATEGORY_MORE_OTHER = "reply.digest.category.more_other";
+    /** brief/normal Other-bucket header with the TRUE cluster count (M1-732). Token {@code {0}} = the section's full cluster count; the values carry a {@code {0,choice,...}} plural shape. Uppercased in code. */
+    public static final String REPLY_DIGEST_CATEGORY_OTHER_COUNT = "reply.digest.category.other_count";
 
     /** Section-cap overflow line, appended ONCE to the last section of a digest whose category count exceeded {@code infochat.digest.max-categories} (M1-721). Token {@code {0}} = the number of categories not shown; both values carry a {@code {0,choice,...}} plural shape. Names no tags — it steers to {@code /summary}, which caps no sections. */
     public static final String REPLY_DIGEST_CATEGORIES_MORE = "reply.digest.categories.more";

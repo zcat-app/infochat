@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.digest;
 
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.digest.DigestRenderer.DigestMode;
 import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
 import app.zcat.infochat.provider.summary.ClusterTraversal;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
@@ -16,6 +17,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -28,15 +30,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * The {@link DigestRenderer#renderSections} unit surface: section order
  * matches D62, the closing affordance is folded into the LAST section's
- * text only, and {@code String.join("\n\n", sections.map(text))} equals
- * {@link DigestRenderer#render} byte-for-byte. Kept as a separate file so
- * the pre-existing {@link DigestRendererTest} stays the unmodified
- * byte-identity proof (acceptance item 8).
+ * text only, the M1-721 section cap shapes the digest only, and (M1-732)
+ * the {@code groups.digest_mode} body shapes — brief/normal hybrid
+ * (true-count header + roll-up + headlines + footer) versus full's
+ * per-cluster prose. Kept as a separate file so the pre-existing
+ * {@link DigestRendererTest} stays the pipeline-wiring proof.
  */
 class DigestRendererSectionsTest {
 
     private DigestRenderer renderer;
     private RecordingSummaryProseGenerator proseGenerator;
+    private RecordingCategoryRollupGenerator rollupGenerator;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -45,11 +49,14 @@ class DigestRendererSectionsTest {
         renderer.clusterTraversal = new ClusterTraversal(new EmptyEdgeSource(), 3);
         proseGenerator = new RecordingSummaryProseGenerator();
         renderer.summaryProseGenerator = proseGenerator;
+        rollupGenerator = new RecordingCategoryRollupGenerator();
+        renderer.categoryRollupGenerator = rollupGenerator;
         renderer.llmOutputSanitizer = SanitizerTestDoubles.noAuditSanitizer();
         renderer.translationPipeline = newEnShortCircuitPipeline(bundleLoader);
         renderer.digestCategorizer = newCategorizer(3);
         renderer.bundleLoader = bundleLoader;
         renderer.categoryItemCap = 12;
+        renderer.categoryHeadlineCount = 5;
     }
 
     @Test
@@ -71,7 +78,7 @@ class DigestRendererSectionsTest {
                 post("c3", "Crypto 3", List.of("crypto")),
                 post("u1", "Untagged", List.of()));
 
-        List<RenderedSection> sections = renderer.renderSections(posts, "en");
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.FULL);
 
         // Arrays.asList, not List.of: List.of is null-hostile and the Other
         // bucket's tag is null by construction (DigestCategorizer.CategorySection).
@@ -91,7 +98,7 @@ class DigestRendererSectionsTest {
                 post("a2", "AI 2", List.of("ai")),
                 post("a3", "AI 3", List.of("ai")));
 
-        List<RenderedSection> sections = renderer.renderSections(posts, "en");
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.FULL);
 
         String affordance =
                 "@mention me to go deeper on any story, or ask about a topic you don't see here.";
@@ -109,30 +116,6 @@ class DigestRendererSectionsTest {
                 "last section ends with the affordance (folded into the section text): " + lastText);
     }
 
-    @Test
-    void joinOfSectionsEqualsRenderByteForByte() {
-        proseGenerator.setResponseText("deterministic prose");
-        // Exercises the full arithmetic (tie-break + fold-back + Other):
-        // ai and security both count 3; the dual-tagged post tie-breaks to
-        // ai, security folds (2 assigned < 3) into Other with the untagged.
-        List<Post> posts = List.of(
-                post("s1", "Sec 1", List.of("security", "ai")),
-                post("s2", "Sec 2", List.of("security")),
-                post("s3", "Sec 3", List.of("security")),
-                post("a1", "AI 1", List.of("ai")),
-                post("a2", "AI 2", List.of("ai")),
-                post("u1", "Untagged", List.of()));
-
-        List<RenderedSection> sections = renderer.renderSections(posts, "en");
-        String joined = String.join("\n\n",
-                sections.stream().map(RenderedSection::text).toList());
-        String rendered = renderer.render(posts, "en");
-
-        assertEquals(rendered, joined,
-                "String.join(\"\\n\\n\", sections) must equal render() byte-for-byte — "
-                        + "render() is a thin join over renderSections()");
-    }
-
     // ----- section cap (M1-721) ---------------------------------------------
 
     @Test
@@ -140,7 +123,8 @@ class DigestRendererSectionsTest {
         renderer.digestCategorizer = newCategorizer(3, 8);
         proseGenerator.setResponseText("capped prose");
 
-        List<RenderedSection> sections = renderer.renderSections(twelveCategoryPosts(), "en");
+        List<RenderedSection> sections =
+                renderer.renderSections(twelveCategoryPosts(), "en", DigestMode.FULL);
 
         assertEquals(8, sections.size(), "12 categories capped to 8 sections");
         String overflow = "4 more categories are not shown";
@@ -161,7 +145,7 @@ class DigestRendererSectionsTest {
                 post("s2", "Sec 2", List.of("security")),
                 post("s3", "Sec 3", List.of("security")));
 
-        List<RenderedSection> sections = renderer.renderSections(posts, "en");
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.FULL);
 
         assertEquals(1, sections.size());
         assertFalse(sections.getFirst().text().contains("not shown"),
@@ -173,7 +157,7 @@ class DigestRendererSectionsTest {
         renderer.digestCategorizer = newCategorizer(3, 8);
         proseGenerator.setResponseText("surviving prose");
 
-        renderer.renderSections(twelveCategoryPosts(), "en");
+        renderer.renderSections(twelveCategoryPosts(), "en", DigestMode.FULL);
 
         // D62 already commits that capped-out CLUSTERS waste no LLM calls;
         // the section cap extends the same property to whole sections. A
@@ -199,6 +183,82 @@ class DigestRendererSectionsTest {
         assertEquals(12, sections.size(),
                 "/summary renders all 12 categories: "
                         + sections.stream().map(RenderedSection::tag).toList());
+    }
+
+    // ----- digest_mode body shapes (M1-732) ---------------------------------
+
+    @Test
+    void normalModeRendersTrueCountHeaderRollupHeadlinesAndFooter() {
+        // The hybrid body: UPPERCASE header with the section's TRUE cluster
+        // count, the roll-up synthesis, up to category-headline-count (5)
+        // bare headlines (title + URL, NO prose), and the category footer.
+        // 13 clusters pin the count against the 5 headlines shown.
+        rollupGenerator.setResponse("thirteen-story synthesis");
+        List<Post> posts = new ArrayList<>();
+        for (int i = 0; i < 13; i++) {
+            posts.add(post("sec-" + i, "Story sec " + i, List.of("security")));
+        }
+
+        List<RenderedSection> sections =
+                renderer.renderSections(posts, "en", DigestMode.NORMAL);
+
+        assertEquals(1, sections.size());
+        String text = sections.getFirst().text();
+        assertTrue(text.startsWith("SECURITY NEWS — 13 STORIES"),
+                "header carries the TRUE cluster count, not the 5 headlines shown: " + text);
+        assertTrue(text.contains("thirteen-story synthesis"),
+                "the roll-up synthesis renders: " + text);
+        for (int i = 0; i < 5; i++) {
+            assertTrue(text.contains("· Story sec " + i + "  https://example.com/sec-" + i),
+                    "headline " + i + " renders as bare title + URL: " + text);
+        }
+        assertFalse(text.contains("Story sec 5"),
+                "the 6th headline is capped off by category-headline-count: " + text);
+        assertTrue(text.contains("/summary security to expand this category"),
+                "the category footer closes the section: " + text);
+        assertEquals(0, proseGenerator.callCount(),
+                "normal renders NO per-cluster prose");
+    }
+
+    @Test
+    void briefModeDropsTheHeadlines() {
+        rollupGenerator.setResponse("brief synthesis");
+        List<Post> posts = List.of(
+                post("s1", "Sec 1", List.of("security")),
+                post("s2", "Sec 2", List.of("security")),
+                post("s3", "Sec 3", List.of("security")));
+
+        List<RenderedSection> sections =
+                renderer.renderSections(posts, "en", DigestMode.BRIEF);
+
+        String text = sections.getFirst().text();
+        assertTrue(text.startsWith("SECURITY NEWS — 3 STORIES"),
+                "brief keeps the true-count header: " + text);
+        assertTrue(text.contains("brief synthesis"), "the roll-up renders: " + text);
+        assertFalse(text.contains("· "), "brief renders NO headlines: " + text);
+        assertTrue(text.contains("/summary security to expand this category"),
+                "the footer stays: " + text);
+        assertEquals(0, proseGenerator.callCount(),
+                "brief renders NO per-cluster prose");
+    }
+
+    @Test
+    void fullModeKeepsPerClusterProseAndThePlainHeader() {
+        proseGenerator.setResponseText("full prose");
+        List<Post> posts = List.of(
+                post("s1", "Sec 1", List.of("security")),
+                post("s2", "Sec 2", List.of("security")),
+                post("s3", "Sec 3", List.of("security")));
+
+        List<RenderedSection> sections =
+                renderer.renderSections(posts, "en", DigestMode.FULL);
+
+        String text = sections.getFirst().text();
+        assertTrue(text.startsWith("SECURITY NEWS\n"),
+                "full keeps the pre-M1-732 header bytes: " + text);
+        assertEquals(3, text.split("full prose", -1).length - 1,
+                "one prose paragraph per cluster: " + text);
+        assertEquals(0, rollupGenerator.callCount(), "full makes no roll-up calls");
     }
 
     // ----- helpers ----------------------------------------------------------
@@ -237,6 +297,21 @@ class DigestRendererSectionsTest {
                 UUID.randomUUID(), uid, UUID.randomUUID(), "TestSrc",
                 title, "https://example.com/" + uid, "body",
                 Instant.now(), tags, List.of("unknown"));
+    }
+
+    /** Recording {@link CategoryRollupGenerator}: counts calls and returns a canned synthesis. */
+    private static final class RecordingCategoryRollupGenerator extends CategoryRollupGenerator {
+        private String response = "category roll-up";
+        private int calls;
+
+        void setResponse(String text) { this.response = text; }
+        int callCount() { return calls; }
+
+        @Override
+        public Optional<String> generateRollup(List<Cluster> categoryClusters, String langCode) {
+            calls++;
+            return Optional.of(response);
+        }
     }
 
     /**

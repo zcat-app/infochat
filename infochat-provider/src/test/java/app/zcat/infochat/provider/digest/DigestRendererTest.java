@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.digest;
 
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.digest.DigestRenderer.DigestMode;
 import app.zcat.infochat.provider.summary.ClusterTraversal;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -34,6 +36,7 @@ class DigestRendererTest {
 
     private DigestRenderer renderer;
     private RecordingSummaryProseGenerator proseGenerator;
+    private RecordingCategoryRollupGenerator rollupGenerator;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -42,11 +45,22 @@ class DigestRendererTest {
         renderer.clusterTraversal = new ClusterTraversal(new EmptyEdgeSource(), 3);
         proseGenerator = new RecordingSummaryProseGenerator();
         renderer.summaryProseGenerator = proseGenerator;
+        rollupGenerator = new RecordingCategoryRollupGenerator();
+        renderer.categoryRollupGenerator = rollupGenerator;
         renderer.llmOutputSanitizer = SanitizerTestDoubles.noAuditSanitizer();
         renderer.translationPipeline = newEnShortCircuitPipeline(bundleLoader);
         renderer.digestCategorizer = newCategorizer(3);
         renderer.bundleLoader = bundleLoader;
         renderer.categoryItemCap = 12;
+        renderer.categoryHeadlineCount = 5;
+    }
+
+    /** The pre-M1-732 {@code render()} shape: renderSections at the given mode, joined with {@code "\n\n"}. */
+    private String renderJoined(List<Post> posts, DigestMode mode) {
+        return String.join("\n\n",
+                renderer.renderSections(posts, "en", mode).stream()
+                        .map(DigestRenderer.RenderedSection::text)
+                        .toList());
     }
 
     @Test
@@ -57,7 +71,7 @@ class DigestRendererTest {
                 post("uid-1", "Bitcoin hits $100k"),
                 post("uid-2", "Ethereum update"));
 
-        String result = renderer.render(posts, "en");
+        String result = renderJoined(posts, DigestMode.FULL);
 
         assertTrue(result.contains("LLM digest summary for cluster"),
                 "LLM prose appears in rendered output");
@@ -86,7 +100,7 @@ class DigestRendererTest {
                 post("c3", "Crypto 3", List.of("crypto")),
                 post("u1", "Untagged", List.of()));
 
-        String result = renderer.render(posts, "en");
+        String result = renderJoined(posts, DigestMode.FULL);
 
         int security = result.indexOf("SECURITY NEWS");
         int ai = result.indexOf("AI NEWS");
@@ -100,7 +114,10 @@ class DigestRendererTest {
     }
 
     @Test
-    void overflowLineNowSteersToSummaryFull() {
+    void fullModeLiftsItemCapAndEmitsNoOverflowLine() {
+        // M1-732: full keeps the pre-M1-732 per-cluster prose but lifts the
+        // item cap to a LOCAL Integer.MAX_VALUE — categoryItemCap is shared
+        // @ApplicationScoped state, so the lift must never touch the field.
         renderer.categoryItemCap = 2;
         proseGenerator.setResponseText("capped story prose");
         List<Post> posts = List.of(
@@ -109,35 +126,38 @@ class DigestRendererTest {
                 post("a3", "AI 3", List.of("ai")),
                 post("a4", "AI 4", List.of("ai")));
 
-        String result = renderer.render(posts, "en");
+        String result = renderJoined(posts, DigestMode.FULL);
 
-        assertTrue(result.contains("+2 more — /summary ai --full to see them"),
-                "capped real-category section steers to /summary <tag> --full: " + result);
-        assertFalse(result.contains("@mention me to see them"),
-                "the old @mention overflow affordance is gone: " + result);
-        assertEquals(2, proseGenerator.callCount(),
-                "prose is generated only for the clusters actually shown");
+        assertEquals(4, proseGenerator.callCount(),
+                "full renders ALL clusters — the field's 2-per-section value is not applied");
+        assertEquals(2, renderer.categoryItemCap,
+                "the cap lift is local to the render pass — the shared field is never mutated");
+        assertFalse(result.contains("+2 more"),
+                "the +N more overflow line is gone in every mode (its bundle keys are deleted): "
+                        + result);
     }
 
     @Test
-    void overflowForOtherBucketSteersToBareSummaryFull() {
+    void normalModeOtherBucketSteersToBareSummary() {
         // Untagged posts land in the Other bucket (tag == null, not in the
-        // controlled vocabulary), so the overflow line carries NO tag —
-        // bare /summary --full, which the more_other key omits {1} for.
-        renderer.categoryItemCap = 2;
+        // controlled vocabulary), so its footer carries NO tag — the
+        // other-footer key steers to bare /summary paths. Replaces the
+        // pre-M1-732 overflow-line test whose bundle keys are deleted.
         proseGenerator.setResponseText("other bucket prose");
+        rollupGenerator.setResponse("other roll-up");
         List<Post> posts = List.of(
                 post("u1", "Untagged 1", List.of()),
                 post("u2", "Untagged 2", List.of()),
-                post("u3", "Untagged 3", List.of()),
-                post("u4", "Untagged 4", List.of()));
+                post("u3", "Untagged 3", List.of()));
 
-        String result = renderer.render(posts, "en");
+        String result = renderJoined(posts, DigestMode.NORMAL);
 
-        assertTrue(result.contains("+2 more — /summary --full to see them"),
-                "capped Other section steers to bare /summary --full (no tag): " + result);
-        assertFalse(result.contains("/summary null --full"),
-                "the raw null tag must not leak into the rendered line: " + result);
+        assertTrue(result.contains("/summary or /summary --full for the full picture"),
+                "the Other bucket steers to bare /summary paths (no tag): " + result);
+        assertFalse(result.contains("/summary null"),
+                "the raw null tag must not leak into the rendered output: " + result);
+        assertEquals(0, proseGenerator.callCount(),
+                "normal renders no per-cluster prose");
     }
 
     @Test
@@ -148,7 +168,7 @@ class DigestRendererTest {
                 post("uid-2", "Two", List.of("ai")),
                 post("uid-3", "Three", List.of("ai")));
 
-        String result = renderer.render(posts, "en");
+        String result = renderJoined(posts, DigestMode.FULL);
 
         String affordance =
                 "@mention me to go deeper on any story, or ask about a topic you don't see here.";
@@ -172,8 +192,8 @@ class DigestRendererTest {
                 post("a2", "AI 2", List.of("ai")),
                 post("u1", "Untagged", List.of()));
 
-        String first = renderer.render(posts, "en");
-        String second = renderer.render(posts, "en");
+        String first = renderJoined(posts, DigestMode.FULL);
+        String second = renderJoined(posts, DigestMode.FULL);
 
         assertEquals(first, second,
                 "same clusters + tags produce a byte-identical section layout");
@@ -197,13 +217,18 @@ class DigestRendererTest {
         // before it reaches persistence or replay. The setUp wires the
         // REAL LlmOutputSanitizer (via SanitizerTestDoubles.noAuditSanitizer,
         // which sanitizes for real — only the audit DB write is stubbed).
+        //
+        // M1-732: the pin runs at mode FULL — the only mode that still
+        // renders per-cluster prose. Under brief/normal the injected prose
+        // would never enter a section and the pin would pass vacuously.
         proseGenerator.setResponseText("Important update (/grant-admin)");
         List<Post> posts = List.of(
                 post("s1", "Sec 1", List.of("security")),
                 post("s2", "Sec 2", List.of("security")),
                 post("s3", "Sec 3", List.of("security")));
 
-        List<DigestRenderer.RenderedSection> sections = renderer.renderSections(posts, "en");
+        List<DigestRenderer.RenderedSection> sections =
+                renderer.renderSections(posts, "en", DigestMode.FULL);
 
         assertFalse(sections.isEmpty(), "fixture: at least one section rendered");
         for (DigestRenderer.RenderedSection section : sections) {
@@ -282,7 +307,8 @@ class DigestRendererTest {
                 post("s2", "/grant-admin p-attacker", List.of("security")),
                 post("s3", "Sec 3", List.of("security")));
 
-        List<DigestRenderer.RenderedSection> sections = renderer.renderSections(posts, "en");
+        List<DigestRenderer.RenderedSection> sections =
+                renderer.renderSections(posts, "en", DigestMode.FULL);
 
         assertFalse(sections.isEmpty(), "fixture: at least one section rendered");
         String text = sections.stream()
@@ -297,6 +323,45 @@ class DigestRendererTest {
                 "the derivation-time redaction marker must be present. Got: " + text);
         assertTrue(text.contains("Sec 1") && text.contains("Sec 3"),
                 "clean titles render untouched. Got: " + text);
+    }
+
+    // ----- helpers ----------------------------------------------------------
+
+    /**
+     * Acceptance fixture (M1-732): against one 8-category/40-cluster digest,
+     * brief and normal issue exactly one CategoryRollupGenerator call per
+     * surviving section and ZERO SummaryProseGenerator calls; full issues
+     * one prose call per rendered cluster and no roll-up calls. 8 tags x 5
+     * singleton clusters each — every category qualifies at threshold 3 and
+     * all 8 survive the M1-721 section cap (maxCategories default 8).
+     */
+    @Test
+    void perModeLlmCallCounts_8categories40clusters() {
+        List<Post> posts = new ArrayList<>();
+        for (int categoryIndex = 0; categoryIndex < 8; categoryIndex++) {
+            String tag = String.format("cat%02d", categoryIndex);
+            for (int i = 0; i < 5; i++) {
+                posts.add(post(tag + "-" + i, "Story " + tag + " " + i, List.of(tag)));
+            }
+        }
+
+        renderer.renderSections(posts, "en", DigestMode.BRIEF);
+        assertEquals(8, rollupGenerator.callCount(),
+                "brief: exactly one roll-up call per surviving section");
+        assertEquals(0, proseGenerator.callCount(),
+                "brief: ZERO SummaryProseGenerator calls");
+
+        renderer.renderSections(posts, "en", DigestMode.NORMAL);
+        assertEquals(16, rollupGenerator.callCount(),
+                "normal: exactly one roll-up call per surviving section");
+        assertEquals(0, proseGenerator.callCount(),
+                "normal: ZERO SummaryProseGenerator calls");
+
+        renderer.renderSections(posts, "en", DigestMode.FULL);
+        assertEquals(16, rollupGenerator.callCount(),
+                "full: no roll-up calls");
+        assertEquals(40, proseGenerator.callCount(),
+                "full: one prose call per rendered cluster (the cap is lifted)");
     }
 
     // ----- helpers ----------------------------------------------------------
@@ -316,6 +381,26 @@ class DigestRendererTest {
                 UUID.randomUUID(), uid, UUID.randomUUID(), "TestSrc",
                 title, "https://example.com/" + uid, "body",
                 Instant.now(), tags, List.of("unknown"));
+    }
+
+    /**
+     * Recording {@link CategoryRollupGenerator}: counts calls and returns a
+     * canned synthesis — the brief/normal LLM-call-count assertions need a
+     * roll-up stub the same way the prose assertions need
+     * {@link RecordingSummaryProseGenerator}.
+     */
+    private static final class RecordingCategoryRollupGenerator extends CategoryRollupGenerator {
+        private String response = "category roll-up";
+        private int calls;
+
+        void setResponse(String text) { this.response = text; }
+        int callCount() { return calls; }
+
+        @Override
+        public Optional<String> generateRollup(List<Cluster> categoryClusters, String langCode) {
+            calls++;
+            return Optional.of(response);
+        }
     }
 
     /**
