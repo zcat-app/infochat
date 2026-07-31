@@ -35,8 +35,9 @@ import org.jspecify.annotations.Nullable;
  * rewrite would then hand the group a dispatchable privileged command at a line
  * start. (Redteam 2026-07-30, medium/INJECTION.)
  * {@link LlmOutputSanitizer#sanitize} then runs over the WHOLE remaining field,
- * because it writes one {@code audit_log} row per hit — truncating first would
- * silently drop the audit rows for the removed tail and shrink what the
+ * because every hit is audit-logged (rows aggregate per distinct token per
+ * call, carrying the exact occurrence count) — truncating first would
+ * silently drop the audit coverage for the removed tail and shrink what the
  * sanitizer sees. {@link #truncate} is therefore last.
  *
  * <p><b>Sanitize unit: ONE author's field per call (M1-697).</b> The helper

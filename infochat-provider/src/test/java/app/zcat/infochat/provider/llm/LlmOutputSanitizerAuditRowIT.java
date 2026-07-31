@@ -19,32 +19,35 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Integration test for the per-occurrence LLM_OUTPUT_SANITIZED audit
+ * Integration test for the aggregated LLM_OUTPUT_SANITIZED audit
  * row commitment from {@code docs/spec/security.md} §LLM output
- * sanitizer ("Every match is audit-logged (per-occurrence, not
- * throttled)").
+ * sanitizer ("Every match is audit-logged; rows aggregate per
+ * distinct token per sanitize call and carry the exact occurrence
+ * count — counted, never throttled").
  *
  * <p>Drives {@link LlmOutputSanitizer#sanitize} directly with a
- * seeded LLM-output string carrying two privileged-tier command
- * tokens; asserts EXACTLY two {@code audit_log} rows with
- * {@code action = 'LLM_OUTPUT_SANITIZED'} land in the database.
- * Acceptance item 13 — NOT one coalesced row per call.</p>
+ * seeded LLM-output string carrying two DISTINCT privileged-tier
+ * command tokens; asserts EXACTLY two {@code audit_log} rows with
+ * {@code action = 'LLM_OUTPUT_SANITIZED'} land in the database —
+ * one per distinct token (aggregation coalesces only same-token
+ * repeats). Acceptance item 13 — NOT one coalesced row per call.</p>
  *
  * <p>Per the outline risk #5 reasoning, the test invokes the
  * sanitizer directly rather than driving a full {@code /summary}
  * dispatch; the sanitizer's audit emission is independent of the
  * summary plumbing and the simpler shape isolates the
- * per-occurrence promise from unrelated test failures.</p>
+ * per-token promise from unrelated test failures.</p>
  */
 @QuarkusTest
 class LlmOutputSanitizerAuditRowIT {
 
     /**
-     * The closed-list token chosen to seed the test. Both
+     * The closed-list tokens chosen to seed the test. Both
      * {@code /grant-admin} and {@code /ban} are explicit entries in
-     * {@link LlmOutputSanitizer#CLOSED_LIST}. The same token appears
-     * twice in the seeded input so the per-occurrence behavior
-     * (two hits → two rows, not one) is the load-bearing assertion.
+     * {@link LlmOutputSanitizer#CLOSED_LIST}. Two DISTINCT tokens
+     * appear in the seeded input so the one-row-per-distinct-token
+     * behavior (two tokens → two rows, not one coalesced row) is the
+     * load-bearing assertion.
      */
     private static final String SEEDED_INPUT =
             "Admin would /grant-admin to ops; meanwhile /ban offender first.";
@@ -76,7 +79,7 @@ class LlmOutputSanitizerAuditRowIT {
                 "sanitizer must replace both tokens; got: " + result);
 
         assertEquals(2L, after - before,
-                "spec promises per-occurrence audit rows: two hits -> exactly two rows, not one coalesced row");
+                "spec promises one audit row per distinct token: two distinct tokens -> exactly two rows, not one coalesced row");
     }
 
     @Test
@@ -89,7 +92,7 @@ class LlmOutputSanitizerAuditRowIT {
         sanitizer.sanitize("Run /ban now");
         long after = countLlmOutputSanitizedRows();
         assertEquals(1L, after - before,
-                "a CDI-built sanitizer always emits the per-occurrence audit row; "
+                "a CDI-built sanitizer always emits the audit row; "
                         + "sanitization without audit wiring is impossible in the CDI path");
     }
 
@@ -133,7 +136,7 @@ class LlmOutputSanitizerAuditRowIT {
     @Test
     void auditWriteFailureAbortsSanitizeFailLoud() throws SQLException {
         // Spec §LLM output sanitizer: "Every match is audit-logged
-        // (per-occurrence, not throttled)." The promise is durability;
+        // ... counted, never throttled." The promise is durability;
         // a fail-soft branch that silently drops the row would leave
         // the user-visible reply emitted without the audit trail.
         // This test wires the sanitizer with a DataSource that throws
@@ -146,7 +149,7 @@ class LlmOutputSanitizerAuditRowIT {
         IllegalStateException ex = assertThrows(
                 IllegalStateException.class,
                 () -> brokenSanitizer.sanitize("/grant-admin"),
-                "audit-write failure must abort sanitize() per the spec's per-occurrence durability commitment");
+                "audit-write failure must abort sanitize() per the spec's durability commitment");
         assertTrue(ex.getCause() instanceof SQLException,
                 "IllegalStateException must wrap the underlying SQLException; got cause: " + ex.getCause());
         long after = countLlmOutputSanitizedRows();
