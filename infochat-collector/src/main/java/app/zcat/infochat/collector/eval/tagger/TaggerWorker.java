@@ -122,6 +122,15 @@ import java.util.regex.Pattern;
  * valid+invalid count so a future operator alert on sustained
  * high invalid rates has the data.
  *
+ * <h2>Aggregate no-tags detector</h2>
+ *
+ * <p>Every completed outcome is also reported to {@link NoTagsRateMonitor}
+ * ({@code true} only for the LLM-answered empty proposal), which fires a
+ * throttled admin alert under {@code tagger.sustained_no_tags} when the
+ * no-tags share of recent completions exceeds the configured threshold
+ * over a minimum sample. The per-post no-tags path itself stays silent
+ * (M1-726); the RATE is the signal, never the single post (M1-735).
+ *
  * <h2>Persistence cursor</h2>
  *
  * <p>The {@code UPDATE post SET tags=..., tagger_done=true,
@@ -204,6 +213,9 @@ public class TaggerWorker {
     RetryBackoff retryBackoff;
 
     @Inject
+    NoTagsRateMonitor noTagsRateMonitor;
+
+    @Inject
     PartitionScan partitionScan;
 
     // The scan-window floor is computed in Java from the injected Clock and
@@ -275,6 +287,13 @@ public class TaggerWorker {
     void processOne(PostRow row) {
         TaggerOutcome outcome = invokeWithFallbackChain(row);
         persistCursor(row, outcome);
+        // Record only after the cursor write succeeded: a crash between
+        // the LLM call and the UPDATE re-processes the post next tick,
+        // so counting before the durable completion would double-count.
+        // noTags is true ONLY for the LLM-answered empty proposal — the
+        // bootstrap fallback already alarms under its own error class.
+        noTagsRateMonitor.record(
+            outcome.outcome() == Outcome.LLM && outcome.tags().isEmpty());
     }
 
     /**

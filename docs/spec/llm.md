@@ -434,7 +434,20 @@ stage.
   corpus. A
   per-post counter records "tagger emitted N valid + M invalid"
   for observability; sustained high invalid rates surface an
-  operator alert (cadence and threshold in design notes).
+  operator alert (cadence and threshold in design notes). The
+  invalid-rate counter cannot see a wholly non-functioning tagger —
+  an all-empty output reports N=0 valid AND M=0 invalid on every
+  post — so a separate aggregate counter tracks the no-tags share of
+  the tagger's recent completions: when that share exceeds a
+  configured threshold over a minimum sample, a throttled admin
+  alert fires under the distinct error class
+  `tagger.sustained_no_tags` (never `tagger.fallback_to_bootstrap` —
+  the two conditions have different meanings and different operator
+  runbooks). Below the minimum sample the window is silent even at
+  100% no-tags, so cold start cannot false-alarm; a normal trickle
+  of untaggable posts stays far below the threshold and fires
+  nothing (window size, minimum sample, and threshold in design
+  notes).
 - Entity extractor — on failure or schema-violating output, release without
   entities; cross-source linking degrades to embedding-only for that post.
 - Embedding — release without a vector (see Embedding pipeline above);

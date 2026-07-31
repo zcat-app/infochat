@@ -1,7 +1,7 @@
 ---
 id: M1-735
 title: "A tagger that answers empty to every post emits no operational signal"
-status: pending
+status: done
 created: 2026-07-31
 last_updated: 2026-07-31
 blocked_by: [M1-726]
@@ -94,12 +94,41 @@ spec_refs:
   - docs/spec/llm.md §Failure handling
 decision_refs:
   - D19
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-31
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 394
+      removed: 5
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-07-31
+    verdict: CLEAN
+    base: e9bd3fc08b4a10320b96b3757cfc7847d7da245e
+    head: working tree
+    verdict_file: docs/plan/m1/redteam/M1-735-2026-07-31.md
+    out_of_model_count: 0
+    note: >-
+      Standing /m1-tick run gate ahead of review (uncommitted branch tip).
+      CLEAN; confirms the aggregate detector closes the M1-726 round-1 LOW
+      AUDIT-EVASION finding with truthful classification (Outcome.LLM covers
+      retry-then-empty; processOne is the sole completion path).
+clarity_check:
+  date: 2026-07-31
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-735: a tagger that answers empty to every post emits no operational signal

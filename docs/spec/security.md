@@ -1360,7 +1360,15 @@ every stage: retry once, then apply the stage-specific failure path below.
   degradation commitment for stream sources.
 - **Tagger** failure → fall back to `source.bootstrap_tags`, mark the post,
   throttled admin notify. (This is why `/add-source --tags` is mandatory:
-  every source must have a deterministic fallback.)
+  every source must have a deterministic fallback.) A clean empty proposal
+  (`{"tags":[]}`) is an outcome, not a failure (`llm.md` §Failure
+  handling), so it never fires this path — and a tagger answering empty
+  to EVERY post would otherwise emit no signal at all: a sustained
+  all-empty tagger output (the no-tags share of recent completions
+  exceeding a configured threshold over a minimum sample) surfaces a
+  throttled admin alert under the distinct error class
+  `tagger.sustained_no_tags`, so a wholly non-functioning tagger stage
+  remains a spec-committed observable condition.
 - **Entity** failure → release without entities; cross-source linking
   degrades to embedding-only for that post (or skipped entirely if
   embedding also failed).

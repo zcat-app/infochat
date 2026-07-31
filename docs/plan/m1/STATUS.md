@@ -11,10 +11,10 @@
 | Status | Count |
 |---|---|
 | pending | 18 |
-| in-progress | 1 |
+| in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 732 |
+| done | 733 |
 | deferred | 1 |
 | abandoned | 21 |
 | **total** | **773** |
@@ -44,7 +44,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 | ID | Title | Status | Last review |
 |---|---|---|---|
-| M1-735 | A tagger that answers empty to every post emits no operational signal | in-progress | (none) |
+
+_(none)_
 
 ---
 
@@ -76,6 +77,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-735 | A tagger that answers empty to every post emits no operational signal | 2026-07-31 | round 1 APPROVE |
 | M1-730 | /saved renders the ingest \"untitled\" sentinel to a reader | 2026-07-31 | round 1 APPROVE |
 | M1-726 | Tagger treats a correct \"no topic fits\" as a failure and relabels the post with the source's topic tags | 2026-07-31 | round 1 APPROVE |
 | M1-731 | Retire infochat.digest.category-summary-enabled and reclaim the generateRollup name | 2026-07-30 | round 2 APPROVE |
@@ -85,7 +87,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-714 | Summary/digest headline renders a raw post title: unbounded for social sources, blank for Bluesky | 2026-07-30 | round 1 APPROVE |
 | M1-712 | encodeJoinGroupCommand's command-injection guard is the one encode entry point no test pins | 2026-07-30 | round 1 APPROVE |
 | M1-711 | SimpleX mention-strip: multi-mention ordering and mid-text whitespace collapse are untested | 2026-07-30 | round 1 APPROVE |
-| M1-710 | SimpleX outbound rate-limit draws are untested; the Signal twin is pinned | 2026-07-30 | round 1 APPROVE |
 
 ---
 
@@ -985,7 +986,7 @@ M1-723 (done)
   └── M1-724 (pending) ← runnable
         └── M1-725 (pending)
 M1-726 (done)
-  ├── M1-735 (in-progress)
+  ├── M1-735 (done)
   └── M1-736 (pending) ← runnable
 M1-727 (pending) ← runnable
 M1-729 (done)

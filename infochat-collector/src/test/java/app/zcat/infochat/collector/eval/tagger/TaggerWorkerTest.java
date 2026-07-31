@@ -41,6 +41,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code {"tags":[]}} versus a proposal whose every tag missed the
  * vocabulary — side by side, so a future change cannot collapse them back
  * into one branch without a visibly contradictory pair of tests.
+ *
+ * <p>And it pins the M1-735 aggregate detector: the per-post no-tags
+ * outcome stays silent, but a sustained all-empty run fires
+ * {@link NoTagsRateMonitor#ERROR_CLASS_SUSTAINED_NO_TAGS} — a distinct
+ * error class from {@code tagger.fallback_to_bootstrap} — while a
+ * normal trickle and a cold start fire nothing.
  */
 @QuarkusTest
 class TaggerWorkerTest {
@@ -67,6 +73,9 @@ class TaggerWorkerTest {
     @Inject
     PartitionScan partitionScan;
 
+    @Inject
+    NoTagsRateMonitor noTagsRateMonitor;
+
     private StubLlmProvider stub() {
         return (StubLlmProvider) llmProvider;
     }
@@ -74,6 +83,10 @@ class TaggerWorkerTest {
     @BeforeEach
     void reset() throws Exception {
         stub().reset();
+        // The CDI monitor's window is in-memory and shared across the
+        // whole Quarkus test instance — same per-test slate role as
+        // stub().reset().
+        noTagsRateMonitor.reset();
         seedVocabularyTag("security");
         seedVocabularyTag("news");
         seedVocabularyTag("finance");
@@ -297,15 +310,136 @@ class TaggerWorkerTest {
                 + "not before the opener where it would read as instructions");
     }
 
+    // ---------- M1-735: aggregate no-tags rate detector ----------
+
+    @Test
+    void sustainedAllEmptyRun_firesDistinctErrorClass_notFallback() throws Exception {
+        // The M1-726 round-1 LOW red-team finding's repro, closed: a tagger
+        // answering {"tags":[]} to EVERY post drives the whole corpus to
+        // tags='{}'. The per-post path stays silent (no retry, no fallback,
+        // no per-post notification), but the AGGREGATE rate past the minimum
+        // sample must fire tagger.sustained_no_tags — and must NOT fire
+        // tagger.fallback_to_bootstrap (distinct classes, distinct runbooks).
+        // Uses the CDI-wired worker and monitor with their real config
+        // defaults (window 50 / min-sample 20 / threshold 0.9), so this test
+        // also pins the production wiring and the configured values. One
+        // tagged post in the middle (19/20 = 0.95 > 0.9) proves a single
+        // healthy answer does not silence a dead tagger.
+        clearNotifierState(NoTagsRateMonitor.ERROR_CLASS_SUSTAINED_NO_TAGS);
+        clearFallbackNotifierState();
+        try {
+            for (int i = 0; i < 20; i++) {
+                stub().setNextResponse(i == 6 ? "{\"tags\":[\"security\"]}" : "{\"tags\":[]}");
+            }
+            List<SeededPost> posts = new ArrayList<>();
+            for (int i = 0; i < 20; i++) {
+                posts.add(seedPost("all-empty-" + i, List.of("ai", "java")));
+            }
+            for (SeededPost post : posts) {
+                taggerWorker.processOne(rowFor(post, List.of("ai", "java")));
+            }
+
+            assertEquals(20, stub().callCount(),
+                "every empty reply is an answer — no post is retried");
+            assertPostState(posts.get(0).id, true, false, Set.of());
+            assertPostState(posts.get(6).id, true, false, Set.of("security"));
+            var state = throttledAdminNotifier.getState(NoTagsRateMonitor.ERROR_CLASS_SUSTAINED_NO_TAGS);
+            assertTrue(state.isPresent(),
+                "a sustained all-empty tagger output must raise the aggregate alert");
+            var fallbackState = throttledAdminNotifier.getState(TaggerWorker.ERROR_CLASS_TAGGER_FALLBACK);
+            assertTrue(fallbackState.isEmpty(),
+                "no-tags outcomes must never fire the bootstrap-fallback error class");
+        } finally {
+            // The notifier's state is DB-persistent across the Quarkus test
+            // instance; leave the empty slate the absence-asserting tests
+            // below start from.
+            clearNotifierState(NoTagsRateMonitor.ERROR_CLASS_SUSTAINED_NO_TAGS);
+        }
+    }
+
+    @Test
+    void noTagsTrickle_belowThreshold_firesNothing() throws Exception {
+        // A normal trickle of untaggable posts is M1-726's intended behavior
+        // and must never alarm: 2 no-tags out of 10 completions (share 0.2,
+        // well under the 0.9 threshold) past the minimum sample of 5.
+        // Hand-wired small window so the test does not need 50 posts; the
+        // CDI-default values are pinned by the all-empty test above.
+        clearNotifierState(NoTagsRateMonitor.ERROR_CLASS_SUSTAINED_NO_TAGS);
+        TaggerWorker worker = workerOver(stub(), smallMonitor(10, 5, 0.9));
+        List<SeededPost> posts = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            // 2 no-tags out of 10, interleaved with tagged answers.
+            stub().setNextResponse(i == 3 || i == 7 ? "{\"tags\":[]}" : "{\"tags\":[\"security\"]}");
+            posts.add(seedPost("trickle-" + i, List.of("ai", "java")));
+        }
+        for (SeededPost post : posts) {
+            worker.processOne(rowFor(post, List.of("ai", "java")));
+        }
+
+        // The per-post outcomes are untouched: tagged posts keep their LLM
+        // tags, untaggable posts persist tags='{}' with no fallback.
+        assertPostState(posts.get(0).id, true, false, Set.of("security"));
+        assertPostState(posts.get(3).id, true, false, Set.of());
+        var state = throttledAdminNotifier.getState(NoTagsRateMonitor.ERROR_CLASS_SUSTAINED_NO_TAGS);
+        assertTrue(state.isEmpty(),
+            "a no-tags share below threshold must never fire the aggregate alert");
+    }
+
+    @Test
+    void coldStart_belowMinSample_firesNothingEvenAtAllEmpty() throws Exception {
+        // Below the minimum sample the window is silent even at 100%
+        // no-tags: a fresh collector tagging its first handful of posts
+        // cannot false-alarm. 4 all-empty completions against a minimum
+        // sample of 5.
+        clearNotifierState(NoTagsRateMonitor.ERROR_CLASS_SUSTAINED_NO_TAGS);
+        TaggerWorker worker = workerOver(stub(), smallMonitor(10, 5, 0.9));
+        for (int i = 0; i < 4; i++) {
+            stub().setNextResponse("{\"tags\":[]}");
+            SeededPost post = seedPost("cold-start-" + i, List.of("ai", "java"));
+            worker.processOne(rowFor(post, List.of("ai", "java")));
+        }
+
+        var state = throttledAdminNotifier.getState(NoTagsRateMonitor.ERROR_CLASS_SUSTAINED_NO_TAGS);
+        assertTrue(state.isEmpty(),
+            "below the minimum sample the window must stay silent even at 100% no-tags");
+    }
+
     // ---------- helpers ----------
+
+    /**
+     * A hand-wired {@link NoTagsRateMonitor} with explicit window
+     * parameters, so window-semantics tests do not need to drive the
+     * production-sized default window (50) to reach the sample floor.
+     */
+    private NoTagsRateMonitor smallMonitor(int windowSize, int minSample, double threshold) {
+        NoTagsRateMonitor monitor = new NoTagsRateMonitor();
+        monitor.throttledAdminNotifier = throttledAdminNotifier;
+        monitor.windowSize = windowSize;
+        monitor.minSample = minSample;
+        monitor.threshold = threshold;
+        monitor.init();
+        return monitor;
+    }
 
     /**
      * A TaggerWorker wired to a caller-supplied provider instead of the
      * shared stub, so a test can vary behaviour BETWEEN the two attempts of
      * the fallback chain. Every other collaborator is the real injected bean,
      * so the DB write and the notifier path stay identical to production.
+     * The monitor is a fresh hand-wired instance with the production
+     * parameters — the two-post scenarios this helper exists for never
+     * reach its sample floor, so it stays silent.
      */
     private TaggerWorker workerOver(LlmProvider provider) {
+        return workerOver(provider, smallMonitor(50, 20, 0.9));
+    }
+
+    /**
+     * {@link #workerOver(LlmProvider)} with a caller-supplied
+     * {@link NoTagsRateMonitor}, so window-semantics tests can shrink
+     * the window and sample floor.
+     */
+    private TaggerWorker workerOver(LlmProvider provider, NoTagsRateMonitor monitor) {
         TaggerWorker worker = new TaggerWorker();
         worker.dataSource = dataSource;
         worker.llmRouter = new LlmRouter(
@@ -315,6 +449,7 @@ class TaggerWorkerTest {
         worker.tagVocabulary = tagVocabulary;
         worker.throttledAdminNotifier = throttledAdminNotifier;
         worker.retryBackoff = retryBackoff;
+        worker.noTagsRateMonitor = monitor;
         worker.partitionScan = partitionScan;
         worker.maxConcurrency = 1;
         worker.init();
@@ -328,10 +463,15 @@ class TaggerWorkerTest {
      * TaggerWorkerBackoffTest performs for this key.
      */
     private void clearFallbackNotifierState() throws Exception {
+        clearNotifierState(TaggerWorker.ERROR_CLASS_TAGGER_FALLBACK);
+    }
+
+    /** {@link #clearFallbackNotifierState()} for an arbitrary notification key. */
+    private void clearNotifierState(String key) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "DELETE FROM admin_notification_state WHERE notification_key = ?")) {
-            ps.setString(1, TaggerWorker.ERROR_CLASS_TAGGER_FALLBACK);
+            ps.setString(1, key);
             ps.executeUpdate();
         }
     }
