@@ -1644,11 +1644,13 @@ Three Postgres roles, least-privilege (decision D34):
   no `UPDATE`); `SELECT` on the rest; `INSERT`-only on `audit_log`;
   `LISTEN/NOTIFY`.
 - **Provider role** — write access on user-state tables, but **not on
-  the privilege columns of the identity/authz tables**: per V62 the
+  the privilege columns of the identity/authz tables**: per V62 (V68
+  added `groups.digest_mode`) the
   Provider holds `SELECT` on `users`, `groups`, `group_membership` and
   `invite_code` plus a **column-scoped** `UPDATE` (`users.probation_until`,
   `users.save_count`; `groups.timezone`, `groups.digest_enabled`,
-  `groups.removed_at`; `group_membership.removed_at`) and a
+  `groups.digest_mode`, `groups.removed_at`;
+  `group_membership.removed_at`) and a
   **column-scoped** `INSERT` (`groups (adapter, upstream_group_id,
   activated_by)`; `group_membership (group_id, user_id)`), and nothing
   else — no `INSERT` on `users`, and no `INSERT` or `UPDATE` at all on

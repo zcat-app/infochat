@@ -16,6 +16,7 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.text.MessageFormat;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -201,6 +202,91 @@ class DigestCommandHandlerTest {
         assertEquals(0, countAuditRows("DIGEST_DISABLE", groupId));
     }
 
+    @Test
+    void digestBrief_setsDigestMode_forGroupAdmin() {
+        inboundContext.setSenderContactId(groupAdminContactId);
+        ScopeRef scope = new ScopeRef.Group(UPSTREAM_GROUP_ID);
+
+        OutboundMessage result = handler.handle(scope, "/digest brief");
+
+        assertEquals(MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_DIGEST_MODE_SET), "brief"), result.text());
+        assertEquals("brief", getDigestMode(groupId));
+        assertEquals(1, countAuditRows("DIGEST_MODE_SET", groupId));
+        assertEquals("normal", getAuditDetailsValue("DIGEST_MODE_SET", groupId, "digest_mode_old"));
+        assertEquals("brief", getAuditDetailsValue("DIGEST_MODE_SET", groupId, "digest_mode_new"));
+    }
+
+    @Test
+    void digestOffThenBrief_leavesGroupPaused() {
+        inboundContext.setSenderContactId(groupAdminContactId);
+        ScopeRef scope = new ScopeRef.Group(UPSTREAM_GROUP_ID);
+
+        handler.handle(scope, "/digest off");
+        OutboundMessage result = handler.handle(scope, "/digest brief");
+
+        assertEquals(MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_DIGEST_MODE_SET), "brief"), result.text());
+        assertEquals("brief", getDigestMode(groupId));
+        // The mode set is independent of the pause flag: the group stays paused.
+        assertFalse(getDigestEnabled(groupId));
+    }
+
+    @Test
+    void modeChange_leavesDigestEnableRowsUntouched() {
+        setDigestEnabled(groupId, false);
+        inboundContext.setSenderContactId(groupAdminContactId);
+        ScopeRef scope = new ScopeRef.Group(UPSTREAM_GROUP_ID);
+
+        handler.handle(scope, "/digest on");
+        assertEquals(1, countAuditRows("DIGEST_ENABLE", groupId));
+
+        handler.handle(scope, "/digest full");
+
+        assertEquals(1, countAuditRows("DIGEST_MODE_SET", groupId));
+        // DIGEST_MODE_SET never doubles as DIGEST_ENABLE — the scheduler's
+        // paused-through-window carve-out reads the DIGEST_ENABLE rows.
+        assertEquals(1, countAuditRows("DIGEST_ENABLE", groupId));
+    }
+
+    @Test
+    void idempotentMode_whenAlreadyInMode_repliesAlready_noUpdate_noAudit() {
+        // Group defaults to digest_mode = 'normal'.
+        inboundContext.setSenderContactId(groupAdminContactId);
+        ScopeRef scope = new ScopeRef.Group(UPSTREAM_GROUP_ID);
+
+        OutboundMessage result = handler.handle(scope, "/digest normal");
+
+        assertEquals(MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_DIGEST_MODE_ALREADY), "normal"), result.text());
+        assertEquals("normal", getDigestMode(groupId));
+        assertEquals(0, countAuditRows("DIGEST_MODE_SET", groupId));
+    }
+
+    @Test
+    void modeSubVerbMatchedCaseInsensitively() {
+        inboundContext.setSenderContactId(groupAdminContactId);
+        ScopeRef scope = new ScopeRef.Group(UPSTREAM_GROUP_ID);
+
+        OutboundMessage result = handler.handle(scope, "/digest FULL");
+
+        assertEquals(MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_DIGEST_MODE_SET), "full"), result.text());
+        assertEquals("full", getDigestMode(groupId));
+    }
+
+    @Test
+    void nonAdminGroupMember_modeChange_getsNotAdminError_noStateChange() {
+        inboundContext.setSenderContactId(regularUserContactId);
+        ScopeRef scope = new ScopeRef.Group(UPSTREAM_GROUP_ID);
+
+        OutboundMessage result = handler.handle(scope, "/digest brief");
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_DIGEST_NOT_ADMIN), result.text());
+        assertEquals("normal", getDigestMode(groupId));
+        assertEquals(0, countAuditRows("DIGEST_MODE_SET", groupId));
+    }
+
     private boolean getDigestEnabled(UUID gId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -209,6 +295,36 @@ class DigestCommandHandlerTest {
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getBoolean("digest_enabled");
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private String getDigestMode(UUID gId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT digest_mode FROM groups WHERE id = ?")) {
+            ps.setObject(1, gId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getString("digest_mode");
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private String getAuditDetailsValue(String action, UUID gId, String key) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT details_json ->> ? AS v FROM audit_log WHERE action = ? AND target_id = ?")) {
+            ps.setString(1, key);
+            ps.setString(2, action);
+            ps.setString(3, gId.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getString("v");
             }
         } catch (Exception e) {
             throw new RuntimeException(e);

@@ -1935,13 +1935,19 @@ public final class BundleKeys {
     /** {@code /digest off} when the group is already paused — idempotent no-op (no UPDATE, no audit row). */
     public static final String REPLY_DIGEST_ALREADY_OFF = "reply.digest.already_off";
 
+    /** {@code /digest brief|normal|full} success — the group's digest render mode is set. Token {@code {0}} = the new mode literal. */
+    public static final String REPLY_DIGEST_MODE_SET = "reply.digest.mode_set";
+
+    /** {@code /digest brief|normal|full} naming the mode the group already has — idempotent no-op (no UPDATE, no audit row). Token {@code {0}} = the mode literal. */
+    public static final String REPLY_DIGEST_MODE_ALREADY = "reply.digest.mode_already";
+
     /** {@code /digest} invoked from DM scope — group-only command (there is no DM periodic digest in v1). */
     public static final String ERROR_DIGEST_DM_SCOPE = "error.digest.dm_scope";
 
     /** {@code /digest} caller is neither group admin nor bot admin. */
     public static final String ERROR_DIGEST_NOT_ADMIN = "error.digest.not_admin";
 
-    /** {@code /digest} with a missing or unrecognized sub-verb — usage error naming the two sub-verbs (never a silent no-op). */
+    /** {@code /digest} with a missing or unrecognized sub-verb — usage error naming the five sub-verbs (never a silent no-op). */
     public static final String ERROR_DIGEST_USAGE = "error.digest.usage";
 
     /** {@code /retry --digest} rejected because the group's digest is paused ({@code digest_enabled = false}); regenerating a stale cached digest around the pause is blocked. */

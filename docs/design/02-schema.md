@@ -452,6 +452,7 @@ test corpus in `infochat-core` keeps the enforcement honest):
 | `RE_EVAL_RELEASED`         | Stage-2 re-eval releases a previously-held post        | `post`          |
 | `DIGEST_ENABLE`            | `/digest on` (group-admin toggle, on actual state flip) | `group`        |
 | `DIGEST_DISABLE`           | `/digest off` (group-admin toggle, on actual state flip) | `group`       |
+| `DIGEST_MODE_SET`          | `/digest brief\|normal\|full` (group-admin mode set, on actual change) | `group` |
 | `DIGEST_RETRY`             | `/retry` (group digest re-run)                         | `group`         |
 | `DIGEST_SLOT_MISSED`       | Digest scheduler: missed slot detected                 | `group`         |
 | `QUARANTINE_TTL_REJECT`    | Quarantine TTL sweep auto-reject                       | `quarantine`    |

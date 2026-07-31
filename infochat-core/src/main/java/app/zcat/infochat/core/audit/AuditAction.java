@@ -236,6 +236,17 @@ public enum AuditAction implements AuditVerb {
     // load-bearing.
     DIGEST_ENABLE,
     DIGEST_DISABLE,
+    // DIGEST_MODE_SET (M1-733) records a group admin's
+    // /digest brief|normal|full change of groups.digest_mode. Written
+    // only on an actual mode change — an idempotent no-op writes no
+    // row — with target_kind='group' and target_id = the group's id,
+    // details_json carrying the old and new mode. Deliberately NOT
+    // DIGEST_ENABLE: DigestScheduler.latestDigestEnableTime derives the
+    // paused-through-window carve-out boundary from
+    // WHERE action = 'DIGEST_ENABLE', so a mode change emitted under
+    // that verb would silently move the boundary and suppress
+    // digest_slot_missed rows for every earlier window.
+    DIGEST_MODE_SET,
     DIGEST_RETRY,
     DIGEST_SLOT_MISSED,
     QUARANTINE_TTL_REJECT,

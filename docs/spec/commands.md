@@ -987,9 +987,9 @@ and makes the digest query depend on row presence.
   suggestions over the IANA tzdb names.
 - `/digest on|off` — pauses (`off`) or resumes (`on`) the group's
   periodic morning/evening digest. Group only; group admin or bot
-  admin. The `on`/`off` sub-verb is matched case-insensitively; a
+  admin. Every sub-verb is matched case-insensitively; a
   missing or unrecognized sub-verb produces a friendly usage error
-  naming the two sub-verbs — never a silent no-op, never a
+  naming the five sub-verbs — never a silent no-op, never a
   fall-through. Mutates the per-group `groups.digest_enabled` flag
   (default `true`), audit-logged before effect. A call that requests
   the state the group is already in is a friendly no-op: it replies
@@ -1000,6 +1000,16 @@ and makes the digest query depend on row presence.
   for a paused group. While a group is paused, `/retry --digest` is
   also rejected (friendly error) so a stale cached digest cannot be
   regenerated and re-sent around the pause.
+- `/digest brief|normal|full` — sets how detailed the group's periodic
+  digest renders (the per-group `groups.digest_mode` column, default
+  `normal`; §Periodic group digests). Group only; group admin or bot
+  admin. Independent of `on|off`: setting the mode never touches
+  `groups.digest_enabled`, so it never resumes a paused group.
+  Audit-logged before effect under `DIGEST_MODE_SET` (distinct from
+  `DIGEST_ENABLE`, whose rows pin the missed-slot pause carve-out
+  boundary), with `details_json` carrying the old and new mode. A call
+  naming the mode the group already has is a friendly no-op: no write,
+  no audit row.
 - `/forget` — immediate purge of everything kept on the calling
   user's behalf. Per decision D37, this is the user-facing privacy
   lever. The exact purge set, called from any scope, is:
