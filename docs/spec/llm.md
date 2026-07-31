@@ -415,9 +415,23 @@ stage.
   silently dropped — losing useful information because of one bad
   entry would degrade tagging quality across deployments where the
   smaller models occasionally emit one out-of-vocab tag in an
-  otherwise-clean list. The bootstrap-tags fallback fires only
-  when **zero** valid tags survive validation (or when the reply
-  is unparseable / schema-violating per the rule above). A
+  otherwise-clean list. **An empty proposal is an outcome, not a
+  failure.** A reply that parses cleanly and proposes no tags at
+  all — the empty list the tagger prompt explicitly asks for when
+  nothing in the vocabulary fits — is a legitimate result of the
+  stage per the zero-or-more contract in §SPI shape: the post is
+  stored with no tags, is not retried, and raises no admin
+  notification. The bootstrap-tags fallback fires only when zero
+  valid tags survive a **non-empty** proposal (or when the reply
+  is unparseable / schema-violating per the rule above). The two
+  zero-tag cases are told apart by the invalid-tag count below,
+  which is zero exactly when the model proposed nothing. A `tags`
+  array whose entries are not strings is not a proposal at all —
+  it is schema-violating per the rule above and never reaches the
+  count. An
+  untagged post is excluded from every tag-keyed retrieval branch
+  and renders in the digest's Other section; it does not leave the
+  corpus. A
   per-post counter records "tagger emitted N valid + M invalid"
   for observability; sustained high invalid rates surface an
   operator alert (cadence and threshold in design notes).

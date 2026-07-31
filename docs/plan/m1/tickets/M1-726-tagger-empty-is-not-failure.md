@@ -1,9 +1,9 @@
 ---
 id: M1-726
 title: "Tagger treats a correct \"no topic fits\" as a failure and relabels the post with the source's topic tags"
-status: escalated
+status: done
 created: 2026-07-30
-last_updated: 2026-07-30
+last_updated: 2026-07-31
 blocked_by: []
 files_budget: 7
 files_scope:
@@ -81,6 +81,20 @@ acceptance:
     model proposed nothing, `invalidCount > 0` means it proposed only
     garbage.
   - >-
+    A `tags` array whose elements are not strings —
+    `{"tags":[{"name":"ai"}]}`, `{"tags":[1,2]}`, `{"tags":[null]}` —
+    is SCHEMA_VIOLATING, not an empty proposal: retry once with the
+    fallback prompt, then bootstrap fallback with `tagger_fallback =
+    TRUE` and the throttled admin notification, exactly as an
+    unparseable reply behaves. Without this, `parseTags`' drop of
+    non-textual elements collapses a wrong-shape reply to an empty
+    list and the `invalidCount` discriminator misreads it as the
+    deliberate "nothing fits" — no retry, no fallback, no notify
+    (round-1 red-team finding, medium). A MIXED array keeps
+    partial-valid semantics (string elements validated, the rest
+    silently dropped). This is what keeps "zero invalid means the
+    model proposed nothing" true.
+  - >-
     The distinction survives the SECOND attempt too. A first attempt
     that is `SCHEMA_VIOLATING` or `UNREACHABLE`, retried, whose retry
     returns a clean empty list, resolves to the same no-tags outcome
@@ -141,7 +155,10 @@ test_plan:
       `tagger_fallback = TRUE`; the two cases are asserted side by side
       in one test class so the distinction cannot be silently collapsed
       again; `UNREACHABLE` then clean-empty resolves to no-tags, not
-      bootstrap; `SCHEMA_VIOLATING` then clean-empty likewise.
+      bootstrap; `SCHEMA_VIOLATING` then clean-empty likewise; a `tags`
+      array of non-strings (`[{"name":"ai"}]` on attempt 1, `[1,2]` on
+      attempt 2) is schema-violating, not NO_TAGS — two calls,
+      bootstrap fallback, throttled notify.
     - >-
       infochat-collector/src/test/java/app/zcat/infochat/collector/eval/tagger/TaggerWorkerIT.java
       (existing file from M1-034a — coverage added, not created) — end
@@ -185,7 +202,20 @@ spec_refs:
   - docs/spec/llm.md §SPI shape
 decision_refs:
   - D19
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-07-31
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 836
+      removed: 29
 redteam_audits:
   - date: 2026-07-30
     verdict: FINDINGS
@@ -205,75 +235,30 @@ redteam_audits:
       spec-committed detector for a wholly non-functioning tagger. Note that
       security.md is explicitly out_of_scope for this ticket, so the
       conformance gap cannot be closed by amending the promise.
+  - date: 2026-07-31
+    verdict: CLEAN
+    base: 96217c955ca1962b7ed066b75b090a190dbc9f41
+    head: working tree (uncommitted branch m1/M1-726-tagger-empty-is-not-failure)
+    verdict_file: docs/plan/m1/redteam/M1-726-2026-07-31-r2.md
+    out_of_model_count: 2
+    note: |
+      Round 2 re-audit of the reworked diff at the /m1-tick run gate, ahead
+      of review. Round-1 medium finding verified closed: a tags array
+      holding elements but no strings is now schema-violating in parseTags
+      (retry → bootstrap → notify restored for wrong-shape replies), and
+      the pre-existing !isArray guard covers scalar/object/null shapes.
+      Round-1 low finding unchanged and not worsened; remediation stays
+      deferred to M1-735 (filed, blocked_by M1-726). Both round-1
+      out-of-model items carry over unchanged.
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings:
-  - date: 2026-07-30
-    category: AUDIT-EVASION
-    severity: medium
-    promise: |
-      docs/spec/security.md §Failure handling — "Schema-violating LLM output
-      (wrong JSON shape, unexpected label value, missing required field) is
-      treated identically to an unparseable reply at every stage: retry once,
-      then apply the stage-specific failure path below." and "Tagger failure →
-      fall back to source.bootstrap_tags, mark the post, throttled admin
-      notify."
-    gap: |
-      The new SUCCESS-vs-failure split keys entirely on
-      ValidationResult.invalidCount(), but invalidCount cannot see a
-      wrong-TYPED tags array: parseTags silently discards every non-textual
-      array element BEFORE validation, so {"tags":[{"name":"ai"}]},
-      {"tags":[null]} or {"tags":[1,2]} yield parsed=[] → valid=[] →
-      invalidCount=0 → NO_TAGS. A schema-violating reply is therefore
-      classified as the model's deliberate "nothing fits" answer and is
-      neither retried nor routed to the bootstrap fallback. Pre-diff the same
-      reply produced ZERO_VALID → retry → BOOTSTRAP + throttled admin notify,
-      so the diff introduces the regression. The diff's own spec text asserts
-      the invariant the code does not hold ("zero invalid means the model
-      proposed nothing" in both llm.md and 05-llm-and-embeddings.md).
-    repro: |
-      A tagger endpoint answers with the well-formed-JSON but wrong-shape body
-      {"tags":[{"name":"ai"}]} (a shape small local models really do emit).
-      parseTags drops the non-textual element, validate reports valid=[]
-      invalid=0, tryOnce returns NO_TAGS, isAnswered short-circuits on attempt
-      1, and persistCursor writes tags='{}', tagger_done=TRUE,
-      tagger_fallback=FALSE. No second attempt, no
-      tagger.fallback_to_bootstrap WARN, no throttled admin notification.
-    suggested_fix_class: input-sanitization
-  - date: 2026-07-30
-    category: AUDIT-EVASION
-    severity: low
-    promise: |
-      docs/spec/security.md §Failure handling — "Tagger failure → fall back to
-      source.bootstrap_tags, mark the post, throttled admin notify." combined
-      with §Trust boundaries item 9 — everything a generative endpoint returns
-      is endpoint-chosen input, so a hostile or compromised endpoint is in
-      scope.
-    gap: |
-      After the diff a clean {"tags":[]} on every call is a terminal success
-      for every post, so an endpoint that answers empty 100% of the time
-      drives the entire corpus to tags='{}' while emitting zero operational
-      signal: no tagger_fallback row marker, no WARN, no
-      ThrottledAdminNotifier call. The replacement observability the diff
-      cites in llm.md ("sustained high invalid rates surface an operator
-      alert") cannot fire either, because the all-empty case reports N=0 AND
-      M=0. The diff removes the only spec-committed detector for a wholly
-      non-functioning tagger stage and adds none.
-    repro: |
-      The configured TAGGER endpoint degrades (or an operator model swap
-      regresses) and returns {"tags":[]} to every request. Every ingested post
-      is persisted with tags='{}', tagger_fallback=FALSE, one LLM call each.
-      /summary <tag>, follow-tag subscriptions, the searchPosts tool and
-      per-tag digest categorization all return nothing for new content, while
-      the admin notification channel stays silent.
-    suggested_fix_class: audit-log-coverage
+redteam_findings: []
 clarity_check:
   date: 2026-07-30
   verdict: PASS
   warnings: []
   blockers: []
-escalation_reason: redteam-finding
 ---
 
 # M1-726: a correct "no topic fits" is punished with the source's topic tags
@@ -387,3 +372,30 @@ in `POSTS_ALL_SQL`. The two readings agree today only because every post
 inherits its source's tags on the fallback path — which is precisely what
 this ticket stops. Correcting that sentence is a `spec:` commit against
 design notes, not part of this diff.
+
+## Escalation resolution (2026-07-31)
+
+Round-1 red-team (`FINDINGS`: 1 medium, 1 low, both AUDIT-EVASION from
+one root — `parseTags` dropped non-textual array elements before
+validation) resolved as **refine**:
+
+- The medium finding is closed in this diff: a `tags` array holding
+  elements but no strings is now schema-violating (new acceptance item
+  above), restoring the retry → bootstrap → notify path for
+  wrong-shape replies and making the amended spec text's "zero invalid
+  means the model proposed nothing" true. Parser hardening (salvaging
+  tags from wrong shapes) was considered and rejected: each model
+  invents new wrong shapes, so a shape violation is a failed tagging
+  attempt, not an answer to be repaired.
+- The low finding — an all-empty endpoint now emits zero operational
+  signal — is split out to M1-735 (rate-based throttled admin alert on
+  the no-tags outcome): an observability addition, not a defect in
+  this diff's logic. The related idea of re-evaluating `tags='{}'`
+  posts when the vocabulary or tagger model changes is filed as
+  M1-736. Both are `blocked_by: [M1-726]`.
+- A controlled-vocabulary `others` tag was considered and rejected:
+  `tags='{}'` already renders in the D62 Other bucket, and an
+  `others` tag would be matchable by `/summary others` and follow-tag
+  subscriptions while giving the model an escape hatch from the
+  nothing-fits judgment — the deceiving-fallback problem rebuilt
+  inside the vocabulary.

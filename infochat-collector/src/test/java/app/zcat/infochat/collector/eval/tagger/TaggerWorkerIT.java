@@ -234,6 +234,30 @@ class TaggerWorkerIT {
         assertTaggerDone(post.id, false);
     }
 
+    // ---------- 27.8 clean empty tag list → no tags, no fallback ----------
+
+    @Test
+    @Order(8)
+    void cleanEmptyTagListPersistsNoTagsAndLeavesBootstrapTagsOff() throws Exception {
+        // M1-726, end to end through the real pipeline write: the model
+        // complied with prompts/tagger.md's "if none fit well, output
+        // {"tags": []}", so the cursor advances with an EMPTY tags array and
+        // tagger_fallback=false. The source's bootstrap tags must be nowhere
+        // on the row — filing an off-topic post under its source's topic is
+        // exactly the defect this scenario pins closed.
+        stub().setNextResponse("{\"tags\":[]}");
+        SeededPost post = seedPickupReadyPost(
+            "tagger-it-clean-empty", "Body", List.of("ai", "java"));
+
+        taggerWorker.processOne(rowFor(post, List.of("ai", "java")));
+
+        assertEquals(1, stub().callCount(),
+            "a deliberate empty tag list is an answer — no retry");
+        assertPostState(post.id, /* taggerDone */ true, /* fallback */ false,
+            List.of());
+        assertPostTagsExclude(post.id, List.of("ai", "java"));
+    }
+
     // ---------- helpers ----------
 
     private SeededPost seedPickupReadyPost(String slug, String body, List<String> bootstrapTags)
@@ -348,6 +372,30 @@ class TaggerWorkerIT {
                 Set<String> actualSet = new HashSet<>(Arrays.asList(actual));
                 Set<String> expectedSet = new HashSet<>(expectedTags);
                 assertEquals(expectedSet, actualSet, "post.tags");
+            }
+        }
+    }
+
+    /**
+     * Asserts none of the given tags reached {@code post.tags}. Stated
+     * separately from {@link #assertPostState} because the interesting claim
+     * is about a specific set the row must NOT have acquired (the source's
+     * bootstrap tags), not about the row's exact contents.
+     */
+    private void assertPostTagsExclude(UUID postId, List<String> forbidden) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT tags FROM post WHERE id = ?")) {
+            ps.setObject(1, postId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "post row must exist after Tagger");
+                Set<String> actual = new HashSet<>(
+                    Arrays.asList((String[]) rs.getArray("tags").getArray()));
+                for (String tag : forbidden) {
+                    assertFalse(actual.contains(tag),
+                        "the source's bootstrap tag '" + tag + "' must not be applied to a post "
+                            + "the tagger judged to have no topic; got " + actual);
+                }
             }
         }
     }

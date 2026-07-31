@@ -1,9 +1,13 @@
 package app.zcat.infochat.collector.eval.tagger;
 
+import app.zcat.infochat.collector.eval.PartitionScan;
+import app.zcat.infochat.collector.eval.RetryBackoff;
 import app.zcat.infochat.collector.eval.testing.StubLlmProvider;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.llm.LlmProvider;
+import app.zcat.infochat.llm.LlmResponse;
+import app.zcat.infochat.llm.routing.LlmRouter;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,8 +23,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -30,6 +36,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Unit-level assertions for TaggerWorker's partial-valid handling and
  * bootstrap-fallback path. Complements TaggerWorkerIT with focus on the
  * M1-081a acceptance items: partial-valid counter and notifier wiring.
+ *
+ * <p>It also holds both halves of the M1-726 distinction — a clean
+ * {@code {"tags":[]}} versus a proposal whose every tag missed the
+ * vocabulary — side by side, so a future change cannot collapse them back
+ * into one branch without a visibly contradictory pair of tests.
  */
 @QuarkusTest
 class TaggerWorkerTest {
@@ -49,6 +60,12 @@ class TaggerWorkerTest {
 
     @Inject
     LlmProvider llmProvider;
+
+    @Inject
+    RetryBackoff retryBackoff;
+
+    @Inject
+    PartitionScan partitionScan;
 
     private StubLlmProvider stub() {
         return (StubLlmProvider) llmProvider;
@@ -93,6 +110,97 @@ class TaggerWorkerTest {
         var state = throttledAdminNotifier.getState(TaggerWorker.ERROR_CLASS_TAGGER_FALLBACK);
         assertTrue(state.isPresent(),
             "ThrottledAdminNotifier should fire on bootstrap fallback");
+    }
+
+    @Test
+    void cleanEmptyTagList_persistsNoTags_withoutRetryOrFallback() throws Exception {
+        // The counterpart of zeroValidTags_fallsBackToBootstrapTags above, and
+        // deliberately adjacent to it: both replies leave ZERO valid tags, and
+        // only invalidCount tells them apart. `{"tags":[]}` is what
+        // prompts/tagger.md tells the model to emit when nothing fits, so it
+        // is an outcome — no retry, no bootstrap tags, no admin notification
+        // (M1-726).
+        clearFallbackNotifierState();
+        stub().setNextResponse("{\"tags\":[]}");
+        SeededPost post = seedPost("clean-empty", List.of("ai", "java"));
+
+        taggerWorker.processOne(rowFor(post, List.of("ai", "java")));
+
+        assertPostState(post.id, true, false, Set.of());
+        assertEquals(1, stub().callCount(),
+            "a deliberate empty tag list is an answer — it must not be retried");
+        var state = throttledAdminNotifier.getState(TaggerWorker.ERROR_CLASS_TAGGER_FALLBACK);
+        assertTrue(state.isEmpty(),
+            "no admin notification may fire for a post the tagger correctly judged to have no topic");
+    }
+
+    @Test
+    void nonStringTagsArray_isSchemaViolating_notNoTags() throws Exception {
+        // M1-726 round-1 red-team finding: {"tags":[{"name":"ai"}]},
+        // {"tags":[1,2]}, {"tags":[null]} are wrong-shape replies, not the
+        // deliberate "nothing fits" empty list. parseTags used to drop the
+        // non-textual elements and hand validate() an empty list, so the
+        // invalidCount discriminator read them as NO_TAGS — no retry, no
+        // fallback, no notification. They now take the schema-violating
+        // path: retry once, then bootstrap fallback + throttled notify.
+        clearFallbackNotifierState();
+        stub().setNextResponses("{\"tags\":[{\"name\":\"ai\"}]}", "{\"tags\":[1,2]}");
+        SeededPost post = seedPost("nonstring-array", List.of("ai", "java"));
+
+        try {
+            taggerWorker.processOne(rowFor(post, List.of("ai", "java")));
+
+            assertEquals(2, stub().callCount(),
+                "a wrong-shape tags array is schema-violating — it must retry once");
+            assertPostState(post.id, true, true, Set.of("ai", "java"));
+            var state = throttledAdminNotifier.getState(TaggerWorker.ERROR_CLASS_TAGGER_FALLBACK);
+            assertTrue(state.isPresent(),
+                "a reply that stays wrong-shaped on retry falls back to bootstrap tags and notifies");
+        } finally {
+            // This test FIRES the notifier, and the notifier's state is
+            // DB-persistent across the whole Quarkus test instance — leaving
+            // it set would make partialValid's must-NOT-fire assertion above
+            // fail on test order. Restore the empty slate we started from.
+            clearFallbackNotifierState();
+        }
+    }
+
+    @Test
+    void schemaViolatingThenCleanEmptyList_resolvesToNoTagsNotBootstrap() throws Exception {
+        // The distinction has to survive the SECOND attempt too: a garbage
+        // first reply retries with the line-oriented fallback prompt, whose
+        // own "nothing fits" shape is a bare `TAGS:`. That is still an answer,
+        // so the chain must terminate there rather than falling through to
+        // the source's bootstrap tags.
+        stub().setNextResponses("this is not json", "TAGS:");
+        SeededPost post = seedPost("schema-then-empty", List.of("ai", "java"));
+
+        taggerWorker.processOne(rowFor(post, List.of("ai", "java")));
+
+        assertEquals(2, stub().callCount(),
+            "the schema-violating first attempt still retries once");
+        assertPostState(post.id, true, false, Set.of());
+    }
+
+    @Test
+    void unreachableThenCleanEmptyList_resolvesToNoTagsNotBootstrap() throws Exception {
+        // Same second-attempt property on the UNREACHABLE arm. The shared
+        // StubLlmProvider fails either every call or none, so this leg wires
+        // its own TaggerWorker over a two-behaviour provider — the only way to
+        // make attempt 1 throw and attempt 2 answer.
+        AtomicInteger calls = new AtomicInteger();
+        TaggerWorker worker = workerOver((task, systemPrompt, userPrompt) -> {
+            if (calls.incrementAndGet() == 1) {
+                throw new RuntimeException("simulated LLM unreachable");
+            }
+            return new LlmResponse("{\"tags\":[]}");
+        });
+        SeededPost post = seedPost("unreachable-then-empty", List.of("ai", "java"));
+
+        worker.processOne(rowFor(post, List.of("ai", "java")));
+
+        assertEquals(2, calls.get(), "the unreachable arm retries exactly once");
+        assertPostState(post.id, true, false, Set.of());
     }
 
     @Test
@@ -190,6 +298,43 @@ class TaggerWorkerTest {
     }
 
     // ---------- helpers ----------
+
+    /**
+     * A TaggerWorker wired to a caller-supplied provider instead of the
+     * shared stub, so a test can vary behaviour BETWEEN the two attempts of
+     * the fallback chain. Every other collaborator is the real injected bean,
+     * so the DB write and the notifier path stay identical to production.
+     */
+    private TaggerWorker workerOver(LlmProvider provider) {
+        TaggerWorker worker = new TaggerWorker();
+        worker.dataSource = dataSource;
+        worker.llmRouter = new LlmRouter(
+            List.of(new LlmRouter.Entry("test-stub", provider, Set.of("en"))),
+            LlmRouter.ConfigReader.fromMap(
+                Map.of(LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER, "test-stub")));
+        worker.tagVocabulary = tagVocabulary;
+        worker.throttledAdminNotifier = throttledAdminNotifier;
+        worker.retryBackoff = retryBackoff;
+        worker.partitionScan = partitionScan;
+        worker.maxConcurrency = 1;
+        worker.init();
+        return worker;
+    }
+
+    /**
+     * The notifier's state is DB-persistent and shared across every test in
+     * the Quarkus instance, so a "no notification fired" assertion is only
+     * meaningful from a known-empty slate — the same per-key cleanup
+     * TaggerWorkerBackoffTest performs for this key.
+     */
+    private void clearFallbackNotifierState() throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "DELETE FROM admin_notification_state WHERE notification_key = ?")) {
+            ps.setString(1, TaggerWorker.ERROR_CLASS_TAGGER_FALLBACK);
+            ps.executeUpdate();
+        }
+    }
 
     private TaggerWorker.PostRow rowFor(SeededPost post, List<String> bootstrapTags) {
         return new TaggerWorker.PostRow(

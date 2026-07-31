@@ -68,11 +68,12 @@ import java.util.regex.Pattern;
  *       prompt — re-issuing the same JSON-mode prompt to the same
  *       small model produces the same garbage, so the retry shape
  *       must change).</li>
- *   <li><b>Zero-valid</b> — JSON parsed but ZERO tags passed the
- *       vocabulary check after partial-valid filtering. Retry once
- *       with the SAME primary prompt — vocabulary mismatch is a
- *       content issue, not a prompt-shape issue, so the same prompt
- *       may produce a different (and valid) tag set.</li>
+ *   <li><b>Zero-valid</b> — JSON parsed, the model PROPOSED at least
+ *       one tag, and ZERO of them passed the vocabulary check after
+ *       partial-valid filtering. Retry once with the SAME primary
+ *       prompt — vocabulary mismatch is a content issue, not a
+ *       prompt-shape issue, so the same prompt may produce a
+ *       different (and valid) tag set.</li>
  *   <li><b>LLM unreachable</b> — {@code provider.generate} threw or
  *       timed out. Retry once with the SAME primary prompt, after
  *       the configured {@link RetryBackoff} sleep — unreachability
@@ -86,6 +87,27 @@ import java.util.regex.Pattern;
  * {@code post.tagger_fallback = true}, log WARN with canonical
  * {@code error_class='tagger.fallback_to_bootstrap'} (consumed by
  * the future T2-G throttled admin notifier).
+ *
+ * <h2>An empty proposal is an outcome, not a failure</h2>
+ *
+ * <p>{@code prompts/tagger.md} instructs the model to emit
+ * {@code {"tags": []}} when nothing in the vocabulary fits, so a clean
+ * empty list is the model COMPLYING, not failing: the post is written
+ * with {@code tags='{}'}, {@code tagger_fallback=false}, no retry and
+ * no admin notification. {@link ValidationResult#invalidCount()} is
+ * what separates it from the zero-valid failure above — a zero count
+ * means the model proposed nothing, a positive count means it proposed
+ * only out-of-vocabulary garbage. Collapsing the two stored every
+ * genuinely off-topic post under its SOURCE's topic tags and kept the
+ * tagger-fallback alarm permanently lit, so a real tagger regression
+ * carried no signal (M1-726, {@code docs/spec/llm.md} §Failure
+ * handling). The bootstrap fallback still covers every real failure
+ * mode; an untagged post remains retrievable through the retrieval
+ * branches that apply no tag predicate and renders in the digest's
+ * D62 Other bucket. A {@code tags} array whose elements are all
+ * non-strings is schema-violating rather than an empty proposal, so
+ * the invalidCount reading — zero means the model proposed nothing —
+ * stays true.
  *
  * <h2>Partial-valid handling</h2>
  *
@@ -267,7 +289,7 @@ public class TaggerWorker {
         // Attempt 1: primary JSON prompt.
         AttemptResult first = tryOnce(provider, row, primaryPromptTemplate, /* attempt */ 1);
 
-        if (first.kind() == AttemptKind.SUCCESS) {
+        if (isAnswered(first.kind())) {
             return new TaggerOutcome(Outcome.LLM, first.validTags());
         }
 
@@ -293,14 +315,14 @@ public class TaggerWorker {
                 second = tryOnce(provider, row, primaryPromptTemplate, /* attempt */ 2);
             }
             default -> {
-                // SUCCESS handled above; the compiler exhaustiveness
-                // forces this branch to exist but it is not reachable
-                // on a non-SUCCESS first attempt.
+                // SUCCESS and NO_TAGS handled above; the compiler
+                // exhaustiveness forces this branch to exist but it is
+                // not reachable on an unanswered first attempt.
                 second = first;
             }
         }
 
-        if (second.kind() == AttemptKind.SUCCESS) {
+        if (isAnswered(second.kind())) {
             return new TaggerOutcome(Outcome.LLM, second.validTags());
         }
 
@@ -316,6 +338,17 @@ public class TaggerWorker {
             "Tagger fallback to bootstrap_tags for post_id=" + row.id()
                 + " (first=" + first.kind() + " second=" + second.kind() + ")");
         return new TaggerOutcome(Outcome.BOOTSTRAP, row.bootstrapTags());
+    }
+
+    /**
+     * Whether the attempt produced a usable answer — a tag set
+     * ({@link AttemptKind#SUCCESS}) or the model's deliberate "nothing
+     * fits" ({@link AttemptKind#NO_TAGS}). Both terminate the chain
+     * with {@link Outcome#LLM}; only the remaining kinds are failures
+     * that retry and then fall back to bootstrap tags.
+     */
+    private static boolean isAnswered(AttemptKind kind) {
+        return kind == AttemptKind.SUCCESS || kind == AttemptKind.NO_TAGS;
     }
 
     /**
@@ -360,7 +393,14 @@ public class TaggerWorker {
             validated.cappedCount());
 
         if (validated.valid().isEmpty()) {
-            return AttemptResult.zeroValid();
+            // invalidCount is the whole distinction: 0 means the model
+            // proposed nothing at all (the documented "none fit" reply),
+            // > 0 means every tag it did propose missed the vocabulary.
+            // Only the latter is a failure worth a retry and the
+            // bootstrap fallback (M1-726).
+            return validated.invalidCount() == 0
+                ? AttemptResult.noTags()
+                : AttemptResult.zeroValid();
         }
         return AttemptResult.success(validated.valid());
     }
@@ -396,7 +436,12 @@ public class TaggerWorker {
      * Parse the model reply as either strict JSON {@code {"tags":
      * [...]}} or the line-oriented fallback shape {@code TAGS: tag1,
      * tag2}. Returns the raw (un-normalized, un-validated) tag list,
-     * or {@code null} when the reply is schema-violating.
+     * or {@code null} when the reply is schema-violating. A {@code
+     * tags} array that holds elements but not a single string
+     * ({@code [1,2]}, {@code [{"name":"ai"}]}, {@code [null]}) is
+     * schema-violating too — a wrong-shape reply, not the model's
+     * deliberate empty answer (M1-726); a mixed array keeps only its
+     * string elements.
      */
     @Nullable List<String> parseTags(@Nullable String text) {
         if (text == null) {
@@ -439,6 +484,19 @@ public class TaggerWorker {
                     out.add(node.asText());
                 }
             });
+            if (out.isEmpty() && !tags.isEmpty()) {
+                // The model proposed SOMETHING, but none of it was a
+                // string — {"tags":[1,2]}, [{"name":"ai"}], [null]. That
+                // is a wrong-shape reply, not the deliberate "nothing
+                // fits" empty list: returning [] here would make it
+                // indistinguishable from {"tags":[]} under the
+                // invalidCount discriminator, skipping the retry and the
+                // bootstrap fallback the schema-violation path mandates
+                // (M1-726 round-1 red-team finding). A MIXED array keeps
+                // partial-valid semantics — the string elements are
+                // validated and the rest silently dropped.
+                return null;
+            }
             return out;
         } catch (IOException e) {
             return null;
@@ -604,12 +662,22 @@ public class TaggerWorker {
         static AttemptResult zeroValid() {
             return new AttemptResult(AttemptKind.ZERO_VALID, List.of());
         }
+        static AttemptResult noTags() {
+            return new AttemptResult(AttemptKind.NO_TAGS, List.of());
+        }
         static AttemptResult unreachable() {
             return new AttemptResult(AttemptKind.UNREACHABLE, List.of());
         }
     }
 
-    private enum AttemptKind { SUCCESS, SCHEMA_VIOLATING, ZERO_VALID, UNREACHABLE }
+    /**
+     * {@code NO_TAGS} is an ANSWER, not a failure — the model parsed
+     * cleanly and proposed nothing, which the prompt explicitly asks
+     * for when no vocabulary entry fits. It is kept distinct from
+     * {@code SUCCESS} so the log and any future metric can tell an
+     * empty result from a populated one.
+     */
+    private enum AttemptKind { SUCCESS, NO_TAGS, SCHEMA_VIOLATING, ZERO_VALID, UNREACHABLE }
 
     /**
      * Partition of one parsed tag list: {@code valid} is the accepted
