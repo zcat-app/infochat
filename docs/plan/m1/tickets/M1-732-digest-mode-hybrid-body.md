@@ -3,20 +3,54 @@ id: M1-732
 title: "groups.digest_mode and the hybrid category body: count + roll-up + headlines"
 status: pending
 created: 2026-07-30
-last_updated: 2026-07-30
+last_updated: 2026-07-31
 blocked_by:
   - M1-731
-files_budget: 8
-files_scope: []
-complexity: low
+files_budget: 12
+files_scope:
+  - infochat-core/src/main/resources/db/migration/V66__group_digest_mode.sql
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRenderer.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
+  - infochat-provider/src/main/resources/bundles/en.properties
+  - infochat-provider/src/main/resources/bundles/cs.properties
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/RecordingDigestRenderer.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererSectionsTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/StubGroupDataSource.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java
+  - docs/design/03-commands.md
+complexity: high
 risk: low
-round_cap: 2
-security_relevant: false
-migration_touch: false
-out_of_scope: []
-acceptance: []
+round_cap: 3
+security_relevant: true
+migration_touch: true
+out_of_scope:
+  - the /digest brief|normal|full command and its audit verb (M1-733)
+  - delivery batching (M1-734)
+  - CategoryRollupGenerator's prompt (M1-728)
+  - the section cap (M1-721) and lead section (M1-725)
+  - prominence ordering (M1-724)
+  - /summary's render forms
+  - the D17 degraded fallback and the zero-posts fixed reply (already single-message and mode-independent)
+acceptance:
+  - "V66__group_digest_mode.sql adds groups.digest_mode TEXT NOT NULL DEFAULT 'normal' CHECK (digest_mode IN ('brief','normal','full')) — additive NOT NULL with a default, metadata-only on PostgreSQL 11+ (same argument V44__group_digest_enabled.sql:15 makes for digest_enabled), so no table rewrite"
+  - "A normal category section renders, in order: UPPERCASE header with the section's TRUE cluster count; the CategoryRollupGenerator synthesis; up to infochat.digest.category-headline-count (default 5) bare headlines, each a DisplayHeadline title plus its URL and NO prose; and the existing reply.summary.short.category_footer affordance"
+  - "brief drops the headlines (header + roll-up + footer only); full keeps today's per-cluster prose with categoryItemCap lifted to Integer.MAX_VALUE"
+  - "The header count is the section's FULL cluster count, not the number of headlines shown — a test pins a 13-cluster section rendering '13' while showing 5"
+  - "Per-mode LLM call counts against one 8-category/40-cluster fixture: brief and normal issue exactly one CategoryRollupGenerator call per surviving section and ZERO SummaryProseGenerator calls; full issues one prose call per rendered cluster"
+  - "DigestWorker.readGroupMetadata is a SQL-deserialization boundary: a digest_mode that is NULL or unrecognized resolves to normal, logged once at WARN — a test pins the fallback"
+  - "StubGroupDataSource gains a digest_mode column, keeping its existing 3-arg constructor defaulting to normal so DigestWorkerClockTest needs no edit"
+  - "DigestRenderer.render(List,String) is DELETED (no production caller — verified 2026-07-31: DigestWorker:213 uses renderSections; the only callers are tests); the 7 test call sites (DigestRendererTest x6, DigestRendererSectionsTest x1) are retargeted to the mode-aware renderSections"
+  - "reply.digest.category.more and reply.digest.category.more_other are DELETED from en.properties AND cs.properties (D43 bilateral keyset — BundleLoaderTest) together with their BundleKeys constants REPLY_DIGEST_CATEGORY_MORE / _MORE_OTHER; their sole producer (DigestRenderer.java:153-165) goes with the lifted full cap"
+  - "DigestRendererTest.renderSections_stripsAdminCommandTokensBeforePersistenceAndReplay runs at mode full, so the sanitize-before-persist pin stays non-vacuous under the mode that still renders per-cluster prose"
+  - "The ONE new config key infochat.digest.category-headline-count (default 5) is documented in docs/design/03-commands.md in the SAME diff as the @ConfigProperty (DocumentedConfigKeyParityTest, M1-708)"
 test_plan:
-  adds: []
+  adds:
+    - "infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererSectionsTest.java — mode-parameterized section shape (normal = header + roll-up + headlines + footer; brief = no headlines; full = per-cluster prose, no overflow line)"
+    - "infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererSectionsTest.java — header true-count pin — 13-cluster section renders '13' while showing 5 headlines"
+    - "infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererTest.java — per-mode LLM call-count fixture, 8 categories / 40 clusters (brief/normal = 1 roll-up per section, zero SummaryProseGenerator calls; full = 1 prose call per cluster)"
+    - "infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java — readGroupMetadata digest_mode fallback — NULL and unrecognized values resolve to normal, WARN logged once"
   preserves:
     - all tests currently green on main
 spec_refs: []
@@ -33,14 +67,22 @@ escalation_reason:
 
 # M1-732: the hybrid digest body
 
-> **Skeleton from the M1-722 decompose (2026-07-30).** `acceptance`,
-> `out_of_scope` and the sizing fields still need authoring.
+> **Authored 2026-07-31** (was a skeleton from the M1-722 decompose,
+> 2026-07-30). Two dispositions the decompose punted on were decided with the
+> user on 2026-07-31: `DigestRenderer.render(List,String)` is **deleted**
+> (verified dead in production — `DigestWorker:213` uses `renderSections`, the
+> only callers are tests), and the orphaned
+> `reply.digest.category.more` / `_more_other` keys are **deleted** (en+cs,
+> D43 pair). Both are acceptance items.
 >
-> **Sizing this ticket almost certainly needs before `start`:**
-> `migration_touch: true` (it adds `V66`), and `complexity: high` /
-> `round_cap: 3` — this is the largest child and the one M1-722's three plan
-> passes kept failing on. Leave `security_relevant` to judgement: the render
-> path carries the M1-697 sanitize control (see §Notes).
+> Sizing set at authoring: `migration_touch: true` (adds `V66`),
+> `complexity: high` / `round_cap: 3` — the largest child and the one M1-722's
+> three plan passes kept failing on — and `security_relevant: true`: the
+> render path carries the M1-697 sanitize control (see §Notes), so the
+> redteam gate runs before review. Because `migration_touch: true` forbids
+> the `--parallel`/worktree start, this ticket runs **sequentially in the
+> primary checkout**, and only once no other ticket is in flight (deferred
+> 2026-07-31 until M1-736/M1-737 land).
 
 ## Context
 
@@ -120,10 +162,15 @@ mode change inverts:
 `Integer.MAX_VALUE`) emits no `+N more` line. **There is no mode assignment for
 `render()` under which all three stay green**, and `render(List,String)` has no
 production caller at all — its only callers are these tests plus
-`DigestRendererSectionsTest:130`. This ticket must decide `render`'s fate
-explicitly (delete it, pin it to `full`, or retarget the tests) and say so in
-`acceptance`, in the same shape M1-722's item 17 used for the two other
-inverted assertions.
+`DigestRendererSectionsTest:130` (verified again 2026-07-31:
+`DigestWorker:213` calls `renderSections` directly, and `DigestWorker:217`
+carries a "NEVER call render() after renderSections()" comment).
+
+**DECIDED 2026-07-31 (user): `render(List,String)` is DELETED.** The seven
+test call sites are retargeted to the mode-aware `renderSections` — the
+three inverted assertions above are rewritten in their M1-722-item-17 shape
+against `full` (prose uncapped, no overflow line) or dropped where `normal`
+coverage supersedes them. Pinned in `acceptance`.
 
 ## Also orphaned by this change
 
@@ -132,19 +179,21 @@ With `full`'s cap lifted and `normal`/`brief` rendering no items,
 `reply.digest.category.more` / `reply.digest.category.more_other`
 (`en.properties:836,838`, `cs.properties:634,636`,
 `BundleKeys.REPLY_DIGEST_CATEGORY_MORE` / `_MORE_OTHER`). Both keys lose their
-last caller in every mode. State delete-or-keep. Note D43 bilateral keyset:
-an `en.properties` change needs its `cs.properties` twin or `BundleLoaderTest`
+last caller in every mode. **DECIDED 2026-07-31 (user): DELETE both keys and
+their `BundleKeys` constants in this diff.** D43 bilateral keyset: the
+`en.properties` deletion needs its `cs.properties` twin or `BundleLoaderTest`
 fails.
 
 ## Acceptance
 
-*To author.* Core commitments the decompose carried forward:
+Authored 2026-07-31 into the frontmatter; the decompose's carried-forward
+commitments behind them:
 
 - `V66__group_digest_mode.sql` adds `groups.digest_mode TEXT NOT NULL DEFAULT
   'normal' CHECK (digest_mode IN ('brief','normal','full'))`. Additive NOT NULL
   with a default is metadata-only on PostgreSQL 11+ (the argument
   `V44__group_digest_enabled.sql:15` makes for `digest_enabled`), so no table
-  rewrite. `V66` was free as of 2026-07-30 (`V65` is the latest).
+  rewrite. `V66` was free as of 2026-07-31 (`V65` is the latest).
 - A `normal` category section renders, in order: UPPERCASE header with the
   section's TRUE cluster count; the `CategoryRollupGenerator` synthesis; up to
   `infochat.digest.category-headline-count` (default 5) bare headlines, each a
@@ -168,7 +217,7 @@ fails.
 
 ## Out-of-scope
 
-*To author.* At minimum: the `/digest brief|normal|full` command and its audit
+Declared in the frontmatter: the `/digest brief|normal|full` command and its audit
 verb (M1-733); delivery batching (M1-734); `CategoryRollupGenerator`'s prompt
 (M1-728); the section cap (M1-721) and lead section (M1-725); prominence
 ordering (M1-724); `/summary`'s render forms; the D17 degraded fallback and the
@@ -197,4 +246,6 @@ sanitize-before-persist pin
 (`:183-216`) passes **vacuously** — the injected `/grant-admin` prose never
 enters a section, so the test `test_plan.preserves` calls "the byte-identity
 proof" keeps its name and loses its teeth. Engineering-rules §10 ("Tests are
-controls too") applies: state which mode keeps it non-vacuous.
+controls too") applies — **resolved at authoring (2026-07-31): the pin runs at
+mode `full`** (an acceptance item), the only mode that still renders
+per-cluster prose.
