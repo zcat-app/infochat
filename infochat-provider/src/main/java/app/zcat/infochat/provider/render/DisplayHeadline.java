@@ -12,12 +12,17 @@ import org.jspecify.annotations.Nullable;
  * {@code SavedCommandHandler}). Sharing one derivation is what keeps those
  * four from drifting.
  *
- * <p><b>Not for prompt input.</b> The summarizer prompt
- * ({@code SummaryProseGenerator.buildPrompt}) and the rollup prompt
- * ({@code CategoryRollupGenerator.buildPrompt}) must keep appending the FULL
- * untruncated title — feeding a bounded headline to either would have the
- * model summarize a fragment, which produces no error and no failing test.
- * This helper is display-only.
+ * <p><b>Prompt input: summarizer no, roll-up yes.</b> The summarizer prompt
+ * ({@code SummaryProseGenerator.buildPrompt}) must keep appending the FULL
+ * untruncated title — it summarizes ONE cluster, so a bounded headline
+ * would have the model describe a fragment, which produces no error and
+ * no failing test. The roll-up prompt
+ * ({@code CategoryRollupGenerator.buildPrompt}) is the deliberate
+ * exception (M1-728, revising M1-714's original both-prompts rule): it
+ * sees every cluster in a category and is told not to re-list them, so
+ * it feeds each title through THIS helper — a corpus-maximum nitter
+ * title contributes 200 chars + an ellipsis instead of crowding out
+ * several hundred other titles.
  *
  * <p><b>Why a headline is derived at all.</b> {@code title} is a headline only
  * for RSS. For the social sources it is the post: measured over the 9,236-post

@@ -210,8 +210,10 @@ public class CategoryRollupGenerator {
      * continuous so the requested length is reproducible and reviewable
      * (M1-728). A malformed entry or a list with no matching band is an
      * {@link IllegalArgumentException} — {@link #generateRollup}'s failure
-     * containment turns it into a no-roll-up outcome with a WARN naming
-     * the bad value.
+     * containment turns it into a no-roll-up outcome with a WARN. Note
+     * {@link SafeLog} drops the exception message body (spec-committed
+     * §User content in exceptions), so the WARN names the failure class,
+     * not the offending value.
      */
     static int requestedSentences(int clusterCount, String bands) {
         for (String band : bands.split(",")) {
