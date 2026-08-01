@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 748 |
+| done | 749 |
 | deferred | 1 |
 | abandoned | 21 |
 | **total** | **777** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-705 — Rate limiting: build the per-cost-profile bucket partition (complexity: high, risk: high)
-- M1-706 — Profile bundle: eval queue depth and summary worker count (complexity: high, risk: medium)
 - M1-725 — The digest has no lead: a reader who opens only the first message gets the newest item of the largest tag (complexity: medium, risk: medium)
 - M1-728 — Category roll-up sends every post's full body and asks for one or two sentences: it neither fits a large category nor describes one (complexity: medium, risk: medium)
 
@@ -949,7 +948,7 @@ M1-702 (done)
 M1-703 (done)
 M1-704 (done)
 M1-705 (pending) ← runnable
-M1-706 (pending) ← runnable
+M1-706 (done)
 M1-707 (done)
 M1-708 (done)
 M1-709 (done)

@@ -7,6 +7,7 @@ import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import io.quarkus.scheduler.Scheduled;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Event;
@@ -37,6 +38,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -55,7 +57,10 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>Slot events are dispatched on virtual threads: one group's slow
  * consumer cannot delay later groups' slot emissions in the same
- * tick.</p>
+ * tick. Concurrent dispatches are bounded by
+ * {@code infochat.summary.workers} (M1-706, the profile bundle's
+ * summary worker count) — the bound queues extra slots, it never
+ * drops them.</p>
  */
 @ApplicationScoped
 public class DigestScheduler {
@@ -75,8 +80,31 @@ public class DigestScheduler {
     // the same tick. A tick that re-fires a slot whose previous dispatch is
     // still rendering (no cache row yet) is absorbed by DigestWorker's
     // in-flight guard, and the summary_cache unique index backstops it.
+    // Concurrency INSIDE fireSlot is bounded by slotDispatchPermits
+    // (M1-706, infochat.summary.workers — the profile bundle's summary
+    // worker count): the per-slot virtual thread parks on the semaphore
+    // until a worker slot frees, so the bound queues extra dispatches
+    // rather than dropping them and never blocks the tick thread.
     private final ExecutorService slotDispatchExecutor =
             Executors.newVirtualThreadPerTaskExecutor();
+
+    // Profile-driven bound on concurrent slot dispatch (M1-706). No inline
+    // defaultValue — profile-driven keys carry their defaults in
+    // application.properties (FetchScheduler.java:95-100 convention); the
+    // base value is the test-time fallback.
+    @ConfigProperty(name = "infochat.summary.workers")
+    int summaryWorkers;
+
+    // Sized in initSlotDispatch() once config injection has run (non-null
+    // at every dispatch deref — hence NullAway.Init, mirroring
+    // NostrStreamSource's start()-set fields).
+    @SuppressWarnings("NullAway.Init")
+    private Semaphore slotDispatchPermits;
+
+    @PostConstruct
+    void initSlotDispatch() {
+        slotDispatchPermits = new Semaphore(summaryWorkers);
+    }
 
     @Inject
     DataSource dataSource;
@@ -183,10 +211,21 @@ public class DigestScheduler {
             }
 
             if (!now.isBefore(effectiveFireTime)) {
-                // Within window and past stagger time: emit
+                // Within window and past stagger time: emit. The dispatch
+                // thread parks on slotDispatchPermits before entering
+                // fireSlot, bounding concurrent slot work to
+                // infochat.summary.workers without blocking this tick and
+                // without dropping the slot (M1-706).
                 DigestSlot slot = new DigestSlot(
                         group.id, group.timezone, slotKind, windowStart, windowEnd);
-                return slotDispatchExecutor.submit(() -> fireSlot(slot));
+                return slotDispatchExecutor.submit(() -> {
+                    slotDispatchPermits.acquireUninterruptibly();
+                    try {
+                        fireSlot(slot);
+                    } finally {
+                        slotDispatchPermits.release();
+                    }
+                });
             }
             return null;
         } catch (SQLException e) {

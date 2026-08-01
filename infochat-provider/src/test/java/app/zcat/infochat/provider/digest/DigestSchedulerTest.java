@@ -1,6 +1,10 @@
 package app.zcat.infochat.provider.digest;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
+import io.quarkus.test.junit.QuarkusTestProfile;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.jboss.logmanager.LogContext;
@@ -21,11 +25,16 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -39,7 +48,76 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
+@TestProfile(DigestSchedulerTest.TwoWorkersProfile.class)
 class DigestSchedulerTest {
+
+    /**
+     * M1-706: pin the summary worker count to 2 so the concurrency-bound
+     * cases need only K&gt;2 due slots. Two, not one:
+     * {@code tick_slowSlotConsumerDoesNotDelayOtherGroupsEmission} holds one
+     * slot gated and needs a second free worker for the other group's slot.
+     */
+    public static class TwoWorkersProfile implements QuarkusTestProfile {
+        @Override
+        public Map<String, String> getConfigOverrides() {
+            return Map.of("infochat.summary.workers", "2");
+        }
+    }
+
+    /**
+     * M1-706: concurrency witness for the worker-count bound. Observes every
+     * {@link DigestSlot} (observer delivery is synchronous inside
+     * {@code fireSlot}, so an observer's entry/exit brackets a permit hold)
+     * and tracks the in-flight count, its high-water mark, and which groups
+     * entered. {@link #holdAll()} parks every slot inside the observer so a
+     * test can saturate the workers and assert no N+1-th dispatch enters.
+     * The hold is bounded (20s) so a forgotten release cannot park a
+     * dispatch thread forever.
+     */
+    @ApplicationScoped
+    public static class ConcurrencyProbe {
+        private final AtomicInteger inFlight = new AtomicInteger();
+        private final AtomicInteger maxInFlight = new AtomicInteger();
+        private final Set<UUID> entered = ConcurrentHashMap.newKeySet();
+        private volatile CountDownLatch holdLatch = new CountDownLatch(0);
+
+        void onSlot(@Observes DigestSlot slot) {
+            int now = inFlight.incrementAndGet();
+            maxInFlight.accumulateAndGet(now, Math::max);
+            entered.add(slot.groupId());
+            try {
+                holdLatch.await(20, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                inFlight.decrementAndGet();
+            }
+        }
+
+        void holdAll() {
+            holdLatch = new CountDownLatch(1);
+        }
+
+        void releaseAll() {
+            holdLatch.countDown();
+        }
+
+        int maxInFlight() {
+            return maxInFlight.get();
+        }
+
+        Set<UUID> entered() {
+            return Set.copyOf(entered);
+        }
+
+        void reset() {
+            releaseAll();
+            inFlight.set(0);
+            maxInFlight.set(0);
+            entered.clear();
+            holdLatch = new CountDownLatch(0);
+        }
+    }
 
     @Inject
     @SeedDataSource
@@ -52,6 +130,9 @@ class DigestSchedulerTest {
     DigestSlotObserver observer;
 
     @Inject
+    ConcurrencyProbe probe;
+
+    @Inject
     SummaryCacheRepository summaryCacheRepository;
 
     private CapturingHandler logCapture;
@@ -61,6 +142,7 @@ class DigestSchedulerTest {
     @BeforeEach
     void setUp() throws Exception {
         observer.clear();
+        probe.reset();
         // Clean only summary_cache; audit_log is append-only (Invariant 10)
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement("DELETE FROM summary_cache")) {
@@ -368,6 +450,66 @@ class DigestSchedulerTest {
             awaitDispatches(dispatches);
         } finally {
             observer.releaseGate();
+        }
+    }
+
+    @Test
+    @Timeout(30)
+    void tick_boundsConcurrentSlotDispatchToWorkerCount() throws Exception {
+        // M1-706 acceptance: with the worker count at N (2 via
+        // TwoWorkersProfile), K>N due slots in one tick never run more
+        // than N concurrently inside fireSlot, and every due slot still
+        // fires — bounded, not dropped.
+        UUID[] groups = new UUID[5];
+        for (int i = 0; i < groups.length; i++) {
+            groups[i] = insertGroup("UTC");
+        }
+
+        // Hold every slot inside the observer so both workers saturate;
+        // a dispatch beyond the bound would then have to queue on the
+        // semaphore instead of entering fireSlot.
+        probe.holdAll();
+        try {
+            // 08:14 UTC: end of the morning window, past every stagger
+            // offset — all 5 groups are due in this one tick.
+            List<Future<?>> dispatches = scheduler.tickAt(todayAt(8, 14, "UTC"));
+
+            // Both workers park inside fireSlot; then give any would-be
+            // third dispatch a generous beat to enter if the bound were
+            // absent (unbounded, all 5 would enter in milliseconds).
+            awaitCondition(() -> probe.entered().size() == 2,
+                    "both workers must be parked inside fireSlot");
+            Thread.sleep(500);
+            assertEquals(2, probe.entered().size(),
+                    "no third slot may enter fireSlot while N=2 workers are held; "
+                            + "the unbounded executor would have admitted all 5");
+
+            probe.releaseAll();
+            awaitDispatches(dispatches);
+
+            // The tick fires every eligible group in the shared test DB,
+            // not only this test's seed — assert containment, not equality.
+            assertTrue(probe.entered().containsAll(Set.of(groups)),
+                    "every due slot still fires — bounded, not dropped; missing: "
+                            + Set.of(groups).stream()
+                                    .filter(g -> !probe.entered().contains(g))
+                                    .collect(Collectors.toSet()));
+            assertTrue(probe.maxInFlight() <= 2,
+                    "concurrency high-water mark " + probe.maxInFlight()
+                            + " must respect infochat.summary.workers=2");
+        } finally {
+            probe.releaseAll();
+        }
+    }
+
+    private void awaitCondition(BooleanSupplier condition, String message)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        if (!condition.getAsBoolean()) {
+            throw new AssertionError(message);
         }
     }
 

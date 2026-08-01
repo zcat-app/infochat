@@ -619,25 +619,29 @@ quarantine-review commands.
   overridable via `infochat.llm.<task>.max-concurrency`. The cap is
   per-process; D46's "one Provider may run multiple adapters" preserves
   this single shared pool.
-- **Eval channel**: bounded queue size (configurable, profile-driven). If
-  full, fetcher blocks (back-pressure to feed schedulers, which is the
-  desired behavior — avoids unbounded memory growth on LLM slowness).
-  **GAP** (audit 2026-07-27, `.scratch/doc-audit.md` §A5): neither half
-  ships. The depth is SmallRye's default 128-item buffer — not configurable,
-  not profile-driven (`infochat.eval.queue-size` does not exist) — and a
-  full buffer makes the next `Emitter.send` **throw** `SRMSG00034` rather
-  than block, so there is no back-pressure to the feed schedulers. Two
+- **Eval channel**: bounded queue size (configurable, profile-driven) via
+  `infochat.eval.queue-size` (M1-706; laptop=1024, vps=256, pi=64,
+  remote-llm=4096 — see §1.7 table), wired to SmallRye's
+  `smallrye.messaging.emitter.default-buffer-size`. A full buffer makes the
+  next `Emitter.send` **throw** `SRMSG00034` — it does not block, because
+  blocking back-pressure is unreachable through a SmallRye `Emitter` (the
+  available strategies are buffer, drop, latest, fail; none parks the
+  producer), so this bullet cannot and does not promise fetcher-side
+  back-pressure. Overflow loses no post: every emit site persists
+  `status='RAW'` before enqueueing and the stale-RAW sweep re-enqueues
+  whatever the buffer could not hold — the depth tunes WHEN the overflow
+  fires (and with it the catch-path churn: logged errors, admin notifies,
+  an abandoned source tick), never WHAT the recovery net does. Two
   mid-drain occurrences (2026-07-03/04) drove `OutboxRehydrator`'s per-emit
-  readiness poll, which guards only its own emits. The design stands; the
-  depth key and the blocking semantics are both owed.
+  readiness poll, which guards only its own emits.
   See [05-llm-and-embeddings.md](05-llm-and-embeddings.md) §5.7.
-- **Periodic-digest worker**: count is profile-driven —
+- **Periodic-digest worker**: count is profile-driven via
+  `infochat.summary.workers` (M1-706) —
   `laptop=4`, `vps=2`, `pi=1`, `remote-llm=8` (see §1.7 table). Generation
-  requests are enqueued with stagger and processed serially per worker.
-  Operators can override via `infochat.digest.workers`.
-  **GAP** (audit 2026-07-27, `.scratch/doc-audit.md` §A5): the key does not
-  exist and no per-profile digest worker count is enforced. The design
-  stands; the knob is owed.
+  requests are enqueued with stagger and dispatched on per-slot virtual
+  threads; a semaphore sized by the key bounds how many run CONCURRENTLY
+  (the bound queues extra slots, it never drops them). Operators can
+  override via `infochat.summary.workers`.
 - **Progress edits**: `ProgressNotifier` enforces
   `max(adapter.minEditInterval, 600ms)` between edits per
   `(scope, requestId)`. Excess events are coalesced; only the latest

@@ -876,22 +876,6 @@ This table is the authoritative source. Profiles select all defaults at once; op
 `.scratch/doc-audit.md` §A). These stay in the table as design; they are work
 owed, not retired intent:
 
-- `infochat.eval.queue-size` — no such key, and the shipped **overflow
-  behavior is not the designed one**. The eval queue is an in-memory SmallRye
-  channel (`@Channel("eval-queue")`) running on SmallRye's **default 128-item
-  buffer**; it is not unbounded, but the depth is neither per-profile nor
-  operator-set. More consequentially, a full buffer makes the next
-  `Emitter.send` **throw** (`SRMSG00034`) — it does not block the producer, so
-  the "if full, fetcher blocks (back-pressure)" contract in
-  [01-architecture.md](01-architecture.md) §1.6 is not what runs. This is not
-  theoretical: two mid-drain `SRMSG00034` failures on 2026-07-03/04 are what
-  drove the per-emit readiness poll in `OutboxRehydrator`, and that guard
-  covers the rehydrator's own emits only — `Stage1Worker` and `Kind6Handler`
-  emit unguarded. The spec lists eval queue depth in the profile bundle
-  (`../spec/architecture.md` §Hardware profiles), so the commitment stands;
-  what is owed is the key **and** the back-pressure semantics.
-- `infochat.summary.workers` — no such key. Summary/digest work has no
-  per-profile worker-count bound. Same spec commitment as above.
 - `infochat.context-hard-limit` — no such key, and no ceiling above
   `infochat.context-compress-at` is enforced anywhere. This row has no
   matching spec commitment either; if the hard ceiling was dropped
@@ -904,6 +888,27 @@ owed, not retired intent:
   `infochat.chat.dispatch.max-concurrency` (default 4), which covers
   chat turns, user `/summary` and user `/retry` alike
   ([06-messaging.md](06-messaging.md) §6.6 `InterruptibleDispatcher`).
+
+**v1 status — shipped rows** (M1-706, 2026-08-01):
+
+- `infochat.eval.queue-size` — declared per profile in the Collector's
+  `application.properties` and wired to SmallRye's
+  `smallrye.messaging.emitter.default-buffer-size` (`eval-queue` is the
+  service's only emitter channel, so the service-wide default is
+  effectively per-channel). The overflow behavior is BUFFER-then-throw: a
+  full buffer makes the next `Emitter.send` throw `SRMSG00034` — it never
+  blocks, because no SmallRye `Emitter` strategy parks the producer, so
+  blocking back-pressure to the feed schedulers is unreachable and not
+  promised ([01-architecture.md](01-architecture.md) §1.6 states the same).
+  No post is lost on overflow: emit sites persist `status='RAW'` before
+  enqueueing and `Stage1Worker.reEmitStaleRaw`'s sweep re-enqueues what the
+  buffer could not hold. Two mid-drain `SRMSG00034` failures on
+  2026-07-03/04 drove the per-emit readiness poll in `OutboxRehydrator`,
+  which still guards its own emits.
+- `infochat.summary.workers` — declared per profile in the Provider's
+  `application.properties`; a semaphore in `DigestScheduler` bounds how
+  many digest/summary slot dispatches run concurrently (the bound queues
+  extra slots, it never drops them — proven by DigestSchedulerTest).
 
 **v1 status — embeddings rows.** The `infochat.embeddings.model` and `infochat.embeddings.index-type` rows below show the *intended* per-profile design. v1 ships 768-d `nomic-embed-text` with an HNSW index on **every** profile (see §5.5); the per-profile embedding model / dimension / index are deferred beyond v1, and `infochat.embeddings.allow-model-change=false` keeps the dimension fixed. The `remote-llm` `infochat.embeddings.model` cell (`text-embedding-3-small`) is **permanently superseded by D54** — embeddings always run on a local nomic-768 backend (the `remote` wizard backend co-starts a local Ollama nomic embedder), never a remote provider.
                                                                                                                                                                                                                                                       

@@ -30,9 +30,11 @@ import org.eclipse.microprofile.reactive.messaging.Emitter;
  *
  * <p>The channel has no consumer in T1-C scope. SmallRye in-memory
  * channels tolerate a producer-without-consumer; the buffer fills
- * to the configured size and applies back-pressure to the producer
- * per {@code docs/design/01-architecture.md} §1.6. T1-D's eval
- * workers attach the consumer.
+ * to the configured depth and the next {@code send} throws
+ * SRMSG00034 — an {@code Emitter} buffers and throws, it never
+ * blocks, so there is no back-pressure to the producer
+ * (docs/design/01-architecture.md §1.6). T1-D's eval workers attach
+ * the consumer.
  *
  * <p>{@link Broadcast @Broadcast} allows the M1-032 production
  * {@code Stage1Worker} and the M1-028 {@code TestEvalQueueConsumer}
@@ -66,10 +68,13 @@ public class EvalQueueProducer {
      * outstanding demand ({@link Emitter#hasRequests()}). {@code false}
      * until the {@code @Incoming("eval-queue")} subscription finishes
      * its asynchronous startup wiring — emitting before then fills
-     * SmallRye's default 128-item buffer and the next {@code send}
-     * throws SRMSG00034. {@link OutboxRehydrator} polls this before its
-     * first emit so a startup-time RAW backlog cannot race the
-     * subscriber wiring and crash boot (M1-551 / F-live-3).
+     * the emitter buffer (capacity {@code infochat.eval.queue-size},
+     * wired to SmallRye's {@code smallrye.messaging.emitter
+     * .default-buffer-size} in {@code application.properties}) and the
+     * next {@code send} throws SRMSG00034. {@link OutboxRehydrator}
+     * polls this before its first emit so a startup-time RAW backlog
+     * cannot race the subscriber wiring and crash boot
+     * (M1-551 / F-live-3).
      */
     public boolean hasDownstreamRequests() {
         return emitter.hasRequests();

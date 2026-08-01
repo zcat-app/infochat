@@ -1,9 +1,9 @@
 ---
 id: M1-706
 title: "Profile bundle: eval queue depth and summary worker count"
-status: pending
+status: done
 created: 2026-07-27
-last_updated: 2026-07-27
+last_updated: 2026-08-01
 blocked_by: []
 files_budget: 10
 files_scope:
@@ -111,12 +111,36 @@ spec_refs:
   - docs/spec/architecture.md §Hardware profiles
   - docs/spec/deployment.md §Configuration surface (spec level)
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 654
+      removed: 51
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-01
+  verdict: PASS
+  warnings:
+    - >-
+      Self-check: census re-grepped live (5 sites match). Kind6Handler:167
+      and NostrStreamSource:466 disposed NO-CHANGE — emit escapes land in
+      NostrStreamSource.deliverOne's RuntimeException catch (SafeLog, worker
+      survives, post stays RAW for the sweep). Stage1Worker:245 disposed
+      CONFIRM — Quarkus scheduler logs-and-continues; later sweeps unaffected.
+  blockers: []
+outline_file: target/m1-tick-outline-M1-706.md
 escalation_reason:
 ---
 
