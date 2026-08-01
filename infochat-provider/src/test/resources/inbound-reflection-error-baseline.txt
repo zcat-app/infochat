@@ -61,7 +61,7 @@ InviteCommandHandler.java | error.invite.bot_contact_unknown_adapter | 0 | targe
 InviteCommandHandler.java | error.invite.bot_contact_unknown_adapter | 1 | String.join(", ", enabledAdapterNames()) | bot-authored: the enabled-adapter name list
 InviteCommandHandler.java | error.invite.bot_contact_unsupported | 0 | targetName | bot-admin-only: admin gate at InviteCommandHandler:225 precedes every reflect (r2 audit)
 InviteCommandHandler.java | error.invite.unknown_adapter | 0 | targetAdapter == null ? "" : targetAdapter | bot-admin-only: admin gate at InviteCommandHandler:225 precedes the reflect (r2 audit)
-LangCommandHandler.java | error.lang.unsupported_code | 0 | sortedJoin(supported) | bot-authored: the sorted supported-language code list
+LangCommandHandler.java | error.lang.unsupported_code | 0 | sortedJoin(enabled) | bot-authored: the sorted enabled-language code list (LanguageRegistry, M1-716)
 QuarantineCommandHandler.java | error.quarantine.invalid_id | 0 | idStr | bot-admin-only: admin gate at QuarantineCommandHandler:127 precedes the reflect (r2 audit)
 QuarantineCommandHandler.java | error.quarantine.invalid_state | 0 | quarantineId.toString() | bot-admin-only: admin gate at QuarantineCommandHandler:127 precedes the reflect (r2 audit)
 QuarantineCommandHandler.java | error.quarantine.not_found | 0 | quarantineId.toString() | bot-admin-only: admin gate at QuarantineCommandHandler:127 precedes the reflect (r2 audit)

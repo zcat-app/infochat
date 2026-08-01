@@ -1356,8 +1356,10 @@ public final class BundleKeys {
      * {@code /lang <code>} unsupported-code reply per spec §Conversation
      * control: "An unsupported code produces a friendly error that lists
      * the supported codes — never a silent no-op and never a fall-through
-     * to the default." Token {@code {0}} = the comma-separated list of
-     * supported codes derived from {@code bundleLoader.supportedLanguages()}.
+     * to the default." Token {@code {0}} = the sorted comma-separated
+     * list of enabled codes from
+     * {@code LanguageRegistry.enabledLanguages()} — the declared enabled
+     * set, not the loaded bundles.
      */
     public static final String ERROR_LANG_UNSUPPORTED_CODE = "error.lang.unsupported_code";
 

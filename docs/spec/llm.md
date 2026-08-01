@@ -301,8 +301,12 @@ Adding a fallback chain is a v2 candidate.
   templates, the banned-user fixed reply, progress-notifier stage
   strings, the "source already existed, tags updated" line, etc. —
   is looked up by key in a localization bundle. v1 ships **`en` and
-  `cs` (Czech) bundles**; adding a third language is a bundle
-  drop-in. The `TranslationProvider` is reserved for LLM-authored
+  `cs` (Czech) bundles**. A loaded bundle does not by itself make a
+  language selectable: `/lang` accepts only codes from the declared
+  enabled set (`LanguageRegistry`), so enabling a language is a
+  deliberate, reviewed change gated on measured quality — never a
+  side effect of dropping in a bundle. The `TranslationProvider` is
+  reserved for LLM-authored
   prose (cluster summaries, chat replies, digest headers) where a
   localization key is not a fit. Mixing the two paths — running
   `/help` text through a model — is explicitly out of v1: it would

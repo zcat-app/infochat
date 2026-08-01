@@ -48,7 +48,9 @@ import java.util.Set;
 public class BundleLoader {
 
     /**
-     * v1 supported language set. Adding a language requires a new
+     * v1 loaded bundle set — which {@code <lang>.properties} bundles
+     * are loaded, NOT which languages users may select (that gate is
+     * {@link LanguageRegistry}). Loading a language requires a new
      * {@code <lang>.properties} drop-in AND adding the code here; the
      * widened {@code BundleLoaderTest} reflective check enforces
      * bilateral parity against {@link BundleKeys} for every loaded
@@ -108,8 +110,8 @@ public class BundleLoader {
      * the pre-M1-060 accessor carried).
      *
      * <p>Unknown {@code langCode} values short-circuit straight to the
-     * en fallback — the handler-side
-     * {@code bundleLoader.supportedLanguages()} pre-check is the
+     * en fallback — the handler-side enabled-set check
+     * ({@link LanguageRegistry#enabledLanguages()}) is the
      * authoritative gate against unsupported codes (see
      * {@code LangCommandHandler}); this accessor is robust to it for
      * defense-in-depth.</p>
@@ -126,11 +128,15 @@ public class BundleLoader {
     }
 
     /**
-     * The loaded language set. Source of truth for
-     * {@code LangCommandHandler}'s unsupported-code rejection: the
-     * spec's "bundle drop-in" invariant means a new language must
-     * appear in the unsupported-code error message automatically once
-     * its bundle ships, with no handler edit.
+     * The loaded bundle set — which bundles exist on the classpath and
+     * were loaded, nothing more. It is deliberately NOT the
+     * {@code /lang} availability gate: {@code LangCommandHandler}
+     * rejects codes against the declared enabled set in
+     * {@link LanguageRegistry#enabledLanguages()}, so a bundle that
+     * shipped ahead of its quality bar stays loadable and testable
+     * without becoming user-selectable. Remaining consumers are the
+     * bundle-parity tests ({@code BundleLoaderTest}), for which the
+     * loaded set is still the right domain.
      */
     public Set<String> supportedLanguages() {
         return Collections.unmodifiableSet(bundlesByLang.keySet());

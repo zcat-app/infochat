@@ -4,6 +4,8 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.bundle.LanguageRegistry;
+import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -15,6 +17,7 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -47,6 +50,7 @@ class LangCommandHandlerTest {
     @Inject @SeedDataSource DataSource dataSource;
     @Inject BundleLoader bundleLoader;
     @Inject InboundContext inboundContext;
+    @Inject GroupMembershipRepository groupMembershipRepository;
 
     @BeforeEach
     void cleanup() throws Exception {
@@ -114,6 +118,45 @@ class LangCommandHandlerTest {
                 "unsupported-code reply must list 'en' as supported — got: " + reply.text());
         assertTrue(reply.text().contains("cs"),
                 "unsupported-code reply must list 'cs' as supported — got: " + reply.text());
+    }
+
+    @Test
+    void rejectsLoadedButNotEnabledLanguageCode() throws Exception {
+        String actor = PREFIX + "notenabled-actor";
+        UUID actorId = seedUser(actor);
+
+        // "cs" IS loaded — its bundle is on the classpath and listed in
+        // BundleLoader.LOADED_LANGUAGES — but the stubbed registry
+        // declares only "en" enabled. The handler must reject /lang cs
+        // exactly like an unknown code: availability is declared, not
+        // inferred from bundle presence. Hand-construct the handler with
+        // the stub wired in (the SummaryCommandHandlerTest pattern):
+        // QuarkusMock would leak the reduced set into this class's other
+        // tests — this Quarkus version has no QuarkusMock.cleanup().
+        LanguageRegistry enabledWithoutCs = new LanguageRegistry() {
+            @Override
+            public Set<String> enabledLanguages() {
+                return Set.of("en");
+            }
+        };
+        LangCommandHandler stubbedHandler = new LangCommandHandler();
+        stubbedHandler.bundleLoader = bundleLoader;
+        stubbedHandler.languageRegistry = enabledWithoutCs;
+        stubbedHandler.dataSource = dataSource;
+        stubbedHandler.inboundContext = inboundContext;
+        stubbedHandler.groupMembershipRepository = groupMembershipRepository;
+
+        OutboundMessage reply = stubbedHandler.handle(new ScopeRef.Dm(actor), "/lang cs");
+
+        assertNull(scopeLanguageOf(actorId),
+                "loaded-but-not-enabled reject must NOT write scope_preferences");
+        String expected = java.text.MessageFormat.format(
+                bundleLoader.get(BundleKeys.ERROR_LANG_UNSUPPORTED_CODE,
+                        inboundContext.effectiveLanguage()),
+                "en");
+        assertEquals(expected, reply.text(),
+                "the unsupported-code error must interpolate the ENABLED set (en only), "
+                        + "not the loaded bundles — got: " + reply.text());
     }
 
     @Test

@@ -1,11 +1,11 @@
 ---
 id: M1-716
 title: "Decouple language enablement from bundle presence"
-status: pending
+status: done
 created: 2026-07-30
-last_updated: 2026-07-30
+last_updated: 2026-08-01
 blocked_by: []
-files_budget: 9
+files_budget: 10
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/LanguageRegistry.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleLoader.java
@@ -13,6 +13,7 @@ files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/LangCommandHandler.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/bundle/LanguageRegistryTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/LangCommandHandlerTest.java
+  - infochat-provider/src/test/resources/inbound-reflection-error-baseline.txt
   - docs/spec/llm.md
   - docs/spec/commands.md
 complexity: low
@@ -64,13 +65,19 @@ acceptance:
     unless it is also declared enabled
   - LangCommandHandlerTest.rejectsLoadedButNotEnabledLanguageCode passes
   - >-
+    LanguageRegistryTest.declaredButMissingBundleFailsFast passes,
+    pinning that declaring a language enabled with no loaded bundle is
+    a startup error (LanguageRegistry's @PostConstruct fail-fast)
+  - >-
     LangCommandHandlerTest existing `/lang cs` and `/lang en` success
     scenarios pass unchanged, and the unsupported-code error still
     interpolates a sorted comma-joined list — now of enabled codes
   - >-
     `LangCommandHandler` reads the enabled set from `LanguageRegistry`,
     and `bundleLoader.supportedLanguages()` has no remaining production
-    call site outside BundleLoader itself and the bundle-parity tests
+    call site outside BundleLoader itself, the bundle-parity tests, and
+    `LanguageRegistry`'s startup fail-fast (which validates that every
+    declared-enabled code has a loaded bundle)
   - >-
     docs/spec/llm.md §Translation flow states that a loaded bundle does
     not by itself make a language selectable, replacing the current
@@ -91,12 +98,44 @@ spec_refs:
   - docs/spec/commands.md §Conversation control
 decision_refs:
   - D43
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-01
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PARTIAL
+    diff_stats:
+      files: 11
+      added: 268
+      removed: 35
+  - round: 2
+    date: 2026-08-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 311
+      removed: 38
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-01
+  verdict: PASS
+  warnings:
+    - "BundleKeys census line drift: ticket says 1345, actual javadoc is at :1360 (text matches; line moved)"
+    - "Parallel-start precondition override: user started M1-716 while M1-741 (migration_touch) is in-flight; declared files_scopes are disjoint"
+  blockers: []
 ---
 
 ## Context
@@ -195,3 +234,23 @@ principle may warrant its own D-number once the target language set is
 settled. No D-number is claimed here to avoid the double-claim hazard;
 this ticket carries D43 only, whose bundle-not-translator rule it leaves
 intact.
+
+## Round 1 rework
+
+Verdict: REWORK (round 1, 2026-08-01). Items named by the reviewer,
+both declaration fixes (no code change):
+
+1. **files_scope membership.** The diff touches
+   `infochat-provider/src/test/resources/inbound-reflection-error-baseline.txt`
+   (forced orphan of the `supported` → `enabled` rename in
+   `LangCommandHandler` — the reflection guard keys its baseline entry
+   on the exact argument expression) without declaring it. Fixed:
+   path added to `files_scope`, `files_budget` bumped 9 → 10.
+2. **Acceptance item 5 vs `LanguageRegistry.validate()`.** The diff's
+   startup fail-fast calls `bundleLoader.supportedLanguages()`, which
+   acceptance item 5's wording forbade ("no remaining production call
+   site outside BundleLoader itself and the bundle-parity tests"), and
+   its covering test `declaredButMissingBundleFailsFast` traced to no
+   acceptance item. Fixed per the reviewer's option (a): item 5 now
+   carves out the registry's startup fail-fast, and the third test is
+   named in `acceptance`.

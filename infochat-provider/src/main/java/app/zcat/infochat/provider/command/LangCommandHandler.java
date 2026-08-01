@@ -5,6 +5,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.bundle.LanguageRegistry;
 import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
@@ -43,12 +44,13 @@ import java.util.UUID;
  *       and {@code group_membership.is_group_admin}. An unregistered
  *       actor, unknown group, or non-admin caller gets
  *       {@link BundleKeys#ERROR_LANG_GROUP_ADMIN_NOT_IN_V1}.</li>
- *   <li><b>Supported-code derivation + validation.</b> The supported
- *       set is {@link BundleLoader#supportedLanguages()} — derived
- *       from the loaded bundles, not hardcoded in the handler. An
- *       unsupported code returns
+ *   <li><b>Enabled-code derivation + validation.</b> The accepted set
+ *       is {@link LanguageRegistry#enabledLanguages()} — the declared
+ *       enabled set, NOT the loaded bundles: a bundle present on the
+ *       classpath does not by itself make its language selectable.
+ *       An unsupported code returns
  *       {@link BundleKeys#ERROR_LANG_UNSUPPORTED_CODE} with the
- *       comma-separated supported list interpolated via
+ *       comma-separated enabled list interpolated via
  *       {@link MessageFormat} — per spec §Conversation control:
  *       "An unsupported code produces a friendly error that lists the
  *       supported codes — never a silent no-op and never a fall-through
@@ -99,6 +101,7 @@ public class LangCommandHandler implements CommandHandler {
                     + "DO UPDATE SET language = EXCLUDED.language";
 
     @Inject BundleLoader bundleLoader;
+    @Inject LanguageRegistry languageRegistry;
     @Inject DataSource dataSource;
     @Inject InboundContext inboundContext;
     @Inject GroupMembershipRepository groupMembershipRepository;
@@ -137,11 +140,11 @@ public class LangCommandHandler implements CommandHandler {
         }
 
         String suppliedCode = parsePositionalCode(rawText);
-        Set<String> supported = bundleLoader.supportedLanguages();
-        if (suppliedCode == null || !supported.contains(suppliedCode)) {
+        Set<String> enabled = languageRegistry.enabledLanguages();
+        if (suppliedCode == null || !enabled.contains(suppliedCode)) {
             String body = MessageFormat.format(
                     bundleLoader.get(BundleKeys.ERROR_LANG_UNSUPPORTED_CODE, inboundContext.effectiveLanguage()),
-                    sortedJoin(supported));
+                    sortedJoin(enabled));
             return reply(scope, body);
         }
 
