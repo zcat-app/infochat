@@ -12,6 +12,7 @@ import app.zcat.infochat.provider.messaging.InterruptibleDispatcher;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
 import app.zcat.infochat.provider.testsupport.DispatchAwaits;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -26,7 +27,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -86,6 +89,19 @@ class GoldenPathJourneyIT {
 
     private static final BigDecimal ZCASH_PRICE = new BigDecimal("42.18");
     private static final String ZCASH_SOURCE_URL = "coingecko.com/en/coins/zcash";
+
+    /**
+     * Partition-key instants pinned inside the migration-provisioned May 2026
+     * partition (M1-740: wall-clock partition keys break on every unprovisioned
+     * month boundary). The journey's time SEMANTICS stay wall-clock relative —
+     * probation, the /summary ready_at window and the digest slot all key on
+     * columns that are not partition keys — so only the partition-key bindings
+     * move to fixed constants. For the hop-12 snapshot the injected Clock is
+     * pinned 30s past CAPTURED_AT, keeping the fresh-staleness verdict a
+     * wall-clock seed produced.
+     */
+    private static final Instant FETCHED_AT = Instant.parse("2026-05-22T12:00:00Z");
+    private static final Instant CAPTURED_AT = Instant.parse("2026-05-22T12:00:00Z");
 
     /** Matches any RFC-4122 UUID literal in a reply body (case-insensitive). */
     private static final Pattern UUID_IN_REPLY =
@@ -341,10 +357,14 @@ class GoldenPathJourneyIT {
         // zcash is already enabled in the registry: JourneyAssetConfigSeeder
         // filled asset_config at startup (standing in for the Collector), so
         // the registry loaded it through its real path. Only the live price
-        // snapshot is seeded here.
+        // snapshot is seeded here. captured_at is pinned to the fixed May 2026
+        // instant (M1-740) and the injected Clock is pinned 30s past it, so
+        // the snapshot reads fresh — the verdict a wall-clock seed produced.
+        QuarkusMock.installMockForType(
+                Clock.fixed(CAPTURED_AT.plusSeconds(30), ZoneOffset.UTC), Clock.class);
         try (Connection conn = dataSource.getConnection()) {
             seedPriceSnapshot(conn, "zcash", "coingecko", ZCASH_PRICE,
-                    Instant.now().minusSeconds(30));
+                    CAPTURED_AT);
         }
         adapter.deliverDm(user, "/zcash coingecko");
         String assetReply = lastReply().text();
@@ -425,7 +445,12 @@ class GoldenPathJourneyIT {
             ps.setString(4, "Body for " + title);
             ps.setString(5, "https://example.com/" + uid);
             ps.setTimestamp(6, pub);
-            ps.setTimestamp(7, pub);
+            // fetched_at is the partition key: pinned to the fixed May 2026
+            // instant (M1-740). It never participates in this fixture's
+            // semantics — the /summary window keys on ready_at and the
+            // COALESCE(published_at, fetched_at) ordering sees the non-null
+            // published_at — so the wall-clock time family is undisturbed.
+            ps.setTimestamp(7, Timestamp.from(FETCHED_AT));
             ps.setTimestamp(8, pub);
             ps.setArray(9, conn.createArrayOf("TEXT", new String[] { PREFIX + "news" }));
             ps.setString(10, uid);

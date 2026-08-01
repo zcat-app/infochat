@@ -17,7 +17,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.time.temporal.ChronoUnit;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -29,9 +28,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * now feeds {@code clock.instant()} into the {@code isStale(capturedAt, now,
  * window)} comparison, so fixing the Clock decides the verdict: a snapshot age
  * of {@code window + 1s} is stale, {@code window - 1s} is fresh. The snapshot is
- * seeded ~30s old on the wall clock (fresh either way), so a stale verdict can
- * only come from the pinned Clock. Distinct asset keys per test sidestep the
- * module-wide {@code @ApplicationScoped} read cache.
+ * pinned to a fixed instant inside the migration-provisioned May 2026 partition
+ * (M1-740: wall-clock {@code captured_at} breaks on every unprovisioned month
+ * boundary), and the injected Clock — fixed relative to that instant — is the
+ * sole source of the staleness verdict. Distinct asset keys per test sidestep
+ * the module-wide {@code @ApplicationScoped} read cache.
  */
 @QuarkusTest
 class AssetSnapshotReaderClockTest {
@@ -41,6 +42,8 @@ class AssetSnapshotReaderClockTest {
     private static final BigDecimal PRICE = new BigDecimal("9.99");
     /** Matches infochat.assets.freshness-window default in application.properties. */
     private static final Duration FRESHNESS_WINDOW = Duration.ofSeconds(180);
+    /** Fixed seed instant; lands in the V17/V29-provisioned May 2026 partition. */
+    private static final Instant CAPTURED_AT = Instant.parse("2026-05-22T12:00:00Z");
 
     @Inject AssetSnapshotReader reader;
     @Inject @SeedDataSource DataSource dataSource;
@@ -57,7 +60,7 @@ class AssetSnapshotReaderClockTest {
     @Test
     void staleVerdictTrueWhenInjectedNowPastFreshnessBoundary() throws Exception {
         String asset = "m454clock-stale";
-        Instant capturedAt = Instant.now().minusSeconds(30).truncatedTo(ChronoUnit.SECONDS);
+        Instant capturedAt = CAPTURED_AT;
         seedSnapshot(asset, capturedAt);
         // Pin one second past the freshness boundary: age = window + 1s.
         QuarkusMock.installMockForType(
@@ -75,7 +78,7 @@ class AssetSnapshotReaderClockTest {
     @Test
     void staleVerdictFalseWhenInjectedNowWithinFreshnessBoundary() throws Exception {
         String asset = "m454clock-fresh";
-        Instant capturedAt = Instant.now().minusSeconds(30).truncatedTo(ChronoUnit.SECONDS);
+        Instant capturedAt = CAPTURED_AT;
         seedSnapshot(asset, capturedAt);
         // Pin one second inside the freshness boundary: age = window - 1s.
         QuarkusMock.installMockForType(

@@ -291,12 +291,13 @@ class GetReferencesToolTest {
     private void seedReference(UUID fromPost, UUID toPost, String linkType, float score) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "INSERT INTO post_reference (from_post, to_post, link_type, score) "
-                     + "VALUES (?, ?, ?, ?)")) {
+                 "INSERT INTO post_reference (from_post, to_post, link_type, score, created_at) "
+                     + "VALUES (?, ?, ?, ?, ?)")) {
             ps.setObject(1, fromPost);
             ps.setObject(2, toPost);
             ps.setString(3, linkType);
             ps.setFloat(4, score);
+            ps.setTimestamp(5, Timestamp.from(FETCHED_AT));
             ps.executeUpdate();
         }
     }

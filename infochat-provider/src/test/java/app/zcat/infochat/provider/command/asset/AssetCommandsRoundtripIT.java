@@ -7,6 +7,7 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -21,7 +22,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 
@@ -50,6 +53,14 @@ class AssetCommandsRoundtripIT {
     private static final String ADAPTER = "inmemory";
     private static final BigDecimal ZCASH_PRICE = new BigDecimal("42.18");
     private static final String ZCASH_SOURCE_URL = "coingecko.com/en/coins/zcash";
+    /**
+     * Fixed snapshot capture instant inside the migration-provisioned May 2026
+     * partition (M1-740: a wall-clock {@code captured_at} breaks on every
+     * unprovisioned month boundary). The injected Clock is pinned 30s after it,
+     * so the seeded snapshot reads FRESH — the same staleness verdict a
+     * wall-clock {@code now().minusSeconds(30)} seed produced.
+     */
+    private static final Instant CAPTURED_AT = Instant.parse("2026-05-22T12:00:00Z");
 
     public static class Profile implements QuarkusTestProfile {
         @Override
@@ -74,6 +85,10 @@ class AssetCommandsRoundtripIT {
         adapter.reset();
         mockLlm.reset();
         mockLlm.setThrowOnCall(true);
+        // AssetSnapshotReader's staleness verdict reads the injected Clock —
+        // pin it 30s past CAPTURED_AT so the seeded snapshot is fresh.
+        QuarkusMock.installMockForType(
+                Clock.fixed(CAPTURED_AT.plusSeconds(30), ZoneOffset.UTC), Clock.class);
 
         try (Connection conn = dataSource.getConnection()) {
             conn.createStatement().executeUpdate(
@@ -124,7 +139,7 @@ class AssetCommandsRoundtripIT {
         // (b) INSERT price_snapshot
         try (Connection writeConn = dataSource.getConnection()) {
             seedPriceSnapshot(writeConn, "zcash", "coingecko", "usd",
-                    ZCASH_PRICE, Instant.now().minusSeconds(30));
+                    ZCASH_PRICE, CAPTURED_AT);
         }
 
         // Verify the row landed
@@ -160,7 +175,7 @@ class AssetCommandsRoundtripIT {
     void zcashCommandReturnsRenderedReply() throws Exception {
         try (Connection conn = dataSource.getConnection()) {
             seedPriceSnapshot(conn, "zcash", "coingecko", "usd",
-                    ZCASH_PRICE, Instant.now().minusSeconds(30));
+                    ZCASH_PRICE, CAPTURED_AT);
             seedUser(conn, "m55-u1", false, false, "vouched", null);
         }
 
@@ -211,9 +226,9 @@ class AssetCommandsRoundtripIT {
     void probationUserCanInvokeAssetCommand() throws Exception {
         try (Connection conn = dataSource.getConnection()) {
             seedPriceSnapshot(conn, "zcash", "coingecko", "usd",
-                    ZCASH_PRICE, Instant.now().minusSeconds(30));
+                    ZCASH_PRICE, CAPTURED_AT);
             seedUser(conn, "m55-u2", false, false, "invited",
-                    Instant.now().plusSeconds(3600));
+                    CAPTURED_AT.plusSeconds(3600));
         }
 
         adapter.deliverDm("m55-u2", "/zcash coingecko");
@@ -238,7 +253,7 @@ class AssetCommandsRoundtripIT {
     void bannedUserHitsBanCheckBeforeDispatch() throws Exception {
         try (Connection conn = dataSource.getConnection()) {
             seedPriceSnapshot(conn, "zcash", "coingecko", "usd",
-                    ZCASH_PRICE, Instant.now().minusSeconds(30));
+                    ZCASH_PRICE, CAPTURED_AT);
             seedUser(conn, "m55-u3", false, true, "vouched", null);
         }
 
@@ -280,7 +295,7 @@ class AssetCommandsRoundtripIT {
             seedAssetConfig(conn, "litecoin", "coingecko", true,
                     "coingecko.com/en/coins/litecoin", true);
             seedPriceSnapshot(conn, "litecoin", "coingecko", "usd",
-                    new BigDecimal("88.40"), Instant.now().minusSeconds(30));
+                    new BigDecimal("88.40"), CAPTURED_AT);
             seedUser(conn, "m55-u4", false, false, "vouched", null);
         }
         // The registry loaded in @BeforeEach without litecoin; refreshing picks

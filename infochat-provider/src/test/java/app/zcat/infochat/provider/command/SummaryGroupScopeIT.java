@@ -5,6 +5,7 @@ import app.zcat.infochat.provider.messaging.InterruptibleDispatcher;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
 import app.zcat.infochat.provider.testsupport.DispatchAwaits;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -17,8 +18,10 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +67,13 @@ class SummaryGroupScopeIT {
 
     private static final String ADAPTER = "inmemory";
     private static final String PREFIX = "m1-288-";
+    /**
+     * Every fixture instant derives from this pinned "now" and the injected
+     * Clock is fixed to it (M1-740): posts land in the migration-provisioned
+     * May 2026 partition and the retrieval window is deterministic, instead
+     * of breaking on each unprovisioned month boundary.
+     */
+    private static final Instant PINNED_NOW = Instant.parse("2026-05-22T12:00:00Z");
 
     @Inject InMemoryAdapter adapter;
 
@@ -77,6 +87,9 @@ class SummaryGroupScopeIT {
     void cleanup() throws Exception {
         adapter.reset();
         mockLlm.reset();
+        // The /summary retrieval window reads the injected Clock — pin it
+        // into the same time family as the fixtures.
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
         try (Connection conn = dataSource.getConnection()) {
             // FK-safe order: anchor + membership (→ users, groups) first,
             // then subscriptions + posts (→ source), scope prefs, then
@@ -119,7 +132,7 @@ class SummaryGroupScopeIT {
         UUID sourceId = insertSource(PREFIX + "flow-src", "FlowNews");
         insertSubscription("group", groupId, sourceId);
         insertPost(PREFIX + "flow-p1", sourceId, "GROUP FLOW HEADLINE",
-                Instant.now().minus(Duration.ofMinutes(1)), "READY",
+                PINNED_NOW.minus(Duration.ofMinutes(1)), "READY",
                 new String[] { PREFIX + "news" });
         mockLlm.setResponseText("Group flow prose.");
 
@@ -171,7 +184,7 @@ class SummaryGroupScopeIT {
         // Group-scope subscription is shared by all members of the group.
         insertSubscription("group", groupId, sourceId);
         insertPost(PREFIX + "tm-p1", sourceId, "TWO MEMBER HEADLINE",
-                Instant.now().minus(Duration.ofMinutes(1)), "READY",
+                PINNED_NOW.minus(Duration.ofMinutes(1)), "READY",
                 new String[] { PREFIX + "news" });
         mockLlm.setResponseText("Two-member prose.");
 
@@ -207,13 +220,13 @@ class SummaryGroupScopeIT {
         UUID dmSource = insertSource(PREFIX + "iso-dm-src", "IsoDmNews");
         insertSubscription("dm", userId, dmSource);
         insertPost(PREFIX + "iso-dm-p1", dmSource, "DM ISOLATION HEADLINE",
-                Instant.now().minus(Duration.ofMinutes(1)), "READY",
+                PINNED_NOW.minus(Duration.ofMinutes(1)), "READY",
                 new String[] { PREFIX + "news" });
         // Group scope: a group subscription + post so the group /summary runs.
         UUID groupSource = insertSource(PREFIX + "iso-grp-src", "IsoGrpNews");
         insertSubscription("group", groupId, groupSource);
         insertPost(PREFIX + "iso-grp-p1", groupSource, "GROUP ISOLATION HEADLINE",
-                Instant.now().minus(Duration.ofMinutes(1)), "READY",
+                PINNED_NOW.minus(Duration.ofMinutes(1)), "READY",
                 new String[] { PREFIX + "news" });
         mockLlm.setResponseText("Isolation prose.");
 
@@ -314,8 +327,8 @@ class SummaryGroupScopeIT {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO post (uid, source_id, title, body, url, published_at, "
-                             + "ready_at, status, tags, upstream_identifier) "
-                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+                             + "fetched_at, ready_at, status, tags, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
             ps.setString(1, uid);
             ps.setObject(2, sourceId);
             ps.setString(3, title);
@@ -323,12 +336,14 @@ class SummaryGroupScopeIT {
             ps.setString(5, "https://example.com/" + uid);
             ps.setTimestamp(6, Timestamp.from(publishedAt));
             // The retrieval window keys on ready_at (M1-689). These fixtures
-            // model negligible fetch+evaluation lag, so it mirrors published_at
-            // and the window means the same thing it did before.
+            // model negligible fetch+evaluation lag, so fetched_at (the
+            // partition key) and ready_at both mirror published_at and the
+            // window means the same thing it did before.
             ps.setTimestamp(7, Timestamp.from(publishedAt));
-            ps.setString(8, status);
-            ps.setArray(9, conn.createArrayOf("TEXT", tags));
-            ps.setString(10, uid);
+            ps.setTimestamp(8, Timestamp.from(publishedAt));
+            ps.setString(9, status);
+            ps.setArray(10, conn.createArrayOf("TEXT", tags));
+            ps.setString(11, uid);
             ps.executeUpdate();
         }
     }

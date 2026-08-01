@@ -6,6 +6,7 @@ import app.zcat.infochat.provider.messaging.InterruptibleDispatcher;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
 import app.zcat.infochat.provider.testsupport.DispatchAwaits;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -18,8 +19,10 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -46,6 +49,13 @@ class SummaryIT {
 
     private static final String PREFIX = "m1-037-mvp-";
     private static final String USER_CONTACT_ID = PREFIX + "user-1";
+    /**
+     * Every fixture instant derives from this pinned "now" and the injected
+     * Clock is fixed to it (M1-740): posts land in the migration-provisioned
+     * May 2026 partition and the retrieval window is deterministic, instead
+     * of breaking on each unprovisioned month boundary.
+     */
+    private static final Instant PINNED_NOW = Instant.parse("2026-05-22T12:00:00Z");
 
     @Inject InMemoryAdapter adapter;
 
@@ -59,6 +69,9 @@ class SummaryIT {
     void cleanup() throws Exception {
         adapter.reset();
         mockLlm.reset();
+        // The /summary retrieval window reads the injected Clock — pin it
+        // into the same time family as the fixtures.
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
         try (Connection conn = dataSource.getConnection()) {
             exec(conn, "DELETE FROM post WHERE uid LIKE '" + PREFIX + "%'");
             exec(conn, "DELETE FROM source_subscription "
@@ -83,7 +96,7 @@ class SummaryIT {
         insertSubscription(userId, source1Id);
         insertSubscription(userId, source2Id);
 
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         insertPost(PREFIX + "p1", source1Id, "MVP headline 1", now.minus(Duration.ofMinutes(1)),
                 "READY", new String[] { PREFIX + "news" });
         insertPost(PREFIX + "p2", source1Id, "MVP headline 2", now.minus(Duration.ofMinutes(2)),
@@ -148,7 +161,7 @@ class SummaryIT {
 
         // 6 READY posts > summarizer-post-cap=5 (profile override below):
         // the M1-623 explicit size decision must fire BEFORE any LLM call.
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         for (int i = 1; i <= 6; i++) {
             insertPost(PREFIX + "p" + i, source1Id, "MVP capped headline " + i,
                     now.minus(Duration.ofMinutes(i)), "READY",
@@ -195,7 +208,7 @@ class SummaryIT {
         UUID source1Id = insertSource(PREFIX + "src-1", "MvpNews");
         insertSubscription(userId, source1Id);
         insertPost(PREFIX + "p1", source1Id, "MVP degraded headline",
-                Instant.now().minus(Duration.ofMinutes(1)), "READY",
+                PINNED_NOW.minus(Duration.ofMinutes(1)), "READY",
                 new String[] { PREFIX + "news" });
 
         mockLlm.setThrowOnCall(true);
@@ -234,7 +247,7 @@ class SummaryIT {
         insertSubscription(userId, source1Id);
         insertSubscription(userId, source2Id);
 
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         insertPost(PREFIX + "p1", source1Id, "MVP headline 1", now.minus(Duration.ofMinutes(1)),
                 "READY", new String[] { PREFIX + "news" });
         insertPost(PREFIX + "p2", source1Id, "MVP headline 2", now.minus(Duration.ofMinutes(2)),
@@ -329,8 +342,8 @@ class SummaryIT {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO post (uid, source_id, title, body, url, published_at, "
-                             + "ready_at, status, tags, upstream_identifier) "
-                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+                             + "fetched_at, ready_at, status, tags, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
             ps.setString(1, uid);
             ps.setObject(2, sourceId);
             ps.setString(3, title);
@@ -338,12 +351,14 @@ class SummaryIT {
             ps.setString(5, "https://example.com/" + uid);
             ps.setTimestamp(6, Timestamp.from(publishedAt));
             // The retrieval window keys on ready_at (M1-689). These fixtures
-            // model negligible fetch+evaluation lag, so it mirrors published_at
-            // and the window means the same thing it did before.
+            // model negligible fetch+evaluation lag, so fetched_at (the
+            // partition key) and ready_at both mirror published_at and the
+            // window means the same thing it did before.
             ps.setTimestamp(7, Timestamp.from(publishedAt));
-            ps.setString(8, status);
-            ps.setArray(9, conn.createArrayOf("TEXT", tags));
-            ps.setString(10, uid);
+            ps.setTimestamp(8, Timestamp.from(publishedAt));
+            ps.setString(9, status);
+            ps.setArray(10, conn.createArrayOf("TEXT", tags));
+            ps.setString(11, uid);
             ps.executeUpdate();
         }
     }

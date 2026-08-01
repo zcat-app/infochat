@@ -6,6 +6,7 @@ import app.zcat.infochat.provider.messaging.InterruptibleDispatcher;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
 import app.zcat.infochat.provider.testsupport.DispatchAwaits;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -18,7 +19,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.UUID;
 
@@ -52,6 +55,13 @@ class SummaryAdapterScopeIT {
     private static final String PREFIX = "m1-040si-";
     private static final String SHARED_CONTACT_ID = PREFIX + "shared";
     private static final String FOREIGN_ADAPTER = "simplex-fake-m1-040si";
+    /**
+     * Every fixture instant derives from this pinned "now" and the injected
+     * Clock is fixed to it (M1-740): posts land in the migration-provisioned
+     * May 2026 partition and the retrieval window is deterministic, instead
+     * of breaking on each unprovisioned month boundary.
+     */
+    private static final Instant PINNED_NOW = Instant.parse("2026-05-22T12:00:00Z");
 
     @Inject InMemoryAdapter adapter;
 
@@ -69,6 +79,9 @@ class SummaryAdapterScopeIT {
     void cleanup() throws Exception {
         adapter.reset();
         mockLlm().reset();
+        // The /summary retrieval window reads the injected Clock — pin it
+        // into the same time family as the fixtures.
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
         try (Connection conn = dataSource.getConnection()) {
             exec(conn, "DELETE FROM post WHERE uid LIKE '" + PREFIX + "%'");
             exec(conn, "DELETE FROM source_subscription "
@@ -92,7 +105,7 @@ class SummaryAdapterScopeIT {
         UUID sourceBravo = insertSource(PREFIX + "bravo-src");
         insertSubscription(inmemoryUserId, sourceAlpha);
         insertSubscription(foreignUserId, sourceBravo);
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         insertPost(PREFIX + "alpha-post", sourceAlpha, "ALPHA HEADLINE m1-040si",
                 now, "READY", new String[] { PREFIX + "news" });
         insertPost(PREFIX + "bravo-post", sourceBravo, "BRAVO HEADLINE m1-040si",
@@ -216,8 +229,8 @@ class SummaryAdapterScopeIT {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO post (uid, source_id, title, body, url, "
-                             + "published_at, ready_at, status, tags, upstream_identifier) "
-                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+                             + "published_at, fetched_at, ready_at, status, tags, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
             ps.setString(1, uid);
             ps.setObject(2, sourceId);
             ps.setString(3, title);
@@ -225,12 +238,14 @@ class SummaryAdapterScopeIT {
             ps.setString(5, "https://example.com/" + uid);
             ps.setTimestamp(6, Timestamp.from(publishedAt));
             // The retrieval window keys on ready_at (M1-689). These fixtures
-            // model negligible fetch+evaluation lag, so it mirrors published_at
-            // and the window means the same thing it did before.
+            // model negligible fetch+evaluation lag, so fetched_at (the
+            // partition key) and ready_at both mirror published_at and the
+            // window means the same thing it did before.
             ps.setTimestamp(7, Timestamp.from(publishedAt));
-            ps.setString(8, status);
-            ps.setArray(9, conn.createArrayOf("TEXT", tags));
-            ps.setString(10, uid);
+            ps.setTimestamp(8, Timestamp.from(publishedAt));
+            ps.setString(9, status);
+            ps.setArray(10, conn.createArrayOf("TEXT", tags));
+            ps.setString(11, uid);
             ps.executeUpdate();
         }
     }

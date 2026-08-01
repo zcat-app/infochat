@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.summary;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Result;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -16,8 +17,10 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,6 +46,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class EligiblePostQueryIT {
 
     private static final String PREFIX = "m1-037q-";
+    /**
+     * Every fixture instant derives from this pinned "now" (M1-740): the
+     * injected Clock is fixed to it so the ready_at window is deterministic,
+     * and every post lands in the migration-provisioned May 2026 partition
+     * instead of breaking on each unprovisioned month boundary.
+     */
+    private static final Instant PINNED_NOW = Instant.parse("2026-05-22T12:00:00Z");
 
     @Inject @SeedDataSource DataSource dataSource;
 
@@ -56,6 +66,9 @@ class EligiblePostQueryIT {
     @BeforeEach
     @AfterEach
     void cleanup() throws Exception {
+        // The fetch window reads the injected Clock — pin it into the same
+        // time family as the fixtures before any seed or query runs.
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
         try (Connection conn = dataSource.getConnection()) {
             exec(conn, "DELETE FROM post WHERE uid LIKE '" + PREFIX + "%'");
             exec(conn, "DELETE FROM source_exclusion "
@@ -81,7 +94,7 @@ class EligiblePostQueryIT {
         UUID sourceId = insertSource("ready-filter-src", "RFS");
         insertSubscription("dm", userId, sourceId);
         // Same window for all four; status differs.
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         insertPost("ready-filter-r", sourceId, "Ready post", now, "READY", List.of(PREFIX + "news"));
         insertPost("ready-filter-q", sourceId, "Quarantined", now, "QUARANTINED", List.of(PREFIX + "news"));
         insertPost("ready-filter-n", sourceId, "Needs review", now, "NEEDS_REVIEW", List.of(PREFIX + "news"));
@@ -97,7 +110,7 @@ class EligiblePostQueryIT {
         UUID userId = insertUser("window-user");
         UUID sourceId = insertSource("window-src", "WIN");
         insertSubscription("dm", userId, sourceId);
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         insertPost("window-fresh", sourceId, "Fresh", now.minus(Duration.ofHours(2)), "READY",
                 List.of(PREFIX + "tech"));
         insertPost("window-stale", sourceId, "Stale", now.minus(Duration.ofHours(48)), "READY",
@@ -115,7 +128,7 @@ class EligiblePostQueryIT {
         UUID unsubscribedSourceId = insertSource("sub-no", "No");
         insertSubscription("dm", userId, subscribedSourceId);
 
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         insertPost("sub-yes-post", subscribedSourceId, "Yes!", now, "READY", List.of(PREFIX + "news"));
         insertPost("sub-no-post", unsubscribedSourceId, "No!", now, "READY", List.of(PREFIX + "news"));
 
@@ -129,7 +142,7 @@ class EligiblePostQueryIT {
         UUID userId = insertUser("tag-user");
         UUID sourceId = insertSource("tag-src", "TagS");
         insertSubscription("dm", userId, sourceId);
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         insertPost("tag-sec", sourceId, "Security post", now, "READY",
                 List.of(PREFIX + "sec", PREFIX + "news"));
         insertPost("tag-ai", sourceId, "AI post", now, "READY",
@@ -146,7 +159,7 @@ class EligiblePostQueryIT {
         UUID userId = insertUser("nosub-user");
         // Source + post exist but the user has no subscription.
         UUID sourceId = insertSource("nosub-src", "NS");
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         insertPost("nosub-post", sourceId, "Lonely", now, "READY", List.of(PREFIX + "news"));
 
         Result result = query.fetch("dm", userId, Optional.empty(), Duration.ofHours(24));
@@ -173,7 +186,7 @@ class EligiblePostQueryIT {
         UUID userId = insertUser("late-user");
         UUID sourceId = insertSource("late-src", "LATE");
         insertSubscription("dm", userId, sourceId);
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         insertPost("late-1", sourceId, "Late arrival",
                 now.minus(Duration.ofDays(7)), now.minus(Duration.ofMinutes(5)),
                 "READY", List.of(PREFIX + "news"));
@@ -193,20 +206,21 @@ class EligiblePostQueryIT {
         UUID userId = insertUser("redact-user");
         UUID sourceId = insertSource("redact-src", "RDS");
         insertSubscription("dm", userId, sourceId);
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO post (uid, source_id, title, body, published_at, ready_at, "
-                             + "status, stage2_failed, tags, upstream_identifier) "
-                             + "VALUES (?, ?, ?, ?, ?, ?, 'READY', TRUE, ?, ?)")) {
+                     "INSERT INTO post (uid, source_id, title, body, published_at, fetched_at, "
+                             + "ready_at, status, stage2_failed, tags, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', TRUE, ?, ?)")) {
             ps.setString(1, PREFIX + "redact-1");
             ps.setObject(2, sourceId);
             ps.setString(3, "Redacted post");
             ps.setString(4, "Body with [REDACTED:abc123] placeholder.");
             ps.setTimestamp(5, Timestamp.from(now));
             ps.setTimestamp(6, Timestamp.from(now));
-            ps.setArray(7, conn.createArrayOf("TEXT", new String[] { PREFIX + "news" }));
-            ps.setString(8, PREFIX + "redact-1");
+            ps.setTimestamp(7, Timestamp.from(now));
+            ps.setArray(8, conn.createArrayOf("TEXT", new String[] { PREFIX + "news" }));
+            ps.setString(9, PREFIX + "redact-1");
             ps.executeUpdate();
         }
 
@@ -224,7 +238,7 @@ class EligiblePostQueryIT {
         insertSubscription("dm", userId, sourceId);
         // Profile cap is 5 in the test profile (set in MvpProfile); seed 8
         // posts so the 3-post surplus is dropped and reported as excluded.
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         for (int i = 0; i < 8; i++) {
             // Stagger by minutes so ORDER BY published_at DESC has a
             // deterministic newest→oldest sequence.
@@ -252,7 +266,7 @@ class EligiblePostQueryIT {
         UUID userId = insertUser("sql-bound-user");
         UUID sourceId = insertSource("sql-bound-src", "SQB");
         insertSubscription("dm", userId, sourceId);
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         for (int i = 0; i < 9; i++) {
             insertPost("sql-bound-" + i, sourceId, "Bound " + i,
                     now.minus(Duration.ofMinutes(i)), "READY", List.of(PREFIX + "news"));
@@ -275,7 +289,7 @@ class EligiblePostQueryIT {
         UUID userId = insertUser("sql-count-user");
         UUID sourceId = insertSource("sql-count-src", "SQC");
         insertSubscription("dm", userId, sourceId);
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         for (int i = 0; i < 7; i++) {
             insertPost("sql-count-" + i, sourceId, "Count " + i,
                     now.minus(Duration.ofMinutes(i)), "READY", List.of(PREFIX + "news"));
@@ -295,7 +309,7 @@ class EligiblePostQueryIT {
         UUID userId = insertUser("order-user");
         UUID sourceId = insertSource("order-src", "ORD");
         insertSubscription("dm", userId, sourceId);
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         insertPost("order-a", sourceId, "A", now.minus(Duration.ofMinutes(10)), "READY",
                 List.of(PREFIX + "news"));
         insertPost("order-b", sourceId, "B", now.minus(Duration.ofMinutes(5)), "READY",
@@ -324,7 +338,7 @@ class EligiblePostQueryIT {
         UUID userId = insertUser("null-order");
         UUID sourceId = insertSource("null-order-src", "NLO");
         insertSubscription("dm", userId, sourceId);
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         Instant undatedFetchedAt = Instant.parse("2026-05-22T12:00:00Z");
         Instant datedFetchedAt = undatedFetchedAt.plus(Duration.ofDays(1));
         // Dated: fetched a day later, published just under its fetch ceiling,
@@ -357,7 +371,7 @@ class EligiblePostQueryIT {
         // sports is NOT a followed tag; sports posts must be excluded.
         insertScopePreferences("dm", userId, "EXPLICIT");
 
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         insertPost("explicit-tech", sourceId, "Tech post", now, "READY",
                 List.of(PREFIX + "explicit-tech"));
         insertPost("explicit-sports", sourceId, "Sports post", now, "READY",
@@ -397,7 +411,7 @@ class EligiblePostQueryIT {
         }
         insertScopePreferences("dm", userId, "ALL");
 
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         int seq = 0;
         for (Map.Entry<String, Integer> e : counts.entrySet()) {
             String tagName = e.getKey();
@@ -496,7 +510,7 @@ class EligiblePostQueryIT {
         UUID userId = insertUser("boot-user");
         UUID otherUserId = insertUser("boot-other");
         UUID bootstrapSource = insertBootstrapSource("boot-src", "BOOT");
-        insertPost("boot-post", bootstrapSource, "Bootstrap post", Instant.now(), "READY",
+        insertPost("boot-post", bootstrapSource, "Bootstrap post", PINNED_NOW, "READY",
                 List.of(PREFIX + "news"));
 
         Result result = query.fetch("dm", userId, Optional.empty(), Duration.ofHours(24));
@@ -525,7 +539,7 @@ class EligiblePostQueryIT {
             insertScopeTag("dm", userId, insertTag(t));
         }
         insertScopePreferences("dm", userId, "ALL");
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         // bt-a=3, bt-b=2, bt-c=1 posts; bt-d/e/f zero.
         for (int i = 0; i < 3; i++) {
             insertPost("boottop3-a" + i, bootstrapSource, "A" + i,
@@ -555,21 +569,22 @@ class EligiblePostQueryIT {
         UUID userId = insertUser("classif-user");
         UUID sourceId = insertSource("classif-src", "CLS");
         insertSubscription("dm", userId, sourceId);
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO post (uid, source_id, title, body, published_at, ready_at, "
-                             + "status, tags, classification, upstream_identifier) "
-                             + "VALUES (?, ?, ?, ?, ?, ?, 'READY', ?, ?, ?)")) {
+                     "INSERT INTO post (uid, source_id, title, body, published_at, fetched_at, "
+                             + "ready_at, status, tags, classification, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, ?, ?)")) {
             ps.setString(1, PREFIX + "classif-1");
             ps.setObject(2, sourceId);
             ps.setString(3, "Classified post");
             ps.setString(4, "Body");
             ps.setTimestamp(5, Timestamp.from(now));
             ps.setTimestamp(6, Timestamp.from(now));
-            ps.setArray(7, conn.createArrayOf("TEXT", new String[] { PREFIX + "news" }));
-            ps.setArray(8, conn.createArrayOf("TEXT", new String[] { "factual", "technical" }));
-            ps.setString(9, PREFIX + "classif-1");
+            ps.setTimestamp(7, Timestamp.from(now));
+            ps.setArray(8, conn.createArrayOf("TEXT", new String[] { PREFIX + "news" }));
+            ps.setArray(9, conn.createArrayOf("TEXT", new String[] { "factual", "technical" }));
+            ps.setString(10, PREFIX + "classif-1");
             ps.executeUpdate();
         }
 
@@ -666,25 +681,29 @@ class EligiblePostQueryIT {
      * Seeds a post with independent publication and readiness instants.
      * {@code ready_at} is the column the /summary window compares against, so
      * the two diverge exactly when fetch + evaluation lag is what the test is
-     * about.
+     * about. {@code fetched_at} (the partition key) mirrors {@code readyAt} —
+     * fetch-then-evaluate collapsed to one instant; it never participates in
+     * the COALESCE(published_at, fetched_at) ordering here because every post
+     * seeded through this helper carries a non-null published_at.
      */
     private void insertPost(String uidSuffix, UUID sourceId, String title,
                              Instant publishedAt, Instant readyAt, String status,
                              List<String> tags) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO post (uid, source_id, title, body, published_at, ready_at, "
-                             + "status, tags, upstream_identifier) "
-                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+                     "INSERT INTO post (uid, source_id, title, body, published_at, fetched_at, "
+                             + "ready_at, status, tags, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
             ps.setString(1, PREFIX + uidSuffix);
             ps.setObject(2, sourceId);
             ps.setString(3, title);
             ps.setString(4, "Body for " + title);
             ps.setTimestamp(5, Timestamp.from(publishedAt));
             ps.setTimestamp(6, Timestamp.from(readyAt));
-            ps.setString(7, status);
-            ps.setArray(8, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
-            ps.setString(9, PREFIX + uidSuffix);
+            ps.setTimestamp(7, Timestamp.from(readyAt));
+            ps.setString(8, status);
+            ps.setArray(9, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
+            ps.setString(10, PREFIX + uidSuffix);
             ps.executeUpdate();
         }
     }

@@ -273,10 +273,11 @@ class RetrievalWorldPredicateIT {
              PreparedStatement ps = conn.prepareStatement(
                      // link_type is CHECK-constrained to the V29 closed set
                      // ('entity','semantic','repost').
-                     "INSERT INTO post_reference (from_post, to_post, link_type, score) "
-                             + "VALUES (?, ?, 'entity', 0.9)")) {
+                     "INSERT INTO post_reference (from_post, to_post, link_type, score, created_at) "
+                             + "VALUES (?, ?, 'entity', 0.9, ?)")) {
             ps.setObject(1, fromPost);
             ps.setObject(2, toPost);
+            ps.setTimestamp(3, Timestamp.from(FETCHED_AT));
             ps.executeUpdate();
         }
     }

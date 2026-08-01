@@ -47,6 +47,14 @@ class DigestPostCollectorIT {
 
     private static final String PREFIX = "m1-263c-";
 
+    /**
+     * Every fixture instant derives from this pinned "now" (M1-740): posts
+     * land in the migration-provisioned May 2026 partition instead of
+     * breaking on each unprovisioned month boundary. The collector's window
+     * is the caller-passed {@code since}, so no Clock pin is needed here.
+     */
+    private static final Instant PINNED_NOW = Instant.parse("2026-05-22T12:00:00Z");
+
     @Inject @SeedDataSource DataSource dataSource;
 
     @Inject CancellationService cancellationService;
@@ -101,7 +109,7 @@ class DigestPostCollectorIT {
         // 3 eligible posts against cap 2: the SQL LIMIT keeps the freshest
         // two (head of the DESC ordering) and drops the oldest, before post
         // bodies leave the database — the same bound /summary applies.
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         insertPost("cap-0", "Cap 0", now.minus(Duration.ofMinutes(1)));
         insertPost("cap-1", "Cap 1", now.minus(Duration.ofMinutes(2)));
         insertPost("cap-2", "Cap 2", now.minus(Duration.ofMinutes(3)));
@@ -124,10 +132,10 @@ class DigestPostCollectorIT {
         UUID freshGroup = insertGroup("fresh-group");
         UUID bootstrapSource = insertBootstrapSource("boot-src");
         insertPost("boot-0", bootstrapSource, "Bootstrap digest post",
-                Instant.now().minus(Duration.ofMinutes(1)));
+                PINNED_NOW.minus(Duration.ofMinutes(1)));
 
         DigestPostCollector.CollectionResult result =
-                collector.collectForGroup(freshGroup, Instant.now().minus(Duration.ofHours(1)));
+                collector.collectForGroup(freshGroup, PINNED_NOW.minus(Duration.ofHours(1)));
 
         assertEquals(1, result.posts().size(),
                 "a subscription-less group's digest collects the bootstrap corpus");
@@ -140,10 +148,10 @@ class DigestPostCollectorIT {
         UUID otherGroup = insertGroup("other-group");
         UUID bootstrapSource = insertBootstrapSource("excl-src");
         insertPost("excl-0", bootstrapSource, "Excluded for one group",
-                Instant.now().minus(Duration.ofMinutes(1)));
+                PINNED_NOW.minus(Duration.ofMinutes(1)));
         insertExclusion(excludingGroup, bootstrapSource);
 
-        Instant since = Instant.now().minus(Duration.ofHours(1));
+        Instant since = PINNED_NOW.minus(Duration.ofHours(1));
         assertTrue(collector.collectForGroup(excludingGroup, since).posts().isEmpty(),
                 "the excluding group's digest drops the source");
         assertEquals(1, collector.collectForGroup(otherGroup, since).posts().size(),
@@ -160,7 +168,7 @@ class DigestPostCollectorIT {
         UUID alphaTag = insertTag("alpha");
         insertScopeTag(explicitGroup, alphaTag);
         insertScopePreferences(explicitGroup, "EXPLICIT");
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         insertPost("explicit-a", bootstrapSource, "Alpha post",
                 now.minus(Duration.ofMinutes(1)), List.of(PREFIX + "alpha"));
         insertPost("explicit-b", bootstrapSource, "Beta post",
@@ -180,7 +188,7 @@ class DigestPostCollectorIT {
         // not supply a date. Under the old `published_at >= ?` window such a
         // post could never satisfy the comparison and was invisible for its
         // entire lifetime; the ready_at window reaches it (M1-689).
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         insertPost("null-pub", sourceId, "No publication date",
                 null, now.minus(Duration.ofMinutes(1)), List.of());
 
@@ -204,7 +212,7 @@ class DigestPostCollectorIT {
         // published before that boundary but evaluated after it fell between
         // the two slots and was never delivered — not late, never. Keyed on
         // ready_at the advance is lossless.
-        Instant emptySlotBoundary = Instant.now().minus(Duration.ofMinutes(30));
+        Instant emptySlotBoundary = PINNED_NOW.minus(Duration.ofMinutes(30));
         insertPost("late-arrival", sourceId, "Late arrival",
                 emptySlotBoundary.minus(Duration.ofHours(6)),
                 emptySlotBoundary.plus(Duration.ofMinutes(5)),
@@ -232,7 +240,7 @@ class DigestPostCollectorIT {
         // a ready_at fallback yet must trail under fetched_at. Both fetched_at
         // values stay inside the May 2026 partition (post is range-partitioned
         // on fetched_at with no DEFAULT).
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         Instant undatedFetchedAt = Instant.parse("2026-05-22T12:00:00Z");
         Instant datedFetchedAt = undatedFetchedAt.plus(Duration.ofDays(1));
         insertPostWithFetchedAt("all-dated", sourceId, "Dated",
@@ -265,7 +273,7 @@ class DigestPostCollectorIT {
         insertScopeTag(explicitGroup, tag);
         insertScopePreferences(explicitGroup, "EXPLICIT");
         String followedTag = PREFIX + "explicit-null-order-tag";
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         Instant undatedFetchedAt = Instant.parse("2026-05-22T12:00:00Z");
         Instant datedFetchedAt = undatedFetchedAt.plus(Duration.ofDays(1));
         insertPostWithFetchedAt("explicit-dated", explicitSource, "Dated",
@@ -290,7 +298,7 @@ class DigestPostCollectorIT {
         RecordingDataSource recordingDataSource = new RecordingDataSource(dataSource);
         collector.dataSource = recordingDataSource;
 
-        collector.collectForGroup(groupId, Instant.now());
+        collector.collectForGroup(groupId, PINNED_NOW);
 
         assertTrue(recordingDataSource.executedSql().stream()
                         .anyMatch(sql -> sql.contains("SET LOCAL statement_timeout")),
@@ -426,24 +434,27 @@ class DigestPostCollectorIT {
      * {@code publishedAt} may be null — the column is nullable and a source
      * need not supply a date. {@code readyAt} is what the digest window
      * compares against and is always set, matching every {@code
-     * status='READY'} writer in the pipeline.
+     * status='READY'} writer in the pipeline. {@code fetched_at} (the
+     * partition key) mirrors {@code readyAt} — the fetch-then-evaluate lag
+     * collapsed to one instant.
      */
     private void insertPost(String uidSuffix, UUID postSourceId, String title,
                             @Nullable Instant publishedAt, Instant readyAt,
                             List<String> tags) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO post (uid, source_id, title, body, published_at, ready_at, "
-                             + "status, tags, upstream_identifier) "
-                             + "VALUES (?, ?, ?, ?, ?, ?, 'READY', ?, ?)")) {
+                     "INSERT INTO post (uid, source_id, title, body, published_at, fetched_at, "
+                             + "ready_at, status, tags, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, ?)")) {
             ps.setString(1, PREFIX + uidSuffix);
             ps.setObject(2, postSourceId);
             ps.setString(3, title);
             ps.setString(4, "Body for " + title);
             ps.setTimestamp(5, publishedAt == null ? null : Timestamp.from(publishedAt));
             ps.setTimestamp(6, Timestamp.from(readyAt));
-            ps.setArray(7, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
-            ps.setString(8, PREFIX + uidSuffix);
+            ps.setTimestamp(7, Timestamp.from(readyAt));
+            ps.setArray(8, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
+            ps.setString(9, PREFIX + uidSuffix);
             ps.executeUpdate();
         }
     }

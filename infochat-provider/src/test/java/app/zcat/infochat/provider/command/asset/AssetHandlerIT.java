@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.command.asset;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,8 +14,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
-import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -36,6 +38,13 @@ class AssetHandlerIT {
 
     private static final String PREFIX = "m1-055c-asset-";
     private static final String ADAPTER = "inmemory";
+    /**
+     * Fixed snapshot capture instant inside the migration-provisioned May 2026
+     * partition (M1-740: a wall-clock {@code captured_at} breaks on every
+     * unprovisioned month boundary). The injected Clock is pinned 30s past it,
+     * so the snapshot reads fresh — the same staleness verdict as before.
+     */
+    private static final Instant CAPTURED_AT = Instant.parse("2026-05-22T12:00:00Z");
 
     @Inject InMemoryAdapter adapter;
     @Inject @SeedDataSource DataSource dataSource;
@@ -44,6 +53,10 @@ class AssetHandlerIT {
     @BeforeEach
     void setUp() throws Exception {
         adapter.reset();
+        // AssetSnapshotReader's staleness verdict reads the injected Clock —
+        // pin it 30s past CAPTURED_AT so the seeded snapshot is fresh.
+        QuarkusMock.installMockForType(
+                Clock.fixed(CAPTURED_AT.plusSeconds(30), ZoneOffset.UTC), Clock.class);
         try (Connection conn = dataSource.getConnection()) {
             // Clean up test data from prior runs
             conn.createStatement().executeUpdate(
@@ -62,7 +75,10 @@ class AssetHandlerIT {
                 ps.executeUpdate();
             }
 
-            // Seed price_snapshot
+            // Seed price_snapshot — captured_at pinned to a fixed instant inside
+            // the migration-provisioned May 2026 partition (M1-740), with the
+            // injected Clock pinned 30s past it in setUp so the snapshot reads
+            // fresh, exactly the verdict a wall-clock seed produced.
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO price_snapshot (asset, sub_verb, vs_currency, price, "
                             + "high_24h, low_24h, change_1h_pct, change_24h_pct, "
@@ -70,7 +86,7 @@ class AssetHandlerIT {
                             + "VALUES ('zcash', 'coingecko', 'usd', 42.18, "
                             + "43.91, 41.07, 0.3, -2.4, ?, "
                             + "'coingecko.com/en/coins/zcash')")) {
-                ps.setTimestamp(1, Timestamp.from(Instant.now().minusSeconds(30)));
+                ps.setTimestamp(1, Timestamp.from(CAPTURED_AT));
                 ps.executeUpdate();
             }
 

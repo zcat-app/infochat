@@ -141,17 +141,20 @@ class EligiblePostQueryClockIT {
                             Instant publishedAt, Instant readyAt) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO post (uid, source_id, title, body, published_at, ready_at, "
-                             + "status, tags, upstream_identifier) "
-                             + "VALUES (?, ?, ?, ?, ?, ?, 'READY', ?, ?)")) {
+                     "INSERT INTO post (uid, source_id, title, body, published_at, fetched_at, "
+                             + "ready_at, status, tags, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, ?)")) {
             ps.setString(1, PREFIX + uidSuffix);
             ps.setObject(2, sourceId);
             ps.setString(3, title);
             ps.setString(4, "Body for " + title);
             ps.setTimestamp(5, Timestamp.from(publishedAt));
+            // fetched_at (partition key) mirrors ready_at: fetch-then-evaluate
+            // collapsed to one instant, inside the May 2026 partition (M1-740).
             ps.setTimestamp(6, Timestamp.from(readyAt));
-            ps.setArray(7, conn.createArrayOf("TEXT", new String[] { PREFIX + "news" }));
-            ps.setString(8, PREFIX + uidSuffix);
+            ps.setTimestamp(7, Timestamp.from(readyAt));
+            ps.setArray(8, conn.createArrayOf("TEXT", new String[] { PREFIX + "news" }));
+            ps.setString(9, PREFIX + uidSuffix);
             ps.executeUpdate();
         }
     }

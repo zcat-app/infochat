@@ -188,9 +188,10 @@ class InboundRouterStopRetryIT {
                 }
             }
             exec(conn,
-                    "INSERT INTO post (uid, source_id, title, url, body, published_at, status, tags, "
-                  + "upstream_identifier) "
-                  + "VALUES (?, ?, ?, ?, 'Body', now(), 'READY', ARRAY['test-it']::text[], ?) "
+                    "INSERT INTO post (uid, source_id, title, url, body, published_at, fetched_at, "
+                  + "status, tags, upstream_identifier) "
+                  + "VALUES (?, ?, ?, ?, 'Body', '2026-05-22T12:00:00Z', '2026-05-22T12:00:00Z', "
+                  + "'READY', ARRAY['test-it']::text[], ?) "
                   + "ON CONFLICT DO NOTHING",
                     uid, sourceId, title, "https://example.com/" + uid, uid);
         }

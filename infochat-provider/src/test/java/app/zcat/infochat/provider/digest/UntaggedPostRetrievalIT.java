@@ -5,6 +5,7 @@ import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterEach;
@@ -17,8 +18,10 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -64,6 +67,14 @@ class UntaggedPostRetrievalIT {
     /** Wide enough to hold every seed, short enough to exclude older fixtures. */
     private static final Duration WINDOW = Duration.ofHours(1);
 
+    /**
+     * Every fixture instant derives from this pinned "now" and the injected
+     * Clock is fixed to it (M1-740): posts land in the migration-provisioned
+     * May 2026 partition and the retrieval windows are deterministic, instead
+     * of breaking on each unprovisioned month boundary.
+     */
+    private static final Instant PINNED_NOW = Instant.parse("2026-05-22T12:00:00Z");
+
     @Inject @SeedDataSource DataSource dataSource;
 
     @Inject DigestPostCollector digestPostCollector;
@@ -76,6 +87,9 @@ class UntaggedPostRetrievalIT {
 
     @BeforeEach
     void setUp() throws Exception {
+        // EligiblePostQuery's ready_at window reads the injected Clock — pin
+        // it into the same time family as the fixtures.
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
         cleanupFixtures();
         groupId = insertGroup();
         UUID sourceId = insertBootstrapSource();
@@ -85,7 +99,7 @@ class UntaggedPostRetrievalIT {
         // three-cluster qualifying threshold and really does render a header;
         // without them the Other-bucket assertion would pass vacuously,
         // because a single-cluster tag folds into Other on its own.
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         insertPost(sourceId, PREFIX + "tagged-a", "Tagged A",
                 now.minus(Duration.ofMinutes(1)), List.of(SOURCE_TOPIC_TAG));
         insertPost(sourceId, PREFIX + "tagged-b", "Tagged B",
@@ -174,7 +188,7 @@ class UntaggedPostRetrievalIT {
      * post from another class perturbing the categorizer's tag arithmetic.
      */
     private List<Post> collectPrefixedDigestPosts() throws SQLException {
-        return digestPostCollector.collectForGroup(groupId, Instant.now().minus(WINDOW))
+        return digestPostCollector.collectForGroup(groupId, PINNED_NOW.minus(WINDOW))
                 .posts().stream()
                 .filter(post -> post.uid().startsWith(PREFIX))
                 .toList();
@@ -274,26 +288,29 @@ class UntaggedPostRetrievalIT {
     }
 
     /**
-     * Seeds a READY post. {@code ready_at} mirrors {@code published_at} — the
-     * negligible-lag shape, where the digest's window and /summary's agree on
-     * membership. Timestamps are relative to now so the fixture cannot age out
-     * of either window on a future calendar date.
+     * Seeds a READY post. {@code fetched_at} (the partition key) and
+     * {@code ready_at} mirror {@code published_at} — the negligible-lag
+     * shape, where the digest's window and /summary's agree on membership.
+     * All instants derive from the pinned {@link #PINNED_NOW}, so the
+     * fixture lands in the May 2026 partition and cannot age out of either
+     * window on a future calendar date (M1-740).
      */
     private void insertPost(UUID sourceId, String uid, String title, Instant at,
             List<String> tags) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO post (uid, source_id, title, body, published_at, ready_at, "
-                             + "status, tags, upstream_identifier) "
-                             + "VALUES (?, ?, ?, ?, ?, ?, 'READY', ?, ?)")) {
+                     "INSERT INTO post (uid, source_id, title, body, published_at, fetched_at, "
+                             + "ready_at, status, tags, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, ?)")) {
             ps.setString(1, uid);
             ps.setObject(2, sourceId);
             ps.setString(3, title);
             ps.setString(4, "Body for " + title);
             ps.setTimestamp(5, Timestamp.from(at));
             ps.setTimestamp(6, Timestamp.from(at));
-            ps.setArray(7, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
-            ps.setString(8, uid);
+            ps.setTimestamp(7, Timestamp.from(at));
+            ps.setArray(8, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
+            ps.setString(9, uid);
             ps.executeUpdate();
         }
     }

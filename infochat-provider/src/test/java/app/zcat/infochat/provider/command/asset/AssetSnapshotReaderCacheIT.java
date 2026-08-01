@@ -35,6 +35,13 @@ class AssetSnapshotReaderCacheIT {
     private static final String SUB_VERB = "coingecko";
     private static final String VS = "usd";
     private static final BigDecimal PRICE = new BigDecimal("12.34");
+    /**
+     * Fixed capture instant inside the migration-provisioned May 2026
+     * partition (M1-740: a wall-clock {@code captured_at} breaks on every
+     * unprovisioned month boundary). The staleness flag is not this test's
+     * verdict — the cache-vs-DB discrimination is — so no Clock pin is needed.
+     */
+    private static final Instant CAPTURED_AT = Instant.parse("2026-05-22T12:00:00Z");
 
     @Inject AssetSnapshotReader reader;
     @Inject @SeedDataSource DataSource dataSource;
@@ -80,7 +87,7 @@ class AssetSnapshotReaderCacheIT {
             ps.setString(2, SUB_VERB);
             ps.setString(3, VS);
             ps.setBigDecimal(4, PRICE);
-            ps.setTimestamp(5, Timestamp.from(Instant.now().minusSeconds(10)));
+            ps.setTimestamp(5, Timestamp.from(CAPTURED_AT));
             ps.executeUpdate();
         }
     }

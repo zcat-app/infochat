@@ -1,15 +1,18 @@
 ---
 id: M1-740
 title: "Provider test fixtures insert into monthly-partitioned tables with wall-clock timestamps: the suite breaks on every unprovisioned month boundary"
-status: pending
+status: done
 created: 2026-08-01
 last_updated: 2026-08-01
 blocked_by: []
-files_budget: 15
+files_budget: 20
 files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/GetReferencesToolTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/RetrievalWorldPredicateIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetSnapshotReaderClockTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetCommandsRoundtripIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetHandlerIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetSnapshotReaderCacheIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterStopRetryIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryCommandHandlerGroupScopeIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryAdapterScopeIT.java
@@ -21,6 +24,8 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/translation/TranslationPipelineIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/UntaggedPostRetrievalIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestPostCollectorIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/journey/GoldenPathJourneyIT.java
+  - infochat-provider/src/test/resources/fixtures/seed-ready-posts.sql
   - scripts/lint-partitioned-test-inserts.py
 complexity: medium
 risk: medium
@@ -124,12 +129,30 @@ test_plan:
 spec_refs:
   - docs/design/02-schema.md §2.4.4
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 22
+      added: 960
+      removed: 163
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-01
+  verdict: WARN
+  warnings:
+    - "lint SECURITY-FLAG-INFERENCE on InboundRouterStopRetryIT — test-only fixture timestamp sourcing changes; no production/security surface touched, security_relevant: false stands"
+    - "self-check: census grep re-run live at start; 48 sites returned, matches ticket's disposition table (14 FIX + verified-pinned remainder + core-module pinned)"
 escalation_reason:
 ---
 
@@ -188,6 +211,8 @@ Disposition of the 2026-08-01 enumeration:
 | `GetReferencesToolTest` | `post_reference` INSERT omits `created_at` (4 surefire errors) | FIX: bind `created_at` to the fixture's fixed May-2026 instant |
 | `RetrievalWorldPredicateIT` | `post_reference` INSERT omits `created_at` | FIX: same |
 | `AssetSnapshotReaderClockTest` | `price_snapshot.captured_at` bound from `Instant.now()` (2 surefire errors) | FIX: pin to a fixed instant; injected `Clock` already decides the verdict |
+| `AssetHandlerIT`, `AssetSnapshotReaderCacheIT`, `AssetCommandsRoundtripIT`, `GoldenPathJourneyIT` | `price_snapshot.captured_at` bound from `Instant.now()` (all); `GoldenPathJourneyIT`'s `post.fetched_at` bound from `Instant.now()` (failsafe tier — never ran in the red window, fails on first August run; surfaced by the implementation-time census re-run and brought into scope by the budget-breach refine) | FIX: pin the partition-key binding to a fixed instant inside a provisioned month, keeping each test's verdict source unchanged (staleness stays with the injected `Clock`; the journey post's window membership stays with `ready_at`) |
+| `seed-ready-posts.sql` (test-resources fixture consumed by `SeedFixtureIT` + `DevTerminalHarnessRoundtripIT`) | both `INSERT INTO post` omit `fetched_at` → `DEFAULT now()` (round-1 verify red on exactly these two ITs; the ticket's census grep was `--include='*.java'`-only and structurally blind to .sql fixtures — second budget-breach refine) | FIX: add `fetched_at` to both INSERT column lists bound to a fixed literal inside a provisioned month; `published_at`/`ready_at` keep their deliberate `now()`-relative staggering (not partition keys; the 24h-window semantics the header documents are unchanged). The `post_embedding` INSERT already reads `fetched_at` back from the post row, so it follows into the same partition. The lint is extended to `.sql` test resources so this class can no longer slip past the census |
 | `InboundRouterStopRetryIT`, `RetryCommandHandlerGroupScopeIT`, `SummaryAdapterScopeIT`, `SummaryRenderFormIT`, `SummaryGroupScopeIT`, `SummaryIT`, `EligiblePostQueryClockIT`, `EligiblePostQueryIT`, `TranslationPipelineIT`, `UntaggedPostRetrievalIT`, `DigestPostCollectorIT` | `post` INSERT omits `fetched_at` (failsafe tier — never ran in the red window, fails on first August run) | FIX: bind `fetched_at` to a fixed instant consistent with each fixture's `published_at`/`ready_at` family |
 | All other provider surefire tests inserting into partitioned tables | ran GREEN on 2026-08-01 post-boundary → empirically August-safe | VERIFY value-level (the partition-key binding resolves to a fixed constant); lint guards |
 | Core-module schema tests (`PartitionHorizonInsertIT` et al.) | `fetched_at` bound to fixed instants; green in the red window | VERIFY value-level; lint guards |

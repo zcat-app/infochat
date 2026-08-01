@@ -64,38 +64,49 @@ INSERT INTO tag (name, display, source_origin) VALUES
 -- published_at is staggered (1h/2h/3h ago) so ORDER BY published_at DESC is
 -- deterministic; using now()-relative times keeps the posts inside a 24h
 -- retrieval window whenever the suite runs (matching the in-tree IT pattern).
+-- fetched_at is the partition key and CANNOT float with the wall clock (M1-740):
+-- it is pinned to a fixed instant inside the migration-provisioned May 2026
+-- partition, or the fixture breaks on every unprovisioned month boundary.
+-- fetched_at never participates in retrieval semantics here (the window keys
+-- on ready_at; ordering sees the non-null published_at).
 INSERT INTO post (id, uid, source_id, upstream_identifier, url, title, body,
-                  published_at, status, ready_at,
+                  published_at, fetched_at, status, ready_at,
                   stage1_done, stage2_done, tagger_done, embedding_done, tags)
 VALUES
     ('00000413-0000-4000-8000-000000000101', 'm1-413-ready-security',
      '00000413-0000-4000-8000-000000000010', 'm1-413-up-security',
      'https://example.invalid/security', 'Seed: security advisory',
-     'Body about a security advisory.', now() - interval '1 hour', 'READY',
+     'Body about a security advisory.', now() - interval '1 hour',
+     '2026-05-22T12:00:00Z', 'READY',
      now(), TRUE, TRUE, TRUE, TRUE, ARRAY['m1-413-security']),
     ('00000413-0000-4000-8000-000000000102', 'm1-413-ready-ai',
      '00000413-0000-4000-8000-000000000010', 'm1-413-up-ai',
      'https://example.invalid/ai', 'Seed: AI model release',
-     'Body about an AI model release.', now() - interval '2 hours', 'READY',
+     'Body about an AI model release.', now() - interval '2 hours',
+     '2026-05-22T12:00:00Z', 'READY',
      now(), TRUE, TRUE, TRUE, FALSE, ARRAY['m1-413-ai']),
     ('00000413-0000-4000-8000-000000000103', 'm1-413-ready-java',
      '00000413-0000-4000-8000-000000000010', 'm1-413-up-java',
      'https://example.invalid/java', 'Seed: Java release',
-     'Body about a Java release.', now() - interval '3 hours', 'READY',
+     'Body about a Java release.', now() - interval '3 hours',
+     '2026-05-22T12:00:00Z', 'READY',
      now(), TRUE, TRUE, TRUE, FALSE, ARRAY['m1-413-java']);
 
 -- Non-READY posts: same source + scope, excluded from retrieval by status.
+-- fetched_at pinned to the same fixed instant (partition key, M1-740).
 INSERT INTO post (id, uid, source_id, upstream_identifier, url, title, body,
-                  published_at, status, tags)
+                  published_at, fetched_at, status, tags)
 VALUES
     ('00000413-0000-4000-8000-000000000201', 'm1-413-raw',
      '00000413-0000-4000-8000-000000000010', 'm1-413-up-raw',
      'https://example.invalid/raw', 'Seed: raw unprocessed',
-     'Body still RAW.', now() - interval '1 hour', 'RAW', ARRAY['m1-413-ai']),
+     'Body still RAW.', now() - interval '1 hour', '2026-05-22T12:00:00Z',
+     'RAW', ARRAY['m1-413-ai']),
     ('00000413-0000-4000-8000-000000000202', 'm1-413-quarantined',
      '00000413-0000-4000-8000-000000000010', 'm1-413-up-quarantined',
      'https://example.invalid/quarantined', 'Seed: quarantined',
-     'Body quarantined.', now() - interval '1 hour', 'QUARANTINED',
+     'Body quarantined.', now() - interval '1 hour', '2026-05-22T12:00:00Z',
+     'QUARANTINED',
      ARRAY['m1-413-security']);
 
 -- Embedding row for ONE READY post only (the security post). The AI and Java
