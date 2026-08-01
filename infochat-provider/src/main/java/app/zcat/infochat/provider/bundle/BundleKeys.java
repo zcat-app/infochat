@@ -1688,6 +1688,9 @@ public final class BundleKeys {
     /** Stored procedure raised "expected PENDING or BENIGN_CLOSED" — the quarantine row exists but is in a non-actionable state. Token {@code {0}} = the supplied UUID. */
     public static final String ERROR_QUARANTINE_INVALID_STATE = "error.quarantine.invalid_state";
 
+    /** Stored procedure raised "stage 2 verdict still owed" — the row's post is Stage 1 flagged but its first-pass Stage 2 verdict is not recorded yet; approving would release unjudged content (M1-741). Token {@code {0}} = the supplied UUID. */
+    public static final String ERROR_QUARANTINE_VERDICT_OWED = "error.quarantine.verdict_owed";
+
     /** {@code /quarantine} rate-cap rejection — the admin exceeded the per-window action budget enforced by {@code RateCapBucket}. */
     public static final String ERROR_QUARANTINE_RATE_LIMIT = "error.quarantine.rate_limit";
 

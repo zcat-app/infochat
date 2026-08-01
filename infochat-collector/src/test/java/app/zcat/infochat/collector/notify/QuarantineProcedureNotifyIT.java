@@ -74,7 +74,7 @@ class QuarantineProcedureNotifyIT {
 
     @Test
     void approveEmitsQuarantineReviewNotifyApproved() throws Exception {
-        Fixture fixture = seedFixture("approve-notify");
+        Fixture fixture = seedFixture("approve-notify", true, true);
 
         try (Connection listenConn = dataSource.getConnection()) {
             PGConnection pg = listenTo(listenConn, "quarantine_review");
@@ -96,7 +96,7 @@ class QuarantineProcedureNotifyIT {
 
     @Test
     void rejectEmitsQuarantineReviewNotifyRejected() throws Exception {
-        Fixture fixture = seedFixture("reject-notify");
+        Fixture fixture = seedFixture("reject-notify", true, true);
 
         try (Connection listenConn = dataSource.getConnection()) {
             PGConnection pg = listenTo(listenConn, "quarantine_review");
@@ -120,7 +120,7 @@ class QuarantineProcedureNotifyIT {
 
     @Test
     void approveNewPostPayloadParsesAsIso8601Instant() throws Exception {
-        Fixture fixture = seedFixture("approve-iso8601");
+        Fixture fixture = seedFixture("approve-iso8601", true, true);
 
         try (Connection listenConn = dataSource.getConnection()) {
             PGConnection pg = listenTo(listenConn, "new_post");
@@ -145,7 +145,7 @@ class QuarantineProcedureNotifyIT {
 
     @Test
     void approveAuditRowCarriesActorContactIdAndAdapter() throws Exception {
-        Fixture fixture = seedFixture("approve-audit");
+        Fixture fixture = seedFixture("approve-audit", true, true);
 
         callProcedure("approve_quarantine", fixture.quarantineId, adminUserId);
 
@@ -154,7 +154,7 @@ class QuarantineProcedureNotifyIT {
 
     @Test
     void rejectAuditRowCarriesActorContactIdAndAdapter() throws Exception {
-        Fixture fixture = seedFixture("reject-audit");
+        Fixture fixture = seedFixture("reject-audit", true, true);
 
         callProcedure("reject_quarantine", fixture.quarantineId, adminUserId);
 
@@ -165,7 +165,7 @@ class QuarantineProcedureNotifyIT {
 
     @Test
     void nonAdminActorIsRejected() throws Exception {
-        Fixture fixture = seedFixture("non-admin");
+        Fixture fixture = seedFixture("non-admin", true, true);
 
         assertThrows(SQLException.class,
             () -> callProcedure("approve_quarantine", fixture.quarantineId, nonAdminUserId),
@@ -206,6 +206,117 @@ class QuarantineProcedureNotifyIT {
         }
     }
 
+    // ---------- M1-741: verdict-owed guard ----------
+
+    @Test
+    void approveRaisesWhenStage2VerdictOwed() throws Exception {
+        // The production first-pass-in-flight bitmap: Stage 1 leaves a
+        // flagged post RAW so Stage 2 can judge (Stage1Pipeline), with
+        // stage2_failed = FALSE and no verdict recorded. The guard must
+        // raise BEFORE any write: no row transition, no post UPDATE, no
+        // audit row, no NOTIFY. (An earlier version of this test seeded
+        // QUARANTINED here — a bitmap Stage1Worker documents as
+        // impossible for a flagged post; the round-2 redteam audit
+        // caught that the guard's status conjunct then never fired in
+        // production.)
+        Fixture fixture = seedFixture("verdict-owed", true, false, false, null, "RAW");
+
+        assertApproveRefusedAsVerdictOwed(fixture, "RAW");
+    }
+
+    @Test
+    void approveRaisesWhenInfraFailureReEvalOwed() throws Exception {
+        // The round-1 redteam case: the Stage 2 infra-failure path sets
+        // stage2_done = TRUE, stage2_failed = TRUE with NO verdict
+        // recorded (release-on-stage2-failure=false → the post sits
+        // QUARANTINED in the re-eval queue). A stage2_done-keyed guard
+        // would silently pass this state; the verdict-NULL guard must
+        // refuse it, or approve's stage2_failed clear would drop the
+        // post from re-evaluation permanently unjudged.
+        Fixture fixture = seedFixture("reeval-owed", true, true, true, null, "QUARANTINED");
+
+        assertApproveRefusedAsVerdictOwed(fixture, "QUARANTINED");
+    }
+
+    private void assertApproveRefusedAsVerdictOwed(Fixture fixture, String expectedPostStatus)
+            throws Exception {
+        try (Connection listenConn = dataSource.getConnection()) {
+            PGConnection pg = listenTo(listenConn, "new_post", "quarantine_review");
+
+            SQLException e = assertThrows(SQLException.class,
+                () -> callProcedure("approve_quarantine", fixture.quarantineId, adminUserId),
+                "approve must refuse while a Stage 2 verdict is owed");
+            assertTrue(e.getMessage().contains("stage 2 verdict still owed"),
+                "the refusal must carry the guard's distinct message: " + e.getMessage());
+
+            PGNotification[] notifications = awaitNotifications(pg, 1);
+            assertTrue(notifications == null || notifications.length == 0,
+                "a refused approve must emit no NOTIFY: "
+                    + (notifications == null ? "none" : java.util.Arrays.toString(notifications)));
+        }
+
+        assertQuarantineStatus(fixture.quarantineId, "PENDING");
+        assertPostStatus(fixture.postId, expectedPostStatus);
+        assertNoApproveAuditRow(fixture.quarantineId);
+    }
+
+    @Test
+    void approveSucceedsForWatchdogQuarantinedPost() throws Exception {
+        // Watchdog / fail-closed quarantine: stage1_flagged = FALSE,
+        // stage2_done = FALSE — no Stage 2 verdict is owed, so the guard
+        // must NOT block the approve.
+        Fixture fixture = seedFixture("watchdog", false, false);
+
+        callProcedure("approve_quarantine", fixture.quarantineId, adminUserId);
+
+        assertQuarantineStatus(fixture.quarantineId, "APPROVED");
+        assertPostStatus(fixture.postId, "READY");
+    }
+
+    @Test
+    void approveSucceedsWhenStage2VerdictRecorded() throws Exception {
+        // stage1_flagged = TRUE with a recorded verdict — the judgment
+        // exists (this is also the race-case row M1-739's
+        // Stage2VerdictHandler inserts), so the guard must NOT block.
+        Fixture fixture = seedFixture("verdict-recorded", true, true);
+
+        callProcedure("approve_quarantine", fixture.quarantineId, adminUserId);
+
+        assertQuarantineStatus(fixture.quarantineId, "APPROVED");
+        assertPostStatus(fixture.postId, "READY");
+    }
+
+    @Test
+    void approveSucceedsForCapExhaustedNeedsReviewPost() throws Exception {
+        // Cap exhaustion: re-eval gave up (stage2_failed = TRUE, no
+        // verdict ever recorded) and transitioned the post to
+        // NEEDS_REVIEW — the admin's review IS the judgment now, so the
+        // guard must NOT block (otherwise these posts would be
+        // unapprovable forever).
+        Fixture fixture = seedFixture("needs-review", true, true, true, null, "NEEDS_REVIEW");
+
+        callProcedure("approve_quarantine", fixture.quarantineId, adminUserId);
+
+        assertQuarantineStatus(fixture.quarantineId, "APPROVED");
+        assertPostStatus(fixture.postId, "READY");
+    }
+
+    @Test
+    void approveSucceedsForFailOpenReleasedPost() throws Exception {
+        // Fail-open infra failure (release-on-stage2-failure=true): the
+        // operator's configured posture already released the post RAW
+        // with Stage 1 redactions (stage2_failed = TRUE, no verdict).
+        // Lifting the redactions is the documented admin-approve
+        // lifecycle (§Quarantine workflow; V41 pins it in
+        // ReEvalVerdictNotifyIT), so the guard must NOT block.
+        Fixture fixture = seedFixture("failopen", true, true, true, null, "RAW");
+
+        callProcedure("approve_quarantine", fixture.quarantineId, adminUserId);
+
+        assertQuarantineStatus(fixture.quarantineId, "APPROVED");
+        assertPostStatus(fixture.postId, "READY");
+    }
+
     // ---------- helpers ----------
 
     private void callProcedure(String procedure, UUID quarantineId, UUID actorId) throws Exception {
@@ -237,6 +348,46 @@ class QuarantineProcedureNotifyIT {
         }
     }
 
+    private void assertQuarantineStatus(UUID quarantineId, String expected) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT status FROM quarantine WHERE id = ?")) {
+            ps.setObject(1, quarantineId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "quarantine row must still exist");
+                assertEquals(expected, rs.getString("status"),
+                    "quarantine row status");
+            }
+        }
+    }
+
+    private void assertPostStatus(UUID postId, String expected) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT status FROM post WHERE id = ? AND fetched_at = ?")) {
+            ps.setObject(1, postId);
+            ps.setTimestamp(2, Timestamp.from(FETCHED_AT));
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "post row must still exist");
+                assertEquals(expected, rs.getString("status"),
+                    "post row status");
+            }
+        }
+    }
+
+    private void assertNoApproveAuditRow(UUID quarantineId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT 1 FROM audit_log "
+                     + "WHERE action = 'APPROVE_QUARANTINE' AND target_id = ?")) {
+            ps.setString(1, quarantineId.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(!rs.next(),
+                    "a refused approve must write no APPROVE_QUARANTINE audit row");
+            }
+        }
+    }
+
     private UUID seedUser(Connection conn, String contactId, boolean isAdmin) throws Exception {
         try (PreparedStatement ps = conn.prepareStatement(
                 "INSERT INTO users (adapter, contact_id, is_admin, registration_state) "
@@ -255,11 +406,35 @@ class QuarantineProcedureNotifyIT {
     }
 
     /**
-     * Seeds a QUARANTINED post with a placeholder in the body and a
-     * matching PENDING quarantine row — the state the procedures
-     * operate on.
+     * Convenience form for the common states: a QUARANTINED post, no
+     * stage2_failed, and a recorded BENIGN verdict iff {@code stage2Done}
+     * (mirroring the real flag semantics — a post with
+     * {@code stage2_done = TRUE} normally carries a verdict).
      */
-    private Fixture seedFixture(String slug) throws Exception {
+    private Fixture seedFixture(String slug, boolean stage1Flagged, boolean stage2Done) throws Exception {
+        return seedFixture(slug, stage1Flagged, stage2Done, false,
+            stage2Done ? "BENIGN" : null, "QUARANTINED");
+    }
+
+    /**
+     * Seeds a post with a placeholder in the body and a matching PENDING
+     * quarantine row — the state the procedures operate on. The eval
+     * flags and post status are fully parameterizable because the V69
+     * verdict-owed guard (M1-741) keys on all of them: it refuses when
+     * {@code stage1_flagged = TRUE AND stage2_verdict IS NULL AND
+     * status <> 'NEEDS_REVIEW' AND (status = 'QUARANTINED' OR
+     * stage2_failed = FALSE)} — the first-pass-in-flight state
+     * ({@code (true, false, false, null, "RAW")} — Stage 1 leaves
+     * flagged posts RAW so Stage 2 can judge) and the fail-closed
+     * infra-failure re-eval-queue state ({@code (true, true, true,
+     * null, "QUARANTINED")}) alike. Legitimate approve paths carry
+     * {@code stage2_verdict IS NOT NULL}, a NEEDS_REVIEW status, or the
+     * fail-open released bitmap ({@code (true, true, true, null,
+     * "RAW")}).
+     */
+    private Fixture seedFixture(String slug, boolean stage1Flagged, boolean stage2Done,
+                                boolean stage2Failed, String stage2Verdict,
+                                String postStatus) throws Exception {
         try (Connection conn = dataSource.getConnection()) {
             UUID sourceId = seedRssSource(conn, slug);
             String uid = UID_PREFIX + slug;
@@ -267,10 +442,11 @@ class QuarantineProcedureNotifyIT {
             UUID postId;
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO post (uid, source_id, upstream_identifier, title, body, "
-                        + "fetched_at, status, stage1_done, stage1_flagged, tags) "
+                        + "fetched_at, status, stage1_done, stage1_flagged, stage2_done, "
+                        + "stage2_failed, stage2_verdict, tags) "
                         + "VALUES (?, ?, ?, ?, "
                         + "'safe prefix [REDACTED:' || ? || '] safe suffix', "
-                        + "?, 'QUARANTINED', TRUE, TRUE, '{}') "
+                        + "?, ?, TRUE, ?, ?, ?, ?, '{}') "
                         + "RETURNING id")) {
                 ps.setString(1, uid);
                 ps.setObject(2, sourceId);
@@ -278,6 +454,11 @@ class QuarantineProcedureNotifyIT {
                 ps.setString(4, "Procedure notify IT " + slug);
                 ps.setString(5, placeholderId);
                 ps.setTimestamp(6, Timestamp.from(FETCHED_AT));
+                ps.setString(7, postStatus);
+                ps.setBoolean(8, stage1Flagged);
+                ps.setBoolean(9, stage2Done);
+                ps.setBoolean(10, stage2Failed);
+                ps.setString(11, stage2Verdict);
                 try (ResultSet rs = ps.executeQuery()) {
                     assertTrue(rs.next());
                     postId = (UUID) rs.getObject(1);
@@ -331,11 +512,13 @@ class QuarantineProcedureNotifyIT {
      * from other tests' commits, so reset the registrations and drain
      * anything already delivered before the test acts.
      */
-    private static PGConnection listenTo(Connection conn, String channel) throws Exception {
+    private static PGConnection listenTo(Connection conn, String... channels) throws Exception {
         conn.setAutoCommit(true);
         try (Statement s = conn.createStatement()) {
             s.execute("UNLISTEN *");
-            s.execute("LISTEN " + channel);
+            for (String channel : channels) {
+                s.execute("LISTEN " + channel);
+            }
         }
         PGConnection pg = conn.unwrap(PGConnection.class);
         pg.getNotifications();

@@ -182,7 +182,10 @@ class QuarantineAuditBeforeEffectIT {
      * Seeds a QUARANTINED post with a placeholder in the body and a
      * matching PENDING quarantine row — the state the procedures operate
      * on. The post starts with {@code stage2_failed = TRUE} so the approve
-     * path's clear is observable.
+     * path's clear is observable, and {@code stage2_done = TRUE} with a
+     * recorded BENIGN verdict (a verdict recorded before a later re-eval
+     * infra-failed — COALESCE preserves it) so the V69 verdict-owed guard
+     * (M1-741) does not block the approve.
      */
     private Fixture seedFixture(String slug) throws Exception {
         try (Connection conn = dataSource.getConnection()) {
@@ -192,10 +195,10 @@ class QuarantineAuditBeforeEffectIT {
             UUID postId;
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO post (uid, source_id, upstream_identifier, title, body, "
-                        + "fetched_at, status, stage1_done, stage1_flagged, stage2_failed, tags) "
+                        + "fetched_at, status, stage1_done, stage1_flagged, stage2_done, stage2_verdict, stage2_failed, tags) "
                         + "VALUES (?, ?, ?, ?, "
                         + "'safe prefix [REDACTED:' || ? || '] safe suffix', "
-                        + "?, 'QUARANTINED', TRUE, TRUE, TRUE, '{}') "
+                        + "?, 'QUARANTINED', TRUE, TRUE, TRUE, 'BENIGN', TRUE, '{}') "
                         + "RETURNING id")) {
                 ps.setString(1, uid);
                 ps.setObject(2, sourceId);

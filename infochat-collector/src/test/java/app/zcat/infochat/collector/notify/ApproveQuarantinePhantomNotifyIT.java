@@ -158,7 +158,9 @@ class ApproveQuarantinePhantomNotifyIT {
     /**
      * Seeds a QUARANTINED post with a placeholder in the body and a
      * matching PENDING quarantine row — the state approve_quarantine
-     * operates on.
+     * operates on. {@code stage2_done = TRUE} with a recorded BENIGN
+     * verdict: the judgment exists, so the V69 verdict-owed guard
+     * (M1-741) does not block the approve.
      */
     private Fixture seedFixture(String slug) throws Exception {
         try (Connection conn = dataSource.getConnection()) {
@@ -168,10 +170,10 @@ class ApproveQuarantinePhantomNotifyIT {
             UUID postId;
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO post (uid, source_id, upstream_identifier, title, body, "
-                        + "fetched_at, status, stage1_done, stage1_flagged, tags) "
+                        + "fetched_at, status, stage1_done, stage1_flagged, stage2_done, stage2_verdict, tags) "
                         + "VALUES (?, ?, ?, ?, "
                         + "'safe prefix [REDACTED:' || ? || '] safe suffix', "
-                        + "?, 'QUARANTINED', TRUE, TRUE, '{}') "
+                        + "?, 'QUARANTINED', TRUE, TRUE, TRUE, 'BENIGN', '{}') "
                         + "RETURNING id")) {
                 ps.setString(1, uid);
                 ps.setObject(2, sourceId);

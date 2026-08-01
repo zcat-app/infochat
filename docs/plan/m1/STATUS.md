@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 12 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 743 |
+| done | 744 |
 | deferred | 1 |
 | abandoned | 21 |
 | **total** | **777** |
@@ -32,7 +32,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-725 — The digest has no lead: a reader who opens only the first message gets the newest item of the largest tag (complexity: medium, risk: medium)
 - M1-727 — Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other (complexity: medium, risk: medium)
 - M1-728 — Category roll-up sends every post's full body and asks for one or two sentences: it neither fits a large category nor describes one (complexity: medium, risk: medium)
-- M1-741 — approve_quarantine ignores an owed Stage 2 verdict (complexity: medium, risk: medium)
 - M1-742 — A quarantine row per non-BENIGN Stage 2 verdict (complexity: medium, risk: medium)
 
 ---
@@ -71,6 +70,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-741 | approve_quarantine ignores an owed Stage 2 verdict | 2026-08-01 | round 1 APPROVE |
 | M1-740 | Provider test fixtures insert into monthly-partitioned tables with wall-clock timestamps: the suite breaks on every unprovisioned month boundary | 2026-08-01 | round 1 APPROVE |
 | M1-739 | First-pass Stage 2 verdicts on row-less posts bypass the admin review queue | 2026-08-01 | round 2 APPROVE |
 | M1-738 | Re-hidden posts bypass the admin review queue | 2026-08-01 | round 1 APPROVE |
@@ -80,7 +80,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-736 | Posts tagged '{}' are never re-evaluated when the vocabulary or model improves | 2026-07-31 | round 1 APPROVE |
 | M1-735 | A tagger that answers empty to every post emits no operational signal | 2026-07-31 | round 1 APPROVE |
 | M1-734 | Narrow D63: batch brief/normal digest categories into one outbound message | 2026-07-31 | round 1 APPROVE |
-| M1-733 | Add /digest brief|normal|full and the DIGEST_MODE_SET audit verb | 2026-07-31 | round 1 APPROVE |
 
 ---
 
@@ -995,6 +994,6 @@ M1-731 (done)
 M1-738 (done)
 M1-739 (done)
 M1-740 (done)
-M1-741 (pending) ← runnable
+M1-741 (done)
 M1-742 (pending) ← runnable
 ```

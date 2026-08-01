@@ -444,8 +444,8 @@ public class QuarantineCommandHandler implements CommandHandler {
 
     /**
      * Maps the stored procedure's RAISE EXCEPTION messages to user-visible
-     * bundle replies. The two known shapes are "not found" and "expected
-     * PENDING or BENIGN_CLOSED".
+     * bundle replies. The three known shapes are "not found", "expected
+     * PENDING or BENIGN_CLOSED", and "stage 2 verdict still owed" (M1-741).
      */
     private OutboundMessage mapStoredProcError(ScopeRef scope, SQLException e, UUID quarantineId) {
         String msg = e.getMessage();
@@ -457,6 +457,11 @@ public class QuarantineCommandHandler implements CommandHandler {
         if (msg != null && msg.contains("expected PENDING or BENIGN_CLOSED")) {
             return reply(scope, MessageFormat.format(
                     bundleLoader.get(BundleKeys.ERROR_QUARANTINE_INVALID_STATE, inboundContext.effectiveLanguage()),
+                    quarantineId.toString()));
+        }
+        if (msg != null && msg.contains("stage 2 verdict still owed")) {
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_VERDICT_OWED, inboundContext.effectiveLanguage()),
                     quarantineId.toString()));
         }
         SafeLog.error(LOG, "/quarantine stored procedure failed for id=" + quarantineId, e);

@@ -64,6 +64,7 @@ InviteCommandHandler.java | error.invite.unknown_adapter | 0 | targetAdapter == 
 LangCommandHandler.java | error.lang.unsupported_code | 0 | sortedJoin(enabled) | bot-authored: the sorted enabled-language code list (LanguageRegistry, M1-716)
 QuarantineCommandHandler.java | error.quarantine.invalid_id | 0 | idStr | bot-admin-only: admin gate at QuarantineCommandHandler:127 precedes the reflect (r2 audit)
 QuarantineCommandHandler.java | error.quarantine.invalid_state | 0 | quarantineId.toString() | bot-admin-only: admin gate at QuarantineCommandHandler:127 precedes the reflect (r2 audit)
+QuarantineCommandHandler.java | error.quarantine.verdict_owed | 0 | quarantineId.toString() | bot-admin-only: admin gate at QuarantineCommandHandler:127 precedes the reflect (M1-741); value is a UUID parsed by UUID.fromString, never raw inbound text
 QuarantineCommandHandler.java | error.quarantine.not_found | 0 | quarantineId.toString() | bot-admin-only: admin gate at QuarantineCommandHandler:127 precedes the reflect (r2 audit)
 RecoverPoolCommandHandler.java | error.recover_pool.not_found | 0 | targetAdapter | bot-admin-only: admin gate at RecoverPoolCommandHandler:104 precedes the reflect (r2 audit)
 RecoverPoolCommandHandler.java | error.recover_pool.not_found | 1 | upstreamGroupId | bot-admin-only: admin gate at RecoverPoolCommandHandler:104 precedes the reflect (r2 audit)

@@ -285,16 +285,17 @@ class QuarantineCommandHandlerTest {
     }
 
     // ---- Stored-procedure error mapping (M1-462 F3) ----
-    // mapStoredProcError() distinguishes the two RAISE EXCEPTION shapes of the
+    // mapStoredProcError() distinguishes the three RAISE EXCEPTION shapes of the
     // approve/reject SECURITY DEFINER functions by substring match on the
-    // message text ("not found" / "expected PENDING or BENIGN_CLOSED"). These
-    // tests drive both real proc error paths and assert each maps to its
+    // message text ("not found" / "expected PENDING or BENIGN_CLOSED" /
+    // "stage 2 verdict still owed"). These tests drive the real proc error
+    // paths and assert each maps to its
     // SPECIFIC bundle reply, never the generic ERROR_INTERNAL fallback — so a
     // future edit to the procedure's RAISE wording fails here loudly instead of
     // silently degrading the user-visible reply. approve is the driving command
     // because handleApprove calls the proc directly with no handler-side
     // status pre-check (handleReject short-circuits terminal states before the
-    // proc), so the proc itself raises both errors.
+    // proc), so the proc itself raises the errors.
 
     @Test
     void approve_nonexistentId_mapsToNotFoundNotInternal() throws Exception {
@@ -330,6 +331,36 @@ class QuarantineCommandHandlerTest {
                 "a non-PENDING/BENIGN_CLOSED row must map to ERROR_QUARANTINE_INVALID_STATE");
         assertNotEquals(bundleLoader.get(BundleKeys.ERROR_INTERNAL), reply.text(),
                 "the invalid-state proc error must NOT collapse to the generic ERROR_INTERNAL fallback");
+    }
+
+    @Test
+    void approve_verdictOwed_mapsToVerdictOwedNotInternal() throws Exception {
+        String admin = PREFIX + "errmap-owed-admin";
+        seedUser(admin, true, false, "vouched");
+        // A Stage 1 flagged post whose first-pass Stage 2 verdict is not
+        // recorded yet trips the V69 guard (M1-741): approve_quarantine
+        // raises "stage 2 verdict still owed". Stage 1 leaves flagged
+        // posts RAW so Stage 2 can judge — mirror that production
+        // bitmap, not the QUARANTINED state the fixture starts in.
+        String postUid = PREFIX + "errmap-owed-p1";
+        UUID qId = seedQuarantineRow("PENDING", postUid);
+        try (Connection conn = dataSource.getConnection()) {
+            exec(conn, "UPDATE post SET stage1_flagged = TRUE, stage2_done = FALSE, "
+                    + "status = 'RAW' WHERE uid = ?",
+                    postUid);
+        }
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(admin), "/quarantine approve " + qId);
+
+        assertEquals(MessageFormat.format(
+                bundleLoader.get(BundleKeys.ERROR_QUARANTINE_VERDICT_OWED),
+                qId.toString()), reply.text(),
+                "a verdict-owed row must map to ERROR_QUARANTINE_VERDICT_OWED");
+        assertNotEquals(bundleLoader.get(BundleKeys.ERROR_INTERNAL), reply.text(),
+                "the verdict-owed proc error must NOT collapse to the generic ERROR_INTERNAL fallback");
+        assertEquals("PENDING", quarantineStatus(qId),
+                "the refused approve must not transition the quarantine row");
     }
 
     // ---- /quarantine reject ----
