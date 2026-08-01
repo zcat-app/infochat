@@ -61,6 +61,31 @@ class ClassifierWorkerTest {
     }
 
     @Test
+    void parse_personalIsSubstantive() {
+        // M1-727: personal joins the substantive set — a reply carrying it
+        // survives the membership filter instead of being dropped as
+        // out-of-enum (which would silently resolve to [unknown]).
+        assertEquals(List.of("personal"),
+            require(worker.parseClassification("{\"classification\":[\"personal\"]}")).labels(),
+            "personal survives the membership filter");
+        // It combines with other substantive labels.
+        assertEquals(List.of("personal", "opinion"),
+            require(worker.parseClassification(
+                "{\"classification\":[\"personal\",\"opinion\"]}")).labels(),
+            "personal combines with other substantive labels");
+        // It counts toward the 1–3 substantive cap like any other label.
+        assertEquals(List.of("personal", "factual", "opinion"),
+            require(worker.parseClassification(
+                "{\"classification\":[\"personal\",\"factual\",\"opinion\",\"technical\"]}")).labels(),
+            "personal obeys the 1–3 substantive cap, first by emission order");
+        // The unknown mutual-exclusion rule applies to it unchanged.
+        assertEquals(List.of("personal"),
+            require(worker.parseClassification(
+                "{\"classification\":[\"personal\",\"unknown\"]}")).labels(),
+            "unknown is never combined with personal either");
+    }
+
+    @Test
     void parse_emptyAfterFilterResolvesToUnknown() {
         // Model returned only an out-of-enum label → empty substantive set.
         assertEquals(List.of("unknown"),

@@ -87,6 +87,31 @@ class DigestPostCollectorTest {
         assertEquals(0L, result.sourceSubscriptionVersion());
     }
 
+    @Test
+    void collectForGroup_carriesRealClassificationInBothTagModes() throws SQLException {
+        // M1-727: the digest routes on post.classification, so the
+        // collected post must carry its real labels (both SELECTs project
+        // the column since M1-724) — never the {unknown} sentinel a
+        // non-projecting reader would have to substitute.
+        for (String tagMode : List.of("ALL", "EXPLICIT")) {
+            collector.dataSource = new StubDataSource(
+                    tagMode, 1L, 1L,
+                    List.of(new PostRow(UUID.randomUUID(), "uid-p", UUID.randomUUID(), "Bsky",
+                            "my cat had a birthday", "https://bsky.example/cat", "body",
+                            Instant.parse("2026-05-25T10:00:00Z"),
+                            new String[]{"security"}, new String[]{"personal", "opinion"},
+                            null, null, null, null)));
+
+            DigestPostCollector.CollectionResult result =
+                    collector.collectForGroup(GROUP_ID, SINCE);
+
+            assertEquals(1, result.posts().size());
+            assertEquals(List.of("personal", "opinion"),
+                    result.posts().getFirst().classification(),
+                    "mode " + tagMode + ": the real classification, not the unknown sentinel");
+        }
+    }
+
     // ----- JDBC stubs (no Mockito) -----------------------------------------
 
     record PostRow(UUID id, String uid, UUID sourceId, String displayName,

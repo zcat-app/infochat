@@ -12,6 +12,7 @@ import java.util.stream.Collectors;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.Nullable;
 
+import app.zcat.infochat.provider.summary.ClusterProminence;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -22,9 +23,28 @@ import jakarta.enterprise.context.ApplicationScoped;
  * digest's section structure is byte-reproducible for a given cluster set,
  * extending the project's "deterministic retrieval, LLM only for prose"
  * boundary to the digest's structure.
+ *
+ * <p>The D62 Other bucket additionally receives PERSONAL clusters (M1-727):
+ * a cluster whose every member post carries the {@code personal} ingest
+ * classification routes to Other regardless of its tags, is excluded from
+ * the qualifying-tag counting pass (cat pictures must neither create a
+ * category nor keep a dying one open), and sorts after non-personal
+ * clusters within Other — the same order {@link ClusterProminence}'s
+ * bottom gate re-applies on the scored digest path, so the non-scored
+ * render paths ({@code /summary} forms) agree with it.
  */
 @ApplicationScoped
 public class DigestCategorizer {
+
+    /**
+     * The ingest classification label that routes a cluster to Other
+     * (M1-727). A literal, like {@code ClusterProminence}'s
+     * {@code "urgent"}: the closed set is shared vocabulary enforced by
+     * the V73 CHECK and {@code ClassifierWorker.SUBSTANTIVE_LABELS}, not
+     * a constant either module can import across the collector/provider
+     * boundary.
+     */
+    static final String PERSONAL = "personal";
 
     /**
      * A tag qualifies as a category only when carried by at least this many
@@ -68,29 +88,43 @@ public class DigestCategorizer {
     public List<CategorySection> categorize(List<Cluster> clusters) {
         // A cluster's tag-set is the union of its member posts' tags;
         // categories are counted at the cluster level (the render unit),
-        // not the post level.
+        // not the post level. PERSONAL clusters are excluded from the
+        // count (M1-727): they are routed away below, so counting them
+        // would let a run of personal posts sharing a tag promote that
+        // tag to a category no real cluster joins, or hold a dying
+        // category open past category-min-clusters.
+        List<Boolean> clusterPersonal = new ArrayList<>(clusters.size());
         List<Set<String>> clusterTagSets = new ArrayList<>(clusters.size());
         Map<String, Integer> tagClusterCounts = new HashMap<>();
         for (Cluster cluster : clusters) {
+            boolean personal = isPersonal(cluster);
+            clusterPersonal.add(personal);
             Set<String> tags = new TreeSet<>();
             for (Post post : cluster.posts()) {
                 tags.addAll(post.tags());
             }
             clusterTagSets.add(tags);
-            for (String tag : tags) {
-                tagClusterCounts.merge(tag, 1, Integer::sum);
+            if (!personal) {
+                for (String tag : tags) {
+                    tagClusterCounts.merge(tag, 1, Integer::sum);
+                }
             }
         }
 
         // First pass: assign each cluster to its highest-count qualifying
         // tag. The TreeSet iterates alphabetically and `best` is replaced
         // only on a strictly greater count, so equal-count ties resolve to
-        // the alphabetically first tag.
+        // the alphabetically first tag. A personal cluster takes no tag —
+        // it routes to Other regardless of what it carries (M1-727).
         List<@Nullable String> chosenTags = new ArrayList<>(clusters.size());
         Map<String, Integer> assignedCounts = new HashMap<>();
-        for (Set<String> tagSet : clusterTagSets) {
+        for (int i = 0; i < clusterTagSets.size(); i++) {
+            if (clusterPersonal.get(i)) {
+                chosenTags.add(null);
+                continue;
+            }
             String best = null;
-            for (String tag : tagSet) {
+            for (String tag : clusterTagSets.get(i)) {
                 if (tagClusterCounts.getOrDefault(tag, 0) < categoryMinClusters) {
                     continue;
                 }
@@ -110,16 +144,24 @@ public class DigestCategorizer {
         // larger co-tag, and a near-empty section reads worse than Other.
         // Single deterministic pass, no cascade: folding only grows Other,
         // never shrinks another category below its already-final count.
+        // Other itself is a stable partition: non-personal clusters first,
+        // personal after (M1-727), the relative order inside each group
+        // unchanged — Other competes for budget like any section, and the
+        // budget must cut cat pictures before it cuts news.
         Map<String, List<Cluster>> sectionsByTag = new HashMap<>();
-        List<Cluster> other = new ArrayList<>();
+        List<Cluster> otherNonPersonal = new ArrayList<>();
+        List<Cluster> otherPersonal = new ArrayList<>();
         for (int i = 0; i < clusters.size(); i++) {
             String tag = chosenTags.get(i);
             if (tag == null || assignedCounts.getOrDefault(tag, 0) < categoryMinClusters) {
-                other.add(clusters.get(i));
+                (clusterPersonal.get(i) ? otherPersonal : otherNonPersonal).add(clusters.get(i));
             } else {
                 sectionsByTag.computeIfAbsent(tag, key -> new ArrayList<>()).add(clusters.get(i));
             }
         }
+        List<Cluster> other = new ArrayList<>(otherNonPersonal.size() + otherPersonal.size());
+        other.addAll(otherNonPersonal);
+        other.addAll(otherPersonal);
 
         List<CategorySection> sections = sectionsByTag.entrySet().stream()
                 .sorted(Comparator
@@ -131,6 +173,31 @@ public class DigestCategorizer {
             sections.add(new CategorySection(null, other));
         }
         return List.copyOf(sections);
+    }
+
+    /**
+     * A cluster is personal only when EVERY member post carries the
+     * {@code personal} ingest label (M1-727 §The all-versus-any choice).
+     * Clusters are connected components of the {@code post_reference}
+     * graph, so a personal post that clustered with real coverage was
+     * linked to it by shared entities or embedding similarity — evidence
+     * it is part of the story, not noise beside it; an any-rule would let
+     * one stray member hide a genuine multi-source cluster in Other.
+     * Absent data fails the check (a null classification or an empty
+     * cluster is NOT personal): demoting real news on missing data is the
+     * worse error. {@link ClusterProminence#score} carries the same
+     * predicate for its bottom gate — keep the two in step.
+     */
+    static boolean isPersonal(Cluster cluster) {
+        if (cluster.posts().isEmpty()) {
+            return false;
+        }
+        for (Post post : cluster.posts()) {
+            if (post.classification() == null || !post.classification().contains(PERSONAL)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

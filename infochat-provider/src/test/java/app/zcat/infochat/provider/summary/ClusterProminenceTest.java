@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.summary;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -25,9 +26,10 @@ import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
  * with the others held equal; the §The-design worked example reproducing
  * scores 85/67/60/41 at default weights; raw-magnitude immunity;
  * percentile ties; population separation by source kind; the present-terms
- * denominator; NULL-vs-0 distinctness; the urgent gate; determinism and
- * total-order validity over a 200-cluster fixture; the all-NULL-social
- * fixture; and the single-post no-signal cluster.
+ * denominator; NULL-vs-0 distinctness; the urgent gate; the M1-727 personal
+ * bottom gate; determinism and total-order validity over a 200-cluster
+ * fixture; the all-NULL-social fixture; and the single-post no-signal
+ * cluster.
  */
 class ClusterProminenceTest {
 
@@ -485,6 +487,80 @@ class ClusterProminenceTest {
         ordered.sort(ClusterProminence.totalOrder());
         assertEquals(urgentLow, ordered.getFirst().cluster(),
                 "the urgent gate ranks ahead of any score");
+    }
+
+    // ----- the personal bottom gate (M1-727) --------------------------------
+
+    @Test
+    void personalBottomGateSortsLastRegardlessOfUrgencyAndScore() {
+        // The gate reads no score component: a personal cluster that is
+        // ALSO urgent and would outscore the field still sorts last.
+        Cluster personal = singlePostCluster("bluesky", 50_000, 50_000, 2,
+                List.of("security"), List.of("personal", "urgent"));
+        Cluster quiet = singlePostCluster("rss", null, null, 300,
+                List.of("security"), List.of("factual"));
+        Map<Cluster, String> tags = new IdentityHashMap<>();
+        tags.put(personal, "security");
+        tags.put(quiet, "security");
+
+        List<ScoredCluster> scored = prominence.score(List.of(personal, quiet), tags);
+        assertTrue(scored.get(0).personal(), "every member post carries the label");
+        assertTrue(scored.get(0).urgent(), "the urgent top gate still sees the post");
+        List<ScoredCluster> ordered = new ArrayList<>(scored);
+        ordered.sort(ClusterProminence.totalOrder());
+        assertEquals(quiet, ordered.getFirst().cluster(),
+                "personal sorts last even when urgent and high-scoring");
+        assertEquals(personal, ordered.getLast().cluster());
+    }
+
+    @Test
+    void bottomGateLeavesNonPersonalRelativeOrderUnchanged() {
+        // Urgent-then-score among the non-personal group is the M1-724
+        // order unchanged; the personal cluster only ever appends.
+        Cluster urgentLow = singlePostCluster("rss", null, null, 300,
+                List.of("low"), List.of("urgent"));
+        Cluster calmHigh = singlePostCluster("rss", null, null, 2,
+                List.of("high", "low"), List.of("factual"));
+        Cluster personalHigh = singlePostCluster("bluesky", 50_000, 50_000, 2,
+                List.of("high", "low"), List.of("personal"));
+        Map<Cluster, String> tags = new IdentityHashMap<>();
+        tags.put(urgentLow, "low");
+        tags.put(calmHigh, "high");
+        tags.put(personalHigh, "high");
+
+        List<ScoredCluster> scored = prominence.score(
+                List.of(personalHigh, calmHigh, urgentLow), tags);
+        List<ScoredCluster> ordered = new ArrayList<>(scored);
+        ordered.sort(ClusterProminence.totalOrder());
+        assertEquals(List.of(urgentLow, calmHigh, personalHigh),
+                ordered.stream().map(ScoredCluster::cluster).toList(),
+                "non-personal order is the M1-724 order; personal appends");
+    }
+
+    @Test
+    void mixedClusterDoesNotTripTheBottomGate() {
+        // The all-versus-any choice at the gate, identical to
+        // DigestCategorizer.isPersonal: one personal post that clustered
+        // with real coverage does not make the cluster personal.
+        Post stray = post(UUID.randomUUID(), "rss", null, null, 10,
+                List.of("security"), List.of("personal"));
+        Post news = post(UUID.randomUUID(), "rss", null, null, 10,
+                List.of("security"), List.of("factual"));
+        Cluster mixed = new Cluster("t-mixed", List.of(stray, news));
+        Cluster personal = singlePostCluster("rss", null, null, 10,
+                List.of("security"), List.of("personal"));
+        Map<Cluster, String> tags = new IdentityHashMap<>();
+        tags.put(mixed, "security");
+        tags.put(personal, "security");
+
+        List<ScoredCluster> scored = prominence.score(List.of(personal, mixed), tags);
+        assertTrue(scored.get(0).personal());
+        assertFalse(scored.get(1).personal(),
+                "a mixed cluster is NOT personal — one stray member hides no news");
+        List<ScoredCluster> ordered = new ArrayList<>(scored);
+        ordered.sort(ClusterProminence.totalOrder());
+        assertEquals(mixed, ordered.getFirst().cluster());
+        assertEquals(personal, ordered.getLast().cluster());
     }
 
     @Test

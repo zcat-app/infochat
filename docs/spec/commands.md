@@ -1845,7 +1845,16 @@ clusters in the digest carry it (operator-configurable, default
 3); each cluster is assigned to exactly **one** category — the
 qualifying tag with the highest digest-wide cluster count, ties
 broken alphabetically — and a cluster with no qualifying tag
-lands in the **Other** bucket. A deterministic second pass folds
+lands in the **Other** bucket. Other additionally receives every
+**personal cluster** — a cluster whose EVERY member post carries
+the `personal` ingest classification — regardless of its tags,
+and personal clusters are excluded from the qualifying-tag count,
+so a run of personal posts sharing a tag can neither create a
+category nor keep one alive past the threshold. The all-members
+rule is deliberate: a personal post that clustered with real
+coverage was linked to it by shared entities or embedding
+similarity, so one stray member must not route a genuine
+multi-source cluster into Other. A deterministic second pass folds
 any category left with fewer than the threshold of *assigned*
 clusters into Other (a category can lose its clusters to a
 larger co-tag). Sections render with an UPPERCASE header
@@ -1861,7 +1870,12 @@ denominator covering only the terms actually PRESENT on the
 cluster (a NULL social column drops the term rather than scoring
 it zero, so an editorial cluster is not structurally beaten by a
 social one), and the existing recency key as the final tiebreak.
-The reorder never moves a cluster between sections and never
+Within Other, personal clusters sort AFTER non-personal ones — a
+bottom gate ahead of the urgent gate and the score, not a fifth
+weighted term: Other competes for the section budget like any
+category, and the budget must cut personal clusters before it
+cuts genuinely-uncategorizable news. The reorder never moves a
+cluster between sections and never
 reorders or merges sections, so a high-scoring cluster cannot
 starve a small category — every section still renders its own
 head. `/summary` stays publication-ordered: it is a pull where
@@ -1883,10 +1897,10 @@ which grows with every source an operator adds, so without this
 the digest's length has an unbounded factor. Sections are dropped
 off the **tail** of the order above — the smallest first — with
 one carve-out: **Other is never dropped by the cap.** It holds
-exactly the clusters with no qualifying tag, the content with no
-other route to a reader, so when the cap binds and Other is
-present it takes the last slot and one more real category yields
-in its place. Clusters in a dropped section are **not**
+the clusters with no qualifying tag plus the personal ones — the
+content with the weakest route to a reader — so when the cap
+binds and Other is present it takes the last slot and one more
+real category yields in its place. Clusters in a dropped section are **not**
 redistributed into the surviving sections and **not** folded into
 Other — folding them in would inflate Other precisely when the
 cap binds. They are simply not rendered, and per-cluster prose

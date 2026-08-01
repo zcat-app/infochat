@@ -1,20 +1,22 @@
 ---
 id: M1-727
 title: "Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other"
-status: pending
+status: done
 created: 2026-07-30
-last_updated: 2026-07-30
+last_updated: 2026-08-01
 blocked_by: []
-files_budget: 12
+files_budget: 14
 files_scope:
-  - infochat-core/src/main/resources/db/migration/V67__classification_personal_label.sql
+  - infochat-core/src/main/resources/db/migration/V73__classification_personal_label.sql
   - infochat-llm-adapter/src/main/resources/prompts/classifier.md
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/classifier/ClassifierWorker.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestPostCollector.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestCategorizer.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/summary/ClusterProminence.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/classifier/ClassifierWorkerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestCategorizerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestPostCollectorTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/ClusterProminenceTest.java
   - docs/design/05-llm-and-embeddings.md
   - docs/design/03-commands.md
   - docs/spec/commands.md
@@ -34,9 +36,10 @@ out_of_scope:
   - >-
     M1-724's prominence score. `personal` routes a cluster to a
     different SECTION; it is not a fifth weighted term and must not
-    become one. The routing happens in `DigestCategorizer`, before any
-    scoring, so the two tickets compose without either knowing about
-    the other.
+    become one — the weights, percentiles and score arithmetic are
+    untouched. The one touch point on M1-724's surface is the bottom
+    gate in `ClusterProminence.totalOrder()` (acceptance item 6), which
+    reads no score component.
   - >-
     Excluding personal clusters from the digest entirely. Rejected in
     favour of Other — see §Why Other and not exclusion. A diff that
@@ -80,13 +83,12 @@ acceptance:
     otherwise on-topic account) and stays inside the existing
     delimiter-wrapped, treat-as-data prompt shape (D21).
   - >-
-    `DigestPostCollector` PROJECTS `p.classification` in both
-    `POSTS_ALL_SQL` and `POSTS_EXPLICIT_SQL`, and `mapPost` reads it.
-    It currently hard-codes `List.of("unknown")` with a comment stating
-    "the digest SELECT does not project it"
-    (`DigestPostCollector.java:120-125`) — that comment must be updated,
-    not left contradicting the code. A test asserts a collected post
-    carries its real classification rather than the sentinel.
+    `DigestPostCollector` already PROJECTS `p.classification` in both
+    `POSTS_ALL_SQL` and `POSTS_EXPLICIT_SQL`, and `mapPost` reads it —
+    M1-724 (done) added the projection for its prominence urgent gate.
+    What this ticket adds is the missing pin: a test asserts a
+    collected post carries its real classification rather than the
+    `unknown` sentinel, in both ALL and EXPLICIT mode.
   - >-
     A cluster is `personal` only when EVERY member post carries the
     label. A mixed cluster — one personal post that clustered with real
@@ -109,8 +111,14 @@ acceptance:
     the M1-721 budget, so without this a run of personal posts would
     evict genuinely-uncategorizable news from the bucket that exists to
     catch it. Relative order within each of the two groups is unchanged.
-    A test pins a budget-constrained Other rendering the real clusters
-    and dropping the personal ones.
+    The ordering is a BOTTOM GATE in `ClusterProminence.totalOrder()` —
+    personal compares after non-personal ahead of the urgent gate and
+    score comparison — symmetric to M1-724's `urgent` top gate and NOT
+    a weighted term; M1-724 landed first without it, so this ticket adds
+    it. `DigestCategorizer` emits its Other bucket in the same order so
+    the non-scored render paths agree. A test pins a budget-constrained
+    Other rendering the real clusters and dropping the personal ones,
+    and `ClusterProminenceTest` pins the bottom gate.
   - >-
     Section order, the `categoryMinClusters` threshold, the
     fold-into-Other second pass and Other-always-last are otherwise
@@ -144,6 +152,11 @@ test_plan:
       infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestPostCollectorTest.java
       — a collected post carries its real classification in both ALL and
       EXPLICIT mode, not the `unknown` sentinel.
+    - >-
+      infochat-provider/src/test/java/app/zcat/infochat/provider/summary/ClusterProminenceTest.java
+      — the personal bottom gate: a personal cluster sorts after every
+      non-personal cluster regardless of urgency or score, and two
+      non-personal clusters keep their prior relative order.
   preserves:
     - >-
       Every existing `DigestCategorizerTest` assertion — assignment,
@@ -175,12 +188,56 @@ decision_refs:
   - D62
   - D19
   - D21
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 16
+      added: 588
+      removed: 72
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-08-01
+    verdict: CLEAN
+    base: b8db467923432e4ad49a3eb30441cfd316aba708
+    head: working tree (in-progress branch m1/M1-727-personal-classification-routes-to-other)
+    verdict_file: docs/plan/m1/redteam/M1-727-2026-08-01.md
+    out_of_model_count: 1
+    note: |
+      Audit at the /m1-tick run gate (security_relevant: true), ahead of
+      review. No findings: the all-versus-any rule bounds content
+      suppression to self-demotion, the closed set is widened not weakened,
+      and no auth/authz/audit/LLM-tool surface is touched. The one
+      out-of-model observation (V73 re-validates existing rows under lock
+      at boot without NOT VALID) was evaluated and falsified as a
+      practical concern: AccessExclusiveLock confirmed, but post is bounded
+      by the 30-day partition-drop TTL, the real corpus is ~10^4 rows, and
+      a measured DROP+ADD of V73's shape over 1M rows took 1.28 s (real
+      corpus: milliseconds) at Flyway boot, before traffic. Accepted
+      residual; no remediation opened.
+clarity_check:
+  date: 2026-08-01
+  verdict: WARN
+  warnings:
+    - >-
+      Self-check: stale premise fixed inline — M1-724 (done) already
+      projects p.classification in both digest SELECTs and mapPost reads
+      it; acceptance item 3 and §Notes rewritten to match (remaining work
+      there is the test pin only).
+    - >-
+      Self-check: files_scope migration path corrected V67 -> V73; V67
+      already taken by V67__group_digest_mode.sql, acceptance item 1
+      already delegates the version number to implementation time.
 escalation_reason:
 ---
 
@@ -255,12 +312,12 @@ same observable behaviour.
 
 ## Notes
 
-`DigestPostCollector` does not currently project `p.classification` — it
-constructs every post with a hard-coded `List.of("unknown")` sentinel
-(`:120-125`) because the digest never rendered the `classification:`
-line. The comment there states the SELECT does not project it, so the
-comment is part of the diff: leaving it while adding the column would
-leave a false statement next to the code it describes.
+`DigestPostCollector` already projects `p.classification` in both
+digest SELECTs and `mapPost` reads it — M1-724 added the projection for
+its prominence urgent gate. The `unknown` sentinel is now only the
+fallback for a hand-stubbed `ResultSet`. What remains for this ticket on
+that front is the test pin: a collected post carries its real
+classification in both ALL and EXPLICIT mode.
 
 Widening a CHECK constraint cannot invalidate an existing row, so the
 migration needs no backfill and no re-classification job — the same

@@ -583,7 +583,7 @@ tags: security, ai
 
 The `classification:` line is the union of the clustered posts' per-post ingest
 classification labels (the closed set `{factual, opinion, technical, urgent,
-ongoing, unknown}`, assigned at ingest — see
+ongoing, personal, unknown}`, assigned at ingest — see
 [05-llm-and-embeddings.md §5.4.4](05-llm-and-embeddings.md)); it is independent
 of `tags:`, and `unknown` is shown only when no substantive label applies.
 
@@ -1741,6 +1741,23 @@ against the live corpus by reading the per-term components
 moves a cluster between sections and never reorders sections, so a
 high-scoring cluster cannot starve a small category. `/summary` stays
 publication-ordered.
+
+**Personal clusters route to Other (M1-727).** The classification label
+set gained a sixth substantive value, `personal` (§5.4.4 of
+[05-llm-and-embeddings.md](05-llm-and-embeddings.md)) — KIND, not topic:
+a post about the author's own life, a joke, a greeting, a social
+pleasantry. A cluster whose EVERY member post carries it routes to the
+D62 Other bucket regardless of its tags, is excluded from the
+qualifying-tag count (a run of personal posts sharing a tag can neither
+create a category nor keep one alive past `category-min-clusters`), and
+sorts AFTER non-personal clusters within Other — a bottom gate in
+`ClusterProminence.totalOrder()`, symmetric to the `urgent` top gate and
+reading no score component, so a personal run cannot evict
+genuinely-uncategorizable news from the budget Other competes for. The
+all-members rule keeps a mixed cluster — one personal post clustered
+with real coverage — in its topic section. `/summary` and `/retry` keep
+personal posts fully visible (routing moves them to Other, never filters
+them) and keep rendering their `classification:` line.
 
 **Collection window.** The slot window above decides *when* a digest
 fires; it is not the period the digest covers. The collection lower bound

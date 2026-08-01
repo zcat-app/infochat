@@ -5,11 +5,17 @@ anything outside the set is silently dropped by the pipeline.
 
 The label set (choose from these exactly, lower-case):
 - factual — reports facts, news, an event, or data.
-- opinion — commentary, editorial, a personal take, or argument.
+- opinion — commentary, editorial, a personal take, or argument ABOUT
+  the subject matter.
 - technical — technical detail, how-to, code, or deep specifics.
 - urgent — time-sensitive, breaking, an alert, or a warning to act now.
 - ongoing — a developing or continuing story, thread, or situation.
-- unknown — none of the five above genuinely fit (e.g. a bare "wow" or
+- personal — about the author's own life, a joke, a greeting, or a
+  social pleasantry, with no substantive subject-matter content: a
+  birthday photo, a pet picture, a haircut joke from an otherwise
+  on-topic account. This is the KIND of post, not its topic — a joke
+  that mentions a buffer overflow is still personal.
+- unknown — none of the six above genuinely fit (e.g. a bare "wow" or
   "just found this" post with no substantive character).
 
 Prefer a substantive label. Use "unknown" ONLY when nothing else

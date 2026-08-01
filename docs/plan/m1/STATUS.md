@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 747 |
+| done | 748 |
 | deferred | 1 |
 | abandoned | 21 |
 | **total** | **777** |
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-705 — Rate limiting: build the per-cost-profile bucket partition (complexity: high, risk: high)
 - M1-706 — Profile bundle: eval queue depth and summary worker count (complexity: high, risk: medium)
 - M1-725 — The digest has no lead: a reader who opens only the first message gets the newest item of the largest tag (complexity: medium, risk: medium)
-- M1-727 — Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other (complexity: medium, risk: medium)
 - M1-728 — Category roll-up sends every post's full body and asks for one or two sentences: it neither fits a large category nor describes one (complexity: medium, risk: medium)
 
 ---
@@ -72,11 +71,11 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-740 | Provider test fixtures insert into monthly-partitioned tables with wall-clock timestamps: the suite breaks on every unprovisioned month boundary | 2026-08-01 | round 1 APPROVE |
 | M1-739 | First-pass Stage 2 verdicts on row-less posts bypass the admin review queue | 2026-08-01 | round 2 APPROVE |
 | M1-738 | Re-hidden posts bypass the admin review queue | 2026-08-01 | round 1 APPROVE |
+| M1-727 | Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other | 2026-08-01 | round 1 APPROVE |
 | M1-724 | Digest cluster selection is recency-only: the cap keeps the newest stories, never the most significant | 2026-08-01 | round 1 APPROVE |
 | M1-716 | Decouple language enablement from bundle presence | 2026-08-01 | round 2 APPROVE |
 | M1-715 | post.body_summary is never written, yet EmbeddingWorker prefers it as embedding input | 2026-08-01 | round 1 APPROVE |
 | M1-707 | Operator-settable default timezone for new groups | 2026-08-01 | round 1 APPROVE |
-| M1-737 | Aggregate sanitize audit rows per distinct token per call | 2026-07-31 | round 1 APPROVE |
 
 ---
 
@@ -978,7 +977,7 @@ M1-723 (done)
 M1-726 (done)
   ├── M1-735 (done)
   └── M1-736 (done)
-M1-727 (pending) ← runnable
+M1-727 (done)
 M1-729 (done)
 M1-730 (done)
   └── M1-737 (done)

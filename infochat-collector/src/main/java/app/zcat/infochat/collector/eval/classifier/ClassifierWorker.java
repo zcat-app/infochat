@@ -70,7 +70,7 @@ import java.util.UUID;
  *
  * <h2>Closed enum + {@code unknown} semantics</h2>
  *
- * <p>{@link #SUBSTANTIVE_LABELS} are the five substantive labels; a post
+ * <p>{@link #SUBSTANTIVE_LABELS} are the six substantive labels; a post
  * gets 1..{@link #MAX_LABELS_PER_POST} of them, OR the single fallback
  * {@link #UNKNOWN}. {@code unknown} is NEVER combined with a substantive
  * label: the parse keeps only substantive labels, and an empty
@@ -132,14 +132,14 @@ public class ClassifierWorker {
     public static final String UNKNOWN = "unknown";
 
     /**
-     * The five substantive labels — the V57 closed set minus
-     * {@link #UNKNOWN}. The worker keeps only these from a reply;
-     * anything else (out-of-enum, or the literal {@code unknown}) is not
-     * added to the substantive set, and an empty substantive set
-     * resolves to {@code [unknown]}.
+     * The six substantive labels — the V57 closed set (widened by V73
+     * with {@code personal}, M1-727) minus {@link #UNKNOWN}. The worker
+     * keeps only these from a reply; anything else (out-of-enum, or the
+     * literal {@code unknown}) is not added to the substantive set, and
+     * an empty substantive set resolves to {@code [unknown]}.
      */
     static final Set<String> SUBSTANTIVE_LABELS =
-        Set.of("factual", "opinion", "technical", "urgent", "ongoing");
+        Set.of("factual", "opinion", "technical", "urgent", "ongoing", "personal");
 
     /**
      * Cap on substantive labels accepted from one reply — the design

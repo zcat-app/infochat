@@ -21,11 +21,15 @@ import jakarta.enterprise.context.ApplicationScoped;
  * is scored as a weighted sum over four percentile-normalized terms —
  * corroboration, reposts, likes, source scarcity — gated by the
  * {@code urgent} ingest classification and tie-broken by the input
- * (recency) order. The full ordering is (1) urgent clusters ahead of
+ * (recency) order. The full ordering is (0) PERSONAL clusters behind
+ * non-personal (the M1-727 bottom gate — an all-personal cluster is
+ * routed to the D62 Other bucket and must not evict
+ * genuinely-uncategorizable news from it), (1) urgent clusters ahead of
  * non-urgent, (2) descending weighted score, (3) ascending input index —
  * the collector's {@code COALESCE(published_at, fetched_at) DESC, id DESC}
  * at cluster granularity — so the order is total without relying on sort
- * stability.
+ * stability. The bottom gate is NOT a fifth weighted term: it reads no
+ * score component, exactly as the {@code urgent} top gate reads none.
  *
  * <p>Every term is an INTEGER percentile 0–100 within its own population,
  * never a raw value: distinct-source counts run 1–10 while like counts run
@@ -79,6 +83,7 @@ public class ClusterProminence {
             Cluster cluster,
             int index,
             boolean urgent,
+            boolean personal,
             int corroborationPercentile,
             @Nullable Integer repostsPercentile,
             @Nullable Integer likesPercentile,
@@ -93,16 +98,20 @@ public class ClusterProminence {
     }
 
     /**
-     * The total order: urgent first, then descending weighted score by
-     * exact rational comparison ({@code numerator/denominator}
-     * cross-multiplied — never divided, so no float and no premature
-     * flooring), then ascending input index (the existing recency sort
-     * key at cluster granularity). Static and stateless: the comparator
-     * reads only the {@link ScoredCluster} fields, so it is valid across
-     * instances and weight configurations.
+     * The total order: personal LAST (the M1-727 bottom gate), then
+     * urgent first, then descending weighted score by exact rational
+     * comparison ({@code numerator/denominator} cross-multiplied — never
+     * divided, so no float and no premature flooring), then ascending
+     * input index (the existing recency sort key at cluster granularity).
+     * Static and stateless: the comparator reads only the
+     * {@link ScoredCluster} fields, so it is valid across instances and
+     * weight configurations.
      */
     public static Comparator<ScoredCluster> totalOrder() {
         return (a, b) -> {
+            if (a.personal() != b.personal()) {
+                return a.personal() ? 1 : -1;
+            }
             if (a.urgent() != b.urgent()) {
                 return a.urgent() ? -1 : 1;
             }
@@ -153,6 +162,7 @@ public class ClusterProminence {
         long[] corrobNum = new long[n];
         long[] corrobDen = new long[n];
         boolean[] urgent = new boolean[n];
+        boolean[] personal = new boolean[n];
         long[] maxReposts = new long[n];
         boolean[] hasReposts = new boolean[n];
         String[] repostsKind = new String[n];
@@ -165,10 +175,21 @@ public class ClusterProminence {
         for (int i = 0; i < n; i++) {
             Cluster cluster = digestOrderClusters.get(i);
             Set<UUID> clusterSources = new HashSet<>();
+            // The M1-727 bottom gate: personal only when EVERY member post
+            // carries the label — the same all-versus-any predicate as
+            // DigestCategorizer.isPersonal (keep the two in step; the
+            // summary package cannot import the digest one). Absent data
+            // (null classification, empty cluster) is NOT personal. The
+            // "personal" literal matches the "urgent" one below: closed-set
+            // vocabulary, not an importable constant.
+            boolean allPersonal = !cluster.posts().isEmpty();
             for (Post p : cluster.posts()) {
                 clusterSources.add(p.sourceId());
                 if (p.classification() != null && p.classification().contains("urgent")) {
                     urgent[i] = true;
+                }
+                if (p.classification() == null || !p.classification().contains("personal")) {
+                    allPersonal = false;
                 }
                 // Max value with the contributing post's kind; strict >
                 // keeps the FIRST max-contributing post on ties, so the
@@ -200,6 +221,7 @@ public class ClusterProminence {
             // assigned tag (D62), so at least one source is active under it;
             // Other-bucket clusters use the digest-wide count.
             corrobDen[i] = tagSources == null ? digestWideSources : tagSources.size();
+            personal[i] = allPersonal;
         }
 
         // Percentiles, one population per term.
@@ -229,7 +251,7 @@ public class ClusterProminence {
                 denominator += weightScarcity;
             }
             out.add(new ScoredCluster(
-                    digestOrderClusters.get(i), i, urgent[i],
+                    digestOrderClusters.get(i), i, urgent[i], personal[i],
                     corrobPercentile[i], repostsPercentile[i], likesPercentile[i],
                     scarcityPercentile[i],
                     weightCorroboration, weightReposts, weightLikes, weightScarcity,

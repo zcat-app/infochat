@@ -20,7 +20,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Verifies the deterministic tag arithmetic of {@link DigestCategorizer}
  * (D62): highest-count qualifying-tag assignment, alphabetical tie-break,
  * post-assignment fold-back, and the Other bucket — plus the M1-721 section
- * cap layered on top of the ordered result.
+ * cap layered on top of the ordered result and the M1-727 personal routing
+ * (all-personal clusters to Other, excluded from the qualifying-tag count,
+ * sorted last within Other).
  */
 class DigestCategorizerTest {
 
@@ -117,6 +119,148 @@ class DigestCategorizerTest {
         assertNull(sections.get(1).tag(), "Other renders last");
         assertEquals(List.of(untagged, rare), sections.get(1).clusters(),
                 "Other preserves digest order across untagged and below-threshold clusters");
+    }
+
+    // ----- personal routing (M1-727) ---------------------------------------
+
+    @Test
+    void allPersonalClusterRoutesToOtherDespiteQualifyingTag() {
+        // security qualifies (3 real clusters carry it); the personal
+        // cluster carries it too but routes to Other regardless — its tag
+        // is not its destination.
+        Cluster personal = personalCluster("cat-pic", "security");
+        Cluster sec1 = cluster("sec1", "security");
+        Cluster sec2 = cluster("sec2", "security");
+        Cluster sec3 = cluster("sec3", "security");
+
+        List<CategorySection> sections = categorizer.categorize(
+                List.of(personal, sec1, sec2, sec3));
+
+        assertEquals(2, sections.size());
+        assertEquals("security", sections.get(0).tag());
+        assertEquals(List.of(sec1, sec2, sec3), sections.get(0).clusters(),
+                "the personal cluster does not join its tag's category");
+        assertNull(sections.get(1).tag());
+        assertEquals(List.of(personal), sections.get(1).clusters(),
+                "an all-personal cluster lands in Other despite a qualifying tag");
+    }
+
+    @Test
+    void mixedClusterStaysInItsTopicSection() {
+        // The all-versus-any choice: ONE personal post that clustered with
+        // real coverage does not make the cluster personal — hiding real
+        // news over one stray member is the worse error.
+        Cluster mixed = new Cluster("mixed", List.of(
+                personalPost("mixed-joke", "security"),
+                post("mixed-cve", "security")));
+        Cluster sec1 = cluster("sec1", "security");
+        Cluster sec2 = cluster("sec2", "security");
+        Cluster sec3 = cluster("sec3", "security");
+
+        List<CategorySection> sections = categorizer.categorize(
+                List.of(mixed, sec1, sec2, sec3));
+
+        assertEquals(1, sections.size(), "no Other: every cluster is on-topic");
+        assertEquals("security", sections.get(0).tag());
+        assertEquals(List.of(mixed, sec1, sec2, sec3), sections.get(0).clusters(),
+                "a mixed cluster stays in its topic section");
+    }
+
+    @Test
+    void personalClustersDoNotPromoteTheirSharedTagToACategory() {
+        // Three personal clusters all tagged security: excluded from the
+        // qualifying-tag count, so security's count is 0 — the cat
+        // pictures can neither create a category nor fill one.
+        Cluster p1 = personalCluster("p1", "security");
+        Cluster p2 = personalCluster("p2", "security");
+        Cluster p3 = personalCluster("p3", "security");
+
+        List<CategorySection> sections = categorizer.categorize(List.of(p1, p2, p3));
+
+        assertEquals(1, sections.size(), "no security category is created");
+        assertNull(sections.get(0).tag());
+        assertEquals(List.of(p1, p2, p3), sections.get(0).clusters());
+    }
+
+    @Test
+    void realCategoryAtThresholdIsUnaffectedByPersonalClustersCarryingItsTag() {
+        // Exactly category-min-clusters real clusters carry security: the
+        // category must survive whether or not personal clusters carrying
+        // the same tag are present — they can neither hold a dying
+        // category open nor inflate one.
+        Cluster sec1 = cluster("sec1", "security");
+        Cluster sec2 = cluster("sec2", "security");
+        Cluster sec3 = cluster("sec3", "security");
+        Cluster p1 = personalCluster("p1", "security");
+        Cluster p2 = personalCluster("p2", "security");
+
+        List<CategorySection> withoutPersonal = categorizer.categorize(List.of(sec1, sec2, sec3));
+        List<CategorySection> withPersonal = categorizer.categorize(
+                List.of(p1, sec1, p2, sec2, sec3));
+
+        assertEquals(1, withoutPersonal.size());
+        assertEquals(2, withPersonal.size(), "the personal clusters add only Other");
+        assertEquals(withoutPersonal.get(0), withPersonal.get(0),
+                "the security section is identical with and without personal clusters");
+        assertNull(withPersonal.get(1).tag());
+        assertEquals(List.of(p1, p2), withPersonal.get(1).clusters());
+    }
+
+    @Test
+    void personalClustersSortLastWithinOther() {
+        // Other competes for budget like any section: the budget must cut
+        // cat pictures before it cuts genuinely-uncategorizable news, so
+        // personal clusters sort after non-personal ones — any prefix
+        // budget drops personal clusters first. Relative order inside
+        // each group is the input (digest) order.
+        Cluster untagged1 = cluster("untagged1");
+        Cluster p1 = personalCluster("p1", "cats");
+        Cluster rare = cluster("rare", "rare-tag");
+        Cluster p2 = personalCluster("p2", "dogs");
+        Cluster untagged2 = cluster("untagged2");
+        Cluster p3 = personalCluster("p3", "cats");
+
+        List<CategorySection> sections = categorizer.categorize(
+                List.of(untagged1, p1, rare, p2, untagged2, p3));
+
+        assertEquals(1, sections.size(), "everything lands in Other");
+        assertNull(sections.get(0).tag());
+        assertEquals(List.of(untagged1, rare, untagged2, p1, p2, p3),
+                sections.get(0).clusters(),
+                "non-personal first in input order, personal after in input order");
+        // The budget pin: every prefix that drops clusters from the tail
+        // (the M1-721/M1-732 head-of-section render shapes) drops ONLY
+        // personal clusters until none remain.
+        List<Cluster> other = sections.get(0).clusters();
+        assertEquals(List.of(untagged1, rare, untagged2),
+                other.subList(0, other.size() - 3),
+                "a budget-constrained Other renders the real clusters and drops the personal ones");
+    }
+
+    @Test
+    void nonPersonalClassificationsAreRoutingTransparent() {
+        // The byte-identical pin at categorizer level: the whole existing
+        // suite runs {unknown} fixtures; swapping in the other five
+        // non-personal labels must not move a single cluster.
+        Cluster dual = new Cluster("dual", List.of(
+                postWithClassification("dual-a", List.of("factual"), "ai"),
+                postWithClassification("dual-b", List.of("opinion", "technical"), "security")));
+        Cluster ai1 = clusterWithClassification("ai1", List.of("urgent"), "ai");
+        Cluster ai2 = clusterWithClassification("ai2", List.of("ongoing"), "ai");
+        Cluster ai3 = clusterWithClassification("ai3", List.of("factual", "technical", "urgent"), "ai");
+        Cluster ai4 = clusterWithClassification("ai4", List.of("opinion"), "ai");
+        Cluster sec1 = clusterWithClassification("sec1", List.of("technical"), "security");
+        Cluster sec2 = clusterWithClassification("sec2", List.of("factual"), "security");
+        Cluster sec3 = clusterWithClassification("sec3", List.of("unknown"), "security");
+
+        List<CategorySection> sections = categorizer.categorize(
+                List.of(dual, ai1, ai2, ai3, ai4, sec1, sec2, sec3));
+
+        assertEquals(2, sections.size(), "two sections, no Other");
+        assertEquals("ai", sections.get(0).tag());
+        assertEquals(List.of(dual, ai1, ai2, ai3, ai4), sections.get(0).clusters());
+        assertEquals("security", sections.get(1).tag());
+        assertEquals(List.of(sec1, sec2, sec3), sections.get(1).clusters());
     }
 
     // ----- section cap (M1-721) ---------------------------------------------
@@ -225,6 +369,30 @@ class DigestCategorizerTest {
     /** One single-post cluster carrying the given tags (categories count at the cluster level, so one post per cluster suffices). */
     private static Cluster cluster(String topicId, String... tags) {
         return new Cluster(topicId, List.of(post("post-" + topicId, tags)));
+    }
+
+    /** One single-post cluster whose post carries the given classification. */
+    private static Cluster clusterWithClassification(String topicId, List<String> classification,
+                                                     String... tags) {
+        return new Cluster(topicId,
+                List.of(postWithClassification("post-" + topicId, classification, tags)));
+    }
+
+    /** One single-post all-personal cluster (M1-727). */
+    private static Cluster personalCluster(String topicId, String... tags) {
+        return new Cluster(topicId, List.of(personalPost("post-" + topicId, tags)));
+    }
+
+    private static Post personalPost(String uid, String... tags) {
+        return postWithClassification(uid, List.of("personal"), tags);
+    }
+
+    private static Post postWithClassification(String uid, List<String> classification,
+                                               String... tags) {
+        return new Post(
+                UUID.randomUUID(), uid, UUID.randomUUID(), "TestSrc",
+                "title-" + uid, "https://example.com/" + uid, "body",
+                Instant.now(), List.of(tags), classification);
     }
 
     private static Post post(String uid, String... tags) {
