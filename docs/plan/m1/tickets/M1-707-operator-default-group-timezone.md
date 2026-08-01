@@ -1,17 +1,19 @@
 ---
 id: M1-707
 title: "Operator-settable default timezone for new groups"
-status: pending
+status: done
 created: 2026-07-27
-last_updated: 2026-07-30
+last_updated: 2026-08-01
 blocked_by: []
-files_budget: 6
+files_budget: 8
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/group/GroupRepository.java
   - infochat-provider/src/main/resources/application.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/group/GroupRepositoryTest.java
-  - infochat-core/src/main/resources/db/migration/V68__provider_groups_timezone_insert_grant.sql
+  - infochat-core/src/main/resources/db/migration/V72__provider_groups_timezone_insert_grant.sql
   - docs/design/07-deployment.md
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/db/ProviderIdentityGrantsIT.java
+  - infochat-provider/src/test/resources/documented-config-key-exemptions.txt
 complexity: low
 risk: medium
 round_cap: 2
@@ -37,7 +39,10 @@ out_of_scope:
     on `groups`. V62 deliberately narrowed the Provider to
     column-scoped INSERT/UPDATE; this ticket adds exactly one column to
     the INSERT list and touches no other table, column or role.
-  - infochat-collector/**
+  - >-
+    infochat-collector production code. The sole collector-module touch
+    is the V62 grant-surface IT named in files_scope — test_plan requires
+    it updated to the new expected column set.
 acceptance:
   - >-
     `infochat.groups.default-timezone` exists in the Provider's
@@ -53,7 +58,7 @@ acceptance:
     would surface later as a digest scheduling failure. Config parsing
     is a system boundary, so this validation belongs here.
   - >-
-    Migration V68 widens the Provider's column-scoped INSERT grant on
+    Migration V72 widens the Provider's column-scoped INSERT grant on
     `groups` to include `timezone` and nothing else; it applies cleanly
     on a fresh database and the existing V62 grant tests stay green.
   - >-
@@ -84,11 +89,35 @@ spec_refs:
   - docs/spec/deployment.md §Configuration surface (spec level)
 decision_refs:
   - D47
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 236
+      removed: 39
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-08-01
+    verdict: CLEAN
+    base: ef4d04c8d35abb82f6fcbee19b9dd0f418fcb623
+    head: working-tree (in-progress gate audit ahead of review)
+    verdict_file: docs/plan/m1/redteam/M1-707-2026-08-01.md
+    out_of_model_count: 0
+    note: |
+      First-round audit of the uncommitted branch diff. CLEAN — the
+      timezone write is parameterized operator config, and V72's
+      one-column INSERT widening touches no privilege column.
 clarity_check: {}
 escalation_reason:
 ---
@@ -125,7 +154,7 @@ GAP note.
 - `GroupRepositoryTest` proves a group created under a non-UTC setting
   persists that zone, and that the default path still yields `UTC`.
 - A non-resolvable zone id refuses boot with a message naming the key.
-- Migration V68 adds `timezone` — and only `timezone` — to the
+- Migration V72 adds `timezone` — and only `timezone` — to the
   Provider's column-scoped INSERT grant on `groups`, applies cleanly on
   a fresh database, and leaves the rest of the V62 grant surface intact.
 - `docs/design/07-deployment.md` §7.4 carries the real key instead of
@@ -141,16 +170,18 @@ change adds one column to one table for one role — no other widening.
 
 ## Notes
 
-- **Why V68 and not the next free number.** Three pending tickets each
-  carry a migration: this one, M1-722 (`V66__group_digest_mode.sql`) and
-  M1-727 (`V67__classification_personal_label.sql`, whose body pins V67
-  to "M1-722's V66 has landed"). No `flyway.out-of-order` is configured,
-  so Flyway's default `outOfOrder=false` applies and versions must land
-  in ascending order — which makes the number and the landing order one
-  decision, not two. This ticket claimed V66 as well; it is the one with
-  no dependents, so it renumbered to V68 and lands last of the three.
-  Landing it before M1-722 or M1-727 would leave Flyway refusing their
-  lower-numbered migrations on any database this one has already touched.
+- **Why V72 and not a lower number.** No `flyway.out-of-order` is
+  configured, so Flyway's default `outOfOrder=false` applies and
+  versions must land in ascending order — which makes the number and
+  the landing order one decision, not two. V68 is on main
+  (`V68__group_digest_mode_update_grant.sql`), V69/V70/V71 are claimed
+  by in-flight M1-741, M1-742 and M1-715 respectively, so this ticket
+  takes V72 and lands last of the set. Landing it before any of those
+  would leave Flyway refusing their lower-numbered migrations on any
+  database this one has already touched. (Renumbered 2026-08-01 from
+  the originally-planned V68, which M1-722's follow-up took; the
+  earlier V66/V67 numbering rationale referred to migrations that have
+  since landed.)
 
 - **The hidden coupling that makes this a migration ticket.** V62 line
   587 is `GRANT INSERT (adapter, upstream_group_id, activated_by) ON
@@ -171,8 +202,8 @@ change adds one column to one table for one role — no other widening.
   at `start` rather than switching silently — `files_scope` and
   `migration_touch` both assume the grant path.
 
-- **Adjacent pattern.** `InterruptibleDispatcher.java:154` is the
-  existing example of a Provider config key validated at injection with
-  a message naming the key; match that shape rather than inventing a new
-  one. `GroupTimezoneCommandHandler.java:108-110` shows the `ZoneId.of`
-  validation the command already applies.
+- **Adjacent pattern.** `InterruptibleDispatcher`'s `@PostConstruct`
+  validation is the existing example of a Provider config key validated
+  at injection with a message naming the key; match that shape rather
+  than inventing a new one. `GroupTimezoneCommandHandler` (`:107-118`)
+  shows the `ZoneId.of` validation the command already applies.

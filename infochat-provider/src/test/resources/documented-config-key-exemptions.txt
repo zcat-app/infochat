@@ -74,7 +74,6 @@ infochat.context-hard-limit | GAP: docs/design/05-llm-and-embeddings.md §5.7 ma
 infochat.digest.workers | GAP (audit §A5, docs/design/01-architecture.md §1.6): no per-profile digest worker count is enforced; the knob is owed.
 infochat.embeddings.index-type | GAP: docs/design/05-llm-and-embeddings.md §5.7 shows the intended per-profile index; v1 ships HNSW on every profile and the per-profile index is deferred beyond v1.
 infochat.eval.queue-size | GAP (audit §A5, docs/design/01-architecture.md §1.6): the eval queue depth is SmallRye's default 128 buffer, neither configurable nor profile-driven; the key is owed.
-infochat.groups.default-timezone | GAP: docs/design/07-deployment.md §7.4 records the per-group timezone default as NOT implemented — "read by nothing".
 infochat.llm.chat.max-concurrency | GAP: docs/design/05-llm-and-embeddings.md §5.7 states this key does not exist; the Provider's bound is the shared infochat.chat.dispatch.max-concurrency.
 infochat.llm.summarizer.max-concurrency | GAP: docs/design/05-llm-and-embeddings.md §5.7 states this key does not exist; the Provider's bound is the shared infochat.chat.dispatch.max-concurrency.
 infochat.summary.workers | GAP: docs/design/05-llm-and-embeddings.md §5.7 marks "no such key" — summary/digest work has no per-profile worker-count bound.

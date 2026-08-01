@@ -226,14 +226,30 @@ class ProviderIdentityGrantsIT {
                 st.execute("SET ROLE infochat_provider");
 
                 UUID groupId;
+                // The column set is the one the Provider's creation
+                // statements actually write: V72 (M1-707) widened the
+                // INSERT grant with timezone so the operator-configured
+                // default zone lands at creation. A non-UTC literal plus
+                // the read-back below pins that the value — not the DDL
+                // default — is what was persisted.
                 try (PreparedStatement insert = conn.prepareStatement(
-                        "INSERT INTO groups (adapter, upstream_group_id, activated_by)"
-                            + " VALUES ('inmemory', ?, ?) RETURNING id")) {
+                        "INSERT INTO groups (adapter, upstream_group_id, activated_by, timezone)"
+                            + " VALUES ('inmemory', ?, ?, 'Europe/Berlin') RETURNING id")) {
                     insert.setString(1, upstreamGroupId);
                     insert.setObject(2, userId);
                     try (ResultSet rs = insert.executeQuery()) {
                         assertTrue(rs.next(), "the groups INSERT must return the new id");
                         groupId = rs.getObject(1, UUID.class);
+                    }
+                }
+
+                try (PreparedStatement readBack = conn.prepareStatement(
+                        "SELECT timezone FROM groups WHERE id = ?")) {
+                    readBack.setObject(1, groupId);
+                    try (ResultSet rs = readBack.executeQuery()) {
+                        assertTrue(rs.next());
+                        assertEquals("Europe/Berlin", rs.getString(1),
+                            "the widened INSERT grant must carry the timezone column (V72)");
                     }
                 }
 

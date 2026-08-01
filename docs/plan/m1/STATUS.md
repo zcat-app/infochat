@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 10 |
+| pending | 9 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 745 |
+| done | 746 |
 | deferred | 1 |
 | abandoned | 21 |
 | **total** | **777** |
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-705 — Rate limiting: build the per-cost-profile bucket partition (complexity: high, risk: high)
 - M1-706 — Profile bundle: eval queue depth and summary worker count (complexity: high, risk: medium)
-- M1-707 — Operator-settable default timezone for new groups (complexity: low, risk: medium)
 - M1-715 — post.body_summary is never written, yet EmbeddingWorker prefers it as embedding input (complexity: low, risk: low)
 - M1-725 — The digest has no lead: a reader who opens only the first message gets the newest item of the largest tag (complexity: medium, risk: medium)
 - M1-727 — Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other (complexity: medium, risk: medium)
@@ -76,9 +75,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-738 | Re-hidden posts bypass the admin review queue | 2026-08-01 | round 1 APPROVE |
 | M1-724 | Digest cluster selection is recency-only: the cap keeps the newest stories, never the most significant | 2026-08-01 | round 1 APPROVE |
 | M1-716 | Decouple language enablement from bundle presence | 2026-08-01 | round 2 APPROVE |
+| M1-707 | Operator-settable default timezone for new groups | 2026-08-01 | round 1 APPROVE |
 | M1-737 | Aggregate sanitize audit rows per distinct token per call | 2026-07-31 | round 1 APPROVE |
 | M1-736 | Posts tagged '{}' are never re-evaluated when the vocabulary or model improves | 2026-07-31 | round 1 APPROVE |
-| M1-735 | A tagger that answers empty to every post emits no operational signal | 2026-07-31 | round 1 APPROVE |
 
 ---
 
@@ -953,7 +952,7 @@ M1-703 (done)
 M1-704 (done)
 M1-705 (pending) ← runnable
 M1-706 (pending) ← runnable
-M1-707 (pending) ← runnable
+M1-707 (done)
 M1-708 (done)
 M1-709 (done)
 M1-710 (done)

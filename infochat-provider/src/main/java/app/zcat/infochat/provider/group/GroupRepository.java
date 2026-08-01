@@ -5,8 +5,10 @@ import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.SafeLog;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,7 +19,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.DateTimeException;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -29,9 +33,13 @@ import java.util.UUID;
 @ApplicationScoped
 public class GroupRepository {
 
+    // timezone is written explicitly so a new group starts on the
+    // operator-configured default (M1-707) rather than the DDL 'UTC'
+    // last resort (V5); the ON CONFLICT path leaves an existing row's
+    // zone untouched.
     private static final String UPSERT =
-            "INSERT INTO groups (adapter, upstream_group_id) "
-          + "VALUES (?, ?) "
+            "INSERT INTO groups (adapter, upstream_group_id, timezone) "
+          + "VALUES (?, ?, ?) "
           + "ON CONFLICT (adapter, upstream_group_id) DO NOTHING";
 
     private static final String SELECT_BY_NATURAL_KEY =
@@ -53,10 +61,13 @@ public class GroupRepository {
     // declares it NOT NULL DEFAULT 'pending', so omitting it inserts the
     // same value the explicit literal did, and it keeps the column out of
     // the Provider's column-scoped INSERT grant — approval_status is
-    // writable only through set_group_approval_status (M1-672).
+    // writable only through set_group_approval_status (M1-672). timezone
+    // is present for the opposite reason: the operator-configured default
+    // (M1-707) must land on the winning row, and V72 widened the INSERT
+    // grant to carry it under the real infochat_provider role.
     private static final String INSERT_PENDING_RETURNING =
-            "INSERT INTO groups (adapter, upstream_group_id, activated_by) "
-          + "VALUES (?, ?, ?) "
+            "INSERT INTO groups (adapter, upstream_group_id, activated_by, timezone) "
+          + "VALUES (?, ?, ?, ?) "
           + "ON CONFLICT (adapter, upstream_group_id) DO NOTHING "
           + "RETURNING id";
 
@@ -157,9 +168,35 @@ public class GroupRepository {
     @Inject
     GroupJoinRepository groupJoinRepository;
 
+    // Deployment-wide default for groups.timezone on newly-created rows
+    // (M1-707; the DDL DEFAULT 'UTC' in V5 stays the last resort for any
+    // writer that omits the column). Field-injected with a "UTC"
+    // initializer — same seam as auditLogWriter above — so hand-constructed
+    // `new GroupRepository(dataSource)` test doubles keep the
+    // DDL-consistent value; the container overwrites it from config.
+    // Writing the column explicitly is what requires the V72 INSERT grant
+    // under the real infochat_provider role.
+    @ConfigProperty(name = "infochat.groups.default-timezone", defaultValue = "UTC")
+    String defaultTimezone = "UTC";
+
     @Inject
     public GroupRepository(DataSource dataSource) {
         this.dataSource = dataSource;
+    }
+
+    // Config-boundary validation (the InterruptibleDispatcher precedent):
+    // an unresolvable zone id refuses boot here, naming the key, rather
+    // than persisting an unusable zone that would surface later as a
+    // digest scheduling failure.
+    @PostConstruct
+    void validateDefaultTimezone() {
+        try {
+            ZoneId.of(defaultTimezone);
+        } catch (DateTimeException e) {
+            throw new IllegalStateException(
+                    "infochat.groups.default-timezone is not a resolvable IANA zone id: "
+                            + defaultTimezone, e);
+        }
     }
 
     /**
@@ -181,6 +218,7 @@ public class GroupRepository {
             try (PreparedStatement ps = conn.prepareStatement(UPSERT)) {
                 ps.setString(1, adapter);
                 ps.setString(2, upstreamGroupId);
+                ps.setString(3, defaultTimezone);
                 ps.executeUpdate();
             }
             try (PreparedStatement ps = conn.prepareStatement(SELECT_BY_NATURAL_KEY)) {
@@ -356,6 +394,7 @@ public class GroupRepository {
             ps.setString(1, adapter);
             ps.setString(2, upstreamGroupId);
             ps.setObject(3, activatedByUserId);
+            ps.setString(4, defaultTimezone);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
                     return Optional.empty();

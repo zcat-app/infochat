@@ -321,15 +321,11 @@ infochat.digest.weight.scarcity=2
 
 # ── Groups (deployment-wide defaults; per-group overrides via /group-timezone) ─
 # Default timezone assigned to a newly-created group row (spec/deployment.md
-# §Configuration surface — Groups). IANA tzdb name; per-group override is the
-# /group-timezone command (03-commands.md §3.10).
-#
-# GAP (audit 2026-07-27, .scratch/doc-audit.md §A): the operator-override key
-# is NOT implemented. `infochat.groups.default-timezone` is read by nothing;
-# the value comes solely from the DDL default
-# (`groups.timezone TEXT NOT NULL DEFAULT 'UTC'`, V5), so an operator cannot
-# currently change it. The spec commitment stands; the key is owed.
-# infochat.groups.default-timezone=UTC
+# §Configuration surface — Groups). IANA tzdb name, validated at boot;
+# per-group override is the /group-timezone command (03-commands.md §3.10).
+# The DDL DEFAULT 'UTC' (V5) stays the last resort for any writer that omits
+# the column.
+infochat.groups.default-timezone=UTC
 infochat.groups.global-max-groups=10             # profile-driven (pi 5, vps 50, remote-llm 100)
 infochat.groups.per-user-activation-cap=3        # profile-driven (vps 5, remote-llm 10)
 

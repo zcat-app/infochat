@@ -16,6 +16,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
@@ -103,5 +104,68 @@ class GroupRepositoryTest {
                 assertNull(rs.getTimestamp("removed_at"));
             }
         }
+    }
+
+    // M1-707: the configured default zone must land on rows from BOTH
+    // creation statements. Hand-constructed repos carry the non-UTC value
+    // because the config field is package-visible with a "UTC" initializer;
+    // the container-injected `repository` keeps proving the UTC default in
+    // findOrCreateByAdapterAndUpstreamId_insertsNewGroup above.
+    @Test
+    void findOrCreateByAdapterAndUpstreamId_persistsConfiguredDefaultTimezone() throws Exception {
+        GroupRepository berlinRepository = new GroupRepository(dataSource);
+        berlinRepository.defaultTimezone = "Europe/Berlin";
+        UUID id = berlinRepository.findOrCreateByAdapterAndUpstreamId(TEST_ADAPTER, TEST_UPSTREAM_ID);
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT timezone FROM groups WHERE id = ?")) {
+            ps.setObject(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals("Europe/Berlin", rs.getString("timezone"));
+            }
+        }
+    }
+
+    @Test
+    void tryInsertPending_persistsConfiguredDefaultTimezone() throws Exception {
+        // activated_by is FK-constrained, so the activating user is seeded
+        // first (the GroupMembershipRepositoryTest seed shape).
+        UUID userId = UUID.randomUUID();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO users (id, adapter, contact_id, registration_state) "
+                   + "VALUES (?, 'inmemory', ?, 'vouched')")) {
+            ps.setObject(1, userId);
+            ps.setString(2, "tz-test-" + userId);
+            ps.executeUpdate();
+        }
+
+        GroupRepository berlinRepository = new GroupRepository(dataSource);
+        berlinRepository.defaultTimezone = "Europe/Berlin";
+        UUID id = berlinRepository
+                .tryInsertPending(TEST_ADAPTER, TEST_UPSTREAM_ID, userId)
+                .orElseThrow();
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT timezone FROM groups WHERE id = ?")) {
+            ps.setObject(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals("Europe/Berlin", rs.getString("timezone"));
+            }
+        }
+    }
+
+    @Test
+    void unresolvableDefaultTimezoneRefusesBootNamingTheKey() {
+        GroupRepository invalidRepository = new GroupRepository(dataSource);
+        invalidRepository.defaultTimezone = "Not/AZone";
+        IllegalStateException refused = assertThrows(IllegalStateException.class,
+                invalidRepository::validateDefaultTimezone);
+        assertTrue(refused.getMessage().contains("infochat.groups.default-timezone"),
+                "the refusal must name the config key: " + refused.getMessage());
     }
 }
