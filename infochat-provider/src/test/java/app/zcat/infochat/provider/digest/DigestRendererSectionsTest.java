@@ -33,10 +33,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * The {@link DigestRenderer#renderSections} unit surface: section order
  * matches D62, the closing affordance is folded into the LAST section's
- * text only, the M1-721 section cap shapes the digest only, and (M1-732)
+ * text only, the M1-721 section cap shapes the digest only, (M1-732)
  * the {@code groups.digest_mode} body shapes — brief/normal hybrid
  * (true-count header + roll-up + headlines + footer) versus full's
- * per-cluster prose. Kept as a separate file so the pre-existing
+ * per-cluster prose, and (M1-725) the lead section — the top
+ * {@code lead-size} clusters by prominence across the whole digest,
+ * rendered first with full prose and removed from their home sections.
+ * Kept as a separate file so the pre-existing
  * {@link DigestRendererTest} stays the pipeline-wiring proof.
  */
 class DigestRendererSectionsTest {
@@ -64,6 +67,7 @@ class DigestRendererSectionsTest {
 
     @Test
     void sectionsMatchD62OrderCountDescAlphaTiesOtherLast() {
+        noLead(); // the D62 section order is this test's subject; the lead's own order tests are below
         proseGenerator.setResponseText("story prose");
         // EmptyEdgeSource → one singleton cluster per post, so tag counts
         // are: security=4, ai=3, crypto=3 (all qualify at threshold 3), and
@@ -123,6 +127,7 @@ class DigestRendererSectionsTest {
 
     @Test
     void cappedDigestAppendsOneOverflowLineOnTheLastSection() {
+        noLead(); // the section-cap shape is the subject; a lead would consume 3 clusters and shift the counts
         renderer.digestCategorizer = newCategorizer(3, 8);
         proseGenerator.setResponseText("capped prose");
 
@@ -157,6 +162,7 @@ class DigestRendererSectionsTest {
 
     @Test
     void proseCoversOnlySectionsThatSurviveTheCap() {
+        noLead(); // pins body prose against the cap; the lead's own call counts are pinned below
         renderer.digestCategorizer = newCategorizer(3, 8);
         proseGenerator.setResponseText("surviving prose");
 
@@ -192,6 +198,7 @@ class DigestRendererSectionsTest {
 
     @Test
     void normalModeRendersTrueCountHeaderRollupHeadlinesAndFooter() {
+        noLead(); // the hybrid body shape is the subject (the "without a lead" half); the with-lead half is below
         // The hybrid body: UPPERCASE header with the section's TRUE cluster
         // count, the roll-up synthesis, up to category-headline-count (5)
         // bare headlines (title + URL, NO prose), and the category footer.
@@ -274,6 +281,7 @@ class DigestRendererSectionsTest {
      */
     @Test
     void prominenceReorderingLeavesSectionMembershipIdentical() {
+        noLead(); // within-section reorder is the subject; lead extraction is covered below
         List<RenderedSection> sections =
                 renderer.renderSections(prominenceFixture(), "en", DigestMode.NORMAL);
 
@@ -292,6 +300,7 @@ class DigestRendererSectionsTest {
      */
     @Test
     void sectionHeadIsTheHighestScoringClusterNotTheNewest() {
+        noLead(); // within-section head selection is the subject; the lead's cross-digest selection is below
         List<RenderedSection> sections =
                 renderer.renderSections(prominenceFixture(), "en", DigestMode.NORMAL);
 
@@ -316,6 +325,7 @@ class DigestRendererSectionsTest {
      */
     @Test
     void lowScoringSectionStillRendersItsOwnHead() {
+        noLead(); // the no-starvation property is the subject; with-lead section behavior is covered below
         List<RenderedSection> sections =
                 renderer.renderSections(prominenceFixture(), "en", DigestMode.NORMAL);
 
@@ -366,7 +376,334 @@ class DigestRendererSectionsTest {
         return titles;
     }
 
+    // ----- the lead section (M1-725) ----------------------------------------
+
+    /**
+     * The lead holds the top {@code lead-size} (default 3) clusters by
+     * prominence across the WHOLE digest — not the newest three. The
+     * fixture is the M1-724 one (recency-ordered input, the THIRD post of
+     * each category carries the quiet-source signal), so prominence pulls
+     * Sec 3 and AI 3 into the lead ahead of the newest cluster, and the
+     * lead's internal order is the prominence total order.
+     */
+    @Test
+    void leadHoldsTopClustersByProminenceAcrossTheWholeDigest() {
+        proseGenerator.setEchoTitle(true);
+        List<RenderedSection> sections =
+                renderer.renderSections(prominenceFixture(), "en", DigestMode.NORMAL);
+
+        RenderedSection lead = sections.getFirst();
+        assertEquals(DigestRenderer.LEAD_TAG, lead.tag(),
+                "the lead is the FIRST section, marked by LEAD_TAG");
+        assertTrue(lead.text().startsWith("TOP STORIES"),
+                "the lead opens with the localized UPPERCASE header: " + lead.text());
+        int sec3 = lead.text().indexOf("Sec 3");
+        int ai3 = lead.text().indexOf("AI 3");
+        int sec1 = lead.text().indexOf("Sec 1");
+        assertTrue(sec3 >= 0 && ai3 > sec3 && sec1 > ai3,
+                "lead order is the prominence order (quiet-source winners first, then the "
+                        + "input-order tiebreak), not recency: " + lead.text());
+        assertEquals(3, proseGenerator.callCount(),
+                "lead prose is generated for exactly the lead-size promoted clusters");
+    }
+
+    /**
+     * No cluster renders twice: the union of lead and section clusters
+     * contains no duplicate topicId. Observable proxy at the render
+     * surface — every post title appears in EXACTLY ONE section's text
+     * (lead prose or category headlines), never two.
+     */
+    @Test
+    void noClusterRendersInBothLeadAndSection() {
+        proseGenerator.setEchoTitle(true);
+        List<Post> posts = List.of(
+                post("s1", "Sec 1", List.of("security")),
+                post("a1", "AI 1", List.of("ai")),
+                post("s2", "Sec 2", List.of("security")),
+                post("a2", "AI 2", List.of("ai")),
+                post("s3", "Sec 3", List.of("security")),
+                post("a3", "AI 3", List.of("ai")),
+                post("s4", "Sec 4", List.of("security")),
+                post("a4", "AI 4", List.of("ai")));
+
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.NORMAL);
+
+        assertEquals(DigestRenderer.LEAD_TAG, sections.getFirst().tag());
+        for (String title : List.of("Sec 1", "AI 1", "Sec 2", "AI 2",
+                "Sec 3", "AI 3", "Sec 4", "AI 4")) {
+            long carrying = sections.stream().filter(s -> s.text().contains(title)).count();
+            assertEquals(1, carrying,
+                    title + " renders in exactly one section — never both lead and category: "
+                            + sections.stream().map(RenderedSection::text).toList());
+        }
+    }
+
+    /**
+     * The section's story count (M1-732 true-count header) reflects the
+     * removal: a 13-cluster section that loses one to the lead reports 12.
+     */
+    @Test
+    void sectionCountDropsByTheClustersPromotedToTheLead() {
+        renderer.leadSize = 1;
+        proseGenerator.setEchoTitle(true);
+        rollupGenerator.setResponse("roll-up");
+        List<Post> posts = new ArrayList<>();
+        for (int i = 0; i < 13; i++) {
+            posts.add(post("sec-" + i, "Story sec " + i, List.of("security")));
+        }
+
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.NORMAL);
+
+        assertEquals(DigestRenderer.LEAD_TAG, sections.getFirst().tag());
+        assertTrue(sections.getFirst().text().contains("Story sec 0"),
+                "the lead holds the promoted cluster's prose: " + sections.getFirst().text());
+        RenderedSection body = sections.get(1);
+        assertTrue(body.text().startsWith("SECURITY NEWS — 12 STORIES"),
+                "the count drops with the promoted cluster — 12, not 13: " + body.text());
+    }
+
+    /**
+     * The lead-minimum boundary in both directions at the DEFAULT minimum
+     * (6): six clusters render a lead, five render none — a header over
+     * nearly the whole digest says nothing and costs an extra message
+     * under D63.
+     */
+    @Test
+    void leadRendersAtTheMinimumAndNotBelowIt() {
+        List<Post> six = List.of(
+                post("s1", "Sec 1", List.of("security")),
+                post("s2", "Sec 2", List.of("security")),
+                post("s3", "Sec 3", List.of("security")),
+                post("a1", "AI 1", List.of("ai")),
+                post("a2", "AI 2", List.of("ai")),
+                post("a3", "AI 3", List.of("ai")));
+
+        List<RenderedSection> withLead = renderer.renderSections(six, "en", DigestMode.NORMAL);
+
+        assertEquals(DigestRenderer.LEAD_TAG, withLead.getFirst().tag(),
+                "six clusters >= the default lead-minimum: the lead renders");
+        int proseAtMinimum = proseGenerator.callCount();
+
+        List<Post> five = six.subList(0, 5);
+        List<RenderedSection> withoutLead =
+                renderer.renderSections(five, "en", DigestMode.NORMAL);
+
+        assertTrue(withoutLead.stream().noneMatch(s -> DigestRenderer.LEAD_TAG.equals(s.tag())),
+                "five clusters < the default lead-minimum: NO lead section at all");
+        assertEquals(proseAtMinimum, proseGenerator.callCount(),
+                "below the minimum no lead prose is paid for");
+    }
+
+    /**
+     * A category the lead drops below the D62 qualifying threshold folds
+     * into Other through the categorizer's EXISTING second pass: the
+     * 3-cluster crypto category loses its quiet-source cluster to the
+     * lead, and the remaining two render under Other — no dedicated code
+     * path, no empty crypto section.
+     */
+    @Test
+    void categoryFoldsIntoOtherAfterTheLeadGutsIt() {
+        renderer.leadSize = 1;
+        proseGenerator.setEchoTitle(true);
+        rollupGenerator.setResponse("roll-up");
+        List<Post> posts = List.of(
+                post("s1", "Sec 1", List.of("security"), 300),
+                post("s2", "Sec 2", List.of("security"), 300),
+                post("s3", "Sec 3", List.of("security"), 300),
+                post("c1", "Crypto 1", List.of("crypto"), 1),
+                post("c2", "Crypto 2", List.of("crypto"), 300),
+                post("c3", "Crypto 3", List.of("crypto"), 300));
+
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.NORMAL);
+
+        assertEquals(DigestRenderer.LEAD_TAG, sections.getFirst().tag());
+        assertTrue(sections.getFirst().text().contains("Crypto 1"),
+                "the quiet-source crypto cluster wins the lead: " + sections.getFirst().text());
+        assertTrue(sections.stream().noneMatch(s -> "crypto".equals(s.tag())),
+                "the gutted crypto category (2 < category-min-clusters) keeps no section");
+        RenderedSection other = sectionByTag(sections, null);
+        assertTrue(other.text().contains("Crypto 2") && other.text().contains("Crypto 3"),
+                "the surviving crypto clusters fold into Other: " + other.text());
+        assertEquals(Set.of("Sec 1", "Sec 2", "Sec 3"),
+                headlineTitles(sectionByTag(sections, "security")),
+                "security is untouched — the lead took nothing from it");
+    }
+
+    /**
+     * NORMAL mode: the lead renders full per-cluster prose (the render
+     * the hybrid-body categories no longer do) while the categories keep
+     * their roll-up + bare headlines. The lead carries NO headline lines
+     * and NO footer.
+     */
+    @Test
+    void leadRendersFullProseWhileCategoriesRenderHeadlines() {
+        proseGenerator.setResponseText("lead prose");
+        proseGenerator.setEchoTitle(true);
+        rollupGenerator.setResponse("roll-up");
+        List<Post> posts = List.of(
+                post("s1", "Sec 1", List.of("security")),
+                post("a1", "AI 1", List.of("ai")),
+                post("s2", "Sec 2", List.of("security")),
+                post("a2", "AI 2", List.of("ai")),
+                post("s3", "Sec 3", List.of("security")),
+                post("a3", "AI 3", List.of("ai")),
+                post("s4", "Sec 4", List.of("security")),
+                post("a4", "AI 4", List.of("ai")),
+                post("s5", "Sec 5", List.of("security")),
+                post("a5", "AI 5", List.of("ai")));
+
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.NORMAL);
+
+        RenderedSection lead = sections.getFirst();
+        assertEquals(DigestRenderer.LEAD_TAG, lead.tag());
+        assertTrue(lead.text().contains("lead prose Sec 1")
+                        && lead.text().contains("lead prose AI 1")
+                        && lead.text().contains("lead prose Sec 2"),
+                "the lead renders full prose for its clusters: " + lead.text());
+        assertTrue(lead.text().lines().noneMatch(line -> line.startsWith("· ")),
+                "the lead renders prose, NOT headlines: " + lead.text());
+        for (RenderedSection section : sections.subList(1, sections.size())) {
+            assertTrue(section.text().contains("· "),
+                    "category sections keep their bare headlines: " + section.text());
+            assertFalse(section.text().contains("lead prose"),
+                    "category sections render NO per-cluster prose: " + section.text());
+        }
+    }
+
+    /**
+     * Message ordering: the lead is the FIRST section (its own first
+     * message under M1-734's batched delivery — DigestDeliveryTest pins
+     * the split) and the closing affordance appears exactly once across
+     * the digest, on the LAST section — never on the lead.
+     */
+    @Test
+    void leadIsFirstAndTheAffordanceStaysLast() {
+        rollupGenerator.setResponse("roll-up");
+        List<Post> posts = List.of(
+                post("s1", "Sec 1", List.of("security")),
+                post("a1", "AI 1", List.of("ai")),
+                post("s2", "Sec 2", List.of("security")),
+                post("a2", "AI 2", List.of("ai")),
+                post("s3", "Sec 3", List.of("security")),
+                post("a3", "AI 3", List.of("ai")));
+
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.NORMAL);
+
+        String affordance =
+                "@mention me to go deeper on any story, or ask about a topic you don't see here.";
+        assertEquals(DigestRenderer.LEAD_TAG, sections.getFirst().tag(),
+                "the lead is the first section — its own first message");
+        assertFalse(sections.getFirst().text().contains(affordance),
+                "the lead never carries the closing affordance");
+        long occurrences = sections.stream()
+                .mapToLong(s -> s.text().split(java.util.regex.Pattern.quote(affordance), -1).length - 1)
+                .sum();
+        assertEquals(1, occurrences,
+                "the affordance appears exactly once across the whole digest: "
+                        + sections.stream().map(RenderedSection::text).toList());
+        assertTrue(sections.getLast().text().endsWith(affordance),
+                "the affordance stays on the LAST section of the digest");
+    }
+
+    /**
+     * brief renders no lead at all: a few lines per category with a prose
+     * lead above would dominate the thing it introduces — and no lead
+     * prose is paid for.
+     */
+    @Test
+    void briefModeRendersNoLead() {
+        rollupGenerator.setResponse("brief synthesis");
+        List<Post> posts = List.of(
+                post("s1", "Sec 1", List.of("security")),
+                post("a1", "AI 1", List.of("ai")),
+                post("s2", "Sec 2", List.of("security")),
+                post("a2", "AI 2", List.of("ai")),
+                post("s3", "Sec 3", List.of("security")),
+                post("a3", "AI 3", List.of("ai")),
+                post("s4", "Sec 4", List.of("security")),
+                post("a4", "AI 4", List.of("ai")));
+
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.BRIEF);
+
+        assertTrue(sections.stream().noneMatch(s -> DigestRenderer.LEAD_TAG.equals(s.tag())),
+                "brief renders NO lead section, even above the minimum");
+        assertEquals(0, proseGenerator.callCount(),
+                "brief pays NO prose — no lead, no per-cluster body");
+    }
+
+    /**
+     * LLM call accounting (NORMAL): exactly {@code lead-size} prose calls
+     * for the lead, on top of M1-732's one roll-up per surviving section —
+     * and nothing else.
+     */
+    @Test
+    void llmCallsAreLeadSizePlusOneRollupPerSection() {
+        proseGenerator.setResponseText("lead prose");
+        rollupGenerator.setResponse("roll-up");
+        List<Post> posts = List.of(
+                post("s1", "Sec 1", List.of("security")),
+                post("a1", "AI 1", List.of("ai")),
+                post("s2", "Sec 2", List.of("security")),
+                post("a2", "AI 2", List.of("ai")),
+                post("s3", "Sec 3", List.of("security")),
+                post("a3", "AI 3", List.of("ai")),
+                post("s4", "Sec 4", List.of("security")),
+                post("a4", "AI 4", List.of("ai")),
+                post("s5", "Sec 5", List.of("security")),
+                post("a5", "AI 5", List.of("ai")));
+
+        renderer.renderSections(posts, "en", DigestMode.NORMAL);
+
+        assertEquals(3, proseGenerator.callCount(),
+                "lead prose runs for exactly the lead-size promoted clusters, no others");
+        assertEquals(2, rollupGenerator.callCount(),
+                "one roll-up per surviving section (ai 4, security 3 after the removal)");
+    }
+
+    /**
+     * FULL mode with a lead: the lead's 3 prose calls plus every surviving
+     * body cluster's — total calls equal the total cluster count, and no
+     * cluster renders twice.
+     */
+    @Test
+    void fullModeRendersLeadAndBodyProseWithoutDuplication() {
+        proseGenerator.setEchoTitle(true);
+        List<Post> posts = List.of(
+                post("s1", "Sec 1", List.of("security")),
+                post("a1", "AI 1", List.of("ai")),
+                post("s2", "Sec 2", List.of("security")),
+                post("a2", "AI 2", List.of("ai")),
+                post("s3", "Sec 3", List.of("security")),
+                post("a3", "AI 3", List.of("ai")),
+                post("s4", "Sec 4", List.of("security")),
+                post("a4", "AI 4", List.of("ai")));
+
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.FULL);
+
+        assertEquals(DigestRenderer.LEAD_TAG, sections.getFirst().tag(),
+                "full renders the lead first too");
+        assertEquals(8, proseGenerator.callCount(),
+                "lead (3) + every surviving body cluster (5) — every cluster exactly once");
+        for (String title : List.of("Sec 1", "AI 1", "Sec 2", "AI 2",
+                "Sec 3", "AI 3", "Sec 4", "AI 4")) {
+            long carrying = sections.stream().filter(s -> s.text().contains(title)).count();
+            assertEquals(1, carrying, title + " renders exactly once in full mode too");
+        }
+    }
+
     // ----- helpers ----------------------------------------------------------
+
+    /**
+     * Disable the lead for a test whose subject predates M1-725: the
+     * default-on lead (3 of any >= 6-cluster non-brief digest) would
+     * otherwise reshape these fixtures. The lead's own behavior — and the
+     * with-lead half of the body assertions — is pinned in the M1-725
+     * block above. Field-init keeps the production default; this is a
+     * test-local override, the newCategorizer(3, 8) idiom.
+     */
+    private void noLead() {
+        renderer.leadMinimum = Integer.MAX_VALUE;
+    }
 
     /**
      * Twelve qualifying categories {@code cat00}..{@code cat11} of exactly 3
@@ -432,14 +769,19 @@ class DigestRendererSectionsTest {
 
     /**
      * Recording subclass: returns canned prose for each cluster and tracks
-     * the language code and call count.
+     * the language code and call count. Echo mode appends the cluster's
+     * first post title to the canned text, so a test can tell WHICH
+     * clusters were promoted from the rendered bytes (the M1-725
+     * no-duplicate and lead-membership assertions).
      */
     private static final class RecordingSummaryProseGenerator extends SummaryProseGenerator {
         private final AtomicReference<String> lastLang = new AtomicReference<>();
         private String responseText = "default summary";
+        private boolean echoTitle;
         private int calls;
 
         void setResponseText(String text) { this.responseText = text; }
+        void setEchoTitle(boolean echo) { this.echoTitle = echo; }
         String lastLanguage() { return lastLang.get(); }
         int callCount() { return calls; }
 
@@ -449,7 +791,10 @@ class DigestRendererSectionsTest {
             List<ClusterProse> out = new ArrayList<>(clusters.size());
             for (Cluster c : clusters) {
                 calls++;
-                out.add(new ClusterProse(c, responseText, false));
+                out.add(new ClusterProse(c,
+                        echoTitle ? responseText + " " + c.posts().getFirst().title()
+                                : responseText,
+                        false));
             }
             return out;
         }

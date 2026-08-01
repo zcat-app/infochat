@@ -1926,6 +1926,35 @@ determinism boundary to the digest's structure. The degraded
   steers group readers to `@mention`, which is meaningless in the
   interactive surface `/summary` serves.
 
+**Digest lead (M1-725).** A non-degraded `normal` or `full` digest
+with at least a minimum number of clusters
+(`infochat.digest.lead-minimum`, default 6) opens with a **lead
+section**: the top clusters by the prominence order (D71) across the
+**whole** digest — not per section — rendered under a localized
+UPPERCASE header with full per-cluster prose and links, the render
+the hybrid-body categories no longer do. How many clusters the lead
+holds is operator-configurable (`infochat.digest.lead-size`,
+default 3); breadth stays with the categories' bare headlines —
+what the digest lacks without a lead is depth on the few things
+that matter. Promoted clusters are **removed from their home
+sections**, so no cluster renders twice in one digest; a section's
+story count drops by the number of its clusters promoted (the count
+describes what the section actually holds), and a category the
+removal leaves below the qualifying threshold folds into Other
+through the categorizer's existing second pass — no dedicated code
+path. The lead is not a category: it consumes no section-cap slot
+and never carries the closing affordance. It is delivered as **its
+own first message** (the affordance stays on the LAST message of
+the digest), so under the batched delivery a `normal` digest with a
+lead is two messages — lead, then all categories — and a reader who
+opens only the first gets the day. A digest below the lead minimum
+renders **no lead at all** (a header over nearly the whole digest
+says nothing and costs an extra message under D63), `brief` mode
+never renders one (a prose lead would dominate the few-line body it
+introduces), and `/summary` gains no lead — it is a pull for a
+named tag, where a "top stories" header above the reader's own
+query is noise.
+
 **Zero-eligible-posts digest.** When a digest slot fires and there
 are no eligible posts for the group (an empty world, or nothing
 arrived in the period above), the digest sends a

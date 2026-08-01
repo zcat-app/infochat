@@ -470,6 +470,96 @@ class DigestDeliveryTest {
                 "each slug records exactly once — on the accepted attempt only");
     }
 
+    // ----- the lead's own first message (M1-725) ----------------------------
+
+    @Test
+    void normalModeLeadRidesItsOwnMessageAheadOfTheBatch() {
+        // A normal digest with a lead is TWO messages: the lead (always
+        // the first section, marked by DigestRenderer.LEAD_TAG) leaves the
+        // batch and rides its own message first — the prose-sized content
+        // D63 keeps out of the chunker's shared body — and the categories
+        // follow as one -batch message. The closing affordance, folded
+        // into the last CATEGORY section's text, stays on the trailing
+        // message; the lead never carries it.
+        String affordance =
+                "@mention me to go deeper on any story, or ask about a topic you don't see here.";
+        RecordingDeliveryRepo deliveryRepo = new RecordingDeliveryRepo();
+        ScriptedAdapter adapter = new ScriptedAdapter(ADAPTER_NAME);
+        DigestDelivery digestDelivery = wiredDelivery(new RecordingRepo(), deliveryRepo);
+        UUID groupId = UUID.randomUUID();
+        Instant windowStart = Instant.now();
+
+        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
+                section(DigestRenderer.LEAD_TAG, "TOP STORIES\n\nlead prose"),
+                section("security", "section A"),
+                section(null, "section Other\n\n" + affordance)), DigestMode.NORMAL);
+
+        assertEquals(2, adapter.sent.size(),
+                "normal with a lead is TWO messages: lead, then the batched categories");
+        assertEquals("TOP STORIES\n\nlead prose", adapter.sent.get(0).text(),
+                "the lead message carries exactly the lead section's bytes");
+        assertEquals(correlationId(groupId, windowStart, DigestRenderer.LEAD_TAG),
+                adapter.sent.get(0).correlationId(),
+                "the lead message's correlationId carries its slug where a category's would");
+        assertEquals("section A\n\nsection Other\n\n" + affordance,
+                adapter.sent.get(1).text(),
+                "the categories batch behind the lead, affordance folded into the last section");
+        assertEquals(batchCorrelationId(groupId, windowStart),
+                adapter.sent.get(1).correlationId());
+        assertFalse(adapter.sent.get(0).text().contains(affordance),
+                "the affordance is NEVER on the lead message");
+        assertTrue(adapter.sent.get(1).text().endsWith(affordance),
+                "the affordance closes the trailing (category) message");
+        assertEquals(Set.of(DigestRenderer.LEAD_TAG, "security", "other"),
+                deliveryRepo.recordedSlugs(groupId, windowStart),
+                "every slug records — the lead's too, so replay never reposts a delivered lead");
+    }
+
+    @Test
+    void fullModeLeadIsTheFirstPerSectionMessage() {
+        // full needs no split logic: every section is its own message in
+        // section order, so the lead (the first section) is automatically
+        // the first message, its slug in the correlationId like any
+        // category's.
+        ScriptedAdapter adapter = new ScriptedAdapter(ADAPTER_NAME);
+        DigestDelivery digestDelivery = wiredDelivery(new RecordingRepo());
+        UUID groupId = UUID.randomUUID();
+        Instant windowStart = Instant.now();
+
+        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
+                section(DigestRenderer.LEAD_TAG, "TOP STORIES\n\nlead prose"),
+                section("security", "section A")), DigestMode.FULL);
+
+        assertEquals(2, adapter.sent.size());
+        assertEquals("TOP STORIES\n\nlead prose", adapter.sent.get(0).text(),
+                "the lead is the first per-section message in full mode");
+        assertEquals(correlationId(groupId, windowStart, DigestRenderer.LEAD_TAG),
+                adapter.sent.get(0).correlationId());
+    }
+
+    @Test
+    void failedLeadLeavesTheWholeDigestMissingForReplay() {
+        // The lead message runs the same ladder as any other message in
+        // the sequence: an all-PERMANENT slot fails the lead AND the batch
+        // (the chokepoint continues the sequence after a permanent
+        // failure), so nothing is accepted, no slug records, and a later
+        // replay re-sends everything — lead included.
+        RecordingDeliveryRepo deliveryRepo = new RecordingDeliveryRepo();
+        UUID groupId = UUID.randomUUID();
+        Instant windowStart = Instant.now();
+        ScriptedAdapter adapter = ScriptedAdapter.allFailing(
+                ADAPTER_NAME, FailureCategory.PERMANENT);
+        DigestDelivery digestDelivery = wiredDelivery(new RecordingRepo(), deliveryRepo);
+
+        digestDelivery.deliver(adapter, UPSTREAM_GROUP_ID, groupId, windowStart, List.of(
+                section(DigestRenderer.LEAD_TAG, "lead"),
+                section("security", "A")), DigestMode.NORMAL);
+
+        assertTrue(adapter.sent.isEmpty(), "nothing lands when every send fails permanently");
+        assertTrue(deliveryRepo.recordedSlugs(groupId, windowStart).isEmpty(),
+                "a failed lead records NOTHING — every slug stays missing for replay");
+    }
+
     // ----- helpers and test doubles -----------------------------------------
 
     private static DigestDelivery wiredDelivery(RecordingRepo repo) {

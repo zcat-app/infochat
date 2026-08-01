@@ -1,21 +1,24 @@
 ---
 id: M1-725
 title: "The digest has no lead: a reader who opens only the first message gets the newest item of the largest tag"
-status: pending
+status: done
 created: 2026-07-30
-last_updated: 2026-07-30
+last_updated: 2026-08-01
 blocked_by:
   - M1-732
   - M1-724
-files_budget: 9
+files_budget: 12
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRenderer.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestCategorizer.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestDelivery.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/bundles/cs.properties
   - infochat-provider/src/main/resources/application.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererSectionsTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestDeliveryTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererTest.java
   - docs/design/07-deployment.md
   - docs/spec/commands.md
 complexity: medium
@@ -111,6 +114,12 @@ test_plan:
       headlines; message ordering puts the lead first with the
       affordance last; brief mode renders no lead; LLM call count equals
       lead-size plus one per section.
+    - >-
+      infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestDeliveryTest.java
+      — the batched modes send the lead as its OWN message before the
+      batched category message (scope refine 2026-08-01: M1-734's batch
+      joins every section into one message, so the two-message framing
+      lives in DigestDelivery, which the original files_scope missed).
   preserves:
     - >-
       Every M1-724 `ClusterProminenceTest` assertion — the ordering
@@ -134,12 +143,43 @@ spec_refs:
 decision_refs:
   - D62
   - D63
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 14
+      added: 771
+      removed: 40
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-01
+  verdict: WARN
+  warnings:
+    - >-
+      lint clean (0 blockers, 0 warnings); developer self-check found one
+      ticket-vs-code premise gap — the "lead is its own message"
+      acceptance requires a DigestDelivery change (M1-734 batches ALL
+      sections into one message), which the original files_scope missed.
+      Resolved by user-approved scope refine: +DigestDelivery.java,
+      +DigestDeliveryTest.java, files_budget 9 -> 11.
+    - >-
+      Implementation-time sweep (same day, user-approved): the default-on
+      lead also breaks two DigestRendererTest expectations
+      (rendersUppercaseHeaders..., perModeLlmCallCounts NORMAL arm) that
+      render lead-eligible digests and pin pre-lead behavior — no
+      acceptance-faithful design keeps them green unmodified, so
+      +DigestRendererTest.java, files_budget 11 -> 12.
+  blockers: []
 escalation_reason:
 ---
 

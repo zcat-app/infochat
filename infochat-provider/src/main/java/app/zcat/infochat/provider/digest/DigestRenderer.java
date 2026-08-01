@@ -2,12 +2,14 @@ package app.zcat.infochat.provider.digest;
 
 import java.text.MessageFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
@@ -35,6 +37,16 @@ import org.jspecify.annotations.Nullable;
  * category, {@code normal} adds bare headlines, and {@code full} keeps the
  * per-cluster LLM prose (sanitized and translated) with the item cap
  * lifted. The {@code /summary} render forms below are mode-independent.
+ *
+ * <p>A non-{@code brief} digest with at least {@code infochat.digest.lead-minimum}
+ * clusters opens with a LEAD section (M1-725): the top
+ * {@code infochat.digest.lead-size} clusters by {@link ClusterProminence}
+ * order across the WHOLE digest, rendered with full per-cluster prose —
+ * the render {@code normal} categories no longer do. Lead clusters are
+ * removed from their home sections (section counts drop with them; a
+ * category gutted below the D62 threshold folds into Other), so no cluster
+ * renders twice. The lead is the FIRST returned section and never carries
+ * the closing affordance, which stays on the LAST category section.
  */
 @ApplicationScoped
 public class DigestRenderer {
@@ -84,6 +96,38 @@ public class DigestRenderer {
     int categoryHeadlineCount = 5;
 
     /**
+     * Clusters promoted to the lead section (M1-725). Field-initialized to
+     * the documented default — the {@link #categoryHeadlineCount} pattern.
+     */
+    @ConfigProperty(name = "infochat.digest.lead-size", defaultValue = "3")
+    int leadSize = 3;
+
+    /**
+     * Minimum digest size (in clusters) for a lead to render at all
+     * (M1-725): below it a lead header would cap the WHOLE digest, not a
+     * selection — a header over 3 of 4 stories says nothing and costs an
+     * extra message under D63. Field-initialized to the documented
+     * default — the {@link #categoryHeadlineCount} pattern.
+     */
+    @ConfigProperty(name = "infochat.digest.lead-minimum", defaultValue = "6")
+    int leadMinimum = 6;
+
+    /**
+     * The lead section's {@link RenderedSection#tag()} — the value
+     * {@code DigestSectionRepository.slugOf} maps to its
+     * {@code (group_id, window_start, category_slug)} key, the delivery
+     * correlationId, and the delivery-record slug. UPPERCASE on purpose:
+     * the V6 {@code tag.name} CHECK ({@code ^[a-z0-9][a-z0-9-]{0,47}$})
+     * makes an uppercase string un-storable as a controlled-vocabulary
+     * tag, so the lead's slug can NEVER collide with a real category the
+     * way a lowercase {@code "lead"} one day could, and it stays distinct
+     * from the Other bucket's {@code "other"} mapping of a null tag.
+     * Package-visible for {@code DigestDelivery}, which splits the lead
+     * out of the batched modes on this marker.
+     */
+    static final String LEAD_TAG = "LEAD";
+
+    /**
      * Per-group digest verbosity ({@code groups.digest_mode}, V67, M1-732).
      * {@code brief} renders a true-count header + roll-up per category;
      * {@code normal} adds up to {@code infochat.digest.category-headline-count}
@@ -130,6 +174,19 @@ public class DigestRenderer {
      * the local-cap precedent is {@code renderSummarySections}' M1-700
      * {@code effectiveCap}), so the old {@code +N more} overflow line can
      * never appear and its bundle keys are deleted.
+     *
+     * <p>M1-725 lead: a non-{@code brief} digest with at least
+     * {@link #leadMinimum} clusters returns a LEAD section FIRST — the top
+     * {@link #leadSize} clusters by the prominence total order across the
+     * whole digest, rendered with full per-cluster prose in
+     * {@code normal} AND {@code full}. Promoted clusters are removed from
+     * their home sections before the count headers, the fold-to-Other pass
+     * and the section cap run, so no cluster renders twice and the lead
+     * consumes no section slot. The lead's tag is {@link #LEAD_TAG} (never
+     * a controlled-vocabulary tag, never the Other bucket's null), it
+     * carries no footer, and the closing affordance stays on the LAST
+     * category section — {@code DigestDelivery} splits the lead into its
+     * own first message on this marker in the batched modes.
      */
     public List<RenderedSection> renderSections(List<EligiblePostQuery.Post> posts,
                                                 String langCode,
@@ -157,6 +214,42 @@ public class DigestRenderer {
         for (ClusterProminence.ScoredCluster scored
                 : clusterProminence.score(clusters, assignedTagByCluster)) {
             scoredByCluster.put(scored.cluster(), scored);
+        }
+        // M1-725 lead selection: the top lead-size clusters by prominence
+        // order across the WHOLE digest (personal clusters sort last via
+        // the M1-727 bottom gate, so cat pictures lead only when nothing
+        // else exists) — but only for a non-brief digest of at least
+        // lead-minimum clusters; below that a lead header caps the WHOLE
+        // digest rather than a selection and costs an extra message to say
+        // nothing. The take is clamped to leave at least one cluster in
+        // the body even under a misconfigured lead-minimum <= lead-size:
+        // a lead-only digest would strand the closing affordance, which
+        // rides the last category section. totalOrder is a TOTAL order
+        // (input-index tiebreak), so the selection is deterministic
+        // regardless of map iteration order.
+        List<Cluster> leadClusters = List.of();
+        if (mode != DigestMode.BRIEF && clusters.size() >= leadMinimum) {
+            List<ClusterProminence.ScoredCluster> ordered =
+                    new ArrayList<>(scoredByCluster.values());
+            ordered.sort(ClusterProminence.totalOrder());
+            int take = Math.min(leadSize, clusters.size() - 1);
+            if (take > 0) {
+                leadClusters = ordered.subList(0, take).stream()
+                        .map(ClusterProminence.ScoredCluster::cluster)
+                        .toList();
+            }
+        }
+        if (!leadClusters.isEmpty()) {
+            // Re-run categorization with the lead clusters excluded from
+            // their home sections. The D62 assignment is untouched (the
+            // full-set run above already produced the FINAL tags the
+            // scoring consumed, and exclusion never re-tags); membership,
+            // the true-count headers and the fold-to-Other pass are what
+            // now reflect the removal. Identity set: categorize partitions
+            // the very instances passed in.
+            Set<Cluster> leadSet = Collections.newSetFromMap(new IdentityHashMap<>());
+            leadSet.addAll(leadClusters);
+            allSections = digestCategorizer.categorize(clusters, leadSet);
         }
         List<CategorySection> rankedSections = new ArrayList<>(allSections.size());
         for (CategorySection section : allSections) {
@@ -188,8 +281,33 @@ public class DigestRenderer {
         } else {
             proseList = List.of();
         }
+        // Lead prose (M1-725): ONE generate() call over exactly the
+        // promoted clusters, in lead (prominence) order — the lead renders
+        // full per-cluster prose in normal AND full, the render the
+        // hybrid-body categories no longer do. An empty lead skips the
+        // call entirely, so prose is paid for the promoted clusters and
+        // no others.
+        List<ClusterProse> leadProse = leadClusters.isEmpty()
+                ? List.of()
+                : summaryProseGenerator.generate(leadClusters, langCode);
 
-        List<RenderedSection> rendered = new ArrayList<>(sections.size());
+        List<RenderedSection> rendered = new ArrayList<>(sections.size() + 1);
+        if (!leadClusters.isEmpty()) {
+            // The lead is its OWN first section — never the affordance,
+            // never a footer; those belong to the category body. The
+            // header uppercases in code like sectionHeader's (plain-text
+            // output, caps are the strongest anchor). Positional
+            // prose↔cluster correspondence holds here exactly as in the
+            // FULL loop below (no categorization reorders the lead list).
+            StringBuilder leadSb = new StringBuilder();
+            leadSb.append(bundleLoader.get(BundleKeys.REPLY_DIGEST_LEAD_HEADER, langCode)
+                    .toUpperCase(Locale.ROOT));
+            for (ClusterProse cp : leadProse) {
+                leadSb.append("\n\n");
+                appendClusterProse(leadSb, cp, langCode);
+            }
+            rendered.add(new RenderedSection(LEAD_TAG, leadSb.toString()));
+        }
         int proseIndex = 0;
         for (int sectionIdx = 0; sectionIdx < sections.size(); sectionIdx++) {
             CategorySection section = sections.get(sectionIdx);
@@ -203,19 +321,7 @@ public class DigestRenderer {
             if (mode == DigestMode.FULL) {
                 for (int i = 0; i < section.clusters().size(); i++) {
                     sb.append("\n\n");
-                    ClusterProse cp = proseList.get(proseIndex++);
-                    // Degraded prose is DERIVED from the cluster, never read
-                    // from the record (M1-697) — same structural-trust rule as
-                    // renderSummarySections below: degradedProseFor re-composes
-                    // and sanitizes each post's title (one author's field per
-                    // call). Non-degraded prose skips nothing: sanitizer-1
-                    // (one LLM-authored value), then the translator.
-                    if (cp.degraded()) {
-                        sb.append(SummaryProseGenerator.degradedProseFor(cp.cluster(), llmOutputSanitizer));
-                    } else {
-                        String sanitized = llmOutputSanitizer.sanitize(cp.prose());
-                        sb.append(translationPipeline.run(sanitized, langCode));
-                    }
+                    appendClusterProse(sb, proseList.get(proseIndex++), langCode);
                 }
             } else {
                 // The roll-up sees ALL clusters in the section (its existing
@@ -586,6 +692,25 @@ public class DigestRenderer {
                         bundleLoader.get(BundleKeys.REPLY_DIGEST_CATEGORY_HEADER_COUNT, langCode),
                         tag, section.clusters().size())
                 .toUpperCase(Locale.ROOT);
+    }
+
+    /**
+     * The ONE per-cluster prose render (M1-725): FULL's category sections
+     * and the lead share this helper, so the lead is byte-for-byte the
+     * render the hybrid-body categories no longer do. Degraded prose is
+     * DERIVED from the cluster, never read from the record (M1-697) — the
+     * same structural-trust rule as {@link #renderSummarySections}:
+     * {@code degradedProseFor} re-composes and sanitizes each post's title
+     * (one author's field per call). Non-degraded prose skips nothing:
+     * sanitizer-1 (one LLM-authored value), then the translator.
+     */
+    private void appendClusterProse(StringBuilder sb, ClusterProse cp, String langCode) {
+        if (cp.degraded()) {
+            sb.append(SummaryProseGenerator.degradedProseFor(cp.cluster(), llmOutputSanitizer));
+        } else {
+            String sanitized = llmOutputSanitizer.sanitize(cp.prose());
+            sb.append(translationPipeline.run(sanitized, langCode));
+        }
     }
 
     /**

@@ -48,6 +48,16 @@ import java.util.UUID;
  * ladder and the counter semantics are unchanged (trivially: there is one
  * message, and the threshold was calibrated for one message per slot).
  *
+ * <p><b>The lead (M1-725)</b> leaves the batch: a lead section (always the
+ * first in the list, marked by {@code DigestRenderer.LEAD_TAG}) rides its
+ * OWN {@link OutboundMessage} ahead of the batched category message, so a
+ * {@code normal} digest with a lead is TWO messages — lead first, then
+ * everything else — and the closing affordance (folded into the last
+ * category section's text) stays on the trailing message. The lead is
+ * prose-sized, which is exactly the content D63 keeps out of the
+ * line-based chunker's shared body. {@code brief} renders no lead, so a
+ * brief digest always keeps the single-message shape.
+ *
  * <p>Section order is inherited as-is from {@link DigestRenderer#renderSections}
  * — D62 order (assigned-cluster count descending, alphabetical ties, Other
  * last). In {@code full} mode, sequential order is what makes the closing
@@ -187,16 +197,46 @@ public class DigestDelivery {
             // batch, nothing dedups on the id (D64), and the suffix cannot
             // collide with a per-category id (tags are single words; the
             // Other bucket is "other").
-            String correlationId = "digest-" + internalGroupId + "-" + windowStart + "-batch";
-            OutboundMessage msg = new OutboundMessage(
-                    new ScopeRef.Group(upstreamGroupId),
-                    sections.stream().map(RenderedSection::text)
-                            .collect(java.util.stream.Collectors.joining("\n\n")),
-                    Instant.now(),
-                    correlationId);
-            messages = List.of(msg);
-            messageSlugs.put(correlationId, sections.stream()
-                    .map(DigestSectionRepository::slugOf).toList());
+            //
+            // M1-725: a LEAD section (always the first, marked by
+            // DigestRenderer.LEAD_TAG) leaves the batch and rides its OWN
+            // message ahead of it — the batched digest is then two
+            // messages, lead first, so a reader who opens only the first
+            // gets the day's top stories and the closing affordance stays
+            // on the trailing category message. The lead message's
+            // correlationId carries its slug where a category's would,
+            // exactly as in full mode. brief renders no lead, so a brief
+            // digest always takes the single-message shape; a
+            // below-lead-minimum normal digest does too.
+            messages = new ArrayList<>(2);
+            List<RenderedSection> batched = sections;
+            if (!sections.isEmpty()
+                    && DigestRenderer.LEAD_TAG.equals(sections.getFirst().tag())) {
+                RenderedSection lead = sections.getFirst();
+                String leadSlug = DigestSectionRepository.slugOf(lead);
+                String leadCorrelationId =
+                        "digest-" + internalGroupId + "-" + windowStart + "-" + leadSlug;
+                messages.add(new OutboundMessage(
+                        new ScopeRef.Group(upstreamGroupId),
+                        lead.text(),
+                        Instant.now(),
+                        leadCorrelationId));
+                messageSlugs.put(leadCorrelationId, List.of(leadSlug));
+                batched = sections.subList(1, sections.size());
+            }
+            if (!batched.isEmpty()) {
+                String correlationId = "digest-" + internalGroupId + "-" + windowStart + "-batch";
+                OutboundMessage msg = new OutboundMessage(
+                        new ScopeRef.Group(upstreamGroupId),
+                        batched.stream().map(RenderedSection::text)
+                                .collect(java.util.stream.Collectors.joining("\n\n")),
+                        Instant.now(),
+                        correlationId);
+                messages.add(msg);
+                messageSlugs.put(correlationId, batched.stream()
+                        .map(DigestSectionRepository::slugOf).toList());
+            }
+            messages = List.copyOf(messages);
         }
         MessagingAdapter recording = new RecordingAdapter(
                 adapter, deliveryRepository, internalGroupId, windowStart, messageSlugs);

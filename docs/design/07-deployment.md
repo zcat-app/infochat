@@ -311,6 +311,19 @@ infochat.digest.weight.corroboration=7
 infochat.digest.weight.reposts=2
 infochat.digest.weight.likes=1
 infochat.digest.weight.scarcity=2
+# Digest lead (M1-725): a non-brief digest with at least lead-minimum
+# clusters opens with a lead section — the top lead-size clusters by the
+# prominence order across the whole digest, rendered with full per-cluster
+# prose as its own first message (a normal digest is then two messages:
+# lead, then the batched categories). Promoted clusters leave their home
+# sections (section counts drop with them; a category gutted below the
+# qualifying threshold folds into Other). Below lead-minimum there is no
+# lead at all: a header over nearly the whole digest says nothing and
+# costs an extra message. Keep lead-minimum ABOVE lead-size so a body
+# remains under the lead; a misconfigured lead-minimum <= lead-size is
+# clamped render-locally to leave at least one cluster in the body.
+infochat.digest.lead-size=3
+infochat.digest.lead-minimum=6
 
 # ── Single-instance enforcement (D41; §7.8.5) ──────────────────────────
 # Heartbeat tick interval written by the lock-holding instance to

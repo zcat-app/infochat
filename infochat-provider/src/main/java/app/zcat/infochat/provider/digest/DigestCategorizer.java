@@ -86,6 +86,29 @@ public class DigestCategorizer {
      * Other last (present only when non-empty).
      */
     public List<CategorySection> categorize(List<Cluster> clusters) {
+        return categorize(clusters, Set.of());
+    }
+
+    /**
+     * {@link #categorize(List)} with a set of clusters EXCLUDED from the
+     * section lists — the M1-725 digest lead. The D62 arithmetic runs over
+     * the FULL cluster set exactly as the 1-arg form: an excluded cluster
+     * still counts toward its tags' qualification and is still assigned its
+     * best tag, so promoting a cluster to the lead never re-tags the
+     * clusters that stay behind. The exclusion bites only after assignment:
+     * an excluded cluster is not counted in {@code assignedCounts} and is
+     * skipped by the regrouping pass, so it renders nowhere here — and a
+     * category the removal drops below {@code categoryMinClusters} folds
+     * into Other through the EXISTING second pass, not a new code path.
+     *
+     * <p>{@code excluded} is an IDENTITY set (the caller builds it with
+     * {@code Collections.newSetFromMap(new IdentityHashMap<>())}): this
+     * method partitions the very instances passed in, and {@link Cluster}
+     * carries no value equality. Only the digest render path
+     * ({@code DigestRenderer.renderSections}) passes a non-empty set; the
+     * {@code /summary} forms use the 1-arg overload.
+     */
+    public List<CategorySection> categorize(List<Cluster> clusters, Set<Cluster> excluded) {
         // A cluster's tag-set is the union of its member posts' tags;
         // categories are counted at the cluster level (the render unit),
         // not the post level. PERSONAL clusters are excluded from the
@@ -134,7 +157,10 @@ public class DigestCategorizer {
                 }
             }
             chosenTags.add(best);
-            if (best != null) {
+            if (best != null && !excluded.contains(clusters.get(i))) {
+                // An excluded (lead) cluster keeps its assignment but is not
+                // counted: the fold check below must see the post-removal
+                // count, so a category the lead gutted folds into Other.
                 assignedCounts.merge(best, 1, Integer::sum);
             }
         }
@@ -152,6 +178,9 @@ public class DigestCategorizer {
         List<Cluster> otherNonPersonal = new ArrayList<>();
         List<Cluster> otherPersonal = new ArrayList<>();
         for (int i = 0; i < clusters.size(); i++) {
+            if (excluded.contains(clusters.get(i))) {
+                continue;
+            }
             String tag = chosenTags.get(i);
             if (tag == null || assignedCounts.getOrDefault(tag, 0) < categoryMinClusters) {
                 (clusterPersonal.get(i) ? otherPersonal : otherNonPersonal).add(clusters.get(i));

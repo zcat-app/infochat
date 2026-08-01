@@ -2040,6 +2040,9 @@ public final class BundleKeys {
     /** brief/normal Other-bucket header with the TRUE cluster count (M1-732). Token {@code {0}} = the section's full cluster count; the values carry a {@code {0,choice,...}} plural shape. Uppercased in code. */
     public static final String REPLY_DIGEST_CATEGORY_OTHER_COUNT = "reply.digest.category.other_count";
 
+    /** Lead-section header (M1-725): the digest's top {@code infochat.digest.lead-size} clusters by prominence, rendered with full prose ahead of every category. No tokens; resolved via the 2-arg accessor. Uppercased in code. */
+    public static final String REPLY_DIGEST_LEAD_HEADER = "reply.digest.lead.header";
+
     /** Section-cap overflow line, appended ONCE to the last section of a digest whose category count exceeded {@code infochat.digest.max-categories} (M1-721). Token {@code {0}} = the number of categories not shown; both values carry a {@code {0,choice,...}} plural shape. Names no tags — it steers to {@code /summary}, which caps no sections. */
     public static final String REPLY_DIGEST_CATEGORIES_MORE = "reply.digest.categories.more";
 

@@ -83,6 +83,12 @@ class DigestRendererTest {
 
     @Test
     void rendersUppercaseHeadersOrderedBySizeThenAlphaOtherLast() {
+        // M1-725: the lead is disabled here (it is default-on for any
+        // >= 6-cluster digest and would promote 3 of these 11 clusters,
+        // reshaping the section sizes) — the D62 section ORDER is this
+        // test's subject; the lead's own ordering is pinned in
+        // DigestRendererSectionsTest.
+        renderer.leadMinimum = Integer.MAX_VALUE;
         proseGenerator.setResponseText("story prose");
         // EmptyEdgeSource → one singleton cluster per post, so tag counts
         // are: security=4, ai=3, crypto=3 (all qualify at threshold 3) and
@@ -337,6 +343,12 @@ class DigestRendererTest {
      */
     @Test
     void perModeLlmCallCounts_8categories40clusters() {
+        // M1-725: the lead is disabled here so the counts stay the BODY's
+        // per-mode accounting this test was written for (brief/normal make
+        // zero body-prose calls) — the lead's own accounting (lead-size
+        // prose calls on top of one roll-up per section) is pinned in
+        // DigestRendererSectionsTest.llmCallsAreLeadSizePlusOneRollupPerSection.
+        renderer.leadMinimum = Integer.MAX_VALUE;
         List<Post> posts = new ArrayList<>();
         for (int categoryIndex = 0; categoryIndex < 8; categoryIndex++) {
             String tag = String.format("cat%02d", categoryIndex);
