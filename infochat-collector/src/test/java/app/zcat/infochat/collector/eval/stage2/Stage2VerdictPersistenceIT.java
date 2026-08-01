@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.eval.stage2;
 
+import app.zcat.infochat.collector.eval.stage1.QuarantineDao;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -18,6 +19,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -36,6 +38,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * operator-visible {@code releasedStage2FailedCount()} counter increments
  * (the observability slice of M-K8 — the boot audit row says the posture is
  * armed, this counter says how often it fired).</p>
+ *
+ * <p>And pins V70's partial unique index (M1-742): a duplicate PENDING
+ * {@code flagged_by='stage2'} row for the same post fails its INSERT
+ * (DAO level, SQLState 23505), and the verdict handler absorbs that
+ * collision as a benign duplicate instead of letting an unclassified
+ * exception escape {@code apply()} (redteam M1-742-2026-08-01,
+ * finding 2).</p>
  */
 @QuarkusTest
 class Stage2VerdictPersistenceIT {
@@ -49,6 +58,9 @@ class Stage2VerdictPersistenceIT {
 
     @Inject
     Stage2VerdictHandler stage2VerdictHandler;
+
+    @Inject
+    QuarantineDao quarantineDao;
 
     @BeforeEach
     void setup() throws Exception {
@@ -112,7 +124,79 @@ class Stage2VerdictPersistenceIT {
             "the fail-open release path must increment the released-post counter exactly once");
     }
 
+    @Test
+    void duplicateStage2RowInsertFailsOnUniqueIndex() throws Exception {
+        // M1-742 acceptance item 3's named pin (DAO level, per item 5's
+        // retarget): V70's partial unique index guarantees at most one
+        // PENDING flagged_by='stage2' row per post — a direct second
+        // insert fails with SQLState 23505 instead of double-listing
+        // the post (redteam M1-739-2026-08-01-r2 phantom).
+        SeededPost post = seedRawPost("dup-stage2-dao");
+        String uid = UID_PREFIX + "dup-stage2-dao";
+
+        try (Connection conn = dataSource.getConnection()) {
+            quarantineDao.insertStage2Row(conn, post.id(), uid, post.fetchedAt(),
+                "stage2_injection", "judged body one");
+        }
+        IllegalStateException dup = assertThrows(IllegalStateException.class, () -> {
+            try (Connection conn = dataSource.getConnection()) {
+                quarantineDao.insertStage2Row(conn, post.id(), uid, post.fetchedAt(),
+                    "stage2_injection", "judged body two");
+            }
+        }, "a second PENDING stage2 row for the same post must be rejected");
+        assertEquals("23505", sqlStateOf(dup),
+            "the failure must come from V70's unique index, not an unrelated error");
+        assertEquals(1, countPendingStage2Rows(post),
+            "the rejected duplicate leaves exactly one PENDING stage2 row");
+    }
+
+    @Test
+    void duplicateVerdictIsAbsorbedAsBenignDuplicate() throws Exception {
+        // M1-742 acceptance item 5's named pin (handler level): the
+        // duplicate-evaluation loser absorbs the 23505 as a benign
+        // duplicate — apply() returns normally instead of escaping an
+        // unclassified exception down the "stage2 never ran" re-enqueue
+        // path. Two sequential applies stand in for the race: the index
+        // makes the interleaving irrelevant, the second insert always
+        // collides.
+        SeededPost post = seedRawPost("dup-stage2-benign");
+
+        stage2VerdictHandler.apply(post.id(), post.fetchedAt(),
+            Stage2VerdictHandler.Verdict.INJECTION, "judged body first for " + post.id());
+        stage2VerdictHandler.apply(post.id(), post.fetchedAt(),
+            Stage2VerdictHandler.Verdict.INJECTION, "judged body second for " + post.id());
+
+        assertEquals(1, countPendingStage2Rows(post),
+            "the duplicate verdict adds no second row");
+        PostRow row = readPost(post);
+        assertEquals("QUARANTINED", row.status(), "the first verdict's quarantine stands");
+        assertEquals("INJECTION", row.stage2Verdict(), "the recorded verdict stands");
+        assertFalse(row.stage2Failed(), "no spurious stage2_failed from the duplicate");
+    }
+
     // ---------- helpers ----------
+
+    private int countPendingStage2Rows(SeededPost post) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT count(*) FROM quarantine"
+                     + " WHERE post_id = ? AND flagged_by = 'stage2' AND status = 'PENDING'")) {
+            ps.setObject(1, post.id());
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getInt(1);
+            }
+        }
+    }
+
+    private static @Nullable String sqlStateOf(Throwable t) {
+        for (Throwable cur = t; cur != null; cur = cur.getCause()) {
+            if (cur instanceof java.sql.SQLException se) {
+                return se.getSQLState();
+            }
+        }
+        return null;
+    }
 
     private PostRow readPost(SeededPost post) throws Exception {
         try (Connection conn = dataSource.getConnection();

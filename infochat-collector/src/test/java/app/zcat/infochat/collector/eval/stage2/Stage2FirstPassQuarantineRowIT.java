@@ -23,27 +23,24 @@ import java.util.concurrent.atomic.AtomicReference;
 import static app.zcat.infochat.collector.testsupport.PgNotifyFixture.awaitNotifications;
 import static app.zcat.infochat.collector.testsupport.PgNotifyFixture.listenTo;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * M1-739: a first-pass non-BENIGN verdict (INJECTION / MALWARE /
- * UNKNOWN) on a post with NO PENDING quarantine row inserts one
- * whole-body {@code flagged_by='stage2'} PENDING row in the same
- * transaction as the post UPDATE, with the same
+ * M1-742: EVERY first-pass non-BENIGN verdict (INJECTION / MALWARE /
+ * UNKNOWN) inserts one whole-body {@code flagged_by='stage2'} PENDING
+ * row in the same transaction as the post UPDATE, with the same
  * {@code quarantine_review} NOTIFY the Stage 1 insert emits — so the
  * QUARANTINED post enters {@code quarantine_review_view} and the
- * {@code /quarantine list} admin queue instead of sitting invisible.
- * Reachable when an admin approves/rejects the Stage 1 rows while the
- * judge call is in flight (the rows are PENDING from the Stage 1
- * commit; the verdict write lands later).
- *
- * <p>The dedup predicate is "no PENDING row", not "no row": a post
- * already carrying PENDING Stage 1 rows gets nothing (those rows
- * already place it in the queue), and a BENIGN_CLOSED row is closed
- * history that does NOT suppress the insert.
+ * {@code /quarantine list} admin queue with its own verdict record
+ * carrying the exact body the judge saw. The insert is unconditional:
+ * a post already carrying PENDING Stage 1 rows gets the stage2 row in
+ * addition (the Stage 1 rows stay untouched PENDING), and a
+ * BENIGN_CLOSED row is closed history beside the fresh review row.
+ * M1-739's dedup predicate ("no PENDING row") and its FOR UPDATE lock
+ * are gone — with no check there is no time-of-check to race;
+ * duplicates from a concurrent duplicate evaluation are bounded by
+ * V70's partial unique index (one PENDING stage2 row per post).
  */
 @QuarkusTest
 class Stage2FirstPassQuarantineRowIT {
@@ -106,25 +103,36 @@ class Stage2FirstPassQuarantineRowIT {
     }
 
     @Test
-    void malwareWithPendingStage1RowInsertsNothing() throws Exception {
-        SeededPost post = seedRawPost("dedup-pending");
+    void injectionWithPendingStage1RowInsertsStage2RowInAddition() throws Exception {
+        // M1-742 acceptance item 1's named pin: a post WITH PENDING Stage 1
+        // rows receiving a first-pass INJECTION verdict gets the stage2 row
+        // in addition — the Stage 1 row is untouched PENDING.
+        SeededPost post = seedRawPost("pending-stage1");
         UUID stage1RowId = seedQuarantineRow(post, "stage1");
 
         try (Connection listenConn = dataSource.getConnection()) {
             PGConnection pg = listenTo(listenConn, "quarantine_review");
 
             stage2VerdictHandler.apply(post.id(), post.fetchedAt(),
-                Stage2VerdictHandler.Verdict.MALWARE, JUDGED_BODY);
+                Stage2VerdictHandler.Verdict.INJECTION, JUDGED_BODY);
 
             assertEquals("QUARANTINED", readPostStatus(post), "the verdict still quarantines the post");
-            assertEquals(1, countRows(post),
-                "a PENDING Stage 1 row already places the post in the queue — no second row");
+            assertEquals(2, countRows(post),
+                "the stage2 row lands IN ADDITION to the PENDING Stage 1 row (no dedup)");
             assertEquals("PENDING", readRowStatus(stage1RowId),
                 "the Stage 1 row is untouched (no state-machine move on an unsafe verdict)");
+            QuarantineRow inserted = readRowByFlaggedBy(post, "stage2");
+            assertEquals("PENDING", inserted.status(), "the stage2 row awaits admin review");
+            assertEquals("stage2_injection", inserted.ruleId(),
+                "first-pass rule_id convention stage2_<verdict>");
+            assertEquals(JUDGED_BODY, inserted.originalHtml(),
+                "original_html holds the exact body the judge saw");
 
-            PGNotification[] notifications = pg.getNotifications(500);
-            assertTrue(notifications == null || notifications.length == 0,
-                "no insert means no NOTIFY: " + java.util.Arrays.toString(notifications));
+            PGNotification[] notifications = awaitNotifications(pg, 1);
+            assertNotNull(notifications, "the insert must fire the PENDING quarantine_review NOTIFY");
+            assertEquals(1, notifications.length, "exactly one NOTIFY — the stage2 row's");
+            assertTrue(notifications[0].getParameter().contains("\"target_id\":\"" + inserted.id() + "\""),
+                "the NOTIFY targets the inserted stage2 row: " + notifications[0].getParameter());
         }
     }
 
@@ -147,12 +155,16 @@ class Stage2FirstPassQuarantineRowIT {
 
     @Test
     void rejectCommittingBeforeTheCheckCannotSuppressInsert() throws Exception {
-        // Redteam M1-739-2026-08-01 (low): the dedup check is serialized
-        // against a concurrent admin review by its FOR UPDATE row lock.
-        // Pin the finding's interleaving: the admin tx takes the row lock
-        // first, the verdict tx blocks on it, the reject commits, and the
-        // unblocked verdict tx must then read zero PENDING rows and insert
-        // — it must NOT commit QUARANTINED with no review row.
+        // Redteam M1-739-2026-08-01 (low) interleaving, retargeted per
+        // M1-742 acceptance item 2(c): an admin tx holds the Stage 1 row's
+        // FOR UPDATE lock while the verdict tx runs, then rejects and
+        // commits. M1-739 serialized its dedup check on that lock; M1-742
+        // removed check and lock together, so the verdict no longer blocks
+        // on the admin tx (the old must-not-commit assertion is gone with
+        // the lock). The pin is the final state, which holds under EITHER
+        // commit order: the unconditional insert lands the stage2 row and
+        // the admin reject stands — the post can never strand QUARANTINED
+        // with zero PENDING review rows.
         SeededPost post = seedRawPost("toctou-reject");
         UUID stage1RowId = seedQuarantineRow(post, "stage1");
 
@@ -174,17 +186,13 @@ class Stage2FirstPassQuarantineRowIT {
             });
             verdictThread.start();
 
-            // Not load-bearing (a slow thread start passes it vacuously);
-            // the final-state assertions below are the pin.
-            assertFalse(verdictDone.await(2, TimeUnit.SECONDS),
-                "the verdict tx must not commit while the admin holds the row lock");
             exec(adminTx,
                 "UPDATE quarantine SET status = 'REJECTED', updated_at = now() WHERE id = ?",
                 stage1RowId);
             adminTx.commit();
 
             assertTrue(verdictDone.await(15, TimeUnit.SECONDS),
-                "the verdict tx completes once the admin tx releases the row lock");
+                "the verdict tx completes (it no longer waits on the admin's row lock)");
             verdictThread.join();
             if (verdictError.get() != null) {
                 throw new AssertionError("the verdict tx failed", verdictError.get());
@@ -195,7 +203,7 @@ class Stage2FirstPassQuarantineRowIT {
         assertEquals("REJECTED", readRowStatus(stage1RowId), "the admin reject stands");
         QuarantineRow inserted = readRowByFlaggedBy(post, "stage2");
         assertEquals("PENDING", inserted.status(),
-            "the reject committed before the dedup check — the stage2 row must be inserted");
+            "the insert is unconditional — a racing reject cannot suppress the stage2 row");
         assertEquals("stage2_injection", inserted.ruleId());
     }
 

@@ -238,6 +238,18 @@ You review these:
 | `/quarantine approve <id>` | Clear the post and restore any redacted text. It then appears to users normally. |
 | `/quarantine reject <id>` | Keep the post hidden/redacted permanently. |
 
+One post can have several review rows, and a row's `<id>` identifies the
+*row*, not the post — so review all of a post's rows together. A post
+flagged by the AI judge (Stage 2) shows its Stage 1 rows (one per redacted
+span) **plus one whole-body row** written by the judge verdict itself —
+the verdict record, internally `rule_id = stage2_<verdict>`. Approving
+that whole-body row clears the post (forces it READY) but restores no
+spans: its placeholder is never woven into the visible text, so the
+redactions from the Stage 1 rows stay until those rows are approved too.
+The mirror image also holds: approving rows one at a time can publish a
+partially-redacted post mid-review. Decide the post first, then approve
+or reject each of its rows to match.
+
 ### Managing news sources
 
 Anyone (with permission) can *add* sources one at a time with `/add-source` —

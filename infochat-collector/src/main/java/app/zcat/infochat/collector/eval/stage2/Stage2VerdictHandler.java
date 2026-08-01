@@ -46,14 +46,20 @@ import java.util.concurrent.atomic.AtomicLong;
  *       handling: "The judge model treating UNKNOWN as a soft
  *       injection signal is intentional: a degraded judge must
  *       never auto-release"). {@code post.status='QUARANTINED'};
- *       quarantine rows stay PENDING (no state-machine move). If the
- *       post carries NO PENDING quarantine row at verdict time —
- *       reachable when an admin approves/rejects the Stage 1 rows
- *       while the judge call is in flight — one whole-body
- *       {@code flagged_by='stage2'} PENDING row is inserted in the
- *       same transaction so the QUARANTINED post still enters the
- *       admin review queue (M1-739; same row shape as M1-738's
- *       re-eval re-hide insert). The
+ *       Stage 1 quarantine rows stay PENDING (no state-machine move).
+ *       EVERY first-pass non-BENIGN verdict also inserts its own
+ *       whole-body {@code flagged_by='stage2'} PENDING row in the same
+ *       transaction (M1-742 — unconditional per V10's header promise
+ *       "a future Stage-2 row per LLM-judge non-BENIGN verdict" and
+ *       docs/spec/security.md §Quarantine workflow's "Every Stage 1 or
+ *       Stage 2 hit creates a quarantine row"): the row is the
+ *       retention-independent primary record of the exact body the
+ *       judge saw, and with no dedup predicate there is no
+ *       time-of-check to race (M1-739's FOR UPDATE serialization is
+ *       gone with it). Duplicates from a concurrent duplicate
+ *       evaluation are bounded by V70's partial unique index (at most
+ *       one PENDING stage2 row per post) — concurrent paths can only
+ *       over-report, never under-report. The
  *       T2-G re-eval queue reads
  *       {@code (status='QUARANTINED' AND stage2_done=true AND
  *       stage2_failed=false)} to find UNKNOWN posts eligible for
@@ -147,16 +153,15 @@ public class Stage2VerdictHandler {
      * harness exhausted without a parseable reply.
      *
      * @param judgedBody the exact body the judge saw (the Stage 1
-     *                   pre-redaction original). Read ONLY when a
-     *                   non-BENIGN verdict hits a post with no PENDING
-     *                   quarantine row and the M1-739
-     *                   {@code flagged_by='stage2'} row is inserted —
-     *                   the column is NOT NULL, so a verdict outcome
-     *                   requires it non-null (the sole production
-     *                   caller always has it). Ignored on the BENIGN
-     *                   and INFRA_FAILURE paths; null there (the
-     *                   judge never ran on INFRA_FAILURE, so there is
-     *                   no judged body).
+     *                   pre-redaction original). Read ONLY on a
+     *                   non-BENIGN verdict, where the M1-742
+     *                   {@code flagged_by='stage2'} row is inserted
+     *                   unconditionally — the column is NOT NULL, so a
+     *                   verdict outcome requires it non-null (the sole
+     *                   production caller always has it). Ignored on
+     *                   the BENIGN and INFRA_FAILURE paths; null there
+     *                   (the judge never ran on INFRA_FAILURE, so there
+     *                   is no judged body).
      */
     public void apply(UUID postId, Instant postFetchedAt, Verdict outcome, @Nullable String judgedBody) {
         switch (outcome) {
@@ -177,40 +182,50 @@ public class Stage2VerdictHandler {
 
     private void applyQuarantineVerdict(UUID postId, Instant postFetchedAt, Verdict verdict,
                                         @Nullable String judgedBody) {
-        TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn -> {
-            // Lock the PENDING rows BEFORE the post UPDATE: reject_quarantine
-            // and approve_quarantine take the same row locks, so the dedup
-            // decision is serialized against an admin review racing this
-            // verdict — a reject committing between a lock-free check and
-            // this tx's commit could otherwise suppress the insert and strand
-            // the post QUARANTINED with zero PENDING rows (redteam
-            // M1-739-2026-08-01, low). Lock order quarantine→post matches
-            // approve_quarantine's (row, then post UPDATE), so there is no
-            // deadlock cycle with the post-row lock taken next.
-            boolean pendingRowsExist = lockPendingQuarantineRows(conn, postId);
-            updatePostQuarantined(conn, postId, postFetchedAt, /* stage2Failed */ false, verdict.name());
-            if (!pendingRowsExist) {
-                // M1-739: a non-BENIGN verdict with NO PENDING row leaves the
-                // post QUARANTINED yet invisible to quarantine_review_view /
-                // /quarantine list (the view projects quarantine rows only).
-                // Reachable when an admin approves/rejects the Stage 1 rows
-                // while the judge call is still in flight (the rows go PENDING
-                // at the Stage 1 commit; the verdict write lands seconds-to-
-                // minutes later under semaphore wait + retry backoff). Insert
-                // the whole-body stage2 row — the same shape M1-738's re-eval
-                // re-hide writes — in THIS transaction so the queue row
-                // commits or rolls back together with the post UPDATE.
+        try {
+            TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn -> {
+                updatePostQuarantined(conn, postId, postFetchedAt, /* stage2Failed */ false, verdict.name());
+                // M1-742: EVERY first-pass non-BENIGN verdict inserts its own
+                // whole-body stage2 row — no dedup predicate (M1-739's "no
+                // PENDING row" check and its FOR UPDATE lock are gone: with no
+                // check there is no time-of-check to race). The post can only
+                // over-report (a duplicate PENDING stage2 row, bounded by V70's
+                // partial unique index), never under-report (a QUARANTINED post
+                // hidden from the review queue). The insert is in THIS
+                // transaction so the queue row commits or rolls back together
+                // with the post UPDATE. The insert branch is the ONLY reader of
+                // judgedBody and requires it non-null (apply()'s contract: a
+                // verdict outcome always carries the judged body; the sole
+                // production caller has it by construction). requireNonNull
+                // re-states that for the type system.
                 quarantineDao.insertStage2Row(conn, postId, readPostUid(conn, postId, postFetchedAt),
                     postFetchedAt, "stage2_" + verdict.name().toLowerCase(Locale.ROOT),
-                    // The insert branch is the ONLY reader of judgedBody and
-                    // requires it non-null (apply()'s contract: a verdict
-                    // outcome always carries the judged body; the sole
-                    // production caller has it by construction).
-                    // requireNonNull re-states that for the type system.
                     java.util.Objects.requireNonNull(judgedBody,
                         "Stage2VerdictHandler: verdict outcome without a judged body"));
+            });
+        } catch (IllegalStateException e) {
+            // M1-742 redteam-finding-2 remediation: a unique violation
+            // (SQLState 23505) from idx_quarantine_one_pending_stage2_row
+            // is the benign duplicate — a concurrent duplicate evaluation
+            // already committed the verdict AND the row, so this loser's
+            // transaction (the post UPDATE replaying the same values, the
+            // colliding insert, its NOTIFY) rolls back and that is the
+            // correct end state. Log at INFO and return normally: an
+            // unclassified escape would be retried down the "stage2 never
+            // ran" path (stale-RAW re-enqueue → INFRA_FAILURE application)
+            // and stamp a spurious stage2_failed on an already-QUARANTINED
+            // post. The catch sits OUTSIDE the transaction because a
+            // statement error aborts the PostgreSQL transaction — only
+            // rollback can follow. Any non-23505 failure keeps propagating.
+            if (e.getCause() instanceof SQLException se && "23505".equals(se.getSQLState())) {
+                LOG.infof("Stage 2 verdict: %s post_id=%s — stage2 row already present "
+                        + "(idx_quarantine_one_pending_stage2_row absorbed a concurrent "
+                        + "duplicate evaluation; verdict transaction rolled back)",
+                    verdict, postId);
+                return;
             }
-        });
+            throw e;
+        }
         LOG.infof("Stage 2 verdict: %s post_id=%s — quarantined (stage2_done=true, status=QUARANTINED)",
             verdict, postId);
     }
@@ -299,36 +314,6 @@ public class Stage2VerdictHandler {
             ps.setObject(3, postId);
             ps.setTimestamp(4, Timestamp.from(postFetchedAt));
             ps.executeUpdate();
-        }
-    }
-
-    /**
-     * The M1-739 dedup predicate: true when the post carries ANY
-     * PENDING quarantine row. A PENDING row already places the post in
-     * the admin review queue, so a second row would only duplicate the
-     * queue entry — insert nothing. A BENIGN_CLOSED / APPROVED /
-     * REJECTED row is closed history and does NOT suppress the insert:
-     * a fresh non-BENIGN judgment needs a fresh review row (the same
-     * reasoning as M1-738's re-announce-count==0 gate).
-     *
-     * <p>{@code FOR UPDATE} is load-bearing (redteam M1-739-2026-08-01,
-     * low): it locks the found rows until this transaction commits, so
-     * a concurrent {@code reject_quarantine} / {@code approve_quarantine}
-     * — both take the same row locks — cannot commit between the check
-     * and the verdict commit and flip the basis of the decision. A
-     * zero-row result locks nothing, and no new PENDING row can appear
-     * mid-verdict: the only PENDING-insert writers are Stage 1
-     * (committed before Stage 2 runs) and the re-eval job (cannot
-     * enumerate a {@code stage2_done=false} post).
-     */
-    private static boolean lockPendingQuarantineRows(Connection conn, UUID postId) throws SQLException {
-        final String sql =
-            "SELECT 1 FROM quarantine WHERE post_id = ? AND status = 'PENDING' FOR UPDATE";
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setObject(1, postId);
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next();
-            }
         }
     }
 

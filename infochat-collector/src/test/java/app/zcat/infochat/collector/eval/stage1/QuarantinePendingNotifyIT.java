@@ -29,10 +29,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Integration test for the PENDING {@code quarantine_review} NOTIFY
  * placement — emitted at {@link QuarantineDao#insert} inside the
- * Stage-1 transaction (the spec's "fires on PENDING insert"), NOT
- * deferred to the Stage-2 verdict. The Stage-2 cases pin the removal
- * of the old per-verdict re-fire: an unsafe verdict fires nothing
- * (PENDING already fired at insert) and a BENIGN verdict fires
+ * Stage-1 transaction (the spec's "fires on PENDING insert"). The
+ * Stage-2 cases pin the verdict-time NOTIFY shape: an unsafe verdict
+ * fires exactly ONE PENDING NOTIFY — the stage2 row's, inserted
+ * unconditionally per M1-742 — and a BENIGN verdict fires
  * BENIGN_CLOSED only.
  *
  * <p>JDBC LISTEN fixture: same shape as {@link
@@ -122,26 +122,35 @@ class QuarantinePendingNotifyIT {
             "rollback must discard the quarantine row itself");
     }
 
-    // ---------- acceptance item 2: the per-verdict re-fire is gone ----------
+    // ---------- acceptance item 2(b): an unsafe verdict fires the stage2 row's PENDING NOTIFY ----------
 
     @Test
-    void quarantineVerdictDoesNotReFirePending() throws Exception {
-        SeededPost post = seedRawPost("no-refire");
+    void quarantineVerdictFiresOnePendingNotifyForStage2Row() throws Exception {
+        SeededPost post = seedRawPost("verdict-notify");
 
         try (Connection listenConn = dataSource.getConnection()) {
             PGConnection pg = listenTo(listenConn, "quarantine_review");
 
-            insertCommitted(post, "rule-no-refire", "ph-no-refire");
+            insertCommitted(post, "rule-verdict-notify", "ph-verdict-notify");
             PGNotification[] pending = awaitNotifications(pg, 1);
             assertNotNull(pending, "the insert-time PENDING NOTIFY must arrive");
 
             stage2VerdictHandler.apply(post.id, post.fetchedAt,
-                Stage2VerdictHandler.Verdict.INJECTION, "judged body no-refire");
+                Stage2VerdictHandler.Verdict.INJECTION, "judged body verdict-notify");
 
-            PGNotification[] afterVerdict = pg.getNotifications(500);
-            assertTrue(afterVerdict == null || afterVerdict.length == 0,
-                "an unsafe verdict must not re-fire PENDING (it already fired at insert); got: "
-                    + java.util.Arrays.toString(afterVerdict));
+            // M1-742: the unsafe verdict inserts its own whole-body stage2
+            // row unconditionally, so it fires exactly ONE PENDING NOTIFY —
+            // the stage2 row's — not zero.
+            PGNotification[] afterVerdict = awaitNotifications(pg, 1);
+            assertNotNull(afterVerdict, "the unsafe verdict must fire the stage2 row's PENDING NOTIFY");
+            assertEquals(1, afterVerdict.length,
+                "exactly one PENDING NOTIFY at verdict time — the stage2 row's");
+            String payload = afterVerdict[0].getParameter();
+            assertTrue(payload.matches(".*\"new_status\"\\s*:\\s*\"PENDING\".*"),
+                "the verdict-time NOTIFY must carry new_status=PENDING: " + payload);
+            UUID stage2RowId = stage2RowIdForPost(post.id);
+            assertTrue(payload.contains("\"target_id\":\"" + stage2RowId + "\""),
+                "the NOTIFY must target the inserted stage2 row, not the Stage 1 row: " + payload);
         }
     }
 
@@ -200,6 +209,18 @@ class QuarantinePendingNotifyIT {
             }
         }
         return ids;
+    }
+
+    private UUID stage2RowIdForPost(UUID postId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT id FROM quarantine WHERE post_id = ? AND flagged_by = 'stage2'")) {
+            ps.setObject(1, postId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "the verdict inserted a flagged_by='stage2' row");
+                return (UUID) rs.getObject(1);
+            }
+        }
     }
 
     private SeededPost seedRawPost(String slug) throws Exception {
