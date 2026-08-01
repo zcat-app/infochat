@@ -56,6 +56,7 @@ and this store is the shared one both worlds read.
 
 ## Codebase couplings and design facts
 
+- [Title/headline doctrine](title-headline-doctrine.md) — LLM-generated titles were rejected; ingest normalizes the stored title (untitled sentinel, 200-char cap) and DisplayHeadline derives per-post headlines deterministically. New surfaces reuse it, never re-derive; LLM-prompt inputs are the one deliberate split.
 - [Handler input is not always normalized](handler-input-not-always-normalized.md) — the router's NFKC pass exempts fenced code while routing reads only line 1, so normalize at the check; never enumerate blank-rendering codepoints.
 - [The reflection guard is error-scoped by design](reflection-guard-is-error-scoped-by-design.md) — a green guard does NOT mean reflection is impossible; the reply/success blind spot is disclosed, not overlooked. Don't re-litigate widening it.
 - [New admin commands trip three couplings](new-admin-command-couplings.md) — IT naming guard, sanitizer closed-list parity, and audit-before-effect for privileged PII reads.
