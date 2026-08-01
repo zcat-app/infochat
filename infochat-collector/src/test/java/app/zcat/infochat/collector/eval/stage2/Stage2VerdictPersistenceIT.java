@@ -54,6 +54,10 @@ class Stage2VerdictPersistenceIT {
     void setup() throws Exception {
         try (Connection conn = dataSource.getConnection()) {
             exec(conn, "DELETE FROM post WHERE uid LIKE ?", UID_PREFIX + "%");
+            // No FK from quarantine to post (denormalized by design) — the
+            // INJECTION test below now inserts a flagged_by='stage2' row
+            // (M1-739), which must not leak into other tests' row counts.
+            exec(conn, "DELETE FROM quarantine WHERE post_uid LIKE ?", UID_PREFIX + "%");
         }
     }
 
@@ -62,7 +66,7 @@ class Stage2VerdictPersistenceIT {
         SeededPost post = seedRawPost("benign");
 
         stage2VerdictHandler.apply(post.id(), post.fetchedAt(),
-            Stage2VerdictHandler.Verdict.BENIGN);
+            Stage2VerdictHandler.Verdict.BENIGN, /* judgedBody */ null);
 
         PostRow row = readPost(post);
         assertEquals("RAW", row.status(), "BENIGN keeps status RAW (Invariant 5)");
@@ -77,7 +81,7 @@ class Stage2VerdictPersistenceIT {
         SeededPost post = seedRawPost("injection");
 
         stage2VerdictHandler.apply(post.id(), post.fetchedAt(),
-            Stage2VerdictHandler.Verdict.INJECTION);
+            Stage2VerdictHandler.Verdict.INJECTION, "judged body for " + post.id());
 
         PostRow row = readPost(post);
         assertEquals("QUARANTINED", row.status(), "INJECTION quarantines the post");
@@ -96,7 +100,7 @@ class Stage2VerdictPersistenceIT {
         // tests in the same container may have bumped.
         long before = stage2VerdictHandler.releasedStage2FailedCount();
         stage2VerdictHandler.apply(post.id(), post.fetchedAt(),
-            Stage2VerdictHandler.Verdict.INFRA_FAILURE);
+            Stage2VerdictHandler.Verdict.INFRA_FAILURE, /* judgedBody */ null);
 
         PostRow row = readPost(post);
         // RAW + stage2_failed proves the release branch ran — i.e. the test

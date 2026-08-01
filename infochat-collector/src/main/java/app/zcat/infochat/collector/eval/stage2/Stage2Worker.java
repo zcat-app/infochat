@@ -163,7 +163,7 @@ public class Stage2Worker {
         // shrink effective eval concurrency for nothing. The verdict itself is
         // computed under the permit (including the retry back-off sleep — see
         // invokeWithRetryOnce); only the write is moved out.
-        verdictHandler.apply(postId, postFetchedAt, outcome);
+        verdictHandler.apply(postId, postFetchedAt, outcome, stage1Result.originalBody());
     }
 
     /**

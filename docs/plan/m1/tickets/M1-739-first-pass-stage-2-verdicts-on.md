@@ -1,14 +1,25 @@
 ---
 id: M1-739
 title: "First-pass Stage 2 verdicts on row-less posts bypass the admin review queue"
-status: pending
+status: done
 created: 2026-08-01
 last_updated: 2026-08-01
 blocked_by: []
-files_budget: 8
+files_budget: 13
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/stage2/Stage2VerdictHandler.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/stage1/QuarantineDao.java
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/stage2/Stage2Worker.java
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/stage1/Stage1Worker.java
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/reeval/ReEvaluationJob.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/ReEvaluationJobTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/FirstPassStage2RowBenignCloseIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage1/QuarantinePendingNotifyIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage2/Stage2BenignNotifyScopeIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage2/Stage2FirstPassQuarantineRowIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage2/Stage2VerdictPersistenceIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/testsupport/ScanWindowFixtureGuardTest.java
+  - docs/plan/m1/scan-window-fixture-census.md
 complexity: medium
 risk: medium
 round_cap: 2
@@ -16,10 +27,15 @@ security_relevant: true
 migration_touch: false
 out_of_scope:
   - >-
-    The re-evaluation re-hide path (`ReEvaluationJob`,
+    The re-evaluation re-hide path's BEHAVIOR (`ReEvaluationJob`,
     `ReEvaluationJobTest`) — M1-738 (86ffcd5f) owns it, including the
     stage2-row BENIGN-close symmetry. This ticket is the first-pass
-    twin of that fix.
+    twin of that fix. Pure rename propagation of
+    `QuarantineDao.insertReEvalRow` → `insertStage2Row` across both
+    files (call sites plus comment/javadoc references, zero behavioral
+    change to the re-hide path) is IN scope per the ticket Notes'
+    rename authorization — the rename is impossible without touching
+    the caller.
   - >-
     `Stage2VerdictHandler.closeStage1QuarantineRowsAndEmit`'s
     stage1-only predicate: at first-pass BENIGN time no stage2 row can
@@ -65,12 +81,100 @@ spec_refs:
   - docs/spec/security.md §Quarantine workflow
   - docs/spec/security.md §Failure handling
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-01
+    verdict: MANUAL
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: FAIL
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 17
+      added: 1004
+      removed: 49
+  - round: 2
+    date: 2026-08-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 17
+      added: 1037
+      removed: 53
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-08-01
+    category: AUDIT-EVASION
+    severity: low
+    promise: |
+      "Every Stage 1 or Stage 2 hit creates a quarantine row ... and a
+      review status ∈ {PENDING, BENIGN_CLOSED, APPROVED, REJECTED}" and
+      "A Stage 2 INJECTION, MALWARE, or UNKNOWN verdict hides the entire
+      post (QUARANTINED status); the quarantine row stays PENDING
+      (subject to admin review...)" (docs/spec/security.md §Quarantine
+      workflow) — i.e. a QUARANTINED post always carries a PENDING row
+      that keeps it present in the admin review queue.
+    gap: |
+      The new dedup predicate is a time-of-check whose answer can go
+      stale before commit: applyQuarantineVerdict runs the EXISTS at
+      READ COMMITTED with no lock on the quarantine rows, and
+      reject_quarantine locks only the quarantine row (never the post),
+      so a concurrent admin reject can commit between the check and the
+      verdict commit — post QUARANTINED with zero PENDING rows,
+      invisible to the queue, and not in either re-eval class
+      (INJECTION/MALWARE), so nothing recovers it. Not
+      adversary-steerable (requires a coincident trusted-admin reject),
+      hence low.
+    repro: |
+      1) Stage-1 rows commit PENDING, judge call in flight. 2) Admin
+      rejects the Stage 1 rows; the reject commits in the window after
+      the verdict tx's SELECT EXISTS returned true and before its
+      commit. 3) Verdict tx commits INJECTION: post QUARANTINED, no
+      stage2 row inserted, all rows REJECTED. 4) /quarantine list shows
+      nothing; no re-eval class picks the post up.
+    suggested_fix_class: other
+redteam_audits:
+  - date: 2026-08-01
+    verdict: FINDINGS
+    base: af41ca821fcfcad6f9f4ebc817521db6a9dfe62f
+    head: working tree
+    verdict_file: docs/plan/m1/redteam/M1-739-2026-08-01.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      Round 1 of the /m1-tick run redteam gate (ahead of review). One
+      low TOCTOU finding on the dedup EXISTS (admin-reject race window);
+      escalated for user decision (fix in branch vs accept residual).
+      Out-of-model: pre-existing approve_quarantine READY-over-in-flight-
+      verdict race, surfaced for a possible future base-code ticket.
+  - date: 2026-08-01
+    verdict: CLEAN
+    base: af41ca821fcfcad6f9f4ebc817521db6a9dfe62f
+    head: working tree
+    verdict_file: docs/plan/m1/redteam/M1-739-2026-08-01-r2.md
+    out_of_model_count: 2
+    note: |
+      Round 2 re-audit of the remediated diff (FOR UPDATE serialization
+      fix + race IT): the round-1 low TOCTOU finding is genuinely
+      closed. Out-of-model advisories: duplicate-verdict phantom insert
+      (over-reports only; possible hardening ticket) and the carried-
+      over pre-existing approve_quarantine race (base-code ticket).
+clarity_check:
+  date: 2026-08-01
+  verdict: PASS
+  warnings:
+    - "self-check: premise re-verified at start (acceptance item 1) — applyQuarantineVerdict writes no quarantine row; only Stage1Pipeline calls QuarantineDao.insert, ReEvaluationJob calls insertReEvalRow"
+    - "self-check: judged-body sourcing TBD at implementation — prefer in-transaction SELECT of post.body/post.uid if it matches the judge input, else thread body through Stage2Worker per ticket Notes"
+  blockers: []
 escalation_reason:
 ---
 

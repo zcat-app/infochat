@@ -65,7 +65,7 @@ class Stage2BenignNotifyScopeIT {
             PGConnection pg = listenTo(listenConn, "quarantine_review");
 
             stage2VerdictHandler.apply(post.id, post.fetchedAt,
-                Stage2VerdictHandler.Verdict.BENIGN);
+                Stage2VerdictHandler.Verdict.BENIGN, /* judgedBody */ null);
 
             PGNotification[] notifications = awaitNotifications(pg, 1);
             assertNotNull(notifications, "the BENIGN verdict must fire one NOTIFY");

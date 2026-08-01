@@ -136,7 +136,7 @@ class QuarantinePendingNotifyIT {
             assertNotNull(pending, "the insert-time PENDING NOTIFY must arrive");
 
             stage2VerdictHandler.apply(post.id, post.fetchedAt,
-                Stage2VerdictHandler.Verdict.INJECTION);
+                Stage2VerdictHandler.Verdict.INJECTION, "judged body no-refire");
 
             PGNotification[] afterVerdict = pg.getNotifications(500);
             assertTrue(afterVerdict == null || afterVerdict.length == 0,
@@ -157,7 +157,7 @@ class QuarantinePendingNotifyIT {
             assertNotNull(pending, "the insert-time PENDING NOTIFY must arrive");
 
             stage2VerdictHandler.apply(post.id, post.fetchedAt,
-                Stage2VerdictHandler.Verdict.BENIGN);
+                Stage2VerdictHandler.Verdict.BENIGN, /* judgedBody */ null);
 
             PGNotification[] afterVerdict = awaitNotifications(pg, 1);
             assertNotNull(afterVerdict, "the BENIGN verdict must fire one NOTIFY");

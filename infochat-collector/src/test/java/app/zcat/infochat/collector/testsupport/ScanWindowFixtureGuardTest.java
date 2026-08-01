@@ -66,7 +66,7 @@ class ScanWindowFixtureGuardTest {
             Pattern.compile("Instant\\.parse\\(\"20\\d\\d-");
 
     /**
-     * The 51 unpinned collector test sources the M1-602 census verified benign
+     * The 53 unpinned collector test sources the M1-602 census verified benign
      * (docs/plan/m1/scan-window-fixture-census.md §(B)). Add an entry ONLY for
      * a genuinely benign absolute instant — one that never feeds an unpinned
      * now-derived gate — and record the justification as a census row in the
@@ -83,6 +83,7 @@ class ScanWindowFixtureGuardTest {
             "app.zcat.infochat.collector.eval.entity.EntityExtractorWorkerBackoffTest",
             "app.zcat.infochat.collector.eval.entity.EntityExtractorWorkerTest",
             "app.zcat.infochat.collector.eval.reeval.AdminReviewTtlJobTest",
+            "app.zcat.infochat.collector.eval.reeval.FirstPassStage2RowBenignCloseIT",
             "app.zcat.infochat.collector.eval.reeval.QuarantineAuditBeforeEffectIT",
             "app.zcat.infochat.collector.eval.reeval.ReEvaluationBenignAuditScopeIT",
             "app.zcat.infochat.collector.eval.reeval.ReEvaluationJobTest",
@@ -96,6 +97,7 @@ class ScanWindowFixtureGuardTest {
             "app.zcat.infochat.collector.eval.stage1.Stage1WorkerEmitterThreadIT",
             "app.zcat.infochat.collector.eval.stage1.Stage1WorkerStaleRawReEmitterIT",
             "app.zcat.infochat.collector.eval.stage2.Stage2BenignNotifyScopeIT",
+            "app.zcat.infochat.collector.eval.stage2.Stage2FirstPassQuarantineRowIT",
             "app.zcat.infochat.collector.eval.stage2.Stage2VerdictPersistenceIT",
             "app.zcat.infochat.collector.eval.stage2.Stage2WorkerIT",
             "app.zcat.infochat.collector.eval.tagger.TaggerWorkerBackoffTest",

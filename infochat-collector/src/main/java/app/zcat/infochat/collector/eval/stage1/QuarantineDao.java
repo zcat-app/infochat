@@ -19,8 +19,9 @@ import java.util.UUID;
  * DAO. The future Stage 2 (M1-033) BENIGN-verdict UPDATE on a prior
  * Stage 1 row also routes through this DAO. The re-evaluation job's
  * re-hide of a row-less post lands one whole-body
- * {@code flagged_by='stage2'} row via {@link #insertReEvalRow}
- * (M1-738).
+ * {@code flagged_by='stage2'} row via {@link #insertStage2Row}
+ * (M1-738); a first-pass non-BENIGN verdict on a post with no
+ * PENDING row lands the same row via the same method (M1-739).
  *
  * <h2>Why a dedicated DAO</h2>
  * <p>Centralizing the INSERT/UPDATE shape here means the reviewer's
@@ -108,19 +109,24 @@ public class QuarantineDao {
     }
 
     /**
-     * INSERT one whole-body quarantine row for a re-evaluation
-     * re-hide ({@code flagged_by='stage2'}, {@code status='PENDING'})
+     * INSERT one whole-body quarantine row for a Stage 2 non-BENIGN
+     * judgment ({@code flagged_by='stage2'}, {@code status='PENDING'})
      * and emit the same PENDING {@code quarantine_review} NOTIFY the
      * Stage 1 insert emits, on the caller's {@link Connection} so the
      * insert commits or rolls back together with the parent
-     * {@code post} re-hide UPDATE (the same atomicity rule
-     * {@link #insert} documents for Stage 1). (M1-738)
+     * {@code post} UPDATE (the same atomicity rule
+     * {@link #insert} documents for Stage 1). Two callers:
+     * the re-evaluation job's re-hide of a row-less post (M1-738) and
+     * {@code Stage2VerdictHandler}'s first-pass non-BENIGN verdict on
+     * a post with no PENDING row (M1-739).
      *
      * <p>Why this row exists: {@code quarantine_review_view} (V10)
-     * projects {@code quarantine} rows only, so a post released READY
-     * during a Stage 2 outage (no Stage 1 hits, hence no row) and
-     * later re-hidden to QUARANTINED by the re-evaluation job would
-     * otherwise never enter the admin review queue, contradicting
+     * projects {@code quarantine} rows only, so a post that reaches
+     * QUARANTINED with no PENDING row — released READY during a Stage
+     * 2 outage and later re-hidden (M1-738), or stripped of its Stage
+     * 1 rows by an admin racing an in-flight first-pass verdict
+     * (M1-739) — would otherwise never enter the admin review queue,
+     * contradicting
      * {@code docs/spec/security.md} §Quarantine workflow's "Every
      * Stage 1 or Stage 2 hit creates a quarantine row" and its
      * "stays QUARANTINED until admin review."
@@ -130,17 +136,20 @@ public class QuarantineDao {
      * {@code sanitizer_exception}): the span covers the entire judged
      * body and {@code original_html} holds it verbatim. Unlike those
      * rows the {@code placeholder_id} is NOT woven into
-     * {@code post.body} — the re-hide deliberately leaves the body
-     * alone — so the id exists only to satisfy the NOT NULL column;
-     * nothing ever splices it.
+     * {@code post.body} — neither Stage 2 path touches the body — so
+     * the id exists only to satisfy the NOT NULL column; nothing ever
+     * splices it.
      *
      * @param ruleId        a stable per-source id in the
-     *                      {@code reeval_<verdict>} shape, supplied by
-     *                      the caller.
-     * @param originalHtml  the exact body the Stage 2 re-judge saw
-     *                      (the reconstructed original); never null.
+     *                      {@code reeval_<verdict>} (re-eval) or
+     *                      {@code stage2_<verdict>} (first-pass) shape,
+     *                      supplied by the caller.
+     * @param originalHtml  the exact body the Stage 2 judge saw (the
+     *                      reconstructed original on the re-eval path,
+     *                      the Stage 1 pre-redaction original on the
+     *                      first-pass path); never null.
      */
-    public void insertReEvalRow(Connection conn, UUID postId, String postUid,
+    public void insertStage2Row(Connection conn, UUID postId, String postUid,
                                 Instant postFetchedAt, String ruleId, String originalHtml) {
         final String sql =
             "INSERT INTO quarantine ("
@@ -167,7 +176,7 @@ public class QuarantineDao {
                 quarantineId, QuarantineNotifyEmitter.NewStatus.PENDING);
         } catch (SQLException e) {
             throw new IllegalStateException(
-                "QuarantineDao.insertReEvalRow: INSERT INTO quarantine failed for post_id="
+                "QuarantineDao.insertStage2Row: INSERT INTO quarantine failed for post_id="
                     + postId + " rule_id=" + ruleId, e);
         }
     }

@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.eval.stage2;
 
 import app.zcat.infochat.collector.eval.TransactionHelper;
+import app.zcat.infochat.collector.eval.stage1.QuarantineDao;
 import app.zcat.infochat.collector.notify.QuarantineNotifyEmitter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -15,6 +16,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -44,7 +46,14 @@ import java.util.concurrent.atomic.AtomicLong;
  *       handling: "The judge model treating UNKNOWN as a soft
  *       injection signal is intentional: a degraded judge must
  *       never auto-release"). {@code post.status='QUARANTINED'};
- *       quarantine rows stay PENDING (no state-machine move). The
+ *       quarantine rows stay PENDING (no state-machine move). If the
+ *       post carries NO PENDING quarantine row at verdict time —
+ *       reachable when an admin approves/rejects the Stage 1 rows
+ *       while the judge call is in flight — one whole-body
+ *       {@code flagged_by='stage2'} PENDING row is inserted in the
+ *       same transaction so the QUARANTINED post still enters the
+ *       admin review queue (M1-739; same row shape as M1-738's
+ *       re-eval re-hide insert). The
  *       T2-G re-eval queue reads
  *       {@code (status='QUARANTINED' AND stage2_done=true AND
  *       stage2_failed=false)} to find UNKNOWN posts eligible for
@@ -125,6 +134,9 @@ public class Stage2VerdictHandler {
     @Inject
     QuarantineNotifyEmitter quarantineNotifyEmitter;
 
+    @Inject
+    QuarantineDao quarantineDao;
+
     @ConfigProperty(name = "infochat.security.release-on-stage2-failure")
     boolean releaseOnStage2Failure;
 
@@ -133,11 +145,23 @@ public class Stage2VerdictHandler {
      * carries either a parsed verdict (BENIGN / INJECTION / MALWARE
      * / UNKNOWN) or {@link Verdict#INFRA_FAILURE} when the retry
      * harness exhausted without a parseable reply.
+     *
+     * @param judgedBody the exact body the judge saw (the Stage 1
+     *                   pre-redaction original). Read ONLY when a
+     *                   non-BENIGN verdict hits a post with no PENDING
+     *                   quarantine row and the M1-739
+     *                   {@code flagged_by='stage2'} row is inserted —
+     *                   the column is NOT NULL, so a verdict outcome
+     *                   requires it non-null (the sole production
+     *                   caller always has it). Ignored on the BENIGN
+     *                   and INFRA_FAILURE paths; null there (the
+     *                   judge never ran on INFRA_FAILURE, so there is
+     *                   no judged body).
      */
-    public void apply(UUID postId, Instant postFetchedAt, Verdict outcome) {
+    public void apply(UUID postId, Instant postFetchedAt, Verdict outcome, @Nullable String judgedBody) {
         switch (outcome) {
             case BENIGN -> applyBenign(postId, postFetchedAt);
-            case INJECTION, MALWARE, UNKNOWN -> applyQuarantineVerdict(postId, postFetchedAt, outcome);
+            case INJECTION, MALWARE, UNKNOWN -> applyQuarantineVerdict(postId, postFetchedAt, outcome, judgedBody);
             case INFRA_FAILURE -> applyInfraFailure(postId, postFetchedAt);
         }
     }
@@ -151,9 +175,42 @@ public class Stage2VerdictHandler {
             postId);
     }
 
-    private void applyQuarantineVerdict(UUID postId, Instant postFetchedAt, Verdict verdict) {
-        TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn ->
-            updatePostQuarantined(conn, postId, postFetchedAt, /* stage2Failed */ false, verdict.name()));
+    private void applyQuarantineVerdict(UUID postId, Instant postFetchedAt, Verdict verdict,
+                                        @Nullable String judgedBody) {
+        TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn -> {
+            // Lock the PENDING rows BEFORE the post UPDATE: reject_quarantine
+            // and approve_quarantine take the same row locks, so the dedup
+            // decision is serialized against an admin review racing this
+            // verdict — a reject committing between a lock-free check and
+            // this tx's commit could otherwise suppress the insert and strand
+            // the post QUARANTINED with zero PENDING rows (redteam
+            // M1-739-2026-08-01, low). Lock order quarantine→post matches
+            // approve_quarantine's (row, then post UPDATE), so there is no
+            // deadlock cycle with the post-row lock taken next.
+            boolean pendingRowsExist = lockPendingQuarantineRows(conn, postId);
+            updatePostQuarantined(conn, postId, postFetchedAt, /* stage2Failed */ false, verdict.name());
+            if (!pendingRowsExist) {
+                // M1-739: a non-BENIGN verdict with NO PENDING row leaves the
+                // post QUARANTINED yet invisible to quarantine_review_view /
+                // /quarantine list (the view projects quarantine rows only).
+                // Reachable when an admin approves/rejects the Stage 1 rows
+                // while the judge call is still in flight (the rows go PENDING
+                // at the Stage 1 commit; the verdict write lands seconds-to-
+                // minutes later under semaphore wait + retry backoff). Insert
+                // the whole-body stage2 row — the same shape M1-738's re-eval
+                // re-hide writes — in THIS transaction so the queue row
+                // commits or rolls back together with the post UPDATE.
+                quarantineDao.insertStage2Row(conn, postId, readPostUid(conn, postId, postFetchedAt),
+                    postFetchedAt, "stage2_" + verdict.name().toLowerCase(Locale.ROOT),
+                    // The insert branch is the ONLY reader of judgedBody and
+                    // requires it non-null (apply()'s contract: a verdict
+                    // outcome always carries the judged body; the sole
+                    // production caller has it by construction).
+                    // requireNonNull re-states that for the type system.
+                    java.util.Objects.requireNonNull(judgedBody,
+                        "Stage2VerdictHandler: verdict outcome without a judged body"));
+            }
+        });
         LOG.infof("Stage 2 verdict: %s post_id=%s — quarantined (stage2_done=true, status=QUARANTINED)",
             verdict, postId);
     }
@@ -242,6 +299,56 @@ public class Stage2VerdictHandler {
             ps.setObject(3, postId);
             ps.setTimestamp(4, Timestamp.from(postFetchedAt));
             ps.executeUpdate();
+        }
+    }
+
+    /**
+     * The M1-739 dedup predicate: true when the post carries ANY
+     * PENDING quarantine row. A PENDING row already places the post in
+     * the admin review queue, so a second row would only duplicate the
+     * queue entry — insert nothing. A BENIGN_CLOSED / APPROVED /
+     * REJECTED row is closed history and does NOT suppress the insert:
+     * a fresh non-BENIGN judgment needs a fresh review row (the same
+     * reasoning as M1-738's re-announce-count==0 gate).
+     *
+     * <p>{@code FOR UPDATE} is load-bearing (redteam M1-739-2026-08-01,
+     * low): it locks the found rows until this transaction commits, so
+     * a concurrent {@code reject_quarantine} / {@code approve_quarantine}
+     * — both take the same row locks — cannot commit between the check
+     * and the verdict commit and flip the basis of the decision. A
+     * zero-row result locks nothing, and no new PENDING row can appear
+     * mid-verdict: the only PENDING-insert writers are Stage 1
+     * (committed before Stage 2 runs) and the re-eval job (cannot
+     * enumerate a {@code stage2_done=false} post).
+     */
+    private static boolean lockPendingQuarantineRows(Connection conn, UUID postId) throws SQLException {
+        final String sql =
+            "SELECT 1 FROM quarantine WHERE post_id = ? AND status = 'PENDING' FOR UPDATE";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setObject(1, postId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    /**
+     * Read the post's {@code uid} for the quarantine row's denormalized
+     * {@code post_uid} (the partition-drop survival denormalization per
+     * {@code docs/design/02-schema.md} §2.5.1). Read on the verdict
+     * transaction's own connection so it is consistent with the post
+     * UPDATE the insert groups with.
+     */
+    private static String readPostUid(Connection conn, UUID postId, Instant postFetchedAt)
+            throws SQLException {
+        final String sql = "SELECT uid FROM post WHERE id = ? AND fetched_at = ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setObject(1, postId);
+            ps.setTimestamp(2, Timestamp.from(postFetchedAt));
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getString(1);
+            }
         }
     }
 

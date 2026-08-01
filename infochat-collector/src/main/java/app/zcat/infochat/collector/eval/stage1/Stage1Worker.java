@@ -195,7 +195,7 @@ public class Stage1Worker {
                 LOG.warnf("Stage1Worker: rescuing orphaned Stage-1-flagged post_id=%s "
                         + "(stage2 never completed) via Stage-2 infra-failure handling.", key.id());
                 stage2VerdictHandler.apply(key.id(), key.fetchedAt(),
-                    Stage2VerdictHandler.Verdict.INFRA_FAILURE);
+                    Stage2VerdictHandler.Verdict.INFRA_FAILURE, /* judgedBody */ null);
                 return;
             }
             // Invariant 5 re-enqueue: rehydrator may re-emit a post

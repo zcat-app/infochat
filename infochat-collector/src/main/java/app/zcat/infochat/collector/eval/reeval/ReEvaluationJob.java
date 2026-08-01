@@ -330,7 +330,7 @@ public class ReEvaluationJob {
      *
      * <p>A re-hide with no open quarantine row additionally INSERTs
      * one whole-body {@code flagged_by='stage2'} PENDING row via
-     * {@link QuarantineDao#insertReEvalRow} (M1-738): a post released
+     * {@link QuarantineDao#insertStage2Row} (M1-738): a post released
      * READY during a Stage 2 outage never had a Stage 1 row, and
      * {@code quarantine_review_view} projects {@code quarantine} rows
      * only — without the insert the re-hidden post would sit
@@ -350,7 +350,7 @@ public class ReEvaluationJob {
             if (hidden) {
                 int reAnnounced = reAnnouncePendingQuarantineRows(conn, candidate.postId(), now);
                 if (reAnnounced == 0) {
-                    quarantineDao.insertReEvalRow(conn, candidate.postId(), candidate.postUid(),
+                    quarantineDao.insertStage2Row(conn, candidate.postId(), candidate.postUid(),
                         candidate.fetchedAt(),
                         "reeval_" + verdict.name().toLowerCase(Locale.ROOT), originalBody);
                 }
@@ -508,7 +508,7 @@ public class ReEvaluationJob {
      * <p>Both machine writers are covered — Stage 1 rows
      * ({@code flagged_by='stage1'}) and the re-eval job's own re-hide
      * rows ({@code flagged_by='stage2'},
-     * {@link QuarantineDao#insertReEvalRow}, M1-738): a re-eval
+     * {@link QuarantineDao#insertStage2Row}, M1-738): a re-eval
      * BENIGN release reverses exactly the judgments those rows
      * record, so leaving one PENDING would keep the admin queue
      * asserting "awaiting review" about a post the system just

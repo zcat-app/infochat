@@ -82,7 +82,7 @@ class ReEvaluationJobTest {
         // U-25, retargeted by M1-738 (test-modification authorized in the
         // ticket body §Redteam refine): the "future non-stage1 writer" the
         // stage1-only predicate guarded against now exists and IS the
-        // re-evaluation job (QuarantineDao.insertReEvalRow). A BENIGN
+        // re-evaluation job (QuarantineDao.insertStage2Row). A BENIGN
         // re-eval reverses the judgments both machine writers recorded,
         // so it must close the post's stage1 AND stage2 PENDING rows —
         // a stage2 row left PENDING would keep the admin queue asserting

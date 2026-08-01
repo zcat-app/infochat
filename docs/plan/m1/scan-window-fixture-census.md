@@ -57,7 +57,7 @@ was "pinned" by grep yet two OTHER methods hit the windowed query unpinned.
 The `@BeforeEach` pin re-arms Orders 2 and 3; Order(8) re-installs its own pin
 on top, unaffected.
 
-## (B) — benign, by family (54 unpinned files; no edit)
+## (B) — benign, by family (56 unpinned files; no edit)
 
 ### Direct-call eval fixtures (seeds land in `fetched_at` but only exact-key paths run)
 
@@ -75,7 +75,8 @@ tests seed `flagged_at` relative, `Instant.now()-48h`).
   `Stage1WorkerBoundaryIT`, `Stage1WorkerEmitterThreadIT`,
   `Stage1WorkerStaleRawReEmitterIT`
 - `eval/stage2/`: `Stage2BenignNotifyScopeIT`, `Stage2VerdictPersistenceIT`,
-  `Stage2WorkerIT`
+  `Stage2WorkerIT`, `Stage2FirstPassQuarantineRowIT` (M1-739 — direct
+  `Stage2VerdictHandler.apply` exact-key calls only)
 - `eval/embedding/` (direct `processBatch`): `EmbeddingWorkerBackoffTest`,
   `EmbeddingWorkerNonFiniteTest`, `EmbeddingWorkerPgvectorRejectionTest`
 - `eval/entity/`: `EntityExtractorWorkerTest` (direct `processOne`),
@@ -84,6 +85,10 @@ tests seed `flagged_at` relative, `Instant.now()-48h`).
 - `eval/tagger/`: `TaggerWorkerTest` (direct `processOne`/`validate`/
   `renderPrompt`), `TaggerWorkerBackoffTest` (unseeded ctor arg, as entity twin)
 - `eval/reeval/`: `AdminReviewTtlJobTest`, `QuarantineAuditBeforeEffectIT`,
+  `FirstPassStage2RowBenignCloseIT` (M1-739 — same boundary caution as
+  `ReEvaluationBenignAuditScopeIT`: benign ONLY because it drives
+  `processOne` on a hand-built candidate; routing it through
+  `enumerateCandidates` would make it an (A) instantly),
   `ReEvaluationBenignAuditScopeIT` (**boundary caution**: its
   `FETCHED_AT = 2026-06-08` is benign ONLY because every method drives
   `processOne` on a hand-built candidate; if a future edit routes it through
