@@ -704,10 +704,44 @@ Pipeline
 
 For each post that reaches EmbeddingWorker:                                                                                                                                                                                                           
  
-1. Build input text: title + "\n\n" + (body_summary or first 800 chars of body).                                                                                                                                                                      
+1. Build input text: title + "\n\n" + (body_summary when populated, else first 800 chars of body).                                                                                                                                                                      
 2. Call EmbeddingProvider.embed(text).                                           
 3. Insert one row into post_embedding(post_id, embedding, embedding_model, fetched_at).                                                                                                                                                               
-4. On failure: 1 retry → release without embedding (the post is still searchable by tag and entity, just not by semantic similarity).                                                                                                                 
+4. On failure: 1 retry → release without embedding (the post is still searchable by tag and entity, just not by semantic similarity).
+
+Input-text decision (2026-08-01, M1-715): body_summary is POPULATED
+
+Until 2026-08-01 the contract above named body_summary as the preferred
+input, but nothing had ever written the column (0 of 9,236 live posts),
+so every stored vector was built from the first-800 fallback. Decision
+(M1-715): keep the preference and make it live — an ingest-time
+BodySummaryWorker writes body_summary, from body, for posts whose body
+exceeds infochat.summarizer.threshold-chars, via ModelTask.SUMMARIZER
+(prompts/body-summary.md). Pipeline placement uses a new per-stage
+cursor flag post.summary_done (V71): EmbeddingWorker and ReadyPromoter
+gate on (summary_done OR length(body) <= threshold), so an
+over-threshold post is embedded and promoted only after its summary
+exists — or after the summarizer's degraded release leaves it NULL on
+double failure, in which case the first-800 fallback stays the failure
+path by construction. Under-threshold posts never reach the LLM and
+never wait.
+
+Re-embedding: NOT required (roll-forward). V71 backfills
+summary_done=TRUE for all pre-existing tagger-passed rows, so the 9,224
+posts already embedded from the first-800 input keep their vectors and
+are never re-summarized. Mixed prefix/summary vector populations retrieve safely:
+a synthetic-corpus A/B (24 posts, nomic-embed-text 768-d, pgvector
+cosine, 11 gold-labeled queries) measured summary-input MRR 0.955 vs
+prefix-input 0.803 (summary never worse, strictly better on the
+long-body/late-content class; dominant mechanism is boilerplate
+dilution — the first 800 chars of odysee-style bodies are channel
+promo), and cross-arm probing kept each summary-embedded post's
+same-topic nearest neighbour at rank 1 in 24/24 cases (separation
+margin +0.09..+0.26). A bulk re-embed for uniformity is optional future
+work, not part of this decision.
+
+Rejected alternative: mark the column vestigial and drop it — discards
+the measured retrieval gain on long bodies to save one migration.                                                                                                                 
 
 Consumers
 

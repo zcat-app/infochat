@@ -5,6 +5,7 @@ import app.zcat.infochat.core.log.SafeLog;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,10 +31,15 @@ import java.util.function.Consumer;
  *
  * <p>{@code status='RAW' AND stage1_done=TRUE AND
  * (stage1_flagged=FALSE OR stage2_done=TRUE) AND tagger_done=TRUE AND
- * entity_done=TRUE AND embedding_done=TRUE AND classifier_done=TRUE}.
+ * entity_done=TRUE AND embedding_done=TRUE AND classifier_done=TRUE
+ * AND (summary_done OR length(body) <= threshold)}.
  * Entity extraction, embedding, and classification are independent
  * parallel stages after the Tagger; this promoter is the synchronization
- * point that waits for ALL THREE to complete. The {@code classifier_done}
+ * point that waits for ALL THREE to complete. The body summarizer is
+ * NOT one of the parallel stages: it sits between the Tagger and
+ * Embedding, and the escaped gate form (M1-715) holds only
+ * over-threshold posts for it — under-threshold posts are promoted
+ * with {@code summary_done} still FALSE. The {@code classifier_done}
  * gate is load-bearing: every eval worker's pickup filters on
  * {@code status='RAW'}, so a post promoted to READY before classification
  * would be excluded from the classifier's own {@code status='RAW'} pickup
@@ -121,6 +127,9 @@ public class ReadyPromoter {
     // overrides it in the managed bean.
     @Inject
     Clock clock = Clock.systemUTC();
+
+    @ConfigProperty(name = "infochat.summarizer.threshold-chars")
+    int summaryThresholdChars;
 
     /**
      * Test-only seam: invoked with the in-transaction connection AFTER
@@ -268,6 +277,11 @@ public class ReadyPromoter {
      * {@code tagger_done}, and the three independent parallel stages
      * {@code entity_done}, {@code embedding_done}, and
      * {@code classifier_done}. The
+     * {@code (summary_done OR length(body) <= threshold)} clause
+     * (M1-715) adds the summarizer gate in its escaped form: an
+     * over-threshold post waits for the BodySummaryWorker (so its
+     * embedding input is the abstract, not the first-800 fallback),
+     * while under-threshold posts are never held back. The
      * {@code status='RAW'} filter excludes quarantined posts. The
      * {@code fetched_at} floor ({@link PartitionScan#scanWindowFloor(Instant)},
      * sampled from the injected Clock) lets the planner prune partitions of
@@ -284,14 +298,16 @@ public class ReadyPromoter {
                 + "   AND entity_done = TRUE "
                 + "   AND embedding_done = TRUE "
                 + "   AND classifier_done = TRUE "
+                + "   AND (summary_done = TRUE OR length(COALESCE(body, '')) <= ?) "
                 + "   AND fetched_at >= ? "
                 + " ORDER BY fetched_at, id "
                 + " LIMIT ?";
         List<PromotionCandidate> rows = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setTimestamp(1, Timestamp.from(partitionScan.scanWindowFloor(clock.instant())));
-            ps.setInt(2, limit);
+            ps.setInt(1, summaryThresholdChars);
+            ps.setTimestamp(2, Timestamp.from(partitionScan.scanWindowFloor(clock.instant())));
+            ps.setInt(3, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     UUID id = (UUID) rs.getObject(1);

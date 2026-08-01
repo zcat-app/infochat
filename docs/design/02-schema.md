@@ -704,9 +704,16 @@ CREATE TABLE post (
                                                       --   Render sites print title verbatim; the cap
                                                       --   is at ingest, not per-renderer.
   body                TEXT,                           -- always plain text (HTML stripped at ingest)
-  body_summary        TEXT,                           -- LLM abstract; populated when body length
-                                                      --   exceeds the body-summary threshold
-                                                      --   (see docs/design/05-llm.md §5.4)
+  body_summary        TEXT,                           -- LLM abstract of the body, written
+                                                      --   post-ingest by BodySummaryWorker when
+                                                      --   length(body) exceeds
+                                                      --   infochat.summarizer.threshold-chars
+                                                      --   (decision 2026-08-01, M1-715; see
+                                                      --   docs/design/05-llm-and-embeddings.md §5.5).
+                                                      --   NULL = no abstract (pre-existing corpus
+                                                      --   row, under-threshold body, or failed
+                                                      --   after retry) → embedding input falls
+                                                      --   back to first 800 chars of body.
   author              TEXT,
   published_at        TIMESTAMPTZ,
   fetched_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -731,6 +738,10 @@ CREATE TABLE post (
   tagger_done     BOOLEAN NOT NULL DEFAULT FALSE,
   embedding_done  BOOLEAN NOT NULL DEFAULT FALSE,
   classifier_done BOOLEAN NOT NULL DEFAULT FALSE,    -- classification stage cursor (V57)
+  summary_done    BOOLEAN NOT NULL DEFAULT FALSE,    -- body-summary stage cursor (V71); backfilled
+                                                     --   TRUE for pre-existing tagger-passed rows,
+                                                     --   so the prefix-embedded corpus is never
+                                                     --   re-summarized (roll-forward, M1-715)
   stage1_flagged  BOOLEAN NOT NULL DEFAULT FALSE,    -- Stage 1 produced ≥1 quarantine span
   stage2_failed   BOOLEAN NOT NULL DEFAULT FALSE,    -- Stage 2 LLM errored after retry
                                                      --   (release-on-stage2-failure path may set
@@ -1843,7 +1854,7 @@ is implemented either as a constraint, a trigger, or a documented test").
 | 2 | Last-admin protection                           | `trg_users_last_admin_update` + `trg_users_last_admin_delete` (§2.1.2) with `LOCK TABLE … SHARE ROW EXCLUSIVE`. App-issued `DELETE` on `users` only via `delete_preban_user` proc (§2.1.6); `DELETE` revoked from app roles. |
 | 3 | At most one group admin per group               | `one_admin_per_group` partial unique index (§2.1.4). Soft-clear trigger frees the slot on `removed_at`. |
 | 4 | Soft-delete only for sources                    | `source.deleted_at` column; `DELETE` revoked from `infochat_collector` and `infochat_provider` (`docs/design/04-security.md`). |
-| 5 | Outbox + per-stage flags                        | `post.status` enum + `stage1_done`, `stage2_done`, `tagger_done`, `embedding_done`, `classifier_done`, `stage1_flagged`, `stage2_failed`, `tagger_fallback`. No `EVALUATING` status. |
+| 5 | Outbox + per-stage flags                        | `post.status` enum + `stage1_done`, `stage2_done`, `tagger_done`, `embedding_done`, `classifier_done`, `summary_done`, `stage1_flagged`, `stage2_failed`, `tagger_fallback`. No `EVALUATING` status. |
 | 6 | TTL by partitioning                             | `post`, `post_entity`, `post_embedding`, `post_reference`, `price_snapshot` are `PARTITION BY RANGE (…)`. `saved_post` snapshots bodies (carve-out). `quarantine` exempt; admin-review TTL via cron in §2.5.1. |
 | 7 | Audit-before-effect                             | Stored procs (`approve_quarantine`, `reject_quarantine`, `delete_preban_user`) `INSERT` into `audit_log` *before* the side effect. Documented test: cancel mid-tx leaves audit row, leaves no side effect. `/forget` no-op carve-out is application-level (skip audit when `RETURNING` count = 0). |
 | 8 | No LLM-writable rows                            | Application-level (LLM tool surface SPI in `infochat-core`). Not a schema constraint; documented in `docs/design/05-llm.md` and `docs/design/04-security.md`. |

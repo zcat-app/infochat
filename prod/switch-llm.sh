@@ -399,7 +399,7 @@ if [[ "$backend" == "remote" ]]; then
       tagger)     echo "  -  tagger — topic tagging over fetched PUBLIC posts; exposes your topic interests." ;;
       entity)     echo "  -  entity — entity extraction over fetched PUBLIC posts; exposes your topic interests." ;;
       classifier) echo "  -  classifier — post-kind classification over fetched PUBLIC posts; exposes your topic interests." ;;
-      summarizer) echo "  -  summarizer — summaries of the posts you query; exposes which topics / posts you read." ;;
+      summarizer) echo "  -  summarizer — ingest-time abstracts of EVERY long fetched PUBLIC post (BodySummaryWorker) plus summaries of the posts you query; exposes your source list / topic interests and which posts you read." ;;
       translator) echo "  -  translator — translation of the bot's replies to you; exposes the bot-reply text (which can echo your queries)." ;;
     esac
   done

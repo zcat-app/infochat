@@ -91,6 +91,15 @@ class EmbeddingWorkerIT {
      */
     private static final Instant PINNED_NOW = Instant.parse("2026-06-20T12:00:00Z");
 
+    // M1-715 gate fixtures: base infochat.summarizer.threshold-chars is
+    // 1200; LONG_BODY clears it, the short fixture body stays well under.
+    private static final String LONG_BODY =
+        ("The riverside district was placed under mandatory evacuation as the "
+            + "crest reached the old town and volunteers sandbagged the "
+            + "brewery quarter through the night. ").repeat(10);
+    private static final String ABSTRACT =
+        "Oberloiben evacuated 1,200 residents as the Danube crested at 5.8 metres.";
+
     @Inject
     @SeedDataSource
     DataSource dataSource;
@@ -345,6 +354,42 @@ class EmbeddingWorkerIT {
             "no embed call may be issued when the permit acquire is interrupted");
     }
 
+    // ---------- 8. summary_done gate (M1-715) ----------
+
+    @Test
+    @Order(8)
+    void summaryGateHoldsOverThresholdPostUntilSummaryDone() throws Exception {
+        // Pin the injected Clock so FETCHED_AT sits inside the pickup
+        // scan window (same seam as the ReadyPromoterIT gate scenarios).
+        QuarkusMock.installMockForType(
+            Clock.fixed(Instant.parse("2026-05-17T00:00:00Z"), ZoneOffset.UTC), Clock.class);
+        SeededPost longPost = seedPostWithSummaryDone("gate-long", LONG_BODY, false);
+        SeededPost shortPost = seedPostWithSummaryDone("gate-short", "short body", false);
+
+        List<EmbeddingWorker.PostRow> pendingBefore = embeddingWorker.enumeratePending(64);
+        assertFalse(pendingBefore.stream().anyMatch(r -> r.id().equals(longPost.id())),
+            "over-threshold post with summary_done=FALSE must NOT be picked for embedding");
+        assertTrue(pendingBefore.stream().anyMatch(r -> r.id().equals(shortPost.id())),
+            "under-threshold post escapes the summary gate with summary_done=FALSE");
+
+        // The BodySummaryWorker writes its abstract and advances the
+        // cursor → the gate opens, and the embed input is the abstract
+        // (title + "\n\n" + body_summary), not the first-800 fallback.
+        setSummary(longPost.id(), ABSTRACT);
+        List<EmbeddingWorker.PostRow> pendingAfter = embeddingWorker.enumeratePending(64);
+        EmbeddingWorker.PostRow row = pendingAfter.stream()
+            .filter(r -> r.id().equals(longPost.id()))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("summary_done=TRUE post must be picked"));
+        assertEquals("Embed IT title gate-long\n\n" + ABSTRACT,
+            EmbeddingWorker.buildInputText(row),
+            "the embed input is the abstract once body_summary is populated");
+
+        stub().queueSuccess(List.of(zeroVector(EXPECTED_DIMENSION)));
+        embeddingWorker.processBatch(List.of(row));
+        assertEmbeddingDone(longPost.id(), true);
+    }
+
     // ---------- helpers ----------
 
     private SeededPost seedPickupReadyPost(String slug) throws Exception {
@@ -411,6 +456,50 @@ class EmbeddingWorkerIT {
                 assertTrue(rs.next());
                 return (UUID) rs.getObject(1);
             }
+        }
+    }
+
+    private SeededPost seedPostWithSummaryDone(String slug, String body, boolean summaryDone)
+            throws Exception {
+        UUID sourceId = seedRssSource(slug);
+        String uid = "embed-it/" + slug;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO post ("
+                     + "  id, uid, source_id, upstream_identifier, title, body, "
+                     + "  fetched_at, status, "
+                     + "  stage1_done, stage2_done, tagger_done, embedding_done, "
+                     + "  stage1_flagged, stage2_failed, tagger_fallback, tags, summary_done,"
+                     + "  entity_done, classifier_done"
+                     + ") VALUES ("
+                     + "  gen_random_uuid(), ?, ?, ?, ?, ?, ?, ?, "
+                     + "  TRUE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE, '{}', ?,"
+                     + "  TRUE, TRUE"
+                     + ") RETURNING id, fetched_at")) {
+            ps.setString(1, uid);
+            ps.setObject(2, sourceId);
+            ps.setString(3, "embed-it-upstream-" + slug);
+            ps.setString(4, "Embed IT title " + slug);
+            ps.setString(5, body);
+            ps.setTimestamp(6, Timestamp.from(FETCHED_AT));
+            ps.setString(7, "RAW");
+            ps.setBoolean(8, summaryDone);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "INSERT INTO post must yield an id");
+                UUID id = (UUID) rs.getObject(1);
+                Instant storedFetchedAt = rs.getTimestamp(2).toInstant();
+                return new SeededPost(id, uid, storedFetchedAt);
+            }
+        }
+    }
+
+    private void setSummary(UUID postId, String summary) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "UPDATE post SET body_summary = ?, summary_done = TRUE WHERE id = ?")) {
+            ps.setString(1, summary);
+            ps.setObject(2, postId);
+            ps.executeUpdate();
         }
     }
 

@@ -1,186 +1,314 @@
 ---
 id: M1-715
 title: "post.body_summary is never written, yet EmbeddingWorker prefers it as embedding input"
-status: pending
+status: done
 created: 2026-07-29
-last_updated: 2026-07-29
+last_updated: 2026-08-01
 blocked_by: []
-files_budget: 2
+files_budget: 13
 files_scope:
+  - infochat-core/src/main/resources/db/migration/V7*__post_summary_done.sql
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/summary/BodySummaryWorker.java
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/embedding/EmbeddingWorker.java
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/ready/ReadyPromoter.java
+  - infochat-collector/src/main/resources/application.properties
+  - infochat-llm-adapter/src/main/resources/prompts/body-summary.md
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/summary/BodySummaryWorkerTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/summary/BodySummaryWorkerIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/embedding/EmbeddingWorkerIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/ready/ReadyPromoterIT.java
+  - prod/switch-llm.sh
   - docs/design/05-llm-and-embeddings.md
   - docs/design/02-schema.md
-complexity: low
-risk: low
+complexity: medium
+risk: medium
 round_cap: 2
-security_relevant: false
-migration_touch: false
+security_relevant: true
+migration_touch: true
 out_of_scope:
   - >-
-    Any code change. This ticket's deliverable is a recorded DECISION,
-    not an implementation. Whichever way it resolves, the work that
-    follows is a separate, gated ticket — populating `body_summary`
-    changes what every future embedding is built from, and dropping the
-    column is a migration. Neither belongs in an investigation diff
-    (see §Notes on the investigation-flow rule).
+    Any re-embed of existing posts: no UPDATE/DELETE against
+    `post_embedding`, no job that recomputes stored vectors. The 2026-08-01
+    decision is roll-forward; a re-embed is an optional separate ticket.
   - >-
-    `EmbeddingWorker.java`. Its read path is correct for the branch it
-    actually takes today; the defect is that the other branch is
-    unreachable. Do not "fix" it by deleting the null check — that
-    pre-empts the decision this ticket exists to make.
-  - >-
-    `PostPersister.java` and the fetchers. Adding `body_summary` to the
-    INSERT is the implementation half, gated behind the decision.
-  - >-
-    A Flyway migration dropping the column. Same reason.
+    Fetcher or ingest changes: no feed-`<description>` capture, no
+    `PostPersister` INSERT change. The persister stays the sole ingest
+    write path; `body_summary` is written post-ingest by
+    `BodySummaryWorker` UPDATE.
   - >-
     The embedding model identity, the 768-dim invariant, and
-    `EmbeddingMetadataStartupGuard`. Untouched — this is about the
-    embedder's INPUT TEXT, not its model or dimensionality.
+    `EmbeddingMetadataStartupGuard`. The input TEXT changes for newly
+    summarized posts; the model and dimensionality do not.
   - >-
-    `M1-714`'s display headline. `body_summary` was evaluated as a
-    headline source there and rejected precisely because it is empty;
-    that ticket must not start populating it, and this one must not
-    change rendering.
-  - any code module, any test
+    `EmbeddingWorker`'s input-preference branch (line ~488): it stays
+    exactly as-is and becomes live. Only its pickup predicate changes.
+  - >-
+    Provider-side `/summary`, digest summaries, and `summary_anchor` —
+    a different feature that shares `ModelTask.SUMMARIZER` routing but
+    nothing else.
+  - >-
+    Dropping `body_summary` — the rejected alternative (b), recorded in
+    the decision.
+  - >-
+    `M1-723`'s social-signal columns (`likes`, `reposts`, `social_score`)
+    — same defect class, separate investigation.
+  - any test not listed in test_plan
 acceptance:
   - >-
-    `docs/design/05-llm-and-embeddings.md` records the decision for
-    `post.body_summary` as one of exactly two outcomes, with its
-    rationale: either (a) it SHOULD be populated, naming which component
-    writes it and from what, or (b) it is vestigial and the embedding
-    input is `title + first 800 chars of body`, full stop.
+    Migration `V71__post_summary_done.sql` adds
+    `post.summary_done BOOLEAN NOT NULL DEFAULT FALSE`, backfills
+    `summary_done = TRUE` for every pre-existing row that has passed the
+    tagger (the prefix-embedded corpus and in-flight RAW posts; the
+    V28/V57 backfill shape), and applies cleanly
+    (Flyway apply green under `mvn verify`).
   - >-
-    `docs/design/02-schema.md` agrees with that decision — the column is
-    either documented as populated-by-<component>, or marked vestigial
-    and slated for removal.
+    `BodySummaryWorkerIT`: a `RAW` post with `tagger_done=TRUE`,
+    `summary_done=FALSE`, and `length(body)` above
+    `infochat.summarizer.threshold-chars` gets a worker-written
+    `body_summary` and `summary_done=TRUE`.
   - >-
-    If the decision is (a), a follow-up implementation ticket exists and
-    is referenced by id. If (b), a follow-up removal ticket exists and is
-    referenced by id. The investigation is not "done" with an unrecorded
-    next step.
+    `BodySummaryWorkerIT`: a post at or below the threshold is never
+    picked for summarization and costs zero LLM calls; the matching gate
+    escapes are pinned in `EmbeddingWorkerIT` (an under-threshold post is
+    embedded with `summary_done` staying FALSE) and `ReadyPromoterIT`
+    (promoted likewise).
   - >-
-    The decision explicitly addresses the re-embedding question: 9,224
-    posts already carry vectors built from `body`, so a change to the
-    input text either leaves them inconsistent with newly-embedded posts
-    or requires a re-embed. Whichever is chosen is stated, not left
-    implicit.
+    `BodySummaryWorkerIT`: after two failed LLM attempts the worker
+    writes `summary_done=TRUE` with `body_summary` NULL (degraded
+    release, canonical error class, `ThrottledAdminNotifier.notifyOnce`),
+    and the post is then embedded from the first-800-chars fallback.
   - >-
-    No file outside `docs/` is modified.
+    `EmbeddingWorkerIT`: an over-threshold post with
+    `summary_done=FALSE` is NOT embedded; once `summary_done=TRUE` with a
+    non-empty `body_summary`, the embed input built for it
+    (`EmbeddingWorker.buildInputText`) equals
+    `title + "\n\n" + body_summary`.
+  - >-
+    `ReadyPromoterIT`: an over-threshold post with `summary_done=FALSE`
+    is not promoted to READY; it is promoted once `summary_done=TRUE`.
+  - >-
+    `BodySummaryWorkerTest`: an over-long LLM reply is truncated to the
+    configured hard cap before storage, and the rendered prompt wraps the
+    body in the per-call-id untrusted-content delimiter (classifier.md
+    precedent).
+  - >-
+    The diff contains no UPDATE or DELETE against `post_embedding` and no
+    path that re-embeds an already-embedded post (roll-forward only).
+  - >-
+    `docs/design/05-llm-and-embeddings.md` records the 2026-08-01
+    decision (populate via `BodySummaryWorker`, roll-forward, no required
+    re-embed, with the experiment evidence) and
+    `docs/design/02-schema.md` documents `body_summary` as
+    populated-by-`BodySummaryWorker` plus the `summary_done` flag.
+  - >-
+    Refusal marker (redteam r1 finding, INJECTION/low): the prompt
+    instructs the §4.3 structured refusal; a reply of
+    `{"summary": "[refused-action]"}` is persisted as NULL
+    `body_summary` with `summary_done=TRUE`, no retry, and a
+    notification under `summarizer.refusal` — the marker never reaches
+    `post.body_summary` (`BodySummaryWorkerTest` unit,
+    `BodySummaryWorkerIT` end-to-end).
+  - >-
+    Disclosure (redteam r1 finding, INFO-LEAK/low): `prod/switch-llm.sh`'s
+    per-task privacy disclosure names the summarizer's ingest-side
+    exposure (every long fetched post's body), keeping the
+    §Secrets-handling "exactly which tasks and what each exposes"
+    commitment accurate.
+  - >-
+    `scripts/verify-serialized.sh` (mvn -B clean verify) is green.
 test_plan:
-  adds: []
+  adds:
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/summary/BodySummaryWorkerTest.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/summary/BodySummaryWorkerIT.java
+  modifies:
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/embedding/EmbeddingWorkerIT.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/ready/ReadyPromoterIT.java
   preserves:
     - >-
-      All tests currently green on main. A doc-only diff that required a
-      test change would mean it was not doc-only.
+      All tests currently green on main. In particular, existing
+      embedding/ready IT fixtures with long bodies may need
+      `summary_done=TRUE` in their INSERT column lists (see §Notes on the
+      fixture blast radius).
 spec_refs:
   - docs/spec/llm.md §Embedding pipeline
   - docs/spec/schema.md §Posts and derivatives
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 17
+      added: 1690
+      removed: 153
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-08-01
+    verdict: FINDINGS
+    base: 7f9f621215e2b0303dcc8d7a0255bf93e4f30966
+    head: working tree
+    verdict_file: docs/plan/m1/redteam/M1-715-2026-08-01.md
+    findings_count: 2
+    out_of_model_count: 2
+    note: |
+      Two low findings on the in-progress diff: missing structured refusal
+      marker in prompts/body-summary.md (INJECTION, embedding-poisoning
+      channel, bounded), and the switch-llm.sh privacy disclosure's
+      ingest-task enumeration not covering the now-ingest-side SUMMARIZER
+      task (INFO-LEAK, public-post content). Both fixed in-branch per user
+      directive (prompt + parseSummary refusal branch + summarizer.refusal
+      class; disclosure line), re-audited r2.
+  - date: 2026-08-01
+    verdict: CLEAN
+    base: 7f9f621215e2b0303dcc8d7a0255bf93e4f30966
+    head: working tree
+    verdict_file: docs/plan/m1/redteam/M1-715-2026-08-01-r2.md
+    out_of_model_count: 2
+    note: |
+      Re-audit of the post-remediation diff: both r1 findings verified
+      closed, no new findings on the remediation surface. Two advisory
+      out-of-model notes (coaxed-refusal reverts to prefix baseline;
+      per-post LLM cost amplification is the pre-existing per-post class).
+clarity_check:
+  date: 2026-08-01
+  verdict: PASS
+  warnings:
+    - >-
+      Refined 2026-08-01 (user directive): doc-only investigation became
+      decision-plus-implementation; the follow-up-ticket acceptance item
+      was dropped by the user. Re-linted clean after the rewrite.
+  blockers: []
 escalation_reason:
 ---
 
-# M1-715: post.body_summary is never written
+# M1-715: post.body_summary is never written — decision + populate implementation
 
 ## Context
 
-`post.body_summary` has existed since the V7 schema. `EmbeddingWorker`
-treats it as the *preferred* input for the text it embeds:
+`post.body_summary` has existed since the V7 schema (V7__joins_post.sql:143)
+and was designed as an LLM abstract populated when body length exceeds a
+threshold. That writer was never built: `PostPersister`'s INSERT omits the
+column, no code path UPDATEs it, no test writes it, and the live corpus
+confirms 0 of 9,236 posts have a non-empty value. `EmbeddingWorker`
+nevertheless prefers it as embedding input (EmbeddingWorker.java:488), so
+its first branch was dead and every one of the 9,224 embedded posts carries
+a vector built from `title + first 800 chars of body`.
 
-```java
-// EmbeddingWorker.java:488
-if (row.bodySummary() != null && !row.bodySummary().isEmpty()) {
-    body = row.bodySummary();
-}
-```
+The ticket was filed as a doc-only investigation to choose between
+populating the column and dropping it. The investigation (2026-08-01, this
+session) decided **populate**, and the user then directed this ticket to
+carry the implementation itself (dropping the original follow-up-ticket
+acceptance item) rather than spawning a separate ticket.
 
-with the documented contract `title + "\n\n" + (body_summary OR first
-800 chars of body)`.
+## Decision (2026-08-01, recorded per the original acceptance)
 
-Nothing writes it. `PostPersister`'s INSERT names its columns
-explicitly and `body_summary` is not among them:
+**`post.body_summary` SHALL be populated** by an ingest-time LLM abstract
+writer (`BodySummaryWorker`), from `body`, when body length exceeds a
+configured threshold. Roll-forward: **no re-embed of the existing corpus is
+required.**
 
-```
-INSERT INTO post (
-  id, uid, source_id, upstream_identifier, url, title, body,
-  author, published_at, fetched_at, status, ...
-)
-```
+Rationale, with the evidence gathered before deciding:
 
-A grep over `infochat-*/src/main` finds one hit in a write context, and
-it is the `post_embedding` insert, not `post`. No test writes it either.
-Confirmed against the live-test corpus: **0 of 9,236 posts have a
-non-empty `body_summary`**, across all five source kinds.
+- An A/B experiment (synthetic 24-post corpus mirroring the live shape,
+  `nomic-embed-text` 768-d, pgvector cosine, 11 gold-labeled queries in
+  three classes) measured `title + ≤300-char summary` against
+  `title + first 800 chars of body`: MRR 0.955 vs 0.803, summary arm never
+  worse, strictly better on the long-body/late-content class that
+  motivated the ticket. The dominant mechanism is boilerplate dilution:
+  the first 800 chars of odysee-style bodies (live average 2,445 chars)
+  are channel promo, which pollutes the vector.
+- Cross-population safety (the re-embed question): probing a
+  prefix-embedded corpus with summary-embedded posts kept the same-topic
+  nearest neighbour at rank 1 in 24/24 cases (separation margins +0.09 to
+  +0.26 over the best foreign match). Old prefix vectors and new summary
+  vectors coexist; a bulk re-embed is an optional uniformity pass, not a
+  correctness requirement.
+- The rejected alternative (b) — mark vestigial and drop the column —
+  would discard the measured retrieval gain to save one trivial migration.
 
-So the first branch of that conditional is dead, and the embedder has
-always used `first 800 chars of body`. That is a defensible input — but
-it is not the documented one, and nobody chose it.
-
-This surfaced while evaluating headline sources for M1-714: the column
-looked like the natural place to get a short summary line from, and it
-turned out to be empty everywhere.
-
-## Why it needs a decision rather than a fix
-
-The two obvious "fixes" pull in opposite directions and have very
-different blast radii, which is why this is filed as an investigation
-and not as an implementation.
-
-**Populate it.** Then every newly embedded post is embedded from
-different text than the 9,224 already-embedded posts. Vector neighbours
-are compared across both populations, so retrieval quality becomes a
-function of when a post was ingested. Doing this properly means a
-re-embed of the corpus, which is a bulk LLM/embedder job, not a code
-tweak.
-
-**Drop it.** Then the read path simplifies and the documented contract
-becomes true, at the cost of a migration and of closing off a cheap
-future improvement — a feed-supplied `<description>` is often a better
-embedding input than the first 800 characters of a body, particularly
-for the `odysee` sources whose bodies average 2,445 characters.
-
-Note also that `EligiblePostQuery` already calls out `body_summary` as a
-field it deliberately does not project, so the column has been
-considered and skipped at least once elsewhere in the codebase.
+Caveats recorded with the decision: the corpus was synthetic and the
+summaries ideal-authored (ceiling case); production summary quality
+variance is de-risked by the failure path (fall back to prefix) rather
+than by a pilot gate.
 
 ## Acceptance
 
-- The decision is recorded in `docs/design/05-llm-and-embeddings.md`,
-  one of two outcomes, with rationale.
-- `docs/design/02-schema.md` agrees.
-- The follow-up ticket (populate, or remove) exists and is referenced by
-  id.
-- The re-embedding consequence for the 9,224 existing vectors is stated
-  explicitly.
-- Nothing outside `docs/` changes.
+Mirrors the YAML `acceptance:` list — migration + worker + ordering +
+failure-path ITs, unit cap/prompt test, roll-forward guarantee, design-doc
+updates, green `mvn verify`.
 
 ## Out-of-scope
 
-All code. `EmbeddingWorker`, `PostPersister`, the fetchers, any Flyway
-migration, the embedding model identity and the 768-dim invariant, and
-M1-714's rendering change. See frontmatter.
+No re-embed, no fetcher/persister changes, no embedding-model or
+dimension changes, no provider-side summary features, no column drop,
+M1-723's columns. See frontmatter.
 
 ## Notes
 
-- **Investigation flow.** The deliverable here is a finding plus a
-  recorded decision, so it should not traverse the full
-  implement → review → redteam → merge cycle as though it were code. If
-  the apply-half turns out to exceed what a doc-only diff can carry,
-  decompose: close this as an investigation and file the gated
-  implementation ticket fresh, rather than growing this one.
-
-- **Do not let this ride along with M1-714.** The two were found
-  together and share no files. M1-714 out-of-scopes `body_summary`
-  precisely so the rendering fix cannot quietly acquire an embedding
-  change; the reverse holds here.
-
-- **The read path is not itself broken.** `EmbeddingWorker` behaves
-  correctly today — it takes the fallback branch every time. Deleting
-  the null check before the decision is made would foreclose option (a)
-  and is out of scope for that reason, not because the check is load
-  bearing.
+- **Design: new `summary_done` cursor flag** (V28 `entity_done` / V57
+  `classifier_done` precedent — ADD COLUMN DEFAULT FALSE + backfill UPDATE).
+  Rejected alternative: overloading `body_summary` with an `''` sentinel to
+  avoid a migration — deviates from the per-stage-flag idiom every
+  post-tagger worker follows, and the load-bearing ReadyPromoter rule
+  (ReadyPromoter.java:31-47 — every post-tagger flag must join its gate or
+  promotion strands posts) is cleaner with an explicit flag.
+- **Why embedding must wait for the summarizer**: both workers poll on
+  seconds-scale schedules, but the summarizer pays an LLM call per post
+  while embedding batches — without a gate, embedding wins the race every
+  time and the feature is dead on arrival. Hence `summary_done=TRUE`
+  (or `length(body) <= threshold`) joins `EmbeddingWorker.enumeratePending`
+  and `ReadyPromoter.enumeratePending`.
+- **Backfill choice**: the migration backfills `summary_done=TRUE` for
+  rows that had passed the tagger at migration time (the V28/V57 shape).
+  Sweeping the old corpus would spend LLM tokens for zero effect — those
+  posts already carry prefix vectors and re-embedding them is out of
+  scope. Not-yet-tagged rows stay FALSE and are summarized when they
+  reach the stage; they carry no vector yet, so that is steady-state
+  behavior, not a re-embed.
+- **Fixture blast radius**: any existing test INSERT with
+  `length(body) > threshold` that expects embedding/promotion will now
+  stall unless it sets `summary_done=TRUE` (or shortens its body).
+  Enumerate before implementing (grep test INSERTs into `post`); most
+  fixtures have short bodies and pass through the `length(body) <=
+  threshold` escape. `scripts/lint-partitioned-test-inserts.py` constrains
+  fixture edits (D72).
+- **LLM wiring is already routed**: `ModelTask.SUMMARIZER`
+  (infochat-llm-adapter ModelTask.java:28) and
+  `infochat.llm.summarizer.model` (collector application.properties:510)
+  exist for the provider's `/summary`; the collector-side worker reuses
+  that task, so `LlmRouterStartupGuard` needs no new keys.
+- **Prompt**: new `prompts/body-summary.md` in infochat-llm-adapter,
+  classifier.md shape — `<<<UNTRUSTED_CONTENT id="{{id}}">>>` wrapper with
+  per-call rotating UUID, JSON reply, `LlmJson.stripCodeFence` parsing.
+  This is why the ticket is `security_relevant: true`: untrusted post
+  bodies enter an LLM prompt.
+- **Disable idiom**: no `.enabled` keys exist in this codebase; the worker
+  is disabled by `infochat.llm.summarizer.poll-interval=off`
+  (`infochat.linking.interval=off` precedent). Defaults stay enabled;
+  per-profile token-cost tuning (pi) is a config decision at deploy time.
+- **V-number**: the migration takes the next free V-number at
+  implementation time. Queue state 2026-08-01: main has V68; M1-741 (in
+  flight) holds V69, M1-742 plans V70; M1-727/M1-707 are stale on V67/V68
+  and owe renumbers. The user owns migration ordering — coordinate the
+  number before writing the file. (Resolved: V71, user-approved.)
+- **Scope expansion 2026-08-01 (user directive)**: the redteam r1
+  audit's two low findings are fixed IN this ticket rather than
+  escalated — the `[refused-action]` refusal marker (prompt +
+  parse branch + refusal notification class) within the original scope,
+  and the `switch-llm.sh` disclosure line via an explicit user-approved
+  `files_scope` expansion (`prod/switch-llm.sh` added, `files_budget`
+  13). The refusal follows the §4.3 convention: the model replies
+  `{"summary": "[refused-action]"}` to in-wrapper action requests; the
+  worker matches it only as a LEADING token (mid-text occurrences are
+  content), persists NULL, advances the cursor, and notifies under the
+  distinct `summarizer.refusal` error class — no retry (a refusal is a
+  final answer, not a failure).

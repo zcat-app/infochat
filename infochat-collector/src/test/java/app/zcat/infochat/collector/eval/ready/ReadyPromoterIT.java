@@ -73,6 +73,13 @@ class ReadyPromoterIT {
     private static final Instant FETCHED_AT = Instant.parse("2026-05-16T11:00:00Z");
     private static final String UID_PREFIX = "ready-it/";
 
+    // M1-715 gate fixture: base infochat.summarizer.threshold-chars is
+    // 1200; LONG_BODY clears it.
+    private static final String LONG_BODY =
+        ("The riverside district was placed under mandatory evacuation as the "
+            + "crest reached the old town and volunteers sandbagged the "
+            + "brewery quarter through the night. ").repeat(10);
+
     @Inject
     @SeedDataSource
     DataSource dataSource;
@@ -483,6 +490,33 @@ class ReadyPromoterIT {
             "once classifier_done=TRUE (all other stages done) the post is promotable");
     }
 
+    // ---------- 9. summary_done gate (M1-715) ----------
+
+    @Test
+    @Order(9)
+    void summaryNotDone_isNotPromotedUntilSummaryDone() throws Exception {
+        // Same clock-pin seam as the Order(8) classifier gate: this
+        // scenario exercises enumeratePending, whose fetched_at floor
+        // reads the injected Clock.
+        QuarkusMock.installMockForType(
+            Clock.fixed(Instant.parse("2026-05-17T00:00:00Z"), ZoneOffset.UTC), Clock.class);
+        SeededPost notSummarized = seedPostWithBody("not-summarized", LONG_BODY, false);
+        SeededPost shortPost = seedPostWithBody("short-escape", "short body", false);
+
+        List<ReadyPromoter.PromotionCandidate> pendingBefore = readyPromoter.enumeratePending(10);
+        assertFalse(pendingBefore.stream().anyMatch(c -> c.id().equals(notSummarized.id())),
+            "over-threshold post with summary_done=FALSE (all other stages done) "
+                + "must NOT be picked for promotion");
+        assertTrue(pendingBefore.stream().anyMatch(c -> c.id().equals(shortPost.id())),
+            "under-threshold post escapes the summary gate with summary_done=FALSE");
+
+        // The BodySummaryWorker advances the cursor → the gate opens.
+        setSummaryDone(notSummarized.id());
+        List<ReadyPromoter.PromotionCandidate> pendingAfter = readyPromoter.enumeratePending(10);
+        assertTrue(pendingAfter.stream().anyMatch(c -> c.id().equals(notSummarized.id())),
+            "once summary_done=TRUE (all other stages done) the post is promotable");
+    }
+
     // ---------- helpers ----------
 
     private void setClassifierDone(UUID id) throws Exception {
@@ -491,6 +525,48 @@ class ReadyPromoterIT {
                  "UPDATE post SET classifier_done = TRUE WHERE id = ?")) {
             ps.setObject(1, id);
             ps.executeUpdate();
+        }
+    }
+
+    private void setSummaryDone(UUID id) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "UPDATE post SET summary_done = TRUE WHERE id = ?")) {
+            ps.setObject(1, id);
+            ps.executeUpdate();
+        }
+    }
+
+    private SeededPost seedPostWithBody(String slug, String body, boolean summaryDone)
+            throws Exception {
+        UUID sourceId = seedRssSource(slug);
+        String uid = UID_PREFIX + slug;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO post ("
+                     + "  id, uid, source_id, upstream_identifier, title, body, "
+                     + "  fetched_at, status, "
+                     + "  stage1_done, stage1_flagged, stage2_done, stage2_failed, "
+                     + "  tagger_done, entity_done, embedding_done, classifier_done, tagger_fallback, tags, summary_done"
+                     + ") VALUES ("
+                     + "  gen_random_uuid(), ?, ?, ?, ?, ?, ?, ?, "
+                     + "  TRUE, FALSE, FALSE, FALSE, "
+                     + "  TRUE, TRUE, TRUE, TRUE, FALSE, '{}', ?"
+                     + ") RETURNING id, fetched_at")) {
+            ps.setString(1, uid);
+            ps.setObject(2, sourceId);
+            ps.setString(3, "ready-it-upstream-" + slug);
+            ps.setString(4, "Ready IT title " + slug);
+            ps.setString(5, body);
+            ps.setTimestamp(6, Timestamp.from(FETCHED_AT));
+            ps.setString(7, "RAW");
+            ps.setBoolean(8, summaryDone);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "INSERT must yield an id");
+                UUID id = (UUID) rs.getObject(1);
+                Instant fetchedAt = rs.getTimestamp(2).toInstant();
+                return new SeededPost(id, uid, fetchedAt);
+            }
         }
     }
 

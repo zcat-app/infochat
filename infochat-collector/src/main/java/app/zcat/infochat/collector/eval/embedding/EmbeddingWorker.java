@@ -223,6 +223,9 @@ public class EmbeddingWorker {
     @ConfigProperty(name = "infochat.embeddings.max-concurrency")
     int maxConcurrency;
 
+    @ConfigProperty(name = "infochat.summarizer.threshold-chars")
+    int summaryThresholdChars;
+
     @SuppressWarnings("NullAway.Init")
     private Semaphore concurrencyPermits;
     @SuppressWarnings("NullAway.Init")
@@ -545,7 +548,16 @@ public class EmbeddingWorker {
      * Enumerate the next batch of pending posts. The pickup filter
      * excludes quarantined posts ({@code status='RAW'} is the
      * load-bearing column) and already-embedded posts
-     * ({@code embedding_done=FALSE}). The {@code fetched_at} floor
+     * ({@code embedding_done=FALSE}). The
+     * {@code (summary_done OR length(body) <= threshold)} clause
+     * (M1-715) holds an over-threshold post until the BodySummaryWorker
+     * has written {@code body_summary} — the summary is the preferred
+     * embedding input (see buildInputText), and without the gate this
+     * worker's seconds-scale batch pickup would win the race against
+     * the summarizer's per-post LLM call every time. Under-threshold
+     * (and NULL-body) posts escape via the length clause and are
+     * embedded from the first-800 fallback exactly as before. The
+     * {@code fetched_at} floor
      * ({@link PartitionScan#scanWindowFloor(Instant)}, sampled from the
      * injected Clock) lets the planner prune partitions of the
      * RANGE(fetched_at) post table. The ORDER BY makes the pickup
@@ -558,14 +570,16 @@ public class EmbeddingWorker {
                 + " WHERE status = 'RAW' "
                 + "   AND tagger_done = TRUE "
                 + "   AND embedding_done = FALSE "
+                + "   AND (summary_done = TRUE OR length(COALESCE(body, '')) <= ?) "
                 + "   AND fetched_at >= ? "
                 + " ORDER BY fetched_at, id "
                 + " LIMIT ?";
         List<PostRow> rows = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setTimestamp(1, Timestamp.from(partitionScan.scanWindowFloor(clock.instant())));
-            ps.setInt(2, limit);
+            ps.setInt(1, summaryThresholdChars);
+            ps.setTimestamp(2, Timestamp.from(partitionScan.scanWindowFloor(clock.instant())));
+            ps.setInt(3, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     UUID id = (UUID) rs.getObject(1);
