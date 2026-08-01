@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 752 |
 | deferred | 1 |
 | abandoned | 21 |
-| **total** | **777** |
+| **total** | **778** |
 
 ---
 
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-743 — Roll-up must not fabricate over an empty headline set (complexity: low, risk: low)
 
 ---
 
@@ -989,4 +989,5 @@ M1-739 (done)
 M1-740 (done)
 M1-741 (done)
 M1-742 (done)
+M1-743 (pending) ← runnable
 ```
