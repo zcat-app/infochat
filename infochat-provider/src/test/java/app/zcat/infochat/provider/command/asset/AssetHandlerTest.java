@@ -4,10 +4,12 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.messaging.RateCapBucket;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -32,10 +34,15 @@ class AssetHandlerTest {
     private AssetReplyRenderer renderer;
     private BundleLoader bundleLoader;
     private AssetHandler handler;
+    private RateCapBucket rateCapBucket;
 
     @BeforeEach
     void setUp() {
         bundleLoader = initBundleLoader();
+        // Real RateCapBucket via the public (Clock, Settings) seam
+        // (M1-705); the 30/min default cheap cap leaves every
+        // pre-existing test (≤3 handle calls) behaviorally unchanged.
+        rateCapBucket = new RateCapBucket(Clock.systemUTC(), RateCapBucket.Settings.defaults());
 
         // Zcash: coingecko (default, enabled), kraken (enabled), bitfinex (enabled).
         // M1-671: kraken is configured for eur while its siblings serve usd, so
@@ -67,7 +74,7 @@ class AssetHandlerTest {
         registry = new AssetRegistry(Map.of("zcash", zcash, "monero", monero));
         snapshotReader = new StubSnapshotReader();
         renderer = new AssetReplyRenderer(bundleLoader);
-        handler = new AssetHandler(registry, snapshotReader, renderer, bundleLoader, new InboundContext());
+        handler = new AssetHandler(registry, snapshotReader, renderer, bundleLoader, new InboundContext(), rateCapBucket);
     }
 
     @Test
@@ -87,7 +94,7 @@ class AssetHandlerTest {
         AssetRegistry noDefault = new AssetRegistry(Map.of(
                 "zcash", new AssetRegistry.AssetEntry("zcash", "Zcash",
                         List.of(sv))));
-        AssetHandler h = new AssetHandler(noDefault, snapshotReader, renderer, bundleLoader, new InboundContext());
+        AssetHandler h = new AssetHandler(noDefault, snapshotReader, renderer, bundleLoader, new InboundContext(), rateCapBucket);
 
         OutboundMessage reply = h.handle("zcash", SCOPE, "/zcash");
         assertTrue(reply.text().contains("No default sub-verb"),
@@ -104,7 +111,7 @@ class AssetHandlerTest {
         AssetRegistry withDisabledDefault = new AssetRegistry(Map.of(
                 "zcash", new AssetRegistry.AssetEntry("zcash", "Zcash",
                         List.of(defaultDisabled, krakenEnabled))));
-        AssetHandler h = new AssetHandler(withDisabledDefault, snapshotReader, renderer, bundleLoader, new InboundContext());
+        AssetHandler h = new AssetHandler(withDisabledDefault, snapshotReader, renderer, bundleLoader, new InboundContext(), rateCapBucket);
 
         OutboundMessage reply = h.handle("zcash", SCOPE, "/zcash");
         assertTrue(reply.text().contains("default sub-verb") && reply.text().contains("disabled"),
@@ -151,7 +158,7 @@ class AssetHandlerTest {
         AssetRegistry withBinance = new AssetRegistry(Map.of(
                 "monero", new AssetRegistry.AssetEntry("monero", "Monero",
                         List.of(moneroCg, moneroBinance))));
-        AssetHandler h = new AssetHandler(withBinance, snapshotReader, renderer, bundleLoader, new InboundContext());
+        AssetHandler h = new AssetHandler(withBinance, snapshotReader, renderer, bundleLoader, new InboundContext(), rateCapBucket);
 
         OutboundMessage reply = h.handle("monero", SCOPE, "/monero binance");
         assertTrue(reply.text().contains("not enabled"),
@@ -260,6 +267,46 @@ class AssetHandlerTest {
         }
     }
 
+    // ----- M1-705 cheap-command bucket ----------------------------------
+
+    /**
+     * Acceptance item 5 (M1-705): an asset command draws the
+     * cheap-command bucket — with the cheap cap set to 2, the third
+     * asset invocation in the window is REJECTED with the friendly
+     * retry-delay reply (never a silent drop), and the over-cap call
+     * never reaches AssetSnapshotReader. The "never the LLM bucket"
+     * half is pinned by construction: the handler holds no LlmRateCap
+     * dependency, so routing asset traffic through it could not compile
+     * (same proof shape as {@link #noLlmCall()}).
+     */
+    @Test
+    void overCheapCapAssetCommandIsRejectedBeforeSnapshotRead() {
+        RateCapBucket tightBucket = new RateCapBucket(Clock.systemUTC(),
+                RateCapBucket.Settings.defaults()
+                        .withCheapCommandBucket(2, Duration.ofMinutes(1)));
+        InboundContext context = new InboundContext();
+        context.setAdapterName("inmemory");
+        AssetHandler tight = new AssetHandler(registry, snapshotReader, renderer,
+                bundleLoader, context, tightBucket);
+        snapshotReader.setResult(coingeckoSnapshot("zcash"));
+
+        OutboundMessage first = tight.handle("zcash", SCOPE, "/zcash");
+        OutboundMessage second = tight.handle("zcash", SCOPE, "/zcash");
+        assertTrue(first.text().contains("Zcash (coingecko)"),
+                "the first asset command succeeds — got: " + first.text());
+        assertTrue(second.text().contains("Zcash (coingecko)"),
+                "the second asset command succeeds — got: " + second.text());
+        assertEquals(2, snapshotReader.callCount(),
+                "precondition: both accepted commands read a snapshot");
+
+        OutboundMessage third = tight.handle("zcash", SCOPE, "/zcash");
+        assertTrue(third.text().contains("commands too quickly"),
+                "the over-cap asset command gets the friendly reject naming the retry "
+                        + "delay — not a silent drop; got: " + third.text());
+        assertEquals(2, snapshotReader.callCount(),
+                "the over-cap asset command is rejected BEFORE any snapshot read");
+    }
+
     // --- Test doubles ---
 
     private static AssetSnapshotReader.SnapshotResult coingeckoSnapshot(String asset) {
@@ -309,6 +356,7 @@ class AssetHandlerTest {
      */
     static class StubSnapshotReader extends AssetSnapshotReader {
         private AssetSnapshotReader.SnapshotResult result;
+        private int callCount;
 
         StubSnapshotReader() {
             // no-arg: bypasses CDI DataSource injection
@@ -318,8 +366,14 @@ class AssetHandlerTest {
             this.result = result;
         }
 
+        /** How many snapshot reads reached the reader (M1-705 over-cap reject pins 0). */
+        int callCount() {
+            return callCount;
+        }
+
         @Override
         public SnapshotResult readLatest(String asset, String subVerb, String vsCurrency) {
+            callCount++;
             return result;
         }
     }

@@ -633,30 +633,34 @@ are open gaps, not retired design (audit 2026-07-27, `.scratch/doc-audit.md`
 §A). Where the shipped shape differs, the design column stays as designed —
 the row is a to-do, not a description.
 
-**The gap is structural, and it is spec-level, not design-level.**
+**The partition ships (M1-705).**
 [../spec/security.md](../spec/security.md) §Rate limiting commits to a
 **partition** — "grouped explicitly so commands that share a cost profile
-share a bucket" — naming five: parser-only/DB-read commands, asset commands,
-`/add-source`, chat-mode transport, and LLM-triggering ops. What ships is a
-different shape, not a subset: ONE per-`(adapter, contact_id)` inbound bucket
-(`RateCapBucket`, 60/min) that every command and chat message draws on, plus
-one genuinely separate LLM bucket (`LlmRateCap`), plus the per-group backstops
-below, plus `/quarantine`'s reuse of the inbound bucket under its own
-namespace. So the ✗ rows below are not five independent missing features —
-they are one missing partition. Closing any single row means deciding whether
-the partition is being built or the spec narrowed to the shipped shape.
+share a bucket" — and as of M1-705 the named groups exist as distinct
+buckets: the cheap-command tier draws a per-`(adapter, contact_id)` bucket
+(`infochat.ratelimit.cheap-commands-per-minute`, default **30/min**) at
+dispatch and in-handler, `/add-source` draws a per-user hourly bucket
+(`infochat.ratelimit.add-source-per-hour`, default **5/hour**), and
+`/quarantine approve`/`reject` draw a dedicated per-admin bucket
+(`infochat.ratelimit.quarantine-per-minute`, default **100/min**). All three
+sit **behind** the step-1.5 transport bucket (`RateCapBucket`, 60/min,
+unchanged — rate, key, stranger split, and silent drop): the transport
+bucket has already metered the inbound before any of them fires, so their
+friendly-reject overflow is bounded outbound cost, not the amplification
+step 1.5's silence exists to prevent. The remaining ✗/`~` rows below are
+individual deviations, not a missing partition.
 
 | Surface | Designed limit | Action on overflow | Status |
 |---|---|---|---|
-| Per-user commands (parser-only, e.g. `/help`, `/list-sources`) | 30/min token bucket | Friendly reject, "slow down, try again in {N}s" | ✗ **not implemented as designed.** One bucket (`RateCapBucket`, `infochat.rate-cap.inbound-per-minute`, default **60/min**) covers ALL inbound — commands and chat alike — and overflow is a **silent drop** at `InboundRouter` step 1.5, not a friendly reject |
-| Per-user `/add-source` | 5/hour | Reject with explanation; encourages bulk via bootstrap JSON | ✗ **not implemented.** No per-command bucket exists; `/add-source` draws only on the shared 60/min inbound bucket |
-| Per-user asset commands (`/zcash`, `/monero`, …) | Shared cache-hit bucket ([../spec/security.md](../spec/security.md) §Rate limiting; [10-asset-commands.md](10-asset-commands.md) §10.10) | Reject; guards against a flood forcing refetches | ✗ **not implemented.** `AssetHandler` consults no bucket; asset commands draw only on the shared 60/min inbound bucket. §10.10's "they share the parser-only command bucket" describes a bucket that does not exist as a distinct one — the sharing is with ALL inbound, not with a cost-profile peer group |
+| Per-user commands (parser-only, e.g. `/help`, `/list-sources`) | 30/min token bucket | Friendly reject, "slow down, try again in {N}s" | ✓ shipped (M1-705). The cheap-command bucket (`infochat.ratelimit.cheap-commands-per-minute`, default **30/min**) is drawn at `InboundRouter` dispatch for `/help`, `/status`, `/list-sources`, `/get-sources`, `/get-tags`, `/saved`, `/audit`, `/export`, and in-handler for `/quarantine list` and the asset commands — behind step 1.5, whose 60/min transport bucket and silent drop are unchanged. Overflow sends `error.command.rate_limit`, "slow down, try again in {N}s" with N computed from bucket state |
+| Per-user `/add-source` | 5/hour | Reject with explanation; encourages bulk via bootstrap JSON | ✓ shipped (M1-705). Per-user (`users.id`) hourly bucket (`infochat.ratelimit.add-source-per-hour`, default **5/hour**), drawn in `AddSourceCommandHandler` after the permission gate and before the UrlProbe fetch; overflow replies `error.add_source.rate_limit` naming the retry delay and the bootstrap-JSON bulk path |
+| Per-user asset commands (`/zcash`, `/monero`, …) | Shared cache-hit bucket ([../spec/security.md](../spec/security.md) §Rate limiting; [10-asset-commands.md](10-asset-commands.md) §10.10) | Reject; guards against a flood forcing refetches | ✓ shipped (M1-705). `AssetHandler` draws the cheap-command bucket (§10.10's "they share the parser-only command bucket") before any snapshot read; over-cap asset traffic gets the friendly retry-delay reject, never a silent drop, never the LLM bucket |
 | Per-user chat-mode messages (transport rate) | 60/min token bucket | Reject; chat agent doesn't run | ~ shipped as the shared 60/min inbound bucket above (correct rate, but not a chat-specific bucket, and it drops silently) |
 | **Per-user LLM-triggering ops** (chat replies + `/summary` + `/retry` re-rolls) | **10/min** (laptop/vps/remote), **5/min** (pi) | Friendly reject; chat agent / summarizer doesn't run | ~ `LlmRateCap`, `infochat.chat.llm-rate-cap-per-minute` — mechanism and reject shipped as designed, but **remote-llm ships 20/min**, 2× the designed value (`%remote-llm` in the Provider's `application.properties`). No spec breach: [../spec/security.md](../spec/security.md) §Rate limiting commits only "profile-driven". Decide which number is right rather than letting the table track the code |
 | **Tool calls per chat turn** | **5** (all profiles) | After the 5th tool call, reply "I've hit my tool-use budget for this turn — please ask a more specific question." and stop the agent loop | ✗ shipped as TWO caps, neither configurable and neither producing the designed reply: `ChatAgent.MAX_TOOL_ITERATIONS = 10` bounds the loop (binding — one tool call per iteration; exhaustion silently makes one more LLM call and returns its text), and `ChatToolDispatcher.TurnContext.DEFAULT_CALL_CAP = 25` is a non-binding backstop that returns a `ValidationError` *to the model*, not to the user. [../spec/security.md](../spec/security.md) §Prompt-injection defenses refers to "the fixed per-turn call cap" — that is the 25 |
 | Per-source HTTP fetches | Politeness window (default 5 min) | Skip until window expires | ~ shipped as a per-**host** floor (`infochat.fetch.host-min-interval`, default **20 s**), not a per-source 5-minute window; per-kind poll cadence is the coarse control (`infochat.fetch.<kind>.interval`) |
 | Eval LLM calls | Profile-driven concurrency | Block fetcher (back-pressure) | ✓ per-task `max-concurrency` |
-| `/quarantine approve` | 100/min per admin | Reject with rate-limit message | ~ shipped, but reuses the shared `RateCapBucket` cap (60/min) under a `quarantine` namespace rather than a dedicated 100/min bucket |
+| `/quarantine approve` | 100/min per admin | Reject with rate-limit message | ✓ shipped (M1-705). Dedicated per-admin bucket (`infochat.ratelimit.quarantine-per-minute`, default **100/min**) keyed on the admin's `users.id`, replacing the pre-M1-705 namespaced reuse of the shared 60/min transport cap; `/quarantine reject` draws the same bucket |
 
 Notes on the LLM-triggering caps:
 

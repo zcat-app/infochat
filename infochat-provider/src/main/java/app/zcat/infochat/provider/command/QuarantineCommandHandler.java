@@ -139,6 +139,16 @@ public class QuarantineCommandHandler implements CommandHandler {
 
     private OutboundMessage handleList(ScopeRef scope, ActorRow actor,
                                        String adapter, String remainder) {
+        // Cheap-command bucket (M1-705): /quarantine list is in the spec's
+        // parser-only / DB-read group, so it draws the per-(adapter,
+        // contact) cheap bucket, not the dedicated per-admin action
+        // bucket approve/reject use. Overflow is the friendly reject
+        // naming the retry delay (design §4.9), never a silent drop.
+        if (!rateCapBucket.tryAcquireCheapCommand(adapter, actor.contactId)) {
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_COMMAND_RATE_LIMIT, inboundContext.effectiveLanguage()),
+                    Long.toString(rateCapBucket.cheapCommandRetryAfterSeconds(adapter, actor.contactId))));
+        }
         ListArgs args = ListArgs.parse(remainder);
         if (args == null) {
             return reply(scope, MessageFormat.format(
@@ -258,7 +268,11 @@ public class QuarantineCommandHandler implements CommandHandler {
 
     private OutboundMessage handleApprove(ScopeRef scope, ActorRow actor,
                                           String adapter, String remainder) {
-        if (!rateCapBucket.tryAcquire("quarantine", actor.id.toString())) {
+        // Dedicated per-admin quarantine bucket (M1-705) at its own
+        // configured cap (design §4.9's 100/min) — replaces the
+        // namespaced tryAcquire("quarantine", …) reuse that silently
+        // inherited the transport cap's 60/min.
+        if (!rateCapBucket.tryAcquireQuarantine(actor.id)) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_QUARANTINE_RATE_LIMIT, inboundContext.effectiveLanguage()));
         }
 
@@ -300,7 +314,10 @@ public class QuarantineCommandHandler implements CommandHandler {
 
     private OutboundMessage handleReject(ScopeRef scope, ActorRow actor,
                                          String adapter, String remainder) {
-        if (!rateCapBucket.tryAcquire("quarantine", actor.id.toString())) {
+        // Same dedicated per-admin bucket as approve (M1-705) — reject
+        // was rate-limited pre-M1-705 too (:303) and must not be
+        // silently un-limited by the bucket split.
+        if (!rateCapBucket.tryAcquireQuarantine(actor.id)) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_QUARANTINE_RATE_LIMIT, inboundContext.effectiveLanguage()));
         }
 

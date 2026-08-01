@@ -46,6 +46,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -246,6 +247,25 @@ public class InboundRouter {
 
     /** The pre-banned registration state: a group message from such a contact is silently dropped at step 3. */
     private static final String REGISTRATION_STATE_PREBAN = "preban";
+
+    /**
+     * M1-705 cheap-command classification — exactly the eight
+     * parser-only / DB-read {@link CommandHandler}-bean command names
+     * docs/spec/security.md §Rate limiting names in the cheap group
+     * ({@code /quarantine list} and the asset commands draw the same
+     * bucket IN-HANDLER: the quarantine subcommand split is invisible
+     * at this name level, and operator-configured asset names can never
+     * appear in a static set). {@code add-source} and {@code
+     * quarantine} are deliberately absent — they draw their own
+     * dedicated per-user buckets in-handler — so no command ever draws
+     * TWO per-user buckets. A cheap command in group scope still draws
+     * the per-GROUP command bucket at dispatch, so the group backstop's
+     * rejection refunds the charged cheap token (the group-LLM refund
+     * discipline, applied to the cheap path).
+     */
+    private static final Set<String> CHEAP_COMMANDS = Set.of(
+            "help", "status", "list-sources", "get-sources",
+            "get-tags", "saved", "audit", "export");
 
     /** Single users-row lookup feeding steps 2, 3, 4, and 5 from one SELECT. */
     private static final String USER_SNAPSHOT_SQL =
@@ -1059,6 +1079,28 @@ public class InboundRouter {
                                                UUID actorId, UUID dispatchScopeId) {
         try {
             if (normalized.startsWith("/")) {
+                // M1-705 cheap-command bucket (design §4.9, spec §Rate
+                // limiting "Parser-only + DB-read paginated commands"):
+                // the eight spec-named bean commands draw a per-(adapter,
+                // contactId) bucket distinct from the step-1.5 transport
+                // bucket. Placed BEFORE the per-group command bucket,
+                // mirroring the per-user-before-per-group order of the
+                // LLM path below. By position it sits BEHIND step 1.5, so
+                // its overflow can afford the friendly reject naming the
+                // retry delay ({0} = seconds, computed from bucket state
+                // — never a hardcoded constant) instead of the transport
+                // bucket's silent drop, without reintroducing the
+                // amplification that silence was built to prevent.
+                boolean cheapCharged = CHEAP_COMMANDS.contains(commandNameOf(normalized));
+                if (cheapCharged
+                        && !rateCapBucket.tryAcquireCheapCommand(
+                                inboundContext.adapterName(), inboundContext.senderContactId())) {
+                    return new DispatchResult.Reply(MessageFormat.format(
+                            bundleLoader.get(BundleKeys.ERROR_COMMAND_RATE_LIMIT,
+                                    inboundContext.effectiveLanguage()),
+                            Long.toString(rateCapBucket.cheapCommandRetryAfterSeconds(
+                                    inboundContext.adapterName(), inboundContext.senderContactId()))));
+                }
                 // Per-group command rate cap (D47) per spec §Rate limiting:
                 // an aggregate sub-bucket keyed on groups.id bounding slash-
                 // command dispatch volume from all members. "Approved only"
@@ -1070,6 +1112,14 @@ public class InboundRouter {
                 // once at step 4.1.
                 if (scope instanceof ScopeRef.Group
                         && !rateCapBucket.tryAcquireGroupCommand(dispatchScopeId)) {
+                    // Refund the cheap token charged above — the group
+                    // backstop must not drain the sender's personal budget
+                    // on a fixed reply (the same discipline as the
+                    // group-LLM refund on the chat path below).
+                    if (cheapCharged) {
+                        rateCapBucket.refundCheapCommand(
+                                inboundContext.adapterName(), inboundContext.senderContactId());
+                    }
                     return new DispatchResult.Reply(
                             bundleLoader.get(BundleKeys.GROUP_COMMAND_RATE_LIMIT, inboundContext.effectiveLanguage()));
                 }

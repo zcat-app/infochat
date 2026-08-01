@@ -1,11 +1,11 @@
 ---
 id: M1-705
 title: "Rate limiting: build the per-cost-profile bucket partition"
-status: pending
+status: done
 created: 2026-07-27
-last_updated: 2026-07-27
+last_updated: 2026-08-01
 blocked_by: []
-files_budget: 14
+files_budget: 19
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/RateCapBucket.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
@@ -17,6 +17,10 @@ files_scope:
   - infochat-provider/src/main/resources/bundles/cs.properties
   - infochat-provider/src/main/resources/application.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/RateCapBucketTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/NoopRateCapBucket.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdmitAllRateCapBucket.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/CountingRateCapBucket.java
+  - infochat-provider/src/test/resources/inbound-reflection-error-baseline.txt
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/QuarantineCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetHandlerTest.java
@@ -133,12 +137,143 @@ spec_refs:
   - docs/spec/security.md §Rate limiting
   - docs/spec/commands.md §Asset commands
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 23
+      added: 1223
+      removed: 80
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-08-01
+    category: DOS
+    severity: low
+    promise: |
+      docs/spec/security.md §Rate limiting — "Per-user token buckets
+      bound" resource use, grouped so commands sharing a cost profile share
+      a bucket; the transport map carries the M1-229/M1-205 key-space cap
+      (maxContactBuckets) precisely because unbounded per-key map growth is
+      a memory-exhaustion vector.
+    gap: |
+      RateCapBucket.java (diff hunk at +575-582) mints
+      cheapCommandBuckets as a ConcurrentHashMap keyed on
+      (adapter, contactId) with NO key-space cap, unlike the sibling
+      transport map whose tryAcquire refuses to mint a new key once
+      maxContactBuckets is reached. The comment justifies the omission by
+      the invariant that only registered (invite-gated) contacts reach
+      step-6 dispatch and the command handlers. That invariant holds in the
+      diff as shown (steps 2/3/4 gate all dispatch), so today entries are
+      bounded by registered-user count — but the bound is now implicit and
+      single-point-of-failure: any future (or undiscovered) path that lets
+      an unregistered contact reach a cheap-drawing site turns this map
+      into the exact stranger-flood memory vector M1-229/M1-205 closed for
+      the transport map, with only the idle-eviction sweep as backstop
+      (and the sweep never evicts active buckets).
+    repro: |
+      Not directly exploitable as shipped. Chained shape: a
+      registration-gate regression (any bug admitting unregistered contacts
+      to slash dispatch or to AssetHandler/QuarantineCommandHandler) plus a
+      SimpleX-style Sybil contact-id minting flood grows
+      cheapCommandBuckets by one entry per distinct contact id per adapter,
+      unbounded, for the process lifetime — heap exhaustion on the Pi
+      profile. The transport map survives the same flood because it
+      refuses new keys past maxContactBuckets; the cheap map has no
+      equivalent refusal.
+    suggested_fix_class: rate-limit
+  - date: 2026-08-01
+    category: DOS
+    severity: low
+    promise: |
+      docs/spec/security.md §Rate limiting — the design row the diff
+      itself ships (docs/design/04-security.md §4.9 table, updated in this
+      diff) commits the cheap-command tier's action-on-overflow to
+      "Friendly reject, 'slow down, try again in {N}s'", and the spec
+      states the transport-vs-tier ordering principle: "Transport rate is
+      intentionally higher than this cap so a flooding user gets quick
+      reject replies without burning the only LLM slot" (stated for the
+      LLM bucket; the same ordering is what makes ANY tiered friendly
+      reject reachable behind the silent-drop transport bucket).
+    gap: |
+      infochat-provider/src/main/resources/application.properties (diff
+      hunk at +905) sets %remote-llm.infochat.ratelimit.cheap-commands-per-
+      minute=60 — equal to the transport bucket's 60/min
+      (infochat.rate-cap.inbound-per-minute, unchanged by this diff). The
+      transport bucket is consulted first (InboundRouter step 1.5) and
+      drops silently; with cheap cap == transport cap, the cheap bucket can
+      never accumulate more draws than the transport bucket admits, so on
+      the remote-llm profile the cheap tier's friendly-reject overflow is
+      unreachable — cheap-command flooding degrades to the silent drop the
+      tier was built to replace. (The default/laptop/vps values of 30/min
+      are correctly below 60/min; %pi 15/min is fine.)
+    repro: |
+      On a remote-llm-profile deployment, a registered user sends
+      61+ cheap commands (/help, /saved, …) within one minute. The 61st
+      and later messages hit the step-1.5 transport bucket first and are
+      dropped silently — the user never receives the designed
+      error.command.rate_limit friendly reject naming the retry delay.
+      The behavioral promise the diff's own docs make ("never a silent
+      drop" for the cheap tier) is void on that profile.
+    suggested_fix_class: rate-limit
+redteam_audits:
+  - date: 2026-08-01
+    verdict: FINDINGS
+    base: b8db467923432e4ad49a3eb30441cfd316aba708
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-705-2026-08-01.md
+    findings_count: 2
+    out_of_model_count: 1
+    note: |
+      Pre-review gate for security_relevant: true; contamination check
+      clean. Two low DOS findings (cheap-map key-space cap omission —
+      chained, not exploitable as shipped; %remote-llm cheap cap equals
+      the transport cap so the friendly reject is unreachable there) plus
+      one out-of-model note (per-process bucket state in multi-replica
+      deployments). Awaiting the user's escalate/fix-or-carry decision
+      ahead of /m1-tick review.
+  - date: 2026-08-01
+    verdict: CLEAN
+    base: b8db467923432e4ad49a3eb30441cfd316aba708
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-705-2026-08-01-r2.md
+    out_of_model_count: 1
+    note: |
+      Round-2 re-audit of the post-remediation diff. Finding 2 was fixed
+      in-branch (%remote-llm cheap 60 -> 40, ordering invariant
+      documented) and the adversary verified it closed; finding 1's
+      falsification (stranger-limiter bound + idle eviction) was upheld.
+      The gate's headless process hit a provider 403 on exit after the
+      verdict artifact was written; the complete on-disk verdict was
+      accepted per verdict-file readback and the contamination check ran
+      manually (clean). One out-of-model note carried (per-process
+      bucket state × multi-replica).
+clarity_check:
+  date: 2026-08-01
+  verdict: PASS
+  warnings:
+    - >-
+      Self-check: all ticket-vs-code claims spot-checked true
+      (InboundRouter:495 transport draw + silent drop; Quarantine:261,303
+      namespaced reuse; no bucket in AddSourceCommandHandler/AssetHandler).
+      Census grep re-run at start (41 command/ handlers + HelpCommandHandler
+      in messaging/ + AssetHandler in command/asset/): spec-named cheap
+      commands, AssetHandler, AddSourceCommandHandler and
+      QuarantineCommandHandler disposed per the table; Summary/Retry stay on
+      LlmRateCap (out of scope); the remaining admin/lifecycle/group/
+      subscription handlers are left on the transport bucket alone — they
+      are admin-gated, low-frequency, outside files_scope, and the spec
+      enumerates a group rather than an exhaustive list.
+  blockers: []
+outline_file: target/m1-tick-outline-M1-705.md
 escalation_reason:
 ---
 
@@ -275,3 +410,27 @@ tests keep their current assertions.
   designed values and the ticket assumes them; a profile-driven spread
   (as the per-group caps have) is the implementer's call, but the base
   values should not be invented fresh.
+
+- **Why the two test doubles are in `files_scope` (budget-breach refine,
+  2026-08-01).** `NoopRateCapBucket` and `AdmitAllRateCapBucket` are
+  zero-assertion test doubles whose inherited acquire methods NPE on
+  their null `@ConfigProperty` fields outside CDI (the M1-222 precedent
+  is documented in `AdmitAllRateCapBucket`'s javadoc). The router-side
+  cheap-command draw is consulted by plain-JUnit router tests that
+  inject these doubles (e.g. `InboundRouterCommandCapTest` dispatches
+  `/help`), so each double gains an admit-everything override for the
+  new acquire method — a test-only change with no production behavior
+  change. They carry no assertions, so §10 control preservation does
+  not apply to them.
+
+- **Second budget-breach refine (2026-08-01, round-1 verify evidence).**
+  Two more out-of-scope paths proved mechanically necessary:
+  `CountingRateCapBucket` (a third double the outline's census missed —
+  `InboundRouterIntakeOrderingTest` and `InboundRouterProbationOrderingTest`
+  inject it, and the missing cheap override NPE'd dispatch into
+  `error.internal`) gains the same log-silent admit-everything override,
+  and `inbound-reflection-error-baseline.txt` gains one `bot-authored`
+  entry per new `error.*` interpolation site (the retry-delay
+  `Long.toString(...)` shapes are content-dependent and therefore not
+  auto-clearable by `InboundReflectionGuardTest`; the value is a
+  bucket-state-computed long, never inbound text).

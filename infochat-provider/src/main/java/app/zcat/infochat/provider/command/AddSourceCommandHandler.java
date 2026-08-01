@@ -12,6 +12,7 @@ import app.zcat.infochat.provider.command.AddSourceArgs.ParseResult;
 import app.zcat.infochat.provider.command.AddSourceArgs.Success;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.messaging.RateCapBucket;
 import app.zcat.infochat.provider.source.KindResolver;
 import app.zcat.infochat.provider.source.KindResolver.Resolution;
 import app.zcat.infochat.provider.source.SourceUpsertService;
@@ -59,6 +60,8 @@ import java.util.UUID;
  *       Group is group-admin-only.</li>
  *   <li>Kind resolution via {@link KindResolver}; AMBIGUOUS short-
  *       circuits to the friendly error.</li>
+ *   <li>Per-user hourly rate bucket (M1-705); over-cap short-circuits
+ *       to the explanatory reject naming the retry delay.</li>
  *   <li>URL probe via {@link UrlProbe}; SSRF / unreachable / timeout
  *       short-circuits to the matching bundle key.</li>
  *   <li>Confirm-or-contradict: if the resolver chose RSS based on a
@@ -110,6 +113,9 @@ public class AddSourceCommandHandler implements CommandHandler {
 
     @Inject
     GroupMembershipRepository groupMembershipRepository;
+
+    @Inject
+    RateCapBucket rateCapBucket;
 
     @Override
     public String name() {
@@ -170,6 +176,20 @@ public class AddSourceCommandHandler implements CommandHandler {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_AMBIGUOUS_URL, inboundContext.effectiveLanguage()));
         }
         KindResolver.SourceKind kind = resolution.kind().orElseThrow();
+
+        // Per-user hourly /add-source bucket (M1-705; design §4.9's
+        // 5/hour row) — the outbound-cost guard: every accepted command
+        // below drives a UrlProbe fetch. Drawn AFTER the permission
+        // gate and kind resolution (both cost-free) and BEFORE the
+        // probe, so over-cap callers are rejected with the explanatory
+        // reply (naming the retry delay and the bulk bootstrap-JSON
+        // path) instead of silently dropping. Distinct from the
+        // cheap-command bucket — a user who drains the hourly budget
+        // keeps their cheap commands.
+        if (!rateCapBucket.tryAcquireAddSource(user.id)) {
+            return reply(scope, format(BundleKeys.ERROR_ADD_SOURCE_RATE_LIMIT,
+                    Long.toString(rateCapBucket.addSourceRetryAfterSeconds(user.id))));
+        }
 
         // URL probe. StreamSource-shaped kinds (Nostr in v1) get a
         // single relay connection attempt per spec §Source management;

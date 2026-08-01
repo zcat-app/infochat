@@ -40,4 +40,16 @@ final class CountingRateCapBucket extends RateCapBucket {
     public boolean tryAcquireGroupCommand(UUID groupId) {
         return true;
     }
+
+    /**
+     * M1-705 cheap-command draw on the slash-dispatch path. Same NPE
+     * rationale as {@link #tryAcquireGroupCommand} — outside CDI the
+     * inherited implementation NPEs on its null {@code @ConfigProperty}
+     * refill-window field, so the fake answers directly: always
+     * under-cap. Deliberately log-silent, same as the group override.
+     */
+    @Override
+    public boolean tryAcquireCheapCommand(String adapter, String contactId) {
+        return true;
+    }
 }

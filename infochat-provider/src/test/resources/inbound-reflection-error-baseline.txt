@@ -28,6 +28,7 @@
 AddSourceArgs.java | error.add_source.unknown_category | 0 | String.join(", ", ALLOWED_CATEGORIES) | bot-authored: the fixed ALLOWED_CATEGORIES source-category vocabulary
 AddSourceArgs.java | error.add_source.unknown_kind | 0 | SourceKind.commaList() | bot-authored: the SourceKind enum's comma-joined value list
 AddSourceCommandHandler.java | error.add_source.nitter_host_type_conflict | 0 | resolution.nitterHostConflict().orElseThrow() | provably-constrained: a URI host of a configured Nitter instance (url.getHost() over the operator allowlist); no slash/whitespace/backtick can survive (M1-656 r3 out-of-model)
+AddSourceCommandHandler.java | error.add_source.rate_limit | 0 | Long.toString(rateCapBucket.addSourceRetryAfterSeconds(user.id)) | bot-authored: bucket-state-computed retry delay in seconds (a long read from RateCapBucket token state), never inbound text (M1-705)
 ApproveGroupCommandHandler.java | error.group_not_found | 0 | groupId | bot-admin-only: is_admin gate precedes parseGroupId in ApproveGroupCommandHandler.handle (M1-657); reader is already an admin
 ApproveGroupCommandHandler.java | error.group_not_found | 0 | parseGroupIdRaw(rawText) | bot-admin-only: is_admin gate precedes parseGroupId in ApproveGroupCommandHandler.handle (M1-657); reader is already an admin
 AssetHandler.java | error.asset.default_disabled | 0 | assetName | bot-authored: the asset command's own registry name (e.g. zcash), not inbound-arbitrary text
@@ -45,6 +46,7 @@ AssetHandler.java | error.asset.unknown_sub_verb | 2 | String.join(", ", allSubV
 AssetHandler.java | error.asset.unsupported_quote_currency | 0 | availableCurrency | bot-authored: the selected pair's asset_config.default_quote_currency, read via AssetRegistry.SubVerbEntry.defaultQuoteCurrency() (AssetHandler:130-148) — a DB config value, not inbound-arbitrary text
 AssetHandler.java | error.asset.unsupported_quote_currency | 1 | assetName | bot-authored: the asset command's own registry name (e.g. zcash), not inbound-arbitrary text
 AssetHandler.java | error.asset.unsupported_quote_currency | 2 | availableCurrency | bot-authored: the same asset_config.default_quote_currency value as argIndex 0 — with one currency per (asset, sub_verb) pair the suggestion and the available-list are necessarily identical
+AssetHandler.java | error.command.rate_limit | 0 | Long.toString(rateCapBucket.cheapCommandRetryAfterSeconds(adapter, contactId)) | bot-authored: bucket-state-computed retry delay in seconds (a long read from RateCapBucket token state), never inbound text (M1-705)
 AssetHandler.java | error.usage.missing_argument | 0 | "/" + assetName + " [sub-verb] [--vs <currency>]" | bot-authored: the asset command's own registry name (e.g. zcash), not inbound-arbitrary text
 AuditCommandHandler.java | error.audit.unknown_action | 0 | args.action | bot-admin-only: admin gate at AuditCommandHandler:99 precedes the reflect (r2 audit)
 AuditCommandHandler.java | error.audit.unknown_action | 1 | ACCEPTED_ACTIONS | bot-authored: the accepted-action vocabulary constant
@@ -53,6 +55,7 @@ ExportCommandHandler.java | error.export.page_out_of_range_one | 1 | String.valu
 FollowTagCommandHandler.java | error.follow_tag.unknown_tag | 0 | String.join(", ", suggestions) | bot-authored: fuzzy suggestions drawn from the controlled vocabulary (M1-647/M1-656), not the raw token
 GroupTimezoneCommandHandler.java | error.group_timezone.invalid_zone | 0 | suggestions | bot-authored: a suggestion list drawn from the controlled vocabulary / catalogue (M1-647/M1-656)
 HelpCommandHandler.java | error.help.unknown_command | 0 | suggestions | bot-authored: a suggestion list drawn from the controlled vocabulary / catalogue (M1-647/M1-656)
+InboundRouter.java | error.command.rate_limit | 0 | Long.toString(rateCapBucket.cheapCommandRetryAfterSeconds( inboundContext.adapterName(), inboundContext.senderContactId())) | bot-authored: bucket-state-computed retry delay in seconds (a long read from RateCapBucket token state), never inbound text (M1-705)
 InboundRouter.java | error.probation.blocked | 0 | formatTimeUntilUnlock(probationNow, probationActor.probationUntil()) | bot-authored: a formatted typed Duration (time-until-unlock), not inbound text
 InboundRouter.java | error.probation.blocked | 1 | commandPermissions.renderProbationCommandList() | bot-authored: the canonical probation command listing (CommandPermissions)
 InviteCommandHandler.java | error.invite.adapter_required | 0 | String.join(", ", enabled) | bot-authored: the enabled-adapter name list
@@ -62,6 +65,7 @@ InviteCommandHandler.java | error.invite.bot_contact_unknown_adapter | 1 | Strin
 InviteCommandHandler.java | error.invite.bot_contact_unsupported | 0 | targetName | bot-admin-only: admin gate at InviteCommandHandler:225 precedes every reflect (r2 audit)
 InviteCommandHandler.java | error.invite.unknown_adapter | 0 | targetAdapter == null ? "" : targetAdapter | bot-admin-only: admin gate at InviteCommandHandler:225 precedes the reflect (r2 audit)
 LangCommandHandler.java | error.lang.unsupported_code | 0 | sortedJoin(enabled) | bot-authored: the sorted enabled-language code list (LanguageRegistry, M1-716)
+QuarantineCommandHandler.java | error.command.rate_limit | 0 | Long.toString(rateCapBucket.cheapCommandRetryAfterSeconds(adapter, actor.contactId)) | bot-authored: bucket-state-computed retry delay in seconds (a long read from RateCapBucket token state), never inbound text (M1-705)
 QuarantineCommandHandler.java | error.quarantine.invalid_id | 0 | idStr | bot-admin-only: admin gate at QuarantineCommandHandler:127 precedes the reflect (r2 audit)
 QuarantineCommandHandler.java | error.quarantine.invalid_state | 0 | quarantineId.toString() | bot-admin-only: admin gate at QuarantineCommandHandler:127 precedes the reflect (r2 audit)
 QuarantineCommandHandler.java | error.quarantine.verdict_owed | 0 | quarantineId.toString() | bot-admin-only: admin gate at QuarantineCommandHandler:127 precedes the reflect (M1-741); value is a UUID parsed by UUID.fromString, never raw inbound text

@@ -476,24 +476,14 @@ class QuarantineCommandHandlerTest {
     @Test
     void approve_rateLimitAfterBucketDrains() throws Exception {
         String admin = PREFIX + "rl-admin";
-        seedUser(admin, true, false, "vouched");
+        UUID adminId = seedUser(admin, true, false, "vouched");
         UUID qId = seedQuarantineRow("PENDING", PREFIX + "rl-p1");
 
-        // Drain the bucket for this admin's quarantine key.
-        // RateCapBucket default is 60/min; exhaust them all.
-        String rateBucketKey = null;
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "SELECT id FROM users WHERE adapter = ? AND contact_id = ?")) {
-            ps.setString(1, ADAPTER);
-            ps.setString(2, admin);
-            try (ResultSet rs = ps.executeQuery()) {
-                rs.next();
-                rateBucketKey = rs.getObject("id", UUID.class).toString();
-            }
-        }
-        for (int i = 0; i < 60; i++) {
-            rateCapBucket.tryAcquire("quarantine", rateBucketKey);
+        // Drain the DEDICATED per-admin quarantine bucket (M1-705).
+        // %test profile sets infochat.ratelimit.quarantine-per-minute=5;
+        // exhaust them all via the new acquire method.
+        for (int i = 0; i < 5; i++) {
+            rateCapBucket.tryAcquireQuarantine(adminId);
         }
 
         OutboundMessage reply = handler.handle(
@@ -503,6 +493,52 @@ class QuarantineCommandHandlerTest {
                 "rate-exceeded approve must return rate-limit reply");
         assertEquals("PENDING", quarantineStatus(qId),
                 "stored procedure must NOT be called when rate exceeded");
+    }
+
+    /**
+     * Acceptance item 6 (M1-705): the quarantine bucket is independent
+     * of the TRANSPORT bucket's value — an admin whose transport bucket
+     * is fully drained can still approve up to the quarantine cap. The
+     * pre-M1-705 namespaced reuse made the transport cap's 60/min the
+     * quarantine cap; the dedicated bucket carries its own configured
+     * value (design §4.9's 100/min; %test uses 5).
+     */
+    @Test
+    void approve_transportBucketDrained_stillAdmitsUpToQuarantineCap() throws Exception {
+        String admin = PREFIX + "rl-indep-admin";
+        UUID adminId = seedUser(admin, true, false, "vouched");
+
+        // Fully drain the admin's TRANSPORT bucket (60/min, the
+        // infochat.rate-cap.inbound-per-minute default — %test does not
+        // override it).
+        for (int i = 0; i < 60; i++) {
+            rateCapBucket.tryAcquire(ADAPTER, admin, true);
+        }
+        assertFalse(rateCapBucket.tryAcquire(ADAPTER, admin, true),
+                "precondition: the transport bucket is drained for this admin");
+
+        // Approve up to the %test quarantine cap (5) — every one must
+        // succeed despite the drained transport bucket.
+        for (int i = 0; i < 5; i++) {
+            UUID qId = seedQuarantineRow("PENDING", PREFIX + "rl-indep-p" + i);
+            OutboundMessage reply = handler.handle(
+                    new ScopeRef.Dm(admin), "/quarantine approve " + qId);
+            assertEquals(MessageFormat.format(
+                    bundleLoader.get(BundleKeys.REPLY_QUARANTINE_APPROVE_SUCCESS),
+                    qId.toString()), reply.text(),
+                    "approve " + i + " must succeed with the transport bucket drained");
+            assertEquals("APPROVED", quarantineStatus(qId),
+                    "approve " + i + " must transition the row");
+        }
+
+        // The 6th exceeds the quarantine bucket's own cap.
+        UUID qId6 = seedQuarantineRow("PENDING", PREFIX + "rl-indep-p6");
+        OutboundMessage reply6 = handler.handle(
+                new ScopeRef.Dm(admin), "/quarantine approve " + qId6);
+        assertTrue(reply6.text().contains("too quickly"),
+                "the 6th approve exceeds the dedicated quarantine cap");
+        assertEquals("PENDING", quarantineStatus(qId6),
+                "the over-cap approve must not transition the row");
     }
 
     // ---- Audit logging ----

@@ -575,6 +575,243 @@ class RateCapBucketTest {
                 "the post-refill group-reply bucket is also bounded at cap");
     }
 
+    // ----- M1-705 cheap-command bucket --------------------------------
+    // Per docs/spec/security.md §Rate limiting "Parser-only + DB-read
+    // paginated commands": a per-(adapter, contactId) bucket distinct
+    // from the step-1.5 transport bucket, drawn by the cheap command
+    // tier. Driven through the settings seam with a small cap against
+    // the controllable TestClock, mirroring the contact-bucket tests.
+
+    private static RateCapBucket bucketWithCheapSeam(TestClock clock) {
+        return new RateCapBucket(clock, CONTACT_SETTINGS
+                .withCheapCommandBucket(CAP, REFILL_WINDOW));
+    }
+
+    /**
+     * Acceptance item 3 (first half): the cheap-command bucket is
+     * independent of the transport bucket for the same
+     * {@code (adapter, contactId)} — draining the TRANSPORT bucket
+     * leaves the cheap bucket admitting, and draining the CHEAP bucket
+     * leaves the transport bucket admitting.
+     */
+    @Test
+    void cheapIndependentOfTransport() {
+        TestClock clock = new TestClock(Instant.parse("2026-08-01T00:00:00Z"));
+        RateCapBucket bucket = bucketWithCheapSeam(clock);
+
+        // Drain the transport bucket for the tuple.
+        for (int i = 0; i < CAP; i++) {
+            assertTrue(bucket.tryAcquire("inmemory", "cheap-1", true));
+        }
+        assertFalse(bucket.tryAcquire("inmemory", "cheap-1", true),
+                "precondition: the transport bucket is drained");
+
+        // The cheap bucket still admits its full budget.
+        for (int i = 0; i < CAP; i++) {
+            assertTrue(bucket.tryAcquireCheapCommand("inmemory", "cheap-1"),
+                    "draining the transport bucket must not drain the cheap bucket (i=" + i + ")");
+        }
+        assertFalse(bucket.tryAcquireCheapCommand("inmemory", "cheap-1"),
+                "the cheap bucket is independently bounded at its own cap");
+
+        // And the reverse direction on a fresh tuple: drain cheap first.
+        for (int i = 0; i < CAP; i++) {
+            assertTrue(bucket.tryAcquireCheapCommand("inmemory", "cheap-2"));
+        }
+        assertFalse(bucket.tryAcquireCheapCommand("inmemory", "cheap-2"),
+                "precondition: the cheap bucket is drained");
+        for (int i = 0; i < CAP; i++) {
+            assertTrue(bucket.tryAcquire("inmemory", "cheap-2", true),
+                    "draining the cheap bucket must not drain the transport bucket (i=" + i + ")");
+        }
+    }
+
+    /**
+     * Acceptance item 3 (second half): the cheap bucket refills on the
+     * injected Clock seam like the existing buckets — a full window
+     * restores the cap.
+     */
+    @Test
+    void cheapRefillOnClock() {
+        TestClock clock = new TestClock(Instant.parse("2026-08-01T00:00:00Z"));
+        RateCapBucket bucket = bucketWithCheapSeam(clock);
+
+        for (int i = 0; i < CAP; i++) {
+            assertTrue(bucket.tryAcquireCheapCommand("inmemory", "cheap-1"));
+        }
+        assertFalse(bucket.tryAcquireCheapCommand("inmemory", "cheap-1"),
+                "cheap bucket drained; next acquire without refill must fail");
+
+        clock.advance(REFILL_WINDOW);
+
+        for (int i = 0; i < CAP; i++) {
+            assertTrue(bucket.tryAcquireCheapCommand("inmemory", "cheap-1"),
+                    "after a full refill window elapses, cap acquires succeed again (i=" + i + ")");
+        }
+        assertFalse(bucket.tryAcquireCheapCommand("inmemory", "cheap-1"),
+                "the post-refill cheap bucket is also bounded at cap");
+    }
+
+    /** Two contacts hold independent cheap buckets. */
+    @Test
+    void cheapPerContactIsolation() {
+        TestClock clock = new TestClock(Instant.parse("2026-08-01T00:00:00Z"));
+        RateCapBucket bucket = bucketWithCheapSeam(clock);
+
+        for (int i = 0; i < CAP; i++) {
+            assertTrue(bucket.tryAcquireCheapCommand("inmemory", "cheap-A"));
+        }
+        assertFalse(bucket.tryAcquireCheapCommand("inmemory", "cheap-A"),
+                "cheap-A's bucket is drained");
+
+        for (int i = 0; i < CAP; i++) {
+            assertTrue(bucket.tryAcquireCheapCommand("inmemory", "cheap-B"),
+                    "cheap-B's bucket must be untouched by cheap-A's drain (i=" + i + ")");
+        }
+    }
+
+    /**
+     * The friendly reject's {@code {N}s} is honest: zero while the
+     * bucket admits, positive and window-bounded once drained, and back
+     * to zero after a full refill. With cap tokens per window, one slot
+     * is {@code window / cap} — the reported wait must never exceed the
+     * window and must clear once a token has accrued.
+     */
+    @Test
+    void cheapRetryAfterIsHonest() {
+        TestClock clock = new TestClock(Instant.parse("2026-08-01T00:00:00Z"));
+        RateCapBucket bucket = bucketWithCheapSeam(clock);
+
+        assertEquals(0, bucket.cheapCommandRetryAfterSeconds("inmemory", "cheap-1"),
+                "an un-minted bucket admits immediately — no wait to report");
+
+        for (int i = 0; i < CAP; i++) {
+            assertTrue(bucket.tryAcquireCheapCommand("inmemory", "cheap-1"));
+        }
+        long wait = bucket.cheapCommandRetryAfterSeconds("inmemory", "cheap-1");
+        assertTrue(wait > 0,
+                "a drained bucket must report a positive retry delay, not a hardcoded 0");
+        assertTrue(wait <= REFILL_WINDOW.getSeconds(),
+                "the retry delay is bounded by the refill window");
+
+        clock.advance(REFILL_WINDOW);
+        assertEquals(0, bucket.cheapCommandRetryAfterSeconds("inmemory", "cheap-1"),
+                "after a full refill the bucket admits again — no wait to report");
+    }
+
+    /**
+     * The refund seam (M1-705): when the per-group command backstop
+     * rejects after the cheap bucket charged, the sender's token is
+     * restored — one refund restores exactly one acquire, and the
+     * restore is capped at the configured cap (a spurious refund cannot
+     * inflate the budget past it).
+     */
+    @Test
+    void cheapRefundRestoresOneTokenCappedAtCap() {
+        TestClock clock = new TestClock(Instant.parse("2026-08-01T00:00:00Z"));
+        RateCapBucket bucket = bucketWithCheapSeam(clock);
+
+        for (int i = 0; i < CAP; i++) {
+            assertTrue(bucket.tryAcquireCheapCommand("inmemory", "cheap-1"));
+        }
+        assertFalse(bucket.tryAcquireCheapCommand("inmemory", "cheap-1"),
+                "precondition: the cheap bucket is drained");
+
+        bucket.refundCheapCommand("inmemory", "cheap-1");
+        assertTrue(bucket.tryAcquireCheapCommand("inmemory", "cheap-1"),
+                "one refund restores exactly one acquire");
+        assertFalse(bucket.tryAcquireCheapCommand("inmemory", "cheap-1"),
+                "the restored token is spent — the bucket is drained again");
+
+        bucket.refundCheapCommand("inmemory", "cheap-1");
+        bucket.refundCheapCommand("inmemory", "cheap-1");
+        bucket.refundCheapCommand("inmemory", "cheap-1");
+        bucket.refundCheapCommand("inmemory", "cheap-1");
+        for (int i = 0; i < CAP; i++) {
+            assertTrue(bucket.tryAcquireCheapCommand("inmemory", "cheap-1"),
+                    "refunds accumulate up to the cap (i=" + i + ")");
+        }
+        assertFalse(bucket.tryAcquireCheapCommand("inmemory", "cheap-1"),
+                "the budget never exceeds the configured cap, however many refunds land");
+    }
+
+    // ----- M1-705 /add-source hourly bucket -----------------------------
+    // Per-user (users.id) bucket at its own cap and window, independent
+    // of the cheap-command bucket (acceptance item 4's bucket half).
+
+    private static final int ADD_SOURCE_CAP = 5;
+    private static final Duration ADD_SOURCE_REFILL_WINDOW = Duration.ofHours(1);
+
+    private static RateCapBucket bucketWithAddSourceSeam(TestClock clock) {
+        return new RateCapBucket(clock, CONTACT_SETTINGS
+                .withCheapCommandBucket(CAP, REFILL_WINDOW)
+                .withAddSourceBucket(ADD_SOURCE_CAP, ADD_SOURCE_REFILL_WINDOW));
+    }
+
+    @Test
+    void addSourceOverCapAtOwnCapAndRefillsOnClock() {
+        TestClock clock = new TestClock(Instant.parse("2026-08-01T00:00:00Z"));
+        RateCapBucket bucket = bucketWithAddSourceSeam(clock);
+        UUID userId = UUID.randomUUID();
+
+        for (int i = 0; i < ADD_SOURCE_CAP; i++) {
+            assertTrue(bucket.tryAcquireAddSource(userId),
+                    "the first " + ADD_SOURCE_CAP + " /add-source acquires must succeed (i=" + i + ")");
+        }
+        assertFalse(bucket.tryAcquireAddSource(userId),
+                "the 6th /add-source within the window is rejected");
+
+        // Cheap commands in the same window are unaffected (acceptance 4).
+        for (int i = 0; i < CAP; i++) {
+            assertTrue(bucket.tryAcquireCheapCommand("inmemory", "cheap-1"),
+                    "a drained /add-source bucket must not drain the cheap bucket (i=" + i + ")");
+        }
+
+        clock.advance(ADD_SOURCE_REFILL_WINDOW);
+
+        for (int i = 0; i < ADD_SOURCE_CAP; i++) {
+            assertTrue(bucket.tryAcquireAddSource(userId),
+                    "after the hourly window elapses, the cap is restored (i=" + i + ")");
+        }
+        assertFalse(bucket.tryAcquireAddSource(userId),
+                "the post-refill /add-source bucket is also bounded at cap");
+    }
+
+    // ----- M1-705 dedicated per-admin quarantine bucket -----------------
+    // Keyed on the admin's users.id at its OWN configured cap —
+    // independent of the transport cap's value (acceptance item 6's
+    // bucket half): with the quarantine cap set ABOVE the transport
+    // cap, an admin at the transport cap's value still has quarantine
+    // budget.
+
+    private static final int QUARANTINE_CAP = 5;
+
+    @Test
+    void quarantineAdmitsPastTransportCapValue() {
+        TestClock clock = new TestClock(Instant.parse("2026-08-01T00:00:00Z"));
+        // Quarantine cap (5) deliberately ABOVE the transport cap (3):
+        // the dedicated bucket must not inherit the transport cap's
+        // value the way the pre-M1-705 namespaced reuse did.
+        RateCapBucket bucket = new RateCapBucket(clock, CONTACT_SETTINGS
+                .withQuarantineBucket(QUARANTINE_CAP, REFILL_WINDOW));
+        UUID adminId = UUID.randomUUID();
+
+        for (int i = 0; i < CAP; i++) {
+            assertTrue(bucket.tryAcquireQuarantine(adminId),
+                    "quarantine actions up to the transport cap's value succeed (i=" + i + ")");
+        }
+        for (int i = CAP; i < QUARANTINE_CAP; i++) {
+            assertTrue(bucket.tryAcquireQuarantine(adminId),
+                    "an admin AT the transport cap's value still has quarantine budget (i=" + i + ")");
+        }
+        assertFalse(bucket.tryAcquireQuarantine(adminId),
+                "the dedicated bucket is bounded at its OWN cap, not the transport cap's");
+
+        clock.advance(REFILL_WINDOW);
+        assertTrue(bucket.tryAcquireQuarantine(adminId),
+                "the quarantine bucket refills on the Clock seam like the other buckets");
+    }
+
     /**
      * Test seam — a mutable Clock whose {@link #millis()} reading
      * advances only when the test calls {@link #advance(Duration)}.

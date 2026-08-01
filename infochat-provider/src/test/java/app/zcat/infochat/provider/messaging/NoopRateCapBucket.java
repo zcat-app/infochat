@@ -9,4 +9,13 @@ final class NoopRateCapBucket extends RateCapBucket {
     public boolean tryAcquire(String adapter, String contactId, boolean registered) {
         return true;
     }
+
+    // M1-705: the router's cheap-command draw would NPE on the null
+    // @ConfigProperty window field outside CDI; this double admits
+    // everything (the M1-222 precedent for the group buckets in
+    // AdmitAllRateCapBucket).
+    @Override
+    public boolean tryAcquireCheapCommand(String adapter, String contactId) {
+        return true;
+    }
 }

@@ -108,6 +108,43 @@ public class RateCapBucket {
     @ConfigProperty(name = "infochat.ratelimit.group-command-refill-window", defaultValue = "PT15M")
     Duration groupCommandRefillWindow;
 
+    // M1-705 cheap-command bucket (design §4.9, spec §Rate limiting
+    // "Parser-only + DB-read paginated commands"). Per-(adapter,
+    // contactId) bucket drawn by the commands that share the low cost
+    // profile — /help, /status, /list-sources, /get-sources, /get-tags,
+    // /saved, /audit, /export, /quarantine list, and the asset commands.
+    // Distinct from the step-1.5 transport bucket: it sits BEHIND it on
+    // the dispatch path, so its friendly-reject overflow is metered
+    // outbound cost, not amplification. Window fixed at 1 minute by the
+    // property name; same declared-default pattern as the group buckets.
+    @ConfigProperty(name = "infochat.ratelimit.cheap-commands-per-minute", defaultValue = "30")
+    int cheapCommandCap;
+
+    @ConfigProperty(name = "infochat.ratelimit.cheap-command-refill-window", defaultValue = "PT1M")
+    Duration cheapCommandRefillWindow;
+
+    // M1-705 /add-source bucket (design §4.9). Per-user (users.id)
+    // hourly bucket bounding the outbound-cost command — every accepted
+    // /add-source drives a UrlProbe fetch. Window fixed at 1 hour by the
+    // property name.
+    @ConfigProperty(name = "infochat.ratelimit.add-source-per-hour", defaultValue = "5")
+    int addSourceCap;
+
+    @ConfigProperty(name = "infochat.ratelimit.add-source-refill-window", defaultValue = "PT1H")
+    Duration addSourceRefillWindow;
+
+    // M1-705 dedicated per-admin quarantine bucket (design §4.9's
+    // 100/min row). Replaces the pre-M1-705 namespaced reuse of the
+    // transport cap (tryAcquire("quarantine", adminId)), which silently
+    // inherited the 60/min inbound cap instead of the designed
+    // per-admin 100/min. Keyed on the admin's users.id; covers both
+    // /quarantine approve and /quarantine reject.
+    @ConfigProperty(name = "infochat.ratelimit.quarantine-per-minute", defaultValue = "100")
+    int quarantineCap;
+
+    @ConfigProperty(name = "infochat.ratelimit.quarantine-refill-window", defaultValue = "PT1M")
+    Duration quarantineRefillWindow;
+
     private Clock clock = Clock.systemUTC();
 
     private final ConcurrentHashMap<Key, Bucket> buckets = new ConcurrentHashMap<>();
@@ -126,6 +163,22 @@ public class RateCapBucket {
     // Independent cap and budget per design §4.9; one group id holds
     // one entry in each of the three group maps.
     private final ConcurrentHashMap<UUID, Bucket> groupCommandBuckets = new ConcurrentHashMap<>();
+
+    // M1-705 cheap-command bucket map, keyed per-(adapter, contactId)
+    // like the transport map but WITHOUT the maxContactBuckets
+    // key-space cap: the map is consulted only at step-6 dispatch and
+    // in admin/registered command handlers, where the actor is already
+    // registered (invite-gated), so the M1-229/M1-205 stranger-flood
+    // defenses do not apply. Idle entries are reclaimed by the eviction
+    // sweep below.
+    private final ConcurrentHashMap<Key, Bucket> cheapCommandBuckets = new ConcurrentHashMap<>();
+
+    // M1-705 /add-source bucket map, keyed on the caller's users.id.
+    private final ConcurrentHashMap<UUID, Bucket> addSourceBuckets = new ConcurrentHashMap<>();
+
+    // M1-705 dedicated per-admin quarantine bucket map, keyed on the
+    // admin's users.id.
+    private final ConcurrentHashMap<UUID, Bucket> quarantineBuckets = new ConcurrentHashMap<>();
 
     // M1-229 shared stranger limiter, keyed by adapter name. ALL
     // unregistered inbound on one adapter (a RegisteredContactSet miss
@@ -150,11 +203,14 @@ public class RateCapBucket {
      * Test seam. Plain-JUnit tests bypass CDI and instantiate the bean
      * with a controllable {@link Clock} and a {@link Settings} snapshot
      * — start from {@link Settings#defaults()} and override only the
-     * bucket(s) under test via the per-bucket withers. Package-private
-     * — the rest of the provider tree consumes the bean via CDI, where
+     * bucket(s) under test via the per-bucket withers. Public (not
+     * package-private) because the plain-JUnit handler tests that
+     * construct against it live outside the {@code messaging} package
+     * ({@code command}, {@code command.asset}); the rest of the
+     * provider tree consumes the bean via CDI, where
      * {@code @ConfigProperty} populates the fields instead.
      */
-    RateCapBucket(Clock clock, Settings settings) {
+    public RateCapBucket(Clock clock, Settings settings) {
         this.clock = clock;
         this.inboundPerMinute = settings.inboundPerMinute();
         this.refillWindow = settings.refillWindow();
@@ -165,6 +221,12 @@ public class RateCapBucket {
         this.groupLlmRefillWindow = settings.groupLlmRefillWindow();
         this.groupCommandCap = settings.groupCommandCap();
         this.groupCommandRefillWindow = settings.groupCommandRefillWindow();
+        this.cheapCommandCap = settings.cheapCommandCap();
+        this.cheapCommandRefillWindow = settings.cheapCommandRefillWindow();
+        this.addSourceCap = settings.addSourceCap();
+        this.addSourceRefillWindow = settings.addSourceRefillWindow();
+        this.quarantineCap = settings.quarantineCap();
+        this.quarantineRefillWindow = settings.quarantineRefillWindow();
         // No Settings component for the key-space cap — mirror the
         // @ConfigProperty default for the no-CDI test path (the flood test
         // overrides this field directly with a small value).
@@ -179,50 +241,101 @@ public class RateCapBucket {
      * defaults; each wither overrides one bucket's cap/window pair so a
      * test names only the values it exercises.
      */
-    record Settings(int inboundPerMinute,
-                    Duration refillWindow,
-                    Duration evictionThreshold,
-                    int groupReplyCap,
-                    Duration groupReplyRefillWindow,
-                    int groupLlmCap,
-                    Duration groupLlmRefillWindow,
-                    int groupCommandCap,
-                    Duration groupCommandRefillWindow) {
+    public record Settings(int inboundPerMinute,
+                           Duration refillWindow,
+                           Duration evictionThreshold,
+                           int groupReplyCap,
+                           Duration groupReplyRefillWindow,
+                           int groupLlmCap,
+                           Duration groupLlmRefillWindow,
+                           int groupCommandCap,
+                           Duration groupCommandRefillWindow,
+                           int cheapCommandCap,
+                           Duration cheapCommandRefillWindow,
+                           int addSourceCap,
+                           Duration addSourceRefillWindow,
+                           int quarantineCap,
+                           Duration quarantineRefillWindow) {
 
         /** The {@code @ConfigProperty} declared defaults, as one snapshot. */
-        static Settings defaults() {
+        public static Settings defaults() {
             return new Settings(60, Duration.ofMinutes(1), Duration.ofMinutes(10),
                     10, Duration.ofMinutes(15),
                     5, Duration.ofMinutes(15),
-                    20, Duration.ofMinutes(15));
+                    20, Duration.ofMinutes(15),
+                    30, Duration.ofMinutes(1),
+                    5, Duration.ofHours(1),
+                    100, Duration.ofMinutes(1));
         }
 
-        Settings withContactBucket(int inboundPerMinute, Duration refillWindow,
-                                   Duration evictionThreshold) {
+        public Settings withContactBucket(int inboundPerMinute, Duration refillWindow,
+                                          Duration evictionThreshold) {
             return new Settings(inboundPerMinute, refillWindow, evictionThreshold,
                     groupReplyCap, groupReplyRefillWindow,
                     groupLlmCap, groupLlmRefillWindow,
-                    groupCommandCap, groupCommandRefillWindow);
+                    groupCommandCap, groupCommandRefillWindow,
+                    cheapCommandCap, cheapCommandRefillWindow,
+                    addSourceCap, addSourceRefillWindow,
+                    quarantineCap, quarantineRefillWindow);
         }
 
-        Settings withGroupReplyBucket(int cap, Duration window) {
+        public Settings withGroupReplyBucket(int cap, Duration window) {
             return new Settings(inboundPerMinute, refillWindow, evictionThreshold,
                     cap, window,
                     groupLlmCap, groupLlmRefillWindow,
-                    groupCommandCap, groupCommandRefillWindow);
+                    groupCommandCap, groupCommandRefillWindow,
+                    cheapCommandCap, cheapCommandRefillWindow,
+                    addSourceCap, addSourceRefillWindow,
+                    quarantineCap, quarantineRefillWindow);
         }
 
-        Settings withGroupLlmBucket(int cap, Duration window) {
+        public Settings withGroupLlmBucket(int cap, Duration window) {
             return new Settings(inboundPerMinute, refillWindow, evictionThreshold,
                     groupReplyCap, groupReplyRefillWindow,
                     cap, window,
-                    groupCommandCap, groupCommandRefillWindow);
+                    groupCommandCap, groupCommandRefillWindow,
+                    cheapCommandCap, cheapCommandRefillWindow,
+                    addSourceCap, addSourceRefillWindow,
+                    quarantineCap, quarantineRefillWindow);
         }
 
-        Settings withGroupCommandBucket(int cap, Duration window) {
+        public Settings withGroupCommandBucket(int cap, Duration window) {
             return new Settings(inboundPerMinute, refillWindow, evictionThreshold,
                     groupReplyCap, groupReplyRefillWindow,
                     groupLlmCap, groupLlmRefillWindow,
+                    cap, window,
+                    cheapCommandCap, cheapCommandRefillWindow,
+                    addSourceCap, addSourceRefillWindow,
+                    quarantineCap, quarantineRefillWindow);
+        }
+
+        public Settings withCheapCommandBucket(int cap, Duration window) {
+            return new Settings(inboundPerMinute, refillWindow, evictionThreshold,
+                    groupReplyCap, groupReplyRefillWindow,
+                    groupLlmCap, groupLlmRefillWindow,
+                    groupCommandCap, groupCommandRefillWindow,
+                    cap, window,
+                    addSourceCap, addSourceRefillWindow,
+                    quarantineCap, quarantineRefillWindow);
+        }
+
+        public Settings withAddSourceBucket(int cap, Duration window) {
+            return new Settings(inboundPerMinute, refillWindow, evictionThreshold,
+                    groupReplyCap, groupReplyRefillWindow,
+                    groupLlmCap, groupLlmRefillWindow,
+                    groupCommandCap, groupCommandRefillWindow,
+                    cheapCommandCap, cheapCommandRefillWindow,
+                    cap, window,
+                    quarantineCap, quarantineRefillWindow);
+        }
+
+        public Settings withQuarantineBucket(int cap, Duration window) {
+            return new Settings(inboundPerMinute, refillWindow, evictionThreshold,
+                    groupReplyCap, groupReplyRefillWindow,
+                    groupLlmCap, groupLlmRefillWindow,
+                    groupCommandCap, groupCommandRefillWindow,
+                    cheapCommandCap, cheapCommandRefillWindow,
+                    addSourceCap, addSourceRefillWindow,
                     cap, window);
         }
     }
@@ -373,6 +486,127 @@ public class RateCapBucket {
     }
 
     /**
+     * M1-705 cheap-command bucket (design §4.9). Token-bucket keyed
+     * per-{@code (adapter, contactId)}, drawn by the parser-only /
+     * DB-read commands that share the low cost profile (spec §Rate
+     * limiting): the eight router-classified bean commands
+     * ({@code /help}, {@code /status}, {@code /list-sources},
+     * {@code /get-sources}, {@code /get-tags}, {@code /saved},
+     * {@code /audit}, {@code /export}), {@code /quarantine list}, and
+     * the asset commands (in-handler draws). Distinct from the step-1.5
+     * transport bucket — draining one never drains the other. Sits
+     * BEHIND the transport bucket on every path that consults it, so
+     * its overflow can afford a friendly reject (outbound cost already
+     * metered at step 1.5) rather than the transport bucket's silent
+     * drop.
+     *
+     * <p>Shares the transport bucket's accepted state-volatility
+     * posture: a flood-bound, not a security boundary; buckets reset on
+     * Provider restart.</p>
+     */
+    public boolean tryAcquireCheapCommand(String adapter, String contactId) {
+        return tryAcquireFrom(cheapCommandBuckets, new Key(adapter, contactId),
+                cheapCommandCap, cheapCommandRefillWindow);
+    }
+
+    /**
+     * Seconds until the caller's cheap-command bucket next admits a
+     * command — the honest {@code {N}s} for the friendly reject (design
+     * §4.9 "slow down, try again in {N}s"). Computed from bucket state
+     * under the bucket monitor, never a hardcoded constant: an empty
+     * bucket reports the ceiling of the time until its next lazy-refill
+     * token; a bucket with tokens (or none minted yet) reports 0.
+     */
+    public long cheapCommandRetryAfterSeconds(String adapter, String contactId) {
+        return retryAfterSeconds(cheapCommandBuckets, new Key(adapter, contactId),
+                cheapCommandCap, cheapCommandRefillWindow);
+    }
+
+    /**
+     * Refund one cheap-command token (M1-705) — the counterpart of the
+     * group-LLM refund discipline at {@code InboundRouter}: when the
+     * per-group command backstop rejects AFTER the cheap bucket
+     * charged, the sender's personal budget must not drain on a fixed
+     * reply. Restores at most one token (capped at the configured cap)
+     * under the bucket monitor; a no-op when no bucket was minted
+     * (nothing was charged).
+     */
+    public void refundCheapCommand(String adapter, String contactId) {
+        Bucket bucket = cheapCommandBuckets.get(new Key(adapter, contactId));
+        if (bucket == null) {
+            return;
+        }
+        synchronized (bucket) {
+            bucket.tokens = Math.min(cheapCommandCap, bucket.tokens + 1);
+        }
+    }
+
+    /**
+     * M1-705 /add-source bucket (design §4.9). Token-bucket keyed on
+     * the caller's {@code users.id}, bounding the outbound-cost command
+     * (every accepted {@code /add-source} drives a UrlProbe fetch) to
+     * the designed 5/hour. Distinct from the cheap-command bucket — a
+     * user who drains the hourly add-source budget keeps their cheap
+     * commands, and vice versa. Same state-volatility posture as the
+     * contact bucket (restart resets the budget; tolerated).
+     */
+    public boolean tryAcquireAddSource(UUID userId) {
+        return tryAcquireFrom(addSourceBuckets, userId, addSourceCap, addSourceRefillWindow);
+    }
+
+    /**
+     * Seconds until the caller's /add-source bucket next admits — the
+     * retry delay for the explanatory over-cap reply. Same honest-from-
+     * bucket-state discipline as {@link #cheapCommandRetryAfterSeconds}.
+     */
+    public long addSourceRetryAfterSeconds(UUID userId) {
+        return retryAfterSeconds(addSourceBuckets, userId, addSourceCap, addSourceRefillWindow);
+    }
+
+    /**
+     * M1-705 dedicated per-admin quarantine bucket (design §4.9's
+     * 100/min row). Token-bucket keyed on the admin's {@code users.id},
+     * drawn by {@code /quarantine approve} and {@code /quarantine
+     * reject}. Replaces the pre-M1-705 namespaced
+     * {@code tryAcquire("quarantine", adminId)} reuse, which inherited
+     * the transport cap's value (60/min) instead of the designed
+     * per-admin cap — an admin at the transport cap can still perform
+     * quarantine actions up to this bucket's own configured cap.
+     */
+    public boolean tryAcquireQuarantine(UUID adminId) {
+        return tryAcquireFrom(quarantineBuckets, adminId, quarantineCap, quarantineRefillWindow);
+    }
+
+    /**
+     * Retry-after computation shared by the friendly-reject accessors.
+     * Mirrors the lazy-refill arithmetic of {@link #tryAcquireFrom}
+     * under the same bucket monitor so the reported delay can never
+     * under-report: the next token lands one
+     * {@code refillWindow / cap} slot after the bucket's advanced
+     * {@code lastRefillEpochMillis}. Returns 0 when the bucket already
+     * holds a token or has never been minted (an immediate acquire
+     * would succeed); rounds UP to whole seconds otherwise so the
+     * user-facing delay is never optimistic.
+     */
+    private <K> long retryAfterSeconds(ConcurrentHashMap<K, Bucket> map, K key,
+                                       int cap, Duration refillWindow) {
+        Bucket bucket = map.get(key);
+        if (bucket == null) {
+            return 0;
+        }
+        synchronized (bucket) {
+            if (bucket.tokens > 0) {
+                return 0;
+            }
+            long now = clock.millis();
+            long slotMs = Math.max(1L, refillWindow.toMillis() / (long) cap);
+            long nextTokenAt = bucket.lastRefillEpochMillis + slotMs;
+            long waitMs = Math.max(0L, nextTokenAt - now);
+            return (waitMs + 999L) / 1000L;
+        }
+    }
+
+    /**
      * Periodically evict idle buckets to bound memory. Quarkus runtime
      * invokes this method on the scheduler thread; plain-JUnit tests
      * never see it fire (no scheduler runtime).
@@ -411,6 +645,9 @@ public class RateCapBucket {
         evictIdle(groupBuckets, now - effectiveEvictionMillis(groupReplyRefillWindow));
         evictIdle(groupLlmBuckets, now - effectiveEvictionMillis(groupLlmRefillWindow));
         evictIdle(groupCommandBuckets, now - effectiveEvictionMillis(groupCommandRefillWindow));
+        evictIdle(cheapCommandBuckets, now - effectiveEvictionMillis(cheapCommandRefillWindow));
+        evictIdle(addSourceBuckets, now - effectiveEvictionMillis(addSourceRefillWindow));
+        evictIdle(quarantineBuckets, now - effectiveEvictionMillis(quarantineRefillWindow));
     }
 
     private long effectiveEvictionMillis(Duration mapRefillWindow) {

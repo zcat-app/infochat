@@ -470,15 +470,17 @@ hot path. They share the parser-only command bucket
 (`security.md` §Rate limiting). They do **not** consume the                                                                                                                                                                                           
 LLM-triggering bucket.
 
-**GAP** (audit 2026-07-27, `.scratch/doc-audit.md` §A1): the parser-only
-bucket does not exist as a distinct bucket. `AssetHandler` consults no
-bucket of its own, so asset commands draw on the single shared inbound
-cap (`RateCapBucket`, `infochat.rate-cap.inbound-per-minute`, 60/min)
-alongside every other command and chat message. The "cheap commands share
-one bucket, LLM work draws on another" intent above still holds — asset
-commands genuinely never touch the LLM bucket — but the cost-profile
-*partition* the spec describes is not built. See
-[04-security.md](04-security.md) §4.9.
+**Shipped (M1-705).** The parser-only command bucket now exists as a
+distinct bucket: `AssetHandler` draws the cheap-command bucket
+(`infochat.ratelimit.cheap-commands-per-minute`, default 30/min) at the
+top of `handle(...)`, before any `AssetSnapshotReader` call. Over-cap
+asset traffic is rejected with the friendly retry-delay reply
+(`error.command.rate_limit`, [04-security.md](04-security.md) §4.9) —
+never silently dropped, and never routed through the LLM bucket (the
+handler path makes zero LLM calls). The cheap bucket sits behind the
+step-1.5 transport bucket (`RateCapBucket`,
+`infochat.rate-cap.inbound-per-minute`, 60/min), whose rate, key,
+stranger split, and silent drop are unchanged.
 
 The fetcher side has its own per-source budget (already part of the                                                                                                                                                                                   
 asset-fetch tick scheduling) — a misbehaving exchange does not

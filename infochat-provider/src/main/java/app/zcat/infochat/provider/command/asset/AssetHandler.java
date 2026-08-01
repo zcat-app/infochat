@@ -5,6 +5,7 @@ import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.messaging.RateCapBucket;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -23,7 +24,11 @@ import java.util.UUID;
  * to {@link AssetReplyRenderer}.
  *
  * <p>The handler path makes ZERO LLM calls and reads ONLY
- * {@code asset_config} + {@code price_snapshot}.</p>
+ * {@code asset_config} + {@code price_snapshot}. Per design
+ * §10.10 the asset commands share the parser-only cheap-command
+ * bucket (M1-705): every invocation draws one token BEFORE any
+ * snapshot read, and over-cap traffic gets the friendly reject naming
+ * the retry delay — never the LLM bucket, never a silent drop.</p>
  */
 @ApplicationScoped
 public class AssetHandler {
@@ -45,20 +50,42 @@ public class AssetHandler {
     @Inject
     InboundContext inboundContext;
 
+    @Inject
+    RateCapBucket rateCapBucket;
+
     /** CDI-required no-arg constructor. */
     public AssetHandler() {}
+
+    /**
+     * Test constructor for callers that do not exercise the
+     * cheap-command bucket (M1-705) — the bucket defaults to a real
+     * {@link RateCapBucket} at the {@code @ConfigProperty} defaults via
+     * the public {@code (Clock, Settings)} seam, so this overload
+     * spares bucket-agnostic tests (e.g. {@code AssetPerSourceCurrencyTest},
+     * outside this change's scope) a mechanical signature update.
+     */
+    AssetHandler(AssetRegistry assetRegistry,
+                 AssetSnapshotReader snapshotReader,
+                 AssetReplyRenderer replyRenderer,
+                 BundleLoader bundleLoader,
+                 InboundContext inboundContext) {
+        this(assetRegistry, snapshotReader, replyRenderer, bundleLoader, inboundContext,
+                new RateCapBucket(java.time.Clock.systemUTC(), RateCapBucket.Settings.defaults()));
+    }
 
     /** Test constructor. */
     AssetHandler(AssetRegistry assetRegistry,
                  AssetSnapshotReader snapshotReader,
                  AssetReplyRenderer replyRenderer,
                  BundleLoader bundleLoader,
-                 InboundContext inboundContext) {
+                 InboundContext inboundContext,
+                 RateCapBucket rateCapBucket) {
         this.assetRegistry = assetRegistry;
         this.snapshotReader = snapshotReader;
         this.replyRenderer = replyRenderer;
         this.bundleLoader = bundleLoader;
         this.inboundContext = inboundContext;
+        this.rateCapBucket = rateCapBucket;
     }
 
     /**
@@ -72,6 +99,22 @@ public class AssetHandler {
                                            ScopeRef scope,
                                            String rawText) {
         String language = inboundContext.effectiveLanguage();
+
+        // Cheap-command bucket (M1-705): asset commands share the
+        // parser-only command bucket per design §10.10. Drawn BEFORE
+        // any AssetSnapshotReader call so over-cap asset traffic is
+        // rejected with the friendly retry-delay reply (design §4.9),
+        // not silently dropped. Never the LLM bucket — this path makes
+        // zero LLM calls.
+        String contactId = scope instanceof ScopeRef.Dm dm
+                ? dm.contactId() : inboundContext.senderContactId();
+        String adapter = inboundContext.adapterName();
+        if (!rateCapBucket.tryAcquireCheapCommand(adapter, contactId)) {
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_COMMAND_RATE_LIMIT, language),
+                    Long.toString(rateCapBucket.cheapCommandRetryAfterSeconds(adapter, contactId))));
+        }
+
         AssetRegistry.AssetEntry asset = assetRegistry.getAsset(assetName);
         if (asset == null) {
             return reply(scope, MessageFormat.format(

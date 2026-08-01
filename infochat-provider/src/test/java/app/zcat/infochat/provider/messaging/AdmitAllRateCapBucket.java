@@ -25,4 +25,11 @@ final class AdmitAllRateCapBucket extends RateCapBucket {
     public boolean tryAcquireGroupLlm(UUID groupId) {
         return true;
     }
+
+    // M1-705: the router's cheap-command draw precedes the group
+    // buckets on the slash path; same NPE rationale as above.
+    @Override
+    public boolean tryAcquireCheapCommand(String adapter, String contactId) {
+        return true;
+    }
 }

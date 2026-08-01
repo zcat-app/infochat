@@ -4,6 +4,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.messaging.RateCapBucket;
 import app.zcat.infochat.provider.source.KindResolver;
 import app.zcat.infochat.provider.source.SourceUpsertService;
 import app.zcat.infochat.provider.source.SourceUpsertService.Outcome;
@@ -12,6 +13,7 @@ import app.zcat.infochat.provider.source.UrlProbe.ProbeResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -58,6 +60,7 @@ class AddSourceCommandHandlerTest {
     private StubSourceUpsertService sourceUpsertService;
     private StubUserDataSource dataSource;
     private BundleLoader bundleLoader;
+    private RateCapBucket rateCapBucket;
 
     @BeforeEach
     void buildHandlerWithStubs() throws Exception {
@@ -65,12 +68,19 @@ class AddSourceCommandHandlerTest {
         urlProbe = new RecordingUrlProbe();
         sourceUpsertService = new StubSourceUpsertService();
         dataSource = new StubUserDataSource();
+        // Real RateCapBucket via the public (Clock, Settings) seam
+        // (M1-705) — the @ConfigProperty defaults (5/hour add-source,
+        // 30/min cheap) keep every pre-existing single-dispatch test
+        // behaviorally unchanged; the rate-limit tests below drain the
+        // add-source bucket deliberately.
+        rateCapBucket = new RateCapBucket(Clock.systemUTC(), RateCapBucket.Settings.defaults());
         handler = new AddSourceCommandHandler();
         handler.bundleLoader = bundleLoader;
         handler.kindResolver = new KindResolver();
         handler.urlProbe = urlProbe;
         handler.sourceUpsertService = sourceUpsertService;
         handler.dataSource = dataSource;
+        handler.rateCapBucket = rateCapBucket;
         InboundContext context = new InboundContext();
         context.setAdapterName("inmemory");
         handler.inboundContext = context;
@@ -567,6 +577,56 @@ class AddSourceCommandHandlerTest {
         assertTrue(body.contains("example.com"),
                 "an over-long --name must fall back to the host-derived display name "
                         + "— got: " + body);
+    }
+
+    // ----- M1-705 per-user hourly /add-source bucket --------------------
+
+    /**
+     * Acceptance item 4 (M1-705): the 6th {@code /add-source} within
+     * the hourly window is rejected with the explanatory reply (naming
+     * the retry delay and the bulk bootstrap-JSON path), and neither
+     * UrlProbe nor SourceUpsertService is invoked for it — while a 6th
+     * cheap-bucket draw in the same window still succeeds (the buckets
+     * are independent). The bucket is the @ConfigProperty-default
+     * 5/hour from {@code Settings.defaults()}.
+     */
+    @Test
+    void sixthAddSourceWithinTheHourIsRejectedCheapCommandsUnaffected() {
+        dataSource.seedUser("m1-705-rl", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-705-rl.xml",
+                ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.FRESH_INSERT);
+
+        // The first five draws (the hourly cap) succeed end-to-end.
+        for (int i = 0; i < 5; i++) {
+            OutboundMessage reply = handler.handle(
+                    new ScopeRef.Dm("m1-705-rl"),
+                    "/add-source https://example.com/m1-705-rl.xml --tags m1-705-news");
+            assertFalse(reply.text().contains("too quickly"),
+                    "add-source " + (i + 1) + " of 5 must succeed — got: " + reply.text());
+        }
+        assertEquals(5, urlProbe.callCount(),
+                "precondition: each accepted add-source drove exactly one probe");
+
+        // The 6th within the window is rejected BEFORE the probe.
+        OutboundMessage rejected = handler.handle(
+                new ScopeRef.Dm("m1-705-rl"),
+                "/add-source https://example.com/m1-705-rl.xml --tags m1-705-news");
+        assertTrue(rejected.text().contains("adding sources too quickly"),
+                "the 6th /add-source must surface the explanatory rate-limit reply — got: "
+                        + rejected.text());
+        assertTrue(rejected.text().contains("bootstrap JSON"),
+                "the explanatory reply points at the bulk path (design §4.9) — got: "
+                        + rejected.text());
+        assertEquals(5, urlProbe.callCount(),
+                "the over-cap add-source must be rejected BEFORE UrlProbe is invoked");
+
+        // A cheap-command draw for the same user in the same window
+        // still succeeds — the hourly bucket is independent of the
+        // cheap-command bucket on the same RateCapBucket instance the
+        // handler drew from.
+        assertTrue(rateCapBucket.tryAcquireCheapCommand("inmemory", "m1-705-rl"),
+                "a 6th cheap command in the same window must still succeed");
     }
 
     // ----- fixtures + collaborator stubs --------------------------------

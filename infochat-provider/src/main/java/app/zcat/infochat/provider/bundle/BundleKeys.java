@@ -518,6 +518,16 @@ public final class BundleKeys {
     /** Caller is banned (handler's own ban check; defense-in-depth — T2-A also gates upstream). */
     public static final String ERROR_ADD_SOURCE_BANNED = "error.add_source.banned";
 
+    /**
+     * {@code /add-source} hourly bucket overflow (M1-705;
+     * {@code infochat.ratelimit.add-source-per-hour}). Explanatory
+     * reject per acceptance: names the retry delay and points at the
+     * bulk path (design §4.9 encourages bootstrap JSON for bulk adds).
+     * Token {@code {0}} = retry delay in seconds, computed from bucket
+     * state.
+     */
+    public static final String ERROR_ADD_SOURCE_RATE_LIMIT = "error.add_source.rate_limit";
+
     /** Caller invoked {@code /add-source} in a group scope without group-admin privilege. */
     public static final String ERROR_ADD_SOURCE_GROUP_ADMIN_ONLY = "error.add_source.group_admin_only";
 
@@ -1465,6 +1475,17 @@ public final class BundleKeys {
 
     /** Per-user LLM-triggering rate cap exceeded (infochat.chat.llm-rate-cap-per-minute). */
     public static final String ERROR_CHAT_LLM_RATE_CAP = "error.chat.llm_rate_cap";
+
+    /**
+     * Cheap-command bucket overflow (M1-705;
+     * {@code infochat.ratelimit.cheap-commands-per-minute}) — the
+     * parser-only / DB-read command tier's friendly reject per design
+     * §4.9 "slow down, try again in {N}s". Token {@code {0}} = retry
+     * delay in seconds, computed from bucket state (never hardcoded).
+     * NOT a silent drop — the reject sits behind the step-1.5 transport
+     * bucket, so its outbound cost is already metered.
+     */
+    public static final String ERROR_COMMAND_RATE_LIMIT = "error.command.rate_limit";
 
     /** Per-user cross-scope concurrent-request cap exceeded (infochat.chat.dispatch.per-user-cap, M1-636). */
     public static final String ERROR_CHAT_PER_USER_CAP = "error.chat.per_user_cap";
