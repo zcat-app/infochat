@@ -16,6 +16,7 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.digest.DigestCategorizer.CategorySection;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.render.DisplayHeadline;
+import app.zcat.infochat.provider.summary.ClusterProminence;
 import app.zcat.infochat.provider.summary.ClusterTraversal;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
@@ -43,6 +44,12 @@ public class DigestRenderer {
 
     @Inject
     DigestCategorizer digestCategorizer;
+
+    // Field-initialized to a default instance so plain-JUnit constructions
+    // score with the ticket-default weights; CDI overwrites at runtime —
+    // the {@link #categoryRollupGenerator} pattern below.
+    @Inject
+    ClusterProminence clusterProminence = new ClusterProminence();
 
     @Inject
     SummaryProseGenerator summaryProseGenerator;
@@ -103,7 +110,12 @@ public class DigestRenderer {
      * (assigned-cluster count descending, alphabetical ties, Other last)
      * inherited as-is — never sorted here. The only filtering is
      * {@link DigestCategorizer#capSections}, which drops whole sections
-     * off the tail (M1-721); within the survivors the order is untouched.
+     * off the tail (M1-721). WITHIN each section the cluster order is the
+     * M1-724 prominence order (urgent gate → weighted percentile score →
+     * the existing recency key), computed by {@link ClusterProminence}
+     * over the pre-cap section list; the reorder never moves a cluster
+     * between sections, so a high-scoring cluster cannot starve a small
+     * category — every surviving section still renders its own head.
      *
      * <p>The {@code mode} (the group's {@code digest_mode}, V67) selects
      * the category body. {@code brief} and {@code normal} render the hybrid
@@ -124,12 +136,41 @@ public class DigestRenderer {
                                                 DigestMode mode) {
         List<Cluster> clusters = clusterTraversal.cluster(posts);
         List<CategorySection> allSections = digestCategorizer.categorize(clusters);
+        // M1-724 prominence ranking: score every cluster (urgent gate →
+        // weighted percentile score → input-order tiebreak) and re-sort
+        // WITHIN each section. Section membership stays D62 tag arithmetic —
+        // the reorder builds new CategorySection copies over the same
+        // cluster sets, never moves a cluster between sections, and never
+        // reorders the sections themselves. Scoring runs over the PRE-CAP
+        // section list so percentile populations don't move with
+        // max-categories, and needs categorize()'s FINAL assigned tags
+        // (post-fold) for the corroboration denominators. The map is
+        // identity-keyed because categorize() partitions the very instances
+        // passed in (the renderSummarySections idiom below).
+        Map<Cluster, String> assignedTagByCluster = new IdentityHashMap<>();
+        for (CategorySection section : allSections) {
+            for (Cluster cluster : section.clusters()) {
+                assignedTagByCluster.put(cluster, section.tag());
+            }
+        }
+        Map<Cluster, ClusterProminence.ScoredCluster> scoredByCluster = new IdentityHashMap<>();
+        for (ClusterProminence.ScoredCluster scored
+                : clusterProminence.score(clusters, assignedTagByCluster)) {
+            scoredByCluster.put(scored.cluster(), scored);
+        }
+        List<CategorySection> rankedSections = new ArrayList<>(allSections.size());
+        for (CategorySection section : allSections) {
+            List<Cluster> reordered = new ArrayList<>(section.clusters());
+            reordered.sort((a, b) -> ClusterProminence.totalOrder().compare(
+                    scoredByCluster.get(a), scoredByCluster.get(b)));
+            rankedSections.add(new CategorySection(section.tag(), reordered));
+        }
         // The section cap is applied HERE and not inside categorize(), so it
         // reaches only the digest broadcast: renderSummarySections and
         // renderShortBody share the categorizer and must keep every section
         // (M1-721). Everything below runs over the capped list, which is what
         // keeps prose off the dropped sections.
-        List<CategorySection> sections = digestCategorizer.capSections(allSections);
+        List<CategorySection> sections = digestCategorizer.capSections(rankedSections);
         int droppedCategories = allSections.size() - sections.size();
 
         // FULL: ONE generate() call covering every cluster of every

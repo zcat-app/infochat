@@ -112,6 +112,16 @@ public class EligiblePostQuery {
      * projects — fields outside this set (e.g. body_summary, author,
      * ready_at) are unused by /summary and intentionally omitted to
      * keep the row narrow.
+     *
+     * <p>The last four components are the M1-724 prominence signals:
+     * {@code reposts}/{@code likes} stay NULL-distinct-from-0 end to end
+     * (M1-723 §Absent is not zero — an RSS article has no like count; a
+     * Bluesky post with 0 was seen and ignored), {@code sourceKind}
+     * populations the social percentiles, and {@code sourceWindowPosts}
+     * is the pre-LIMIT per-source window count the scarcity term inverts
+     * (the window function evaluates before LIMIT, like
+     * {@code total_count}). Only {@link ClusterProminence} reads them;
+     * the /summary render is unchanged.
      */
     public record Post(
             UUID id,
@@ -123,7 +133,31 @@ public class EligiblePostQuery {
             String body,
             @Nullable Instant publishedAt,
             List<String> tags,
-            List<String> classification) {
+            List<String> classification,
+            @Nullable Integer reposts,
+            @Nullable Integer likes,
+            @Nullable String sourceKind,
+            @Nullable Integer sourceWindowPosts) {
+        /**
+         * Pre-M1-724 shape: every prominence signal absent. Keeps the
+         * ~26 construction sites that predate the ranking (tests,
+         * {@code RetryCommandHandler}) compiling unchanged, and is the
+         * correct shape for any hand-built fixture whose posts carry no
+         * signals — NULL drops the term from the score denominator.
+         */
+        public Post(UUID id,
+                    String uid,
+                    UUID sourceId,
+                    String sourceDisplayName,
+                    String title,
+                    String url,
+                    String body,
+                    @Nullable Instant publishedAt,
+                    List<String> tags,
+                    List<String> classification) {
+            this(id, uid, sourceId, sourceDisplayName, title, url, body,
+                    publishedAt, tags, classification, null, null, null, null);
+        }
     }
 
     /**
@@ -219,6 +253,8 @@ public class EligiblePostQuery {
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT p.id, p.uid, p.source_id, s.display_name, p.title, ")
            .append("       p.url, p.body, p.published_at, p.tags, p.classification, ")
+           .append("       p.reposts, p.likes, s.kind, ")
+           .append("       COUNT(*) OVER (PARTITION BY p.source_id)::int AS source_window_posts, ")
            .append("       COUNT(*) OVER () AS total_count ")
            .append("  FROM post p ")
            .append("  JOIN source s ON s.id = p.source_id ")
@@ -297,10 +333,18 @@ public class EligiblePostQuery {
                     List<String> tags = Arrays.asList(tagArr);
                     String[] classificationArr = (String[]) rs.getArray("classification").getArray();
                     List<String> classification = Arrays.asList(classificationArr);
+                    // getObject(Integer.class), NEVER getInt: getInt coerces
+                    // SQL NULL to 0 and erases the M1-723 absent-vs-zero
+                    // distinction the prominence ranking depends on.
+                    Integer reposts = rs.getObject("reposts", Integer.class);
+                    Integer likes = rs.getObject("likes", Integer.class);
+                    String sourceKind = rs.getString("kind");
+                    Integer sourceWindowPosts = rs.getObject("source_window_posts", Integer.class);
                     // Same value on every row; zero rows → total stays 0.
                     totalBeforeCap = rs.getInt("total_count");
                     out.add(new Post(id, uid, sourceId, displayName, title, url, body,
-                            publishedAt, tags, classification));
+                            publishedAt, tags, classification,
+                            reposts, likes, sourceKind, sourceWindowPosts));
                 }
                 return new Selection(out, totalBeforeCap);
             }

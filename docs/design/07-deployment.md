@@ -298,6 +298,19 @@ infochat.digest.tick-interval=60s                # DigestScheduler: due-group ch
 # not redistributed; one overflow line names how many categories were
 # omitted. Digest broadcast only: /summary caps no sections.
 infochat.digest.max-categories=8
+# Prominence weights (M1-724, D71): the within-section cluster order is a
+# weighted sum of four integer-percentile terms — corroboration, reposts,
+# likes, source scarcity — gated by the urgent classification, tie-broken by
+# recency. The denominator is the sum of the weights of the terms PRESENT on
+# a cluster (NULL social columns drop out, so an editorial cluster is not
+# structurally beaten by a social one). Hand-chosen and uncalibrated: tune
+# against the live corpus by reading the per-term components
+# ClusterProminence returns (docs/design/03-commands.md §3.12). Retuning is
+# a config edit, not a code change; no fitting, no per-deployment variation.
+infochat.digest.weight.corroboration=7
+infochat.digest.weight.reposts=2
+infochat.digest.weight.likes=1
+infochat.digest.weight.scarcity=2
 
 # ── Single-instance enforcement (D41; §7.8.5) ──────────────────────────
 # Heartbeat tick interval written by the lock-holding instance to

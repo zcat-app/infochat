@@ -1848,8 +1848,24 @@ clusters into Other (a category can lose its clusters to a
 larger co-tag). Sections render with an UPPERCASE header
 (bundle-localized per D43; caps because v1 output is plain text,
 D30), ordered by assigned-cluster count descending, ties
-alphabetical, Other always last; under each header the existing
-per-cluster prose + links render unchanged. Each section
+alphabetical, Other always last. **Within each section, clusters
+are prominence-ordered (D71):** clusters carrying the `urgent`
+ingest classification sort first, then a weighted sum of four
+integer-percentile terms — corroboration, reposts, likes, source
+scarcity — computed in integer arithmetic over columns already on
+`post` (no LLM, byte-identical on replay, D19), with the
+denominator covering only the terms actually PRESENT on the
+cluster (a NULL social column drops the term rather than scoring
+it zero, so an editorial cluster is not structurally beaten by a
+social one), and the existing recency key as the final tiebreak.
+The reorder never moves a cluster between sections and never
+reorders or merges sections, so a high-scoring cluster cannot
+starve a small category — every section still renders its own
+head. `/summary` stays publication-ordered: it is a pull where
+the reader asked for a specific tag and a stable
+reverse-chronological list is the right answer; the digest is a
+push where the reader asked for nothing. Under each header the
+existing per-cluster prose + links render unchanged. Each section
 (including Other) shows at most a per-section **item cap** of
 clusters (operator-configurable, default 12); a capped section
 appends a localized "+N more" line steering readers to

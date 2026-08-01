@@ -17,7 +17,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -25,6 +27,7 @@ import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newEnSh
 import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newRealBundleLoader;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -261,6 +264,108 @@ class DigestRendererSectionsTest {
         assertEquals(0, rollupGenerator.callCount(), "full makes no roll-up calls");
     }
 
+    // ----- M1-724: prominence ordering within sections --------------------
+
+    /**
+     * Prominence reorders clusters WITHIN a section but leaves every
+     * section's membership SET identical: the reorder is a within-section
+     * sort, never a move between sections — which is also what makes a
+     * high-scoring cluster unable to starve a small category.
+     */
+    @Test
+    void prominenceReorderingLeavesSectionMembershipIdentical() {
+        List<RenderedSection> sections =
+                renderer.renderSections(prominenceFixture(), "en", DigestMode.NORMAL);
+
+        assertEquals(3, sections.size());
+        assertEquals(Set.of("AI 1", "AI 2", "AI 3"), headlineTitles(sectionByTag(sections, "ai")));
+        assertEquals(Set.of("Sec 1", "Sec 2", "Sec 3"),
+                headlineTitles(sectionByTag(sections, "security")));
+        assertEquals(Set.of("Untagged"), headlineTitles(sectionByTag(sections, null)));
+    }
+
+    /**
+     * The head of each section is its highest-scoring cluster, NOT its
+     * newest: the input is recency-ordered (s1/a1 first), but the
+     * quiet-source clusters (1 window post vs 300) win the scarcity term
+     * and lead their sections.
+     */
+    @Test
+    void sectionHeadIsTheHighestScoringClusterNotTheNewest() {
+        List<RenderedSection> sections =
+                renderer.renderSections(prominenceFixture(), "en", DigestMode.NORMAL);
+
+        String ai = sectionByTag(sections, "ai").text();
+        String security = sectionByTag(sections, "security").text();
+        assertTrue(firstHeadline(ai).contains("AI 3"),
+                "ai head is the high scorer, not the newest: " + ai);
+        assertTrue(firstHeadline(security).contains("Sec 3"),
+                "security head is the high scorer, not the newest: " + security);
+        // Section ORDER is untouched: D62 (count desc, alphabetical ties,
+        // Other last) — ai before security, Other last.
+        assertEquals("ai", sections.get(0).tag());
+        assertEquals("security", sections.get(1).tag());
+        assertNull(sections.get(2).tag());
+    }
+
+    /**
+     * A section whose clusters all score low still renders its own head:
+     * the Other bucket's lone cluster scores bottom on every term, yet the
+     * section ships with its headline — the score never decides WHETHER a
+     * section renders, only the order inside it.
+     */
+    @Test
+    void lowScoringSectionStillRendersItsOwnHead() {
+        List<RenderedSection> sections =
+                renderer.renderSections(prominenceFixture(), "en", DigestMode.NORMAL);
+
+        RenderedSection other = sectionByTag(sections, null);
+        assertTrue(other.text().contains("Untagged"),
+                "the zero-signal Other section still renders its head: " + other.text());
+    }
+
+    /**
+     * Six tagged posts (two categories × three, qualifying at threshold 3)
+     * plus one untagged post. Input order is recency (newest first); the
+     * THIRD post of each category carries the quiet-source signal
+     * (1 window post vs 300 everywhere else), so prominence pulls the
+     * oldest cluster to the head of each section. Kinds and social columns
+     * are uniformly NULL, so corroboration ties within each section and
+     * scarcity alone separates the head.
+     */
+    private static List<Post> prominenceFixture() {
+        return List.of(
+                post("s1", "Sec 1", List.of("security"), 300),
+                post("s2", "Sec 2", List.of("security"), 300),
+                post("s3", "Sec 3", List.of("security"), 1),
+                post("a1", "AI 1", List.of("ai"), 300),
+                post("a2", "AI 2", List.of("ai"), 300),
+                post("a3", "AI 3", List.of("ai"), 1),
+                post("u1", "Untagged", List.of(), 300));
+    }
+
+    private static RenderedSection sectionByTag(List<RenderedSection> sections, String tag) {
+        return sections.stream()
+                .filter(s -> Objects.equals(s.tag(), tag))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no section for tag " + tag));
+    }
+
+    private static String firstHeadline(String sectionText) {
+        return sectionText.lines()
+                .filter(line -> line.startsWith("· "))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no headline in: " + sectionText));
+    }
+
+    private static Set<String> headlineTitles(RenderedSection section) {
+        Set<String> titles = new java.util.HashSet<>();
+        section.text().lines()
+                .filter(line -> line.startsWith("· "))
+                .forEach(line -> titles.add(line.substring(2).split("  ")[0].trim()));
+        return titles;
+    }
+
     // ----- helpers ----------------------------------------------------------
 
     /**
@@ -293,10 +398,21 @@ class DigestRendererSectionsTest {
     }
 
     private static Post post(String uid, String title, List<String> tags) {
+        return post(uid, title, tags, List.of("unknown"), "rss", null, null, null);
+    }
+
+    /** M1-724: a post with the prominence scarcity signal populated. */
+    private static Post post(String uid, String title, List<String> tags, int windowPosts) {
+        return post(uid, title, tags, List.of("unknown"), "rss", null, null, windowPosts);
+    }
+
+    private static Post post(String uid, String title, List<String> tags,
+                             List<String> classification, String kind,
+                             Integer reposts, Integer likes, Integer windowPosts) {
         return new Post(
                 UUID.randomUUID(), uid, UUID.randomUUID(), "TestSrc",
                 title, "https://example.com/" + uid, "body",
-                Instant.now(), tags, List.of("unknown"));
+                Instant.now(), tags, classification, reposts, likes, kind, windowPosts);
     }
 
     /** Recording {@link CategoryRollupGenerator}: counts calls and returns a canned synthesis. */

@@ -1,9 +1,9 @@
 ---
 id: M1-724
 title: "Digest cluster selection is recency-only: the cap keeps the newest stories, never the most significant"
-status: pending
+status: done
 created: 2026-07-30
-last_updated: 2026-07-31
+last_updated: 2026-08-01
 blocked_by:
   - M1-723
 files_budget: 12
@@ -231,12 +231,43 @@ decision_refs:
   - D19
   - D62
   - D13
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 14
+      added: 1301
+      removed: 25
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-08-01
+    verdict: CLEAN
+    base: af41ca82
+    head: "working tree (uncommitted branch tip, m1/M1-724-digest-prominence-ordering)"
+    verdict_file: docs/plan/m1/redteam/M1-724-2026-08-01.md
+    out_of_model_count: 2
+    note: |
+      Gate audit ahead of review round 1. CLEAN. Two out-of-model items
+      (engagement-metric manipulation as a ranking input; urgent-gate
+      gaming via crafted content) are ordering-influence notes outside
+      the documented threat model — user decides on a threat-model
+      extension; no remediation ticket filed by the gate.
+clarity_check:
+  date: 2026-07-31
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-724.md
 escalation_reason:
 ---
 

@@ -91,7 +91,17 @@ class DigestPostCollectorTest {
 
     record PostRow(UUID id, String uid, UUID sourceId, String displayName,
                    String title, String url, String body, Instant publishedAt,
-                   String[] tags) {}
+                   String[] tags, String[] classification,
+                   Integer reposts, Integer likes, String kind,
+                   Integer sourceWindowPosts) {
+        /** Pre-M1-724 shape: no prominence signals (all NULL). */
+        PostRow(UUID id, String uid, UUID sourceId, String displayName,
+                String title, String url, String body, Instant publishedAt,
+                String[] tags) {
+            this(id, uid, sourceId, displayName, title, url, body, publishedAt,
+                    tags, new String[]{"unknown"}, null, null, null, null);
+        }
+    }
 
     /**
      * Hand-rolled DataSource stub that returns canned scope_preferences
@@ -200,6 +210,9 @@ class DigestPostCollectorTest {
                             yield switch (col) {
                                 case "id" -> row.id();
                                 case "source_id" -> row.sourceId();
+                                case "reposts" -> row.reposts();
+                                case "likes" -> row.likes();
+                                case "source_window_posts" -> row.sourceWindowPosts();
                                 default -> throw new UnsupportedOperationException(
                                         "getObject(" + col + ")");
                             };
@@ -213,6 +226,7 @@ class DigestPostCollectorTest {
                                 case "title" -> row.title();
                                 case "url" -> row.url();
                                 case "body" -> row.body();
+                                case "kind" -> row.kind();
                                 default -> null;
                             };
                         }
@@ -221,8 +235,14 @@ class DigestPostCollectorTest {
                             yield Timestamp.from(row.publishedAt());
                         }
                         case "getArray" -> {
+                            String col = (String) args[0];
                             PostRow row = posts.get(cursor[0]);
-                            yield stubArray(row.tags());
+                            yield switch (col) {
+                                case "tags" -> stubArray(row.tags());
+                                case "classification" -> stubArray(row.classification());
+                                default -> throw new UnsupportedOperationException(
+                                        "getArray(" + col + ")");
+                            };
                         }
                         case "close" -> null;
                         default -> throw new UnsupportedOperationException(

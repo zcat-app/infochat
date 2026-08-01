@@ -103,6 +103,13 @@ public class DigestPostCollector {
         List<String> tags = tagsArray == null
                 ? List.of()
                 : List.of((String[]) tagsArray.getArray());
+        java.sql.Array classificationArray = rs.getArray("classification");
+        List<String> classification = classificationArray == null
+                // NOT NULL in production (V57); the fallback only guards a
+                // hand-stubbed ResultSet. Projected for real since M1-724:
+                // the prominence urgent gate reads it.
+                ? List.of("unknown")
+                : List.of((String[]) classificationArray.getArray());
         Timestamp publishedTs = rs.getTimestamp("published_at");
         return new EligiblePostQuery.Post(
                 rs.getObject("id", UUID.class),
@@ -118,11 +125,15 @@ public class DigestPostCollector {
                 // a NULL row could never match, so this read was unguarded.
                 publishedTs == null ? null : publishedTs.toInstant(),
                 tags,
-                // The digest path never renders the classification: line (that
-                // belongs to /summary + /retry via ClusterBlockRenderer); the
-                // shared Post record still requires the field, so it carries the
-                // {unknown} sentinel here — the digest SELECT does not project it.
-                List.of("unknown"));
+                classification,
+                // M1-724 prominence signals. getObject(Integer.class), never
+                // getInt — SQL NULL must survive as null (absent term), not
+                // collapse to 0 (present term, bottom percentile): M1-723
+                // §Absent is not zero.
+                rs.getObject("reposts", Integer.class),
+                rs.getObject("likes", Integer.class),
+                rs.getString("kind"),
+                rs.getObject("source_window_posts", Integer.class));
     }
 
     private static final String SCOPE_PREFS_SQL = """
@@ -137,7 +148,9 @@ public class DigestPostCollector {
     // subscription rows, as before.
     private static final String POSTS_ALL_SQL = """
             SELECT p.id, p.uid, p.source_id, s.display_name, p.title,
-                   p.url, p.body, p.published_at, p.tags
+                   p.url, p.body, p.published_at, p.tags, p.classification,
+                   p.reposts, p.likes, s.kind,
+                   COUNT(*) OVER (PARTITION BY p.source_id)::int AS source_window_posts
               FROM post p
               JOIN source s ON s.id = p.source_id
              WHERE p.status = 'READY'
@@ -155,7 +168,9 @@ public class DigestPostCollector {
     // KEEPS follow-tag narrowing — only chat/RAG decoupled, M1-621).
     private static final String POSTS_EXPLICIT_SQL = """
             SELECT p.id, p.uid, p.source_id, s.display_name, p.title,
-                   p.url, p.body, p.published_at, p.tags
+                   p.url, p.body, p.published_at, p.tags, p.classification,
+                   p.reposts, p.likes, s.kind,
+                   COUNT(*) OVER (PARTITION BY p.source_id)::int AS source_window_posts
               FROM post p
               JOIN source s ON s.id = p.source_id
              WHERE p.status = 'READY'
