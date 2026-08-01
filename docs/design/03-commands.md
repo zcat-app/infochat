@@ -1712,6 +1712,23 @@ boundary (`DigestWorker.readGroupMetadata`). The user-facing
 `/digest brief|normal|full` command is M1-733; delivery batching is
 M1-734.
 
+**Roll-up prompt shape (M1-728).** The roll-up's prompt carries post
+**titles only** — no bodies, no URLs — each bounded via
+`DisplayHeadline`, so a several-hundred-cluster category fits a model
+context the full-body prompt never could. The requested length scales
+with the section's cluster count
+(`infochat.digest.rollup-sentence-bands`; default 1 sentence up to 5
+clusters, 2 up to 20, 3 up to 75, 5 above); a multi-sentence request
+asks for 2-4 distinct threads rather than one flat synthesis, and every
+request forbids filler ("various", "a number of", "several
+developments") and any stated quantity — the section header already
+carries the true count deterministically, and nothing verifies a
+model-supplied one. If the truncated titles still exceed
+`infochat.digest.rollup-prompt-char-budget`, whole clusters drop from
+the END of the section order until the prompt fits, logged at INFO with
+the section tag and dropped count. Both keys live in
+[07-deployment.md](07-deployment.md) §Configuration surface.
+
 **Prominence ordering within sections (M1-724, D71).** Section
 membership and section order stay D62 tag arithmetic; what changes is
 the order of clusters WITHIN a section. The ordering is (1) clusters

@@ -28,7 +28,12 @@ out_of_scope:
     prompt). Truncating either would have the model summarize a
     fragment. `CategoryRollupGenerator.java` is deliberately absent from
     `files_scope` so a diff cannot reach it; a diff that touches
-    `SummaryProseGenerator.java:179` has left scope.
+    `SummaryProseGenerator.java:179` has left scope. REVISED by M1-728
+    for the roll-up call site only: the roll-up sees every cluster in
+    the category and is told not to re-list them, so its prompt now
+    receives `DisplayHeadline`-bounded titles (no body, no URL). The
+    summarizer half stands unchanged — it summarizes ONE cluster, where
+    a cut title really would have the model describe a fragment.
   - >-
     `post.title` itself, the fetchers that write it, and the ingest
     pipeline. This is a presentation-layer change only. Trimming at
@@ -175,7 +180,9 @@ acceptance:
   - >-
     `SummaryProseGenerator.java:179` and `CategoryRollupGenerator.java:199`
     still append the FULL title. A test asserts the summarizer prompt
-    contains a long title in full.
+    contains a long title in full. (The roll-up half was REVISED by
+    M1-728: the roll-up prompt now receives `DisplayHeadline`-bounded
+    titles. The summarizer half stands.)
   - mvn verify from the repo root is green.
 test_plan:
   adds:
@@ -539,7 +546,7 @@ Six sites, in three dispositions:
 | `summary/SummaryProseGenerator.java:224` | **fix** — display, `degradedProseFor` |
 | `digest/DegradedDigestRenderer.java:59` | **fix** — display, degraded digest |
 | `summary/SummaryProseGenerator.java:179` | **must not touch** — summarizer PROMPT input |
-| `digest/CategoryRollupGenerator.java:199` | **must not touch** — rollup PROMPT input |
+| `digest/CategoryRollupGenerator.java:199` | **must not touch** — rollup PROMPT input (revised by M1-728: the roll-up prompt now takes `DisplayHeadline`-bounded titles) |
 | `help/TopicCorpusBuilder.java:280` | not-a-post — help `Topic.title()`, unrelated type |
 
 The prompt/display split is the whole reason this ticket is scoped to a

@@ -324,6 +324,21 @@ infochat.digest.weight.scarcity=2
 # clamped render-locally to leave at least one cluster in the body.
 infochat.digest.lead-size=3
 infochat.digest.lead-minimum=6
+# Category roll-up prompt scale (M1-728): the roll-up prompt carries post
+# titles only (bounded via DisplayHeadline — no bodies, no URLs), so a
+# 300-cluster category is ~6K tokens instead of ~90K. The requested
+# synthesis length scales with the section's cluster count:
+# rollup-sentence-bands is comma-separated <ceiling>:<sentences> bands
+# evaluated in order ('*' = open-ended top band) — the default asks for
+# 1 sentence up to 5 clusters, 2 up to 20, 3 up to 75, 5 above; a
+# multi-sentence request additionally asks for 2-4 distinct threads and
+# forbids filler and any stated quantity. When the truncated titles
+# still exceed rollup-prompt-char-budget, whole clusters drop from the
+# END of the section order until the prompt fits, logged at INFO with
+# the section tag and dropped count (a truncated LLM input is never
+# silent).
+infochat.digest.rollup-sentence-bands=5:1,20:2,75:3,*:5
+infochat.digest.rollup-prompt-char-budget=50000
 
 # ── Single-instance enforcement (D41; §7.8.5) ──────────────────────────
 # Heartbeat tick interval written by the lock-holding instance to

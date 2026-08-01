@@ -1,17 +1,22 @@
 ---
 id: M1-728
 title: "Category roll-up sends every post's full body and asks for one or two sentences: it neither fits a large category nor describes one"
-status: pending
+status: done
 created: 2026-07-30
-last_updated: 2026-07-30
+last_updated: 2026-08-01
 blocked_by:
   - M1-714
   - M1-731
-files_budget: 8
+files_budget: 12
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/CategoryRollupGenerator.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRenderer.java
   - infochat-provider/src/main/resources/application.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/CategoryRollupGeneratorTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererSectionsTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryCommandHandlerTest.java
   - docs/design/07-deployment.md
   - docs/design/05-llm-and-embeddings.md
   - docs/design/03-commands.md
@@ -46,12 +51,18 @@ out_of_scope:
     The roll-up's failure path. A failed roll-up still degrades that
     category to deterministic headlines via
     `SummaryProseGenerator.degradedProseFor` (`DigestRenderer.java:344-357`)
-    and never blocks the digest. Unchanged.
+    and never blocks the digest. Unchanged. The only
+    `DigestRenderer.java` lines this ticket touches are the two
+    `generateRollup` call sites, which gain the `section.tag()` argument
+    for the section-tag logging parameter (budget-breach refine
+    2026-08-01).
   - >-
     `infochat.digest.category-summary-enabled` and the gated
     `generateRollup` wrapper. M1-731 DELETES both and renames
     `generateRollupUnconditional` to `generateRollup`; this ticket runs
-    after that and edits `buildPrompt` only. Both tickets touch
+    after that and edits `buildPrompt` plus the `generateRollup`
+    signature (the section-tag parameter added by the budget-breach
+    refine 2026-08-01) only. Both tickets touch
     `CategoryRollupGenerator.java`, hence `blocked_by: M1-731` — a diff
     here that re-introduces the flag, or that deletes it a second time,
     has left scope.
@@ -103,7 +114,10 @@ acceptance:
     still exceed `infochat.digest.rollup-prompt-char-budget`, clusters
     are dropped from the END of the section's existing order until the
     prompt fits, and the drop is logged at INFO with the section tag and
-    dropped count. Silent truncation of an LLM input is the failure mode
+    dropped count. The section tag reaches the generator as a new
+    `@Nullable String sectionTag` parameter on `generateRollup` —
+    `DigestRenderer`'s two call sites pass `section.tag()` (null for the
+    Other bucket). Silent truncation of an LLM input is the failure mode
     that makes a bad roll-up unexplainable. A test pins the bound and
     the log.
   - >-
@@ -132,6 +146,13 @@ test_plan:
       failure-path assertions — a failed roll-up still degrades that
       category to deterministic headlines and never blocks the digest.
     - >-
+      The four recording test subclasses that override `generateRollup`
+      (`DigestRendererTest`, `DigestRendererSectionsTest`,
+      `SummaryCommandHandlerTest`, `RetryCommandHandlerTest`) keep every
+      assertion — only their override signatures and call arguments move
+      to the new three-parameter shape (budget-breach refine
+      2026-08-01).
+    - >-
       `/summary --short` behaviour in `SummaryCommandHandlerTest`: it
       calls the same generator, so its LLM call COUNT is unchanged
       (one per category) even though the prompt content changes.
@@ -147,12 +168,59 @@ decision_refs:
   - D19
   - D21
   - D62
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 15
+      added: 637
+      removed: 66
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-08-01
+    verdict: CLEAN
+    base: 77dd51433814e97cd5ff7ab0289ec416b6ec3ccb
+    head: "working tree (uncommitted branch tip of m1/M1-728-rollup-prompt-scale)"
+    verdict_file: docs/plan/m1/redteam/M1-728-2026-08-01.md
+    out_of_model_count: 2
+    note: |
+      Gate audit at the /m1-tick run redteam step, ahead of review
+      round 1 (headless kimi threat-actor, contamination=none). CLEAN:
+      the D21 delimiter shape, the sanitize-then-translate output chain,
+      and failure containment are preserved; the prompt-input surface
+      shrinks (titles only, DisplayHeadline-bounded, sanitized). Two
+      out-of-model items (empty-prompt fabrication on an
+      all-titleless/over-budget category; a javadoc-vs-SafeLog wording
+      mismatch) surfaced to the user with recommendations — no ticket
+      auto-filed.
+clarity_check:
+  date: 2026-08-01
+  verdict: WARN
+  warnings:
+    - >-
+      Self-check found the acceptance item requiring the section tag in
+      the budget-drop log unreachable within the original files_scope:
+      the tag lives in DigestRenderer's CategorySection (Cluster.topicId
+      is a per-cluster slug, not the section tag), and the
+      generateRollup signature change ripples to four recording test
+      subclasses. Resolved by user-directed budget-breach refine
+      (2026-08-01): files_scope widened to DigestRenderer.java plus
+      DigestRendererTest, DigestRendererSectionsTest,
+      SummaryCommandHandlerTest and RetryCommandHandlerTest (mechanical
+      override-signature updates only, assertions preserved);
+      files_budget 8 to 12; generateRollup gains a @Nullable String
+      sectionTag parameter.
+  blockers: []
 escalation_reason:
 ---
 

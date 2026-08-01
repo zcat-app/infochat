@@ -331,7 +331,8 @@ public class DigestRenderer {
                 // synthesis line (CategoryRollupGenerator's existing failure
                 // containment, same as renderShortBody).
                 Optional<String> rollup =
-                        categoryRollupGenerator.generateRollup(section.clusters(), langCode);
+                        categoryRollupGenerator.generateRollup(
+                                section.clusters(), section.tag(), langCode);
                 if (rollup.isPresent()) {
                     sb.append("\n\n").append(rollup.get());
                 }
@@ -535,7 +536,8 @@ public class DigestRenderer {
             }
             out.append(sectionHeader(section, langCode));
             Optional<String> rollup =
-                    categoryRollupGenerator.generateRollup(section.clusters(), langCode);
+                    categoryRollupGenerator.generateRollup(
+                            section.clusters(), section.tag(), langCode);
             if (rollup.isPresent()) {
                 out.append("\n\n").append(rollup.get());
             } else {

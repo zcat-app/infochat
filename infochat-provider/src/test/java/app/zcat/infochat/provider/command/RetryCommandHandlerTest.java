@@ -803,7 +803,8 @@ class RetryCommandHandlerTest {
         }
 
         @Override
-        public Optional<String> generateRollup(List<Cluster> clusters, String langCode) {
+        public Optional<String> generateRollup(List<Cluster> clusters,
+                                               String sectionTag, String langCode) {
             int n = callCount.incrementAndGet();
             clusterCounts.add(clusters.size());
             if (returnEmpty || (returnEmptyForFirstCalls > 0 && n <= returnEmptyForFirstCalls)) {

@@ -761,7 +761,8 @@ class DigestRendererSectionsTest {
         int callCount() { return calls; }
 
         @Override
-        public Optional<String> generateRollup(List<Cluster> categoryClusters, String langCode) {
+        public Optional<String> generateRollup(List<Cluster> categoryClusters,
+                                               String sectionTag, String langCode) {
             calls++;
             return Optional.of(response);
         }
