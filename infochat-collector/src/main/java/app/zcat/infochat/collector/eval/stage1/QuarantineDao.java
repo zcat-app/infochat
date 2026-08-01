@@ -20,8 +20,9 @@ import java.util.UUID;
  * Stage 1 row also routes through this DAO. The re-evaluation job's
  * re-hide of a row-less post lands one whole-body
  * {@code flagged_by='stage2'} row via {@link #insertStage2Row}
- * (M1-738); a first-pass non-BENIGN verdict on a post with no
- * PENDING row lands the same row via the same method (M1-739).
+ * (M1-738); EVERY first-pass non-BENIGN verdict lands the same row
+ * via the same method (unconditional since M1-742 — M1-739's
+ * "no PENDING row" dedup predicate is gone).
  *
  * <h2>Why a dedicated DAO</h2>
  * <p>Centralizing the INSERT/UPDATE shape here means the reviewer's
