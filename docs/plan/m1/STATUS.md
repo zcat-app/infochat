@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 13 |
+| pending | 15 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 740 |
 | deferred | 1 |
 | abandoned | 21 |
-| **total** | **775** |
+| **total** | **777** |
 
 ---
 
@@ -34,6 +34,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-727 — Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other (complexity: medium, risk: medium)
 - M1-728 — Category roll-up sends every post's full body and asks for one or two sentences: it neither fits a large category nor describes one (complexity: medium, risk: medium)
 - M1-740 — Provider test fixtures insert into monthly-partitioned tables with wall-clock timestamps: the suite breaks on every unprovisioned month boundary (complexity: medium, risk: medium)
+- M1-741 — approve_quarantine ignores an owed Stage 2 verdict (complexity: medium, risk: medium)
+- M1-742 — A quarantine row per non-BENIGN Stage 2 verdict (complexity: medium, risk: medium)
 
 ---
 
@@ -996,4 +998,6 @@ M1-731 (done)
 M1-738 (done)
 M1-739 (done)
 M1-740 (pending) ← runnable
+M1-741 (pending) ← runnable
+M1-742 (pending) ← runnable
 ```
