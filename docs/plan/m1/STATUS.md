@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 9 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 752 |
 | deferred | 0 |
 | abandoned | 22 |
-| **total** | **782** |
+| **total** | **783** |
 
 ---
 
@@ -28,6 +28,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-743 — Roll-up must not fabricate over an empty headline set (complexity: low, risk: low)
 - M1-744 — llama.cpp compose services: operator-settable resource caps and an opt-in GPU overlay (complexity: medium, risk: medium)
 - M1-745 — English anchor: translate non-English posts at ingest and retrieve against the English field (complexity: high, risk: high)
+- M1-748 — Investigate why no similarity threshold separates true from false matches, and whether a single global threshold is the right model at all (complexity: medium, risk: low)
 
 ---
 
@@ -999,4 +1000,5 @@ M1-745 (pending) ← runnable
   │     ├── M1-719 (pending) [see above]
   │     └── M1-720 (pending) [see above]
   └── M1-747 (pending)
+M1-748 (pending) ← runnable
 ```
