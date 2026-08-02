@@ -5,15 +5,27 @@ status: pending
 created: 2026-08-02
 last_updated: 2026-08-02
 blocked_by: []
-files_budget: 9
+files_budget: 21
 files_scope:
   - infochat-core/src/main/resources/db/migration/V74__post_english_anchor.sql
+  - infochat-core/src/main/java/app/zcat/infochat/core/llm/LlmOutputSanitizerCore.java
+  - infochat-core/src/main/java/app/zcat/infochat/core/source/SourceLanguageRegistry.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/translation/IngestTranslationWorker.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/embedding/EmbeddingWorker.java
-  - infochat-collector/src/main/java/app/zcat/infochat/collector/bootstrap/BootstrapSourceLoader.java
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/bootstrap/BootstrapLoader.java
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/bootstrap/BootstrapSourcesEntry.java
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/bootstrap/BootstrapSourcesParser.java
+  - infochat-collector/src/main/resources/application.properties
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/command/AddSourceArgs.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/AddSourceCommandHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/source/SourceUpsertService.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/llm/LlmOutputSanitizer.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/translation/IngestTranslationWorkerTest.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/translation/IngestTranslationWorkerIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/embedding/EmbeddingWorkerIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/bootstrap/BootstrapSourcesParserTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceArgsTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/source/SourceUpsertServiceIT.java
   - docs/design/02-schema.md
   - docs/design/05-llm-and-embeddings.md
 complexity: high
@@ -49,12 +61,22 @@ out_of_scope:
     messaging adapter and its contract governs the PRESENTATION path,
     which is unchanged. Filed separately so the fix lands with the
     consumer it describes.
+  - >-
+    Moving or renaming the `LlmOutputSanitizer` BEAN or its package, or
+    touching `LanguageRegistry`'s reviewed UI-language set. The bean stays
+    in infochat-provider with its current API; only its pure text
+    transform is extracted to infochat-core. `LanguageRegistry` remains a
+    user-UI-language gate and is not the source-language validator.
 acceptance:
   - >-
-    V74 adds `post.body_en TEXT` and `post.title_en TEXT` (both nullable)
-    and `source.language TEXT NOT NULL DEFAULT 'en'`. Nullable is
-    deliberate: a row is un-translated until the worker runs, and the
-    outbox pattern requires that state be representable.
+    V74 adds `post.body_en TEXT` and `post.title_en TEXT` (both nullable),
+    `source.language TEXT NOT NULL DEFAULT 'en'`, and
+    `post.translation_done BOOLEAN NOT NULL`. Nullable `body_en`/`title_en`
+    is deliberate: a row is un-translated until the worker runs, and the
+    outbox pattern requires that state be representable. Existing rows
+    backfill `translation_done = TRUE` (every current row is English and
+    already embedded); the new-row default is `FALSE` — the durable cursor
+    the embedding gate below reads.
   - >-
     V74 REPLACES the `search_tsv` generated column so it reads
     `coalesce(title_en, title)` and `coalesce(body_en, body)` rather than
@@ -69,18 +91,31 @@ acceptance:
   - >-
     `EmbeddingWorker` embeds `coalesce(title_en, title)` and the
     `coalesce(body_en, body)`-derived text, preserving its existing
-    `body_summary`-else-first-800-chars composition rule. The vector space
-    is unchanged (D54 local nomic-768) — only the input text moves.
+    `body_summary`-else-first-800-chars composition rule, and its pickup
+    query gains `AND translation_done = TRUE`. The vector space is
+    unchanged (D54 local nomic-768) — only the input text moves. The gate
+    is what stops a Czech post being embedded from Czech text before the
+    translator runs: `embedding_done` is the durable cursor and never
+    re-fires, so an early embed would be permanent.
   - >-
-    A new `IngestTranslationWorker` translates title and body to English
-    via `ModelTask.TRANSLATOR` for posts whose `source.language <> 'en'`,
-    writing `title_en`/`body_en`. It follows the existing eval-worker
-    shape: poll-interval, `max-concurrency`, status gate, and the outbox
-    rehydrate path, so an interrupted run resumes rather than losing work.
-  - >-
-    A post from an `en` source is NEVER sent to the translator — asserted,
-    not assumed. Today that is the whole corpus, so a regression here would
-    silently put every ingested post through an LLM call.
+    A new `IngestTranslationWorker` follows the existing eval-worker
+    shape: poll-interval, `infochat.llm.translator.max-concurrency`,
+    status gate, and the outbox rehydrate path, so an interrupted run
+    resumes rather than losing work. It picks up posts with
+    `translation_done = FALSE` joined to their source's declared language.
+    A post whose `source.language = 'en'` is marked `translation_done =
+    TRUE` with NO translator dispatch — the en-never-dispatched property
+    is asserted at the dispatch boundary, not assumed. Today that is the
+    whole corpus, so a regression here would silently put every ingested
+    post through an LLM call. A non-English post is translated via
+    `ModelTask.TRANSLATOR` (title and body), the output is normalized and
+    sanitized per the controls item, written to `title_en`/`body_en`, and
+    `translation_done` set TRUE. On retry exhaustion the worker sets
+    `translation_done = TRUE` leaving `body_en`/`title_en` NULL — the post
+    proceeds to embedding from its original text and stays retrievable
+    through the `coalesce` fallback rather than wedging out of READY
+    (ReadyPromoter requires `embedding_done`, which the gate would
+    otherwise block forever).
   - >-
     CONTROLS CARRIED ACROSS FROM THE PATH THIS REROUTES (engineering rules
     §10). Retrieval moves from `body` to `body_en`, and `body_en` is
@@ -89,22 +124,35 @@ acceptance:
     `IngestTextNormalizer` runs on the translator's OUTPUT before it is
     stored, unconditionally, with no fenced-code carve-out (`security.md`
     §141-143 and step 1.7 — the carve-out is chat-side only); (b) the
-    translator's output passes `LlmOutputSanitizer` before storage, because
-    it is model output re-entering the corpus; (c) `SemanticSearchTool`'s
-    two arms keep their inline `status='READY'` + D59 world predicate
-    BEFORE their LIMIT — no over-fetch-then-filter path is introduced; (d)
-    retrieved rows still fold into the D21 `UNTRUSTED_CONTENT` wrapper.
-    Each is asserted by a test naming the control.
+    translator's output passes the SAME sanitization pipeline as
+    `LlmOutputSanitizer` before storage, because it is model output
+    re-entering the corpus — implemented by extracting the bean's pure
+    text transform into a static `LlmOutputSanitizerCore` in infochat-core
+    that BOTH the provider bean (delegating, behaviour and API unchanged,
+    so the spec-parity CI test still pins one implementation) and the
+    collector worker call — a collector-side copy of the 700-line control
+    is a fork the parity test would not cover and is rejected; (c)
+    `SemanticSearchTool`'s two arms keep their inline `status='READY'` +
+    D59 world predicate BEFORE their LIMIT — no over-fetch-then-filter
+    path is introduced; (d) retrieved rows still fold into the D21
+    `UNTRUSTED_CONTENT` wrapper. Each is asserted by a test naming the
+    control.
   - >-
     Stage 1's regex scan continues to operate on the raw normalized body.
     Translation happens AFTER security evaluation, never before — a
     translator that paraphrases an injection attempt out of regex range
     must not be able to launder it past Stage 1.
   - >-
-    `bootstrap-sources.json` entries accept an optional `language` (default
-    `en`), and `/add-source` accepts `--lang <code>`; both are validated
-    against `LanguageRegistry` and reject an unknown code rather than
-    silently storing it.
+    `bootstrap-sources.json` entries accept an optional `language`
+    (default `en`) parsed through `BootstrapSourcesEntry`/
+    `BootstrapSourcesParser` and persisted by `BootstrapLoader`, and
+    `/add-source` accepts `--lang <code>` parsed in `AddSourceArgs` and
+    persisted through `AddSourceCommandHandler`/`SourceUpsertService`.
+    BOTH are validated against a new `SourceLanguageRegistry` in
+    infochat-core — a reviewed constant set of supported source languages,
+    initially `{en, cs}`, deliberately separate from `LanguageRegistry`'s
+    UI-language set — and reject an unknown code rather than silently
+    storing it.
   - >-
     `post.body` and `post.title` are byte-identical before and after
     translation — asserted directly, since "source bodies are never
@@ -115,27 +163,46 @@ test_plan:
   adds:
     - >-
       infochat-collector/src/test/java/app/zcat/infochat/collector/eval/translation/IngestTranslationWorkerTest.java
-      — an `en` source is never dispatched to
-      the translator; a non-English source is; the worker is idempotent
-      over a re-delivered post; a translator failure leaves `body_en` NULL
-      and the post still retrievable through the `coalesce` fallback
-      rather than dropping out of the corpus.
+      — an `en` source is marked done with NO
+      translator dispatch (spy on the LLM call); a non-English source is
+      dispatched; the worker is idempotent over a re-delivered post; retry
+      exhaustion sets `translation_done = TRUE` with `body_en` NULL so the
+      post still reaches embedding and stays retrievable through the
+      `coalesce` fallback rather than dropping out of the corpus.
     - >-
       infochat-collector/src/test/java/app/zcat/infochat/collector/eval/translation/IngestTranslationWorkerIT.java
       — end to end against the real schema - a
       Czech post is persisted, translated, and found by an ENGLISH lexical
       query (which is the behaviour that does not exist today), while
-      `post.body` is unchanged; and the sanitize/normalize calls on the
+      `post.body` is unchanged; the normalize/sanitize calls on the
       translator output are asserted by a spy, so the carried-across
-      controls are pinned to the new path rather than the old one.
+      controls are pinned to the new path rather than the old one; and the
+      Czech post is NOT embedded before `translation_done` flips.
+    - >-
+      infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceArgsTest.java
+      — `--lang <code>` parses in both `--flag value` and `--flag=value`
+      forms; an unknown code is rejected by `SourceLanguageRegistry`
+      rather than stored.
+    - >-
+      infochat-collector/src/test/java/app/zcat/infochat/collector/bootstrap/BootstrapSourcesParserTest.java
+      — optional `language` defaults to `en`; an unknown code is rejected
+      by `SourceLanguageRegistry`.
+    - >-
+      infochat-provider/src/test/java/app/zcat/infochat/provider/source/SourceUpsertServiceIT.java
+      — the declared language round-trips into `source.language` through
+      the upsert.
   preserves:
     - >-
       SemanticSearchToolHybridIT in full — both arms, RRF ordering with
       `RRF_K = 60`, the READY + D59 predicates, and the total order. This
       ticket changes what text the arms match, never how they fuse.
     - >-
-      EmbeddingWorker's existing composition rule and its
-      `summary_done OR length(body) <= threshold` pickup gate.
+      EmbeddingWorker's existing composition rule and the
+      `summary_done OR length(body) <= threshold` pickup condition (the
+      `translation_done` conjunct is additive).
+    - >-
+      LlmOutputSanitizer's existing provider-side tests — the delegation
+      to `LlmOutputSanitizerCore` is behaviour-identical.
     - all tests currently green on main
 spec_refs:
   - docs/spec/llm.md §Translation flow
@@ -190,13 +257,36 @@ entirely English — while the pivot fixes both arms with one field, needs no
 `bootstrap-sources.json` and `/add-source --lang` set it. Inference over the
 body would put a non-deterministic classifier in the ingest path and make the
 retrievable text a function of model output on text nobody reviewed. The
-operator adding a Czech feed knows it is Czech.
+operator adding a Czech feed knows it is Czech. Validation lives in a new
+`SourceLanguageRegistry` (infochat-core, reviewed constant set, initially
+`{en, cs}`) so both the collector bootstrap path and the provider command path
+enforce the same list; the UI-facing `LanguageRegistry` is untouched.
 
 **`coalesce(x_en, x)` is what makes this safe to land.** Every existing row has
 `language = 'en'` and therefore a NULL `body_en`, so the generated column and
 the embedder read exactly the text they read today — the change is a no-op for
 the current corpus, which is the property that lets a schema change this
 central ship without a backfill.
+
+**`translation_done` is the durable cursor that orders the pipeline.**
+`EmbeddingWorker`'s pickup gains `AND translation_done = TRUE`, and the
+translator is the only writer that flips it for non-English posts. Without the
+gate, `EmbeddingWorker` (no translation condition today) would embed a Czech
+post from Czech text before the translator runs — permanently, because
+`embedding_done` never re-fires. Retry exhaustion flips the cursor with
+`*_en` left NULL, so a permanently failed translation degrades to
+embedding-from-original instead of wedging the post out of READY forever.
+Existing rows backfill `TRUE` (all English, already embedded); new posts
+default `FALSE`.
+
+**The sanitizer is shared, not forked.** Control (b) requires the translator's
+output to pass the same sanitization pipeline as `LlmOutputSanitizer`, but the
+bean lives in infochat-provider and the collector cannot depend on it. The
+pure text transform is extracted into a static `LlmOutputSanitizerCore` in
+infochat-core; the provider bean delegates to it (API and behaviour unchanged,
+so the spec-parity CI test keeps pinning the single implementation) and the
+collector worker calls it directly. Copying the 700-line red-team-hardened
+control collector-side is explicitly rejected.
 
 **Translation runs after Stage 1, not before.** Security evaluation reads the
 raw normalized body. A translator paraphrasing an injection attempt must not be
@@ -207,7 +297,9 @@ able to move it out of regex range on the way in.
 The query leg (M1-746) and display-time translation (M1-747). No language
 detection. No corpus backfill — there is nothing non-English to backfill. No
 per-language regconfig; one `'english'` configuration is the point. The
-`TranslationProvider` javadoc fix rides with its own consumer.
+`TranslationProvider` javadoc fix rides with its own consumer. No move or
+rename of the `LlmOutputSanitizer` bean/package, and no change to
+`LanguageRegistry`'s UI-language set.
 
 ## Notes
 
@@ -225,6 +317,18 @@ per-language regconfig; one `'english'` configuration is the point. The
 - **Nullable `body_en` is not laziness.** The outbox pattern needs "persisted
   but not yet translated" to be representable, and the `coalesce` fallback means
   that state is still searchable rather than invisible.
+- **Scope grew from 9 to 21 files at the outline-fail refine** (2026-08-02):
+  the first Plan pass verified that the `/add-source --lang` + bootstrap item
+  needs `AddSourceArgs`/`SourceUpsertService`/`BootstrapSourcesEntry`/
+  `BootstrapSourcesParser`, that the sanitizer control is unreachable from the
+  collector without the core extraction, and that the embedding gate needs the
+  `translation_done` cursor. The full failure analysis is in the refine commit
+  message (`M1-745: refine ticket spec (outline-fail rework)`).
+- Worker config follows the sibling-worker convention:
+  `infochat.llm.translator.max-concurrency` plus a poll-interval key, added to
+  the collector `application.properties` (the existing
+  `infochat.llm.translator.model` stays; its "translator live call sites run in
+  the Provider service" comment is updated by this ticket).
 - Measurement behind the model choice lives in `docs/measurement/translator-slot.md`.
   It is evidence, not direction — no acceptance item cites it, and the model
   name stays out of the spec.
