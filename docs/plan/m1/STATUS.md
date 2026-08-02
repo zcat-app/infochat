@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 754 |
 | deferred | 0 |
-| abandoned | 22 |
-| **total** | **783** |
+| abandoned | 23 |
+| **total** | **785** |
 
 ---
 
@@ -25,8 +25,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-745 — English anchor: translate non-English posts at ingest and retrieve against the English field (complexity: high, risk: high)
 - M1-748 — Investigate why no similarity threshold separates true from false matches, and whether a single global threshold is the right model at all (complexity: medium, risk: low)
+- M1-749 — English anchor: ingest translation + embedding gate (complexity: high, risk: high)
 
 ---
 
@@ -46,8 +46,9 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-718 — blocked_by: M1-716 (done), M1-746 (pending)
 - M1-719 — blocked_by: M1-716 (done), M1-746 (pending)
 - M1-720 — blocked_by: M1-716 (done), M1-746 (pending)
-- M1-746 — blocked_by: M1-745 (pending)
-- M1-747 — blocked_by: M1-745 (pending)
+- M1-746 — blocked_by: M1-749 (pending)
+- M1-747 — blocked_by: M1-749 (pending)
+- M1-750 — blocked_by: M1-749 (pending)
 
 ---
 
@@ -89,7 +90,7 @@ _(none)_
 
 Tickets decided against — not implemented as this ticket. Terminal: not reopenable via the driver's `reopen`. `abandoned_reason` records why (`decomposed` = split into shipped children; `superseded` = absorbed by another ticket; `obsoleted-by-spec-amend` = a spec change dropped the requirement; `wont-do-infeasible` = evaluated and judged not worth building). See `docs/process/workflow.md` §Status values.
 
-### decomposed (10)
+### decomposed (11)
 - M1-034 — Tagger + Embedding pipeline + status→READY + new_post NOTIFY
 - M1-318 — Derive per-adapter bot contact id from adapter identity material (SimpleX queue address, Signal ACI)
 - M1-493 — Schema hardening: NOT NULL upstream_identifier + approve_quarantine phantom NOTIFY
@@ -100,6 +101,7 @@ Tickets decided against — not implemented as this ticket. Terminal: not reopen
 - M1-648 — Semantic command-intent index with deterministic answer composition
 - M1-687 — /summary renders the categorized digest form by default
 - M1-722 — Digest categories render a prose paragraph per cluster: replace with count + roll-up + headlines, and add /digest brief|normal|full
+- M1-745 — English anchor: translate non-English posts at ingest and retrieve against the English field
 
 ### obsoleted-by-spec-amend (1)
 - M1-314 — Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed
@@ -990,13 +992,15 @@ M1-741 (done)
 M1-742 (done)
 M1-743 (done)
 M1-744 (done)
-M1-745 (pending) ← runnable
-  ├── M1-717 (abandoned)
+M1-745 (abandoned)
+  └── M1-717 (abandoned)
+M1-748 (pending) ← runnable
+M1-749 (pending) ← runnable
   ├── M1-746 (pending)
   │     ├── M1-717 (abandoned) [see above]
   │     ├── M1-718 (pending) [see above]
   │     ├── M1-719 (pending) [see above]
   │     └── M1-720 (pending) [see above]
-  └── M1-747 (pending)
-M1-748 (pending) ← runnable
+  ├── M1-747 (pending)
+  └── M1-750 (pending)
 ```

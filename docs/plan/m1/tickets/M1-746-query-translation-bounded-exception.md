@@ -5,7 +5,7 @@ status: pending
 created: 2026-08-02
 last_updated: 2026-08-02
 blocked_by:
-  - M1-745
+  - M1-749
 files_budget: 6
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/tool/SemanticSearchTool.java

@@ -1,7 +1,7 @@
 ---
 id: M1-745
 title: "English anchor: translate non-English posts at ingest and retrieve against the English field"
-status: pending
+status: abandoned
 created: 2026-08-02
 last_updated: 2026-08-02
 blocked_by: []
@@ -252,8 +252,18 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-02
+  verdict: WARN
+  warnings:
+    - >-
+      CENSUS-PRESENT-IF-CLASS-SCOPED fired on the word "parity" (the
+      "spec-parity CI test" pinning LlmOutputSanitizer's single
+      implementation). That is one named existing test, not a class of
+      sites to enumerate and dispose — the ticket is not class-scoped.
+  blockers: []
 escalation_reason:
+abandoned_reason: decomposed
 ---
 
 # M1-745: English anchor — translate non-English posts at ingest, retrieve against the English field
@@ -381,3 +391,11 @@ REASON: The refined ticket is one file short of implementable, and the missing f
 SUGGESTED ESCALATION: refine
 
 EVIDENCE: ticket acceptance items 1 and 4 (`translation_done` DEFAULT FALSE + `AND translation_done = TRUE` conjunct) vs `infochat-collector/src/test/java/app/zcat/infochat/collector/eval/embedding/EmbeddingWorkerPickupFloorIT.java:69-76,84-93` (absent from `files_scope`/`test_plan`); `files_budget: 21` fully allocated; `infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:498-501` + `infochat-provider/src/main/resources/bundles/en.properties:159-172,512` (dedicated-key precedent vs reusable `error.lang.unsupported_code`) + `BundleLoader.java:50-58` (en/cs bilateral parity CI); `infochat-core/src/main/resources/db/migration/V31__service_role_login_and_audit_redaction.sql:44-45` (column-scoped UPDATE grant excludes `language`); `V58__post_search_tsv.sql:27-33` (generated column + GIN index V74 must replace and recreate).
+
+## OUTLINE FAILED (2026-08-02, plan-writer round 3 — post-refine-2)
+
+REASON: Third pass, same failure class as rounds 1 and 2: the twice-refined ticket is one file short of implementable, and the missing file is again a pre-existing test artifact it never authorizes modifying. The acceptance-pinned `/add-source --lang` rejection reuses `error.lang.unsupported_code` with the valid-codes `{0}` interpolation sourced from the new `SourceLanguageRegistry` — but `InboundReflectionGuardTest` (M1-658) censuses every `error.*` interpolation site in infochat-provider and auto-clears only string/int literals, `.size()` calls, and same-file `static final String` constants (`isTriviallySafe`, InboundReflectionGuardTest.java:417-424). A registry-sourced codes list is none of those, so the new site fails `everyErrorInterpolationIsTriviallySafeOrBaselined` unless `infochat-provider/src/test/resources/inbound-reflection-error-baseline.txt` gains a `AddSourceArgs.java | error.lang.unsupported_code | 0 | <expr> | bot-authored: the reviewed SourceLanguageRegistry constant set` line — the exact shape of the existing `LangCommandHandler` entry (baseline:67). That file is in neither `files_scope` (24/24 allocated; adding it is 25 > `files_budget: 24`) nor `test_plan`/`§Notes`, yet the acceptance item "`mvn verify` from the repo root is green" cannot hold without it — the guard runs in surefire. The refine should add the baseline file to `files_scope`, raise `files_budget` to 25, and pin the baseline line's expression so the implementation isn't free-styled. Three secondary disposals the same refine should make so pass 4 is the last: (a) `EmbeddingWorkerIT` needs the same `translation_done = TRUE` fixture seed as PickupFloorIT — its INSERTs (lines 419-438, 468-488) list every `*_done` flag explicitly and its `enumeratePending` assertions (lines 289-296) go empty under the new conjunct; the file IS in `files_scope` but unnamed in `test_plan`/`§Notes`, so add a `preserves` line for symmetry; (b) the ticket's own spec_ref `docs/spec/llm.md` §Translation flow states "Entity extraction likewise reads the English field", but `EntityExtractorWorker` (pickup `status='RAW' AND tagger_done=TRUE AND entity_done=FALSE`, reads `title`/`body`, no translation gate) is out of scope and budget — disclaim it in `out_of_scope` as a follow-up or scope it in, or review's SPEC-CONFORMANCE-CHECK flags the diff against the cited section; (c) `help.cmd.add-source.usage` (en.properties:86, cs.properties:89) will drift from the new `--lang` grammar in commands.md while the ticket pins bundles untouched — say so explicitly in §Notes. Everything else verified clean this pass: all three spec_ref anchors resolve FOUND; V31's column-scoped UPDATE grant excludes `language` (INSERT-only upsert mirrors the `source_origin` precedent); V58's `search_tsv` + `idx_post_search_tsv` match the pinned V74 DDL; collector holds table-level `GRANT SELECT, INSERT, UPDATE` on both `post` (V7:222) and `source` (V6:104) so V74 needs no new grants; `PostRow`'s 5-field shape and the five out-of-scope direct constructors confirmed; `error.lang.unsupported_code` exists in en.properties:512/cs.properties:395 with `{0}`; collector LLM test infrastructure (`StubLlmProvider`, hand-wired `LlmRouter` per TaggerWorkerTest:445-448) supports the new worker's tests without new test-support files; V73 is the latest migration so V74 is next.
+
+SUGGESTED ESCALATION: refine
+
+EVIDENCE: ticket acceptance item 8 (`--lang` rejection reusing `error.lang.unsupported_code` with `{0}`) + acceptance "`mvn verify` green" vs `infochat-provider/src/test/java/app/zcat/infochat/provider/bundle/InboundReflectionGuardTest.java:107-125,284-296,417-424` (census forms + auto-clear rules) and `infochat-provider/src/test/resources/inbound-reflection-error-baseline.txt:14-19,67` (format + the `LangCommandHandler` precedent line) — the baseline file absent from `files_scope` (24/24 allocated, `files_budget: 24`) and `test_plan`/`§Notes`; precedent tickets listing it: M1-716 files_scope:16, M1-705 files_scope:23, M1-741 files_scope:19, M1-671 files_scope:15; secondary: `EmbeddingWorkerIT.java:289-296,419-438,468-488` (fixture seed gap, in scope but unnamed in test_plan), `docs/spec/llm.md:300-302` vs `EntityExtractorWorker.java:493-502` (entity-extraction English-field conformance gap), `en.properties:86`/`cs.properties:89` (help-text drift vs pinned "bundles untouched").
