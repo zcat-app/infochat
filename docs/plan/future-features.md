@@ -161,6 +161,14 @@ touch determinism, but it *would* trip the current spy and therefore needs a
 
 **Verdict: `needs-analysis`** (spec decision on D29 first).
 
+**Update 2026-08-02 — RESOLVED, and the reframe above was right.** D29 was
+amended (`21ad3517`) to permit exactly the carve-out this entry argued for:
+display-time translation of a retrieved post's **title and snippet** into the
+reader's language, never stored, never embedded. Filed as **M1-747**. Note the
+narrowing — title and snippet, not the whole body: cost then scales with what a
+user reads rather than with what has been ingested. The verification spy was
+retargeted at the presentation path in the same commit.
+
 ### D2. Cross-lingual retrieval
 **What:** a Czech query retrieves relevant English (etc.) posts.
 
@@ -189,6 +197,22 @@ across en/fr/ru/cs. The re-embed and threshold recalibration are now ticket
 `EMBEDDER-MEASUREMENT-RESULTS.md`. This entry's framing above was correct on both
 counts — it is an embedding-model question, and partitioning works against the goal.
 
+**Update 2026-08-02 — RESOLVED, but NOT by an embedder swap. Do not act on the
+2026-07-30 note above.** Measurement (`docs/measurement/translator-slot.md`)
+established that the multilingual swap buys +0.12 on non-English and *costs*
+0.02–0.07 on English, on a corpus that is 100% English — and that the incumbent
+`nomic-embed-text-v1.5` is not beaten on English by any candidate while being
+2–5× faster. The adopted answer is the **English pivot** (D29 amended): the
+corpus is anchored in English at ingest and the query is translated into the
+anchor under D58's four bounded conditions, so **both sides of every comparison
+are English and the embedder never sees non-English text**. Consequences:
+no 768→1024 migration, no whole-corpus re-embed, no D54 amendment, and an
+embedder may be selected on English inputs alone. **M1-717's stated
+justification ("the swap is required regardless") is gone** — it is a filed
+ticket someone could still pick up, so it needs closing as superseded or
+rescoping to the separability problem, which is unsolved and independent.
+Implementation: M1-745 (ingest leg), M1-746 (query leg).
+
 ### D3. Per-language full-text search config (lexical arm)
 **What:** the lexical half of hybrid retrieval stems with the target language's
 rules, so an inflected Spanish/Russian/Turkish query matches its document forms.
@@ -216,6 +240,63 @@ today. Explicitly deferred out of M1-717.
 
 **Verdict: `parked`** (understood, no current effect; revisit when non-English
 sources are ingested).
+
+**Update 2026-08-02 — SUPERSEDED as a plan; kept because its analysis is the
+reason the alternative won.** Per-language regconfig is precisely the option the
+English pivot rejected. D29 (amended `21ad3517`) anchors the corpus in English,
+so `search_tsv` keeps ONE `'english'` configuration and a non-English post is
+matched through its derived English field instead of its own stemmer. That
+sidesteps every cost this entry enumerates — no `post.language`-driven column
+fork, no per-language GIN rebuild, no session-dependent regconfig (so the D19
+question does not arise), and no tokenizer extension for Thai/Japanese/Chinese/
+Korean, which have no snowball config at all. The ingest-time language question
+is answered by a **declared** `source.language`, never detection. Implemented by
+M1-745.
+
+### D4. Configurable corpus anchor language
+**What:** make the corpus anchor language a deployment setting (`en` by default
+and recommended) instead of hardcoded English, so a deployment whose sources and
+users are all one non-English language stops paying two translation hops for
+nothing.
+
+**Why it is real.** Under a hardcoded English anchor, a Spanish-only deployment
+translates every Spanish post ES→EN at ingest and every Spanish query ES→EN,
+round-tripping through a language nobody reads, paying an LLM call per post plus
+translation loss on exactly the entities and technical terms D4/D29 care about —
+while native ES→ES matching would have none of it.
+
+**Why it is NOT built now.** v1 ships English and **Czech**, and Czech **cannot
+be an anchor**: this Postgres has 29 text-search configs and `czech` is not among
+them (nor `japanese`/`chinese`/`thai`/`korean`). The knob's only working values —
+`spanish`, `portuguese`, `russian`, `turkish`, `arabic`, and the other snowball
+languages — are ones this product does not ship a `/lang` bundle for. It would be
+a setting with no usable non-default value, which is speculative generality.
+
+**Constraints for whoever builds it, so they are not rediscovered:**
+- Must validate the anchor against `pg_ts_config` **at boot and refuse to start**
+  on an unsupported value. Silently falling back to `simple` (no stemming)
+  degrades the lexical arm — the exact failure the pivot exists to fix, and the
+  M1-597 shape (~4,700 posts silently labelled `unknown`).
+- It is a **deploy-time, effectively immutable** setting: `search_tsv` is a STORED
+  generated column with the regconfig baked into its DDL, so changing it later
+  means a migration plus a full partition rewrite, GIN rebuild and re-embed.
+- It **reopens the embedder question** for that deployment. "Select the embedder
+  on English inputs alone" is only valid because the anchor is English;
+  nomic-v1.5's 0.630 English recall does not transfer to another anchor.
+- For a **mixed** corpus it can backfire. Crypto/AI news is English-dominated, so
+  a Spanish anchor would translate EN→ES for the *majority* of posts — more work
+  than the English anchor, and lossy on tickers and project names. The knob wins
+  only for a genuinely monolingual deployment, and the operator is the one who
+  knows which they have.
+
+**Prerequisite that is not the knob:** such a deployment also needs a `/lang`
+bundle for its language (D43 bilateral keyset). The anchor is not the first thing
+it would be missing.
+
+**Verdict: `needs-analysis`** — revisit when a deployment appears whose sources
+are majority one non-English language that Postgres stems. The change is small
+when it comes: M1-745 already isolates it to one comparison
+(`source.language <> 'en'`) and one DDL literal.
 
 ---
 
