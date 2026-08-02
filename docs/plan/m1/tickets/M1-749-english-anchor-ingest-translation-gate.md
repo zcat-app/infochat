@@ -5,11 +5,12 @@ status: pending
 created: 2026-08-02
 last_updated: 2026-08-02
 blocked_by: []
-files_budget: 12
+files_budget: 13
 files_scope:
   - infochat-core/src/main/resources/db/migration/V74__post_english_anchor.sql
   - infochat-core/src/main/java/app/zcat/infochat/core/llm/LlmOutputSanitizerCore.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/llm/LlmOutputSanitizer.java
+  - infochat-llm-adapter/src/main/resources/prompts/ingest-translator.md
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/translation/IngestTranslationWorker.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/embedding/EmbeddingWorker.java
   - infochat-collector/src/main/resources/application.properties
@@ -107,7 +108,12 @@ acceptance:
     A new `IngestTranslationWorker` follows the existing eval-worker shape:
     poll-interval, `infochat.llm.translator.max-concurrency`, status gate,
     and the outbox rehydrate path, so an interrupted run resumes rather
-    than losing work. It picks up posts with `translation_done = FALSE`
+    than losing work. Its prompt is loaded from the new
+    `infochat-llm-adapter/src/main/resources/prompts/ingest-translator.md`
+    classpath resource (the universal collector-worker pattern — the
+    existing `prompts/translator.md` is hard-wired to the presentation
+    direction English -> target and cannot serve source-language ->
+    English ingest). It picks up posts with `translation_done = FALSE`
     joined to their source's declared language. A post whose
     `source.language = 'en'` is marked `translation_done = TRUE` with NO
     translator dispatch — the en-never-dispatched property is asserted at
