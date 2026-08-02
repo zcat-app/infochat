@@ -1001,8 +1001,10 @@ escape hatch is `/clear` (the user's choice, not the system's).
 ### `/lang <code>`
 
 Sets per-scope output language. ISO 639-1 codes; v1 ships `en` and `cs`
-(decision D43). Source post bodies are never translated; only LLM-authored
-prose is routed through `TranslationProvider`.
+(decision D43). Source post bodies are never rewritten, and only LLM-authored
+prose is routed through this presentation path; the English-anchor translation
+a non-English post receives at ingest (decision D29) is a separate path writing
+a derived field, and does not change what `/lang` shows the user.
 
 - DM: own scope.
 - Group: group admin only.

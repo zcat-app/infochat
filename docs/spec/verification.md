@@ -449,14 +449,18 @@ or `deployment.md`. Each one corresponds to at least one named test.
 - Embedding model swap is detected (a vector built with one model is                                                                                                                                                                                  
   not silently mixed with another).
 - Translation cache: a digest sent to N members translates once.
-- Source bodies are never translated (decision D29): with the scope's
+- Source bodies are never rewritten (decision D29): with the scope's
   `/lang` set to a non-English code, a fixture run that produces a
   `/summary` and a periodic digest exercises the
-  `TranslationProvider`. A spy on the provider asserts that no call
-  argument equals or contains the body of any `post` row; only
-  presentation strings (cluster prose, headers, system phrasing)
-  reach the provider. Source post titles and URLs likewise never
-  pass through translation.
+  `TranslationProvider`. A spy on the **presentation** path asserts
+  that no call argument equals or contains the body of any `post` row;
+  only presentation strings (cluster prose, headers, system phrasing)
+  reach it. The ingest-time English-anchor translation is a SEPARATE
+  path writing a derived field, and the property it must prove is the
+  complement: the original `post.body` is byte-identical before and
+  after that translation, and it — not the derived English — is what
+  a user is shown. Display-time translation of a retrieved title or
+  snippet is permitted and must not write back to the post row.
 - Translation flake fallback: a translator that throws falls back to                                                                                                                                                                                  
   English with a one-line note; the user does not see a hung response.
 - **Localization bundle completeness** (decision D43,

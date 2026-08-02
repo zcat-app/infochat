@@ -32,8 +32,8 @@ The LLM adapter exposes pluggable interfaces (decision D32):
 - **`EmbeddingProvider`** — text → vector batch.
 - **`TranslationProvider`** — text + (from, to) → text. **Placement:**
   unlike the other interfaces in this list, this SPI is owned by the
-  messaging adapter, not the LLM adapter. Translation is a
-  presentation-layer concern (decision D29) and the contract is
+  messaging adapter, not the LLM adapter. Translation of bot-authored
+  prose is a presentation-layer concern (decision D29) and the contract is
   model-agnostic — an implementation need not call an LLM at all. The
   LLM-backed implementation is one plug among possible others and
   dispatches to the `TRANSLATOR` task internally; the two are
@@ -292,9 +292,14 @@ Adding a fallback chain is a v2 candidate.
   summarizer is invoked with `target_language` directly to save a round                                                                                                                                                                               
   trip. The summarizer exposes a "language-aware" capability so the                                                                                                                                                                                   
   router knows when this shortcut is safe.
-- **Source post bodies are never translated.** Embeddings, retrieval, and
-  entity extraction always operate on the original language. Translation
-  is purely a presentation-layer concern.
+- **Source post bodies are never rewritten (decision D29).** A non-English
+  post is translated to English once at ingest into a derived field; the
+  original body is retained unmodified and stays what the user is shown.
+  Embeddings and retrieval — both the semantic and the lexical arm — operate
+  on the English field, so there is one vector space and one FTS
+  configuration rather than per-language variants. Entity extraction
+  likewise reads the English field, so the controlled vocabulary does not
+  fork by source language.
 - **Deterministic strings come from a localization bundle, not the
   translator (decision D43).** Anything the bot says that does not
   depend on user content — `/help` output, friendly-error

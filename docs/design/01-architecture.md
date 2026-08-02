@@ -715,7 +715,10 @@ Notes:
 - For supported model + language combinations (Czech via `llama3.1:8b` and
   larger), the summarizer can be invoked with `target_language=cs` directly
   to save a round-trip. `Summarizer` exposes `LanguageAware` capability.
-- Source post bodies are **never** translated. Embeddings, retrieval, and
-  entity extraction always operate on the original language. Translation is
-  purely a presentation-layer concern.
+- Source post bodies are **never rewritten** (decision D29). A non-English
+  post is translated to English once at ingest into a derived field; the
+  original body is retained unmodified and stays what the user is shown.
+  Embeddings, retrieval (both arms) and entity extraction operate on the
+  English field, so there is one vector space, one FTS configuration and one
+  controlled vocabulary rather than per-language variants.
 - Command parsing (`/summary`, `/save`, etc.) is English-only in v1.
