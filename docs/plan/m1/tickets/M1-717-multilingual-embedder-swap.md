@@ -1,11 +1,12 @@
 ---
 id: M1-717
 title: "Swap to a multilingual embedder and recalibrate thresholds"
-status: deferred
+status: abandoned
 created: 2026-07-30
-last_updated: 2026-07-30
+last_updated: 2026-08-02
 blocked_by: []
-deferred_reason: blocked-on-external-measurement
+deferred_on: [M1-745, M1-746]
+abandoned_reason: superseded
 files_budget: 12
 files_scope:
   - infochat-collector/src/main/resources/application.properties
@@ -91,6 +92,46 @@ reopens: []
 redteam_findings: []
 clarity_check: {}
 ---
+
+## ABANDONED 2026-08-02 — superseded by the English pivot
+
+**Do not implement this ticket.** The evaluation it was waiting on ran, and it
+did not produce the values this ticket needed — it removed the reason to want
+them.
+
+**What the measurement found** (`docs/measurement/translator-slot.md` and
+`.bench/track-a/ENGLISH-ANCHOR-MEASUREMENT.md`):
+
+- The incumbent `nomic-embed-text-v1.5` is **not beaten on English** by any
+  candidate (recall@8 0.630 against 0.557–0.610) and is **2–5× faster**.
+- The multilingual swap buys **+0.12 on non-English and costs 0.02–0.07 on
+  English** — on a corpus that is 100% English today.
+- Anchoring the corpus in English instead solves three problems (the semantic
+  arm, the silently-degrading lexical arm, and reader comprehension) where the
+  swap solves one, at no migration cost.
+
+**This ticket's stated justification is therefore gone.** It rested on "a
+non-English query against the corpus needs cross-lingual matching, and
+translating the query is what D19 forbids." D58 was amended (`21ad3517`) to
+permit query translation under four bounded determinism conditions, so the
+premise no longer holds. Under the pivot **both sides of every comparison are
+English and the embedder never sees non-English text**, which means no
+768→1024 migration, no whole-corpus re-embed, no D54 amendment, and an embedder
+that may be selected on English inputs alone.
+
+Superseded by **M1-745** (ingest leg) and **M1-746** (query leg).
+
+⚠ **One live problem this ticket carried does NOT die with it, and has no
+home.** M1-717 bundled the embedder swap with **threshold recalibration**, and
+the measurement showed that **no model — incumbent or candidate — is separable**:
+`worst_true < best_false` on all five evaluated, so no single global similarity
+threshold splits true matches from false ones, and the six thresholds this
+ticket would have set cannot be derived from any of them. Absolute recall is
+also low across the board (0.56–0.63 @ k=8). That is independent of which model
+ships and is likely a fixture or metric problem rather than a model one. **It
+needs its own ticket** — closing this one must not be read as closing that.
+
+The original skeleton follows, kept as the record of what was planned.
 
 ## Context
 

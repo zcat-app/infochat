@@ -3,10 +3,10 @@ id: M1-720
 title: "Turkish (tr) localization bundle and enablement"
 status: pending
 created: 2026-07-30
-last_updated: 2026-07-30
+last_updated: 2026-08-02
 blocked_by:
   - M1-716
-  - M1-717
+  - M1-746
 files_budget: 6
 files_scope:
   - infochat-provider/src/main/resources/bundles/tr.properties
