@@ -308,11 +308,58 @@ dispatch_auditor() {
     local stub; stub="$(stub_prompt "$prompt_file")"
     local rc=0
 
+    # The CLIs confine file reads to their working directory, so an auditor
+    # launched from below the repo root is DENIED docs/spec/security.md and the
+    # diff — and still emits a verdict, which is the dangerous part: a CLEAN
+    # authored without the threat model is indistinguishable from a real one.
+    # Measured on the Track A gold panel 2026-08-02, where the identical shape
+    # denied every read of a file one level above cwd (100% deterministic on the
+    # caller's cwd, not the flaky behaviour it first looked like).
+    # Scoped here rather than at the top of the script because cmd_run's --diff
+    # accepts a caller-relative path; all four args above are already absolute
+    # (run_dir is derived from repo_root). This cd cannot leak — dispatch_auditor
+    # is invoked through command substitution — but it is written explicitly so
+    # the guarantee does not depend on that.
+    cd "$repo_root" || { printf 'cannot cd to repo root\n'; return 1; }
+
     case "$auditor" in
         claude)
+            # --output-format json is what makes permission_denials visible at
+            # all; in plain-text mode a denied read is reported nowhere and
+            # surfaces only if the model happens to mention it in prose. The
+            # envelope is kept next to the reply so a denial is auditable after
+            # the fact. Only claude exposes this — the other three CLIs have no
+            # equivalent, so this guard is per-auditor by necessity.
             REDTEAM_MULTI_DEPTH=1 timeout 900 claude -p --agent threat-actor \
                 --permission-mode acceptEdits --disable-slash-commands \
-                "$stub" > "$reply_file" 2>&1 || rc=$?
+                --output-format json "$stub" \
+                > "$reply_file.json" 2>&1 || rc=$?
+            python3 -c '
+import json, sys
+raw = open(sys.argv[1], encoding="utf-8").read()
+sys.stdout.write(json.loads(raw[raw.index("{"):]).get("result") or "")
+' "$reply_file.json" > "$reply_file" 2>/dev/null || cp "$reply_file.json" "$reply_file"
+            local denied
+            denied="$(python3 -c '
+import json, sys
+try:
+    raw = open(sys.argv[1], encoding="utf-8").read()
+    denials = json.loads(raw[raw.index("{"):]).get("permission_denials", [])
+except Exception:
+    sys.exit(0)
+for d in denials:
+    target = (d.get("tool_input") or {}).get("file_path", "")
+    print((str(d.get("tool_name")) + " " + str(target)).strip())
+' "$reply_file.json")"
+            if [ -n "$denied" ]; then
+                # Fail closed: discard the verdict rather than let an audit
+                # written without its inputs count as a real one. The caller
+                # writes an unavailable stub, which is visible; a blind CLEAN
+                # is not.
+                rm -f "$verdict_file"
+                printf 'permission denied during audit: %s\n' "$(printf '%s' "$denied" | tr '\n' ';')"
+                return 1
+            fi
             ;;
         opencode)
             REDTEAM_MULTI_DEPTH=1 timeout 900 opencode run --agent threat-actor \
