@@ -5,7 +5,7 @@ status: pending
 created: 2026-08-02
 last_updated: 2026-08-02
 blocked_by: []
-files_budget: 21
+files_budget: 24
 files_scope:
   - infochat-core/src/main/resources/db/migration/V74__post_english_anchor.sql
   - infochat-core/src/main/java/app/zcat/infochat/core/llm/LlmOutputSanitizerCore.java
@@ -26,8 +26,11 @@ files_scope:
   - infochat-collector/src/test/java/app/zcat/infochat/collector/bootstrap/BootstrapSourcesParserTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceArgsTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/source/SourceUpsertServiceIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/embedding/EmbeddingWorkerPickupFloorIT.java
   - docs/design/02-schema.md
   - docs/design/05-llm-and-embeddings.md
+  - docs/design/07-deployment.md
+  - docs/spec/commands.md
 complexity: high
 risk: high
 round_cap: 3
@@ -76,7 +79,17 @@ acceptance:
     outbox pattern requires that state be representable. Existing rows
     backfill `translation_done = TRUE` (every current row is English and
     already embedded); the new-row default is `FALSE` — the durable cursor
-    the embedding gate below reads.
+    the embedding gate below reads. Mechanics, pinned: `translation_done`
+    is `ADD COLUMN ... NOT NULL DEFAULT TRUE` followed by `ALTER COLUMN
+    ... SET DEFAULT FALSE` (PG fast default via attmissingval — existing
+    rows read TRUE, new rows default FALSE, no table rewrite), and the
+    `search_tsv` replacement is DROP COLUMN (the cascade takes
+    `idx_post_search_tsv` on the parent and per-partition with it) +
+    re-ADD (rewrites every partition) + explicit `CREATE INDEX` on the
+    parent. `source.language` is INSERT-only at the upsert: the provider
+    role's column-scoped UPDATE grant (V31) excludes it, so V74 mirrors
+    the `source_origin` precedent — the ON CONFLICT DO UPDATE does not
+    overwrite an existing row's language.
   - >-
     V74 REPLACES the `search_tsv` generated column so it reads
     `coalesce(title_en, title)` and `coalesce(body_en, body)` rather than
@@ -92,7 +105,13 @@ acceptance:
     `EmbeddingWorker` embeds `coalesce(title_en, title)` and the
     `coalesce(body_en, body)`-derived text, preserving its existing
     `body_summary`-else-first-800-chars composition rule, and its pickup
-    query gains `AND translation_done = TRUE`. The vector space is
+    query gains `AND translation_done = TRUE`. The coalesce reads happen
+    in `enumeratePending`'s SELECT projection so the `PostRow` record
+    keeps its exact current 5-field shape — five existing tests construct
+    `PostRow` directly (`IngestNotifySmokeIT`, `EmbeddingWorkerBackoffTest`,
+    `EmbeddingWorkerNonFiniteTest`, `EmbeddingWorkerDimensionMismatchTest`,
+    `EmbeddingWorkerPgvectorRejectionTest`) and a record-shape change
+    breaks them all. The vector space is
     unchanged (D54 local nomic-768) — only the input text moves. The gate
     is what stops a Czech post being embedded from Czech text before the
     translator runs: `embedding_done` is the durable cursor and never
@@ -152,12 +171,20 @@ acceptance:
     infochat-core — a reviewed constant set of supported source languages,
     initially `{en, cs}`, deliberately separate from `LanguageRegistry`'s
     UI-language set — and reject an unknown code rather than silently
-    storing it.
+    storing it. The user-facing rejection reuses the EXISTING
+    `error.lang.unsupported_code` bundle key (its cs twin already exists;
+    it takes the valid-codes `{0}` interpolation) — no new bundle keys, so
+    `BundleKeys.java`/`en.properties`/`cs.properties` stay untouched.
   - >-
     `post.body` and `post.title` are byte-identical before and after
     translation — asserted directly, since "source bodies are never
     rewritten" is the property D29 now turns on and
     `docs/spec/verification.md` states it as verifiable.
+  - >-
+    Doc drift disposed: `docs/spec/commands.md`'s `/add-source` grammar
+    documents `--lang <code>`, and `docs/design/07-deployment.md` §7.6.1
+    documents the bootstrap entry's optional `language` field (default
+    `en`).
   - mvn verify from the repo root is green.
 test_plan:
   adds:
@@ -200,6 +227,12 @@ test_plan:
       EmbeddingWorker's existing composition rule and the
       `summary_done OR length(body) <= threshold` pickup condition (the
       `translation_done` conjunct is additive).
+    - >-
+      EmbeddingWorkerPickupFloorIT's pickup-window assertions — its
+      fixture INSERT lists every `*_done` flag explicitly, so it gains an
+      explicit `translation_done = TRUE` seed (without it the new DEFAULT
+      FALSE makes `enumeratePending` return empty and the test fails
+      loudly).
     - >-
       LlmOutputSanitizer's existing provider-side tests — the delegation
       to `LlmOutputSanitizerCore` is behaviour-identical.
@@ -317,13 +350,19 @@ rename of the `LlmOutputSanitizer` bean/package, and no change to
 - **Nullable `body_en` is not laziness.** The outbox pattern needs "persisted
   but not yet translated" to be representable, and the `coalesce` fallback means
   that state is still searchable rather than invisible.
-- **Scope grew from 9 to 21 files at the outline-fail refine** (2026-08-02):
+- **Scope grew 9 → 21 → 24 files across two outline-fail refines**
+  (2026-08-02). The round-2 refine added `EmbeddingWorkerPickupFloorIT`
+  (fixture seed above) and pinned: the `error.lang.unsupported_code` key
+  reuse, the `PostRow`-shape-preserving SELECT projection, the
+  INSERT-only `source.language` upsert, and the V74 DDL mechanics — all
+  verified by the second Plan pass, which found every other dimension
+  clean. The round-1 refine (9 → 21):
   the first Plan pass verified that the `/add-source --lang` + bootstrap item
   needs `AddSourceArgs`/`SourceUpsertService`/`BootstrapSourcesEntry`/
   `BootstrapSourcesParser`, that the sanitizer control is unreachable from the
   collector without the core extraction, and that the embedding gate needs the
-  `translation_done` cursor. The full failure analysis is in the refine commit
-  message (`M1-745: refine ticket spec (outline-fail rework)`).
+  `translation_done` cursor. Full failure analyses are in the two refine
+  commit messages (`M1-745: refine ticket spec (outline-fail rework)`).
 - Worker config follows the sibling-worker convention:
   `infochat.llm.translator.max-concurrency` plus a poll-interval key, added to
   the collector `application.properties` (the existing
@@ -334,3 +373,11 @@ rename of the `LlmOutputSanitizer` bean/package, and no change to
   name stays out of the spec.
 - Pre-flight: `python3 scripts/lint-ticket.py docs/plan/m1/tickets/M1-745-english-anchor-ingest-leg.md`
   is clean.
+
+## OUTLINE FAILED (2026-08-02, plan-writer round 2 — post-refine)
+
+REASON: The refined ticket is one file short of implementable, and the missing file is a pre-existing test the ticket never authorizes modifying — the same failure class as the first pass. Ground truth: the acceptance-pinned `AND translation_done = TRUE` pickup conjunct (EmbeddingWorker) plus the pinned `DEFAULT FALSE` for new rows breaks `EmbeddingWorkerPickupFloorIT` loudly — its fixture INSERT (`EmbeddingWorkerPickupFloorIT.java:84-93`) lists every `*_done` flag explicitly but cannot include the new column, so it defaults FALSE, `enumeratePending` returns empty, and `assertTrue(pickedUp.contains(inWindowId))` at lines 69-76 fails. That file is in neither `files_scope` (21/21 fully allocated → adding it is 22 > `files_budget`) nor `test_plan`/`§Notes` (test-modification authorization missing), yet `test_plan.preserves` demands all main-green tests stay green. Second, the `/add-source --lang` unknown-code rejection needs a user-facing friendly error, and `AddSourceArgs.Failure` carries a bundle key: a dedicated key per house style (`error.add_source.unknown_kind`/`unknown_category` precedent, `BundleKeys.java:498-501`) requires `BundleKeys.java` + `en.properties` + `cs.properties` (bilateral en/cs parity is CI-enforced per `BundleLoader` javadoc) — three more out-of-scope files, 25 > 21. The refine should either add those four files and raise `files_budget` to 25, or add only `EmbeddingWorkerPickupFloorIT` (budget 22) and PIN reuse of the existing language-generic `error.lang.unsupported_code` key (`en.properties:512`, cs twin already present, takes the valid-codes `{0}` interpolation). The refine should also pin three things this pass verified but the ticket leaves to guesswork: (a) the `coalesce(title_en, title)`/`coalesce(body_en, body)` reads belong in `EmbeddingWorker.enumeratePending`'s SELECT projection so `PostRow` keeps its 5-field shape — five out-of-scope tests construct `PostRow` directly (`IngestNotifySmokeIT:249`, `EmbeddingWorkerBackoffTest:191`, `EmbeddingWorkerNonFiniteTest:93`, `EmbeddingWorkerDimensionMismatchTest:113`, `EmbeddingWorkerPgvectorRejectionTest:181`) and any record-shape change breaks them too; (b) `source.language` is INSERT-only in `SourceUpsertService`'s `ON CONFLICT DO UPDATE` because the provider role's column-scoped UPDATE grant (V31: `status, consecutive_failures, deleted_at, deleted_by, bootstrap_tags`) excludes it — mirror the `source_origin` precedent or have V74 extend the grant; (c) V74 mechanics on the RANGE(fetched_at)-partitioned `post`: `search_tsv` replacement is DROP COLUMN (cascades, taking `idx_post_search_tsv` parent + per-partition indexes with it) + re-ADD (rewrites every partition) + explicit `CREATE INDEX` on the parent, and `translation_done` as `ADD COLUMN … NOT NULL DEFAULT TRUE` then `ALTER COLUMN SET DEFAULT FALSE` (PG fast-default attmissingval yields existing-rows TRUE / new-rows FALSE with no rewrite). Doc drift to dispose explicitly in the refine: `docs/spec/commands.md:654` grammar omits `--lang`, and `docs/design/07-deployment.md` §7.6.1 omits the entry `language` field — neither file is in `files_scope`. (Verified clean: all three spec_refs resolve; `ModelTask.TRANSLATOR`, `LlmRouter.forTask(ModelTask, String)`, the EntityExtractorWorker retry/release shape, `IngestTextNormalizer.stripBidiAndZeroWidth` + caller-composed NFKC matching `Stage1Pipeline.unicodeNormalize`'s no-fence-carve-out ingest rule, the 698-line `LlmOutputSanitizer` with extractable static transform + bean re-export of `CLOSED_LIST` keeping `matchSetEqualsSpecClosedList` compiling, `SemanticSearchTool`'s inline READY+D59+LIMIT arms reading `search_tsv` transparently, and `ScanWindowFixtureGuardTest` tolerating the new IT provided it pins `Clock.fixed`.)
+
+SUGGESTED ESCALATION: refine
+
+EVIDENCE: ticket acceptance items 1 and 4 (`translation_done` DEFAULT FALSE + `AND translation_done = TRUE` conjunct) vs `infochat-collector/src/test/java/app/zcat/infochat/collector/eval/embedding/EmbeddingWorkerPickupFloorIT.java:69-76,84-93` (absent from `files_scope`/`test_plan`); `files_budget: 21` fully allocated; `infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java:498-501` + `infochat-provider/src/main/resources/bundles/en.properties:159-172,512` (dedicated-key precedent vs reusable `error.lang.unsupported_code`) + `BundleLoader.java:50-58` (en/cs bilateral parity CI); `infochat-core/src/main/resources/db/migration/V31__service_role_login_and_audit_redaction.sql:44-45` (column-scoped UPDATE grant excludes `language`); `V58__post_search_tsv.sql:27-33` (generated column + GIN index V74 must replace and recreate).
