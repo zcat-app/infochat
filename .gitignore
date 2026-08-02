@@ -15,6 +15,7 @@ Thumbs.db
 .bench/
 .models/
 .embeddings/
+.mt/
 target/
 docs/deep-code-review/
 docker-compose.override.yml
