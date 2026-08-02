@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 752 |
+| done | 753 |
 | deferred | 0 |
 | abandoned | 22 |
 | **total** | **783** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-743 — Roll-up must not fabricate over an empty headline set (complexity: low, risk: low)
 - M1-744 — llama.cpp compose services: operator-settable resource caps and an opt-in GPU overlay (complexity: medium, risk: medium)
 - M1-745 — English anchor: translate non-English posts at ingest and retrieve against the English field (complexity: high, risk: high)
 - M1-748 — Investigate why no similarity threshold separates true from false matches, and whether a single global threshold is the right model at all (complexity: medium, risk: low)
@@ -68,6 +67,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-743 | Roll-up must not fabricate over an empty headline set | 2026-08-02 | round 1 APPROVE |
 | M1-742 | A quarantine row per non-BENIGN Stage 2 verdict | 2026-08-01 | round 1 APPROVE |
 | M1-741 | approve_quarantine ignores an owed Stage 2 verdict | 2026-08-01 | round 1 APPROVE |
 | M1-740 | Provider test fixtures insert into monthly-partitioned tables with wall-clock timestamps: the suite breaks on every unprovisioned month boundary | 2026-08-01 | round 1 APPROVE |
@@ -77,7 +77,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-727 | Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other | 2026-08-01 | round 1 APPROVE |
 | M1-725 | The digest has no lead: a reader who opens only the first message gets the newest item of the largest tag | 2026-08-01 | round 1 APPROVE |
 | M1-724 | Digest cluster selection is recency-only: the cap keeps the newest stories, never the most significant | 2026-08-01 | round 1 APPROVE |
-| M1-716 | Decouple language enablement from bundle presence | 2026-08-01 | round 2 APPROVE |
 
 ---
 
@@ -990,7 +989,7 @@ M1-739 (done)
 M1-740 (done)
 M1-741 (done)
 M1-742 (done)
-M1-743 (pending) ← runnable
+M1-743 (done)
 M1-744 (pending) ← runnable
 M1-745 (pending) ← runnable
   ├── M1-717 (abandoned)

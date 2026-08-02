@@ -51,7 +51,9 @@ import java.util.UUID;
  * still exceed {@code infochat.digest.rollup-prompt-char-budget}, logging
  * the drop at INFO so a truncated LLM input is never silent.
  *
- * <p>Failure containment: a roll-up LLM failure, an empty response, or a
+ * <p>Failure containment: an empty headline set (no post contributed a
+ * line — every post titleless or every cluster dropped over the budget,
+ * M1-743), a roll-up LLM failure, an empty response, or a
  * REFUSAL marker yields {@link Optional#empty()} — the caller ships that
  * category's message WITHOUT a prefix. The
  * digest is never degraded or blocked by a roll-up failure. A render-
@@ -153,6 +155,12 @@ public class CategoryRollupGenerator {
      * Generate one roll-up synthesis for a category's clusters. Returns
      * {@link Optional#empty()} when:
      * <ul>
+     *   <li>NOT ONE headline line was emitted for the section — every post
+     *       titleless (blank title or the {@code untitled} sentinel,
+     *       resolving to no headline via {@link DisplayHeadline} with the
+     *       body fallback off) or every cluster dropped over the char
+     *       budget — so the LLM call is skipped outright before
+     *       {@link LlmRouter#forTask} runs (M1-743);</li>
      *   <li>the LLM call throws (failure containment);</li>
      *   <li>the LLM returns empty text or the {@code [REFUSAL: ...]} marker
      *       (the same per-cluster refusal-detection SummaryProseGenerator
@@ -165,8 +173,9 @@ public class CategoryRollupGenerator {
      *                         what "+N more" hides)
      * @param sectionTag       the category's section tag ({@code null} for
      *                         the Other bucket) — carried into the char-
-     *                         budget drop log so a truncated prompt names
-     *                         its section (M1-728)
+     *                         budget drop log and the empty-headline-set
+     *                         skip log so a truncated or skipped prompt
+     *                         names its section (M1-728, M1-743)
      * @param langCode         the scope language code, forwarded to
      *                         {@link LlmRouter#forTask(ModelTask, String)}
      *                         and {@link TranslationPipeline#run}
@@ -174,10 +183,18 @@ public class CategoryRollupGenerator {
     public Optional<String> generateRollup(List<Cluster> categoryClusters,
                                            @Nullable String sectionTag, String langCode) {
         try {
+            Optional<String> userPrompt = buildPrompt(categoryClusters, sectionTag);
+            if (userPrompt.isEmpty()) {
+                // M1-743: an empty untrusted block would have the model
+                // "name the themes" of nothing, and the fabrication would be
+                // sanitized, translated and delivered as fact. A fabricated
+                // roll-up is worse than none — skip the provider call
+                // BEFORE llmRouter.forTask runs (zero LLM calls).
+                return Optional.empty();
+            }
             LlmProvider provider = llmRouter.forTask(ModelTask.SUMMARIZER, langCode);
-            String userPrompt = buildPrompt(categoryClusters, sectionTag);
             LlmResponse response = provider.generate(
-                    ModelTask.SUMMARIZER, ROLLUP_SYSTEM_PROMPT, userPrompt);
+                    ModelTask.SUMMARIZER, ROLLUP_SYSTEM_PROMPT, userPrompt.get());
             String text = response.text().trim();
             if (text.isEmpty()) {
                 LOG.warn("category roll-up returned empty text; yielding category without prefix");
@@ -263,8 +280,18 @@ public class CategoryRollupGenerator {
      * prompt fits, and the drop is logged at INFO with the section tag and
      * dropped count — silent truncation of an LLM input is the failure
      * mode that makes a bad roll-up unexplainable.
+     *
+     * <p>Returns {@link Optional#empty()} when NOT ONE headline line was
+     * emitted — every post titleless (the Bluesky/Nostr shape) or every
+     * cluster dropped over the budget, both subsumed by the zero-line
+     * count, an empty {@code categoryClusters} list included — logging
+     * the skip at INFO with the section tag and the reason (empty headline
+     * set), so a missing roll-up is as explainable as the budget drop
+     * above (M1-743). {@link #generateRollup} then skips the LLM call
+     * outright: asking the model to synthesize themes of an empty input
+     * can only fabricate.
      */
-    String buildPrompt(List<Cluster> categoryClusters, @Nullable String sectionTag) {
+    Optional<String> buildPrompt(List<Cluster> categoryClusters, @Nullable String sectionTag) {
         String marker = UUID.randomUUID().toString();
         String open = String.format(UNTRUSTED_CONTENT_OPEN_FORMAT, marker);
         String close = String.format(UNTRUSTED_CONTENT_CLOSE_FORMAT, marker);
@@ -289,30 +316,46 @@ public class CategoryRollupGenerator {
 
         // Longest fitting prefix of the section's existing cluster order —
         // equivalent to dropping whole clusters from the END until the
-        // assembled prompt fits the char budget.
+        // assembled prompt fits the char budget. `n` advances only when a
+        // block is actually appended (block-local numbering until then), so
+        // n == 1 after the loop means NOT ONE headline line was emitted —
+        // the M1-743 skip condition.
         int n = 1;
         int dropped = 0;
         for (int i = 0; i < categoryClusters.size(); i++) {
             StringBuilder block = new StringBuilder();
+            int blockLines = 0;
             for (Post p : categoryClusters.get(i).posts()) {
                 String headline = DisplayHeadline.of(p.title(), null, llmOutputSanitizer);
                 if (headline.isEmpty()) {
                     continue;
                 }
-                block.append('[').append(n++).append("] ").append(headline).append('\n');
+                block.append('[').append(n + blockLines).append("] ").append(headline).append('\n');
+                blockLines++;
             }
             if (sb.length() + block.length() + close.length() + 1 > rollupPromptCharBudget) {
                 dropped = categoryClusters.size() - i;
                 break;
             }
             sb.append(block);
+            n += blockLines;
         }
         if (dropped > 0) {
             LOG.info("category roll-up prompt over char budget {}; dropped {} trailing "
                     + "cluster(s) from section {}",
                     rollupPromptCharBudget, dropped, sectionTag == null ? "other" : sectionTag);
         }
+        if (n == 1) {
+            // Zero headline lines emitted: every post was titleless (blank
+            // title or the untitled sentinel, resolving to no headline via
+            // DisplayHeadline with the body fallback off) or every cluster
+            // dropped over the char budget. Mirror the budget-drop log so a
+            // missing roll-up is as explainable as a truncated one (M1-743).
+            LOG.info("category roll-up skipped for section {}: empty headline set",
+                    sectionTag == null ? "other" : sectionTag);
+            return Optional.empty();
+        }
         sb.append(close).append('\n');
-        return sb.toString();
+        return Optional.of(sb.toString());
     }
 }

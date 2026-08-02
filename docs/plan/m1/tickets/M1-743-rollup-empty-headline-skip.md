@@ -1,9 +1,9 @@
 ---
 id: M1-743
 title: "Roll-up must not fabricate over an empty headline set"
-status: pending
+status: done
 created: 2026-08-01
-last_updated: 2026-08-01
+last_updated: 2026-08-02
 blocked_by: []
 remediates: M1-728
 files_budget: 4
@@ -91,12 +91,41 @@ spec_refs:
   - docs/design/05-llm-and-embeddings.md §5.4.5
 decision_refs:
   - D17
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 173
+      removed: 28
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-08-02
+    verdict: CLEAN
+    base: 31c64357bf403e6e56e3c93f02511e7cbbfd723e
+    head: working tree
+    verdict_file: docs/plan/m1/redteam/M1-743-2026-08-02.md
+    out_of_model_count: 0
+    note: |
+      Pre-review gate audit (/m1-tick run step 4) of the empty-headline-set
+      skip. D21 injection shape, the sanitizer/translation chain, and failure
+      containment all preserved; the skip strictly reduces LLM-call surface.
+      No findings, no out-of-model items.
+clarity_check:
+  date: 2026-08-02
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 

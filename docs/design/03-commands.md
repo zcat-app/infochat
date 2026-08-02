@@ -1728,7 +1728,15 @@ carries the true count deterministically, and nothing verifies a
 model-supplied one. If the truncated titles still exceed
 `infochat.digest.rollup-prompt-char-budget`, whole clusters drop from
 the END of the section order until the prompt fits, logged at INFO with
-the section tag and dropped count. Both keys live in
+the section tag and dropped count. When NOT ONE headline line is
+emitted at all — every post in the section titleless (the Bluesky/Nostr
+shape: blank titles and the `untitled` sentinel resolve to no headline
+via `DisplayHeadline` with the body fallback off) or every cluster
+dropped over the budget — the roll-up skips the LLM call entirely and
+the category ships without a prefix, logged at INFO with the section
+tag and the reason (empty headline set): a fabricated synthesis over an
+empty input is worse than none, and the header (+ headlines) + footer
+rendering already covers the no-roll-up outcome (M1-743). Both keys live in
 [07-deployment.md](07-deployment.md) §Configuration surface.
 
 **Prominence ordering within sections (M1-724, D71).** Section
