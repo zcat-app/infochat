@@ -925,6 +925,19 @@ Quarkus supports GraalVM native images. We don't ship them in v1; JVM mode is fi
 | `pi` | Pi 5 (4 cores ARM) | 8 GB | 32 GB SD or SSD | SSD strongly recommended; SD wears out. |
 | `remote-llm` | 1 vCPU | 1 GB | 5 GB | Minimal; LLM cost lives at the API provider. |
 
+The llama.cpp container caps in `docker-compose.yml` are operator-settable (M1-744) — the right values are a property of the operator's model and host, not of the code. Set the keys in the same `--env-file secrets.env` the wizard drives; a deployment that sets nothing renders the defaults, which are exactly the M1-512 starting points:
+
+| Key | Default | Caps |
+|---|---|---|
+| `INFOCHAT_LLAMACPP_CPUS` | `3.0` | generative `llamacpp` CPU limit |
+| `INFOCHAT_LLAMACPP_MEMORY` | `7g` | generative memory limit |
+| `INFOCHAT_LLAMACPP_MEMORY_RESERVATION` | `3g` | generative memory reservation |
+| `INFOCHAT_LLAMACPP_EMBED_CPUS` | `1.5` | `llamacpp-embeddings` CPU limit |
+| `INFOCHAT_LLAMACPP_EMBED_MEMORY` | `2g` | embeddings memory limit |
+| `INFOCHAT_LLAMACPP_EMBED_MEMORY_RESERVATION` | `512m` | embeddings memory reservation |
+
+The postgres / collector / provider caps are deliberately NOT settable this way: their memory limits are coupled to `JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=60.0`, which must stay strictly below the container limit so the JVM hits a managed heap OOM before the cgroup killer (M1-512).
+
 ### 7.8.4 Collector + Provider separation
 
 In v1 the two services are separate JVMs colocated on one host. They communicate only through Postgres (LISTEN/NOTIFY + shared schema). This means either can be restarted independently without affecting the other beyond the duration of the restart.
@@ -987,12 +1000,30 @@ Swap is a safety margin, not a runtime the app should live in: the per-container
 
 **Per-container caps.** Every long-running prod service in `docker-compose.yml` (llamacpp, llamacpp-embeddings, collector, provider, postgres) declares a `deploy.resources` memory limit + reservation and a CPU limit; the sizing basis is commented in the Compose file. The memory limits are **blast-radius caps**: a runaway hits its own container's limit and is OOM-killed-and-restarted (`restart: unless-stopped`) rather than dragging down the host. The CPU limits **throttle** (never kill) — capping the generative llama.cpp server below the core count leaves a core for Postgres and the JVMs, directly countering the incident's all-cores-pegged inference. The two JVM services additionally pin a heap ceiling (`-XX:MaxRAMPercentage` via `JAVA_TOOL_OPTIONS`, **not** `JAVA_OPTS` — the `Dockerfile.jvm` ENTRYPOINT is a bare `java -jar` that does not expand `$JAVA_OPTS`) strictly **below** their container memory limit, so the JVM hits a managed, catchable heap limit before the cgroup OOM-killer SIGKILLs the container.
 
+**GPU (Vulkan) overlay — opt-in.** The base `docker-compose.yml` runs the CPU build of llama.cpp and declares no `devices:` passthrough, so a host without an iGPU (the VPS scenario in `docs/spec/deployment.md`) still starts — Docker fails container creation when a `devices:` path is absent, which is why the keys cannot live in the base file unconditionally. A host with a supported iGPU applies `docker-compose.gpu.yml` as a second `-f` file (M1-744):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+    --profile llamacpp --profile llamacpp-embeddings up -d
+```
+
+The overlay swaps only the two llama.cpp services to the Vulkan build of the same pinned release (`server-vulkan-b9776`) and passes `/dev/dri` through with `group_add` for the host's `render`/`video` GIDs (the shipped `990`/`44` are the Debian/Ubuntu values — check with `getent group render video`). A GPU-resident model still needs RAM headroom: GTT pages are pinned system memory charged to the container's cgroup, so the `deploy.resources` caps above bind a GPU model just as firmly as a CPU one — raise them via the §7.8.3 keys when the model is GPU-resident.
+
+**Rootless-Docker prerequisite (the trap that makes GPU look broken when it is not).** Under rootless Docker, container-root maps to the host user, so the host user's `render`/`video` group membership does NOT reach into the container — those GIDs are not mapped into the user namespace, `group_add` is ineffective, the device node appears as `65534:65534`, and `llama-server --list-devices` prints an empty list with no error (measured 2026-08-01). The fix is host-side: grant the user container-root maps to an ACL on the render nodes, and persist it with a udev rule so it survives reboot:
+
+```bash
+setfacl -m u:<user>:rw /dev/dri/renderD128 /dev/dri/card1
+# Persist across reboots (adjust KERNEL names to `udevadm info -a /dev/dri/renderD128`):
+echo 'KERNEL=="renderD128", RUN+="/usr/bin/setfacl -m u:<user>:rw /dev/dri/renderD128"' | sudo tee /etc/udev/rules.d/99-infochat-dri.rules
+echo 'KERNEL=="card1", RUN+="/usr/bin/setfacl -m u:<user>:rw /dev/dri/card1"' | sudo tee -a /etc/udev/rules.d/99-infochat-dri.rules
+sudo udevadm control --reload
+```
+
 **No second, unused local LLM runtime.** The host systemd `ollama.service` used by the `quarkus:dev` inner loop (D49, §7.7) MUST NOT run on a box whose production deployment is the **pure-llama.cpp shape** (shape a: `--profile llamacpp --profile llamacpp-embeddings`). It is a second local LLM runtime that needlessly reserves RAM and resident model weights with no consumer — a footgun under memory pressure. Tear it down on such a host:
 
 ```bash
 sudo systemctl disable --now ollama.service
 ```
-
 One-line check that no enabled local runtime is unused by the active Compose profile set — on a pure-llama.cpp box the running services do not include `ollama`, so an active host `ollama.service` is the unused second runtime:
 
 ```bash

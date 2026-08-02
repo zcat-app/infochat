@@ -1,9 +1,9 @@
 ---
 id: M1-744
 title: "llama.cpp compose services: operator-settable resource caps and an opt-in GPU overlay"
-status: pending
+status: done
 created: 2026-08-01
-last_updated: 2026-08-01
+last_updated: 2026-08-02
 blocked_by: []
 files_budget: 4
 files_scope:
@@ -114,12 +114,41 @@ spec_refs:
   - docs/design/07-deployment.md §7.8.7
 decision_refs:
   - D49
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 233
+      removed: 20
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-08-02
+    verdict: CLEAN
+    base: 4ac55356af564efa522567da7ca1b10e82cacb5d
+    head: working-tree (uncommitted, vs fork point)
+    verdict_file: docs/plan/m1/redteam/M1-744-2026-08-02.md
+    out_of_model_count: 1
+    note: |
+      Pre-review gate audit (/m1-tick run). CLEAN. The one out-of-model item
+      (/dev/dri passthrough widening the container's host-device attack
+      surface) is an opt-in operator action outside the documented threat
+      model — no follow-up ticket warranted.
+clarity_check:
+  date: 2026-08-02
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 

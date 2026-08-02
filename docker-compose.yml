@@ -325,13 +325,18 @@ services:
     # guarantees placement. cpus 3.0 (of 4) is the key incident mitigation: it
     # caps inference below the core count so a request burst cannot peg all
     # cores and starve Postgres + the JVMs (the 2026-06-28 failure mode).
+    # The right values are a property of the operator's model + host, so all
+    # three are operator-settable (M1-744) via the INFOCHAT_LLAMACPP_* keys
+    # below — set them in the same --env-file secrets.env the wizard drives.
+    # The defaults ARE the M1-512 literals above, so a deployment that sets
+    # nothing renders byte-identical caps.
     deploy:
       resources:
         limits:
-          cpus: "3.0"
-          memory: 7g
+          cpus: "${INFOCHAT_LLAMACPP_CPUS:-3.0}"
+          memory: "${INFOCHAT_LLAMACPP_MEMORY:-7g}"
         reservations:
-          memory: 3g
+          memory: "${INFOCHAT_LLAMACPP_MEMORY_RESERVATION:-3g}"
 
   # Second llama.cpp instance for the pure-llama.cpp embeddings shape (M1-417,
   # D49): one llama-server serves exactly one model, so the fixed 768-dim nomic
@@ -364,14 +369,16 @@ services:
     # is small (weights well under 1 GB) but CPU-bursty under an embedding
     # backlog (1877 inference requests drove the 2026-06-28 window). 2g limit is
     # generous headroom; cpus 1.5 caps the burst so it cannot pile onto the
-    # generative server's cores.
+    # generative server's cores. Operator-settable via the
+    # INFOCHAT_LLAMACPP_EMBED_* keys (M1-744, same pattern as the generative
+    # service above); the defaults ARE the M1-512 literals.
     deploy:
       resources:
         limits:
-          cpus: "1.5"
-          memory: 2g
+          cpus: "${INFOCHAT_LLAMACPP_EMBED_CPUS:-1.5}"
+          memory: "${INFOCHAT_LLAMACPP_EMBED_MEMORY:-2g}"
         reservations:
-          memory: 512m
+          memory: "${INFOCHAT_LLAMACPP_EMBED_MEMORY_RESERVATION:-512m}"
 
 volumes:
   infochat-pgdata:

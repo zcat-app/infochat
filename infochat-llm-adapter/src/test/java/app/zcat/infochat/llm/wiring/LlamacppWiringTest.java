@@ -30,7 +30,12 @@ import org.junit.jupiter.api.io.TempDir;
  *       generative {@code llamacpp} service its model + host args and a
  *       healthcheck, declares a second {@code llamacpp-embeddings} service in
  *       embedding mode with its own healthcheck, and publishes no host port for
- *       either (binds stay on the compose network — the security ask).</li>
+ *       either (binds stay on the compose network — the security ask). Also
+ *       pins (M1-744): the operator-settable resource caps with their M1-512
+ *       literal defaults, the base file's freedom from {@code devices:}
+ *       passthrough, the generative service's {@code LLAMA_ARG_REASONING: "off"}
+ *       (M1-560), and the opt-in {@code docker-compose.gpu.yml} overlay's
+ *       Vulkan image + device/group_add keys for both services.</li>
  *   <li><b>Generated config</b> — drives the real {@code prod/scripts/4-llm.sh}
  *       wizard with a fake {@code docker} on {@code PATH} (no-ops the compose /
  *       run calls, answers the checksum probe) and scripted stdin, then asserts
@@ -67,6 +72,10 @@ class LlamacppWiringTest {
     // image both llama.cpp services must run. server-b5350 predates the gemma4
     // architecture and cannot load GEN_GGUF (M1-442); a downgrade fails the build.
     private static final String LLAMACPP_IMAGE = "ghcr.io/ggml-org/llama.cpp:server-b9776";
+    // The Vulkan build of the SAME pinned release, declared by the opt-in
+    // docker-compose.gpu.yml overlay (M1-744) — a second image, so the
+    // anti-downgrade pin must cover it too rather than move off the base file.
+    private static final String LLAMACPP_VULKAN_IMAGE = "ghcr.io/ggml-org/llama.cpp:server-vulkan-b9776";
 
     // The model volume the wizard's fetch_gguf writes to and the compose services
     // mount; must resolve to the same real Docker volume regardless of compose
@@ -130,6 +139,76 @@ class LlamacppWiringTest {
                 "generative llamacpp service must pin " + LLAMACPP_IMAGE);
         assertTrue(composeServiceBlock("llamacpp-embeddings").contains("image: " + LLAMACPP_IMAGE),
                 "embeddings llamacpp service must pin " + LLAMACPP_IMAGE);
+    }
+
+    @Test
+    void resourceCapsAreOperatorSettableWithDefaultsEqualToTheM1_512Literals() throws IOException {
+        // M1-744: the caps are interpolated so an operator can set them via the
+        // same --env-file secrets.env the wizard drives, and every default IS the
+        // M1-512 literal — a deployment that sets nothing renders byte-identical
+        // caps (verified against `docker compose config` at authoring). An edit
+        // that drops the interpolation or re-tunes a default fails here.
+        String gen = composeServiceBlock("llamacpp");
+        assertTrue(gen.contains("cpus: \"${INFOCHAT_LLAMACPP_CPUS:-3.0}\""),
+                "generative llamacpp cpus must be operator-settable, default 3.0:\n" + gen);
+        assertTrue(gen.contains("memory: \"${INFOCHAT_LLAMACPP_MEMORY:-7g}\""),
+                "generative llamacpp memory limit must be operator-settable, default 7g:\n" + gen);
+        assertTrue(gen.contains("memory: \"${INFOCHAT_LLAMACPP_MEMORY_RESERVATION:-3g}\""),
+                "generative llamacpp memory reservation must be operator-settable, default 3g:\n" + gen);
+
+        String emb = composeServiceBlock("llamacpp-embeddings");
+        assertTrue(emb.contains("cpus: \"${INFOCHAT_LLAMACPP_EMBED_CPUS:-1.5}\""),
+                "embeddings llamacpp cpus must be operator-settable, default 1.5:\n" + emb);
+        assertTrue(emb.contains("memory: \"${INFOCHAT_LLAMACPP_EMBED_MEMORY:-2g}\""),
+                "embeddings llamacpp memory limit must be operator-settable, default 2g:\n" + emb);
+        assertTrue(emb.contains("memory: \"${INFOCHAT_LLAMACPP_EMBED_MEMORY_RESERVATION:-512m}\""),
+                "embeddings llamacpp memory reservation must be operator-settable, default 512m:\n" + emb);
+    }
+
+    @Test
+    void gpuOverlayPinsVulkanImageAndDeviceKeysForBothServices() throws IOException {
+        // The opt-in docker-compose.gpu.yml overlay (M1-744) is the ONLY place
+        // GPU wiring may live. The anti-downgrade control is duplicated here, not
+        // moved off the base file: an accidental downgrade to a pre-gemma4 Vulkan
+        // build cannot load the pinned generative GGUF and must fail the build
+        // (M1-442 precedent).
+        for (String service : new String[] {"llamacpp", "llamacpp-embeddings"}) {
+            String block = composeServiceBlock("docker-compose.gpu.yml", service);
+            assertTrue(block.contains("image: " + LLAMACPP_VULKAN_IMAGE),
+                    "GPU overlay " + service + " must pin " + LLAMACPP_VULKAN_IMAGE
+                            + " — the Vulkan build of the same pinned release:\n" + block);
+            assertTrue(block.contains("/dev/dri:/dev/dri"),
+                    "GPU overlay " + service + " must pass the render nodes through:\n" + block);
+            assertTrue(block.contains("group_add:"),
+                    "GPU overlay " + service + " must add the host render/video GIDs:\n" + block);
+        }
+    }
+
+    @Test
+    void baseComposeDeclaresNoDevicePassthrough() throws IOException {
+        // Docker fails container creation when a `devices:` path is absent, so a
+        // devices: key in the BASE file would break every host without an iGPU
+        // (the VPS scenario in docs/spec/deployment.md). GPU wiring stays in the
+        // opt-in overlay only (M1-744).
+        assertFalse(composeServiceBlock("llamacpp").contains("devices:"),
+                "generative llamacpp service must not declare devices: in the base file");
+        assertFalse(composeServiceBlock("llamacpp-embeddings").contains("devices:"),
+                "embeddings llamacpp service must not declare devices: in the base file");
+    }
+
+    @Test
+    void generativeLlamacppServiceDisablesReasoning() throws IOException {
+        // M1-560 set this; nothing pinned it until M1-744. Without it llama.cpp's
+        // --reasoning auto detects a thinking-capable template and turns reasoning
+        // ON, so the per-task max-tokens caps (M1-548, sized for VISIBLE output)
+        // are consumed by thinking-channel tokens — empty or format-broken replies
+        // (F-live-8, host-proven 2026-07-04; reproduced 2026-08-01 against a
+        // DeepSeek-V4-Flash GGUF with content:"" and the whole answer in
+        // reasoning_content).
+        assertTrue(composeServiceBlock("llamacpp").contains("LLAMA_ARG_REASONING: \"off\""),
+                "generative llamacpp service must declare LLAMA_ARG_REASONING: \"off\""
+                        + " or thinking-capable models return empty/format-broken replies"
+                        + " (F-live-8, M1-560)");
     }
 
     // --- Generated config (drive the real wizard) -------------------------------
@@ -344,9 +423,14 @@ class LlamacppWiringTest {
                 + "exit 0\n";
     }
 
-    /** The compose block for a 2-space-indented service, header to the next service key. */
+    /** The base-file compose block for a 2-space-indented service, header to the next service key. */
     private String composeServiceBlock(String service) throws IOException {
-        String compose = Files.readString(repoRoot().resolve("docker-compose.yml"));
+        return composeServiceBlock("docker-compose.yml", service);
+    }
+
+    /** The compose block for a 2-space-indented service in the named compose file. */
+    private String composeServiceBlock(String composeFile, String service) throws IOException {
+        String compose = Files.readString(repoRoot().resolve(composeFile));
         Pattern header = Pattern.compile("(?m)^  " + Pattern.quote(service) + ":\\s*$");
         Matcher m = header.matcher(compose);
         assertTrue(m.find(), "service '" + service + "' not found in docker-compose.yml");

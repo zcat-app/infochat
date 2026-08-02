@@ -1,0 +1,44 @@
+# Opt-in GPU (Vulkan) overlay for the two llama.cpp services (M1-744, D49).
+# Apply as a SECOND -f file — never fold these keys into the base file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+#       --profile llamacpp --profile llamacpp-embeddings up -d
+#
+# Why an overlay and not the base file or a Compose profile: a profile gates
+# WHETHER a service starts; it cannot add keys to an already-defined service.
+# And `devices:` cannot live in the base file unconditionally because Docker
+# fails container creation when the path is absent — which would break every
+# host without an iGPU (the VPS scenario in docs/spec/deployment.md included).
+# With the overlay, the base file stays startable everywhere.
+#
+# The image is the Vulkan build of the SAME pinned llama.cpp release as the
+# base file's CPU build (server-b9776 — the anti-downgrade pin in
+# LlamacppWiringTest covers both). A GPU-resident model still needs host RAM
+# headroom: GTT pages are pinned system memory charged to the container's
+# cgroup, so the deploy.resources caps from the base file (settable via the
+# INFOCHAT_LLAMACPP_* keys) bind a GPU model just as firmly as a CPU one.
+#
+# ROOTLESS DOCKER TRAP (measured 2026-08-01): under rootless Docker the
+# group_add below does NOT work — the host's render/video GIDs are not mapped
+# into the user namespace, the device node shows up as 65534:65534, and
+# llama-server --list-devices prints an empty list with no error. The fix is
+# host-side: an ACL granting the user container-root maps to (see
+# docs/design/07-deployment.md §7.8.7 for the setfacl + udev runbook). The
+# group_add values are the host's render/video GIDs — the 990/44 below are the
+# Debian/Ubuntu values; check yours with `getent group render video`.
+services:
+  llamacpp:
+    image: ghcr.io/ggml-org/llama.cpp:server-vulkan-b9776
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "990" # render
+      - "44"  # video
+
+  llamacpp-embeddings:
+    image: ghcr.io/ggml-org/llama.cpp:server-vulkan-b9776
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "990" # render
+      - "44"  # video

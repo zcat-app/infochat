@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 753 |
+| done | 754 |
 | deferred | 0 |
 | abandoned | 22 |
 | **total** | **783** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-744 — llama.cpp compose services: operator-settable resource caps and an opt-in GPU overlay (complexity: medium, risk: medium)
 - M1-745 — English anchor: translate non-English posts at ingest and retrieve against the English field (complexity: high, risk: high)
 - M1-748 — Investigate why no similarity threshold separates true from false matches, and whether a single global threshold is the right model at all (complexity: medium, risk: low)
 
@@ -67,6 +66,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-744 | llama.cpp compose services: operator-settable resource caps and an opt-in GPU overlay | 2026-08-02 | round 1 APPROVE |
 | M1-743 | Roll-up must not fabricate over an empty headline set | 2026-08-02 | round 1 APPROVE |
 | M1-742 | A quarantine row per non-BENIGN Stage 2 verdict | 2026-08-01 | round 1 APPROVE |
 | M1-741 | approve_quarantine ignores an owed Stage 2 verdict | 2026-08-01 | round 1 APPROVE |
@@ -76,7 +76,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-728 | Category roll-up sends every post's full body and asks for one or two sentences: it neither fits a large category nor describes one | 2026-08-01 | round 1 APPROVE |
 | M1-727 | Personal and humorous posts from social accounts render under topic headers: add a `personal` label and route those clusters to Other | 2026-08-01 | round 1 APPROVE |
 | M1-725 | The digest has no lead: a reader who opens only the first message gets the newest item of the largest tag | 2026-08-01 | round 1 APPROVE |
-| M1-724 | Digest cluster selection is recency-only: the cap keeps the newest stories, never the most significant | 2026-08-01 | round 1 APPROVE |
 
 ---
 
@@ -990,7 +989,7 @@ M1-740 (done)
 M1-741 (done)
 M1-742 (done)
 M1-743 (done)
-M1-744 (pending) ← runnable
+M1-744 (done)
 M1-745 (pending) ← runnable
   ├── M1-717 (abandoned)
   ├── M1-746 (pending)
