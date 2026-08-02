@@ -193,6 +193,12 @@ class ReEvalVerdictNotifyIT {
             // flips READY and fires the suite's only new_post emit.
             taggerWorker.onTick();
             entityExtractorWorker.onTick();
+            // The fixture seeds translation_done=TRUE (M1-749): the
+            // post's source is 'en'-declared, so the translator would
+            // have flipped the cursor with no dispatch — seeding the
+            // flag is that end state, and it keeps the drive
+            // deterministic (the translator's own tick batch is
+            // max-concurrency-sized against a shared fixture DB).
             embeddingWorker.onTick();
             // The classifier is the third parallel-after-tagger stage and gates
             // RAW→READY (M1-597). No classifier reply is queued on the stub, so
@@ -315,13 +321,13 @@ class ReEvalVerdictNotifyIT {
                         + "  fetched_at, status, status_changed_at, ready_at,"
                         + "  stage1_done, stage1_flagged, stage2_done, stage2_failed,"
                         + "  tagger_done, tagger_fallback, entity_done, embedding_done,"
-                        + "  tags, re_eval_attempts, stage2_verdict"
+                        + "  tags, re_eval_attempts, stage2_verdict, translation_done"
                         + ") VALUES ("
                         + "  ?, ?, ?, ?, ?,"
                         + "  ?, ?, now(), " + (readyAt ? "now()" : "NULL") + ","
                         + "  TRUE, TRUE, TRUE, ?,"
                         + "  ?, FALSE, ?, ?,"
-                        + "  ?::text[], 0, ?"
+                        + "  ?::text[], 0, ?, TRUE"
                         + ") RETURNING id, fetched_at")) {
                 ps.setString(1, uid);
                 ps.setObject(2, sourceId);

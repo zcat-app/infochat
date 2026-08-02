@@ -390,6 +390,56 @@ class EmbeddingWorkerIT {
         assertEmbeddingDone(longPost.id(), true);
     }
 
+    // ---------- 9. translation_done gate + English-anchor projection (M1-749) ----------
+
+    @Test
+    @Order(9)
+    void translationGateHoldsPostAndProjectionReadsEnglishAnchor() throws Exception {
+        // Pin the injected Clock so FETCHED_AT sits inside the pickup
+        // scan window (same seam as the @Order(8) summary-gate scenario).
+        QuarkusMock.installMockForType(
+            Clock.fixed(Instant.parse("2026-05-17T00:00:00Z"), ZoneOffset.UTC), Clock.class);
+        // Three seeds differing ONLY in the M1-749 columns:
+        //   gated-out — translation_done=FALSE: the IngestTranslationWorker
+        //     has not run, so embedding must not see the post (without the
+        //     gate a non-English post would be permanently embedded from
+        //     non-English text — embedding_done never re-fires).
+        //   anchored — translation_done=TRUE with title_en/body_en written:
+        //     the pickup projection must read the English anchor through
+        //     coalesce(title_en, title) / coalesce(body_en, body).
+        //   fallback — translation_done=TRUE with NULL *_en (an
+        //     English-source or translation-released post): the projection
+        //     must fall back to the original text.
+        UUID sourceId = seedRssSource("translation-gate");
+        SeededPost gatedOut = seedPostWithTranslationState(
+            "gate-closed", sourceId, false, null, null);
+        SeededPost anchored = seedPostWithTranslationState(
+            "gate-anchored", sourceId, true, "English anchor title", "English anchor body");
+        SeededPost fallback = seedPostWithTranslationState(
+            "gate-fallback", sourceId, true, null, null);
+
+        List<EmbeddingWorker.PostRow> pending = embeddingWorker.enumeratePending(Integer.MAX_VALUE);
+
+        assertFalse(pending.stream().anyMatch(r -> r.id().equals(gatedOut.id())),
+            "translation_done=FALSE must hold the post out of embedding pickup (M1-749)");
+        EmbeddingWorker.PostRow anchoredRow = pending.stream()
+            .filter(r -> r.id().equals(anchored.id()))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("translation_done=TRUE post must be picked"));
+        assertEquals("English anchor title", anchoredRow.title(),
+            "the projection reads coalesce(title_en, title)");
+        assertEquals("English anchor body", anchoredRow.body(),
+            "the projection reads coalesce(body_en, body)");
+        EmbeddingWorker.PostRow fallbackRow = pending.stream()
+            .filter(r -> r.id().equals(fallback.id()))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("a released post must still be picked"));
+        assertEquals("Embed IT title gate-fallback", fallbackRow.title(),
+            "NULL title_en falls back to the original title");
+        assertEquals("Embed IT body for slug gate-fallback", fallbackRow.body(),
+            "NULL body_en falls back to the original body");
+    }
+
     // ---------- helpers ----------
 
     private SeededPost seedPickupReadyPost(String slug) throws Exception {
@@ -420,10 +470,10 @@ class EmbeddingWorkerIT {
                      + "  id, uid, source_id, upstream_identifier, title, body, "
                      + "  fetched_at, status, "
                      + "  stage1_done, stage2_done, tagger_done, embedding_done, "
-                     + "  stage1_flagged, stage2_failed, tagger_fallback, tags"
+                     + "  stage1_flagged, stage2_failed, tagger_fallback, tags, translation_done"
                      + ") VALUES ("
                      + "  gen_random_uuid(), ?, ?, ?, ?, ?, ?, ?, "
-                     + "  TRUE, FALSE, ?, ?, FALSE, FALSE, FALSE, '{}'"
+                     + "  TRUE, FALSE, ?, ?, FALSE, FALSE, FALSE, '{}', TRUE"
                      + ") RETURNING id, fetched_at")) {
             ps.setString(1, uid);
             ps.setObject(2, sourceId);
@@ -434,6 +484,47 @@ class EmbeddingWorkerIT {
             ps.setString(7, status);
             ps.setBoolean(8, taggerDone);
             ps.setBoolean(9, embeddingDone);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "INSERT INTO post must yield an id");
+                UUID id = (UUID) rs.getObject(1);
+                Instant storedFetchedAt = rs.getTimestamp(2).toInstant();
+                return new SeededPost(id, uid, storedFetchedAt);
+            }
+        }
+    }
+
+    /**
+     * M1-749 fixture: a pickup-ready post (RAW, tagger_done=TRUE,
+     * embedding_done=FALSE, short body so the summary gate escapes) with
+     * explicit {@code translation_done} and English-anchor fields.
+     */
+    private SeededPost seedPostWithTranslationState(String slug, UUID sourceId,
+            boolean translationDone, @Nullable String titleEn, @Nullable String bodyEn)
+            throws Exception {
+        String uid = "embed-it/" + slug;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO post ("
+                     + "  id, uid, source_id, upstream_identifier, title, body, "
+                     + "  fetched_at, status, "
+                     + "  stage1_done, stage2_done, tagger_done, embedding_done, "
+                     + "  stage1_flagged, stage2_failed, tagger_fallback, tags, summary_done,"
+                     + "  entity_done, classifier_done, translation_done, title_en, body_en"
+                     + ") VALUES ("
+                     + "  gen_random_uuid(), ?, ?, ?, ?, ?, ?, ?, "
+                     + "  TRUE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE, '{}', TRUE,"
+                     + "  TRUE, TRUE, ?, ?, ?"
+                     + ") RETURNING id, fetched_at")) {
+            ps.setString(1, uid);
+            ps.setObject(2, sourceId);
+            ps.setString(3, "embed-it-upstream-" + slug);
+            ps.setString(4, "Embed IT title " + slug);
+            ps.setString(5, "Embed IT body for slug " + slug);
+            ps.setTimestamp(6, Timestamp.from(FETCHED_AT));
+            ps.setString(7, "RAW");
+            ps.setBoolean(8, translationDone);
+            ps.setString(9, titleEn);
+            ps.setString(10, bodyEn);
             try (ResultSet rs = ps.executeQuery()) {
                 assertTrue(rs.next(), "INSERT INTO post must yield an id");
                 UUID id = (UUID) rs.getObject(1);
@@ -470,11 +561,11 @@ class EmbeddingWorkerIT {
                      + "  fetched_at, status, "
                      + "  stage1_done, stage2_done, tagger_done, embedding_done, "
                      + "  stage1_flagged, stage2_failed, tagger_fallback, tags, summary_done,"
-                     + "  entity_done, classifier_done"
+                     + "  entity_done, classifier_done, translation_done"
                      + ") VALUES ("
                      + "  gen_random_uuid(), ?, ?, ?, ?, ?, ?, ?, "
                      + "  TRUE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE, '{}', ?,"
-                     + "  TRUE, TRUE"
+                     + "  TRUE, TRUE, TRUE"
                      + ") RETURNING id, fetched_at")) {
             ps.setString(1, uid);
             ps.setObject(2, sourceId);

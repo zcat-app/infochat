@@ -85,11 +85,11 @@ class EmbeddingWorkerPickupFloorIT {
                      + "  id, uid, source_id, upstream_identifier, title, body, "
                      + "  fetched_at, status, status_changed_at, "
                      + "  stage1_done, stage2_done, tagger_done, embedding_done, "
-                     + "  stage1_flagged, stage2_failed, tagger_fallback, tags"
+                     + "  stage1_flagged, stage2_failed, tagger_fallback, tags, translation_done"
                      + ") VALUES ("
                      + "  gen_random_uuid(), ?, ?, ?, ?, 'body', "
                      + "  ?, 'RAW', now(), "
-                     + "  TRUE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE, '{}'"
+                     + "  TRUE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE, '{}', TRUE"
                      + ") RETURNING id")) {
             ps.setString(1, "embed-floor-it/" + slug);
             ps.setObject(2, sourceId);

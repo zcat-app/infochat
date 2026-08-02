@@ -1,11 +1,12 @@
 ---
 id: M1-749
 title: "English anchor: ingest translation + embedding gate"
-status: pending
+status: done
 created: 2026-08-02
-last_updated: 2026-08-02
+last_updated: 2026-08-03
+outline_file: target/m1-tick-outline-M1-749.md
 blocked_by: []
-files_budget: 13
+files_budget: 14
 files_scope:
   - infochat-core/src/main/resources/db/migration/V74__post_english_anchor.sql
   - infochat-core/src/main/java/app/zcat/infochat/core/llm/LlmOutputSanitizerCore.java
@@ -18,6 +19,7 @@ files_scope:
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/translation/IngestTranslationWorkerIT.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/embedding/EmbeddingWorkerIT.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/embedding/EmbeddingWorkerPickupFloorIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/ReEvalVerdictNotifyIT.java
   - docs/design/02-schema.md
   - docs/design/05-llm-and-embeddings.md
 complexity: high
@@ -141,7 +143,21 @@ acceptance:
     that BOTH the provider bean (delegating, behaviour and API unchanged,
     so the spec-parity CI test still pins one implementation) and the
     collector worker call — a collector-side copy of the 700-line control
-    is a fork the parity test would not cover and is rejected; (c)
+    is a fork the parity test would not cover and is rejected. The
+    collector-side application ALSO emits the `LLM_OUTPUT_SANITIZED`
+    `audit_log` rows the spec attaches to every sanitizer match —
+    aggregated per distinct token per sanitize call, carrying the exact
+    occurrence count (counted, never throttled), via `AuditLogWriter`
+    (the collector role is INSERT-capable on `audit_log`; the
+    `RE_EVAL_RELEASED` precedent is the same ingest-side posture). The
+    pure transform itself stays audit-free; the emission lives in the
+    worker, and a failed audit write fails the translation attempt
+    (nothing is stored un-audited — the same durability posture as the
+    provider bean, mirrored fail-closed: the post stays
+    `translation_done=FALSE` and is retried next tick). A surface that
+    takes the strip takes the audit — the red-team round-2 finding
+    (M1-749-2026-08-02-r2) pinned that half-application is the worst of
+    both readings; (c)
     `SemanticSearchTool`'s two arms keep their inline `status='READY'` +
     D59 world predicate BEFORE their LIMIT — no over-fetch-then-filter
     path is introduced; (d) retrieved rows still fold into the D21
@@ -211,12 +227,208 @@ decision_refs:
   - D21
   - D54
   - D59
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-03
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 20
+      added: 2858
+      removed: 554
+  - round: 2
+    date: 2026-08-03
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 19
+      added: 2889
+      removed: 556
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-08-02
+    category: AUDIT-EVASION
+    severity: medium
+    promise: |
+      docs/spec/security.md §LLM output sanitizer: "Every match is
+      audit-logged; rows aggregate per distinct token per sanitize call
+      and carry the exact occurrence count — counted, never throttled."
+      The same section scopes the sanitizer to "the full set of
+      LLM-authored output surfaces: chat-mode replies, on-the-fly
+      /summary prose, periodic group digests, /retry re-rolls, and any
+      future LLM-emitted text."
+    gap: |
+      The diff adds a new sanitize call site for LLM-emitted text —
+      IngestTranslationWorker.sanitize — which runs the shared
+      LlmOutputSanitizerCore closed-list strip over translator output
+      before storage but emits only one WARN per distinct token; the
+      class javadoc states explicitly that the collector-side
+      application emits no audit_log rows, and LlmOutputSanitizerCore
+      is declared pure, so no audit path exists anywhere for this
+      surface. Not a capability constraint: the collector DB role is
+      INSERT-only on audit_log, so the spec-committed
+      LLM_OUTPUT_SANITIZED row could have been written from this call
+      site.
+    repro: |
+      An adversary publishing to a subscribed non-English feed laces
+      posts with privileged-command tokens (the translator is
+      instructed to preserve them verbatim, so its output carries
+      them). The worker's sanitize pass redacts them from body_en
+      before storage — the preventive control fires — but the only
+      record is a WARN in collector stdout; /audit shows nothing, so
+      translation-laundering probes at feed scale leave zero
+      operator-visible audit trail.
+    suggested_fix_class: audit-log-coverage
+  - date: 2026-08-02
+    category: INJECTION
+    severity: low
+    promise: |
+      docs/spec/security.md §Prompt-injection defenses: "Every prompt
+      that includes user-derived text is wrapped in a delimiter block
+      whose marker contains a per-call random value... The system
+      prompt instructs the model to never follow instructions inside
+      the wrapper... and to treat the content as data." The wrapper's
+      integrity depends on untrusted bytes never being reinterpreted
+      as template structure.
+    gap: |
+      IngestTranslationWorker.renderPrompt substitutes placeholders
+      sequentially: {{id}}, {{SOURCE_LANGUAGE}}, {{title}}, {{body}} —
+      in that order. Because {{body}} is replaced AFTER the
+      upstream-controlled title is spliced in, a title containing the
+      literal string "{{body}}" has the full post body substituted
+      into the Title line as well, collapsing the prompt's title/body
+      separation the JSON contract assumes.
+    repro: |
+      A feed publisher sets a post title containing the literal
+      {{body}}. The rendered prompt shows the entire body twice and
+      the model can legitimately return the whole body translation as
+      the "title" value, which parses as VALID, is stored as
+      post.title_en, and is indexed into search_tsv and embedded.
+      Blast radius is bounded (retrieval pollution of the attacker's
+      own feed content, output still normalized/sanitized, fetch body
+      caps bound the size), hence low.
+    suggested_fix_class: input-sanitization
+  - date: 2026-08-02
+    category: AUDIT-EVASION
+    severity: medium
+    promise: |
+      docs/spec/security.md §LLM output sanitizer: "Every match is
+      audit-logged; rows aggregate per distinct token per sanitize call
+      and carry the exact occurrence count — counted, never throttled."
+      The same section scopes the sanitizer to "the full set of
+      LLM-authored output surfaces ... and any future LLM-emitted text."
+      The spec's re-eval precedent (RE_EVAL_RELEASED) shows the same
+      posture on the ingest side: automated security-relevant
+      transitions carry a committed audit row precisely so attacker
+      probing at feed scale is not invisible to operators.
+    gap: |
+      Re-audit round 2 — verified NOT closed (the round-2 change was
+      the renderPrompt substitution-order hardening only).
+      IngestTranslationWorker.sanitize runs the shared
+      LlmOutputSanitizerCore closed-list strip over translator output
+      before storage but emits only one WARN per distinct token; the
+      class javadoc states explicitly that the collector-side
+      application emits no audit_log rows, and LlmOutputSanitizerCore
+      is declared pure, so no audit path exists anywhere for this
+      surface. Not a capability constraint: the collector DB role is
+      INSERT-only on audit_log. Scope re-examination: the "delivered
+      to a user" anchor cuts toward exclusion, but the diff itself
+      concedes the surface is inside the sanitizer's mandate by
+      applying the redaction half ("the SAME sanitization pipeline"),
+      and the spec attaches the audit row to every match of that
+      sanitizer — a surface cannot be inside the mandate for the strip
+      and outside it for the audit row. If the user judges the anchor
+      excludes retrieval-only fields, the correct resolution is a spec
+      amendment stating that boundary, not a silent half-application.
+    repro: |
+      An adversary publishing to a subscribed non-English feed laces
+      posts with privileged-command tokens; the translator's output
+      carries them, the sanitize pass redacts them from
+      title_en/body_en before storage — the preventive control fires —
+      but the only record is a WARN in collector stdout; /audit shows
+      nothing, so translation-laundering probes at feed scale leave
+      zero operator-visible audit trail, unlike every provider-side
+      sanitizer hit and unlike the ingest-side RE_EVAL_RELEASED
+      transitions.
+    suggested_fix_class: audit-log-coverage
+redteam_audits:
+  - date: 2026-08-02
+    verdict: FINDINGS
+    base: a150a29f
+    head: working tree (fork-point + uncommitted branch work)
+    verdict_file: docs/plan/m1/redteam/M1-749-2026-08-02.md
+    findings_count: 2
+    out_of_model_count: 1
+    note: |
+      First audit at the /m1-tick run redteam gate (ahead of review).
+      One medium (collector-side sanitize emits no audit_log rows) and
+      one low (renderPrompt's sequential {{body}}-after-{{title}}
+      substitution). Developer falsification attempt (user directive):
+      the low was confirmed as a correctness nit and fixed in-band
+      (substitution order swapped + unit test); the medium was judged
+      a spec-scope misread but re-examined independently in round 2.
+      Out-of-model: semantic-pollution via the translation channel —
+      retrieval-integrity commitments are not in the threat model.
+  - date: 2026-08-02
+    verdict: FINDINGS
+    base: a150a29f
+    head: working tree (fork-point + uncommitted branch work, incl. round-1 nit fix)
+    verdict_file: docs/plan/m1/redteam/M1-749-2026-08-02-r2.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      Re-audit after the renderPrompt fix. Round-1 INJECTION (low)
+      VERIFIED CLOSED. Round-1 AUDIT-EVASION (medium) STANDS — the
+      adversary's decisive argument: the diff applies the redaction
+      half of the sanitizer to this surface, so it cannot sit outside
+      the mandate for the audit row; resolution is user-owned (add
+      collector-side audit rows OR spec-amend the commitment's scope).
+      Escalated as redteam-finding per the user directive.
+  - date: 2026-08-02
+    verdict: CLEAN
+    base: a150a29f
+    head: working tree (fork-point + uncommitted branch work, incl. audit-emission remediation)
+    verdict_file: docs/plan/m1/redteam/M1-749-2026-08-02-r3.md
+    out_of_model_count: 1
+    note: |
+      Terminal audit for the gate. AUDIT-EVASION VERIFIED CLOSED by the
+      collector-side LLM_OUTPUT_SANITIZED emission (aggregation, exact
+      counts, fail-closed durability, no new surface); INJECTION
+      RE-CONFIRMED CLOSED. Out-of-model (advisory, carried):
+      semantic/retrieval pollution via the translation channel —
+      retrieval-integrity commitments are not in the threat model.
+clarity_check:
+  date: 2026-08-02
+  verdict: WARN
+  warnings:
+    - >-
+      CENSUS-PRESENT-IF-CLASS-SCOPED (lint): advisory — the extraction
+      touches exactly one class (LlmOutputSanitizer, delegated) and the
+      spec-parity CI test pins the single implementation; the ticket
+      already enumerates the five direct PostRow-constructing tests and
+      the fixture INSERT sites.
+    - >-
+      Self-check spot-verified (pre-refine pass): LlmOutputSanitizer is
+      698 lines; V58 holds search_tsv + idx_post_search_tsv; V73 is the
+      latest migration; EmbeddingWorker.enumeratePending projects 5
+      fields; ModelTask.TRANSLATOR, IngestTextNormalizer, and the
+      TaggerWorkerTest hand-wired LlmRouter pattern all exist as cited;
+      ReadyPromoter requires embedding_done; spec_ref anchors resolve.
+      Refine delta verified: prompts/ directory exists (translator.md
+      lives there) and is confirmed English -> target in direction.
+  blockers: []
 escalation_reason:
 ---
 
@@ -295,3 +507,20 @@ entity extraction on the English field (follow-up), the
 - Measurement behind the model choice lives in
   `docs/measurement/translator-slot.md` — evidence, not direction; the
   model name stays out of the spec.
+
+## Round 1 rework
+
+1. SCOPE-DRIFT-CHECK FAIL — the diff carried a stray
+   `.agents/memory/MEMORY.md` hunk (a "pre-registration free variable"
+   memory-index bullet) that matches no `files_scope` entry, is not
+   lifecycle-exempt, and traces to no acceptance item. Drop it from the
+   branch's commit; land the memory-index update separately.
+
+   Disposition (developer): the hunk was pre-existing working-tree state,
+   not part of this ticket's work. Reverted out of the diff; the full
+   pre-revert file is preserved at
+   `/tmp/MEMORY.md.pre-registration-preserved` and its backing entry
+   `.agents/memory/pre-registration-free-variable.md` remains untracked
+   on disk — both can be re-applied as a standalone `process:` commit.
+   No testable surface changed, so the round-1 green verify log stays
+   valid (M1-272).

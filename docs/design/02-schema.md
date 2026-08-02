@@ -518,6 +518,17 @@ CREATE TABLE source (
   display_name    TEXT NOT NULL,
   category        TEXT NOT NULL,                    -- 'news','blog','social'
   bootstrap_tags  TEXT[] NOT NULL DEFAULT '{}',     -- tagger fallback (D22). /add-source --tags ≥1.
+  language        TEXT NOT NULL DEFAULT 'en',       -- DECLARED language of every post from this
+                                                    --   source (ISO 639-1), never inferred over the
+                                                    --   body (D29; V74). Drives the ingest
+                                                    --   translator: non-'en' posts are translated
+                                                    --   to English once at ingest into
+                                                    --   post.title_en/body_en. The write path
+                                                    --   (/add-source --lang, bootstrap entry) is
+                                                    --   M1-750; V74 creates the column with the
+                                                    --   'en' default (the current corpus is all
+                                                    --   English, so existing rows backfill with
+                                                    --   no rewrite).
   status          TEXT NOT NULL DEFAULT 'active'
     CHECK (status IN ('active','failed','disabled')),
   added_by        UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -714,6 +725,22 @@ CREATE TABLE post (
                                                       --   row, under-threshold body, or failed
                                                       --   after retry) → embedding input falls
                                                       --   back to first 800 chars of body.
+  title_en            TEXT,                           -- English ANCHOR fields (D29 amended, M1-749;
+  body_en             TEXT,                           --   V74): a non-English post is translated to
+                                                    --   English once at ingest by
+                                                    --   IngestTranslationWorker; the ORIGINAL
+                                                    --   title/body above are never rewritten and
+                                                    --   stay what the user is shown. Both retrieval
+                                                    --   arms read coalesce(x_en, x), so a NULL
+                                                    --   (English-source, not-yet-translated, or
+                                                    --   released-after-retry row) keeps the
+                                                    --   pre-V74 behaviour byte-identical. LLM-
+                                                    --   authored, so the translator's output passes
+                                                    --   the ingest normalizer + the shared
+                                                    --   LlmOutputSanitizerCore pipeline before
+                                                    --   storage, with the same aggregated
+                                                    --   LLM_OUTPUT_SANITIZED audit rows as the
+                                                    --   provider bean's surface.
   author              TEXT,
   published_at        TIMESTAMPTZ,
   fetched_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -742,6 +769,17 @@ CREATE TABLE post (
                                                      --   TRUE for pre-existing tagger-passed rows,
                                                      --   so the prefix-embedded corpus is never
                                                      --   re-summarized (roll-forward, M1-715)
+  translation_done BOOLEAN NOT NULL,                 -- ingest-translation stage cursor (V74, M1-749):
+                                                     --   EmbeddingWorker's pickup gates on it and the
+                                                     --   translator is the only writer that flips it.
+                                                     --   Two-step default (ADD ... DEFAULT TRUE, then
+                                                     --   SET DEFAULT FALSE — both attmissingval fast
+                                                     --   defaults, no table rewrite): pre-V74 rows
+                                                     --   read TRUE (already English; mid-pipeline rows
+                                                     --   finish embedding from original text), new
+                                                     --   inserts default FALSE (gated). Retry
+                                                     --   exhaustion also flips it TRUE with *_en left
+                                                     --   NULL — degrade-to-original, never wedge.
   stage1_flagged  BOOLEAN NOT NULL DEFAULT FALSE,    -- Stage 1 produced ≥1 quarantine span
   stage2_failed   BOOLEAN NOT NULL DEFAULT FALSE,    -- Stage 2 LLM errored after retry
                                                      --   (release-on-stage2-failure path may set
@@ -775,9 +813,17 @@ CREATE TABLE post (
   search_tsv      tsvector
     GENERATED ALWAYS AS (
       to_tsvector('english',
-                  coalesce(title, '') || ' ' || coalesce(body, ''))
+                  coalesce(title_en, title, '') || ' '
+                  || coalesce(body_en, body, ''))
     ) STORED,                                        -- lexical arm of hybrid chat retrieval
-                                                     --   (05-llm §5.4.6, D58; V58).
+                                                     --   (05-llm §5.4.6, D58; V58, replaced by V74
+                                                     --   for the D29 English anchor: reads the
+                                                     --   English fields with the original as
+                                                     --   fallback, so the all-English corpus is
+                                                     --   byte-identical and a not-yet-translated
+                                                     --   post stays searchable). regconfig stays
+                                                     --   hard-pinned to 'english' — per-language
+                                                     --   regconfig is the rejected alternative.
                                                      --   2-arg to_tsvector REQUIRED: the 1-arg
                                                      --   form is GUC-dependent (only STABLE) —
                                                      --   rejected in a generated column and a

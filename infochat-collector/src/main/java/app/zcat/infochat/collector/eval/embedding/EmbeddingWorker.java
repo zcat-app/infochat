@@ -37,7 +37,8 @@ import java.util.concurrent.Semaphore;
  *
  * <h2>Pickup criteria</h2>
  *
- * <p>{@code status='RAW' AND tagger_done=TRUE AND embedding_done=FALSE}.
+ * <p>{@code status='RAW' AND tagger_done=TRUE AND embedding_done=FALSE
+ * AND translation_done=TRUE}.
  * Quarantined posts are mechanically excluded by the {@code status='RAW'}
  * filter (Stage 2 INJECTION/MALWARE/UNKNOWN and Stage 1 watchdog
  * fail-closed both write {@code status='QUARANTINED'}). Posts on the
@@ -557,6 +558,18 @@ public class EmbeddingWorker {
      * the summarizer's per-post LLM call every time. Under-threshold
      * (and NULL-body) posts escape via the length clause and are
      * embedded from the first-800 fallback exactly as before. The
+     * {@code translation_done = TRUE} conjunct (M1-749, additive to the
+     * summary/length clause) holds a post until the
+     * IngestTranslationWorker has run: without the gate this worker
+     * would win the pickup race and permanently embed a non-English
+     * post from non-English text ({@code embedding_done} never
+     * re-fires). The SELECT projection reads the English anchor fields
+     * through {@code coalesce(title_en, title)} /
+     * {@code coalesce(body_en, body)} (D29), so a translated post is
+     * embedded from its English text while an English-source or
+     * translation-released post (NULL {@code *_en}) is embedded from
+     * its original text exactly as before; the {@code PostRow} record
+     * keeps its exact 5-field shape. The
      * {@code fetched_at} floor
      * ({@link PartitionScan#scanWindowFloor(Instant)}, sampled from the
      * injected Clock) lets the planner prune partitions of the
@@ -565,11 +578,12 @@ public class EmbeddingWorker {
      */
     List<PostRow> enumeratePending(int limit) throws SQLException {
         final String sql =
-            "SELECT id, fetched_at, title, body, body_summary "
+            "SELECT id, fetched_at, coalesce(title_en, title), coalesce(body_en, body), body_summary "
                 + "  FROM post "
                 + " WHERE status = 'RAW' "
                 + "   AND tagger_done = TRUE "
                 + "   AND embedding_done = FALSE "
+                + "   AND translation_done = TRUE "
                 + "   AND (summary_done = TRUE OR length(COALESCE(body, '')) <= ?) "
                 + "   AND fetched_at >= ? "
                 + " ORDER BY fetched_at, id "

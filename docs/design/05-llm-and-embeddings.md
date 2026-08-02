@@ -563,9 +563,13 @@ call cap and identical-call cache hold across the whole turn.
   (embed → `ORDER BY embedding <=> query LIMIT k` under the distance
   threshold).
 - **Lexical arm** — Postgres full-text over `post.search_tsv`, a STORED
-  generated column (V58) `to_tsvector('english', coalesce(title,'') || ' '
-  || coalesce(body,''))` with a GIN index declared on the partitioned
-  parent (`idx_post_search_tsv`). The query text reaches
+  generated column (V58, replaced by V74 for the D29 English anchor)
+  `to_tsvector('english', coalesce(title_en, title, '') || ' '
+  || coalesce(body_en, body, ''))` with a GIN index declared on the
+  partitioned parent (`idx_post_search_tsv`). The vector therefore reads
+  the English anchor fields with the original as fallback: the
+  all-English corpus is byte-identical in behaviour, and a post stays
+  searchable between persist and translate. The query text reaches
   `plainto_tsquery('english', ?)` ONLY as a bind parameter — never
   string-concatenated — and the regconfig is pinned to `'english'` on both
   the column and the query side: the 1-arg forms read
@@ -712,10 +716,42 @@ Pipeline
 
 For each post that reaches EmbeddingWorker:                                                                                                                                                                                                           
  
-1. Build input text: title + "\n\n" + (body_summary when populated, else first 800 chars of body).                                                                                                                                                                      
+1. Build input text: title + "\n\n" + (body_summary when populated, else first 800 chars of body). Since M1-749 the title/body reads are the D29 English anchor fields — the pickup projection selects coalesce(title_en, title) / coalesce(body_en, body), so a translated post embeds from its English text and an English-source or translation-released post (NULL *_en) embeds from its original text exactly as before. The composition rule itself (body_summary preferred, else first-800) is unchanged.                                                                                                                                                                      
 2. Call EmbeddingProvider.embed(text).                                           
 3. Insert one row into post_embedding(post_id, embedding, embedding_model, fetched_at).                                                                                                                                                               
 4. On failure: 1 retry → release without embedding (the post is still searchable by tag and entity, just not by semantic similarity).
+
+English-anchor gate (2026-08-02, M1-749, D29 amended): a non-English
+source post is translated to English ONCE at ingest by the collector's
+IngestTranslationWorker (prompts/ingest-translator.md via
+ModelTask.TRANSLATOR, source-language → English; prompts/translator.md
+stays the presentation-direction prompt) into post.title_en / post.body_en
+(V74). The original title/body are never rewritten and stay what the user
+is shown; the post's language comes from the DECLARED source.language
+column (V74, write path M1-750), never from inference over the body. A
+new per-stage cursor post.translation_done orders the pipeline:
+EmbeddingWorker's pickup gains AND translation_done = TRUE and the
+translator is the only writer that flips it — without the gate,
+embedding's seconds-scale batch pickup would permanently embed a
+non-English post from non-English text (embedding_done never re-fires).
+An 'en'-declared post flips TRUE with no translator dispatch; retry
+exhaustion flips TRUE with *_en left NULL, so a permanently failed
+translation degrades to embedding-from-original through the coalesce
+fallback rather than wedging the post out of READY. Translation ALWAYS
+runs after security evaluation (the pickup requires tagger_done=TRUE,
+which implies Stage 1/Stage 2 passed over the raw normalized body) — a
+paraphrasing translator must never launder an injection attempt past
+Stage 1. Because title_en/body_en are LLM-authored text derived from
+upstream-untrusted input, the translator's output passes the ingest
+normalizer (unconditional, no fenced-code carve-out) and the shared
+LlmOutputSanitizerCore pipeline before storage — with the same
+observability as the provider bean's sanitize path: aggregated WARN lines
+and LLM_OUTPUT_SANITIZED audit rows per distinct matched token, emitted
+by the worker (fail-closed: a failed audit write fails the translation
+attempt, so nothing is stored un-audited). V74's attmissingval
+two-step default makes every pre-V74 row read translation_done=TRUE (the
+current corpus is 100% English — no backfill, no re-embed, behaviour
+byte-identical).
 
 Input-text decision (2026-08-01, M1-715): body_summary is POPULATED
 
