@@ -137,6 +137,7 @@ class AddSourceBanCheckOrderingTest {
                                    String identifier,
                                    String displayName,
                                    String category,
+                                   String language,
                                    List<String> tags) {
             callCount.incrementAndGet();
             return new UpsertResult(Outcome.FRESH_INSERT, UUID.randomUUID(), displayName);

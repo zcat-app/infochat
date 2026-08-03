@@ -163,15 +163,22 @@ public class BootstrapLoader {
         // source_origin = 'bootstrap' on BOTH branches (D59): the file is
         // operator intent, so listing a previously /add-source'd ('user')
         // source promotes it into the implicit public corpus.
+        // language is declared operator intent too: the DO UPDATE branch
+        // overwrites it (unlike the provider upsert, whose INSERT-only
+        // language is grant-constrained — V31 excludes the column from the
+        // provider role's UPDATE) because re-listing an entry with a new
+        // language IS the operator's correction path (D29 declared, never
+        // inferred).
         final String sql =
-            "INSERT INTO source (kind, identifier, display_name, category, bootstrap_tags, config, source_origin) "
-                + "VALUES (?, ?, ?, ?, ?, ?::JSONB, 'bootstrap') "
+            "INSERT INTO source (kind, identifier, display_name, category, bootstrap_tags, config, source_origin, language) "
+                + "VALUES (?, ?, ?, ?, ?, ?::JSONB, 'bootstrap', ?) "
                 + "ON CONFLICT (kind, identifier) DO UPDATE "
                 + "SET display_name = EXCLUDED.display_name, "
                 + "    category = EXCLUDED.category, "
                 + "    bootstrap_tags = EXCLUDED.bootstrap_tags, "
                 + "    config = EXCLUDED.config, "
-                + "    source_origin = 'bootstrap' "
+                + "    source_origin = 'bootstrap', "
+                + "    language = EXCLUDED.language "
                 + "WHERE source.deleted_at IS NULL";
 
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -191,6 +198,7 @@ public class BootstrapLoader {
                 ps.setString(4, entry.category());
                 ps.setArray(5, tagArray);
                 ps.setString(6, parser.configToJsonString(entry.config()));
+                ps.setString(7, Objects.requireNonNull(entry.language()));
                 ps.executeUpdate();
             }
         }

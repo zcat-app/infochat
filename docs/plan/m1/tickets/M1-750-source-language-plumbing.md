@@ -1,12 +1,15 @@
 ---
 id: M1-750
 title: "Source language plumbing: --lang + bootstrap validation"
-status: pending
+status: done
 created: 2026-08-02
-last_updated: 2026-08-02
+last_updated: 2026-08-03
+refine_log:
+  - date: 2026-08-03
+    reason: scope-drift regularization at implementation — upsert signature gains `language`, forcing mechanical parameter additions in three test files (fake overrides in AddSourceCommandHandlerTest/AddSourceBanCheckOrderingTest, direct call in AddSourceContactIdRedactionTest); files_scope extended by those three, files_budget 15 → 18
 blocked_by:
   - M1-749
-files_budget: 15
+files_budget: 18
 files_scope:
   - infochat-core/src/main/java/app/zcat/infochat/core/source/SourceLanguageRegistry.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/bootstrap/BootstrapSourcesEntry.java
@@ -21,6 +24,9 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceArgsTest.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/bootstrap/BootstrapSourcesParserTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/source/SourceUpsertServiceIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceCommandHandlerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceBanCheckOrderingTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceContactIdRedactionTest.java
   - docs/spec/commands.md
   - docs/design/07-deployment.md
 complexity: medium
@@ -125,12 +131,53 @@ spec_refs:
   - docs/spec/llm.md §Translation flow
 decision_refs:
   - D29
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-03
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      assertion_adequacy: WARN
+    diff_stats:
+      files: 25
+      added: 593
+      removed: 41
+    notes: >-
+      Reviewer cited line numbers relative to the .diff file (e.g. AddSourceArgs
+      "--lang=" at "691", actual source line 159) rather than the source files;
+      every cited CONTENT claim was verified against the worktree (the described
+      code exists only there), so the wrong-tree read is refuted — citations are
+      diff-relative, not source-relative. ASSERTION-ADEQUACY WARN (informational):
+      bootstrap loader path's language write has no end-of-path assertion in
+      BootstrapLoaderIT (pre-existing test, fixture omits the field); surviving
+      mutations confined to the trusted operator-JSON path; deferred as noted.
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-08-03
+    verdict: CLEAN
+    base: fork-point-of-branch (working tree vs merge-base main HEAD)
+    head: working-tree (0 commits on branch)
+    verdict_file: docs/plan/m1/redteam-multi/M1-750-2026-08-03/cross-examination.md
+    out_of_model_count: 2
+    note: |
+      redteam-multi gate (run step 4, auditors claude/codex/opencode, 3/3
+      CLEAN, no findings). 2 out-of-model observations in disposition.md:
+      (1) operator-vs-caller framing wording, no gap; (2) user-influenced
+      ingest-translation cost surface — accepted residual risk, follow-up
+      ticket if the ingest-translation wave needs a spend bound; (3) bootstrap
+      resolveLanguage trim asymmetry — fail-closed, no ticket.
+clarity_check:
+  date: 2026-08-03
+  verdict: PASS
+  warnings:
+    - CENSUS-PRESENT-IF-CLASS-SCOPED lint WARN resolved inline — Census section added enumerating AddSourceArgs/SourceUpsertService/Bootstrap* sites
 escalation_reason:
 ---
 
@@ -175,6 +222,31 @@ The schema/worker/embedding gate (M1-749). Extending the supported set
 beyond `{en, cs}`. `LanguageRegistry`'s UI set. Language detection. New
 bundle keys. Entity extraction, the query leg (M1-746), display-time
 translation (M1-747).
+
+## Census
+
+This ticket adds a field to three existing records/parsers and a column to
+one INSERT, so it is class-scoped. The classes are "sites that construct or
+consume the changed surfaces". Enumerated mechanically — re-runnable greps:
+
+    grep -rn "new AddSourceArgs" infochat-provider/src/main/java
+    grep -rln "sourceUpsertService.upsert\|SourceUpsertService" infochat-provider/src
+    grep -rln "BootstrapSourcesEntry\|BootstrapSourcesParser\|BootstrapLoader" infochat-collector/src
+
+| Site | Disposition |
+|---|---|
+| `AddSourceArgs.java:180` (record construction in parse's Success path) | fix — the record gains `lang`; this is the single main-code construction site |
+| `AddSourceCommandHandler.java` (parses args, calls `sourceUpsertService.upsert` at :219) | fix — carries `lang` into the upsert |
+| `SourceUpsertService.java` (`UPSERT_SOURCE_SQL` INSERT) | fix — column list gains `language` |
+| `BootstrapSourcesEntry.java` / `BootstrapSourcesParser.java` (entry field + parse) | fix — optional `language`, default `en` |
+| `BootstrapLoader.java` (@Priority(200) startup bean; the INSERT) | fix — INSERT gains `language` |
+| `AddSourceArgsTest`, `BootstrapSourcesParserTest`, `SourceUpsertServiceIT` | fix — the ticket's test additions |
+| every remaining `SourceUpsertService` hit — `AddSourceCommandHandlerTest`, `AddSourceBanCheckOrderingTest`, `AddSourceContactIdRedactionTest`, `DegradedDigestRendererTest` | fix — mechanical only: the `upsert` signature gains `language`, so the two fake overrides and the redaction test's direct call add the parameter (no behavioral change); `DegradedDigestRendererTest` only names the class — no change |
+| every remaining `BootstrapLoader` hit — `BootstrapLoaderTest`, `BootstrapLoaderIT`, plus `@Priority(200)` ordering mentions in `FetchScheduler`, `StreamSourceSupervisor`, `NostrStreamSource`, `TagVocabulary` | out-of-scope — the bean's startup wiring and priority ordering are untouched by the column addition |
+
+The greps are deliberately broad (class-name hits), so the last rows dispose
+the incidental references as a class. Re-run them live at `start`/review and
+verify no hit is missed.
 
 ## Notes
 

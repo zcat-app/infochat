@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 761 |
+| done | 762 |
 | deferred | 0 |
 | abandoned | 23 |
 | **total** | **792** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-746 — Query leg: translate a non-English search query into the corpus anchor language under D58's four conditions (complexity: medium, risk: high)
-- M1-750 — Source language plumbing: --lang + bootstrap validation (complexity: medium, risk: medium)
 - M1-754 — Parked-source re-probe ladder + park-reason discriminator + recurring parked-set signal (complexity: high, risk: medium)
 - M1-755 — Display-time translation of /saved list headlines (complexity: medium, risk: medium)
 - M1-756 — Display-time hit translation for digest headlines and the degraded renderers (complexity: medium, risk: medium)
@@ -71,12 +70,12 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-753 | RssFeedParser rejects an entire feed that exceeds MAX_ITEMS instead of truncating, so a large legitimate archive feed can never be ingested at all | 2026-08-03 | round 1 APPROVE |
 | M1-752 | A source parked in status='failed' is dark forever and, after one notification, silently — decide whether D42's no-automatic-recovery stance survives | 2026-08-03 | round 1 APPROVE |
 | M1-751 | Tagger prompt renders the controlled vocabulary in a per-JVM-random order; make it deterministic | 2026-08-03 | round 1 APPROVE |
+| M1-750 | Source language plumbing: --lang + bootstrap validation | 2026-08-03 | round 1 APPROVE |
 | M1-749 | English anchor: ingest translation + embedding gate | 2026-08-03 | round 2 APPROVE |
 | M1-748 | Investigate why no similarity threshold separates true from false matches, and whether a single global threshold is the right model at all | 2026-08-03 | round 1 APPROVE |
 | M1-747 | Display-time translation of a retrieved post's title and snippet into the reader's language | 2026-08-03 | round 1 APPROVE |
 | M1-744 | llama.cpp compose services: operator-settable resource caps and an opt-in GPU overlay | 2026-08-02 | round 1 APPROVE |
 | M1-743 | Roll-up must not fabricate over an empty headline set | 2026-08-02 | round 1 APPROVE |
-| M1-742 | A quarantine row per non-BENIGN Stage 2 verdict | 2026-08-01 | round 1 APPROVE |
 
 ---
 
@@ -1004,7 +1003,7 @@ M1-749 (done)
   ├── M1-747 (done)
   │     ├── M1-755 (pending) ← runnable
   │     └── M1-756 (pending) ← runnable
-  └── M1-750 (pending) ← runnable
+  └── M1-750 (done)
 M1-751 (done)
 M1-752 (done)
   └── M1-754 (pending) ← runnable

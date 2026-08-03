@@ -111,7 +111,7 @@ class SourceUpsertServiceIT {
                 SourceKind.RSS,
                 "https://example.com/m1-036-fresh.xml",
                 "Example Fresh Feed",
-                "news",
+                "news", "en",
                 List.of("m1-036-tag-a", "m1-036-tag-b"));
 
         assertEquals(Outcome.FRESH_INSERT, result.outcome(),
@@ -160,7 +160,7 @@ class SourceUpsertServiceIT {
 
         UpsertResult result = service.upsert(
                 caller, false, "dm", caller, SourceKind.RSS,
-                "https://example.com/m1-036-boot.xml", "Boot Feed Re-add", "news",
+                "https://example.com/m1-036-boot.xml", "Boot Feed Re-add", "news", "en",
                 List.of("m1-036-tag-a"));
 
         assertEquals(Outcome.SUBSCRIBED_EXISTING, result.outcome());
@@ -196,13 +196,13 @@ class SourceUpsertServiceIT {
 
         UpsertResult first = service.upsert(
                 caller, false, "dm", caller, SourceKind.RSS,
-                "https://example.com/m1-036-repeat.xml", "Repeat Feed", "news",
+                "https://example.com/m1-036-repeat.xml", "Repeat Feed", "news", "en",
                 List.of("m1-036-tag-a"));
         assertEquals(Outcome.FRESH_INSERT, first.outcome());
 
         UpsertResult second = service.upsert(
                 caller, false, "dm", caller, SourceKind.RSS,
-                "https://example.com/m1-036-repeat.xml", "Repeat Feed", "news",
+                "https://example.com/m1-036-repeat.xml", "Repeat Feed", "news", "en",
                 List.of("m1-036-tag-b"));
         assertEquals(Outcome.SUBSCRIBED_EXISTING, second.outcome(),
                 "second /add-source for the same (kind, identifier) by the same "
@@ -228,13 +228,13 @@ class SourceUpsertServiceIT {
 
         UpsertResult first = service.upsert(
                 adminInserter, true, "dm", adminInserter, SourceKind.RSS,
-                "https://example.com/m1-036-shared.xml", "Shared Feed", "news",
+                "https://example.com/m1-036-shared.xml", "Shared Feed", "news", "en",
                 List.of("m1-036-tag-a"));
         assertEquals(Outcome.FRESH_INSERT, first.outcome());
 
         UpsertResult second = service.upsert(
                 nonAdminCaller, false, "dm", nonAdminCaller, SourceKind.RSS,
-                "https://example.com/m1-036-shared.xml", "Shared Feed", "news",
+                "https://example.com/m1-036-shared.xml", "Shared Feed", "news", "en",
                 List.of("m1-036-tag-b"));
         assertEquals(Outcome.SUBSCRIBED_EXISTING, second.outcome());
 
@@ -258,13 +258,13 @@ class SourceUpsertServiceIT {
 
         UpsertResult seed = service.upsert(
                 seedAdmin, true, "dm", seedAdmin, SourceKind.RSS,
-                "https://example.com/m1-036-admin-rewrite.xml", "Rewrite Feed", "news",
+                "https://example.com/m1-036-admin-rewrite.xml", "Rewrite Feed", "news", "en",
                 List.of("m1-036-tag-a"));
         assertEquals(Outcome.FRESH_INSERT, seed.outcome());
 
         UpsertResult rewrite = service.upsert(
                 rewriteAdmin, true, "dm", rewriteAdmin, SourceKind.RSS,
-                "https://example.com/m1-036-admin-rewrite.xml", "Rewrite Feed", "news",
+                "https://example.com/m1-036-admin-rewrite.xml", "Rewrite Feed", "news", "en",
                 List.of("m1-036-tag-b", "m1-036-tag-c"));
         assertEquals(Outcome.ADMIN_TAGS_REPLACED, rewrite.outcome());
         assertEquals(seed.sourceId(), rewrite.sourceId(),
@@ -294,7 +294,7 @@ class SourceUpsertServiceIT {
         UpsertResult result = service.upsert(
                 admin, /* actorIsBotAdmin */ true, "dm", admin, SourceKind.RSS,
                 "https://example.com/m1-036-669-removed-outcome.xml",
-                "Removed Feed", "news",
+                "Removed Feed", "news", "en",
                 List.of("m1-036-tag-b", "m1-036-tag-c"));
 
         assertEquals(Outcome.ADMIN_EXISTING_REMOVED, result.outcome(),
@@ -328,7 +328,7 @@ class SourceUpsertServiceIT {
         UpsertResult result = service.upsert(
                 admin, /* actorIsBotAdmin */ true, "dm", admin, SourceKind.RSS,
                 "https://example.com/m1-036-669-removed-audit.xml",
-                "Removed Feed", "news",
+                "Removed Feed", "news", "en",
                 List.of("m1-036-tag-b"));
 
         assertEquals(Outcome.ADMIN_EXISTING_REMOVED, result.outcome());
@@ -351,7 +351,7 @@ class SourceUpsertServiceIT {
         UpsertResult result = service.upsert(
                 caller, /* actorIsBotAdmin */ false, "dm", caller, SourceKind.RSS,
                 "https://example.com/m1-036-669-removed-non-admin.xml",
-                "Removed Feed", "news",
+                "Removed Feed", "news", "en",
                 List.of("m1-036-tag-b"));
 
         assertEquals(Outcome.SUBSCRIBED_EXISTING_REMOVED, result.outcome(),
@@ -386,6 +386,37 @@ class SourceUpsertServiceIT {
                         + "not one per tag");
         assertEquals(3L, countTags("m1-036-tag-a", "m1-036-tag-b", "m1-036-tag-c"),
                 "the single statement must still union all three supplied tags");
+    }
+
+    // M1-750: the declared language round-trips into source.language on
+    // insert, and a re-upsert (ON CONFLICT DO UPDATE) does NOT overwrite
+    // it — V31's column-scoped UPDATE grant excludes language, so the
+    // DO UPDATE arm cannot (and per D29 must not) touch it; changing a
+    // declared language is an operator action, never a chat command.
+    @Test
+    void declaredLanguageRoundTripsAndIsInsertOnly() throws Exception {
+        UUID caller = insertUser("m1-036-750-lang", false);
+
+        UpsertResult first = service.upsert(
+                caller, /* actorIsBotAdmin */ false,
+                "dm", caller,
+                SourceKind.RSS,
+                "https://example.com/m1-036-750-lang.xml",
+                "Language Feed", "news", "cs",
+                List.of("m1-036-tag-a"));
+        assertEquals(Outcome.FRESH_INSERT, first.outcome());
+        assertEquals("cs", readSource(first.sourceId()).language,
+                "the declared --lang must round-trip into source.language on insert");
+
+        UpsertResult second = service.upsert(
+                caller, false, "dm", caller, SourceKind.RSS,
+                "https://example.com/m1-036-750-lang.xml",
+                "Language Feed", "news", "en",
+                List.of("m1-036-tag-b"));
+        assertEquals(Outcome.SUBSCRIBED_EXISTING, second.outcome());
+        assertEquals("cs", readSource(first.sourceId()).language,
+                "the re-upsert must NOT overwrite an existing row's declared language "
+                        + "(INSERT-only per the V31 grant; D29 operator-declared)");
     }
 
     // --- helpers ---------------------------------------------------------
@@ -471,13 +502,14 @@ class SourceUpsertServiceIT {
             String category,
             List<String> bootstrapTags,
             java.sql.Timestamp deletedAt,
-            String sourceOrigin) {}
+            String sourceOrigin,
+            String language) {}
 
     private SourceRow readSource(UUID sourceId) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT kind, identifier, status, category, bootstrap_tags, deleted_at, "
-                             + "source_origin FROM source WHERE id = ?")) {
+                             + "source_origin, language FROM source WHERE id = ?")) {
             ps.setObject(1, sourceId);
             try (ResultSet rs = ps.executeQuery()) {
                 assertTrue(rs.next(), "source row must exist for id=" + sourceId);
@@ -490,7 +522,8 @@ class SourceUpsertServiceIT {
                         rs.getString("category"),
                         Arrays.asList(tags),
                         rs.getTimestamp("deleted_at"),
-                        rs.getString("source_origin"));
+                        rs.getString("source_origin"),
+                        rs.getString("language"));
             }
         }
     }

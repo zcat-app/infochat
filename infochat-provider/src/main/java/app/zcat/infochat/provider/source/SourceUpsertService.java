@@ -118,10 +118,16 @@ public class SourceUpsertService {
     // bootstrap row to 'user' on re-add, and the provider role's
     // column-scoped UPDATE grant (V31) does not include source_origin —
     // the promote direction is collector-side (BootstrapLoader) only.
+    // language: INSERT-only, same grant constraint — V31's UPDATE column
+    // list (status, consecutive_failures, deleted_at, deleted_by,
+    // bootstrap_tags) excludes language, so the DO UPDATE branch cannot
+    // (and per D29 must not) overwrite an existing row's declared
+    // language; changing it is an operator action (bootstrap re-list,
+    // operator SQL), never a chat command (M1-750).
     private static final String UPSERT_SOURCE_SQL =
             "INSERT INTO source "
-                    + "(kind, identifier, display_name, category, bootstrap_tags, status, added_by, source_origin) "
-                    + "VALUES (?, ?, ?, ?, ?, 'active', ?, 'user') "
+                    + "(kind, identifier, display_name, category, bootstrap_tags, status, added_by, source_origin, language) "
+                    + "VALUES (?, ?, ?, ?, ?, 'active', ?, 'user', ?) "
                     + "ON CONFLICT (kind, identifier) DO UPDATE "
                     + "SET bootstrap_tags = CASE "
                     + "      WHEN ? AND source.deleted_at IS NULL THEN EXCLUDED.bootstrap_tags "
@@ -164,6 +170,9 @@ public class SourceUpsertService {
      * @param displayName  display name (caller {@code --name}
      *                     override or a host-derived fallback).
      * @param category     closed-set category ({@code news|blog|social}).
+     * @param language     declared source language, validated by
+     *                     {@code AddSourceArgs} against the reviewed
+     *                     {@code SourceLanguageRegistry} set (D29).
      * @param tags         normalized tag list (≥1 element by the
      *                     parser's contract).
      */
@@ -175,6 +184,7 @@ public class SourceUpsertService {
                                String identifier,
                                String displayName,
                                String category,
+                               String language,
                                List<String> tags) {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
@@ -182,7 +192,7 @@ public class SourceUpsertService {
                 upsertTagVocab(conn, tags);
                 SourceUpsertResultRow row = upsertSource(
                         conn, actorUserId, actorIsBotAdmin, kind, identifier,
-                        displayName, category, tags);
+                        displayName, category, language, tags);
                 upsertSubscription(conn, scopeKind, scopeId, row.id(), actorUserId);
 
                 Outcome outcome;
@@ -248,6 +258,7 @@ public class SourceUpsertService {
                                                String identifier,
                                                String displayName,
                                                String category,
+                                               String language,
                                                List<String> tags) throws SQLException {
         Array tagArray = conn.createArrayOf("TEXT", tags.toArray(new String[0]));
         try (PreparedStatement ps = conn.prepareStatement(UPSERT_SOURCE_SQL)) {
@@ -257,7 +268,8 @@ public class SourceUpsertService {
             ps.setString(4, category);
             ps.setArray(5, tagArray);
             ps.setObject(6, actorUserId);
-            ps.setBoolean(7, actorIsBotAdmin);
+            ps.setString(7, language);
+            ps.setBoolean(8, actorIsBotAdmin);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
                     // Reachable only if the conditional UPDATE-WHERE

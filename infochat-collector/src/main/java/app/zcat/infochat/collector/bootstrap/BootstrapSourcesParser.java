@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.bootstrap;
 
+import app.zcat.infochat.core.source.SourceLanguageRegistry;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -105,6 +106,7 @@ public final class BootstrapSourcesParser {
         }
 
         String kind = entry.kind().toLowerCase(Locale.ROOT);
+        String language = resolveLanguage(entry.language(), index);
 
         if (HTTP_SHAPED_KINDS.contains(kind)) {
             // HTTP-shaped sources: config MUST be null or omitted
@@ -114,7 +116,14 @@ public final class BootstrapSourcesParser {
                     "entry[" + index + "] kind=" + kind
                         + " requires config to be null or omitted; non-null configs are reserved for stream-shaped kinds (HTTP-shaped sources have no per-kind config in v1)");
             }
-            return entry;
+            return new BootstrapSourcesEntry(
+                entry.kind(),
+                entry.identifier(),
+                entry.name(),
+                entry.category(),
+                entry.tags(),
+                entry.config(),
+                language);
         }
 
         if (NOSTR_KIND.equals(kind)) {
@@ -126,12 +135,37 @@ public final class BootstrapSourcesParser {
                 entry.name(),
                 entry.category(),
                 entry.tags(),
-                entry.config());
+                entry.config(),
+                language);
         }
 
         throw new BootstrapSourcesParseException(
             "entry[" + index + "] has unsupported kind '" + entry.kind()
                 + "' (expected one of: " + HTTP_SHAPED_KINDS + " or '" + NOSTR_KIND + "')");
+    }
+
+    /**
+     * Resolves the entry's declared language to its canonical form:
+     * an omitted {@code language} defaults to {@code "en"} (the V74
+     * column default — the pre-M1-750 corpus is all English), and a
+     * supplied code is {@code Locale.ROOT} lower-cased (ISO 639-1
+     * codes are case-insensitive) and validated against the reviewed
+     * {@code SourceLanguageRegistry} set. An unknown code rejects the
+     * whole file at parse time — fail-fast at startup (D29: declared,
+     * never inferred, never silently stored).
+     */
+    private static String resolveLanguage(@Nullable String language, int index) {
+        if (language == null) {
+            return "en";
+        }
+        String normalized = language.toLowerCase(Locale.ROOT);
+        if (!SourceLanguageRegistry.isSupported(normalized)) {
+            throw new BootstrapSourcesParseException(
+                "entry[" + index + "] language '" + language
+                    + "' is not supported; supported languages: "
+                    + SourceLanguageRegistry.supportedCodesCommaList());
+        }
+        return normalized;
     }
 
     /**

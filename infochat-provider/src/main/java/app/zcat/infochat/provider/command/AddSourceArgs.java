@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.command;
 
+import app.zcat.infochat.core.source.SourceLanguageRegistry;
 import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.provider.bundle.BundleKeys;
@@ -32,6 +33,10 @@ import java.util.Optional;
  *       {@code news|blog|social}; defaults to {@code news})</li>
  *   <li>{@code --name "..."} (optional; defaults to a host-derived
  *       display name when omitted)</li>
+ *   <li>{@code --lang <code>} (optional; declared source language per
+ *       D29 — validated against the reviewed
+ *       {@link SourceLanguageRegistry} set, never inferred over the
+ *       body; defaults to {@code en})</li>
  * </ul>
  *
  * <p>The parser is conservative on validation: SQL-tier constraints
@@ -46,12 +51,16 @@ public record AddSourceArgs(
         List<String> tags,
         Optional<SourceKind> typeOverride,
         String category,
-        Optional<String> displayNameOverride) {
+        Optional<String> displayNameOverride,
+        String lang) {
 
     /** Closed category set per {@code docs/spec/commands.md} §Source management. */
     public static final List<String> ALLOWED_CATEGORIES = List.of("news", "blog", "social");
 
     private static final String DEFAULT_CATEGORY = "news";
+
+    /** Declared source language default — mirrors the V74 column default. */
+    private static final String DEFAULT_LANG = "en";
 
     public sealed interface ParseResult permits Success, Failure {}
 
@@ -88,6 +97,7 @@ public record AddSourceArgs(
         Optional<SourceKind> typeOverride = Optional.empty();
         String category = DEFAULT_CATEGORY;
         Optional<String> displayNameOverride = Optional.empty();
+        String lang = DEFAULT_LANG;
 
         int i = 0;
         while (i < tokens.size()) {
@@ -146,6 +156,23 @@ public record AddSourceArgs(
                     displayNameOverride = Optional.of(tokens.get(i + 1));
                     i += 2;
                 }
+            } else if (token.startsWith("--lang=")) {
+                Optional<String> resolved = resolveLang(token.substring("--lang=".length()));
+                if (resolved.isEmpty()) {
+                    return unsupportedSourceLanguage();
+                }
+                lang = resolved.get();
+                i++;
+            } else if (token.equals("--lang")) {
+                if (i + 1 >= tokens.size()) {
+                    return unsupportedSourceLanguage();
+                }
+                Optional<String> resolved = resolveLang(tokens.get(i + 1));
+                if (resolved.isEmpty()) {
+                    return unsupportedSourceLanguage();
+                }
+                lang = resolved.get();
+                i += 2;
             } else if (token.startsWith("--")) {
                 // Unknown flag — surface as malformed for MVP (the spec
                 // does not enumerate per-unknown-flag bundle keys).
@@ -177,7 +204,24 @@ public record AddSourceArgs(
             return new Failure(BundleKeys.ERROR_ADD_SOURCE_TAGS_REQUIRED);
         }
 
-        return new Success(new AddSourceArgs(url, tags, typeOverride, category, displayNameOverride));
+        return new Success(new AddSourceArgs(url, tags, typeOverride, category, displayNameOverride, lang));
+    }
+
+    /**
+     * Normalize (ISO 639-1 codes are case-insensitive) and validate a
+     * supplied {@code --lang} code against the reviewed
+     * {@link SourceLanguageRegistry} set. Empty/blank values resolve
+     * empty — an unknown code is the Failure path, never a silent
+     * default (D29).
+     */
+    private static Optional<String> resolveLang(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return Optional.empty();
+        }
+        String normalized = raw.trim().toLowerCase(Locale.ROOT);
+        return SourceLanguageRegistry.isSupported(normalized)
+                ? Optional.of(normalized)
+                : Optional.empty();
     }
 
     private static List<String> parseTagList(String csv) {
@@ -243,5 +287,18 @@ public record AddSourceArgs(
     private static Failure unknownCategory() {
         return new Failure(BundleKeys.ERROR_ADD_SOURCE_UNKNOWN_CATEGORY,
                 List.of(String.join(", ", ALLOWED_CATEGORIES)));
+    }
+
+    /**
+     * The supplied {@code --lang} token is deliberately NOT carried into
+     * the reply (the M1-656 discipline, same as {@link #unknownKind()}):
+     * the valid-codes list is registry-sourced
+     * ({@code SourceLanguageRegistry}, a reviewed constant set) and
+     * carries the message on its own. Reuses the existing
+     * {@code error.lang.unsupported_code} key — no new bundle key.
+     */
+    private static Failure unsupportedSourceLanguage() {
+        return new Failure(BundleKeys.ERROR_LANG_UNSUPPORTED_CODE,
+                List.of(SourceLanguageRegistry.supportedCodesCommaList()));
     }
 }

@@ -666,6 +666,7 @@ class AddSourceCommandHandlerTest {
                                    String identifier,
                                    String displayName,
                                    String category,
+                                   String language,
                                    List<String> tags) {
             this.lastKind = kind;
             this.lastSourceId = UUID.randomUUID();

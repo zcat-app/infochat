@@ -219,7 +219,7 @@ public class AddSourceCommandHandler implements CommandHandler {
         UpsertResult result = sourceUpsertService.upsert(
                 user.id, user.isAdmin, scopeKind, scopeId,
                 kind, args.url().toString(),
-                displayName, args.category(), args.tags());
+                displayName, args.category(), args.lang(), args.tags());
 
         return reply(scope, buildReply(result));
     }

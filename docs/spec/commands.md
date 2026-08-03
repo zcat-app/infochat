@@ -651,7 +651,7 @@ non-excluded bootstrap sources OR the scope's subscriptions".
 `/follow-tag` narrows the DIGEST only; chat/RAG search stays broad
 over the whole world (§Per-scope tag preferences).
 
-- `/add-source <url> --tags … [--type <kind>] [--category <name>]` —
+- `/add-source <url> --tags … [--type <kind>] [--category <name>] [--lang <code>]` —
   DM: any non-banned user adds to their own scope. Group: group admin
   only. Tags are mandatory (decision D14). Identity is
   `(kind, identifier)` per decision D38; the per-kind `config`
@@ -662,6 +662,19 @@ over the whole world (§Per-scope tag preferences).
   permission decisions; v2 may attach behavior to it (e.g., a
   chat-agent tool filter), v1 commits to nothing beyond
   storing it.
+
+  **Declared language.** The `--lang <code>` flag declares the source's
+  language (ISO 639-1; default `en`). Per decision D29 the language is
+  DECLARED by the caller, never inferred over the post bodies. The
+  accepted set is the reviewed `SourceLanguageRegistry` constant set
+  in infochat-core (initially `{en, cs}` — the set M1-749's ingest
+  translator can serve); an unknown code is rejected with the
+  `error.lang.unsupported_code` friendly error listing the supported
+  codes — never a silent default and never a silent store. The value
+  is INSERT-only: the provider role's column-scoped UPDATE grant (V31)
+  excludes `source.language`, so re-adding an existing source cannot
+  overwrite its declared language; changing one is an operator action
+  (bootstrap re-list, operator SQL), not a chat command.
 
   **Kind resolution.** The source `kind` is determined deterministically:
 

@@ -57,6 +57,7 @@ GroupTimezoneCommandHandler.java | error.group_timezone.invalid_zone | 0 | sugge
 HelpCommandHandler.java | error.help.unknown_command | 0 | suggestions | bot-authored: a suggestion list drawn from the controlled vocabulary / catalogue (M1-647/M1-656)
 InboundRouter.java | error.command.rate_limit | 0 | Long.toString(rateCapBucket.cheapCommandRetryAfterSeconds( inboundContext.adapterName(), inboundContext.senderContactId())) | bot-authored: bucket-state-computed retry delay in seconds (a long read from RateCapBucket token state), never inbound text (M1-705)
 InboundRouter.java | error.probation.blocked | 0 | formatTimeUntilUnlock(probationNow, probationActor.probationUntil()) | bot-authored: a formatted typed Duration (time-until-unlock), not inbound text
+AddSourceArgs.java | error.lang.unsupported_code | 0 | SourceLanguageRegistry.supportedCodesCommaList() | bot-authored: the reviewed SourceLanguageRegistry constant set (M1-750)
 InboundRouter.java | error.probation.blocked | 1 | commandPermissions.renderProbationCommandList() | bot-authored: the canonical probation command listing (CommandPermissions)
 InviteCommandHandler.java | error.invite.adapter_required | 0 | String.join(", ", enabled) | bot-authored: the enabled-adapter name list
 InviteCommandHandler.java | error.invite.bot_contact_unavailable | 0 | targetName | bot-admin-only: admin gate at InviteCommandHandler:225 precedes every reflect (r2 audit)

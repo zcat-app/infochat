@@ -137,4 +137,59 @@ class BootstrapSourcesParserTest {
         assertTrue(ex.getMessage().contains("relays"),
             "rejection should name relays; got: " + ex.getMessage());
     }
+
+    // M1-750: the optional `language` field (default 'en', validated
+    // against the reviewed SourceLanguageRegistry set — D29 declared,
+    // never inferred).
+    @Test
+    void omittedLanguageDefaultsToEn() {
+        String json = "[{"
+            + "\"kind\":\"rss\","
+            + "\"identifier\":\"https://example.com/lang-default\","
+            + "\"name\":\"Default\",\"category\":\"news\","
+            + "\"tags\":[\"AI\"]}]";
+        List<BootstrapSourcesEntry> entries = parser.parse(json.getBytes(StandardCharsets.UTF_8));
+        assertEquals("en", entries.get(0).language(),
+            "an omitted language must default to 'en' (the V74 column default)");
+    }
+
+    @Test
+    void declaredLanguageSurvivesParse() {
+        String json = "[{"
+            + "\"kind\":\"rss\","
+            + "\"identifier\":\"https://example.com/lang-cs\","
+            + "\"name\":\"Czech\",\"category\":\"news\","
+            + "\"tags\":[\"AI\"],"
+            + "\"language\":\"cs\"}]";
+        List<BootstrapSourcesEntry> entries = parser.parse(json.getBytes(StandardCharsets.UTF_8));
+        assertEquals("cs", entries.get(0).language());
+    }
+
+    @Test
+    void languageIsCaseInsensitive() {
+        String json = "[{"
+            + "\"kind\":\"rss\","
+            + "\"identifier\":\"https://example.com/lang-upper\","
+            + "\"name\":\"Upper\",\"category\":\"news\","
+            + "\"tags\":[\"AI\"],"
+            + "\"language\":\"EN\"}]";
+        List<BootstrapSourcesEntry> entries = parser.parse(json.getBytes(StandardCharsets.UTF_8));
+        assertEquals("en", entries.get(0).language(),
+            "ISO 639-1 codes are case-insensitive; the stored value must be canonical lower-case");
+    }
+
+    @Test
+    void unknownLanguageIsRejected() {
+        String json = "[{"
+            + "\"kind\":\"rss\","
+            + "\"identifier\":\"https://example.com/lang-de\","
+            + "\"name\":\"German\",\"category\":\"news\","
+            + "\"tags\":[\"AI\"],"
+            + "\"language\":\"de\"}]";
+        BootstrapSourcesParseException ex = assertThrows(
+            BootstrapSourcesParseException.class,
+            () -> parser.parse(json.getBytes(StandardCharsets.UTF_8)));
+        assertTrue(ex.getMessage().contains("language"),
+            "rejection should name the language field; got: " + ex.getMessage());
+    }
 }

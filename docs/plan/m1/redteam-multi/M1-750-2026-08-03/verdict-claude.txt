@@ -1,0 +1,63 @@
+RED-TEAM VERDICT: CLEAN
+
+OUT-OF-MODEL:
+  - Operator-vs-caller language-declaration asymmetry. The diff's own design
+    note (docs/design/07-deployment.md, `language` row: "D29: the language is
+    DECLARED by the operator, never inferred") frames source language as
+    operator intent, but the same diff's commands.md amendment hands the
+    declaration to "the caller" — any non-banned DM user (or group admin in a
+    group) via `/add-source --lang`. Because source rows are global (D7) and
+    the value is INSERT-only on the provider path, the FIRST adder of a source
+    fixes its declared language for every user, and only an operator
+    (bootstrap re-list, which the BootstrapLoader DO UPDATE branch overwrites,
+    or admin SQL) can correct it. Consequences of a wrong/hostile declaration:
+    (a) the M1-749 ingest translator spends one extra LLM call per post over
+    the mislabeled source — marginal on top of the per-post eval cost the
+    `/add-source` rate bucket already accepts as the control, so not a
+    DOS-promise violation; (b) corpus-quality degradation (English bodies
+    translated as-if-Czech) visible to all users of that source.
+    docs/spec/security.md carries no commitment about who may declare a
+    source's language, so this cannot be scored as a FINDING; flagging it so
+    the user can decide whether D29's "operator" framing should become a
+    spec-level authorization commitment (e.g. restrict a non-default `--lang`
+    to bot admins) or whether caller-declared is the accepted design.
+
+Audit notes (why CLEAN, checked against the threat model):
+  - INJECTION: the new `language` value is bound as a prepared-statement
+    parameter in both writers (BootstrapLoader.java sql param 7,
+    SourceUpsertService.java UPSERT_SOURCE_SQL param 7) and is closed-set
+    validated ({en, cs} exact match) at both system boundaries before any SQL
+    runs, so only the canonical literals "en"/"cs" can ever reach storage.
+  - INFO-LEAK / inbound reflection: the one new user-facing error
+    (`error.lang.unsupported_code`) interpolates only
+    `SourceLanguageRegistry.supportedCodesCommaList()` — a reviewed constant —
+    and AddSourceArgsTest asserts the supplied token never reaches the reply
+    (the M1-656 discipline); the inbound-reflection baseline entry added for
+    it is a correct bot-authored classification, not a guard weakening. The
+    bundle key exists in both en and cs bundles with the `{0}` slot.
+  - Normalization bypass (security.md §Message intake step 1.7 fenced-code
+    carve-out): a `--lang` value smuggled in exotic Unicode (fullwidth,
+    zero-width-split) that evades the router's NFKC pass fails the exact-match
+    closed-set check and takes the Failure path — fail-closed, nothing
+    reflected. Flag-token case (`--LANG`) falls to the unknown-flag malformed
+    rejection, also fail-closed.
+  - AUTH / ban ordering: no gate is moved. The router-level ban check
+    (security.md §Authorization model step 4) still precedes handler dispatch;
+    the in-handler defense-in-depth ban check and group-admin gate are
+    untouched; the new flag adds no privileged behavior, so no sanitizer
+    closed-list change is owed (security.md §Match-set derivation —
+    `/add-source` is not privileged-tier).
+  - DB roles (security.md §DB roles, V31 closed column enumeration): the diff
+    correctly does NOT extend the provider role's column-scoped UPDATE grant
+    to `source.language`; the INSERT-only promise in the amended commands.md
+    is delivered at the application layer by the DO UPDATE SET list omitting
+    `language` (SourceUpsertService.java UPSERT_SOURCE_SQL) and pinned by
+    SourceUpsertServiceIT.declaredLanguageRoundTripsAndIsInsertOnly. The
+    bootstrap-side overwrite runs under the Collector role, which holds
+    unscoped UPDATE on ingest-owned tables per the same section — consistent.
+  - AUDIT-EVASION: the upsert's existing single-transaction audit_log write is
+    unchanged; bootstrap language overwrites ride the existing bootstrap
+    audit row. No new mutation path lacks a trail.
+  - Trusted-input boundary: bootstrap JSON is operator-set config, trusted per
+    security.md §Threat model; the parser still fails boot on an unknown code
+    (never a silent default/store), matching the amended spec text.

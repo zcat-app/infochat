@@ -25,7 +25,15 @@ import java.util.Map;
  * relay list for {@code nostr}. {@code tags} is {@code @Nullable}
  * because Jackson leaves an omitted field null at the parse boundary;
  * the parser's validation rejects a null/empty array, so loader-side
- * consumers re-state non-nullness via {@code requireNonNull}.
+ * consumers re-state non-nullness via {@code requireNonNull}.</p>
+ *
+ * <p>{@code language} is {@code @Nullable} for the same Jackson-boundary
+ * reason: an omitted {@code language} defaults to {@code "en"} (the V74
+ * column default), resolved by the parser before the loader sees the
+ * record, so loader-side consumers re-state non-nullness via
+ * {@code requireNonNull}. Unknown codes are rejected by the parser
+ * against {@code SourceLanguageRegistry} (D29 — declared, never
+ * inferred).</p>
  */
 public record BootstrapSourcesEntry(
     String kind,
@@ -33,6 +41,7 @@ public record BootstrapSourcesEntry(
     String name,
     String category,
     @Nullable List<String> tags,
-    @Nullable Map<String, Object> config
+    @Nullable Map<String, Object> config,
+    @Nullable String language
 ) {
 }

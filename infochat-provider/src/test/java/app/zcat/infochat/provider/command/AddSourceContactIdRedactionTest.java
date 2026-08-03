@@ -121,6 +121,7 @@ class AddSourceContactIdRedactionTest {
                         LONG_URL,                           // identifier
                         "example",                          // displayName
                         "news",                             // category
+                        "en",                               // language
                         List.of("m1-039-news")));           // tags
 
         assertFalse(ise.getMessage().contains(LONG_URL),

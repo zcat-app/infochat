@@ -55,6 +55,8 @@ class AddSourceArgsTest {
         assertEquals("news", args.category(),
                 "category default is 'news' per AddSourceArgs.DEFAULT_CATEGORY");
         assertEquals(Optional.empty(), args.displayNameOverride());
+        assertEquals("en", args.lang(),
+                "lang default is 'en' per AddSourceArgs.DEFAULT_LANG (D29, V74 column default)");
     }
 
     @Test
@@ -91,6 +93,69 @@ class AddSourceArgsTest {
 
         Success success = assertInstanceOf(Success.class, result);
         assertEquals(Optional.of("Example Feed"), success.args().displayNameOverride());
+    }
+
+    @Test
+    void honorsLangFlagWithSpaceForm() {
+        ParseResult result = AddSourceArgs.parse(
+                "/add-source https://example.com/feed.xml --tags news --lang cs");
+
+        Success success = assertInstanceOf(Success.class, result);
+        assertEquals("cs", success.args().lang());
+    }
+
+    @Test
+    void honorsLangFlagWithEqualsForm() {
+        ParseResult result = AddSourceArgs.parse(
+                "/add-source https://example.com/feed.xml --tags news --lang=cs");
+
+        Success success = assertInstanceOf(Success.class, result);
+        assertEquals("cs", success.args().lang());
+    }
+
+    @Test
+    void langFlagIsCaseInsensitive() {
+        ParseResult result = AddSourceArgs.parse(
+                "/add-source https://example.com/feed.xml --tags news --lang CS");
+
+        Success success = assertInstanceOf(Success.class, result);
+        assertEquals("cs", success.args().lang(),
+                "ISO 639-1 codes are case-insensitive; the stored value must be canonical lower-case");
+    }
+
+    // (g) unknown --lang
+    @Test
+    void unknownLangFlagSurfacesUnsupportedCodeBundleKey() {
+        ParseResult result = AddSourceArgs.parse(
+                "/add-source https://example.com/feed.xml --tags news --lang=de");
+        Failure failure = assertInstanceOf(Failure.class, result);
+        assertEquals("error.lang.unsupported_code", failure.bundleKey());
+        // M1-656 discipline: the supplied token is not carried into the
+        // reply; the registry-sourced valid-codes list carries the message.
+        assertEquals(1, failure.interpolationArgs().size(),
+                "unsupported_code failure carries only (validCodesCommaList)");
+        assertFalse(failure.interpolationArgs().contains("de"),
+                "the supplied token must not reach the reply: " + failure.interpolationArgs());
+        assertEquals("en, cs", failure.interpolationArgs().get(0),
+                "the valid-codes list must be the reviewed SourceLanguageRegistry set");
+    }
+
+    @Test
+    void langFlagWithMissingValueSurfacesUnsupportedCodeBundleKey() {
+        ParseResult result = AddSourceArgs.parse(
+                "/add-source https://example.com/feed.xml --tags news --lang");
+        Failure failure = assertInstanceOf(Failure.class, result);
+        assertEquals("error.lang.unsupported_code", failure.bundleKey());
+    }
+
+    // (h) unknown --flag still fails malformed (the --lang addition must
+    // not widen the unknown-flag rejection).
+    @Test
+    void unknownFlagStillFailsMalformed() {
+        ParseResult result = AddSourceArgs.parse(
+                "/add-source https://example.com/feed.xml --tags news --bogus x");
+        Failure failure = assertInstanceOf(Failure.class, result);
+        assertEquals("error.add_source.malformed_url", failure.bundleKey());
     }
 
     @Test
