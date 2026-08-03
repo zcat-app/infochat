@@ -458,9 +458,15 @@ or `deployment.md`. Each one corresponds to at least one named test.
   reach it. The ingest-time English-anchor translation is a SEPARATE
   path writing a derived field, and the property it must prove is the
   complement: the original `post.body` is byte-identical before and
-  after that translation, and it — not the derived English — is what
-  a user is shown. Display-time translation of a retrieved title or
-  snippet is permitted and must not write back to the post row.
+  after that translation. What the user is SHOWN is a separate
+  question, settled by the D29 display-leg amendment (2026-08-04):
+  the derived English MAY be displayed — for an English reader it is,
+  read straight from the column at no translator cost — with the
+  original headline kept visible on a bracketed line beneath it. The
+  storage guarantee is what "never rewritten" means; it was never a
+  claim about the render. Display-time translation of a retrieved
+  title or snippet is permitted and must not write back to the post
+  row.
 - Translation flake fallback: a translator that throws falls back to                                                                                                                                                                                  
   English with a one-line note; the user does not see a hung response.
 - **Localization bundle completeness** (decision D43,

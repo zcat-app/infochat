@@ -294,12 +294,27 @@ Adding a fallback chain is a v2 candidate.
   router knows when this shortcut is safe.
 - **Source post bodies are never rewritten (decision D29).** A non-English
   post is translated to English once at ingest into a derived field; the
-  original body is retained unmodified and stays what the user is shown.
-  Embeddings and retrieval — both the semantic and the lexical arm — operate
+  original body is retained unmodified in storage. Embeddings and
+  retrieval — both the semantic and the lexical arm — operate
   on the English field, so there is one vector space and one FTS
   configuration rather than per-language variants. Entity extraction
   likewise reads the English field, so the controlled vocabulary does not
   fork by source language.
+- **The English field is a display artifact too (decision D29, amended
+  2026-08-04).** "Never rewritten" is a guarantee about the stored row,
+  not about the render. A headline whose source language differs from the
+  reader's is displayed in the reader's language: from the English field
+  directly when the reader is English (a column read — no translator
+  call), otherwise by translating that field into the reader's language.
+  The display translator's source is therefore always English, so only
+  one direction per reader language is ever exercised rather than one per
+  (source, reader) pair. The original headline remains visible on a
+  bracketed line beneath it; an unbracketed line always means the text is
+  already in the reader's language. When the English field is NULL on a
+  non-English source — the ingest translator exhausted its attempts — the
+  bracketed original takes the primary slot and the repair is a
+  collector-side re-drive, not a display-time retry, which would
+  reintroduce a translator call on the scheduled digest path.
 - **Deterministic strings come from a localization bundle, not the
   translator (decision D43).** Anything the bot says that does not
   depend on user content — `/help` output, friendly-error
