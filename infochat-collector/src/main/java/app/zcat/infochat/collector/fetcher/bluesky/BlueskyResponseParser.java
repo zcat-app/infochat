@@ -28,8 +28,15 @@ public final class BlueskyResponseParser {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    // Per-response item-count cap, parity with RssFeedParser.MAX_ITEMS
-    // (M1-409). A single getAuthorFeed page carries far fewer than 1000
+    // Per-response item-count cap. Shares RssFeedParser.MAX_ITEMS' value
+    // (M1-409) but NOT its over-cap behaviour: RSS truncates, this
+    // rejects, and the divergence is deliberate (M1-753). This parser
+    // reads ONE paginated getAuthorFeed response, where a 1000+ entry
+    // payload is anomalous — nothing legitimate produces it, so refusing
+    // the response is the right answer. An RSS archive feed, by contrast,
+    // legitimately grows past the cap forever, and rejecting it there
+    // meant never ingesting the source at all.
+    // A single getAuthorFeed page carries far fewer than 1000
     // entries; the cap bounds the per-response allocation against a hostile
     // feed serving an unbounded array — defense in depth above the SSRF
     // 5 MiB body cap, which already bounds it absolutely. Checked on the

@@ -40,6 +40,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>a non-saturated tick resets the streak.</li>
  * </ul>
  *
+ * <p>Also covers the separate feed-truncation signal (M1-753), which
+ * shares this thread-local hand-off but NOT the streak policy: it
+ * reports per truncating tick, so a feed oscillating across the cap —
+ * the case the streak-gated design silently missed — still produces a
+ * durable record. The independence of the two signals is asserted
+ * directly, because collapsing them back into one flag is the tempting
+ * wrong fix.</p>
+ *
  * <p>Test isolation mirrors {@link FetchSchedulerFailureLadderIT}:
  * fixture rows carry the {@code m1-216-it-} prefix; every test seeds
  * its own fresh source UUID so the tracker's in-memory per-source
@@ -50,6 +58,7 @@ class FetchSchedulerSaturationIT {
 
     private static final String PREFIX = "m1-216-it-";
     private static final String NOTIFY_KEY_PREFIX = "fetch_saturation:";
+    private static final String TRUNCATION_KEY_PREFIX = "feed_truncated:";
 
     @Inject
     FetchScheduler fetchScheduler;
@@ -75,8 +84,9 @@ class FetchSchedulerSaturationIT {
         try (Connection conn = dataSource.getConnection()) {
             try (PreparedStatement ps = conn.prepareStatement(
                 "DELETE FROM admin_notification_state "
-                    + "WHERE notification_key LIKE ?")) {
+                    + "WHERE notification_key LIKE ? OR notification_key LIKE ?")) {
                 ps.setString(1, NOTIFY_KEY_PREFIX + "%");
+                ps.setString(2, TRUNCATION_KEY_PREFIX + "%");
                 ps.executeUpdate();
             }
             try (PreparedStatement ps = conn.prepareStatement(
@@ -177,6 +187,105 @@ class FetchSchedulerSaturationIT {
                 + "transition and must fire");
     }
 
+    @Test
+    void truncationNotifiesEvenWhenNoConsecutiveStreakEverForms() throws Exception {
+        // THE discriminating case for M1-753's redteam finding. The rejected
+        // implementation routed truncation through the streak-gated
+        // saturation counter, where any non-saturated tick clears the streak
+        // (PaginationSaturationTracker.recordTick). A feed oscillating across
+        // the cap therefore never reached the threshold and never notified,
+        // while discarding content on the ticks in between. A test that drives
+        // only CONSECUTIVE truncating ticks passes against that broken design,
+        // so it would not close the finding — this one interleaves a clean
+        // tick often enough that no streak of `threshold` ever forms.
+        UUID sourceId = seedSource("oscillating");
+        FetchScheduler.SourceRow row = newRow(sourceId, "oscillating");
+        String truncationKey = TRUNCATION_KEY_PREFIX + sourceId;
+        int threshold = saturationTracker.saturationThreshold();
+
+        for (int cycle = 0; cycle < 3; cycle++) {
+            mockFetcher.truncateNext.set(true);
+            for (int i = 0; i < threshold - 1; i++) {
+                fetchScheduler.tickOnce(row);
+            }
+            mockFetcher.truncateNext.set(false);
+            fetchScheduler.tickOnce(row);
+        }
+
+        Optional<AdminNotificationRecord> record =
+            throttledAdminNotifier.getState(truncationKey);
+        assertTrue(record.isPresent(),
+            "a truncating tick must notify on its own, not on a consecutive "
+                + "streak — this sequence never forms a streak of " + threshold
+                + ", which is exactly the case the streak-gated design missed");
+        assertEquals("feed_truncated", record.get().errorClass(),
+            "the notification's error_class must identify the truncation path, "
+                + "distinct from fetch_saturation");
+    }
+
+    @Test
+    void noTruncationNotificationWhenNoTickTruncates() throws Exception {
+        // Negative control: without this, the oscillation test above could
+        // pass on a implementation that notifies unconditionally.
+        UUID sourceId = seedSource("notrunc");
+        FetchScheduler.SourceRow row = newRow(sourceId, "notrunc");
+
+        mockFetcher.truncateNext.set(false);
+        for (int i = 0; i < 3; i++) {
+            fetchScheduler.tickOnce(row);
+        }
+
+        assertTrue(throttledAdminNotifier.getState(TRUNCATION_KEY_PREFIX + sourceId).isEmpty(),
+            "a source that never truncates must never produce a truncation record");
+    }
+
+    @Test
+    void truncationAndPaginationSaturationAreIndependentSignals() throws Exception {
+        // Regression guard for the forbidden fix. The tempting way to close
+        // the oscillation finding is to stop recordTick clearing the streak,
+        // which would redefine pagination saturation for Bluesky and Reddit.
+        // The two signals must stay separate: truncation must not touch the
+        // saturation counter, and saturation must not emit a truncation
+        // record.
+        UUID sourceId = seedSource("independent");
+        FetchScheduler.SourceRow row = newRow(sourceId, "independent");
+        String truncationKey = TRUNCATION_KEY_PREFIX + sourceId;
+        String saturationKey = NOTIFY_KEY_PREFIX + sourceId;
+        int threshold = saturationTracker.saturationThreshold();
+
+        // Truncation alone: notifies on the truncation key, and leaves the
+        // pagination cap-hit counter untouched.
+        mockFetcher.truncateNext.set(true);
+        fetchScheduler.tickOnce(row);
+        mockFetcher.truncateNext.set(false);
+
+        assertTrue(throttledAdminNotifier.getState(truncationKey).isPresent(),
+            "the truncating tick must emit its own record");
+        assertEquals(0L, saturationTracker.capHitCount(sourceId),
+            "truncation must NOT increment the pagination cap-hit counter — "
+                + "they are different conditions with different policies");
+        assertTrue(throttledAdminNotifier.getState(saturationKey).isEmpty(),
+            "truncation must not fire the pagination-saturation notification");
+
+        long truncationCountAfterTruncating =
+            throttledAdminNotifier.getState(truncationKey).get().notificationCount();
+
+        // Saturation alone: fires the saturation transition without adding
+        // any further truncation record.
+        mockFetcher.hitCapNext.set(true);
+        for (int i = 0; i < threshold; i++) {
+            fetchScheduler.tickOnce(row);
+        }
+        mockFetcher.hitCapNext.set(false);
+
+        assertTrue(throttledAdminNotifier.getState(saturationKey).isPresent(),
+            "pagination saturation must still fire on its threshold tick — "
+                + "its streak semantics are unchanged by M1-753");
+        assertEquals(truncationCountAfterTruncating,
+            throttledAdminNotifier.getState(truncationKey).get().notificationCount(),
+            "a cap-hit tick that did not truncate must not emit a truncation record");
+    }
+
     // ----- helpers ---------------------------------------------------------
 
     private UUID seedSource(String slug) throws Exception {
@@ -210,11 +319,18 @@ class FetchSchedulerSaturationIT {
      */
     private static final class CapHittingRssFetcher extends RssFetcher {
         final AtomicBoolean hitCapNext = new AtomicBoolean(false);
+        final AtomicBoolean truncateNext = new AtomicBoolean(false);
 
         @Override
         public List<NormalizedPost> fetch(long dispatchKey, String identifier) {
             if (hitCapNext.get()) {
                 PaginationSaturationTracker.signalCapHit();
+            }
+            // Independently settable: the two flags are separate signals
+            // with separate notification policies, and the tests need to
+            // raise either without the other.
+            if (truncateNext.get()) {
+                PaginationSaturationTracker.signalTruncation();
             }
             return List.of();
         }

@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.fetcher.rss;
 
+import app.zcat.infochat.collector.fetcher.PaginationSaturationTracker;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import org.jspecify.annotations.Nullable;
 
@@ -51,12 +52,46 @@ public final class RssFeedParser {
 
     private static final String ATOM_NS = "http://www.w3.org/2005/Atom";
 
-    // Per-parse item-count cap. A normal feed publishes 10–500
-    // items; 1000 is an order of magnitude above legitimate use,
-    // small enough to bound the allocation against a hostile feed
-    // serving an unbounded item list. The check applies AFTER each
-    // successful per-item parse — a feed with exactly MAX_ITEMS
-    // entries succeeds; the cap+1-th entry raises.
+    // Per-parse item-count cap. A normal feed publishes 10–500 items;
+    // 1000 is an order of magnitude above legitimate use, small enough
+    // to bound the allocation against a hostile feed serving an
+    // unbounded item list.
+    //
+    // An over-cap feed is TRUNCATED to the first MAX_ITEMS items in
+    // document order, not rejected. Rejecting is not the stricter
+    // security posture it appears to be: against a hostile feed the
+    // throw and the truncation stop at the same item and bound the
+    // allocation identically, so the throw bought no security — while
+    // against a legitimate archive feed it discarded the whole payload,
+    // including the MAX_ITEMS items that had parsed cleanly. The cost
+    // was total and permanent: M1-753 found a 1105-item feed that had
+    // ingested nothing since the day it was seeded, because every fetch
+    // failed identically. The cap's value is NOT what changed here —
+    // only what happens on reaching it.
+    //
+    // The bound is enforced by stopping the read, not by trimming
+    // afterwards: the check fires on the cap+1-th item's START_ELEMENT,
+    // BEFORE that item is parsed, and breaks out of the read loop. The
+    // remaining bytes are never walked and no post beyond MAX_ITEMS is
+    // ever allocated, so a feed of any size costs O(MAX_ITEMS) posts.
+    //
+    // Truncation is not silent. RssFeedParser is a static utility with
+    // no logger that receives a dispatchKey and never the source UUID,
+    // so it cannot name the source it clipped; the signal instead
+    // travels the established out-of-band path,
+    // PaginationSaturationTracker.signalTruncation(), which the
+    // scheduler drains immediately after fetch() returns and turns into
+    // a throttled, durably-recorded admin notification.
+    //
+    // It is deliberately NOT signalCapHit(), the pagination-saturation
+    // flag. That flag notifies only after N CONSECUTIVE saturated ticks,
+    // and any non-saturated tick clears the streak — so a feed
+    // oscillating across the cap (1001/1001/999, repeating) would reset
+    // the counter every third tick, never notify, and silently discard
+    // content on the other two. That is not a hypothetical: any feed
+    // hovering near MAX_ITEMS oscillates naturally. Truncation is
+    // therefore reported per occurrence and coalesced by the notifier's
+    // own throttle window, not by a streak.
     private static final int MAX_ITEMS = 1000;
 
     private RssFeedParser() {
@@ -130,11 +165,14 @@ public final class RssFeedParser {
         while (reader.hasNext()) {
             int event = reader.next();
             if (event == XMLStreamConstants.START_ELEMENT && "item".equals(reader.getLocalName())) {
-                posts.add(parseRssItem(reader, dispatchKey, fetchedAt));
-                if (posts.size() > MAX_ITEMS) {
-                    throw new RssFeedParseException(
-                        "feed item count exceeded " + MAX_ITEMS);
+                // Truncate at the cap: stop before parsing the cap+1-th
+                // item, so the stream is never walked past it. See
+                // MAX_ITEMS for why this truncates instead of raising.
+                if (posts.size() == MAX_ITEMS) {
+                    PaginationSaturationTracker.signalTruncation();
+                    break;
                 }
+                posts.add(parseRssItem(reader, dispatchKey, fetchedAt));
             }
         }
         return posts;
@@ -198,11 +236,15 @@ public final class RssFeedParser {
         while (reader.hasNext()) {
             int event = reader.next();
             if (event == XMLStreamConstants.START_ELEMENT && "entry".equals(reader.getLocalName())) {
-                posts.add(parseAtomEntry(reader, dispatchKey, fetchedAt));
-                if (posts.size() > MAX_ITEMS) {
-                    throw new RssFeedParseException(
-                        "feed item count exceeded " + MAX_ITEMS);
+                // Same truncation contract as the RSS <item> loop above;
+                // Atom carries its own copy of the check because it is a
+                // separate read loop, and a fix applied to only one of
+                // them leaves the defect live on the other dialect.
+                if (posts.size() == MAX_ITEMS) {
+                    PaginationSaturationTracker.signalTruncation();
+                    break;
                 }
+                posts.add(parseAtomEntry(reader, dispatchKey, fetchedAt));
             }
         }
         return posts;

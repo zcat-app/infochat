@@ -29,8 +29,15 @@ final class RedditResponseParser {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    // Per-response item-count cap, parity with RssFeedParser.MAX_ITEMS
-    // (M1-409). A single listing page carries far fewer than 1000 children;
+    // Per-response item-count cap. Shares RssFeedParser.MAX_ITEMS' value
+    // (M1-409) but NOT its over-cap behaviour: RSS truncates, this
+    // rejects, and the divergence is deliberate (M1-753). This parser
+    // reads ONE paginated listing response, where a 1000+ child payload
+    // is anomalous — nothing legitimate produces it, so refusing the
+    // response is the right answer. An RSS archive feed, by contrast,
+    // legitimately grows past the cap forever, and rejecting it there
+    // meant never ingesting the source at all.
+    // A single listing page carries far fewer than 1000 children;
     // the cap bounds the per-response allocation against a hostile listing
     // serving an unbounded children array — defense in depth above the SSRF
     // 5 MiB body cap, which already bounds it absolutely. Checked on the raw

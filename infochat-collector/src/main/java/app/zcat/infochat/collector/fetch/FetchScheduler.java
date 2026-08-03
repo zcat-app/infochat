@@ -113,6 +113,17 @@ import org.jspecify.annotations.Nullable;
  * {@code infochat.fetch.saturation-threshold} consecutive ticks,
  * {@link ThrottledAdminNotifier#notifyOnce} fires once on the
  * transition tick, keyed on the source UUID.
+ *
+ * <h2>Feed truncation (M1-753)</h2>
+ * <p>Separately from saturation, a parser may clip a feed at its
+ * per-parse item cap and return a prefix. That is drained from the
+ * same thread-local channel ({@code consumeTruncation()}) and reported
+ * on EVERY truncating tick rather than on a streak — a feed
+ * oscillating across the cap would reset a streak and never report,
+ * while still discarding content. Volume is bounded by the notifier's
+ * own throttle window, and the persisted
+ * {@code admin_notification_state} row is what makes a discard
+ * recoverable after the fact.
  */
 @Startup
 @Priority(400)
@@ -489,6 +500,7 @@ public class FetchScheduler {
         // the store the same way.
         List<NormalizedPost> posts;
         boolean capHit;
+        boolean truncated;
         try {
             posts = fetcher.fetch(row.dispatchKey(), row.identifier());
             // Consume the thread-local cap-hit signal immediately after
@@ -496,6 +508,9 @@ public class FetchScheduler {
             // the fetcher's pagination loop and must not survive into
             // the next dispatch.
             capHit = saturationTracker.consumeCapHit();
+            // Same hand-off, different condition: a parser clipped the
+            // feed at its per-parse item cap (M1-753).
+            truncated = saturationTracker.consumeTruncation();
         } catch (Exception e) {
             // Log the numeric dispatch key + UUID; NEVER the
             // identifier URL (which can carry embedded credentials
@@ -531,7 +546,45 @@ public class FetchScheduler {
             // consecutive-saturation streak ("consistently saturates
             // ... across multiple ticks" reads consecutive).
             saturationTracker.recordTick(row.uuid(), false);
+            // Clear any truncation flag this tick left behind. A fetcher
+            // that parsed (raising the flag) and then threw would
+            // otherwise leak it onto the next source ticked on this
+            // thread and notify against the wrong uuid. Draining here is
+            // what makes the flag's one-tick lifetime a property of the
+            // scheduler rather than a coincidence of which fetchers
+            // happen to throw after parsing.
+            saturationTracker.consumeTruncation();
             return;
+        }
+
+        // Feed truncation (M1-753). Reported on EVERY truncating tick,
+        // deliberately NOT gated on a consecutive streak the way
+        // pagination saturation below is: a feed oscillating across the
+        // cap resets that streak and would never report, while
+        // discarding content on the ticks in between. Coalescing is the
+        // notifier's job — notifyOnce throttles per (key, window) AND
+        // persists a row in admin_notification_state, so this is both
+        // bounded in volume and durable, which a log line alone would
+        // not be. The key is per-source, bounded by the source table,
+        // because that table grows monotonically and only a DBA
+        // TRUNCATE recovers it. uuid + kind only, never the identifier
+        // URL (M1-023 INFO-LEAK precedent).
+        //
+        // Reported here, ahead of Stage 2, because truncation is a
+        // parse-stage fact: whether the surviving posts later persist
+        // is orthogonal, and reporting after Stage 2 would silently
+        // drop the signal on any tick whose persist failed.
+        if (truncated) {
+            throttledAdminNotifier.notifyOnce(
+                "feed_truncated:" + row.uuid(),
+                "feed_truncated",
+                "Source uuid=" + row.uuid() + " kind=" + row.kind()
+                    + " served more items than the per-parse cap; the first "
+                    + posts.size() + " were ingested and the remainder"
+                    + " discarded. This repeats every tick while the feed"
+                    + " stays over the cap. The dropped items are the"
+                    + " document-order tail, which for a newest-first feed"
+                    + " is its oldest content");
         }
 
         // Stage 2 — persist + enqueue. A failure here is a Collector-side
