@@ -323,6 +323,63 @@ class DisplayHitTranslationTest {
                 "the display cut still governs what the reader sees");
     }
 
+    // ----- saved-leg cache partition (M1-755) ---------------------------
+
+    private static final UUID SAVED_USER_A =
+            UUID.fromString("33333333-3333-3333-3333-333333333333");
+    private static final UUID SAVED_USER_B =
+            UUID.fromString("44444444-4444-4444-4444-444444444444");
+
+    /** The /saved leg's call shape: scopeKind "saved", scopeId = the ACTOR's users.id. */
+    private String runSavedLeg(UUID userId, String sourceLanguage, String scopeLanguage) {
+        return pipeline.runForDisplayHit(HEADLINE, sourceLanguage, "saved", userId, scopeLanguage);
+    }
+
+    @Test
+    void savedLegEntriesArePartitionedPerUser() {
+        // D13 makes the /saved list user-global, so the security-relevant
+        // boundary for the display-hit cache is the USER, not the calling
+        // scope: the partition is hit/saved/<userId>/<effectiveLanguage>.
+        // An entry written for one user must be a MISS for another with
+        // the same headline and language — no user may observe (via a
+        // first-render HIT) that another user saved and rendered the same
+        // post within the TTL.
+        String userA = runSavedLeg(SAVED_USER_A, "en", "cs");
+        String userB = runSavedLeg(SAVED_USER_B, "en", "cs");
+
+        assertEquals(userA, userB, "both users render the same translation");
+        assertEquals(2, translatorStub.callCount(),
+                "a second user must MISS on a headline another user already cached");
+        assertEquals(2, sanitizer.sanitizeCallCount(),
+                "a per-user miss is a full translating render — one sanitize per user");
+
+        runSavedLeg(SAVED_USER_A, "en", "cs");
+        assertEquals(2, translatorStub.callCount(),
+                "the first user's own re-render still hits its partition");
+    }
+
+    @Test
+    void savedLegReadsThePerUserKeyspaceItWrites() {
+        // The same user renders the same user-global list in every scope
+        // they are in, and the leg keys the partition on the ACTOR, so
+        // the user's own re-renders share entries. Seeding the REAL
+        // composition (package-private on the pipeline) and rendering
+        // with the leg's call shape proves the leg reads exactly
+        // hit/saved/<userId>/<effectiveLanguage> — not a re-derived copy.
+        cache.put(HEADLINE,
+                TranslationPipeline.displayHitCacheLanguage("saved", SAVED_USER_A, "cs"),
+                "přeložený titulek");
+
+        String result = runSavedLeg(SAVED_USER_A, "en", "cs");
+
+        assertEquals("přeložený titulek " + marker("cs"), result,
+                "a saved-leg hit renders truncate + marker exactly like any display hit");
+        assertEquals(0, translatorStub.callCount(),
+                "an entry seeded in the saved-leg keyspace must be a HIT");
+        assertEquals(0, sanitizer.sanitizeCallCount(),
+                "no sanitize on the hit path — disjointness is what makes that safe");
+    }
+
     // ----- fallback -----------------------------------------------------
 
     @Test

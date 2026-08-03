@@ -4,13 +4,17 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.messaging.RateCapBucket;
 import app.zcat.infochat.provider.render.DisplayHeadline;
+import app.zcat.infochat.provider.testing.TestLlmProvider;
 import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -57,6 +61,22 @@ class SavedCommandHandlerTest {
     @Inject @SeedDataSource DataSource dataSource;
     @Inject BundleLoader bundleLoader;
     @Inject InboundContext inboundContext;
+    // The test-classpath translator stub behind the REAL TranslationPipeline
+    // bean — the spy that pins the en-scope no-op at the renderer level.
+    @Inject TestLlmProvider mockLlm;
+    // The same per-user LLM bucket the handler draws from — saturated in
+    // the rate-cap test and refunded there so no budget leaks across tests.
+    @Inject LlmRateCap llmRateCap;
+    // The D47 aggregate group bucket, saturated in the group-backstop test.
+    @Inject RateCapBucket rateCapBucket;
+
+    @Inject
+    @ConfigProperty(name = "infochat.chat.llm-rate-cap-per-minute", defaultValue = "10")
+    int llmRateCapPerMinute;
+
+    @Inject
+    @ConfigProperty(name = "infochat.ratelimit.group-llm-per-15min", defaultValue = "5")
+    int groupLlmCap;
 
     @BeforeEach
     void cleanup() throws Exception {
@@ -71,6 +91,9 @@ class SavedCommandHandlerTest {
                     PREFIX + "%");
             exec(conn,
                     "DELETE FROM source WHERE identifier LIKE ?",
+                    PREFIX + "%");
+            exec(conn,
+                    "DELETE FROM groups WHERE upstream_group_id LIKE ?",
                     PREFIX + "%");
             exec(conn,
                     "DELETE FROM users WHERE contact_id LIKE ?",
@@ -372,6 +395,222 @@ class SavedCommandHandlerTest {
     }
 
     @Test
+    void csScopeTranslatesHeadlineOfDifferingSourceLanguageRowWithMarker() throws Exception {
+        // M1-755 renderer-wiring pin (the M1-747 precedent): without this
+        // case, deleting the runForDisplayHit call in buildReply would keep
+        // every pipeline-level test green — those prove the leg works WHEN
+        // called; only this proves the /saved renderer calls it. The saved
+        // row's snapshot language ('en', the V76 default) differs from the
+        // cs scope, so the headline routes through the translating leg and
+        // renders the translated, marker-suffixed headline through the REAL
+        // pipeline (real cache, real sanitizer-2, real bundle marker).
+        String contactId = PREFIX + "xlate-actor";
+        inboundContext.setEffectiveLanguage("cs");
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "xlate-source");
+        String uid = PREFIX + "xlate-uid-1";
+        seedSavedPost(userId, sourceId, uid, "Original title",
+                new String[] {}, new String[] {},
+                Instant.now().minus(1, ChronoUnit.HOURS));
+        mockLlm.reset();
+        mockLlm.setTranslatorResponseText("Přeložený titulek");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/saved");
+
+        assertTrue(reply.text().contains("Přeložený titulek"),
+                "cs-scope /saved must render the translated headline; got: " + reply.text());
+        assertTrue(reply.text().contains(
+                        bundleLoader.get(BundleKeys.REPLY_TRANSLATION_HIT_MARKER, "cs")),
+                "the translated headline must carry the machine-translation marker; got: "
+                        + reply.text());
+        assertFalse(reply.text().contains("Original title"),
+                "the English headline must be REPLACED by the translation, not appended; got: "
+                        + reply.text());
+        assertEquals(1, mockLlm.callCount(),
+                "one row, one translator call — the cs-scope render must exercise the leg");
+        mockLlm.reset();
+    }
+
+    @Test
+    void enScopeRendersByteIdenticalWithZeroTranslatorCalls() throws Exception {
+        // The en-scope no-op, pinned at the renderer level with the
+        // TestLlmProvider spy: a byte-identical en render must not invoke
+        // the translator once (the existing line-byte pins cover the
+        // bytes; this covers the call count).
+        String contactId = PREFIX + "enscope-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "enscope-source");
+        String uid = PREFIX + "enscope-uid-1";
+        seedSavedPost(userId, sourceId, uid, "En title",
+                new String[] {}, new String[] {},
+                Instant.now().minus(1, ChronoUnit.HOURS));
+        mockLlm.reset();
+        mockLlm.setTranslatorResponseText("would-be translation");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/saved");
+
+        assertTrue(reply.text().contains("En title"),
+                "en-scope /saved must render the headline byte-identical; got: " + reply.text());
+        assertFalse(reply.text().contains("would-be translation"),
+                "the translator must never be invoked for an en scope; got: " + reply.text());
+        assertEquals(0, mockLlm.callCount(),
+                "an en-scope /saved page must make ZERO translator calls");
+        mockLlm.reset();
+    }
+
+    @Test
+    void llmBucketExhaustedRendersPageUntranslatedWithZeroTranslatorCalls() throws Exception {
+        // The rate-cap control (redteam 2026-08-03, high/DOS refine): the
+        // leg draws ONE per-user LlmRateCap token per translating
+        // invocation; a rejected draw degrades the WHOLE page to
+        // untranslated — the listing must still render (it stays in the
+        // cheap class), just without the leg.
+        String contactId = PREFIX + "llmcapx-actor";
+        inboundContext.setEffectiveLanguage("cs");
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "llmcapx-source");
+        seedSavedPost(userId, sourceId, PREFIX + "llmcapx-uid-1", "Cap title",
+                new String[] {}, new String[] {},
+                Instant.now().minus(1, ChronoUnit.HOURS));
+        // Saturate the user's per-user LLM bucket (the bean the handler
+        // draws from). The test profile caps it at 3/min
+        // (%test.infochat.chat.llm-rate-cap-per-minute=3), so the
+        // handler's draw after saturation must be rejected.
+        for (int i = 0; i < llmRateCapPerMinute; i++) {
+            assertTrue(llmRateCap.tryAcquire(userId), "saturation acquire must succeed at " + i);
+        }
+        mockLlm.reset();
+        mockLlm.setTranslatorResponseText("would-be translation");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/saved");
+
+        assertTrue(reply.text().contains("Cap title"),
+                "the listing must still render at bucket exhaustion; got: " + reply.text());
+        assertFalse(reply.text().contains("would-be translation"),
+                "no translator call may fire at bucket exhaustion; got: " + reply.text());
+        assertEquals(0, mockLlm.callCount(),
+                "an exhausted per-user LLM bucket must degrade the leg, not run it");
+
+        // Restore the budget so the saturation never leaks across tests.
+        for (int i = 0; i < llmRateCapPerMinute; i++) {
+            llmRateCap.refund(userId);
+        }
+        mockLlm.reset();
+    }
+
+    @Test
+    void perPageTranslationBudgetBoundsTranslatorCallsAndRendersConverge() throws Exception {
+        // The per-page budget control (redteam 2026-08-03, high/DOS
+        // refine): one more budget-eligible row than
+        // infochat.save.translation-max-per-page (default 5). The first
+        // render makes exactly `budget` translator calls and leaves the
+        // overflow row untranslated; the second render translates the
+        // remainder because cache hits cost nothing — the budget bounds
+        // per-invocation calls, never the cache.
+        String contactId = PREFIX + "budget-actor";
+        inboundContext.setEffectiveLanguage("cs");
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "budget-source");
+        for (int i = 0; i < 6; i++) {
+            seedSavedPost(userId, sourceId, PREFIX + "budget-uid-" + i, "Original " + i,
+                    new String[] {}, new String[] {},
+                    Instant.now().minus(i, ChronoUnit.HOURS));
+        }
+        mockLlm.reset();
+        mockLlm.setTranslatorResponseText("Přeložený titulek");
+
+        OutboundMessage first = handler.handle(new ScopeRef.Dm(contactId), "/saved");
+
+        assertEquals(5, mockLlm.callCount(),
+                "the first render must make exactly the per-page budget of translator calls; got: "
+                        + first.text());
+        assertEquals(5, countOccurrences(first.text(), "Přeložený titulek"),
+                "exactly the budget rows render translated on the first render; got: "
+                        + first.text());
+        assertTrue(first.text().contains("Original 5"),
+                "the row beyond the budget renders untranslated on the first render; got: "
+                        + first.text());
+
+        OutboundMessage second = handler.handle(new ScopeRef.Dm(contactId), "/saved");
+
+        assertEquals(6, mockLlm.callCount(),
+                "the second render translates the remainder — cache hits cost nothing");
+        assertEquals(6, countOccurrences(second.text(), "Přeložený titulek"),
+                "after two renders every row is translated; got: " + second.text());
+
+        // Converged-page no-draw pin (redteam refine, opencode finding):
+        // a fully-cached page makes ZERO translator calls AND draws no
+        // per-user token. The user has drawn exactly 2 tokens (one per
+        // translating render) against the %test cap of 3 — if the
+        // converged render drew a third, this acquire would fail.
+        OutboundMessage third = handler.handle(new ScopeRef.Dm(contactId), "/saved");
+        assertEquals(6, mockLlm.callCount(),
+                "a converged page must make ZERO translator calls");
+        assertEquals(6, countOccurrences(third.text(), "Přeložený titulek"),
+                "the converged page renders every row translated; got: " + third.text());
+        assertTrue(llmRateCap.tryAcquire(userId),
+                "a converged render must not draw a per-user token — the user's "
+                        + "last slot must still be free");
+        for (int i = 0; i < llmRateCapPerMinute; i++) {
+            llmRateCap.refund(userId);
+        }
+        mockLlm.reset();
+    }
+
+    @Test
+    void groupBucketExhaustedDegradesTheLegAndRefundsThePerUserToken() throws Exception {
+        // The D47 group backstop (redteam 2026-08-03, kimi finding): in
+        // group scope the leg draws the aggregate group LLM bucket
+        // alongside the per-user token, and a group reject REFUNDS the
+        // per-user token (the RetryCommandHandler pattern) — otherwise
+        // the backstop would drain every member's personal budget. The
+        // per-user bucket is pre-filled to cap-1: if the refund is
+        // missing, the post-render acquire below fails.
+        String contactId = PREFIX + "grpbk-actor";
+        inboundContext.setEffectiveLanguage("cs");
+        inboundContext.setSenderContactId(contactId);
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "grpbk-source");
+        UUID groupId = seedGroup(PREFIX + "grpbk-group");
+        seedSavedPost(userId, sourceId, PREFIX + "grpbk-uid-1", "Group title",
+                new String[] {}, new String[] {},
+                Instant.now().minus(1, ChronoUnit.HOURS));
+        // Saturate the group's D47 aggregate LLM bucket (the bean the
+        // handler draws from). The %test profile caps it at 100 per
+        // 15 min (%test.infochat.ratelimit.group-llm-per-15min=100), so
+        // the acquire after saturation must be rejected.
+        for (int i = 0; i < groupLlmCap; i++) {
+            assertTrue(rateCapBucket.tryAcquireGroupLlm(groupId),
+                    "group saturation acquire must succeed at " + i);
+        }
+        for (int i = 0; i < llmRateCapPerMinute - 1; i++) {
+            assertTrue(llmRateCap.tryAcquire(userId), "user pre-fill must succeed at " + i);
+        }
+        mockLlm.reset();
+        mockLlm.setTranslatorResponseText("would-be translation");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Group(PREFIX + "grpbk-group"), "/saved");
+
+        assertTrue(reply.text().contains("Group title"),
+                "the listing must still render at group-bucket exhaustion; got: "
+                        + reply.text());
+        assertFalse(reply.text().contains("would-be translation"),
+                "no translator call may fire at group-bucket exhaustion; got: "
+                        + reply.text());
+        assertEquals(0, mockLlm.callCount(),
+                "an exhausted group bucket must degrade the leg, not run it");
+        assertTrue(llmRateCap.tryAcquire(userId),
+                "the group reject must refund the per-user token — the pre-filled "
+                        + "cap-1 user must still have its last slot free");
+
+        for (int i = 0; i < llmRateCapPerMinute; i++) {
+            llmRateCap.refund(userId);
+        }
+        mockLlm.reset();
+    }
+
+    @Test
     void savedHidesSaveWhosePostIsQuarantined() throws Exception {
         // The visibility interlock (M1-730; redteam 2026-07-30,
         // medium/INFO-LEAK): a post re-hidden to QUARANTINED after being
@@ -490,6 +729,20 @@ class SavedCommandHandlerTest {
                              + "RETURNING id")) {
             ps.setString(1, identifier);
             ps.setString(2, "Test Source " + identifier);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return (UUID) rs.getObject("id");
+            }
+        }
+    }
+
+    private UUID seedGroup(String upstreamGroupId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO groups (adapter, upstream_group_id, approval_status) "
+                             + "VALUES (?, ?, 'approved') RETURNING id")) {
+            ps.setString(1, ADAPTER);
+            ps.setString(2, upstreamGroupId);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return (UUID) rs.getObject("id");

@@ -1617,7 +1617,9 @@ share a cost profile share a bucket:
 - **Parser-only + DB-read paginated commands** — `/help`,
   `/status`, `/list-sources`, `/get-sources`, `/get-tags`,
   `/saved`, `/audit`, `/export`, `/quarantine list` and similar.
-  One bucket; high cap; cheap.
+  One bucket; high cap; cheap. (The `/saved` display-hit
+  translation leg is NOT parser-only — it is metered separately
+  under the LLM-triggering class, see below.)
 - **Asset commands** — `/zcash`, `/monero` and friends. Share a
   cache-hit bucket (most calls within a freshness window are
   served from cache, so the limit guards against a flood that
@@ -1656,6 +1658,30 @@ share a cost profile share a bucket:
   presentation translation legs ("shares today", design 05 §5.4.6),
   so the greedy temperature-0 emission applies to all three — a
   determinism improvement, disclosed here and in the design doc.
+- **`/saved` display-hit translation (M1-755)** — the presentation
+  translation leg on the saved-list surface. The listing itself stays in
+  the cheap parser-only+DB-read class (its invocation bucket unchanged);
+  the leg is metered as an LLM-triggering operation: ONE per-user bucket
+  token per invocation that actually makes a translator call (drawn on
+  the first cache-miss row — an `en` scope, an all-no-op page and a
+  fully-converged page never draw), plus a per-page translator-call
+  budget (`infochat.save.translation-max-per-page`, default 5) bounding
+  the per-invocation generative count — rows beyond the budget render
+  untranslated, unmarked, and a rejected draw degrades the page's
+  cache-miss rows the same way (cached translations still render: they
+  cost no generative call). In group scope the D47 per-group LLM
+  sub-bucket is drawn alongside the per-user token (the
+  RetryCommandHandler pattern: a group reject refunds the per-user
+  token), so a group's aggregate saved-list translation load is bounded
+  across members. Cache hits cost nothing, so repeated renders of a
+  page converge. The budget is what bounds the per-invocation
+  dispatch-thread hold; the leg stays on the transport thread by
+  design (offloading is the D35 interruptible redesign, out of scope).
+  Amplification is therefore bounded at rate-cap x budget (and, in
+  group scope, by the group bucket). What the leg sends to the backend
+  is disclosed under §Secrets handling. The leg shares
+  `ModelTask.TRANSLATOR` with the ingest, query-anchoring and
+  /summary presentation legs.
 - **Per-user interruptible concurrency** — not a rate
   bucket: a ceiling on one sender's CONCURRENT interruptible
   requests (the D35 interruptible class: chat replies, on-demand
@@ -1861,6 +1887,17 @@ sources). Application code uses the soft-delete column.
   bot-prose-only exposure the presentation and ingest translation legs
   imply. The disclosure text that `prod/switch-llm.sh` prints at switch
   time is updated to match by M1-758.
+- **`translator` also carries the user's saved-post headlines
+  (M1-755).** The `/saved` display-hit leg (§Rate limiting) sends each
+  listed row's rendered headline — the snapshot `title` or `body`
+  prefix of the user's bookmark set, per-user state (D13) — to
+  `ModelTask.TRANSLATOR`, which may be remote. The disclosure text
+  `prod/switch-llm.sh` prints at switch time must name this surface
+  (the pending M1-758 update is scoped to cover it alongside the M1-746
+  query-anchoring leg). The translated headlines are retained in the
+  display-hit cache per (user, language) for 24h — process-local, never
+  persisted, bounded, and `/forget` does not drain it: the same accepted
+  residual as the query-anchoring cache below.
 - The translation of that query is retained in an in-memory cache for 24h
   (per (scope, query-hash, language), M1-746). This is **user-authored
   content**, so it is deliberately outside the premise of the

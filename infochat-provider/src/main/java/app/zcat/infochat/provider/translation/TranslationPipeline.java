@@ -279,10 +279,11 @@ public class TranslationPipeline {
      * presentation prose, "not user-authored content"; feed-authored
      * headlines are, so they never share entries across scopes.
      *
-     * <p>Package-private so the leg's tests seed and probe the REAL
-     * keyspace rather than a re-derived copy that could drift.
+     * <p>Public so the /saved leg (M1-755) can probe the REAL composition
+     * before drawing from its per-page translator budget — a re-derived
+     * copy in the handler could drift from the implementation.
      */
-    static String displayHitCacheLanguage(String scopeKind, UUID scopeId, String scopeLanguage) {
+    public static String displayHitCacheLanguage(String scopeKind, UUID scopeId, String scopeLanguage) {
         return "hit/" + scopeKind + "/" + scopeId + "/" + scopeLanguage;
     }
 

@@ -1,0 +1,234 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: DOS
+    SEVERITY: high
+    PROMISE: security.md §Rate limiting: "Per-user token buckets bound, grouped
+              explicitly so commands that share a cost profile share a bucket:
+              - **Parser-only + DB-read paginated commands** — `/help`,
+              `/status`, `/list-sources`, `/get-sources`, `/get-tags`,
+              `/saved`, `/audit`, `/export`, `/quarantine list` and similar.
+              One bucket; high cap; cheap. … - **LLM-triggering operations**
+              (chat replies + on-demand `/summary` + `/retry` re-rolls) — its
+              own bucket, capped lower, profile-driven." The ONLY generative
+              call the spec exempts from that lower-capped bucket is named and
+              bounded: "**Query-anchoring translation (M1-746, D58)** — a
+              disclosed exception to the 'LLM-triggering operations' bucket …
+              one per turn for the D28 pre-fetch, plus one per DISTINCT
+              model-elected `semanticSearch` query — that draw NO per-user
+              bucket token".
+    GAP: The diff turns `/saved` — a spec-listed CHEAP, non-LLM command — into
+          an LLM-triggering command that draws no LLM token at all.
+          `infochat-provider/.../command/SavedCommandHandler.java:351-353`
+          calls `translationPipeline.runForDisplayHit(...)` once PER ROW inside
+          the `for (Row row : rows)` loop at :324, and the page size is 20
+          (`SavedCommandHandler.java:71`, `:247`). Each non-no-op call is one
+          generative `ModelTask.TRANSLATOR` HTTP request
+          (`translation/TranslationPipeline.java:228-231` →
+          `translation/LlmTranslationProvider.java:93-94`). `/saved` is still
+          classified cheap at the router
+          (`messaging/InboundRouter.java:266-268`, `CHEAP_COMMANDS` contains
+          `"saved"`), i.e. 30 invocations/minute
+          (`application.properties:699`), and it never touches `LlmRateCap`
+          (default 10/min, `chat/LlmRateCap.java:49-50`) — the grep for
+          `llmRateCap` shows draws only in InboundRouter chat, SummaryCommandHandler
+          and RetryCommandHandler, not here. Amplification is therefore ~60×
+          the per-user LLM budget (30 × 20 = 600 generative calls/min vs 10).
+          The leg is not a rare path: the new test at
+          `SavedCommandHandlerTest` (`csScopeTranslatesHeadlineOfDifferingSourceLanguageRowWithMarker`)
+          asserts `mockLlm.callCount() == 1` for ONE row with the V76 default
+          `source_language='en'` in a `cs` scope, i.e. every ordinary saved row
+          translates for any non-English scope. Cache relief is weaker than it
+          looks: entries are per-USER
+          (`TranslationPipeline.java:212`, `285-287`), the shared cache holds
+          10 000 entries with a 24 h TTL
+          (`translation/TranslationCache.java:43-46`), and the `/save` cap is
+          1000 rows/user (`application.properties:294`), so a handful of
+          non-English users thrash the cache and re-pay every eviction. Note
+          also that `/saved` is on the probation allowlist (§Slow-start tier),
+          whose premise for admitting a command is "no LLM cost" (the reason
+          `/lang` is allowed and `/retry` is blocked); that premise no longer
+          holds for `/saved`, though a fresh probation identity has no saves
+          yet, so the probation angle is a premise break rather than a
+          reachable burst.
+    REPRO: 1. Register normally (invite code), leave probation, `/lang cs`.
+            2. `/save <uid>` 20+ posts from ordinary bootstrap sources (their
+               `source_language` is the V76 default `'en'`, which differs from
+               the `cs` scope, so every row takes the translating leg).
+            3. Send `/saved`. One inbound message = 20 sequential generative
+               translator calls, charged against the cheap 30/min bucket and
+               ZERO LLM-bucket tokens.
+            4. Repeat `/saved --page 2`, `--page 3`, … up to 30 messages/min;
+               with 1000 saves the attacker walks 50 pages of distinct
+               headlines, then waits out the 24 h TTL (or churns
+               `/unsave` + `/save` on fresh titles) to keep every call a cache
+               miss. Where `ModelTask.TRANSLATOR` is routed remote (allowed —
+               only embeddings are pinned local by D54), this is billable
+               third-party spend driven by one ordinary user.
+            The system should not have allowed it because the spec places
+            `/saved` in the cheap bucket precisely on the ground that it is
+            parser-only + DB-read, and it enumerates the one generative leg
+            that may skip the LLM bucket; this is a second, undisclosed one.
+    SUGGESTED-FIX-CLASS: rate-limit
+
+  - CATEGORY: DOS
+    SEVERITY: high
+    PROMISE: security.md §Authorization model step 1.5: the transport cap
+              "runs after step 1 … and before every application-level check
+              below, so a hostile flood cannot drive outbound cost via the
+              per-inbound fixed-reply paths"; §Rate limiting: "**Per-user
+              interruptible concurrency** — … a ceiling on one sender's
+              CONCURRENT interruptible requests … so group membership cannot
+              let a single sender occupy every dispatch worker at one
+              instant"; §Failure handling: "A complete LLM outage degrades
+              quality, not safety." The threat model's bounding story for
+              per-message cost assumes the expensive class is the D35
+              interruptible class that is offloaded, capped and cancellable.
+    GAP: The new per-row translator calls run INLINE on the adapter's single
+          transport dispatch thread and while a pooled DB connection is held.
+          `/saved` is not in the D35 interruptible class
+          (`messaging/InboundRouter.java:1046-1060` — only non-slash chat,
+          `/summary` and `/retry` without `--digest`), so it reaches
+          `runDispatchStage(...)` at `InboundRouter.java:951`, which the
+          javadoc at `:962-965` states "Runs inline on the transport thread
+          for non-interruptible bodies"; the fork comment at `:864-873` calls
+          it "the transport's single dispatch thread". Each translator call is
+          bounded only by the per-task `timeout-ms`, default 30 000 ms
+          (`infochat-llm-adapter/.../impl/OpenAiCompatibleProvider.java:205`),
+          so a 20-row page can hold that thread for up to ~600 s against a
+          slow-but-answering endpoint (the circuit breaker only trips on
+          transport failures, so a merely slow endpoint never short-circuits).
+          While that happens NO other inbound on that adapter is processed —
+          including other users' ban checks, `/stop`, and admin commands.
+          Aggravating: `buildReply(...)` is invoked at
+          `SavedCommandHandler.java:215` INSIDE
+          `try (Connection conn = dataSource.getConnection())` opened at
+          `:196`, so a pool connection is pinned for the whole translator
+          sequence — directly contrary to the invariant the router states at
+          `InboundRouter.java:855-857` ("nothing may pin a connection under an
+          LLM call"). Because the work is inline and non-interruptible, `/stop`
+          cannot cancel it and the per-user interruptible concurrency ceiling
+          does not see it.
+    REPRO: 1. Same setup as the finding above (cs scope, ≥20 saved rows).
+            2. Point the deployment at any translator endpoint that answers
+               slowly but successfully (a loaded local Ollama under concurrent
+               ingest is enough; no attacker control of the endpoint needed).
+            3. Send a single `/saved`. Measure: every other user's messages on
+               that adapter — including a banned user's fixed-reply path and a
+               bot admin's `/ban` — are not processed until the 20th
+               translation returns. Repeating `/saved` at the cheap bucket's
+               30/min keeps the adapter's dispatch thread saturated
+               indefinitely from one ordinary account.
+            The system should not have allowed it because the spec's cost
+            bounding rests on expensive work being in the offloaded,
+            LLM-bucketed, `/stop`-cancellable class; this puts unbounded-count
+            LLM latency on the serialized intake path every other security
+            check runs on.
+    SUGGESTED-FIX-CLASS: other
+
+  - CATEGORY: INFO-LEAK
+    SEVERITY: medium
+    PROMISE: security.md §Secrets handling: the switcher "prints a per-task
+              privacy disclosure naming exactly which generative tasks now call
+              a remote provider and **what each exposes** — `chat` (private
+              user messages) flagged loudest, the ingest tasks … as
+              topic-interest exposure over public posts"; and "**`translator`
+              carries private user messages too (M1-746, D58).** … it is not
+              the bot-prose-only exposure the presentation and ingest
+              translation legs imply." Also §Secrets handling §User-content
+              logging names `saved_post` bodies as a protected user-content
+              class, and §What's intentionally NOT in v1 accepts the shared
+              translation cache only because "the cached strings are
+              presentation prose generated by the bot … not user-authored
+              content", with v1 relying "on minimization (chat-memory TTL,
+              `/forget`, `/export`)".
+    GAP: The diff routes a NEW class of content to `ModelTask.TRANSLATOR` —
+          the caller's own bookmark set — with no matching disclosure. The
+          value sent is the rendered headline of a `saved_post` row
+          (`SavedCommandHandler.java:339-353`), which per
+          `SELECT_ROWS_BASE_SQL` (`:123-126`) is the snapshot `title` OR
+          `left(body, BODY_SCAN_LIMIT)` — i.e. saved-post body text, the class
+          §Secrets handling singles out. `ModelTask.TRANSLATOR` has no
+          locality pin (only embeddings are local by D54; §Rate limiting says
+          the translator "may be remote"), so a remote provider learns, per
+          request, the exact content a specific user has bookmarked. Worse
+          than the M1-747 `/summary` precedent, the cache partition is now the
+          USER (`TranslationPipeline.java:212`, `285-287` via the diff's
+          `"saved", userId` arguments at `SavedCommandHandler.java:352`), so
+          the process retains, for 24 h
+          (`TranslationCache.java:43-46`), a per-user map of that user's saved
+          headlines. `/forget` deletes `saved_post` rows
+          (`ForgetCommandHandler.java:233` reports `saved_post_count`) but has
+          no hook into this cache, so the D37 minimization lever no longer
+          reaches the data. Nothing in the diff updates the disclosure surface
+          the spec makes a commitment about.
+    REPRO: 1. Operator routes `translator` to a remote provider (a supported,
+               documented configuration; the switcher's disclosure names only
+               chat/ingest/prose exposure).
+            2. Victim sets `/lang cs` and saves posts — including from feeds
+               whose titles are sensitive to be associated with them.
+            3. Every `/saved` ships those headlines (or body prefixes) to the
+               remote endpoint, tied to one requesting deployment and issued
+               only because that one user bookmarked them. The user was told
+               `translator` handles bot prose and (per M1-746) their search
+               queries — not their bookmark library.
+            4. Victim then runs `/forget`; the DB rows go, the translated
+               headlines stay resident for up to 24 h under a key derived from
+               their `users.id`.
+    SUGGESTED-FIX-CLASS: trust-boundary-tightening
+
+  - CATEGORY: AUDIT-EVASION
+    SEVERITY: low
+    PROMISE: security.md §LLM output sanitizer: "Every match is audit-logged;
+              rows aggregate per distinct token per sanitize call and carry the
+              exact occurrence count — counted, never throttled." And, for this
+              exact echo surface: "the `/save -t` render-side redaction, by
+              contrast, is audit-logged on every hit".
+    GAP: The diff routes the `/saved` headline through a leg whose cache-hit
+          path performs NO sanitize call — `TranslationPipeline.java:214-224`
+          returns the stored bytes with "NO transform — truncate + marker
+          only". A closed-list token that the TRANSLATOR (an LLM, and the
+          reason sanitizer-2 exists) introduced into a headline is redacted and
+          audited exactly ONCE, on the miss that populated the entry
+          (`TranslationPipeline.java:247`, `252`); every subsequent delivery of
+          that same `[redacted command]` line — for 24 h, on every `/saved`
+          page render, and in group scope to every member — emits no
+          `LLM_OUTPUT_SANITIZED` row. Before the diff, `/saved` sanitized every
+          rendered headline on every render
+          (`SavedCommandHandler.java:339`), so the surface's redaction count
+          matched its delivery count. The redaction itself still holds; what is
+          lost is the "counted, never throttled" occurrence record for the
+          translator-introduced tokens on this surface.
+    REPRO: 1. Get a feed title into the corpus that steers the translator into
+               emitting an admin-command-shaped string in its output (the
+               translator prompt wraps untrusted content, but the threat model
+               treats the model as coaxable by construction).
+            2. A cs-scope user saves that post and runs `/saved`: one audit row
+               records the redaction.
+            3. The user (or, in a group, any member triggering the same render)
+               repeats `/saved` all day: the same redacted line ships from
+               cache with zero further audit rows, so `/audit` under-reports
+               how often admin-command-shaped output is reaching readers by the
+               full cache-hit multiple.
+    SUGGESTED-FIX-CLASS: audit-log-coverage
+
+OUT-OF-MODEL:
+  - Operator routing `ModelTask.TRANSLATOR` to a hostile endpoint: §Trust
+    boundaries item 9 puts a hostile endpoint's REPLY in scope (and the leg
+    handles it — pre-bound → flatten → sanitizer-2 → truncate), but choosing
+    the endpoint is trusted operator config, so "operator points translator at
+    an adversary" is not itself a finding.
+  - `source.language` as an injection vector into the translator prompt's
+    instruction region: reachable only through `/add-source --lang` (admin- and
+    user-write per M1-750) and already gated by `ISO_639_SHAPE`
+    (`TranslationPipeline.java:53`, `204-210`) plus the single-pass prompt
+    render (`LlmTranslationProvider.java:122-132`). The diff's V76 snapshot
+    (`V76__saved_post_source_language.sql:21`, `NOT NULL DEFAULT 'en'`) freezes
+    that value at save time, so a later language correction cannot retro-steer
+    an old bookmark's translation — noted as the correct posture, not a gap.
+  - The 24 h cross-user timing side-channel that §What's intentionally NOT in
+    v1 accepts for the shared prose cache does not apply here: the saved leg is
+    partitioned per `users.id`, and the new
+    `DisplayHitTranslationTest.savedLegEntriesArePartitionedPerUser` pins that
+    a second user MISSES on another user's entry. That part of the diff is
+    sound.

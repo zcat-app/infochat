@@ -1,0 +1,77 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: DOS
+    SEVERITY: low
+    PROMISE: >
+      The /saved display-hit translation leg's cost metering, as amended by
+      this very diff (docs/spec/security.md §Rate limiting): "the leg is
+      metered as an LLM-triggering operation: ONE per-user bucket token per
+      invocation that actually translates (drawn on the first row that would
+      take the translating leg — an `en` scope or an all-no-op page never
+      draws; a rejected draw degrades the whole page to untranslated)".
+    GAP: >
+      The draw is keyed to row ELIGIBILITY, not to an actual translator call.
+      SavedCommandHandler.buildReply draws the token on the first row that
+      passes `!headline.isEmpty() && !"en".equalsIgnoreCase(scopeLanguage)
+      && !row.sourceLanguage.equalsIgnoreCase(scopeLanguage)`
+      (SavedCommandHandler.java:373-391) BEFORE probing the cache — so a
+      fully-converged page (every eligible row a display-hit cache hit,
+      which the spec itself says repeated renders converge to) draws a
+      per-user LlmRateCap token and then makes ZERO translator calls
+      (rows render via runForDisplayHit's hit path,
+      SavedCommandHandler.java:398-405). The spec's "all-no-op page never
+      draws" and "per invocation that actually translates" are not delivered
+      for converged pages. Separately, a rejected draw sets
+      `translationBudget = 0` (SavedCommandHandler.java:388-390), but the
+      guard `if (cacheHit || translationBudget > 0)` (line 399) still
+      renders cache-hit rows translated, so the documented "degrades the
+      WHOLE page to untranslated" is not delivered for partially-cached
+      pages — the page degrades only its cache-miss rows, unmarked. Both
+      deviations are cost-conservative (no unmetered translator call is
+      reachable; the per-page budget, the one-token-per-invocation cap, the
+      per-user partition and the en-scope exemption all hold), so severity
+      is low; the impact is that the user's own shared LLM bucket is
+      consumed by no-op renders and the degrade-on-reject semantics are
+      weaker than the amended spec states.
+    REPRO: >
+      A cs-scope user whose /saved page is fully cached (rendered once
+      already) issues `/saved` ten or more times within a minute (the /saved
+      invocation bucket stays in the cheap class and the transport cap is
+      60/min, so this is trivially reachable). Each render draws one
+      per-user LlmRateCap token (SavedCommandHandler.java:386-389) although
+      the pipeline performs zero translator calls (all rows hit the
+      per-user "hit/saved/<userId>/<cs>" keyspace). After ~10 renders the
+      user's per-user LLM bucket (infochat.chat.llm-rate-cap-per-minute,
+      default 10, the SAME bucket as chat replies, on-demand /summary and
+      /retry) is exhausted, and the user's next chat-mode message or
+      /summary is rejected for the remainder of the window — a
+      self-inflicted availability degradation the documented metering
+      contract ("per invocation that actually translates", "all-no-op page
+      never draws") says must not happen. At bucket exhaustion a
+      partially-cached page additionally renders a mix of translated
+      (cache-hit) and untranslated rows with no marker or notice, contrary
+      to "degrades the whole page to untranslated".
+    SUGGESTED-FIX-CLASS: rate-limit
+
+OUT-OF-MODEL:
+  - >
+    Translation-fidelity cache collision within one user's library: the
+    display-hit cache key is (SHA-256(headline), "hit/saved/<userId>/<lang>")
+    — the snapshot source language is NOT a key dimension, so two rows of
+    the same user with byte-identical headline text but different
+    source_language values share one entry and the second row renders the
+    first row's translation (wrong target-language output for a legitimate
+    bookmark). No confidentiality/integrity boundary is crossed — outside
+    the security threat model, flagged for the user's awareness.
+  - >
+    Cross-user cache-eviction interference on the shared 10,000-entry
+    TranslationCache: a hostile registered user filling their own
+    "hit/saved/<userId>/..." partition at their bucket-bounded fill rate
+    (~bucket-cap x 5 entries/min) can LRU-evict other users' cached
+    translations — and M1-747's shared prose entries — forcing metered
+    re-translation for victims. Harm is bounded (re-translation is metered
+    against each victim's own per-user bucket) and the cache bound is
+    documented as "a memory-safety belt, not a spec commitment"
+    (TranslationCache.java), so no spec commitment covers eviction-based
+    interference.

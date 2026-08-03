@@ -1,0 +1,78 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: DOS
+    SEVERITY: medium
+    PROMISE: docs/spec/security.md §Rate limiting, "Per-group LLM rate
+      (D47) — a separate sub-bucket per approved group bounding
+      LLM-triggering operations (chat replies + on-demand /summary +
+      /retry re-rolls) across all group members. The per-user LLM cap
+      fires first; the per-group cap is the backstop for groups with many
+      active members."
+    GAP: The diff's own spec amendment (security.md §Rate limiting,
+      "**/saved display-hit translation (M1-755)**") declares the new leg
+      "metered as an LLM-triggering operation", yet the only draw in the
+      code is the per-user bucket: SavedCommandHandler.buildReply calls
+      `llmRateCap.tryAcquire(userId)` (diff hunk at
+      infochat-provider/.../SavedCommandHandler.java, the new
+      `if (!llmTokenHeld) { ... tryAcquire(userId) ... }` block). No
+      per-group LLM sub-bucket is consulted when /saved runs in a group
+      scope. A new generative-call surface (up to
+      `infochat.save.translation-max-per-page` = 5 translator calls per
+      invocation) is now reachable inside approved groups while bypassing
+      the D47 group backstop that exists precisely for "groups with many
+      active members". The per-group bullet's enumeration was not amended
+      to name this leg either, so the group backstop's coverage silently
+      shrank as the "LLM-triggering operation" class grew.
+    REPRO: In an approved group with K active members on a non-en /lang,
+      each member pages /saved (cheap parser-only invocation bucket,
+      high cap). Every member draws their own per-user LLM token and
+      issues up to 5 translator calls per render; first-render storms
+      (cold per-user caches) produce K × rate-cap × 5 generative calls
+      per minute against ModelTask.TRANSLATOR, with the per-group LLM
+      bucket never firing. Aggregate translator load scales with group
+      membership — exactly the shape the D47 group sub-bucket was
+      committed to bound.
+    SUGGESTED-FIX-CLASS: rate-limit
+  - CATEGORY: DOS
+    SEVERITY: low
+    PROMISE: docs/spec/security.md §Rate limiting, "Per-user
+      interruptible concurrency — ... a ceiling on one sender's
+      CONCURRENT interruptible requests ... across all scopes, so group
+      membership cannot let a single sender occupy every dispatch worker
+      at one instant — the per-minute bucket bounds rate, this bounds
+      share."
+    GAP: The /saved translation leg runs inline on the adapter's
+      transport dispatch thread (accepted per the amendment: "the leg
+      stays on the transport thread by design"), and the per-page budget
+      bounds only the PER-INVOCATION hold ("The budget is what bounds the
+      per-invocation dispatch-thread hold"). But the leg is outside the
+      D35 interruptible class, so no per-user concurrency ceiling covers
+      it: a single sender can have several /saved invocations in flight
+      at once, each holding a dispatch thread for up to budget x
+      per-call-timeout. The amendment's bound is honestly scoped
+      ("per-invocation") but the concurrency multiplier is unbounded by
+      any control in the diff — only the per-(adapter, contact) inbound
+      rate cap (60/min) throttles arrivals, and it does not serialize
+      in-flight work. This extends the ticket's accepted inline-hold
+      residual (out_of_scope, "Redteam 2026-08-03, high/DOS — accepted
+      remediation scope") by a dimension that acceptance did not cover.
+    REPRO: A registered, non-probation user sends a burst of /saved
+      commands (across pages or repeated) within the transport rate cap
+      on a non-en scope with a cold cache, against a slow-but-answering
+      translator endpoint. Each invocation occupies a transport dispatch
+      thread for up to 5 sequential translator calls; N concurrent
+      invocations occupy N threads for that duration, degrading inbound
+      processing for every user on the same adapter. The per-user LLM
+      bucket caps tokens per minute but not concurrent in-flight
+      invocations, and the per-page budget caps calls per invocation but
+      not invocations.
+    SUGGESTED-FIX-CLASS: rate-limit
+
+OUT-OF-MODEL:
+  - The display-hit translation cache retains a user's translated
+    saved-post headlines per (user, language) for 24h, process-local,
+    and /forget does not drain it. Already stated as an accepted
+    residual in the amended security.md §Secrets handling (M1-755
+    bullet) and the ticket's out_of_scope, so noted here only for
+    completeness — no new exposure beyond the documented acceptance.

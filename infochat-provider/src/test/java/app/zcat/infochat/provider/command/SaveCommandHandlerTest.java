@@ -476,6 +476,39 @@ class SaveCommandHandlerTest {
     }
 
     @Test
+    void savePersistsTheSourcesDeclaredLanguageIntoTheSnapshot() throws Exception {
+        // M1-755: the save-time SELECT projects source.language and the
+        // INSERT writes it, so the snapshot's source_language is frozen
+        // with the rest of the row — a later /add-source --lang edit never
+        // retro-applies. The probe reads the INSERT argument back from the
+        // stored row, so deleting the column from the save path is a test
+        // failure.
+        String contactId = PREFIX + "lang-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "lang-source", new String[] { "news" }, "cs");
+        seedDmSubscription(userId, sourceId);
+        String uid = PREFIX + "lang-uid";
+        seedPost(sourceId, uid, "READY", "Title L", "Body L", null, null, null);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/save " + uid);
+
+        assertEquals(MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_SAVE_SUCCESS), uid),
+                reply.text(),
+                "/save must succeed for a source declaring a non-en language");
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT source_language FROM saved_post WHERE post_uid = ?")) {
+            ps.setString(1, uid);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "saved_post row must exist");
+                assertEquals("cs", rs.getString("source_language"),
+                        "the declared source language must be snapshotted with the row");
+            }
+        }
+    }
+
+    @Test
     void save_succeedsInGroupScope() throws Exception {
         String contactId = PREFIX + "group-actor";
         inboundContext.setSenderContactId(contactId);
@@ -655,14 +688,20 @@ class SaveCommandHandlerTest {
     }
 
     private UUID seedSource(String identifier, String[] bootstrapTags) throws Exception {
+        return seedSource(identifier, bootstrapTags, "en");
+    }
+
+    private UUID seedSource(String identifier, String[] bootstrapTags, String language)
+            throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO source (kind, identifier, display_name, category, "
-                             + "bootstrap_tags) VALUES ('rss', ?, ?, 'news', ?) "
+                             + "bootstrap_tags, language) VALUES ('rss', ?, ?, 'news', ?, ?) "
                              + "RETURNING id")) {
             ps.setString(1, identifier);
             ps.setString(2, "Test Source " + identifier);
             ps.setArray(3, conn.createArrayOf("TEXT", bootstrapTags));
+            ps.setString(4, language);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return (UUID) rs.getObject("id");

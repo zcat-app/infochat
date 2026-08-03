@@ -5,12 +5,17 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.messaging.RateCapBucket;
 import app.zcat.infochat.provider.render.DisplayHeadline;
+import app.zcat.infochat.provider.translation.TranslationCache;
+import app.zcat.infochat.provider.translation.TranslationPipeline;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -121,8 +126,17 @@ public class SavedCommandHandler implements CommandHandler {
     // that. (Redteam 2026-07-30, medium/DOS.)
     private static final String SELECT_ROWS_BASE_SQL =
             "SELECT post_uid, title, left(body, " + DisplayHeadline.BODY_SCAN_LIMIT + ") AS body, "
-                    + "url, snapshot_tags, personal_tags, saved_at "
+                    + "url, snapshot_tags, personal_tags, saved_at, source_language "
                     + "FROM saved_post WHERE user_id = ?" + VISIBILITY_INTERLOCK_SQL;
+
+    // D47 group backstop (M1-755, redteam 2026-08-03): the active (not
+    // soft-removed) groups row for the inbound (adapter, upstream_group_id)
+    // — the same query the InboundRouter and SummaryCommandHandler run, so
+    // the id the group LLM bucket keys on is the same groups.id the
+    // router carries.
+    private static final String SELECT_GROUP_ID_SQL =
+            "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ? "
+                    + "AND removed_at IS NULL";
 
     @Inject
     BundleLoader bundleLoader;
@@ -156,6 +170,37 @@ public class SavedCommandHandler implements CommandHandler {
     // render/record, they gate nothing (§9 display/record exemption).
     @Inject
     Clock clock = Clock.systemUTC();
+
+    // The display-hit translation leg (M1-755): the /saved render path is
+    // user-global (D13), so the pipeline's cache partition rides on the
+    // ACTOR (hit/saved/<actorUserId>/<effectiveLanguage>), not the calling
+    // scope — entries are shared across the user's own scopes but never
+    // across users. The snapshot column was frozen at /save time (V76),
+    // so the source language never re-resolves against the live post.
+    //
+    // LLM-cost metering (redteam 2026-08-03, high/DOS refine): the leg
+    // draws ONE per-user LlmRateCap token per invocation that actually
+    // translates — the same per-user bucket as chat / on-demand /summary
+    // / /retry (security.md §Rate limiting) — and a per-page translator
+    // budget bounds the per-invocation generative count. Cache hits cost
+    // no translator call, so the handler probes the REAL display-hit
+    // keyspace before drawing from the budget: repeated renders converge
+    // to fully-translated pages.
+    @Inject
+    TranslationPipeline translationPipeline;
+
+    @Inject
+    LlmRateCap llmRateCap;
+
+    @Inject
+    RateCapBucket rateCapBucket;
+
+    @Inject
+    TranslationCache translationCache;
+
+    @Inject
+    @ConfigProperty(name = "infochat.save.translation-max-per-page", defaultValue = "5")
+    int translationMaxPerPage;
 
     @Override
     public String name() {
@@ -202,7 +247,18 @@ public class SavedCommandHandler implements CommandHandler {
                 return reply(scope, bundleLoader.get(BundleKeys.REPLY_SAVED_EMPTY, inboundContext.effectiveLanguage()));
             }
 
-            return reply(scope, buildReply(rows, totalCount, args));
+            // D47 group backstop: when the display-hit leg may run in
+            // group scope, resolve the group's DB id so the aggregate
+            // group LLM bucket can be drawn alongside the per-user token.
+            // En scopes skip the leg entirely, so the lookup is gated on
+            // a non-en effective language.
+            UUID groupId = null;
+            if (scope instanceof ScopeRef.Group group
+                    && !"en".equalsIgnoreCase(inboundContext.effectiveLanguage())) {
+                groupId = resolveGroupId(conn, adapter, group.adapterGroupId());
+            }
+
+            return reply(scope, buildReply(rows, totalCount, args, userId, groupId));
         }
     }
 
@@ -285,10 +341,26 @@ public class SavedCommandHandler implements CommandHandler {
                 rs.getString("url"),
                 snapshotArr == null ? List.of() : Arrays.asList((String[]) snapshotArr.getArray()),
                 personalArr == null ? List.of() : Arrays.asList((String[]) personalArr.getArray()),
-                savedAtTs.toInstant());
+                savedAtTs.toInstant(),
+                rs.getString("source_language"));
     }
 
-    private String buildReply(List<Row> rows, long totalCount, ParsedArgs args) {
+    private @Nullable UUID resolveGroupId(Connection conn, String adapter, String upstreamGroupId)
+            throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_ID_SQL)) {
+            ps.setString(1, adapter);
+            ps.setString(2, upstreamGroupId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                return (UUID) rs.getObject("id");
+            }
+        }
+    }
+
+    private String buildReply(List<Row> rows, long totalCount, ParsedArgs args, UUID userId,
+                              @Nullable UUID groupId) {
         int totalPages = (int) Math.max(1L, (totalCount + PAGE_SIZE - 1) / PAGE_SIZE);
         // The filter echo ({4}) reflects the caller's own /saved <tag>
         // token, and only renders once it byte-matched a stored personal
@@ -310,6 +382,19 @@ public class SavedCommandHandler implements CommandHandler {
         String noHeadlineTemplate = bundleLoader.get(
                 BundleKeys.REPLY_SAVED_LINE_NO_HEADLINE, inboundContext.effectiveLanguage());
         StringBuilder body = new StringBuilder(header);
+        String scopeLanguage = inboundContext.effectiveLanguage();
+        // LLM-cost metering (M1-755, redteam 2026-08-03 high/DOS refine):
+        // the display-hit leg draws ONE per-user LlmRateCap token per
+        // invocation that actually makes a translator call (drawn on the
+        // first cache-miss row); in group scope the D47 aggregate group
+        // bucket is drawn alongside it. A rejected draw degrades the
+        // page's cache-miss rows to untranslated (the listing itself
+        // stays cheap and usable). The per-page translator budget then
+        // bounds the invocation's generative count; rows beyond it
+        // render untranslated, unmarked (the M1-747 degraded-cluster
+        // precedent).
+        boolean llmTokenHeld = false;
+        int translationBudget = translationMaxPerPage;
         for (Row row : rows) {
             String tagJoined = joinTags(row.personalTags, row.snapshotTags);
             // Both attacker-influenceable placeholders stay redacted, each by
@@ -326,6 +411,53 @@ public class SavedCommandHandler implements CommandHandler {
             // unless it actually redacts. The bot-authored uid and relative
             // age are not sanitized.
             String headline = DisplayHeadline.of(row.title, row.body, llmOutputSanitizer);
+            if (!headline.isEmpty()
+                    && !"en".equalsIgnoreCase(scopeLanguage)
+                    && !row.sourceLanguage.equalsIgnoreCase(scopeLanguage)) {
+                // Display-hit translation (M1-755): a no-op for en scopes,
+                // same-language hits, and null source language — the
+                // pipeline owns the decision, the controls (pre-bound →
+                // flatten → sanitizer-2 → re-truncate → marker) and the
+                // fallback. Input is the DisplayHeadline OUTPUT, so the
+                // headline is capped before the translator call by
+                // construction. The cache partition is per-USER
+                // (hit/saved/<userId>/<effectiveLanguage>) — the list is
+                // user-global (D13), so the user's own scopes share
+                // entries, but no user ever sees another's.
+                // Cache hits cost no translator call: the per-user token
+                // and the D47 group bucket are drawn only on the first
+                // row that will actually CALL the translator — a cache
+                // miss — so an en-scope, all-no-op, or fully-converged
+                // page never draws. A rejected per-user draw degrades the
+                // page's cache-miss rows to untranslated; a rejected
+                // group draw refunds the per-user token first (the
+                // RetryCommandHandler pattern) and degrades the same.
+                // Cached translations still render — they cost no
+                // generative call.
+                String displayHitKey = TranslationPipeline.displayHitCacheLanguage(
+                        "saved", userId, scopeLanguage);
+                boolean cacheHit = translationCache.get(headline, displayHitKey).isPresent();
+                if (!cacheHit && !llmTokenHeld) {
+                    llmTokenHeld = true;
+                    if (!llmRateCap.tryAcquire(userId)) {
+                        translationBudget = 0;
+                    } else if (groupId != null && !rateCapBucket.tryAcquireGroupLlm(groupId)) {
+                        llmRateCap.refund(userId);
+                        translationBudget = 0;
+                    }
+                }
+                // Cache hits cost no translator call: they render free.
+                // A cache miss consumes one budget slot — the row that
+                // spends the last slot still calls.
+                if (cacheHit) {
+                    headline = translationPipeline.runForDisplayHit(
+                            headline, row.sourceLanguage, "saved", userId, scopeLanguage);
+                } else if (translationBudget > 0) {
+                    translationBudget--;
+                    headline = translationPipeline.runForDisplayHit(
+                            headline, row.sourceLanguage, "saved", userId, scopeLanguage);
+                }
+            }
             // An empty headline means the snapshot carries no renderable text
             // at all; DisplayHeadline's contract is that the caller drops the
             // token together with its separator, which needs the second
@@ -456,5 +588,8 @@ public class SavedCommandHandler implements CommandHandler {
             String url,
             List<String> snapshotTags,
             List<String> personalTags,
-            Instant savedAt) {}
+            Instant savedAt,
+            // `saved_post.source_language` is NOT NULL DEFAULT 'en' (V76) —
+            // the declared source language frozen at /save time.
+            String sourceLanguage) {}
 }

@@ -113,7 +113,7 @@ public class SaveCommandHandler implements CommandHandler {
     // contract, security.md §Prompt-injection defenses).
     private static final String SELECT_POST_SQL =
             "SELECT p.id, p.title, p.body, p.url, p.author, p.published_at, "
-                    + "p.source_id, s.bootstrap_tags "
+                    + "p.source_id, s.bootstrap_tags, s.language "
                     + "FROM post p JOIN source s ON s.id = p.source_id "
                     + "WHERE p.uid = ? AND p.status = 'READY' "
                     + "AND (((s.source_origin = 'bootstrap' AND s.deleted_at IS NULL "
@@ -142,8 +142,8 @@ public class SaveCommandHandler implements CommandHandler {
     private static final String INSERT_SAVED_POST_SQL =
             "INSERT INTO saved_post ("
                     + "user_id, post_uid, source_id, title, body, url, author, "
-                    + "published_at, snapshot_tags, personal_tags"
-                    + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                    + "published_at, snapshot_tags, personal_tags, source_language"
+                    + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     @Inject
     BundleLoader bundleLoader;
@@ -346,7 +346,8 @@ public class SaveCommandHandler implements CommandHandler {
                         rs.getString("author"),
                         publishedAtTs == null ? null : publishedAtTs.toInstant(),
                         (UUID) rs.getObject("source_id"),
-                        bootstrapTags));
+                        bootstrapTags,
+                        rs.getString("language")));
             }
         }
     }
@@ -378,6 +379,7 @@ public class SaveCommandHandler implements CommandHandler {
             }
             ps.setArray(9, conn.createArrayOf("TEXT", post.bootstrapTags.toArray(new String[0])));
             ps.setArray(10, conn.createArrayOf("TEXT", personalTags.toArray(new String[0])));
+            ps.setString(11, post.sourceLanguage);
             ps.executeUpdate();
         }
     }
@@ -463,5 +465,6 @@ public class SaveCommandHandler implements CommandHandler {
             String author,
             @Nullable Instant publishedAt,
             UUID sourceId,
-            List<String> bootstrapTags) {}
+            List<String> bootstrapTags,
+            String sourceLanguage) {}
 }

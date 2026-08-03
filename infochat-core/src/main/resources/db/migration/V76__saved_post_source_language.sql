@@ -1,0 +1,21 @@
+-- V76: saved_post.source_language — snapshot the DECLARED source language
+-- at /save time (M1-755, D29/D43).
+--
+-- The /saved render path is a pure snapshot read (SELECT_ROWS_BASE_SQL
+-- carries no post/source join — the only post interaction is the M1-730
+-- existence/status visibility interlock), so the translation leg must not
+-- re-resolve source.language against live rows at render: the snapshot
+-- contract ("content never re-resolves against post", V15/D13/D33) is what
+-- makes a bookmark survive the post-partition TTL, and a render-time join
+-- would join the one source column M1-750 opens to writes (/add-source
+-- --lang) — a later language correction would retroactively change the
+-- translation language of bookmarks whose title/body stay frozen.
+--
+-- The save path already joins post -> source (SaveCommandHandler's
+-- SELECT_POST_SQL), so snapshotting costs one projected column at a site
+-- with the join in hand. NOT NULL DEFAULT 'en' mirrors V74's
+-- source.language default: pre-column rows read 'en', which is truth for
+-- them (every row is 'en' until M1-750), and the M1-747 no-op legs make
+-- old saves never-translate, which is correct.
+
+ALTER TABLE saved_post ADD COLUMN source_language TEXT NOT NULL DEFAULT 'en';
