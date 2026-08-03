@@ -3,7 +3,7 @@ id: M1-719
 title: "Russian (ru) localization and target-script check"
 status: pending
 created: 2026-07-30
-last_updated: 2026-08-02
+last_updated: 2026-08-04
 blocked_by:
   - M1-716
   - M1-746
@@ -42,9 +42,15 @@ security_relevant: false
 migration_touch: false
 acceptance:
   - >-
-    SKELETON — gated on `EMBEDDER-MEASUREMENT-RESULTS.md` §4 recording
-    `ru` as `enable`, and §2c confirming the chosen model scores Russian
-    as MEANING rather than SCRIPT-ONLY.
+    Retrieval for a non-English scope is settled architecturally by the
+    English pivot (D29 amended, D58) — M1-749 anchors the corpus in
+    English at ingest, M1-746 translates the query into that anchor — so
+    no embedder measurement gates this ticket. The
+    `EMBEDDER-MEASUREMENT-RESULTS.md` §4 and §2c verdicts this item used
+    to gate on belonged to the embedder swap (M1-717, abandoned as
+    superseded) and were never filled. The Cyrillic obligation that
+    survives is the translator-output check below, which validates
+    generated prose and is independent of the embedder.
   - >-
     `ru.properties` carries a non-empty value for every key in
     `BundleKeys`, and `BundleLoaderTest`'s bilateral parity check covers
@@ -85,7 +91,7 @@ clarity_check: {}
 
 ## Context
 
-**SKELETON.** Russian output localization, plus the first non-Latin target
+Russian output localization, plus the first non-Latin target
 script — which is what makes `TranslationPipeline`'s missing failure
 condition (d) reachable.
 
@@ -100,11 +106,16 @@ it, and Cyrillic is the first target where it can fire — which is why it
 ships here rather than in M1-716 (adding it earlier would be a branch that
 cannot execute, forbidden by the no-defensive-code rule).
 
-Russian is the language the embedder swap is most needed for: on
+Russian was the strongest case for the embedder swap: on
 `nomic-embed-text` it ranks 0/7 within a Russian-only pool with a negative
-margin, and random Cyrillic characters score 0.710 against a real Russian
-sentence versus 0.805 for a genuine paraphrase. Against the English corpus
-it ranks 1/7 with 0/7 above the admit line.
+margin, random Cyrillic characters score 0.710 against a real Russian
+sentence versus 0.805 for a genuine paraphrase, and against the English
+corpus it ranks 1/7 with 0/7 above the admit line. The English pivot (D29
+amended, D58) makes those numbers inapplicable rather than better: M1-749
+embeds the English anchor and M1-746 translates the query into it, so no
+Cyrillic ever reaches the embedder. M1-717 is abandoned as superseded.
+Condition (d) is untouched by this — it validates *translator output*, not
+embeddings.
 
 ## Census
 
@@ -137,7 +148,8 @@ fallback decision and the existing two are the regression surface.
 
 ## Acceptance
 
-See frontmatter. Confirm the `ru` verdict in results §4 and §2c at `start`.
+See frontmatter. There is no measurement verdict to confirm at `start` —
+see §Context for why the §4/§2c gate no longer applies.
 
 ## Out-of-scope
 

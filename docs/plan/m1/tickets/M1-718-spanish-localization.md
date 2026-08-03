@@ -3,7 +3,7 @@ id: M1-718
 title: "Spanish (es) localization bundle and enablement"
 status: pending
 created: 2026-07-30
-last_updated: 2026-08-02
+last_updated: 2026-08-04
 blocked_by:
   - M1-716
   - M1-746
@@ -39,9 +39,14 @@ security_relevant: false
 migration_touch: false
 acceptance:
   - >-
-    SKELETON — gated on `EMBEDDER-MEASUREMENT-RESULTS.md` §4 recording
-    `es` as `enable`. If the measurement rejects Spanish, this ticket is
-    abandoned rather than shipped.
+    Retrieval for a non-English scope is settled architecturally, not by a
+    per-language embedder measurement: the English pivot (D29 amended,
+    D58) anchors the corpus in English at ingest (M1-749) and translates
+    the query into that anchor (M1-746), so both retrieval arms compare
+    English to English and the embedder never sees Spanish. The
+    `EMBEDDER-MEASUREMENT-RESULTS.md` §4 verdict this item used to gate on
+    belonged to the embedder swap (M1-717, abandoned as superseded); §4
+    was never filled and gates nothing.
   - >-
     `es.properties` carries a non-empty value for every key in
     `BundleKeys`, and `BundleLoaderTest`'s bilateral parity check covers
@@ -75,23 +80,27 @@ clarity_check: {}
 
 ## Context
 
-**SKELETON.** Spanish output localization: a 421-key `es.properties`, the
+Spanish output localization: a 421-key `es.properties`, the
 `BundleLoader.LOADED_LANGUAGES` entry, and the `LanguageRegistry` enable
 flag from M1-716.
 
-Blocked on M1-717 for a measured reason, not a precautionary one. On the
-current embedder a Spanish query ranks the correct English document first
-in all 7 test topics — but every correct match scores 0.41–0.50, and
-`SemanticSearchTool` admits only similarity > 0.60. So the semantic arm
-returns **zero rows** for a Spanish user; only the lexical arm fires, on
-shared tokens like proper nouns. Shipping the bundle alone would deliver
-fluent Spanish replies over a chat surface that finds nothing — the
-"looks shipped, isn't" failure M1-716's gate exists to prevent.
+**The retrieval blocker this ticket was filed behind is gone.** As authored
+(2026-07-30) it waited on M1-717: on `nomic-embed-text` a Spanish query
+ranked the correct English document first in all 7 test topics but scored
+only 0.41–0.50, under `SemanticSearchTool`'s 0.60 admit line, so the
+semantic arm returned **zero rows** and only the lexical arm fired.
+Shipping the bundle then would have delivered fluent Spanish replies over a
+chat surface that finds nothing. The English pivot adopted 2026-08-02 (D29
+amended, D58) removes that failure by construction rather than by a better
+embedder: M1-749 translates a non-English post to English at ingest and
+embeds the English field, M1-746 translates the query into the same anchor,
+so a Spanish user's search never presents non-English text to the embedder.
+M1-717 is abandoned as superseded and its §4 verdict table was never
+filled — there is no measurement to consult.
 
-Spanish is the strongest of the three candidate languages: Latin script (no
-bidi or ZWNJ concerns), a Postgres `spanish` snowball config already
-installed for the deferred lexical work, and the highest same-language
-ranking quality measured.
+Spanish stays the easiest of the three candidate bundles on the
+presentation side: Latin script, so no bidi or ZWNJ concerns and no
+`TranslationPipeline` target-script obligation.
 
 ## Census
 
@@ -117,7 +126,8 @@ the `en` key list wholesale would defeat the fallback test.
 
 ## Acceptance
 
-See frontmatter. Confirm the `es` verdict in results §4 at `start`.
+See frontmatter. There is no measurement verdict to confirm at `start` —
+see §Context for why the §4 gate no longer applies.
 
 ## Out-of-scope
 

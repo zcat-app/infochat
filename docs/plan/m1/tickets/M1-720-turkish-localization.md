@@ -3,7 +3,7 @@ id: M1-720
 title: "Turkish (tr) localization bundle and enablement"
 status: pending
 created: 2026-07-30
-last_updated: 2026-08-02
+last_updated: 2026-08-04
 blocked_by:
   - M1-716
   - M1-746
@@ -36,10 +36,13 @@ security_relevant: false
 migration_touch: false
 acceptance:
   - >-
-    SKELETON — gated on `EMBEDDER-MEASUREMENT-RESULTS.md` §4 recording
-    `tr` as `enable`. Turkish measured worst of the three candidate
-    languages on the current embedder, so this verdict is the one most
-    likely to come back negative.
+    Retrieval for a non-English scope is settled architecturally by the
+    English pivot (D29 amended, D58) — M1-749 anchors the corpus in
+    English at ingest, M1-746 translates the query into that anchor — so
+    no embedder measurement gates this ticket. The
+    `EMBEDDER-MEASUREMENT-RESULTS.md` §4 verdict this item used to gate on
+    belonged to the embedder swap (M1-717, abandoned as superseded); §4
+    was never filled and gates nothing.
   - >-
     `tr.properties` carries a non-empty value for every key in
     `BundleKeys`, and `BundleLoaderTest`'s bilateral parity check covers
@@ -72,23 +75,21 @@ clarity_check: {}
 
 ## Context
 
-**SKELETON.** Turkish output localization: a 421-key `tr.properties`, the
+Turkish output localization: a 421-key `tr.properties`, the
 loader entry, and the `LanguageRegistry` enable flag.
 
-Turkish is the weakest of the three candidates on the current embedder and
-the most likely to fail its gate. Measured: 4/7 top-1 within a Turkish-only
-pool with a mean margin of +0.023 and an unplaceable threshold
-(worst-correct 0.583 < worst-false 0.716); 15 of 21 unrelated Turkish pairs
-score above the 0.60 admit line, so unrelated documents look related.
-Against the English corpus it is 3/7 with 0/7 above the admit line. The
-cause is agglutination — heavy suffixation fragments under an
-English-trained tokenizer — which is also why a multilingual model's
-Turkish coverage should be confirmed specifically rather than assumed from
-a "100+ languages" claim.
-
-If results §4 records `tr` as rejected, abandon this ticket with
-`abandoned_reason: wont-do-infeasible` rather than shipping a bundle whose
-chat surface returns nothing.
+Turkish measured worst of the three candidates on `nomic-embed-text`: 4/7
+top-1 within a Turkish-only pool with a mean margin of +0.023 and an
+unplaceable threshold (worst-correct 0.583 < worst-false 0.716); 15 of 21
+unrelated Turkish pairs score above the 0.60 admit line, so unrelated
+documents look related; against the English corpus it is 3/7 with 0/7 above
+the admit line. The cause is agglutination — heavy suffixation fragments
+under an English-trained tokenizer. The English pivot (D29 amended, D58)
+makes those numbers inapplicable rather than better: M1-749 embeds the
+English anchor and M1-746 translates the query into it, so no Turkish text
+reaches the embedder. M1-717 is abandoned as superseded and its §4 verdict
+table was never filled, so there is no rejection verdict that could abandon
+this ticket.
 
 ## Census
 
@@ -113,7 +114,8 @@ the test is the gate.
 
 ## Acceptance
 
-See frontmatter. Confirm the `tr` verdict in results §4 at `start`.
+See frontmatter. There is no measurement verdict to confirm at `start` —
+see §Context for why the §4 gate no longer applies.
 
 ## Out-of-scope
 
