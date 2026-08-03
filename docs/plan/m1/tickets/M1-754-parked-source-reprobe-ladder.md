@@ -1,7 +1,7 @@
 ---
 id: M1-754
 title: "Parked-source re-probe ladder + park-reason discriminator + recurring parked-set signal"
-status: pending
+status: done
 created: 2026-08-03
 last_updated: 2026-08-03
 blocked_by:
@@ -9,17 +9,18 @@ blocked_by:
 files_budget: 14
 files_scope:
   - infochat-core/src/main/resources/db/migration/V*__source_park_reason.sql
+  - infochat-core/src/main/java/app/zcat/infochat/core/audit/AuditAction.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/fetch/**
   - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/**
   - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/FetchSchedulerReprobeLadderIT.java
-  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ParkedSetSummaryTest.java
-  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ParkReasonWriteGuardTest.java
-  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ReprobeSelectionGuardTest.java
-  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ReprobeBudgetNoRefillOnRestoreTest.java
-  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ReprobeRestoreCompareAndSwapTest.java
-  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/PerSourceUnknownTrackerUpgradeTest.java
-  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/PerSourceUnknownTrackerReprobeExclusionTest.java
-  - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/CycleCapReprobeExclusionTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ParkedSetSummaryIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ParkReasonWriteGuardIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ReprobeSelectionGuardIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ReprobeBudgetNoRefillOnRestoreIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ReprobeRestoreCompareAndSwapIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/PerSourceUnknownTrackerUpgradeIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/PerSourceUnknownTrackerReprobeExclusionIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/CycleCapReprobeExclusionIT.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/reeval/PerSourceUnknownTracker.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/**
   - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSource.java
@@ -208,9 +209,9 @@ acceptance:
     Exclusion legs (the security property of the M1-752 amendment):
     a source parked by `PerSourceUnknownTracker` is NEVER selected by
     the re-probe path
-    (PerSourceUnknownTrackerReprobeExclusionTest), and a source parked
+    (PerSourceUnknownTrackerReprobeExclusionIT), and a source parked
     by the `NostrStreamSource` cycle cap is NEVER selected
-    (CycleCapReprobeExclusionTest) — each seeds a parked row with its
+    (CycleCapReprobeExclusionIT) — each seeds a parked row with its
     reason and asserts zero probe attempts.
   - >-
     Recurring parked-set signal: a scheduled reader emits a recurring
@@ -218,7 +219,7 @@ acceptance:
     park reasons, parked-since; never the identifier URL — the M1-023
     INFO-LEAK rule), silent when the set is empty, cadence
     profile-driven. Covers ALL park reasons, including terminally
-    parked sources. Named test: ParkedSetSummaryTest.
+    parked sources. Named test: ParkedSetSummaryIT.
   - >-
     `/source-enable` clears the park reason and re-probe state in the
     same UPDATE that sets `status='active'` and
@@ -235,14 +236,14 @@ acceptance:
 test_plan:
   adds:
     - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/FetchSchedulerReprobeLadderIT.java
-    - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/PerSourceUnknownTrackerReprobeExclusionTest.java
-    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/CycleCapReprobeExclusionTest.java
-    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ParkedSetSummaryTest.java
-    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ParkReasonWriteGuardTest.java
-    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ReprobeSelectionGuardTest.java
-    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ReprobeBudgetNoRefillOnRestoreTest.java
-    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ReprobeRestoreCompareAndSwapTest.java
-    - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/PerSourceUnknownTrackerUpgradeTest.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/PerSourceUnknownTrackerReprobeExclusionIT.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/CycleCapReprobeExclusionIT.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ParkedSetSummaryIT.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ParkReasonWriteGuardIT.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ReprobeSelectionGuardIT.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ReprobeBudgetNoRefillOnRestoreIT.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/ReprobeRestoreCompareAndSwapIT.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/PerSourceUnknownTrackerUpgradeIT.java
   preserves:
     - >-
       FetchSchedulerFailureLadderIT — the existing ladder semantics
@@ -260,13 +261,57 @@ spec_refs:
 decision_refs:
   - D42
   - D38
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-03
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 28
+      added: 3372
+      removed: 40
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-08-03
+    verdict: CLEAN
+    base: 184f0e3c
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-754-2026-08-03.md
+    out_of_model_count: 0
+    note: >-
+      Redteam gate at /m1-tick run, ahead of review, against the uncommitted
+      branch tip. CLEAN first pass: the adversary confirmed SSRF inheritance
+      via the registered Fetcher SPI, positive-equality park_reason selection
+      (manual-only and NULL-reason parks never probed), the CAS restore
+      re-checking the full eligibility predicate with the probe payload gated
+      on its result, the audit row riding the restore transaction, the
+      INFO-LEAK posture of the summary and probe-failure logs, and the V75
+      column-scoped grant leaving identity columns revoked. Re-confirmed CLEAN
+      twice as test-only fixes landed: the *Test -> *IT renames and the
+      CDI-client-proxy recorder fix, then the @AfterEach fixture-leak fix and
+      the two SourceEnableParkResetIT fixes (self-contained @TestProfile/stub
+      replacing a cross-test-class reference that loaded production types in
+      the application classloader; audit_log cleanup ahead of the FK-blocked
+      users DELETE). The trigger-disable in that cleanup was raised for
+      adversarial scrutiny and cleared as the established pattern at 53
+      existing sites, confined to an ephemeral test DB, fail-loud not
+      fail-silent; hardening it is a repo-wide follow-up, not this ticket. No
+      production file changed after the snapshot — verified by mtime.
+clarity_check:
+  date: 2026-08-03
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
+outline_file: target/m1-tick-outline-M1-754.md
 ---
 
 # M1-754: parked-source re-probe ladder, park-reason discriminator, recurring parked-set signal

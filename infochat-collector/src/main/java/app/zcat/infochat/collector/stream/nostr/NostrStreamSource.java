@@ -553,9 +553,14 @@ public final class NostrStreamSource implements StreamSource {
         // out of scope for M1-099, and a single-row status flip does not need
         // a repository method. The `status='active'` guard means a concurrent
         // failure path (e.g. D42 fetcher ladder for a misclassified row) does
-        // not clobber a status that has already moved on.
+        // not clobber a status that has already moved on. The park reason is
+        // recorded in the SAME guarded statement (D42 property (a), M1-754):
+        // 'stream-cycle-cap' is manual-only — the re-probe ladder never
+        // selects it, so only /source-enable revives a cycle-capped source.
         private void markSourceFailed(UUID sourceUuid) throws SQLException {
-            final String sql = "UPDATE source SET status = 'failed' WHERE id = ? AND status = 'active'";
+            final String sql = "UPDATE source SET status = 'failed', "
+                    + "park_reason = 'stream-cycle-cap', parked_at = now() "
+                    + "WHERE id = ? AND status = 'active'";
             try (Connection conn = dataSource.getConnection();
                  PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setObject(1, sourceUuid);

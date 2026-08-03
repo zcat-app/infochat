@@ -241,6 +241,20 @@ public class FetchScheduler {
     }
 
     /**
+     * The registered {@link Fetcher} for {@code kind}, or {@code null}
+     * when none is bound. Package-private seam for the re-probe path
+     * (M1-754): a parked-source probe must go through the SAME
+     * registered Fetcher instance the active path uses — that is how
+     * it inherits the D20 SSRF allowlist (each Fetcher constructs its
+     * own {@code SsrfGuardedHttpClient} internally) — without
+     * duplicating {@link #discoverFetchers()}.
+     */
+    @Nullable
+    Fetcher fetcherFor(String kind) {
+        return fetchersByKind.get(kind);
+    }
+
+    /**
      * Heartbeat tick that drives per-kind dispatch. Fires at a base
      * interval; each registered kind is gated by its own configured
      * interval ({@code infochat.fetch.<kind>.interval}).

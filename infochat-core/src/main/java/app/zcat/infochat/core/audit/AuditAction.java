@@ -226,6 +226,16 @@ public enum AuditAction implements AuditVerb {
     SET_TIMEZONE,
     LLM_OUTPUT_SANITIZED,
     RE_EVAL_RELEASED,
+    // SOURCE_REPROBE_RESTORED (M1-754, D42 as amended by M1-752) records an
+    // automatic failed->active restore by the re-probe ladder, written in the
+    // SAME transaction as the compare-and-swap UPDATE under the job actor id
+    // (the RE_EVAL_RELEASED system-actor pattern). Every other failed->active
+    // transition is admin-issued and audited (SOURCE_ENABLE), so the automatic
+    // writer of the same transition inherits the obligation; the throttled
+    // RECOVERED notification is coalesced/lossy and does not substitute —
+    // audit_log is the only durable record of when a globally-shared source
+    // row (D7) went back to active without a human.
+    SOURCE_REPROBE_RESTORED,
     // DIGEST_ENABLE / DIGEST_DISABLE record a group admin's
     // /digest on|off toggle of groups.digest_enabled (mirroring
     // SOURCE_ENABLE / SOURCE_DISABLE). Written only on an actual
