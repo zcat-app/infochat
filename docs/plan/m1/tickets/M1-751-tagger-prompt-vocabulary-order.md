@@ -1,9 +1,9 @@
 ---
 id: M1-751
 title: "Tagger prompt renders the controlled vocabulary in a per-JVM-random order; make it deterministic"
-status: pending
+status: done
 created: 2026-08-02
-last_updated: 2026-08-02
+last_updated: 2026-08-03
 blocked_by: []
 files_budget: 2
 files_scope:
@@ -63,8 +63,8 @@ acceptance:
     unrelated to the post, the vocabulary or the model.
   - >-
     `TagVocabularyRefreshTest` still passes, including its existing refresh
-    and failure-path assertions. The refresh path publishes the same way as
-    the initial load, so both must be covered by whatever guarantees the
+    and scheduler-wiring assertions. The refresh path publishes the same way
+    as the initial load, so both must be covered by whatever guarantees the
     order.
 test_plan:
   adds:
@@ -76,7 +76,8 @@ test_plan:
   preserves:
     - >-
       `TagVocabularyRefreshTest`'s existing coverage — refresh picks up a
-      new tag, a failed refresh keeps the previous vocabulary.
+      new tag; the `@Scheduled` wiring pins the interval and SKIP
+      concurrent-execution.
     - >-
       `TaggerWorkerTest`, `TaggerWorkerIT`, `TaggerWorkerSweepIT` — the
       sweep fingerprint sorts independently and must not shift.
@@ -84,12 +85,46 @@ test_plan:
 spec_refs:
   - docs/design/05-llm-and-embeddings.md §5.4.2
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-03
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 120
+      removed: 16
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-03
+  verdict: WARN
+  warnings:
+    - >-
+      lint FILES-SCOPE-COVERAGE: "test_plan.adds path 'An' is not in
+      files_scope" — linter artifact; it parses the prose entry's first
+      token as a path. The file the entry names
+      (`TagVocabularyRefreshTest.java`) IS in files_scope.
+    - >-
+      self-check: acceptance item 5 and test_plan.preserves cited an
+      existing "failed refresh keeps the previous vocabulary" assertion in
+      `TagVocabularyRefreshTest`. No such assertion exists (the class holds
+      exactly two tests: runtime-add refresh, and the `@Scheduled` wiring
+      pin); no failure-path test exists anywhere. Vacuous — nothing to
+      preserve and test_plan.adds asks only for the order assertion — so
+      corrected inline to name the assertions that do exist.
+    - >-
+      lint BLOCKER SPEC-REFS-RESOLVABLE (spec_ref missing the `§<section>`
+      anchor) was cleared by a bounded self-refine before this start; see
+      commit "M1-751: refine ticket spec (lint-blocker fix)".
+  blockers: []
 escalation_reason:
 ---
 

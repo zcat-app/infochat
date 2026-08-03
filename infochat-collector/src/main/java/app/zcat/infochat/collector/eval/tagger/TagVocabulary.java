@@ -14,6 +14,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -48,6 +49,21 @@ import java.util.Set;
  * normalization. Diverging on this rule silently breaks partial-valid
  * handling (the membership check would falsely reject a tag that
  * differs only by composition form or case).
+ *
+ * <h2>Iteration order (load-bearing)</h2>
+ *
+ * <p>{@link #names()} iterates in the {@code ORDER BY name} order of the
+ * load query, and that is a contract rather than an accident.
+ * {@link TaggerWorker#renderPrompt} expands the vocabulary straight into
+ * the tagger prompt's {@code {#tags}} block, so this iteration order IS
+ * the order the model sees, and LLM output is order-sensitive. Publishing
+ * through a hash-ordered set would therefore make ingest tagging vary
+ * from one Collector restart to the next — and between two Collectors on
+ * the same database — for reasons unrelated to the post, the vocabulary
+ * or the model, leaving an irreproducibility no operator can see. Hence
+ * the load path preserves the query's order instead of copying into
+ * {@link Set#copyOf}, whose iteration order is randomized per JVM by a
+ * process-wide salt (M1-751).
  *
  * <h2>Startup ordering</h2>
  *
@@ -124,12 +140,21 @@ public class TagVocabulary {
             throw new IllegalStateException(
                 "TagVocabulary: failed to load tag table", e);
         }
-        return Set.copyOf(loaded);
+        // Publish the LinkedHashSet's insertion order — the query's ORDER BY
+        // name — rather than Set.copyOf's per-JVM-salted hash order; see the
+        // class javadoc for why the order reaches the model and must be
+        // stable. `loaded` never escapes this method, so the unmodifiable
+        // view is effectively immutable, and the volatile `names` field
+        // supplies the safe publication that Set.copyOf's final fields did.
+        return Collections.unmodifiableSet(loaded);
     }
 
     /**
-     * The full, immutable vocabulary set. Used by the tagger prompt
-     * builders that iterate the vocabulary into a Qute template.
+     * The full, immutable vocabulary set, iterating in the load query's
+     * {@code ORDER BY name} order — see the class javadoc's
+     * <i>Iteration order</i> section for why that order is load-bearing.
+     * Used by the tagger prompt builders that iterate the vocabulary into
+     * a Qute template.
      */
     public Set<String> names() {
         return names;

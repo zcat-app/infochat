@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.eval.tagger;
 
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
+import app.zcat.infochat.core.util.TagNormalizer;
 import io.quarkus.scheduler.Scheduled;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -11,6 +12,10 @@ import javax.sql.DataSource;
 import java.lang.reflect.Method;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -65,6 +70,38 @@ class TagVocabularyRefreshTest {
             "the refreshed set must also surface through names() (prompt builders)");
     }
 
+    /**
+     * The vocabulary is rendered straight into the tagger prompt, so its
+     * iteration order reaches the model and must not change from one
+     * Collector run to the next. Both publication paths — the startup load
+     * and the scheduled refresh — return through the same method, so both
+     * are asserted here.
+     *
+     * <p>The comparison is deliberately against a {@link List}: a
+     * set-equality assertion holds on the {@code Set.copyOf} publication
+     * this test exists to catch, because that defect reorders the same
+     * names rather than changing them (M1-751).
+     */
+    @Test
+    void namesIteratesInQueryOrderAfterInitialLoadAndAfterRefresh() throws Exception {
+        tagVocabulary.load();
+
+        List<String> afterLoad = tagTableInQueryOrder();
+        assertTrue(afterLoad.size() > 1,
+            "fixture invalid: an order assertion over fewer than two tags cannot fail");
+        assertEquals(afterLoad, List.copyOf(tagVocabulary.names()),
+            "names() must iterate in the load query's ORDER BY name order after the startup load");
+
+        insertTag(RUNTIME_TAG);
+        tagVocabulary.refresh();
+
+        List<String> afterRefresh = tagTableInQueryOrder();
+        assertTrue(afterRefresh.contains(RUNTIME_TAG),
+            "fixture invalid: the runtime tag is not in the table the refresh reads");
+        assertEquals(afterRefresh, List.copyOf(tagVocabulary.names()),
+            "the refresh must publish the same ORDER BY name order as the startup load");
+    }
+
     @Test
     void refreshIsScheduledWithSkipConcurrentExecution() throws NoSuchMethodException {
         Method refresh = TagVocabulary.class.getDeclaredMethod("refresh");
@@ -73,6 +110,28 @@ class TagVocabularyRefreshTest {
             "refresh must run on the property-driven interval so the reload happens unattended");
         assertEquals(Scheduled.ConcurrentExecution.SKIP, scheduled.concurrentExecution(),
             "overlapping reloads would be wasted duplicate table scans");
+    }
+
+    /**
+     * The exact sequence {@code TagVocabulary.loadFromDatabase} projects —
+     * the same query, the same normalization filter, the same
+     * insertion-ordered de-duplication — so the assertion pins the order
+     * the load publishes rather than a second guess at what it should be.
+     */
+    private List<String> tagTableInQueryOrder() throws Exception {
+        Set<String> ordered = new LinkedHashSet<>();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT name FROM tag ORDER BY name");
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                String normalized = TagNormalizer.normalize(rs.getString(1));
+                if (normalized != null) {
+                    ordered.add(normalized);
+                }
+            }
+        }
+        return List.copyOf(ordered);
     }
 
     private void insertTag(String name) throws Exception {
