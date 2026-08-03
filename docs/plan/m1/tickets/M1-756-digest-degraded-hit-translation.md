@@ -5,13 +5,17 @@ status: pending
 created: 2026-08-03
 last_updated: 2026-08-04
 blocked_by: []
-files_budget: 8
+files_budget: 10
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestPostCollector.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRenderer.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DegradedDigestRenderer.java
   - infochat-provider/src/main/resources/application.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestPostCollectorTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererSectionsTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/RecordingDigestRenderer.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DegradedDigestRendererTest.java
   - docs/spec/security.md
 complexity: medium
@@ -63,6 +67,20 @@ acceptance:
     returns the input unchanged for every digest row, forever, with no
     error anywhere.
   - >-
+    `DigestRenderer.renderSections` GAINS THE GROUP SCOPE. The renderer is
+    `@ApplicationScoped` and its signature is `renderSections(posts,
+    langCode, mode)`, so neither the `scopeKind` nor the non-null `UUID
+    scopeId` that `runForDisplayHit` requires is reachable from inside it —
+    the pipeline call cannot be made without threading the group in. Add a
+    `UUID groupId` parameter; the sole production caller `DigestWorker`
+    already holds `slot.groupId()` at its call site, and `scopeKind` is the
+    literal `"group"` supplied by the renderer (the digest broadcasts to
+    groups only). The two test callers the signature reaches —
+    `RecordingDigestRenderer`'s `@Override` and every
+    `DigestRendererSectionsTest` call site — are updated MECHANICALLY, with
+    no assertion touched: all of them render an `en` scope, so their
+    persisted-byte pins hold through the no-op leg.
+  - >-
     `DigestRenderer.appendHeadlines` routes each headline through
     `translationPipeline.runForDisplayHit(headline, p.sourceLanguage(),
     scopeKind, scopeId, scopeLanguage)` — the same entry point, no-op
@@ -94,7 +112,15 @@ acceptance:
     the translator is down": the translator is a different
     `ModelTask.TRANSLATOR` route than the summarizer whose failure
     triggered the degraded branch, and a cache hit makes no provider call
-    at all, so the cost argument alone does not survive review.
+    at all, so the cost argument alone does not survive review. TWO COMMENT
+    HOMES, not three files: `DegradedDigestRenderer` carries its own (it is
+    a separate renderer this diff does not otherwise represent, and it is
+    where a reader asking "why is the degraded digest untranslated?"
+    lands), and the `degradedProseFor` rationale goes inline at
+    `DigestRenderer.appendClusterProse`, the site that calls it — the
+    `ClusterBlockRenderer` precedent records its degraded skip at the
+    TRANSLATING site, not inside the degraded class.
+    `SummaryProseGenerator.java` is NOT touched.
   - >-
     `en` scope stays byte-identical with zero translator calls, asserted
     with a provider spy — the M1-747 acceptance property, extended to the
