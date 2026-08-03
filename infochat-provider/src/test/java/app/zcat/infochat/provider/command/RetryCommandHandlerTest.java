@@ -937,6 +937,10 @@ class RetryCommandHandlerTest {
                             case "title" -> p.title();
                             case "url" -> p.url();
                             case "body" -> p.body();
+                            // M1-747: mapPost reads the projected source
+                            // language; compat-constructed fixtures answer
+                            // null = unknown, the never-translate leg.
+                            case "source_language" -> p.sourceLanguage();
                             default -> throw new UnsupportedOperationException("col: " + col);
                         };
                     }

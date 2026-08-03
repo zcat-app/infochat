@@ -87,7 +87,8 @@ public class RetryCommandHandler implements CommandHandler {
     // reads Post.classification).
     private static final String SELECT_POSTS_BY_UIDS = """
             SELECT p.id, p.uid, p.source_id, s.display_name AS source_display_name,
-                   p.title, p.url, p.body, p.published_at, p.tags, p.classification
+                   p.title, p.url, p.body, p.published_at, p.tags, p.classification,
+                   s.language AS source_language
             FROM post p
             JOIN source s ON s.id = p.source_id
             WHERE p.uid = ANY(?) AND p.status = 'READY'
@@ -338,7 +339,8 @@ public class RetryCommandHandler implements CommandHandler {
                         ClusterBlockRenderer clusterBlockRenderer =
                                 new ClusterBlockRenderer(llmOutputSanitizer, translationPipeline, bundleLoader);
                         for (ClusterProse cp : prose) {
-                            clusterBlockRenderer.appendClusterBlock(out, cp, scopeLanguage);
+                            clusterBlockRenderer.appendClusterBlock(
+                                    out, cp, scopeLanguage, scopeKind, scopeId);
                         }
                     }
                     case "full" -> {
@@ -455,7 +457,13 @@ public class RetryCommandHandler implements CommandHandler {
                 // read was unguarded (M1-689 redteam round 3).
                 publishedTs == null ? null : publishedTs.toInstant(),
                 List.of(rawTags),
-                List.of(rawClassification));
+                List.of(rawClassification),
+                // Prominence signals stay absent — replay renders anchored
+                // clusters, it never re-ranks. source_language rides along so
+                // a non-en-scope flat replay translates the same headlines
+                // the original render did (M1-747 replay parity).
+                null, null, null, null,
+                rs.getString("source_language"));
     }
 
     private Optional<UUID> resolveUserId(ScopeRef scope) {

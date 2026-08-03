@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 760 |
+| done | 761 |
 | deferred | 0 |
 | abandoned | 23 |
 | **total** | **792** |
@@ -26,9 +26,10 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-746 — Query leg: translate a non-English search query into the corpus anchor language under D58's four conditions (complexity: medium, risk: high)
-- M1-747 — Display-time translation of a retrieved post's title and snippet into the reader's language (complexity: medium, risk: medium)
 - M1-750 — Source language plumbing: --lang + bootstrap validation (complexity: medium, risk: medium)
 - M1-754 — Parked-source re-probe ladder + park-reason discriminator + recurring parked-set signal (complexity: high, risk: medium)
+- M1-755 — Display-time translation of /saved list headlines (complexity: medium, risk: medium)
+- M1-756 — Display-time hit translation for digest headlines and the degraded renderers (complexity: medium, risk: medium)
 
 ---
 
@@ -48,8 +49,6 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-718 — blocked_by: M1-716 (done), M1-746 (pending)
 - M1-719 — blocked_by: M1-716 (done), M1-746 (pending)
 - M1-720 — blocked_by: M1-716 (done), M1-746 (pending)
-- M1-755 — blocked_by: M1-747 (pending)
-- M1-756 — blocked_by: M1-747 (pending)
 
 ---
 
@@ -74,10 +73,10 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-751 | Tagger prompt renders the controlled vocabulary in a per-JVM-random order; make it deterministic | 2026-08-03 | round 1 APPROVE |
 | M1-749 | English anchor: ingest translation + embedding gate | 2026-08-03 | round 2 APPROVE |
 | M1-748 | Investigate why no similarity threshold separates true from false matches, and whether a single global threshold is the right model at all | 2026-08-03 | round 1 APPROVE |
+| M1-747 | Display-time translation of a retrieved post's title and snippet into the reader's language | 2026-08-03 | round 1 APPROVE |
 | M1-744 | llama.cpp compose services: operator-settable resource caps and an opt-in GPU overlay | 2026-08-02 | round 1 APPROVE |
 | M1-743 | Roll-up must not fabricate over an empty headline set | 2026-08-02 | round 1 APPROVE |
 | M1-742 | A quarantine row per non-BENIGN Stage 2 verdict | 2026-08-01 | round 1 APPROVE |
-| M1-741 | approve_quarantine ignores an owed Stage 2 verdict | 2026-08-01 | round 1 APPROVE |
 
 ---
 
@@ -1002,9 +1001,9 @@ M1-749 (done)
   │     ├── M1-718 (pending) [see above]
   │     ├── M1-719 (pending) [see above]
   │     └── M1-720 (pending) [see above]
-  ├── M1-747 (pending) ← runnable
-  │     ├── M1-755 (pending)
-  │     └── M1-756 (pending)
+  ├── M1-747 (done)
+  │     ├── M1-755 (pending) ← runnable
+  │     └── M1-756 (pending) ← runnable
   └── M1-750 (pending) ← runnable
 M1-751 (done)
 M1-752 (done)

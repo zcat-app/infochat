@@ -162,9 +162,50 @@ public final class DisplayHeadline {
         }
         // Unlike the title, the body has no write-boundary length cap, so it is
         // bounded here BEFORE the sanitizer is handed it. See BODY_SCAN_LIMIT.
-        return body.length() <= BODY_SCAN_LIMIT
-                ? body
-                : body.substring(0, codePointSafeCut(body, BODY_SCAN_LIMIT));
+        return boundForScan(body);
+    }
+
+    /**
+     * Bound an unbounded operand at {@link #BODY_SCAN_LIMIT} before it
+     * reaches the sanitizer — the {@code BODY_SCAN_LIMIT} runaway-input
+     * guard as a reusable cut (code-point-safe like {@link #truncate}'s).
+     */
+    private static String boundForScan(String text) {
+        return text.length() <= BODY_SCAN_LIMIT
+                ? text
+                : text.substring(0, codePointSafeCut(text, BODY_SCAN_LIMIT));
+    }
+
+    /**
+     * Prepare an LLM-authored headline replacement for a headline slot:
+     * bound at {@link #BODY_SCAN_LIMIT}, flatten to one line, then
+     * sanitize — the same order, and the same reasons, as
+     * {@link #of(String, String, LlmOutputSanitizer)}. The display-hit
+     * translation leg (M1-747) hands the translator's reply here; the
+     * reply is LLM output bounded only by the provider's 1-8 MiB body cap,
+     * so the pre-bound keeps a hostile endpoint's in-cap answer from
+     * buying megabytes of NFKC and closed-list scanning.
+     *
+     * <p><b>This composite exists so the order cannot be gotten wrong.</b>
+     * The three steps are private precisely because applying
+     * {@code flattenToOneLine} AFTER {@link LlmOutputSanitizer#sanitize}
+     * re-creates the line-boundary smuggling hazard documented on this
+     * class — a finding twice over (2026-07-30 on the body operand;
+     * 2026-08-03 round 1 on the display-hit cache-read path). A caller
+     * that cannot reach the primitives cannot sequence them wrongly, which
+     * is the structural standard {@code docs/spec/security.md} §"The
+     * chokepoint routing is build-guarded" sets for this kind of
+     * invariant. Truncation is deliberately NOT part of this composite:
+     * the display-hit leg caches the sanitized form and cuts afterwards,
+     * and {@link #truncate} can only drop a suffix, so it is safe to apply
+     * on its own. (Redteam 2026-08-03 round 2, low/INJECTION.)
+     *
+     * @return the bounded, one-line, sanitized headline — NOT truncated to
+     *         {@link #MAX_LENGTH}; the caller applies {@link #truncate}
+     */
+    public static String prepareTranslatedHeadline(String translated,
+                                                   LlmOutputSanitizer llmOutputSanitizer) {
+        return llmOutputSanitizer.sanitize(flattenToOneLine(boundForScan(translated)));
     }
 
     /**
@@ -181,6 +222,12 @@ public final class DisplayHeadline {
      * never wrote; because this now runs ahead of the sanitizer that token
      * would be caught and redacted rather than leaked, but fabricating it in
      * the first place corrupts the headline and emits a spurious audit row.
+     *
+     * <p>PRIVATE, and load-bearingly so: reachable only through the two
+     * entry points that sequence it before the sanitizer
+     * ({@link #of(String, String, LlmOutputSanitizer)} and
+     * {@link #prepareTranslatedHeadline}), so no caller can apply it to an
+     * already-sanitized value.
      */
     private static String flattenToOneLine(String source) {
         return source.replaceAll("(?:\\R|\\s)+", " ").strip();
@@ -208,8 +255,13 @@ public final class DisplayHeadline {
      * content rather than as a redaction), and a cut may not split a surrogate
      * pair (287 of 1,868 nitter titles carry emoji, so an astral-plane
      * character at the boundary is routine).
+     *
+     * <p>Public because the display-hit translation leg (M1-747) re-bounds
+     * the translated headline with this same cut — a translation of a
+     * MAX_LENGTH input legitimately runs longer, and a second truncation
+     * implementation would lose the marker-safety arguments above.
      */
-    private static String truncate(String headline) {
+    public static String truncate(String headline) {
         if (headline.length() <= MAX_LENGTH) {
             return headline;
         }

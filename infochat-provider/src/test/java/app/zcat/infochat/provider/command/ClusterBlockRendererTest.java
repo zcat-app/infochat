@@ -8,7 +8,9 @@ import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
+import app.zcat.infochat.messaging.TranslationProvider;
 import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
+import app.zcat.infochat.provider.translation.TranslationCache;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +20,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -41,6 +44,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ClusterBlockRendererTest {
 
+    /** The fixture rendering scope — the display-hit cache-partition dimensions. */
+    private static final String SCOPE_KIND = "group";
+    private static final UUID SCOPE_ID =
+            UUID.fromString("11111111-1111-1111-1111-111111111111");
+
     private ClusterBlockRenderer renderer;
     private BundleLoader bundleLoader;
 
@@ -54,9 +62,14 @@ class ClusterBlockRendererTest {
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize BundleLoader for test", e);
         }
-        // TranslationPipeline is never exercised here: all fixtures use degraded
-        // prose, which the renderer derives from the cluster (M1-697) without
-        // touching the pipeline.
+        // The bare TranslationPipeline's collaborators are never dereferenced
+        // here: all fixtures use degraded prose, which the renderer derives
+        // from the cluster (M1-697) without touching the pipeline, and a
+        // degraded cluster skips the headline's display-hit leg (M1-747)
+        // outright — the leg would no-op anyway for these fixtures (en scope
+        // for the en cases, null sourceLanguage from the compat constructors
+        // for the cs cases). The translating leg is exercised by
+        // csScopeTranslatesHeadline... below with its own wired pipeline.
         renderer = new ClusterBlockRenderer(
                 SanitizerTestDoubles.noAuditSanitizer(), new TranslationPipeline(), bundleLoader);
     }
@@ -143,6 +156,115 @@ class ClusterBlockRendererTest {
     }
 
     @Test
+    void csScopeTranslatesHeadlineOfDifferingSourceLanguagePostWithMarker() throws Exception {
+        // The renderer-level pin for the M1-747 display-hit wiring: without
+        // this case, deleting the runForDisplayHit call in appendClusterBlock
+        // would keep every test green (the pipeline-level tests prove the leg
+        // works WHEN called; only this proves the renderer calls it). The
+        // real bundle marker is asserted so the cs value's presence is pinned
+        // end to end. NON-degraded prose on purpose: a degraded cluster
+        // skips the leg (see the degraded pin below), so only this shape
+        // exercises the wiring.
+        ClusterBlockRenderer translatingRenderer = new ClusterBlockRenderer(
+                SanitizerTestDoubles.noAuditSanitizer(),
+                translatingPipeline((text, from, to) -> "Přeložený titulek"),
+                bundleLoader);
+        Cluster cluster = clusterWithSourceLanguage("en");
+
+        StringBuilder out = new StringBuilder();
+        translatingRenderer.appendClusterBlock(
+                out, new ClusterProse(cluster, "Prose.", false), "cs",
+                SCOPE_KIND, SCOPE_ID);
+        String rendered = out.toString();
+
+        assertTrue(rendered.startsWith("[topic_id=t-1]\nPřeložený titulek [strojový překlad]\n"),
+                "cs-scope block must lead with the translated, marker-suffixed headline; got: "
+                        + rendered);
+    }
+
+    @Test
+    void degradedClusterMakesNoTranslatorCallAndRendersHeadlineUntranslated() throws Exception {
+        // [redteam 2026-08-03, low/DOS] The degraded branch exists because
+        // the LLM path already failed (security.md §Failure handling pins
+        // degraded = headlines + URLs + UIDs, no prose) — the first
+        // implementation ran the display-hit leg ahead of the degraded
+        // check, turning the cost-shedding path into one translator
+        // round-trip per cluster. The post's differing sourceLanguage in a
+        // cs scope is exactly the shape that WOULD translate on the
+        // non-degraded path above, so a zero call count pins the skip.
+        AtomicInteger translatorCalls = new AtomicInteger();
+        ClusterBlockRenderer degradedRenderer = new ClusterBlockRenderer(
+                SanitizerTestDoubles.noAuditSanitizer(),
+                translatingPipeline((text, from, to) -> {
+                    translatorCalls.incrementAndGet();
+                    return "Přeložený titulek";
+                }),
+                bundleLoader);
+        Cluster cluster = clusterWithSourceLanguage("en");
+
+        StringBuilder out = new StringBuilder();
+        degradedRenderer.appendClusterBlock(
+                out, new ClusterProse(cluster, "Degraded prose.", true), "cs",
+                SCOPE_KIND, SCOPE_ID);
+        String rendered = out.toString();
+
+        assertEquals(0, translatorCalls.get(),
+                "a degraded cluster must make ZERO translator calls; got a call for: " + rendered);
+        assertTrue(rendered.startsWith("[topic_id=t-1]\nOriginal headline\n"),
+                "the degraded headline renders untranslated and unmarked; got: " + rendered);
+        assertFalse(rendered.contains("[strojový překlad]"),
+                "no machine-translation marker on an untranslated degraded headline; got: "
+                        + rendered);
+    }
+
+    /**
+     * A single-post cluster whose post declares {@code sourceLanguage} —
+     * the 15-component canonical {@link Post} constructor — for the two
+     * M1-747 renderer-wiring pins above.
+     */
+    private static Cluster clusterWithSourceLanguage(String sourceLanguage) {
+        return new Cluster("t-1", List.of(new Post(
+                UUID.randomUUID(),
+                "p-1",
+                UUID.randomUUID(),
+                "Src1",
+                "Original headline",
+                "https://example.com/p-1",
+                "body",
+                Instant.parse("2026-01-01T00:00:00Z"),
+                List.of("a"),
+                List.of("factual"),
+                null, null, null, null,
+                // The declared source language differing from the cs scope is
+                // what routes the headline through the translating leg.
+                sourceLanguage)));
+    }
+
+    /**
+     * A {@link TranslationPipeline} whose translator is the supplied stub,
+     * wired reflectively like
+     * {@code TranslationFixtures.newEnShortCircuitPipeline} — that fixture's
+     * identity translator cannot exercise the translating leg (an identity
+     * translation is deliberately delivered unmarked).
+     */
+    private TranslationPipeline translatingPipeline(TranslationProvider translator) throws Exception {
+        TranslationPipeline pipeline = new TranslationPipeline();
+        var cacheField = TranslationPipeline.class.getDeclaredField("translationCache");
+        cacheField.setAccessible(true);
+        cacheField.set(pipeline, new TranslationCache());
+        var providerField = TranslationPipeline.class.getDeclaredField("translationProvider");
+        providerField.setAccessible(true);
+        providerField.set(pipeline, translator);
+        var sanitizerField = TranslationPipeline.class.getDeclaredField("llmOutputSanitizer");
+        sanitizerField.setAccessible(true);
+        sanitizerField.set(pipeline, SanitizerTestDoubles.noAuditSanitizer());
+        var bundleLoaderField = TranslationPipeline.class.getDeclaredField("bundleLoader");
+        bundleLoaderField.setAccessible(true);
+        bundleLoaderField.set(pipeline, bundleLoader);
+        return pipeline;
+    }
+
+    @Test
     void headlineShapedLikeCommandIsRedacted() {
         // The cluster headline is the first post's title and renders at line
         // start in a group-visible /summary reply; a command-shaped title
@@ -221,7 +343,7 @@ class ClusterBlockRendererTest {
                 out,
                 new ClusterProse(clusterWithTitleAndBody(farPastTheBound, "body"),
                         "Degraded prose.", true),
-                "en");
+                "en", SCOPE_KIND, SCOPE_ID);
         String rendered = out.toString();
 
         assertFalse(auditRows.isEmpty(),
@@ -243,7 +365,8 @@ class ClusterBlockRendererTest {
 
     private String render(Cluster cluster, String language) {
         StringBuilder out = new StringBuilder();
-        renderer.appendClusterBlock(out, new ClusterProse(cluster, "Degraded prose.", true), language);
+        renderer.appendClusterBlock(out, new ClusterProse(cluster, "Degraded prose.", true), language,
+                SCOPE_KIND, SCOPE_ID);
         return out.toString();
     }
 

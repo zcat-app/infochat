@@ -303,7 +303,8 @@ public class SummaryCommandHandler implements CommandHandler {
                 && result.posts().size() > summarizerPostCap) {
             String scopeLanguage = readScopeLanguage(scopeKind, scopeId.get());
             if (args.form() == SummaryArgs.RenderForm.FLAT) {
-                return reply(scope, composeWindowTooLargeReply(result, scopeLanguage));
+                return reply(scope, composeWindowTooLargeReply(
+                        result, scopeLanguage, scopeKind, scopeId.get()));
             }
             // M1-695: the default (categorized) over-cap form is delivered
             // per-section like the terminal path. --full (M1-700) takes the
@@ -503,7 +504,9 @@ public class SummaryCommandHandler implements CommandHandler {
                         progressNotifier.complete(scope, stoppedTerminal());
                     } else if (args.form() == SummaryArgs.RenderForm.FLAT) {
                         progressNotifier.complete(scope,
-                                (prefixes.toString() + renderFlatBody(prose, scopeLanguage)).stripTrailing());
+                                (prefixes.toString()
+                                        + renderFlatBody(prose, scopeLanguage, scopeKind, scopeId.get()))
+                                        .stripTrailing());
                     } else if (args.form() == SummaryArgs.RenderForm.FULL) {
                         // --full (M1-700): categorized sections with ALL
                         // clusters, no 12-per-section cap, no "+N more"
@@ -584,7 +587,8 @@ public class SummaryCommandHandler implements CommandHandler {
      * byte-identical to what the LLM-failure path would have rendered for
      * the same posts.
      */
-    private String composeWindowTooLargeReply(Result result, String scopeLanguage) {
+    private String composeWindowTooLargeReply(Result result, String scopeLanguage,
+                                              String scopeKind, UUID scopeId) {
         List<Cluster> clusters = clusterTraversal.cluster(result.posts());
         StringBuilder out = new StringBuilder();
         appendWindowPrefixes(out, result);
@@ -597,7 +601,7 @@ public class SummaryCommandHandler implements CommandHandler {
                 .map(cluster -> new ClusterProse(
                         cluster, SummaryProseGenerator.degradedProseFor(cluster, llmOutputSanitizer), true))
                 .toList();
-        out.append(renderFlatBody(degradedProse, scopeLanguage));
+        out.append(renderFlatBody(degradedProse, scopeLanguage, scopeKind, scopeId));
         return out.toString().stripTrailing();
     }
 
@@ -655,12 +659,13 @@ public class SummaryCommandHandler implements CommandHandler {
      * {@code TranslationPipelineIT}'s exact {@code mockLlm.callCount()}
      * assertions rest on.
      */
-    private String renderFlatBody(List<ClusterProse> prose, String scopeLanguage) {
+    private String renderFlatBody(List<ClusterProse> prose, String scopeLanguage,
+                                  String scopeKind, UUID scopeId) {
         StringBuilder out = new StringBuilder();
         ClusterBlockRenderer clusterBlockRenderer =
                 new ClusterBlockRenderer(llmOutputSanitizer, translationPipeline, bundleLoader);
         for (ClusterProse cp : prose) {
-            clusterBlockRenderer.appendClusterBlock(out, cp, scopeLanguage);
+            clusterBlockRenderer.appendClusterBlock(out, cp, scopeLanguage, scopeKind, scopeId);
         }
         return out.toString();
     }

@@ -14,6 +14,7 @@ import java.text.MessageFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Renders one summary cluster block — the six deterministic fields plus the
@@ -43,12 +44,20 @@ import java.util.Set;
  * {@link LlmOutputSanitizer} inside {@link DisplayHeadline} (M1-675) — this
  * cluster block is group-visible and the headline renders at line start, where
  * command-shaped text would otherwise be one copy-paste from dispatch.
- * Deriving the headline is a deterministic pure function, so the
- * byte-identical-replay property (D19/D36) holds: the same post yields the
- * same headline bytes at both call sites. The order of the steps inside
- * {@link DisplayHeadline} is load-bearing for the sanitizer's guarantees and
- * is documented there — never re-apply one of them from a caller. A
- * legit-slash title (TCP/IP) is returned byte-identical.
+ * Deriving the headline is a deterministic pure function; for an {@code en}
+ * scope (every scope today) the byte-identical-replay property (D19/D36)
+ * holds exactly as before. For a non-English scope the headline additionally
+ * runs the display-hit translation leg (M1-747), which carries the same
+ * cache/provider temporal variance the {@code summary:} field's translation
+ * already has — replay parity is preserved because /retry re-projects the
+ * post's source language (not because the leg is pure). Degraded clusters
+ * are excepted: they render the headline untranslated and unmarked, because
+ * the degraded branch exists precisely because the LLM path failed and
+ * {@code security.md} §Failure handling pins its shape as zero LLM calls
+ * (redteam 2026-08-03, low/DOS). The order of the
+ * steps inside {@link DisplayHeadline} is load-bearing for the sanitizer's
+ * guarantees and is documented there — never re-apply one of them from a
+ * caller. A legit-slash title (TCP/IP) is returned byte-identical.
  * Label prefixes carry no trailing space in the bundle — the renderer appends
  * the single separator space — so the bundle never depends on invisible
  * trailing whitespace surviving an editor round-trip.
@@ -82,7 +91,8 @@ final class ClusterBlockRenderer {
      * prose into the same slot, bypassing the pipeline per D43's
      * bundle-not-translator invariant).
      */
-    void appendClusterBlock(StringBuilder out, ClusterProse cp, String scopeLanguage) {
+    void appendClusterBlock(StringBuilder out, ClusterProse cp, String scopeLanguage,
+                            String scopeKind, UUID scopeId) {
         Cluster cluster = cp.cluster();
         List<Post> posts = cluster.posts();
         Post first = posts.get(0);
@@ -105,7 +115,23 @@ final class ClusterBlockRenderer {
         // below.
         String headline = DisplayHeadline.of(first, llmOutputSanitizer);
         if (!headline.isEmpty()) {
-            out.append(headline).append("\n");
+            // Display-hit translation (M1-747): a no-op for en scopes,
+            // same-language hits, and null source language — the pipeline
+            // owns the decision, the controls (pre-bound → flatten →
+            // sanitizer-2 → re-truncate → marker) and the fallback. Input
+            // is the DisplayHeadline OUTPUT, so the snippet is capped
+            // before the translator call by construction. A DEGRADED
+            // cluster skips the leg outright — untranslated, unmarked:
+            // the branch exists because the LLM path failed, and turning
+            // the cost-shedding path into one translator round-trip per
+            // cluster would invert it (security.md §Failure handling pins
+            // degraded = headlines + URLs + UIDs, no LLM calls; redteam
+            // 2026-08-03, low/DOS).
+            out.append(cp.degraded()
+                    ? headline
+                    : translationPipeline.runForDisplayHit(
+                            headline, first.sourceLanguage(), scopeKind, scopeId, scopeLanguage))
+               .append("\n");
         }
         // covered by: source display name (uid p-...), ...
         out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_CLUSTER_COVERED_BY, scopeLanguage))

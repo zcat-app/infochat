@@ -137,7 +137,8 @@ public class EligiblePostQuery {
             @Nullable Integer reposts,
             @Nullable Integer likes,
             @Nullable String sourceKind,
-            @Nullable Integer sourceWindowPosts) {
+            @Nullable Integer sourceWindowPosts,
+            @Nullable String sourceLanguage) {
         /**
          * Pre-M1-724 shape: every prominence signal absent. Keeps the
          * ~26 construction sites that predate the ranking (tests,
@@ -156,7 +157,35 @@ public class EligiblePostQuery {
                     List<String> tags,
                     List<String> classification) {
             this(id, uid, sourceId, sourceDisplayName, title, url, body,
-                    publishedAt, tags, classification, null, null, null, null);
+                    publishedAt, tags, classification, null, null, null, null,
+                    null);
+        }
+
+        /**
+         * Pre-M1-747 shape: prominence signals present, source language
+         * absent. Keeps the M1-724-era construction sites compiling
+         * unchanged. {@code sourceLanguage} NULL means "unknown — never
+         * translate" (the display-hit no-op leg), which is the correct
+         * default for every hand-built fixture: translation is opt-in per
+         * D29's declared-never-inferred rule.
+         */
+        public Post(UUID id,
+                    String uid,
+                    UUID sourceId,
+                    String sourceDisplayName,
+                    String title,
+                    String url,
+                    String body,
+                    @Nullable Instant publishedAt,
+                    List<String> tags,
+                    List<String> classification,
+                    @Nullable Integer reposts,
+                    @Nullable Integer likes,
+                    @Nullable String sourceKind,
+                    @Nullable Integer sourceWindowPosts) {
+            this(id, uid, sourceId, sourceDisplayName, title, url, body,
+                    publishedAt, tags, classification, reposts, likes,
+                    sourceKind, sourceWindowPosts, null);
         }
     }
 
@@ -253,7 +282,7 @@ public class EligiblePostQuery {
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT p.id, p.uid, p.source_id, s.display_name, p.title, ")
            .append("       p.url, p.body, p.published_at, p.tags, p.classification, ")
-           .append("       p.reposts, p.likes, s.kind, ")
+           .append("       p.reposts, p.likes, s.kind, s.language, ")
            .append("       COUNT(*) OVER (PARTITION BY p.source_id)::int AS source_window_posts, ")
            .append("       COUNT(*) OVER () AS total_count ")
            .append("  FROM post p ")
@@ -340,11 +369,16 @@ public class EligiblePostQuery {
                     Integer likes = rs.getObject("likes", Integer.class);
                     String sourceKind = rs.getString("kind");
                     Integer sourceWindowPosts = rs.getObject("source_window_posts", Integer.class);
+                    // Declared per source (V74, NOT NULL DEFAULT 'en'), never
+                    // inferred from the body — drives the display-hit
+                    // translation no-op decision (M1-747).
+                    String sourceLanguage = rs.getString("language");
                     // Same value on every row; zero rows → total stays 0.
                     totalBeforeCap = rs.getInt("total_count");
                     out.add(new Post(id, uid, sourceId, displayName, title, url, body,
                             publishedAt, tags, classification,
-                            reposts, likes, sourceKind, sourceWindowPosts));
+                            reposts, likes, sourceKind, sourceWindowPosts,
+                            sourceLanguage));
                 }
                 return new Selection(out, totalBeforeCap);
             }
