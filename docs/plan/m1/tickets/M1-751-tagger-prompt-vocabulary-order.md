@@ -82,7 +82,7 @@ test_plan:
       sweep fingerprint sorts independently and must not shift.
     - all tests currently green on main
 spec_refs:
-  - docs/design/05-llm-and-embeddings.md
+  - docs/design/05-llm-and-embeddings.md §5.4.2
 decision_refs: []
 reviews: {}
 overrides: []
