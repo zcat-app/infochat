@@ -1178,7 +1178,7 @@ is the post-sanitize usage-block composition step (D67).
 The topic-delivery trigger (D69) rides the same shape: the SAME
 embed round-trip's vector probes `doc_kind='topic'` FIRST via
 `CommandIntentIndex.lookupTopic` — at the pinned
-`CommandIntentIndex.TOPIC_SIMILARITY_THRESHOLD` (0.60; no tier filter,
+`CommandIntentIndex.TOPIC_SIMILARITY_THRESHOLD` (0.52; no tier filter,
 topics are tier-flat per D68) — and a match short-circuits the command
 probe (topic-over-command precedence, D69; at most one help block per
 reply). Same LIMIT-1 + `statement_timeout` bounds, same friendly
@@ -1189,11 +1189,12 @@ the topic's `topic.<slug>.answer` bundle value at the scope's `/lang`
 is appended verbatim under the fixed `reply.chat.topic_delivery.header`
 line — never through the sanitizer (topics name user-tier `CLOSED_LIST`
 commands) and never through `TranslationPipeline` (D43 two-path rule).
-The threshold is the tool-parity 0.60 rather than the command trigger's
-conservative 0.70 because there is no lower-threshold tool path to
+The threshold is the tool-parity 0.52 rather than the command trigger's
+conservative 0.62 because there is no lower-threshold tool path to
 distinguish from: this trigger is the topic corpus's only consumer, and
-the pinned starting value applies directly (recalibration is a named
-follow-up, matching how the chat confidence cutoff was handled).
+the tool-parity value applies directly (both were recalibrated from the
+M1-748 production-space measurement, matching how the chat confidence
+cutoff was handled by M1-619).
 
 | Profile | `statement_timeout` for interruptible queries |
 |---|---|

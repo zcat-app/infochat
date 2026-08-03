@@ -46,21 +46,24 @@ public final class CommandIntentIndex {
     public static final String DOC_KIND = "command_intent";
 
     /**
-     * Starting similarity threshold for {@link #lookupTopic}. Mirrors
-     * {@code HelpLookupTool.SIMILARITY_THRESHOLD} (0.60) because the
+     * Similarity threshold for {@link #lookupTopic}. Mirrors
+     * {@code HelpLookupTool.SIMILARITY_THRESHOLD} (0.52) because the
      * topic match text is intent-shaped (title + intent words, mirroring
      * {@code CommandIntentIndexBuilder.composeIntentText}), so its
      * similarity statistics sit close to the command corpus rather than
      * the long-form-prose corpus the post-embedding store carries.
      *
-     * <p><b>Calibration note.</b> This is the M1-649 starting value.
-     * Real calibration against a live query corpus is a named follow-up
-     * (the M1-619 pattern — the suite's embedders are stubs, so CI
-     * cannot measure recall). Pinning the value as a named constant
-     * means a deployment change requires a spec amendment, not a silent
-     * config tweak (the D19 determinism posture).
+     * <p><b>Calibration note.</b> M1-649 set the starting 0.60 by
+     * inspection; M1-748's production-space measurement
+     * (docs/measurement/retrieval-separability.md §5.4) moved it to
+     * 0.52 together with the command threshold it mirrors — the same
+     * distribution covers both (the suite's embedders are stubs, so CI
+     * cannot measure recall; the measurement ran against the live
+     * {@code doc_embedding} vectors). Pinning the value as a named
+     * constant means a deployment change requires a spec amendment, not
+     * a silent config tweak (the D19 determinism posture).
      */
-    public static final double TOPIC_SIMILARITY_THRESHOLD = 0.60;
+    public static final double TOPIC_SIMILARITY_THRESHOLD = 0.52;
 
     private CommandIntentIndex() {
     }

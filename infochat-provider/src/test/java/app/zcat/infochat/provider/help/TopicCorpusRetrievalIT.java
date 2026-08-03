@@ -280,9 +280,9 @@ class TopicCorpusRetrievalIT {
 
         // Probe 3 — below threshold returns empty.
         deleteFixtures();
-        // cosine similarity 0.50 = distance 0.50 — JUST below the 0.60
-        // similarity cutoff. A realistic unrelated English query against
-        // nomic-embed-text routinely scores in this band.
+        // cosine similarity 0.50 = distance 0.50 — JUST below the 0.52
+        // similarity cutoff (M1-748). A realistic unrelated English query
+        // against nomic-embed-text routinely scores in this band.
         seedTopicRow("clear-vs-forget", vectorAtAngle(Math.acos(0.50)));
         try (Connection conn = dataSource.getConnection()) {
             try {

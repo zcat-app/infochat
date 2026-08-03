@@ -1639,7 +1639,7 @@ entry point the `helpLookup` tool uses, with the SAME tier-filter-inside-
 WHERE posture — never by a model-elected tool call. A model-elected
 `helpLookup` call reaches the model context only; it cannot cause
 delivery. The trigger threshold is intentionally stricter than the tool's
-(0.70 vs 0.60 similarity) so a turn that merely mentions a topic does
+(0.62 vs 0.52 similarity) so a turn that merely mentions a topic does
 not acquire an unsolicited usage block. At most one block per reply (the
 SQL is `LIMIT 1`), and the composed bytes interpolate no inbound-derived
 text — every byte is fixed bundle output or a closed-list catalogue

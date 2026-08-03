@@ -118,21 +118,24 @@ public class ChatAgent {
     /**
      * Similarity cutoff a command-intent document must clear for the
      * deterministic delivery trigger (M1-665) to fire. Conservative
-     * relative to {@code HelpLookupTool}'s 0.60: the tool answers the
+     * relative to {@code HelpLookupTool}'s 0.52: the tool answers the
      * model's question "which command matches this phrase"; the trigger
      * answers "did the CALLER ask how to do something" — a different
      * question with a higher false-positive cost (an unsolicited usage
-     * block on every turn that merely mentions a topic). 0.70 sits
-     * above the tool's 0.60 admit-band and below an overly-strict 0.80
-     * that would miss real phrasings; calibrated by inspection against
-     * the same fixture phrasings HelpLookupToolIT seeds at similarity
-     * &gt; 0.90, with the same recalibrate-as-follow-up posture as the
-     * tool's threshold. Pinned as a code constant so a deployment
-     * change requires a spec amendment, not a silent config tweak
-     * (D19 determinism posture; security.md §LLM output sanitizer
-     * amendment M1-663 governing this delivery path).
+     * block on every turn that merely mentions a topic). 0.62 keeps
+     * the deliberate +0.10 offset above the tool's admit-band on the
+     * scale genuine phrasings actually occupy: M1-748's
+     * production-space measurement
+     * (docs/measurement/retrieval-separability.md §5.4) found
+     * expected-doc similarities span 0.40–0.71 (median 0.63), so the
+     * inspection-calibrated 0.70 cleared only the two strongest of
+     * fourteen phrasings — an effectively dead trigger. Pinned as a
+     * code constant so a deployment change requires a spec amendment,
+     * not a silent config tweak (D19 determinism posture; security.md
+     * §LLM output sanitizer amendment M1-663 governing this delivery
+     * path).
      */
-    static final double INTENT_DELIVERY_SIMILARITY_THRESHOLD = 0.70;
+    static final double INTENT_DELIVERY_SIMILARITY_THRESHOLD = 0.62;
 
     // M1-618 conversational-refinement directives, appended per-turn AFTER
     // the untrusted retrieval block (a trusted region — the model's own

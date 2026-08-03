@@ -176,23 +176,23 @@ class HelpLookupToolIT {
      * command; the agent is directed (by {@code ChatAgent.TOOL_INSTRUCTIONS})
      * to say it does not know and point at {@code /help} rather than
      * answering from general knowledge. The threshold is
-     * {@link HelpLookupTool#SIMILARITY_THRESHOLD} = 0.60 similarity
-     * (distance 0.40 — aligned with {@code SemanticSearchTool}'s
-     * default distance threshold).
+     * {@link HelpLookupTool#SIMILARITY_THRESHOLD} = 0.52 similarity
+     * (M1-748-measured; docs/measurement/retrieval-separability.md
+     * §5.4).
      *
      * <p><b>Boundary fixture, not orthogonal-vector sanity.</b> The
      * seeded row sits at similarity 0.50 (distance 0.50) — JUST BELOW
-     * the new 0.60 cutoff but WELL ABOVE the prior 0.40 cutoff. A
-     * realistic unrelated English query against nomic-embed-text
-     * routinely scores in this band, so this fixture exercises the
-     * boundary the production behaviour actually lives at. The prior
-     * implementation seeded an orthogonal vector at similarity ≈0.0,
-     * which passed vacuously under any plausible threshold and pinned
-     * nothing — the M1-664 round-1 redteam flagged this as the
-     * reason the loose 0.40 cutoff survived review. Asserting
-     * {@code {"command":null}} here both verifies the new cutoff and
-     * pins the regression: if the constant drifts back to 0.40 (or
-     * below 0.50), this fixture would match and the assertion would
+     * the 0.52 cutoff and WELL ABOVE the original units-confused 0.40
+     * cutoff. A realistic unrelated English query against
+     * nomic-embed-text routinely scores in this band, so this fixture
+     * exercises the boundary the production behaviour actually lives
+     * at. The prior implementation seeded an orthogonal vector at
+     * similarity ≈0.0, which passed vacuously under any plausible
+     * threshold and pinned nothing — the M1-664 round-1 redteam
+     * flagged this as the reason the loose 0.40 cutoff survived
+     * review. Asserting {@code {"command":null}} here both verifies
+     * the cutoff and pins the regression: if the constant drifts to
+     * 0.50 or below, this fixture would match and the assertion would
      * fail.
      */
     @Test
@@ -200,7 +200,7 @@ class HelpLookupToolIT {
         UUID user = seedUser("user", false);
         // similarity 0.50 (cos(acos(0.50))) — would have WRONGLY matched
         // under the prior 0.40 cutoff; correctly returns no command under
-        // the 0.60 cutoff.
+        // the 0.52 cutoff.
         seedIntentDoc("save", vectorAtAngle(Math.acos(0.50)));
 
         String json = tool.execute(user, "dm", user,

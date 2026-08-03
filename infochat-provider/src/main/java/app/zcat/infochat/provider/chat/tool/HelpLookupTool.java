@@ -80,16 +80,19 @@ public class HelpLookupTool implements ChatToolRegistry.ChatTool {
      * and point at {@code /help} rather than answering from general
      * knowledge.
      *
-     * <p><b>Calibrated by inspection, NOT reused.</b> The post-retrieval
+     * <p><b>Measured on this corpus, NOT reused.</b> The post-retrieval
      * cutoff (M1-616 set 0.75, M1-619 moved to 0.65 similarity) is NOT
      * reusable here: a 41-document intent corpus has different
      * similarity statistics from a post-embedding store of thousands
-     * of long-form documents. 0.60 similarity is chosen to align with
-     * {@code SemanticSearchTool}'s effective posture — its
-     * {@code infochat.chat.semantic-threshold} default of 0.40 is a
-     * <em>distance</em> threshold (= similarity 0.60), so the two
-     * retrieval surfaces apply the same strictness against the same
-     * nomic-embed-text backend. The prior 0.40 <em>similarity</em>
+     * of long-form documents. 0.52 is read from the first
+     * production-space measurement of this surface (M1-748,
+     * docs/measurement/retrieval-separability.md §5.4): genuine
+     * free-text phrasings score 0.40–0.71 against their expected doc
+     * (median 0.63) while off-domain queries top out at 0.43, and the
+     * initial 0.60 (chosen to align with {@code SemanticSearchTool}'s
+     * 0.40-distance = 0.60-similarity posture, before any measurement
+     * existed) refused 6 of 14 genuine phrasings — including matches
+     * ranked top-1 correctly. The prior 0.40 <em>similarity</em>
      * value was a units confusion (the implementer referenced M1-619's
      * 0.65 similarity as the prior art but typed SemanticSearchTool's
      * 0.40 distance value into a similarity constant); at 0.40
@@ -98,14 +101,14 @@ public class HelpLookupTool implements ChatToolRegistry.ChatTool {
      * /help" path would effectively never fire and every free-text
      * query would return some command — confidently-wrong
      * suggestions rather than the friendly-degradation the spec
-     * promises. 0.60 admits the test-validated free-text phrasings
-     * (all fixture-seeded at similarity &gt; 0.90) while rejecting
-     * realistic unrelated queries. Recalibration against a real
-     * query corpus is a follow-up; the value is pinned as a code
-     * constant so a deployment change requires a spec amendment, not
-     * a silent config tweak (the D19 determinism posture).
+     * promises. 0.52 admits 12–13 of the 14 measured phrasings with
+     * &ge;0.09 clearance over the off-domain band (the fixture-seeded
+     * phrasings all sit at similarity &gt; 0.90); the value is pinned
+     * as a code constant so a deployment change requires a spec
+     * amendment, not a silent config tweak (the D19 determinism
+     * posture).
      */
-    static final double SIMILARITY_THRESHOLD = 0.60;
+    static final double SIMILARITY_THRESHOLD = 0.52;
 
     private final DataSource dataSource;
     private final CancellationService cancellationService;

@@ -1,13 +1,24 @@
 ---
 id: M1-748
 title: "Investigate why no similarity threshold separates true from false matches, and whether a single global threshold is the right model at all"
-status: pending
+status: done
 created: 2026-08-02
-last_updated: 2026-08-02
+last_updated: 2026-08-03
 blocked_by: []
-files_budget: 1
+files_budget: 12
 files_scope:
   - docs/measurement/retrieval-separability.md
+  - infochat-collector/src/main/resources/application.properties
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/tool/HelpLookupTool.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/help/CommandIntentIndex.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/HelpLookupToolIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/help/CommandIntentIndexIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/help/TopicCorpusRetrievalIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java
+  - docs/design/05-llm-and-embeddings.md
+  - docs/design/03-commands.md
+  - docs/spec/commands.md
 complexity: medium
 risk: low
 round_cap: 2
@@ -15,23 +26,25 @@ security_relevant: false
 migration_touch: false
 out_of_scope:
   - >-
-    CHANGING ANY THRESHOLD VALUE. This ticket produces a finding and a
-    recommendation; it touches no production configuration and no
-    production code. Re-tuning belongs to the follow-up implementation
-    ticket this one is expected to file, gated normally. A diff that edits
-    a `.properties` value or a Java constant has left scope.
+    `infochat.chat.semantic-threshold` (0.40 distance) and
+    `ChatAgent.CONFIDENT_SIMILARITY_CUTOFF` (0.65). The measurement
+    record concludes "no change" for both (§5.1, §5.3); a diff that edits
+    either value has left scope.
   - >-
     Swapping the embedding model. M1-717 is abandoned as superseded and
     the incumbent stands; separability is independent of which model
-    ships, which is the whole reason it outlived that ticket.
+    ships, which is the whole reason it outlived that ticket. The
+    record's prefix observation likewise recommends no production change
+    (frozen model contract, D54).
   - >-
     The English pivot legs (M1-745/746/747). Those change WHICH TEXT is
     embedded; this asks whether the resulting scores can be thresholded at
     all. Both are true at once and neither blocks the other.
   - >-
-    Building a new evaluation harness. `.bench/m1-717/` already carries
-    the fixtures, the corpus container and `M1-717-embedder-eval.py`.
-    Reimplementing them is how this becomes a month of work.
+    Building a new evaluation harness, or completing the
+    `pooling_pending` fixture labels in `.bench/m1-717/`. The record's
+    recommendations read production-space or gross-margin data and need
+    no fixture work (record §6).
 acceptance:
   - >-
     `docs/measurement/retrieval-separability.md` states, with numbers,
@@ -68,38 +81,91 @@ acceptance:
     the correct finding rather than a failure.
   - >-
     Per-threshold recommendations, each carrying the distribution it was
-    read from, so the follow-up ticket can set values without re-deriving
-    them. `infochat.linking.semantic-threshold` must carry a value for
-    every profile that overrides it today — base 0.18 and the `%pi` 0.20 —
-    or record that the spread collapses and say why.
+    read from. `infochat.linking.semantic-threshold` must carry a value
+    for every profile that overrides it today — base 0.18 and the `%pi`
+    0.20 — or record that the spread collapses and say why.
   - >-
-    A named follow-up IMPLEMENTATION ticket is filed for whatever the
-    finding recommends, or the document states explicitly that no
-    production change is warranted. This ticket must not end with a
-    finding nobody owns.
+    THE RECOMMENDATIONS ARE IMPLEMENTED IN THIS TICKET (refined
+    2026-08-03, user decision: the changes are small, so they land here
+    rather than in a follow-up ticket): (a)
+    `%pi.infochat.linking.semantic-threshold` 0.20 → 0.18 and the
+    config-comment claim of a smaller Pi embedder corrected to the v1
+    reality; (b) `HelpLookupTool.SIMILARITY_THRESHOLD` 0.60 → 0.52; (c)
+    `CommandIntentIndex.TOPIC_SIMILARITY_THRESHOLD` 0.60 → 0.52; (d)
+    `ChatAgent.INTENT_DELIVERY_SIMILARITY_THRESHOLD` 0.70 → 0.62. Each
+    constant's javadoc calibration note cites the measurement record
+    instead of "recalibration is a follow-up", and (d) preserves the
+    stated stricter-than-tool design offset (+0.10) in its rationale.
   - >-
-    No production file is modified. Asserted by the diff itself — the
-    files_scope is one document.
+    Every doc surface that pins the old values is synced in the same
+    diff: `docs/design/05-llm-and-embeddings.md` §5.7 pi linking row
+    (0.20 → 0.18) and the §5.5 prose sentence explaining pi's margin;
+    `docs/spec/commands.md` "(0.70 vs 0.60 similarity)"; and
+    `docs/design/03-commands.md` §topic-block threshold prose (0.60 /
+    "conservative 0.70").
+  - >-
+    Tests seeded relative to the old cutoffs still prove the same
+    admit/reject legs at the new values — boundary fixtures are
+    re-margined, never deleted; no admit-band or reject-band assertion is
+    weakened or removed.
 test_plan:
   adds: []
   preserves:
     - >-
-      No test is added or changed. The deliverable is a measurement
-      record, not code — the evaluation runs against the existing
-      `.bench/m1-717/` harness and the `m1-717-corpus` container (9,224
-      READY posts), neither of which is in the repo.
+      HelpLookupToolIT / CommandIntentIndexIT / TopicCorpusRetrievalIT /
+      ChatAgentTest admit- and reject-leg assertions, re-margined to the
+      new cutoffs where a fixture similarity sits inside a moved band.
     - all tests currently green on main
 spec_refs:
   - docs/design/05-llm-and-embeddings.md §5.4.6
 decision_refs:
   - D19
   - D54
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-03
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 12
+      added: 534
+      removed: 109
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-08-03
+    verdict: CLEAN
+    base: 3737750c66d62c428d6ade0093826ee54919e0db
+    head: working-tree on m1/M1-748-retrieval-separability-investigation @ b6d4628d
+    verdict_file: docs/plan/m1/redteam/M1-748-2026-08-03.md
+    out_of_model_count: 0
+    note: >-
+      User-requested in-progress gate ahead of code review (ticket is
+      security_relevant: false, so the standing gate would not have fired
+      it). Audited the working-tree diff vs the fork point — the same
+      byte-identical input the reviewer reads: the four threshold moves,
+      the measurement record, the doc syncs, the test re-margining. CLEAN;
+      no findings, no out-of-model observations. No re-audit owed (a
+      threshold/config-only diff adds no attack surface, and nothing
+      changed since the audit).
+clarity_check:
+  date: 2026-08-03
+  verdict: PASS
+  warnings:
+    - >-
+      Refined 2026-08-03 mid-ticket by user decision: the original
+      "investigation only, file a follow-up" shape was replaced by
+      "implement the small recommended changes in this ticket"; the
+      drafted follow-up (M1-757) was withdrawn before it acquired any
+      work.
+  blockers: []
 escalation_reason:
 ---
 
@@ -145,15 +211,16 @@ questions on two different units. Treating "no global threshold exists" as a
 failure presumes a global threshold was ever the right shape. It may not be, and
 saying so with evidence is a better outcome than forcing a number.
 
-**Investigation, not implementation.** The deliverable is a written finding plus
-a follow-up ticket. Threshold changes go through their own gates with their own
-acceptance — bundling them here is how an investigation acquires a migration and
-a round cap it does not need.
+**Measure first, then apply.** The deliverable is the written finding plus the
+small per-surface value changes it justifies, landed together (refined
+2026-08-03; the original follow-up-ticket shape was collapsed into this ticket
+because the implementation is four value edits plus doc/test sync). The two
+thresholds the record concludes are correctly placed are not touched.
 
 ## Out-of-scope
 
-Any threshold value change. Any embedding-model change. The pivot legs. Building
-a new harness.
+The two keep-thresholds (chat floor, confident cutoff). Any embedding-model or
+prefix change. The pivot legs. Building a new harness or completing its labels.
 
 ## Notes
 
@@ -163,12 +230,15 @@ a new harness.
   outcome, the recommendation is likely per-surface thresholds or a different
   gating mechanism, and that is worth knowing precisely.
 - **`.bench/` is gitignored**, so the harness, fixtures and corpus container are
-  not in the repo and not in `files_scope`. The committed artifact is the
-  finding. `docs/measurement/README.md` records why measurement records live in
-  the tree at all: a decision whose evidence exists only in a scratch folder
+  not in the repo. The committed artifact is the finding.
+  `docs/measurement/README.md` records why measurement records live in the
+  tree at all: a decision whose evidence exists only in a scratch folder
   cannot be audited or re-checked.
 - `infochat.linking.semantic-threshold` is the one with a live per-profile
   spread (0.18 base, 0.20 on `%pi`), so it is the one where "the spread
   collapses" is a real possible finding rather than a formality.
-- Pre-flight: `python3 scripts/lint-ticket.py docs/plan/m1/tickets/M1-748-retrieval-separability-investigation.md`
-  is clean.
+- The doc-store constants' javadocs pin their values under the D19
+  "deployment change requires a spec amendment, not a silent config tweak"
+  posture — which is why the value changes land through this gated ticket
+  with the spec/design surfaces synced in the same diff, not as config
+  tweaks.
