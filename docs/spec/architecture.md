@@ -171,7 +171,11 @@ from.
   scheduler reads `asset_config` rows where `enabled = true AND
   status = 'active'`; D42's per-source failure-counter model
   applies to `asset_config.consecutive_failures` and the
-  `active → failed` transition on threshold crossing. The
+  `active → failed` transition on threshold crossing. D42's
+  automatic re-probe rung (amended by M1-752) does **not** apply
+  to `asset_config` — a parked asset feed recovers only by
+  operator action in v1; extending re-probe to asset feeds is its
+  own decision, not an automatic consequence of the amendment. The
   Provider has `SELECT` on both `asset_config` and `price_snapshot`.
 - **`StreamSource`** — *long-lived, event-driven*. Started once at
   Collector startup; runs as a supervised worker that maintains its

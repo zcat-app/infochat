@@ -259,9 +259,34 @@ connect with (see decision D34 and `security.md`).
   hides the row from listings. The fetcher / StreamSource scheduler
   selects rows where `status = 'active'` AND `deleted_at IS NULL`.
   Transitions: `active → failed` is set by the worker on threshold
-  crossing; `failed → active` is set by a bot-admin recovery
-  command (`/source-enable`, `commands.md`) or by a successful
-  manual probe; `active ↔ disabled` is set by a bot-admin command
+  crossing. Three distinct mechanisms park a source this way — the
+  D42 consecutive-fetch-failure ladder, the per-source Stage 2
+  UNKNOWN-rate auto-disable (`security.md` §Failure handling), and
+  D38's all-relays-bad cycle cap — and because their recovery
+  rights differ, the row records which one fired via a
+  **park-reason discriminator** (closed set; concrete column shape
+  in design notes, lands with M1-754). The reason is written by the
+  same guarded condition that performs the park — never by an
+  unguarded SET term on an unrelated UPDATE. Manual-only reasons win
+  in both directions: they may also be written as an **upgrade** of an
+  already-parked, re-probe-eligible row (so a source the fetch ladder
+  parked first can still be marked as a security park later), while a
+  re-probe-eligible reason never overwrites a manual-only one. A
+  parked row whose reason is absent or unrecognized is treated as
+  manual-only (fail-closed; the introducing migration does NOT
+  backfill pre-existing `failed` rows). `failed → active` is set by
+  a bot-admin recovery command (`/source-enable`, `commands.md`),
+  by a successful manual probe, or — for fetch-failure parks only,
+  and only before D42's absolute re-probe cap — by a successful
+  automatic re-probe (D42 as amended by M1-752), which selects on
+  `deleted_at IS NULL` like every other scheduler enumeration (a
+  soft-deleted source is never probed or revived), **re-checks that
+  whole eligibility predicate in the restoring UPDATE's own `WHERE`**
+  — status, park reason and `deleted_at` can all change during the
+  probe, and a zero-row result leaves the park standing — and writes
+  an `audit_log` row for the transition in the same transaction as the
+  UPDATE, exactly as the admin path does; UNKNOWN-rate and
+  cycle-cap parks never recover automatically. `active ↔ disabled` is set by a bot-admin command
   (`/source-disable` / `/source-enable`); `disabled → failed`
   cannot happen (a disabled source isn't scheduled, so it can't
   fail). All admin transitions are bot-admin only because source

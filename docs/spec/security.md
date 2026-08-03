@@ -1360,9 +1360,32 @@ every stage: retry once, then apply the stage-specific failure path below.
   After *N* consecutive per-source failures (profile-driven), the source
   `status` transitions to `'failed'` and the scheduler skips it; a
   throttled admin notification is sent with the error class and source
-  id. Other sources are unaffected. An admin must explicitly re-enable
-  the source. D42 is the HTTP-shaped mirror of D38's per-relay
-  degradation commitment for stream sources.
+  id. Other sources are unaffected. A fetch-failure park is then
+  re-probed automatically on exponential backoff and restored to
+  `active` on the first success; after the absolute re-probe cap it is
+  terminally parked and only an explicit admin re-enable
+  (`/source-enable`) revives it (D42 as amended by M1-752). Parks
+  written by the per-source UNKNOWN-rate auto-disable (below) and by
+  D38's cycle cap are excluded from re-probe — they recover only by
+  admin action, distinguished via the park-reason discriminator
+  (`schema.md` §Sources and tags), which is written only by the
+  guarded condition that parks the row, is never downgraded from
+  manual-only to fetch-failure, and is fail-closed when absent or
+  unrecognized. The UNKNOWN-rate control may also **upgrade** a row
+  the fetch ladder already parked: its candidate selection covers
+  parked-and-re-probe-eligible rows, not only `active` ones, so a feed
+  cannot escape the control by failing its way into a `fetch-failure`
+  park first and then flooding UNKNOWN verdicts. Because that upgrade
+  can land while a probe against the same row is in flight, the
+  restoring UPDATE re-checks the full eligibility predicate (status,
+  park reason, `deleted_at`, cap) in its own `WHERE` and no-ops when
+  the row no longer qualifies — an automatic restore must never clear
+  a park reason a security control wrote during the probe window. Automatic restores select on `deleted_at IS NULL`
+  (a soft-deleted source is never probed or revived) and write an
+  `audit_log` row for the transition in the same transaction as the
+  UPDATE — the coalesced RECOVERED notification is not a substitute,
+  since `audit_log` is the append-only, `/audit`-readable record. D42 is the HTTP-shaped mirror of
+  D38's per-relay degradation commitment for stream sources.
 - **Tagger** failure → fall back to `source.bootstrap_tags`, mark the post,
   throttled admin notify. (This is why `/add-source --tags` is mandatory:
   every source must have a deterministic fallback.) A clean empty proposal
@@ -1533,10 +1556,20 @@ high UNKNOWN rate also triggers the operator alert
 **Per-source UNKNOWN auto-disable.** A source whose Stage 2 UNKNOWN
 rate exceeds a profile-driven threshold over a profile-driven rolling
 window has its `source.status` transitioned to `'failed'` (the same
-terminal status used for consecutive HTTP failures, decision D42),
+status used for consecutive HTTP failures, decision D42 — but
+**excluded from D42's automatic re-probe rung**: this park is a
+security control, its park-reason discriminator marks it manual-only,
+and recovery happens only via `/source-enable`),
 the scheduler skips it on subsequent ticks, and a throttled admin
 notification fires citing the source id, the observed UNKNOWN rate,
-and the threshold. **Auto-disable only blocks new ingest** — it stops
+and the threshold. Because D42's re-probe rung makes recovery rights
+depend on which control parked the row, this evaluator's candidate set
+is **not** restricted to `status='active'` rows: it also covers rows
+already parked with a re-probe-eligible reason, upgrading them to the
+manual-only `unknown-rate` reason. Otherwise a feed that failed its way
+into a `fetch-failure` park before its UNKNOWN verdicts landed would be
+auto-readmitted on a timer by the very ladder this control overrides.
+**Auto-disable only blocks new ingest** — it stops
 the fetcher or stream-source worker from enqueueing new posts from
 the source. Posts already in the outbox or re-evaluation queue
 **continue through their current evaluation stage** unaffected; the
@@ -1552,7 +1585,11 @@ attack content with legitimate content from other sources), while
 the per-source cap fires on per-source ratio (which the attacker
 cannot dilute without losing control of their own input). An admin
 explicitly re-enables the source via `/source-enable <id>` after
-diagnosis, the same recovery path used for HTTP-failure sources.
+diagnosis. This is the **only** recovery path for an UNKNOWN-rate
+park: unlike an HTTP-failure park, which D42's amended ladder re-probes
+automatically, this one is manual-only for as long as its park reason
+stands — the control exists precisely to force a human diagnosis
+before the feed is readmitted.
 
 **Absolute NEEDS_REVIEW depth alert.** Operators also see an
 absolute-depth alert when the `NEEDS_REVIEW` queue exceeds a
@@ -1710,7 +1747,19 @@ Three Postgres roles, least-privilege (decision D34):
   `deleted_by`, `bootstrap_tags` only; identity columns stay read-only so
   a Provider SQL-injection foothold cannot repoint a trusted source) for
   the deterministic `/add-source` / `/enable-source` / `/disable-source` /
-  `/remove-source` commands; `SELECT` on the quarantine review *view* (no
+  `/remove-source` commands. **The column list is a closed enumeration
+  that grows only by explicit, column-scoped extension.** When a new
+  `source` column must be written by one of those commands — as D42's
+  park-reason discriminator and re-probe state are, since
+  `/source-enable` resets them — the grant is extended by naming that
+  column, the enumeration above is updated in the same change, and the
+  identity columns (`kind`, `identifier`, `display_name`, `category`,
+  `added_by`) stay revoked. A blanket `GRANT UPDATE ON source` is
+  forbidden: it is the shortest way to make a failing migration test
+  green and it silently hands a Provider SQL-injection foothold the
+  ability to repoint a globally-shared, D7-trusted bootstrap source at
+  attacker content under its original display name. `DELETE` stays
+  revoked regardless (invariant 4, soft-delete only); `SELECT` on the quarantine review *view* (no
   raw original content); **`SELECT` on the redacted `audit_log_view`,
   not on `audit_log` itself** (`/audit` reads through the view, see
   below); `INSERT`-only on `audit_log`; `EXECUTE` on the
