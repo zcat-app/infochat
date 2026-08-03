@@ -111,7 +111,17 @@ public class PerSourceUnknownTracker {
                 + "  COUNT(*) AS total_count "
                 + "FROM source s "
                 + "JOIN post p ON p.source_id = s.id "
-                + "WHERE s.status = 'active' "
+                // Candidates are active sources PLUS rows the D42 fetch ladder
+                // already parked (D42 property (b), M1-754): recovery rights
+                // depend on the recorded reason, so this security control must
+                // be able to UPGRADE a 'fetch-failure' park to 'unknown-rate'
+                // — otherwise a source that failed its way into a re-probe-
+                // eligible park first could never be marked as a security park
+                // and the re-probe ladder would auto-readmit it. Positive
+                // equality on the reason: 'stream-cycle-cap' (already manual-
+                // only) is never relabeled.
+                + "WHERE (s.status = 'active' "
+                + "       OR (s.status = 'failed' AND s.park_reason = 'fetch-failure')) "
                 + "  AND p.stage2_done = TRUE "
                 + "  AND p.stage2_failed = FALSE "
                 + "  AND p.fetched_at >= ? "
@@ -143,9 +153,19 @@ public class PerSourceUnknownTracker {
     }
 
     private void disableSource(UUID sourceId, double observedRate) {
+        // The WHERE mirrors the candidate selection (D42 property (b), M1-754):
+        // a fresh park of an active row AND an upgrade of a 'fetch-failure'
+        // park both land 'unknown-rate' in the same guarded statement — never
+        // a downgrade of a manual-only reason. COALESCE keeps the original
+        // parked-since stamp on the upgrade path (the row has been dark since
+        // the fetch ladder parked it, not since the upgrade).
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "UPDATE source SET status = 'failed' WHERE id = ? AND status = 'active'")) {
+                 "UPDATE source SET status = 'failed', "
+                     + "park_reason = 'unknown-rate', "
+                     + "parked_at = COALESCE(parked_at, now()) "
+                     + "WHERE id = ? AND (status = 'active' "
+                     + "  OR (status = 'failed' AND park_reason = 'fetch-failure'))")) {
             ps.setObject(1, sourceId);
             int updated = ps.executeUpdate();
             if (updated > 0) {

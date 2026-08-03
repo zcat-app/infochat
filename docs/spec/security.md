@@ -1778,7 +1778,10 @@ Three Postgres roles, least-privilege (decision D34):
   exception to "`SELECT` on collector-owned tables" — per V31 the
   Provider holds `INSERT` on `source` and `tag` plus a **column-scoped**
   `UPDATE` on `source` (`status`, `consecutive_failures`, `deleted_at`,
-  `deleted_by`, `bootstrap_tags` only; identity columns stay read-only so
+  `deleted_by`, `bootstrap_tags`, and — per V75, because `/source-enable`
+  resets D42's park/re-probe state — `park_reason`, `parked_at`,
+  `reprobe_count`, `next_reprobe_at`, `reprobe_restored_at` only;
+  identity columns stay read-only so
   a Provider SQL-injection foothold cannot repoint a trusted source) for
   the deterministic `/add-source` / `/enable-source` / `/disable-source` /
   `/remove-source` commands. **The column list is a closed enumeration

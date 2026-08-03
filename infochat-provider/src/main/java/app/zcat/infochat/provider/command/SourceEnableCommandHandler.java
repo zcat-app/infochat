@@ -102,12 +102,22 @@ public class SourceEnableCommandHandler implements CommandHandler {
             "SELECT display_name, identifier, kind, status, deleted_at "
                     + "FROM source WHERE id = ? FOR UPDATE";
 
+    // Both UPDATEs clear the D42 park reason AND the whole re-probe state
+    // (M1-754) in the same statement that sets status='active', so a
+    // re-enabled source starts a fresh ladder: an operator /source-enable is
+    // the one path that revives manual-only and terminally-capped parks, and
+    // leaving reprobe_count behind would hand the revived source a
+    // part-spent — or already-exhausted — automatic-recovery budget.
     private static final String UPDATE_SOURCE_REACTIVATE_SQL =
-            "UPDATE source SET status = 'active', consecutive_failures = 0 WHERE id = ?";
+            "UPDATE source SET status = 'active', consecutive_failures = 0, "
+                    + "  park_reason = NULL, parked_at = NULL, reprobe_count = 0, "
+                    + "  next_reprobe_at = NULL, reprobe_restored_at = NULL WHERE id = ?";
 
     private static final String UPDATE_SOURCE_REVIVE_SQL =
             "UPDATE source SET deleted_at = NULL, deleted_by = NULL, "
-                    + "  status = 'active', consecutive_failures = 0 WHERE id = ?";
+                    + "  status = 'active', consecutive_failures = 0, "
+                    + "  park_reason = NULL, parked_at = NULL, reprobe_count = 0, "
+                    + "  next_reprobe_at = NULL, reprobe_restored_at = NULL WHERE id = ?";
 
     @Inject
     BundleLoader bundleLoader;

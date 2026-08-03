@@ -531,6 +531,20 @@ CREATE TABLE source (
                                                     --   no rewrite).
   status          TEXT NOT NULL DEFAULT 'active'
     CHECK (status IN ('active','failed','disabled')),
+  park_reason     TEXT                              -- WHY status='failed' (V75, D42/M1-752):
+    CHECK (park_reason IN ('fetch-failure',         --   closed set, TEXT-with-CHECK like status.
+                           'unknown-rate',          --   NULL = not parked or pre-V75 park
+                           'stream-cycle-cap')),    --   (fail-closed: manual-only).
+  parked_at       TIMESTAMPTZ,                      -- record-only "parked since" for the
+                                                    --   parked-set summary; never a decision input.
+  reprobe_count   INT NOT NULL DEFAULT 0,           -- absolute re-probe cap counter; survives
+                                                    --   restore, cleared only by the sustained-
+                                                    --   success sweep or /source-enable.
+  next_reprobe_at TIMESTAMPTZ,                      -- backoff state owned by ReprobeScheduler,
+                                                    --   which writes AND reads it on its injected
+                                                    --   Clock (no app-vs-DB clock split).
+  reprobe_restored_at TIMESTAMPTZ,                  -- sustained-success-window anchor stamped by
+                                                    --   the automatic restore.
   added_by        UUID REFERENCES users(id) ON DELETE SET NULL,
   added_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_fetch_at   TIMESTAMPTZ,
@@ -556,10 +570,31 @@ NULL` (operator intent gone wrong is not silently overridden).
 
 **Status state machine.** `active ↔ disabled` via bot-admin command;
 `active → failed` set by the worker on threshold crossing (D42); `failed →
-active` by `/source-enable` or successful manual probe; `disabled →
-failed` is structurally impossible (the worker doesn't schedule disabled
-rows). All admin transitions are bot-admin only — source rows are global
-(D7), so a group admin cannot pause a source that the deployment shares.
+active` by `/source-enable`, successful manual probe, or — for
+`park_reason='fetch-failure'` rows only, while `reprobe_count` sits under
+the absolute cap — the automatic re-probe ladder (D42 as amended by
+M1-752; normative properties in `spec/schema.md` §Sources and tags);
+`disabled → failed` is structurally impossible (the worker doesn't
+schedule disabled rows). All admin transitions are bot-admin only —
+source rows are global (D7), so a group admin cannot pause a source that
+the deployment shares.
+
+**Park-reason / re-probe state (V75, M1-754).** Every writer of
+`status='failed'` records its reason in the same guarded statement:
+`SourceRepository.RECORD_FAILURE_SQL` writes `fetch-failure` inside the
+same `CASE` guard as the status flip, `PerSourceUnknownTracker` writes
+`unknown-rate` (also as an *upgrade* of an existing `fetch-failure`
+park, keeping the original `parked_at`), and the `NostrStreamSource`
+cycle cap writes `stream-cycle-cap`. Only `fetch-failure` is
+re-probe-eligible; the selection predicate is a positive equality plus
+`deleted_at IS NULL`, and the restore re-checks the whole predicate in
+its own `WHERE` (compare-and-swap; a zero-row result leaves the park
+standing and discards the probe's fetched batch). `next_reprobe_at` is
+deliberately NOT set by the park writers — the re-probe job initializes
+it from its injected Clock on first sight, so schedule decisions never
+straddle the app and DB clocks. `/source-enable` clears all five
+columns in the same UPDATE that sets `status='active'` (fresh ladder).
+Backoff/cap/cadence values: [01-architecture.md §1.6](01-architecture.md).
 
 **Bluesky identifier shape — verdict: the URL form (D38 stands
 unamended).** Three artifacts disagreed on what a `kind='bluesky'`

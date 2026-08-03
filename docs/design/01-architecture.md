@@ -590,6 +590,30 @@ quarantine-review commands.
   `org.eclipse.microprofile.faulttolerance` for retry+backoff. D42
   threshold-based `active → failed` transition applies after N consecutive
   failures.
+- **Parked-source re-probe ladder (D42 as amended by M1-752; M1-754)**:
+  `ReprobeScheduler` sweeps every `infochat.fetch.reprobe.poll-interval`
+  (15m) on a path separate from the active enumeration. A
+  `park_reason='fetch-failure'` row is first probed
+  `infochat.fetch.reprobe.first-delay` (6h) after the job first sees the
+  park, then on `first-delay × backoff-factor^k` (factor 2.0) capped at
+  `backoff-ceiling` (4d), until `infochat.fetch.reprobe.cap` (10 probes ≈
+  3 weeks) terminally parks it. The cap counter refills only after a
+  restored source stays healthy for
+  `infochat.fetch.reprobe.sustained-success-window` (24h). All values are
+  uniform across hardware profiles (the `failure-threshold` precedent —
+  re-probe cadence is upstream-facing policy, not a hardware-class knob)
+  and remain per-profile/-D overridable. The probe goes through the
+  registered `Fetcher` SPI instance (inheriting the D20 SSRF guard); its
+  fetched batch is persisted+enqueued only when the compare-and-swap
+  restore actually updated the row.
+- **Recurring parked-set summary (M1-754)**: `ParkedSetSummaryJob` emits
+  one operator notification per `infochat.fetch.parked-summary.interval`
+  (24h) enumerating every `status='failed'` source (UUID, park reason,
+  parked-since; never the identifier URL), silent when the set is empty.
+  The summary reuses `notifyOnce` with the constant key
+  `parked_set_summary`, so its cadence must stay above
+  `infochat.admin-notifier.throttle-window` (1h default) — a cadence
+  inside the window would be coalesced away as a duplicate.
 - **Per-source Fetcher pagination cap (single tick)**:
 
   | Source kind | laptop | vps | pi | remote-llm |
