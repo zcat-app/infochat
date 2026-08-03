@@ -42,13 +42,24 @@ public class LanguageRegistry {
     public record EnabledLanguage(String code) {}
 
     /**
-     * The declared enabled set — exactly {@code {en, cs}}, the same
+     * The declared enabled set — exactly {@code {en, cs, es}}, the same
      * codes users can select today. Flipping an entry is a ticketed,
      * reviewed change with measured evidence behind it.
+     *
+     * <p>{@code es} joined in M1-718. What cleared it was not a
+     * per-language embedder score but the English pivot (D29 amended,
+     * D58): the corpus is anchored in English at ingest and a
+     * non-English query is translated into that anchor, so both
+     * retrieval arms compare English to English and a Spanish scope
+     * retrieves exactly as well as an English one. The quality bar this
+     * class exists to enforce is therefore met by construction rather
+     * than by measurement — see the ticket for why the embedder-swap
+     * gate it was originally filed behind no longer applies.</p>
      */
     private static final List<EnabledLanguage> ENABLED_LANGUAGES = List.of(
             new EnabledLanguage("en"),
-            new EnabledLanguage("cs"));
+            new EnabledLanguage("cs"),
+            new EnabledLanguage("es"));
 
     private static final Set<String> ENABLED_CODES =
             ENABLED_LANGUAGES.stream()

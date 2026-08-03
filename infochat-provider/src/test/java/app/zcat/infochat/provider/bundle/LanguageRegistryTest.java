@@ -33,12 +33,12 @@ class LanguageRegistryTest {
     }
 
     @Test
-    void enabledSetIsExactlyEnAndCs() {
-        LanguageRegistry registry = registryOverLoaded(Set.of("en", "cs"));
+    void enabledSetIsExactlyEnCsAndEs() {
+        LanguageRegistry registry = registryOverLoaded(Set.of("en", "cs", "es"));
 
-        assertEquals(Set.of("en", "cs"), registry.enabledLanguages(),
-                "the enabled set must be exactly {en, cs} — the same codes users "
-                        + "can select today; this diff changes NO language's availability");
+        assertEquals(Set.of("en", "cs", "es"), registry.enabledLanguages(),
+                "the enabled set must be exactly {en, cs, es} — the same codes users "
+                        + "can select today; widening it is a ticketed, reviewed change");
     }
 
     @Test
@@ -47,9 +47,9 @@ class LanguageRegistryTest {
         // BundleLoader.LOADED_LANGUAGES (stubbed) — but NOT declared
         // enabled. The registry must still reject it: loading does not
         // imply availability.
-        LanguageRegistry registry = registryOverLoaded(Set.of("en", "cs", "th"));
+        LanguageRegistry registry = registryOverLoaded(Set.of("en", "cs", "es", "th"));
 
-        assertEquals(Set.of("en", "cs"), registry.enabledLanguages(),
+        assertEquals(Set.of("en", "cs", "es"), registry.enabledLanguages(),
                 "a loaded-but-undeclared bundle must not widen the enabled set");
         assertFalse(registry.isEnabled("th"),
                 "loaded bundle present, yet 'th' must be rejected — it was never declared enabled");

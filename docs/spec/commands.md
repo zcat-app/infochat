@@ -986,8 +986,8 @@ and makes the digest query depend on row presence.
   user confirming the checkpoint was created. Probation users have
   chat mode blocked, so their `chat_session` cannot grow; auto-compress
   never fires during probation (correct by construction).
-- `/lang <code>` — sets per-scope output language. v1 enables English
-  and Czech; the accepted codes come from an explicit enabled set
+- `/lang <code>` — sets per-scope output language. v1 enables English,
+  Czech and Spanish; the accepted codes come from an explicit enabled set
   (`LanguageRegistry`), so a bundle present on the classpath is not
   selectable unless declared enabled. DM: own scope. Group: group
   admin only. An unsupported code

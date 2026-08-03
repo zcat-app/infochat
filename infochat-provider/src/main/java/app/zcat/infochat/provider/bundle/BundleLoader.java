@@ -56,7 +56,7 @@ public class BundleLoader {
      * bilateral parity against {@link BundleKeys} for every loaded
      * bundle at build time.
      */
-    private static final List<String> LOADED_LANGUAGES = List.of("en", "cs");
+    private static final List<String> LOADED_LANGUAGES = List.of("en", "cs", "es");
 
     /** The fallback language used by both accessors when a key is missing in the target. */
     private static final String FALLBACK_LANGUAGE = "en";

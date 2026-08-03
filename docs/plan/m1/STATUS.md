@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 765 |
+| done | 766 |
 | deferred | 0 |
 | abandoned | 23 |
 | **total** | **793** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-718 — Spanish (es) localization bundle and enablement (complexity: low, risk: low)
 - M1-719 — Russian (ru) localization and target-script check (complexity: medium, risk: medium)
 - M1-720 — Turkish (tr) localization bundle and enablement (complexity: low, risk: low)
 - M1-756 — Display-time hit translation for digest headlines and the degraded renderers (complexity: medium, risk: medium)
@@ -66,6 +65,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-755 | Display-time translation of /saved list headlines | 2026-08-04 | round 2 APPROVE |
+| M1-718 | Spanish (es) localization bundle and enablement | 2026-08-04 | round 1 APPROVE |
 | M1-757 | Drain the pagination cap-hit flag on the tick failure path | 2026-08-03 | round 1 APPROVE |
 | M1-754 | Parked-source re-probe ladder + park-reason discriminator + recurring parked-set signal | 2026-08-03 | round 1 APPROVE |
 | M1-753 | RssFeedParser rejects an entire feed that exceeds MAX_ITEMS instead of truncating, so a large legitimate archive feed can never be ingested at all | 2026-08-03 | round 1 APPROVE |
@@ -74,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-750 | Source language plumbing: --lang + bootstrap validation | 2026-08-03 | round 1 APPROVE |
 | M1-749 | English anchor: ingest translation + embedding gate | 2026-08-03 | round 2 APPROVE |
 | M1-748 | Investigate why no similarity threshold separates true from false matches, and whether a single global threshold is the right model at all | 2026-08-03 | round 1 APPROVE |
-| M1-747 | Display-time translation of a retrieved post's title and snippet into the reader's language | 2026-08-03 | round 1 APPROVE |
 
 ---
 
@@ -962,7 +961,7 @@ M1-714 (done)
   └── M1-728 (done)
 M1-715 (done)
 M1-716 (done)
-  ├── M1-718 (pending) ← runnable
+  ├── M1-718 (done)
   ├── M1-719 (pending) ← runnable
   └── M1-720 (pending) ← runnable
 M1-721 (done)
@@ -996,7 +995,7 @@ M1-748 (done)
 M1-749 (done)
   ├── M1-746 (done)
   │     ├── M1-717 (abandoned) [see above]
-  │     ├── M1-718 (pending) [see above]
+  │     ├── M1-718 (done) [see above]
   │     ├── M1-719 (pending) [see above]
   │     ├── M1-720 (pending) [see above]
   │     └── M1-758 (pending) ← runnable

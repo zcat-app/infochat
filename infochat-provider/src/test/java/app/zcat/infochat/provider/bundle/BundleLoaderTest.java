@@ -210,6 +210,35 @@ class BundleLoaderTest {
                 "UTF-8 round-trip through bytes must preserve the cs.properties value");
     }
 
+    @Test
+    void twoArgAccessorReturnsSpanishOrthographyRoundtripped() {
+        // The es counterpart of the cs check above (M1-718). Both parity
+        // assertions only prove a key is PRESENT and non-empty, so a bundle
+        // that is a verbatim copy of en.properties passes them both — the
+        // "looks shipped, isn't" failure. Pinning target-language
+        // orthography on a translated value is what distinguishes a real
+        // bundle from a placeholder one, and it doubles as the UTF-8
+        // round-trip check for the es load path.
+        //
+        // Deliberately NOT the cs check's reply.lang.success: its natural
+        // Spanish ("Idioma de salida establecido en {0}.") carries no
+        // accented character, so asserting orthography there would force
+        // unnatural wording to satisfy a test. error.lang.unsupported_code
+        // is the adjacent /lang key whose Spanish is accented on its own
+        // terms (`Código`).
+        String esValue = bundleLoader.get(BundleKeys.ERROR_LANG_UNSUPPORTED_CODE, "es");
+        assertNotNull(esValue,
+                "error.lang.unsupported_code must resolve in es.properties");
+        assertTrue(containsAnySpanishOrthography(esValue),
+                "es.properties error.lang.unsupported_code must carry at least one Spanish "
+                        + "orthographic character (the bundle discipline forbids "
+                        + "placeholder English strings); got: " + esValue);
+        byte[] esBytes = esValue.getBytes(StandardCharsets.UTF_8);
+        String roundtripped = new String(esBytes, StandardCharsets.UTF_8);
+        assertEquals(esValue, roundtripped,
+                "UTF-8 round-trip through bytes must preserve the es.properties value");
+    }
+
     private static Properties loadOwnKeys(String lang) throws IOException {
         // Mirror BundleLoader's load path (InputStreamReader UTF-8) so cs
         // diacritics decode identically; reading the resource directly is
@@ -241,6 +270,18 @@ class BundleLoaderTest {
     private static boolean containsAnyDiacritic(String s) {
         // Czech diacritic set per M1-060 acceptance item 4.
         for (char ch : new char[] {'á', 'ě', 'š', 'č', 'ř', 'ž', 'ý', 'í', 'ú', 'ů', 'é', 'ó', 'ť', 'ď', 'ň'}) {
+            if (s.indexOf(ch) >= 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsAnySpanishOrthography(String s) {
+        // Accented vowels, ñ and the inverted marks — the characters
+        // Spanish has that English does not, so their presence proves the
+        // value is not English text left in place.
+        for (char ch : new char[] {'á', 'é', 'í', 'ó', 'ú', 'ü', 'ñ', 'Á', 'É', 'Í', 'Ó', 'Ú', 'Ñ', '¿', '¡'}) {
             if (s.indexOf(ch) >= 0) {
                 return true;
             }
