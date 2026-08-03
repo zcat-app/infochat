@@ -1,7 +1,7 @@
 ---
 id: M1-757
 title: "Drain the pagination cap-hit flag on the tick failure path"
-status: pending
+status: done
 created: 2026-08-03
 last_updated: 2026-08-03
 blocked_by: []
@@ -16,11 +16,16 @@ security_relevant: true
 migration_touch: false
 out_of_scope:
   - >-
-    THE TRUNCATION FLAG'S DRAIN, added by M1-753. `consumeTruncation()`
-    is ALREADY called on both the success and the failure path
-    (`FetchScheduler` fetch try-block and its `catch (Exception e)`).
-    This ticket brings the older sibling up to that standard; it does not
-    revisit the newer one.
+    THE TRUNCATION FLAG'S DRAIN: its BEHAVIOUR is not revisited — the
+    success-path consume, the per-occurrence reporting policy, and the
+    consume-and-discard on failure all stay byte-unchanged in effect.
+    The REFINED scope (redteam-finding rework, 2026-08-03) does relocate
+    the failure-path drain of BOTH flags to the top of the catch block,
+    ahead of the fallible failure-recording sub-path: the M1-753 drain
+    sat at the tail and shared the same residual leak window the M1-757
+    finding identified, so one restructure closes it for both. Moving
+    the call earlier changes nothing observable — the failure path
+    discards the value either way.
   - >-
     `recordTick`'s STREAK-RESET SEMANTICS and the pagination-saturation
     notification policy generally. The streak reset on a non-saturated
@@ -53,6 +58,16 @@ acceptance:
     thread, and the flag is a static ThreadLocal that only a consume
     clears, so an undrained flag is read as the NEXT source's cap hit.
   - >-
+    The drain runs at the TOP of the catch block, AHEAD of the fallible
+    failure-recording sub-path (`logFetchFailure`,
+    `sourceRepository.recordFailure`, the throttled notification,
+    `recordTick`) — an unchecked exception from any of those must not be
+    able to skip the drain and leave the flag set until the next
+    heartbeat (redteam-finding rework, 2026-08-03). The truncation drain
+    moves to the same point for the same reason; both consumed values
+    are discarded on the failure path, so the reordering is
+    behaviour-neutral.
+  - >-
     `FetchSchedulerSaturationIT.capHitFlagDoesNotLeakToTheNextSourceWhenFetchThrows`
     passes. It must tick a source whose fetcher signals a cap hit and
     then throws, then tick a DIFFERENT source whose fetcher signals
@@ -81,12 +96,117 @@ test_plan:
 spec_refs:
   - docs/spec/architecture.md §Ingest SPIs
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-03
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 258
+      removed: 28
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-08-03
+    category: INFO-LEAK
+    severity: low
+    promise: |
+      docs/spec/security.md §Failure handling — Fetcher failure: "Fetcher
+      failure (HTTP error, connection timeout, feed parse failure on an
+      HTTP-shaped source) → retry on the next scheduled tick (decision
+      D42). ... a throttled admin notification is sent with the error class
+      and source id. Other sources are unaffected." Combined with the
+      PaginationSaturationTracker contract (docs/spec/architecture.md §Ingest
+      SPIs): the per-source pagination-cap saturation counter and the
+      `fetch_saturation` notification are attributed to the source that
+      actually saturated. The diff's own added comment re-asserts the
+      invariant unconditionally: "a failed tick records no saturation" and
+      the drain "is what makes the flag's one-tick lifetime a property of
+      the scheduler."
+    gap: |
+      The M1-757 drain is placed at the TAIL of the tick-failure catch
+      block (FetchScheduler.java:556, 562), AFTER the fallible statements:
+      logFetchFailure (line 522), sourceRepository.recordFailure + the
+      throttled notifyOnce (lines 527-544 — the inner try/catch catches
+      only SQLException), and saturationTracker.recordTick (line 548). An
+      unchecked (non-SQLException) exception from any of those escapes the
+      outer catch at line 514, skipping BOTH drains — the CAP_HIT ThreadLocal
+      stays set on the @Scheduled heartbeat thread (onTick at line 250 has
+      no outer guard around drainPending→tickOnce, so the whole heartbeat
+      aborts). The next heartbeat's first fetch on that thread reads
+      capHit=true at line 510 and recordTick(wrongUuid, true) at line 649
+      attributes the signal to an innocent source. The same residual window
+      applies to the truncation drain (line 556), so the diff inherits the
+      shape rather than introduces it — but the added comment claims the
+      property unconditionally, and the promise ("Other sources are
+      unaffected", "a failed tick records no saturation") is therefore not
+      fully delivered: a failed tick CAN still leak saturation onto the next
+      source when the failure-recording path itself fails.
+    repro: |
+      (1) A source's fetcher raises the cap-hit signal (as
+      BlueskyFetcher.java:107 / RedditFetcher.java:113 do on a capped-out
+      page loop) and then throws; (2) the catch block runs logFetchFailure
+      and recordFailure; recordFailure throws an unchecked exception (any
+      repository defect — NPE, IllegalStateException — or a non-SQLException
+      driver error), which the inner `catch (SQLException)` at line 540 does
+      not swallow; (3) the exception propagates out of tickOnce, skipping
+      recordTick(false), consumeTruncation() and consumeCapHit() — the
+      CAP_HIT flag survives on the heartbeat thread; (4) the next heartbeat
+      ticks a DIFFERENT source on that thread; line 510 consumes the stale
+      flag as that source's own cap hit; recordTick inflates its cumulative
+      counter and streak, and at the streak threshold a `fetch_saturation`
+      admin notification fires naming the innocent source's uuid (with a
+      persisted admin_notification_state row) — and the in-memory
+      capHitTotals pollution is permanent for the process lifetime. The
+      system should not have allowed a failed tick to attribute saturation
+      to any source; the failure-isolation promise requires the drain to run
+      regardless of what the failure-recording sub-path does.
+    suggested_fix_class: other
+redteam_audits:
+  - date: 2026-08-03
+    verdict: FINDINGS
+    base: 3737750c
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-757-2026-08-03.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      Low-severity INFO-LEAK: the drain sits at the tail of the failure
+      catch block, after the fallible failure-recording sub-path; an
+      unchecked exception there escapes the outer catch and leaves both
+      thread-local flags set until the next heartbeat, which could
+      attribute saturation to an innocent source. The shape is inherited
+      from the M1-753 truncation drain (the same window exists there).
+      One out-of-model item: thread-confined signal channel would silently
+      drop a cap-hit from a hypothetical async fetcher (advisory only).
+      Ticket halted at the run redteam gate for user escalation decision.
+  - date: 2026-08-03
+    verdict: CLEAN
+    base: c4b21b52
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam-multi/M1-757-r2-2026-08-03/cross-examination.md
+    out_of_model_count: 2
+    note: |
+      Multi-auditor re-audit (codex + opencode, headless) of the
+      remediation diff; both auditors returned CLEAN, cross-examination
+      found 0 clusters. The r1 finding is confirmed closed: both
+      failure-path drains now run at the top of the catch block ahead of
+      the fallible failure-recording sub-path. Two advisory out-of-model
+      items (async-fetcher signal loss; failure-recording sub-path
+      robustness) — both pre-existing/not-adversary-reachable;
+      disposition.md recommends no follow-up tickets.
+clarity_check:
+  date: 2026-08-03
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 
@@ -143,7 +263,9 @@ row here before this ticket is started.
 
 See the YAML `acceptance:` list. In prose: the scheduler's fetch-failure
 `catch` block must consume-and-clear the cap-hit flag exactly as it
-already consumes the truncation flag, and a new IT case must prove the
+already consumes the truncation flag — both drains at the TOP of the
+block, ahead of the fallible failure-recording sub-path, so an exception
+from that sub-path cannot skip them — and a new IT case must prove the
 absence of cross-source leakage by asserting on the SECOND source's
 state — the only place the leak is observable.
 
@@ -152,7 +274,8 @@ state — the only place the leak is observable.
 See the YAML `out_of_scope:` list. The two worth restating: do not touch
 `recordTick`'s streak semantics (spec-anchored, deliberately preserved by
 M1-753), and do not refactor the two flags into one structure. The fix is
-one call plus its rationale comment.
+a restructure of the catch block — both failure-path drains move to its
+top — plus its rationale comment.
 
 ## Notes
 
@@ -174,10 +297,12 @@ not a weakened test.
 `security_relevant: true` because the failure mode is a mis-attributed
 admin notification — an operator-facing signal naming the wrong source —
 and because the item originates from a red-team audit. The change itself
-is one line.
+is a restructure of one catch block.
 
 - Adjacent code: `FetchScheduler` fetch try/catch (the truncation drain
-  immediately above is the pattern to match, including its comment
-  explaining why the failure path drains).
+  is the sibling; the refined fix moves both failure-path drains to the
+  top of the catch block, per the redteam finding persisted at
+  `docs/plan/m1/redteam/M1-757-2026-08-03.md`).
 - Origin: `docs/plan/m1/redteam/M1-753-2026-08-03-r2.md` OUT-OF-MODEL
-  item 2.
+  item 2; reworked per the M1-757 redteam finding (INFO-LEAK / low,
+  2026-08-03).

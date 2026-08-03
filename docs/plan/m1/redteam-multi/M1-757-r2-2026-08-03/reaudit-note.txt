@@ -1,0 +1,24 @@
+
+========================================================================
+RE-AUDIT NOTE (from the orchestrating session; applies to this audit)
+========================================================================
+This audit is a RE-AUDIT of a diff that remediated a prior finding. The
+prior single-auditor audit (docs/plan/m1/redteam/M1-757-2026-08-03.md,
+FINDINGS: INFO-LEAK / low) reported:
+
+  GAP: the pagination cap-hit drain was placed at the TAIL of the
+  fetch-failure catch block, AFTER the fallible failure-recording
+  sub-path (logFetchFailure, recordFailure, throttled notifyOnce,
+  recordTick). An unchecked (non-SQLException) exception from any of
+  those escapes the outer catch, skipping the drains, so the CAP_HIT
+  ThreadLocal stays set on the heartbeat thread and the next heartbeat
+  could attribute saturation to an innocent source. The same residual
+  window applied to the truncation drain.
+
+The remediation moves BOTH failure-path drains to the TOP of the catch
+block, ahead of the fallible sub-path. Do NOT assume the finding is
+closed because remediation was attempted — evaluate the current diff on
+its merits. Do NOT re-report the finding if it is genuinely closed.
+Be willing to return CLEAN if the diff genuinely warrants it: an audit
+that manufactures a finding to justify itself is worse than no audit.
+========================================================================

@@ -512,6 +512,20 @@ public class FetchScheduler {
             // feed at its per-parse item cap (M1-753).
             truncated = saturationTracker.consumeTruncation();
         } catch (Exception e) {
+            // Drain BOTH thread-local signals FIRST, before anything
+            // below that could itself fail. A fetcher that raised a
+            // flag and then threw would otherwise leak it onto the
+            // next source ticked on this thread and notify against the
+            // wrong uuid; the drains must run regardless of what the
+            // failure-recording sub-path does. Draining here is what
+            // makes each flag's one-tick lifetime a property of the
+            // scheduler rather than a coincidence of which fetchers
+            // happen to throw after parsing (M1-753 for truncation,
+            // M1-757 for the cap hit). The consumed values are
+            // discarded — a failed tick records no truncation and no
+            // saturation.
+            saturationTracker.consumeTruncation();
+            saturationTracker.consumeCapHit();
             // Log the numeric dispatch key + UUID; NEVER the
             // identifier URL (which can carry embedded credentials
             // per M1-023's redteam INFO-LEAK finding). The chained
@@ -546,14 +560,6 @@ public class FetchScheduler {
             // consecutive-saturation streak ("consistently saturates
             // ... across multiple ticks" reads consecutive).
             saturationTracker.recordTick(row.uuid(), false);
-            // Clear any truncation flag this tick left behind. A fetcher
-            // that parsed (raising the flag) and then threw would
-            // otherwise leak it onto the next source ticked on this
-            // thread and notify against the wrong uuid. Draining here is
-            // what makes the flag's one-tick lifetime a property of the
-            // scheduler rather than a coincidence of which fetchers
-            // happen to throw after parsing.
-            saturationTracker.consumeTruncation();
             return;
         }
 

@@ -286,6 +286,40 @@ class FetchSchedulerSaturationIT {
             "a cap-hit tick that did not truncate must not emit a truncation record");
     }
 
+    @Test
+    void capHitFlagDoesNotLeakToTheNextSourceWhenFetchThrows() throws Exception {
+        // M1-757 regression guard. A fetcher that raises the cap-hit
+        // signal and then throws leaves the static ThreadLocal set on
+        // the dispatch thread; the scheduler must drain it on the
+        // failure path, or the NEXT source ticked on that thread
+        // inherits the signal. The leak is observable only on the
+        // second source — the first source behaves identically in both
+        // designs, so a test asserting only on it could not detect it.
+        UUID firstSourceId = seedSource("leak-first");
+        UUID secondSourceId = seedSource("leak-second");
+        FetchScheduler.SourceRow firstRow = newRow(firstSourceId, "leak-first");
+        FetchScheduler.SourceRow secondRow = newRow(secondSourceId, "leak-second");
+        String secondNotificationKey = NOTIFY_KEY_PREFIX + secondSourceId;
+
+        // Tick 1: a source whose fetcher signals a cap hit and then
+        // throws — the exact window the failure path must drain.
+        mockFetcher.throwAfterCapHitNext.set(true);
+        fetchScheduler.tickOnce(firstRow);
+        mockFetcher.throwAfterCapHitNext.set(false);
+
+        // Tick 2: a DIFFERENT source whose fetcher signals nothing.
+        // The second source's cap-hit counter is the leak detector: an
+        // undrained flag from tick 1 would be read as this source's cap
+        // hit and counted against its uuid.
+        fetchScheduler.tickOnce(secondRow);
+
+        assertEquals(0L, saturationTracker.capHitCount(secondSourceId),
+            "the second source must not inherit the first source's cap-hit signal — "
+                + "an undrained flag leaks onto the next tick on the same thread");
+        assertTrue(throttledAdminNotifier.getState(secondNotificationKey).isEmpty(),
+            "no fetch_saturation notification may name the second source");
+    }
+
     // ----- helpers ---------------------------------------------------------
 
     private UUID seedSource(String slug) throws Exception {
@@ -320,6 +354,7 @@ class FetchSchedulerSaturationIT {
     private static final class CapHittingRssFetcher extends RssFetcher {
         final AtomicBoolean hitCapNext = new AtomicBoolean(false);
         final AtomicBoolean truncateNext = new AtomicBoolean(false);
+        final AtomicBoolean throwAfterCapHitNext = new AtomicBoolean(false);
 
         @Override
         public List<NormalizedPost> fetch(long dispatchKey, String identifier) {
@@ -331,6 +366,12 @@ class FetchSchedulerSaturationIT {
             // raise either without the other.
             if (truncateNext.get()) {
                 PaginationSaturationTracker.signalTruncation();
+            }
+            // M1-757: raise the cap-hit signal and then throw — the
+            // failure window the scheduler's catch block must drain.
+            if (throwAfterCapHitNext.get()) {
+                PaginationSaturationTracker.signalCapHit();
+                throw new RuntimeException("simulated post-raise failure");
             }
             return List.of();
         }

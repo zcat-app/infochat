@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 10 |
+| pending | 9 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 759 |
+| done | 760 |
 | deferred | 0 |
 | abandoned | 23 |
 | **total** | **792** |
@@ -29,7 +29,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-747 — Display-time translation of a retrieved post's title and snippet into the reader's language (complexity: medium, risk: medium)
 - M1-750 — Source language plumbing: --lang + bootstrap validation (complexity: medium, risk: medium)
 - M1-754 — Parked-source re-probe ladder + park-reason discriminator + recurring parked-set signal (complexity: high, risk: medium)
-- M1-757 — Drain the pagination cap-hit flag on the tick failure path (complexity: low, risk: low)
 
 ---
 
@@ -69,6 +68,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-757 | Drain the pagination cap-hit flag on the tick failure path | 2026-08-03 | round 1 APPROVE |
 | M1-753 | RssFeedParser rejects an entire feed that exceeds MAX_ITEMS instead of truncating, so a large legitimate archive feed can never be ingested at all | 2026-08-03 | round 1 APPROVE |
 | M1-752 | A source parked in status='failed' is dark forever and, after one notification, silently — decide whether D42's no-automatic-recovery stance survives | 2026-08-03 | round 1 APPROVE |
 | M1-751 | Tagger prompt renders the controlled vocabulary in a per-JVM-random order; make it deterministic | 2026-08-03 | round 1 APPROVE |
@@ -78,7 +78,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-743 | Roll-up must not fabricate over an empty headline set | 2026-08-02 | round 1 APPROVE |
 | M1-742 | A quarantine row per non-BENIGN Stage 2 verdict | 2026-08-01 | round 1 APPROVE |
 | M1-741 | approve_quarantine ignores an owed Stage 2 verdict | 2026-08-01 | round 1 APPROVE |
-| M1-740 | Provider test fixtures insert into monthly-partitioned tables with wall-clock timestamps: the suite breaks on every unprovisioned month boundary | 2026-08-01 | round 1 APPROVE |
 
 ---
 
@@ -1011,5 +1010,5 @@ M1-751 (done)
 M1-752 (done)
   └── M1-754 (pending) ← runnable
 M1-753 (done)
-M1-757 (pending) ← runnable
+M1-757 (done)
 ```
