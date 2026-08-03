@@ -30,7 +30,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-756 — Display-time hit translation for digest headlines and the degraded renderers (complexity: medium, risk: medium)
 - M1-758 — switch-llm.sh: translator now carries private user messages (complexity: low, risk: medium)
 - M1-760 — Re-drive posts whose ingest translation exhausted its attempts (complexity: medium, risk: medium)
-- M1-761 — Translator output target-script check, required before a non-Latin language is enabled (complexity: medium, risk: medium)
 
 ---
 
@@ -48,6 +47,7 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-759 — blocked_by: M1-756 (pending)
+- M1-761 — blocked_by: M1-719 (pending)
 
 ---
 
@@ -965,6 +965,7 @@ M1-715 (done)
 M1-716 (done)
   ├── M1-718 (done)
   ├── M1-719 (pending) ← runnable
+  │     └── M1-761 (pending)
   └── M1-720 (pending) ← runnable
 M1-721 (done)
   └── M1-722 (abandoned) [see above]
@@ -1012,5 +1013,4 @@ M1-756 (pending) ← runnable
   └── M1-759 (pending)
 M1-757 (done)
 M1-760 (pending) ← runnable
-M1-761 (pending) ← runnable
 ```
