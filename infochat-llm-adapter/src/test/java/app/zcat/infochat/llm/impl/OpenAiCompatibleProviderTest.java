@@ -4,6 +4,7 @@ import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
 import app.zcat.infochat.llm.routing.LlmRouter;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -22,6 +23,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -218,6 +220,43 @@ class OpenAiCompatibleProviderTest {
 
         assertEquals(1024, JSON.readTree(receivedBodies.get(0)).path("max_tokens").asInt(),
             "an absent max-tokens key must default to 1024 in the request body");
+    }
+
+    @Test
+    void translatorCallCarriesTemperatureZeroOnTheWireRequest() throws Exception {
+        // D58 (a) GREEDY: the query-translation leg — and, sharing the
+        // ModelTask.TRANSLATOR key, the ingest and presentation legs — must
+        // be decoded greedily. Temperature 0 must be ON the wire request the
+        // provider receives, never merely a config property someone could
+        // unset (M1-746 acceptance a3; asserted on the request, not config).
+        OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(new StubConfig(Map.of(
+            "infochat.llm.translator.base-url", baseUrl,
+            "infochat.llm.translator.api-key", "",
+            "infochat.llm.translator.model", "model-translator")));
+
+        provider.generate(ModelTask.TRANSLATOR, "", "translate me");
+
+        JsonNode body = JSON.readTree(receivedBodies.get(0));
+        assertTrue(body.has("temperature"),
+            "a TRANSLATOR call must carry a temperature field on the wire request");
+        assertEquals(0, body.get("temperature").asInt(),
+            "a TRANSLATOR call must carry temperature 0 on the wire request");
+    }
+
+    @Test
+    void nonTranslatorTaskKeepsTheTemperatureFreeBody() throws Exception {
+        // Adding a temperature field to other tasks would silently change
+        // their sampling behavior (chat/summarize run at the endpoint's
+        // default); only the TRANSLATOR leg is greedy per D58 (a).
+        OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(new StubConfig(Map.of(
+            "infochat.llm.chat.base-url", baseUrl,
+            "infochat.llm.chat.api-key", "",
+            "infochat.llm.chat.model", "model-chat")));
+
+        provider.generate(ModelTask.CHAT_AGENT, "sys", "usr");
+
+        assertFalse(JSON.readTree(receivedBodies.get(0)).has("temperature"),
+            "a non-TRANSLATOR call must keep today's temperature-free body");
     }
 
     @Test

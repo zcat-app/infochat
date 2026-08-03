@@ -2,8 +2,14 @@ package app.zcat.infochat.provider.chat.tool;
 
 import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
+import app.zcat.infochat.llm.LlmProvider;
+import app.zcat.infochat.llm.LlmResponse;
+import app.zcat.infochat.llm.ModelTask;
+import app.zcat.infochat.llm.routing.LlmCircuitBreakerRegistry;
+import app.zcat.infochat.llm.routing.LlmRouter;
 import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
+import app.zcat.infochat.provider.translation.QueryTranslationCache;
 import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -21,6 +27,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -84,8 +91,31 @@ class RetrievalWorldPredicateIT {
         // the 0.5 threshold.
         semanticSearchTool = new SemanticSearchTool(
                 dataSource, cancellationService,
-                texts -> List.of(new EmbeddingResult(QUERY_VECTOR)), 0.5, 8);
+                texts -> List.of(new EmbeddingResult(QUERY_VECTOR)), noOpAnchorTranslator(),
+                0.5, 8);
         deleteFixtures();
+    }
+
+    // No-op anchor translator: this class seeds no scope_preferences
+    // rows, so the tool's language lookup defaults to 'en' and
+    // translate() short-circuits. The provider stub THROWS on any call,
+    // so an unexpected translation attempt fails the test loudly.
+    private static QueryAnchorTranslator noOpAnchorTranslator() {
+        return new QueryAnchorTranslator(
+                new LlmRouter(
+                        List.of(new LlmRouter.Entry("stub", new NeverCalledLlmProvider(), Set.of())),
+                        LlmRouter.ConfigReader.fromMap(Map.of())),
+                new QueryTranslationCache(),
+                new LlmCircuitBreakerRegistry(3, 30_000, Clock.systemUTC(),
+                        LlmRouter.ConfigReader.fromMap(Map.of())),
+                500);
+    }
+
+    private static final class NeverCalledLlmProvider implements LlmProvider {
+        @Override
+        public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
+            throw new AssertionError("no translation may be issued on the en-default test path");
+        }
     }
 
     @AfterEach

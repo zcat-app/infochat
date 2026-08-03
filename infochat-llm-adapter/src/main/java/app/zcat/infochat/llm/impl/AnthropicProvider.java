@@ -114,7 +114,7 @@ public class AnthropicProvider implements LlmProvider {
     public LlmResponse generate(ModelTask task, String systemPrompt,
                                           String userPrompt) {
         TaskConfig cfg = configFor(task);
-        return doCall(cfg, systemPrompt, userPrompt);
+        return doCall(task, cfg, systemPrompt, userPrompt);
     }
 
     /**
@@ -174,12 +174,20 @@ public class AnthropicProvider implements LlmProvider {
         }
     }
 
-    private LlmResponse doCall(TaskConfig cfg, String systemPrompt, String userPrompt) {
+    private LlmResponse doCall(ModelTask task, TaskConfig cfg, String systemPrompt, String userPrompt) {
         String body;
         try {
             ObjectNode root = LlmHttpSupport.JSON.createObjectNode();
             root.put("model", cfg.model());
             root.put("max_tokens", cfg.maxTokens());
+            // D58 (a) GREEDY — mirrors OpenAiCompatibleProvider: the
+            // translation leg is decoded at temperature 0, hard-coded for
+            // ModelTask.TRANSLATOR (never a config knob; asserted on the
+            // wire request in AnthropicProviderTest). Anthropic's Messages
+            // API accepts "temperature" as a top-level request field.
+            if (task == ModelTask.TRANSLATOR) {
+                root.put("temperature", 0);
+            }
 
             // The Messages API rejects an empty system text block, and a
             // blank system prompt is a real call shape (translation passes

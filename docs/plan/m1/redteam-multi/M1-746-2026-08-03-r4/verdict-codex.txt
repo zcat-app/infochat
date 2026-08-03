@@ -1,0 +1,9 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: DOS
+    SEVERITY: medium
+    PROMISE: "All free-form string and list inputs across every tool below are length-bounded by a profile-driven cap," and the endpoint-response boundary prevents hostile data from exhausting JVM memory.
+    GAP: QueryTranslationCache.java:41-44 retains the exact attacker-supplied sourceText in every cache key. QueryAnchorTranslator.java:252-260 caps only the translated value before caching; it does not cap or avoid retaining the key. QueryAnchorTranslator.java:162-165 accepts the operator-configured input-max-length as the only functional input bound. Raising that configured cap therefore permits 10,000 distinct large user queries to be retained as cache keys, despite the claimed fixed 2048-character retention belt.
+    REPRO: An attacker in a non-English scope sends distinct, maximum-length semanticSearch queries until the global cache reaches 10,000 entries. Each query becomes a QueryKey containing its full raw text. If input-max-length has been raised to accept multi-megabyte queries, the attacker retains tens of gigabytes of key strings for up to 24 hours and exhausts the Provider heap; the 2048-character value ceiling does not constrain this path.
+    SUGGESTED-FIX-CLASS: rate-limit

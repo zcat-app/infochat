@@ -2,8 +2,14 @@ package app.zcat.infochat.provider.chat.tool;
 
 import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
+import app.zcat.infochat.llm.LlmProvider;
+import app.zcat.infochat.llm.LlmResponse;
+import app.zcat.infochat.llm.ModelTask;
+import app.zcat.infochat.llm.routing.LlmCircuitBreakerRegistry;
+import app.zcat.infochat.llm.routing.LlmRouter;
 import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
+import app.zcat.infochat.provider.translation.QueryTranslationCache;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterEach;
@@ -15,9 +21,11 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -83,8 +91,33 @@ class SemanticSearchToolIT {
     @BeforeEach
     void setUp() throws Exception {
         tool = new SemanticSearchTool(
-                dataSource, cancellationService, stubEmbedder, THRESHOLD, 8);
+                dataSource, cancellationService, stubEmbedder,
+                noOpAnchorTranslator(), THRESHOLD, 8);
         deleteFixtures();
+    }
+
+    // No-op anchor translator for the en-default tests: this class seeds
+    // no scope_preferences rows, so the tool's language lookup defaults
+    // to 'en' and translate() short-circuits before touching any
+    // dependency. The provider stub THROWS on any call, so an unexpected
+    // translation attempt fails the test loudly instead of silently
+    // changing the query the arms receive.
+    private static QueryAnchorTranslator noOpAnchorTranslator() {
+        return new QueryAnchorTranslator(
+                new LlmRouter(
+                        List.of(new LlmRouter.Entry("stub", new NeverCalledLlmProvider(), Set.of())),
+                        LlmRouter.ConfigReader.fromMap(Map.of())),
+                new QueryTranslationCache(),
+                new LlmCircuitBreakerRegistry(3, 30_000, Clock.systemUTC(),
+                        LlmRouter.ConfigReader.fromMap(Map.of())),
+                500);
+    }
+
+    private static final class NeverCalledLlmProvider implements LlmProvider {
+        @Override
+        public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
+            throw new AssertionError("no translation may be issued on the en-default test path");
+        }
     }
 
     // Failsafe ITs share one Quarkus JVM and one DevServices DB, and the

@@ -2,8 +2,14 @@ package app.zcat.infochat.provider.chat.tool;
 
 import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
+import app.zcat.infochat.llm.LlmProvider;
+import app.zcat.infochat.llm.LlmResponse;
+import app.zcat.infochat.llm.ModelTask;
+import app.zcat.infochat.llm.routing.LlmCircuitBreakerRegistry;
+import app.zcat.infochat.llm.routing.LlmRouter;
 import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
+import app.zcat.infochat.provider.translation.QueryTranslationCache;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterEach;
@@ -15,9 +21,11 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -56,6 +64,8 @@ class SemanticSearchToolHybridIT {
     @Inject
     CancellationService cancellationService;
 
+    private StubEmbedder stubEmbedder;
+    private CannedTranslationProvider cannedProvider;
     private SemanticSearchTool tool;
 
     private static float[] vectorAtAngle(double theta) {
@@ -66,16 +76,51 @@ class SemanticSearchToolHybridIT {
     }
 
     static class StubEmbedder implements EmbeddingProvider {
+        /** The last embedded text — the IT pins what reaches the semantic arm. */
+        volatile String lastEmbeddedText;
+
         @Override
         public List<EmbeddingResult> embed(List<String> texts) {
+            lastEmbeddedText = texts.get(0);
             return List.of(new EmbeddingResult(QUERY_VECTOR));
+        }
+    }
+
+    /**
+     * Canned-response translator provider: the REAL
+     * {@link QueryAnchorTranslator} runs against this stub, so the
+     * cache, the breaker check and the verbatim-output path are all
+     * exercised; only the LLM itself is faked. {@link #callCount}
+     * proves the D58 (b) cache contract in the IT: a repeated query
+     * issues no second call.
+     */
+    static class CannedTranslationProvider implements LlmProvider {
+        private static final String CANNED_TRANSLATION = "quantum router exploit";
+
+        int callCount;
+        String canned = CANNED_TRANSLATION;
+
+        @Override
+        public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
+            callCount++;
+            return new LlmResponse(canned);
         }
     }
 
     @BeforeEach
     void setUp() throws Exception {
+        stubEmbedder = new StubEmbedder();
+        cannedProvider = new CannedTranslationProvider();
+        QueryAnchorTranslator translator = new QueryAnchorTranslator(
+                new LlmRouter(
+                        List.of(new LlmRouter.Entry("stub", cannedProvider, Set.of())),
+                        LlmRouter.ConfigReader.fromMap(Map.of())),
+                new QueryTranslationCache(),
+                new LlmCircuitBreakerRegistry(3, 30_000, Clock.systemUTC(),
+                        LlmRouter.ConfigReader.fromMap(Map.of())),
+                500);
         tool = new SemanticSearchTool(
-                dataSource, cancellationService, new StubEmbedder(), THRESHOLD, 8);
+                dataSource, cancellationService, stubEmbedder, translator, THRESHOLD, 8);
         deleteFixtures();
     }
 
@@ -94,6 +139,12 @@ class SemanticSearchToolHybridIT {
                     + "(SELECT id FROM source WHERE identifier LIKE '" + PREFIX + "%')");
             exec(conn, "DELETE FROM post WHERE uid LIKE '" + PREFIX + "%'");
             exec(conn, "DELETE FROM source WHERE identifier LIKE '" + PREFIX + "%'");
+            // The cs-language fixture must not leak: a leftover
+            // scope_preferences row would silently re-route the OTHER
+            // tests' queries through the translator (they seed none and
+            // rely on the 'en' default).
+            exec(conn, "DELETE FROM scope_preferences WHERE scope_kind = 'dm' AND scope_id IN "
+                + "(SELECT id FROM users WHERE contact_id LIKE '" + PREFIX + "%')");
             exec(conn, "DELETE FROM users WHERE contact_id LIKE '" + PREFIX + "%'");
         }
     }
@@ -222,6 +273,46 @@ class SemanticSearchToolHybridIT {
                         + "RRF; got: " + json);
     }
 
+    // M1-746 (D58): a scope declaring a non-English /lang must have the
+    // query anchored to the corpus language BEFORE it reaches either
+    // arm. The Czech query "kvantový router exploit" would match nothing
+    // in this all-English fixture (the lexical arm is 'english' FTS); the
+    // translated string "quantum router exploit" must be what gets
+    // embedded AND what plainto_tsquery receives — so the English post is
+    // retrieved, the embedder records exactly the translated text, and a
+    // repeated query issues NO second translator call (D58 (b) cache)
+    // while returning a byte-identical result set (D19).
+    @Test
+    void nonEnglishScopeAnchorsTheQueryToTheCorpusLanguage() throws Exception {
+        UUID userId = seedUser("anchored");
+        UUID sourceId = seedSource("anchored-src", "Anchored source");
+        seedSubscription("dm", userId, sourceId);
+        seedScopeLanguage("dm", userId, "cs");
+        seedPost("anchored-en", sourceId,
+                "Quantum router exploit disclosed", "A quantum router exploit writeup.", "READY");
+
+        String first = tool.execute(userId, "dm", userId,
+                Map.of("query", "kvantový router exploit"));
+
+        assertTrue(first.contains(PREFIX + "anchored-en"),
+                "the lexical arm must match the ANCHORED (translated) query, not the raw "
+                        + "Czech text; got: " + first);
+        assertEquals(CannedTranslationProvider.CANNED_TRANSLATION, stubEmbedder.lastEmbeddedText,
+                "the semantic arm must embed the anchored translation, not the raw query");
+        assertEquals(1, cannedProvider.callCount,
+                "the first query must issue exactly one translator call");
+
+        String second = tool.execute(userId, "dm", userId,
+                Map.of("query", "kvantový router exploit"));
+
+        assertEquals(1, cannedProvider.callCount,
+                "a repeated query must hit the D58 (b) cache and issue NO second translator "
+                        + "call — same query -> same posts by construction");
+        assertEquals(first, second,
+                "a repeated query must return a byte-identical result set (D19) through the "
+                        + "translated path");
+    }
+
     // ---------- helpers (SemanticSearchToolIT rig, plus status/no-embedding variants) ----------
 
     private UUID seedUser(String suffix) throws Exception {
@@ -260,6 +351,19 @@ class SemanticSearchToolHybridIT {
             ps.setString(1, scopeKind);
             ps.setObject(2, scopeId);
             ps.setObject(3, sourceId);
+            ps.executeUpdate();
+        }
+    }
+
+    /** Declares the scope's /lang (scope_preferences.language) — D58 (c). */
+    private void seedScopeLanguage(String scopeKind, UUID scopeId, String language) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO scope_preferences (scope_kind, scope_id, language) "
+                     + "VALUES (?, ?, ?)")) {
+            ps.setString(1, scopeKind);
+            ps.setObject(2, scopeId);
+            ps.setString(3, language);
             ps.executeUpdate();
         }
     }

@@ -1,0 +1,9 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: DOS
+    SEVERITY: medium
+    PROMISE: "An in-memory circuit breaker keyed by resolved provider endpoint ... guards every LLM/embedding transport call. After a configured count of CONSECUTIVE transport-unreachable failures ... the endpoint's breaker trips OPEN and subsequent calls short-circuit ... without an HTTP attempt."
+    GAP: QueryAnchorTranslator checks the existing breaker at infochat-provider/src/main/java/app/zcat/infochat/provider/chat/tool/QueryAnchorTranslator.java:174-182, but invokes provider.generate directly at :192-194 and its failure path at :195-203 only logs and falls back. The diff contains no registry success/failure update for this new transport call, so repeated transport failures from this path never cause the checked breaker state to open.
+    REPRO: Set a registered user's scope language to a non-English value, make the translator endpoint unreachable, then repeatedly send distinct chat/search queries after the query-translation cache misses. Each request passes the still-closed check and attempts another translator HTTP call until its transport timeout, even though the committed breaker should stop attempts after its configured consecutive-failure threshold. An attacker can sustain those timed-out calls within the normal request limits and consume LLM/dispatch capacity during an outage.
+    SUGGESTED-FIX-CLASS: other

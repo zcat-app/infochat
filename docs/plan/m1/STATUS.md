@@ -14,10 +14,10 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 762 |
+| done | 763 |
 | deferred | 0 |
 | abandoned | 23 |
-| **total** | **792** |
+| **total** | **793** |
 
 ---
 
@@ -25,10 +25,13 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-746 — Query leg: translate a non-English search query into the corpus anchor language under D58's four conditions (complexity: medium, risk: high)
+- M1-718 — Spanish (es) localization bundle and enablement (complexity: low, risk: low)
+- M1-719 — Russian (ru) localization and target-script check (complexity: medium, risk: medium)
+- M1-720 — Turkish (tr) localization bundle and enablement (complexity: low, risk: low)
 - M1-754 — Parked-source re-probe ladder + park-reason discriminator + recurring parked-set signal (complexity: high, risk: medium)
 - M1-755 — Display-time translation of /saved list headlines (complexity: medium, risk: medium)
 - M1-756 — Display-time hit translation for digest headlines and the degraded renderers (complexity: medium, risk: medium)
+- M1-758 — switch-llm.sh: translator now carries private user messages (complexity: low, risk: medium)
 
 ---
 
@@ -45,9 +48,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-718 — blocked_by: M1-716 (done), M1-746 (pending)
-- M1-719 — blocked_by: M1-716 (done), M1-746 (pending)
-- M1-720 — blocked_by: M1-716 (done), M1-746 (pending)
+_(none)_
 
 ---
 
@@ -74,8 +75,8 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-749 | English anchor: ingest translation + embedding gate | 2026-08-03 | round 2 APPROVE |
 | M1-748 | Investigate why no similarity threshold separates true from false matches, and whether a single global threshold is the right model at all | 2026-08-03 | round 1 APPROVE |
 | M1-747 | Display-time translation of a retrieved post's title and snippet into the reader's language | 2026-08-03 | round 1 APPROVE |
+| M1-746 | Query leg: translate a non-English search query into the corpus anchor language under D58's four conditions | 2026-08-03 | round 2 APPROVE |
 | M1-744 | llama.cpp compose services: operator-settable resource caps and an opt-in GPU overlay | 2026-08-02 | round 1 APPROVE |
-| M1-743 | Roll-up must not fabricate over an empty headline set | 2026-08-02 | round 1 APPROVE |
 
 ---
 
@@ -963,9 +964,9 @@ M1-714 (done)
   └── M1-728 (done)
 M1-715 (done)
 M1-716 (done)
-  ├── M1-718 (pending)
-  ├── M1-719 (pending)
-  └── M1-720 (pending)
+  ├── M1-718 (pending) ← runnable
+  ├── M1-719 (pending) ← runnable
+  └── M1-720 (pending) ← runnable
 M1-721 (done)
   └── M1-722 (abandoned) [see above]
 M1-723 (done)
@@ -995,11 +996,12 @@ M1-745 (abandoned)
   └── M1-717 (abandoned)
 M1-748 (done)
 M1-749 (done)
-  ├── M1-746 (pending) ← runnable
+  ├── M1-746 (done)
   │     ├── M1-717 (abandoned) [see above]
   │     ├── M1-718 (pending) [see above]
   │     ├── M1-719 (pending) [see above]
-  │     └── M1-720 (pending) [see above]
+  │     ├── M1-720 (pending) [see above]
+  │     └── M1-758 (pending) ← runnable
   ├── M1-747 (done)
   │     ├── M1-755 (pending) ← runnable
   │     └── M1-756 (pending) ← runnable

@@ -600,6 +600,50 @@ considered-and-deferred in D58 — each makes the retrieved set a function
 of non-deterministic model output (D19), and cross-encoder re-rank is
 additionally blocked by the CPU-only posture.
 
+**Query anchoring to the corpus language (D58, M1-746).** The query text
+reaching both arms is anchored to the corpus anchor language (English,
+D29) before it is embedded or tokenized, under D58's four conditions —
+(a) the translation is decoded **greedily**: the `ModelTask.TRANSLATOR`
+wire request carries `temperature: 0`, hard-coded in both providers
+(`OpenAiCompatibleProvider`, `AnthropicProvider`) as a fixed code
+constant, deliberately not a config key, so the determinism promise
+cannot drift; (b) the result is **cached** in `QueryTranslationCache`
+keyed by (scope_kind, scope_id, SHA-256(source text), source language) —
+the hash bounds retained key memory (redteam r4; the same decision the
+presentation cache makes) and the scope component is a security
+partition (redteam R2: no cross-scope
+cache state, so a translation produced from one scope's query can never
+be served to another scope's search, and hit/miss latency cannot be a
+cross-scope oracle for another user's query text), and a separate store
+from the presentation-path `TranslationCache` (whose key, SHA-256 of
+English prose + target language, is the opposite direction), so a
+repeated query reuses the stored translation and "same query → same
+posts" holds by construction (D19); (c) the source language is
+**declared**, read from
+the scope's `/lang` (`scope_preferences.language`, defaulting to `en`
+for a missing row per D43) — `SemanticSearchTool` runs the same lookup
+as `InboundRouter.lookupScopeLanguage` on a short-lived connection, never
+inferring the language from the query text, and a lookup failure
+degrades to `en` (the pre-M1-746 behaviour); (d) the translation is
+**language-only**: the translator prompt instructs language conversion
+only — no expansion, disambiguation or added terms — and the provider's
+output is used verbatim; the D58-deferred techniques (rewriting,
+expansion, HyDE, re-ranking) remain deferred. An `en` scope is a strict
+no-op: no call, no cache access, byte-identical query — asserted, not
+assumed, because every scope today is `en`. A translator failure or an
+open circuit breaker falls back to the original query text — degraded
+retrieval beats no retrieval — as does an accepted translation longer
+than the tool's configured input cap (redteam R1/R2: the cap keeps the
+cache from amplifying a hostile endpoint's multi-MiB response into the
+heap, and the anchored string may never exceed what the raw query path
+permits). The anchored string is what gets embedded
+AND what `plainto_tsquery('english', ?)` receives (still bind-only), so
+both arms always see the same text and the READY + D59 predicates,
+fusion and emission shape are untouched. The same `TRANSLATOR` task key
+serves the ingest and presentation legs ("shares today"), so the
+temperature-0 emission applies to all three translation legs — a
+determinism win, not a behavior risk.
+
 **Retrieval-provenance notice (D58).** ChatAgent tracks the
 DISTINCT post UIDs the turn retrieved — the deterministic pre-fetch plus
 every model-initiated post-corpus tool Success (`searchPosts`,

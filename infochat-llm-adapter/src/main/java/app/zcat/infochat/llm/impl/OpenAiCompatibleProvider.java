@@ -40,6 +40,10 @@ import java.util.Optional;
  *   ]
  * }
  * }</pre>
+ * A {@link ModelTask#TRANSLATOR} call additionally carries
+ * {@code "temperature": 0} — D58 (a) decodes the translation leg
+ * greedily, and the field must be ON the wire request, not a config
+ * knob (M1-746).
  * Response body's load-bearing path is
  * {@code choices[0].message.content} — the model's plain text reply.
  * The optional {@code usage.prompt_tokens} / {@code usage.completion_tokens}
@@ -223,6 +227,18 @@ public class OpenAiCompatibleProvider implements LlmProvider {
             ObjectNode root = LlmHttpSupport.JSON.createObjectNode();
             root.put("model", cfg.model());
             root.put("max_tokens", cfg.maxTokens());
+            // D58 (a) GREEDY: the translation leg is decoded at temperature
+            // 0 — hard-coded for ModelTask.TRANSLATOR, deliberately NOT a
+            // config key (a config knob could drift from the determinism
+            // promise and could not be asserted on the request the provider
+            // receives). The task key is shared with the ingest and
+            // presentation translation legs (M1-746 note "shares today"),
+            // so those become greedy too — a determinism win, not a behavior
+            // risk. Every other task keeps today's temperature-free body,
+            // so chat/summarize sampling is untouched.
+            if (task == ModelTask.TRANSLATOR) {
+                root.put("temperature", 0);
+            }
             ArrayNode messages = root.putArray("messages");
             ObjectNode system = messages.addObject();
             system.put("role", "system");

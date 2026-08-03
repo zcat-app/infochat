@@ -93,6 +93,53 @@ class AnthropicProviderTest {
     }
 
     @Test
+    void translatorCallCarriesTemperatureZeroOnTheWireRequest() throws Exception {
+        // D58 (a) GREEDY — mirrors OpenAiCompatibleProviderTest: the
+        // translation leg must be decoded greedily, with temperature 0 ON
+        // the wire request the provider receives, never merely a config
+        // knob (M1-746 acceptance a3).
+        AtomicReference<String> capturedBody = new AtomicReference<>();
+        mockServer.createContext("/messages", exchange -> {
+            capturedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] resp = successResponse("ok").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(resp);
+            }
+        });
+        mockServer.start();
+
+        AnthropicProvider provider = providerFor(ModelTask.TRANSLATOR, API_KEY);
+        provider.generate(ModelTask.TRANSLATOR, "", "translate me");
+
+        assertEquals(0, JSON.readTree(capturedBody.get()).get("temperature").asInt(),
+            "a TRANSLATOR call must carry temperature 0 on the wire request");
+    }
+
+    @Test
+    void nonTranslatorTaskKeepsTheTemperatureFreeBody() throws Exception {
+        // Adding a temperature field to other tasks would silently change
+        // their sampling behavior (chat/summarize run at the endpoint's
+        // default); only the TRANSLATOR leg is greedy per D58 (a).
+        AtomicReference<String> capturedBody = new AtomicReference<>();
+        mockServer.createContext("/messages", exchange -> {
+            capturedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] resp = successResponse("ok").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(resp);
+            }
+        });
+        mockServer.start();
+
+        AnthropicProvider provider = providerFor(ModelTask.SUMMARIZER, API_KEY);
+        provider.generate(ModelTask.SUMMARIZER, "sys", "usr");
+
+        assertFalse(JSON.readTree(capturedBody.get()).has("temperature"),
+            "a non-TRANSLATOR call must keep today's temperature-free body");
+    }
+
+    @Test
     void generateIncludesCacheControlOnSystemPrompt() throws Exception {
         AtomicReference<String> capturedBody = new AtomicReference<>();
         mockServer.createContext("/messages", exchange -> {

@@ -324,7 +324,7 @@ considered untrusted (decision D21):
   | Name | Inputs | Output | Notes |
   |---|---|---|---|
   | `searchPosts` | `tags: list<Tier-1 tag>` (each value validated against the controlled vocabulary), `window: duration`, `limit: int ≤ profile-driven cap` | list of `{uid, title, url, ready_at, tags}` | Returns `READY` posts visible in the calling `(user, scope)`'s world only (D59: live, non-excluded bootstrap sources OR the scope's subscriptions). The requested tag filter applies as-is (validated against the controlled vocabulary); the scope's `tag_mode`/`scope_tag` preferences intentionally do NOT apply — tag preferences narrow the digests only (commands.md §Per-scope tag preferences, D59). The `window` filter binds to `ready_at` (the pipeline's READY-transition time): the result is the posts that became readable within the window, so a post with an old `published_at` but a recent `ready_at` DOES surface in a short window — it arrived in that window (commands.md §Content, *What the window measures*). Results are ordered `COALESCE(published_at, fetched_at)` descending. The ordering falls back to `fetched_at` rather than sorting on a bare `published_at` because that column is source-supplied AND nullable, and Postgres sorts NULLs first under `DESC`: a bare key would let any feed seize the head of every result — the position re-injected first into the chat prompt — by simply omitting its publication date, which is strictly easier than the future-dating the ingest clamp already denies (schema.md §"`published_at` clamp"). The fallback is `fetched_at`, **not** `ready_at`: `ready_at` is stamped at the READY promotion (always later than the row's own fetch) and is re-stamped by `approve_quarantine` and re-evaluation, so keying on it would rank an undated post above the ceiling the clamp imposes on dated ones and let a released post jump to a position no dated post can reach. `fetched_at` is the partition key and is never re-stamped. **The bound this gives is precise, and is worth stating exactly rather than over-promising:** an undated post sorts at the top of *its own fetch cycle* — level with the ceiling a dated post from that same fetch could claim — and no higher, and it cannot move on release. That bound is stated against its own fetch, not against the corpus, and the difference matters: a **later** fetch does not automatically displace it, because the clamp bounds `published_at` from above only and an honest backfilled item can key arbitrarily far in the past. What the bound denies is any position a dated post from the same fetch could not already have taken. Omitting a date therefore buys a bounded, self-decaying position, not the unconditional head a bare `published_at DESC` would grant. |
-  | `semanticSearch` | `query: string` (free text, length-capped), `limit: int ≤ profile-driven cap` | list of `{uid, title, url, similarity}` (`similarity` null for lexical-only rows) | **Hybrid** semantic + lexical retrieval over the post corpus, fused by Reciprocal Rank Fusion (D58): a pgvector cosine-distance arm over the post-embedding store and a full-text arm over `post.search_tsv` (`plainto_tsquery`, query bound as a parameter — never string-concatenated). Returns `READY` posts visible in the calling `(user, scope)`'s world only — **both** arms carry the same D59 world + `READY` predicate as `searchPosts` inside the arm before its limit, so a post outside the caller's world (a private custom the scope never subscribed, an excluded bootstrap source, or not yet `READY`) can never surface through either arm or the fused result. The query is embedded on the **local** embedding backend (embeddings never leave the deployment, D54); the fused candidate set and its order are decided entirely by SQL (per-arm `ORDER BY` + RRF, tie-broken by `post_id`), reproducible on unchanged DB state and never chosen by the LLM (D19). A configured cosine-distance relevance threshold gates the **semantic arm**; the lexical arm surfaces keyword-exact matches the semantic arm's threshold would exclude. When both arms return nothing → empty result → the agent answers from general knowledge. The scope's per-tag preferences (`tag_mode`, commands.md §Per-scope tag preferences) intentionally do **not** apply to either arm — under D59 tag preferences narrow the digests only (no chat retrieval surface applies them); this tool is scoped by the world predicate only. `similarity` (= 1 − distance) is a display value only, emitted `null` for a lexical-only row that has no embedding; the raw embedding vector is never exposed (D5). Besides being model-callable, the chat agent dispatches this tool **deterministically on every chat turn** (the D28 pre-fetch pattern) and re-injects the result through the untrusted-content wrapper — retrieved titles/URLs are attacker-influenced content. The deterministic pre-fetch shares the tool loop's per-turn dispatch context, so the fixed per-turn call cap and the identical-call cache hold turn-wide. The turn's retrieval outcome also drives a deterministic, bundle-localized provenance notice on the reply (grounded-with-count vs general-knowledge; count only, no feed-derived text interpolated — the D31/D43 constraint; commands.md §Chat mode, D58). |
+  | `semanticSearch` | `query: string` (free text, length-capped), `limit: int ≤ profile-driven cap` | list of `{uid, title, url, similarity}` (`similarity` null for lexical-only rows) | **Hybrid** semantic + lexical retrieval over the post corpus, fused by Reciprocal Rank Fusion (D58): a pgvector cosine-distance arm over the post-embedding store and a full-text arm over `post.search_tsv` (`plainto_tsquery`, query bound as a parameter — never string-concatenated). Returns `READY` posts visible in the calling `(user, scope)`'s world only — **both** arms carry the same D59 world + `READY` predicate as `searchPosts` inside the arm before its limit, so a post outside the caller's world (a private custom the scope never subscribed, an excluded bootstrap source, or not yet `READY`) can never surface through either arm or the fused result. The query is embedded on the **local** embedding backend (embeddings never leave the deployment, D54); the fused candidate set and its order are decided entirely by SQL (per-arm `ORDER BY` + RRF, tie-broken by `post_id`), reproducible on unchanged DB state and never chosen by the LLM (D19). **Query anchoring (M1-746, D58):** when the scope declares a non-English `/lang`, the query text is first translated to the corpus anchor language (English, D29) by a generative `ModelTask.TRANSLATOR` call (decoded greedily — temperature 0 on the wire; language-only prompt; result cached per (scope, query, language); accepted translation capped at the tool's input length) — an `en` scope is a strict no-op. A translator failure, an open breaker, or an over-cap translation falls back to the raw query text (degraded retrieval beats no retrieval); the fallback and the translation both reach the arms only as bind parameters. The translation leg draws no per-user bucket token (see §Rate limiting) and its outputs are never shown to the user — they enter the retrieval arms only. A configured cosine-distance relevance threshold gates the **semantic arm**; the lexical arm surfaces keyword-exact matches the semantic arm's threshold would exclude. When both arms return nothing → empty result → the agent answers from general knowledge. The scope's per-tag preferences (`tag_mode`, commands.md §Per-scope tag preferences) intentionally do **not** apply to either arm — under D59 tag preferences narrow the digests only (no chat retrieval surface applies them); this tool is scoped by the world predicate only. `similarity` (= 1 − distance) is a display value only, emitted `null` for a lexical-only row that has no embedding; the raw embedding vector is never exposed (D5). Besides being model-callable, the chat agent dispatches this tool **deterministically on every chat turn** (the D28 pre-fetch pattern) and re-injects the result through the untrusted-content wrapper — retrieved titles/URLs are attacker-influenced content. The deterministic pre-fetch shares the tool loop's per-turn dispatch context, so the fixed per-turn call cap and the identical-call cache hold turn-wide. The turn's retrieval outcome also drives a deterministic, bundle-localized provenance notice on the reply (grounded-with-count vs general-knowledge; count only, no feed-derived text interpolated — the D31/D43 constraint; commands.md §Chat mode, D58). |
   | `getPost` | `uid: string` | `{uid, title, body, url, ready_at, tags}` or `null` | Scope-filtered: returns null for a UID not visible in the calling scope (the same path as a UID that does not exist; the existence-vs-no-access distinction is never exposed). |
   | `getReferences` | `uid: string`, `limit: int ≤ profile-driven cap` | list of `{uid, title, url, link_type, score}` | Edges from the `post_reference` graph. Scope-filtered the same way as `searchPosts`. |
   | `recallMemory` | `keywords: list<string>` (each ≤ a profile-driven length cap) | list of `{compressed_at, summary, references}` | Reads `chat_memory` for the calling `(user, scope)` only — D28. **Not** the user-facing `/recall <keyword>` command, which is v2-deferred per SPEC.md §"Deferred to v2". |
@@ -1444,13 +1444,23 @@ rules:
   `statement_timeout`, the embed HTTP call by
   `infochat.embeddings.timeout-ms`), and gated by the same per-user
   LLM rate bucket as the turn itself — and it writes nothing, so
-  the "discard the turn" guarantee above is unaffected. Once the
-  chat endpoint's circuit breaker (below) is OPEN, the pre-fetch is
-  **skipped entirely** — no embed round-trip, no pgvector probe —
-  so an outage window pays that bounded cost at most once per
-   breaker cycle: only the failures that precede the trip (and the
-   cooldown-expiry probe turn, which legitimately needs its
-   grounding) run it.
+  the "discard the turn" guarantee above is unaffected. **Query
+  anchoring (M1-746, D58):** for a non-English scope the pre-fetch
+  additionally fires ONE generative `ModelTask.TRANSLATOR` call
+  (the query-anchoring leg, §Rate limiting) before the embed — it
+  draws no per-user bucket token (the bucket counts turns, not
+  generative calls inside them), is bounded by the translator
+  transport timeouts and the per-endpoint circuit breaker (below,
+  §Failure handling), falls back to the raw query text on any
+  failure, and is cached per (scope, query, language) so a repeat
+  of the same text costs nothing. Once the
+   chat endpoint's circuit breaker (below) is OPEN, the pre-fetch is
+   **skipped entirely** — no translation, no embed round-trip, no
+   pgvector probe —
+   so an outage window pays that bounded cost at most once per
+    breaker cycle: only the failures that precede the trip (and the
+    cooldown-expiry probe turn, which legitimately needs its
+    grounding) run it.
 - **Fail-fast on a known-unreachable provider (circuit breaker).** An in-memory circuit breaker keyed by resolved provider
    endpoint (base-url; all tasks routed to one endpoint share its
   state, matching the D56 one-LLM-service topology — the embedding
@@ -1622,6 +1632,30 @@ share a cost profile share a bucket:
   profile-driven. Transport rate is intentionally higher than this
   cap so a flooding user gets quick reject replies without burning
   the only LLM slot.
+- **Query-anchoring translation (M1-746, D58)** — a disclosed
+  exception to the "LLM-triggering operations" bucket: a non-English
+  scope's retrieval issues generative `ModelTask.TRANSLATOR` calls —
+  one per turn for the D28 pre-fetch, plus one per DISTINCT
+  model-elected `semanticSearch` query — that draw NO per-user bucket
+  token (the bucket counts turns, not generative calls inside them).
+  Accepted v1 posture, stated rather than hidden: the per-turn
+  tool-call cap bounds model-elected volume, every call is a small
+  (~100-token) prompt, the
+  translation leg is cached per (scope, query, language) so repeated
+  queries cost nothing, and the shared breaker bounds outage
+  behaviour. The call goes to whichever backend `ModelTask.TRANSLATOR`
+  resolves to, which **may be remote** — unlike the embedding leg,
+  which D54 pins local, nothing constrains this task's locality, so
+  the cost bound is the remote provider's limits when it is routed
+  remotely. What that exposes is disclosed under §Secrets handling. `cs` is enabled today, so this is the standing posture
+  for the current user base, not a future trigger: the per-call
+  generative budget the bucket shape cannot express would need a
+  tool-path-shaped rate limit (the bucket lives on the inbound
+  router's per-turn path) and is a follow-up decision when usage
+  warrants. The leg shares `ModelTask.TRANSLATOR` with the ingest and
+  presentation translation legs ("shares today", design 05 §5.4.6),
+  so the greedy temperature-0 emission applies to all three — a
+  determinism improvement, disclosed here and in the design doc.
 - **Per-user interruptible concurrency** — not a rate
   bucket: a ceiling on one sender's CONCURRENT interruptible
   requests (the D35 interruptible class: chat replies, on-demand
@@ -1815,6 +1849,24 @@ sources). Application code uses the soft-delete column.
   provider and what each exposes — `chat` (private user messages) flagged loudest,
   the ingest tasks (`security`/`tagger`/`entity`/`classifier`) as topic-interest exposure over
   public posts — see `SETUP_GUIDE.md` §"Switching your AI backend later".
+- **`translator` carries private user messages too (M1-746, D58).** The
+  query-anchoring leg (§Rate limiting) sends the user's search query to
+  `ModelTask.TRANSLATOR`, and on the D28 pre-fetch path that query IS the
+  user's raw chat message (truncated, not redacted). For a scope on a
+  non-English `/lang`, routing `translator` to a remote provider therefore
+  exposes private user messages, exactly as `chat` does — it is not the
+  bot-prose-only exposure the presentation and ingest translation legs
+  imply. The disclosure text that `prod/switch-llm.sh` prints at switch
+  time is updated to match by M1-758.
+- The translation of that query is retained in an in-memory cache for 24h
+  (per (scope, query-hash, language), M1-746). This is **user-authored
+  content**, so it is deliberately outside the premise of the
+  presentation-cache residual noted under §What's intentionally NOT in v1
+  — no minimization lever reaches it: `/forget` clears chat memory, not
+  this cache, and eviction is by TTL and capacity only. Accepted for v1
+  because the store is process-local, never persisted, and bounded; a
+  `/forget` that also drains the caller's translation entries is the
+  follow-up if the retention window is judged too long.
 - Audit-log writes pass through a redaction hook that masks values
   matching a **closed catalogue of API-key shapes**. The catalogue's
   v1 baseline (spec-level commitment) is:

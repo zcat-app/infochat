@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.chat.tool;
 
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.ChatToolRegistry;
@@ -7,6 +8,8 @@ import app.zcat.infochat.provider.chat.ChatToolRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.nio.charset.StandardCharsets;
@@ -26,7 +29,11 @@ import java.util.UUID;
 // by Reciprocal Rank Fusion. Both arms carry the READY + D59 world
 // (implicit-bootstrap-not-excluded OR subscribed) predicates INSIDE the
 // arm, and the fused set and its order are decided entirely by SQL (D19);
-// the LLM never picks the set. The lexical arm recovers keyword-exact
+// the LLM never picks the set. The query text reaching both arms is
+// anchored to the corpus language (English, D29) when the scope declares
+// a non-English /lang (D58 bounded exception, M1-746): the anchored
+// string is what gets embedded AND what plainto_tsquery receives, so the
+// arms always see the same text. The lexical arm recovers keyword-exact
 // posts (CVE ids, product names) whose embeddings fall outside the
 // semantic threshold.
 @ApplicationScoped
@@ -54,9 +61,17 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
      */
     static final int RRF_K = 60;
 
+    // The scope's declared language (D58 (c)): identical SQL to
+    // InboundRouter's lookup — a missing row means 'en' (D43).
+    private static final String SELECT_SCOPE_LANGUAGE_SQL =
+            "SELECT language FROM scope_preferences WHERE scope_kind = ? AND scope_id = ?";
+
+    private static final Logger LOG = LoggerFactory.getLogger(SemanticSearchTool.class);
+
     private final DataSource dataSource;
     private final CancellationService cancellationService;
     private final EmbeddingProvider embeddingProvider;
+    private final QueryAnchorTranslator queryAnchorTranslator;
     private final double distanceThreshold;
     private final int defaultLimit;
 
@@ -64,6 +79,7 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
     public SemanticSearchTool(DataSource dataSource,
                               CancellationService cancellationService,
                               EmbeddingProvider embeddingProvider,
+                              QueryAnchorTranslator queryAnchorTranslator,
                               // defaultValue duplicates the explicit key in
                               // application.properties; the two must not drift.
                               @ConfigProperty(name = "infochat.chat.semantic-threshold",
@@ -73,6 +89,7 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
         this.dataSource = dataSource;
         this.cancellationService = cancellationService;
         this.embeddingProvider = embeddingProvider;
+        this.queryAnchorTranslator = queryAnchorTranslator;
         this.distanceThreshold = distanceThreshold;
         this.defaultLimit = defaultLimit;
     }
@@ -88,16 +105,67 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
         int limit = args.containsKey("limit")
                 ? ((Number) args.get("limit")).intValue() : defaultLimit;
 
+        // D58 (c) DECLARED: the source language is the scope's declared
+        // /lang (scope_preferences.language, defaulting to 'en' for a
+        // missing row per D43) — never inferred from the query text. This
+        // is a quick indexed SELECT on a short acquisition: it must NOT
+        // run on the main pooled connection, because the translation and
+        // embed calls below are HTTP round-trips that must not hold a
+        // pool slot.
+        String scopeLanguage = lookupScopeLanguage(scopeKind, scopeId);
+
+        // D58: anchor the query to the corpus language (English, D29).
+        // An en-declared scope is a strict no-op (byte-identical to
+        // today, no translator call); a non-English scope yields ONE
+        // translated string that BOTH arms consume — it is what gets
+        // embedded and what plainto_tsquery receives, so the two arms
+        // always see the same text. Runs before the pooled connection is
+        // acquired: the translation call is an HTTP round-trip (same
+        // discipline as the embed call below). The scope travels with
+        // the call so the translation cache is scope-partitioned (R2).
+        String anchoredQuery = queryAnchorTranslator.translate(
+                query, scopeLanguage, scopeKind, scopeId);
+
         // Embed BEFORE acquiring the pooled connection: the embed call is
         // an HTTP round-trip to the local backend and must not hold a
         // pool slot for its duration.
-        float[] queryVector = embeddingProvider.embed(List.of(query)).get(0).vector();
+        float[] queryVector = embeddingProvider.embed(List.of(anchoredQuery)).get(0).vector();
         String vectorLiteral = toVectorLiteral(queryVector);
 
         try (Connection conn = dataSource.getConnection()) {
             cancellationService.armToolConnection(conn, userId, scopeKind, scopeId);
             enableIterativeScan(conn);
-            return queryFusedPosts(conn, scopeKind, scopeId, vectorLiteral, query, limit);
+            return queryFusedPosts(conn, scopeKind, scopeId, vectorLiteral, anchoredQuery, limit);
+        }
+    }
+
+    // The scope's declared language — the same SQL and the same
+    // missing-row default ('en', D43) as
+    // InboundRouter.lookupScopeLanguage. That method cannot be reused
+    // here (package-private, bound to the inbound router's per-dispatch
+    // connection), so the lookup is replicated with identical semantics.
+    // A lookup FAILURE degrades to 'en' — the pre-M1-746 behaviour — and
+    // logs: an unreadable language must not fail the search. The query
+    // then reaches both arms exactly as it did before this ticket, which
+    // is the fallback-direction decision of the ticket applied to its
+    // own pre-flight (degraded retrieval beats no retrieval); nothing
+    // isolation-relevant depends on the value.
+    private String lookupScopeLanguage(String scopeKind, UUID scopeId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_SCOPE_LANGUAGE_SQL)) {
+            ps.setString(1, scopeKind);
+            ps.setObject(2, scopeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return "en";
+                }
+                return rs.getString("language");
+            }
+        } catch (SQLException e) {
+            SafeLog.warn(LOG, "SemanticSearchTool.lookupScopeLanguage failed for scope_kind="
+                    + scopeKind + " scope_id=" + scopeId
+                    + "; degrading to 'en' (pre-M1-746 behaviour)", e);
+            return "en";
         }
     }
 

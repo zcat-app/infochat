@@ -1,0 +1,39 @@
+RED-TEAM VERDICT: CLEAN
+
+OUT-OF-MODEL:
+  - Within-group-scope cache timing oracle. The R2 remediation partitions
+    QueryTranslationCache by (scope_kind, scope_id) — per SCOPE, not per
+    (user, scope). In a group scope every member shares one partition, so
+    member B who sends the exact text member A recently searched can read
+    hit-vs-miss latency (an LLM round-trip vs none) as "someone here
+    searched this within 24h". The amended threat model commits only to
+    CROSS-scope isolation for this cache (security.md semanticSearch row +
+    QueryTranslationCache.java:~35 R2 javadoc), so this sits outside the
+    stated commitment rather than violating it, and it is largely
+    neutralized in practice: group @mention chat is a mutually visible
+    surface, so A's pre-fetch query text (their raw message) was already
+    readable by B; only model-elected query strings (composed by the chat
+    model, not shown in the group) carry any marginal signal, and those
+    derive from the visible conversation. Flagged so the user can decide
+    whether the per-(user, scope) isolation convention should be extended
+    to this cache or the scope-level partition documented as the accepted
+    unit.
+  - Hostile-translator determinism re-roll across cache loss. The
+    semanticSearch spec row retains "decided entirely by SQL …
+    reproducible on unchanged DB state and never chosen by the LLM (D19)"
+    while the same row's new Query-anchoring sentence makes the effective
+    query text, for a non-English scope, a generative TRANSLATOR output —
+    endpoint-chosen bytes under trust boundary 9. Within the 24h in-memory
+    cache the "same query → same posts" property holds by construction as
+    promised; across restart, TTL expiry, or capacity eviction a repeat
+    re-translates, and a hostile or merely nondeterministic-at-temp-0
+    endpoint can return different text, changing the grounded set on
+    unchanged DB state (bounded: world predicate, input cap, bind-only —
+    no cross-scope reach; a translator-routed endpoint gains retrieval
+    steering it lacked under split routing where chat stays local). The
+    mechanism, the cache's in-memory/TTL nature, and the trust-boundary-9
+    residual are each disclosed in the amended spec (adjudicated as R3
+    across prior rounds), so this is an internal spec tension, not a
+    silent divergence — flagged so the user can decide whether to qualify
+    the retained D19 sentence ("given the anchored query text") in a
+    future spec pass.
