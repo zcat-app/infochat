@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 10 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 758 |
 | deferred | 0 |
 | abandoned | 23 |
-| **total** | **791** |
+| **total** | **792** |
 
 ---
 
@@ -30,6 +30,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-748 — Investigate why no similarity threshold separates true from false matches, and whether a single global threshold is the right model at all (complexity: medium, risk: low)
 - M1-750 — Source language plumbing: --lang + bootstrap validation (complexity: medium, risk: medium)
 - M1-754 — Parked-source re-probe ladder + park-reason discriminator + recurring parked-set signal (complexity: high, risk: medium)
+- M1-757 — Drain the pagination cap-hit flag on the tick failure path (complexity: low, risk: low)
 
 ---
 
@@ -1011,4 +1012,5 @@ M1-751 (done)
 M1-752 (done)
   └── M1-754 (pending) ← runnable
 M1-753 (done)
+M1-757 (pending) ← runnable
 ```
