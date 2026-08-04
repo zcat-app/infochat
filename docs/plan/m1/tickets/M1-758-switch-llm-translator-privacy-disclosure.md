@@ -11,6 +11,7 @@ files_budget: 3
 files_scope:
   - prod/switch-llm.sh
   - infochat-provider/src/test/java/app/zcat/infochat/provider/wiring/SwitchLlmWiringTest.java
+  - docs/spec/security.md
 complexity: low
 risk: medium
 round_cap: 2
@@ -18,10 +19,29 @@ security_relevant: true
 migration_touch: false
 out_of_scope:
   - >-
-    `docs/spec/security.md`. M1-746 already corrected the spec-side
-    disclosure (§Rate limiting and §Secrets handling); this ticket carries
-    only the operator-facing text the script PRINTS at switch time. Editing
-    the spec here would duplicate a landed change.
+    RE-EDITING WHAT M1-746 ALREADY LANDED in `docs/spec/security.md`
+    (§Rate limiting and §Secrets handling). That correction stands and is
+    not revisited. NOTE this clause USED to forbid touching security.md
+    outright, on the reasoning that editing it "would duplicate a landed
+    change" — that is false for the two gaps this ticket now also closes,
+    because those bullets do not exist yet. The file is in `files_scope`
+    for exactly those two additions and nothing else.
+  - >-
+    THE AGGREGATE SYSTEM LLM BUDGET SENTENCE, `docs/spec/security.md`
+    §Rate limiting: "Periodic digests do NOT count against user-initiated
+    per-group LLM budget (they are system-initiated; the aggregate system
+    LLM budget is the backstop for digest cost)." NO SUCH CONTROL EXISTS
+    in code — only the per-user `LlmRateCap`, the D47 per-group bucket
+    (both user-initiated) and per-task concurrency semaphores, which bound
+    concurrency rather than volume. Two independent M1-756 audit rounds
+    declined to attribute it to that diff; it is pre-existing. It is
+    recorded HERE, rather than in a ticket, because this ticket is the one
+    that edits that section and its author will be standing next to the
+    false sentence. Resolving it needs a DECISION first — is the sentence
+    aspirational, or is a real ceiling missing? — and the answer decides
+    whether it is a one-line `spec:` commit or an implementation ticket.
+    Do not fix it inline here, and do not delete this note when the
+    section is edited.
   - >-
     Changing which backend any task routes to, the `LLM_TASKS` list, or the
     config-writing logic. This is a disclosure-text correction only — a diff
@@ -50,19 +70,43 @@ acceptance:
     is corrected to match, so the next reader does not restore the old
     grouping from the comment.
   - >-
-    THE DISCLOSURE NAMES EVERY TRANSLATOR LEG `docs/spec/security.md`
-    §Secrets handling enumerates, not just M1-746's. This ticket was
-    filed against a one-leg world and its title still reads that way, but
-    the section already enumerates TWO on main — the query-anchoring leg
-    (M1-746: the user's raw chat message) and the saved-post headlines
-    (M1-755) — and M1-756 adds a THIRD, the periodic digest's
-    source-authored feed headlines, whose own security.md bullet states
-    "M1-758 owns that text". Sync the script against that section as it
-    stands when this ticket runs, not against the single-leg framing
-    above; a disclosure naming one of three is the same defect in
-    smaller form. `blocked_by` includes M1-756 for exactly this reason —
-    the files do not collide, but landing first would ship a disclosure
-    already known to be incomplete.
+    THE DISCLOSURE NAMES EVERY TRANSLATOR LEG, which is FOUR, not the one
+    this ticket was filed against and still titled for. Three are already
+    enumerated in `docs/spec/security.md` §Secrets handling on main: the
+    query-anchoring leg (M1-746 — the user's raw chat message), the
+    saved-post headlines (M1-755), and the periodic digest's
+    source-authored feed headlines (M1-756, merged at `2698edbf`, whose
+    bullet states "M1-758 owns that text"). The fourth is the `/summary`
+    leg below, which this ticket adds to the section first. A disclosure
+    naming one of four is the same security defect as naming none, in
+    smaller form — the script's own Phase 4 comment sets that standard.
+  - >-
+    SYNC THE SECTION BEFORE SYNCING THE SCRIPT. The script is corrected
+    against `docs/spec/security.md` §Secrets handling, so an incomplete
+    section propagates into the operator-facing text rather than being
+    caught by it. Both spec gaps below are therefore fixed in THIS
+    ticket, ahead of the script edit, not left for a later one.
+  - >-
+    SPEC GAP 1 — §Secrets handling omits the `/summary` display-hit leg
+    (M1-747). It is the same data class the section already discloses for
+    the digest (a `DisplayHeadline` output reaching
+    `ModelTask.TRANSLATOR`), differing only in being user-initiated
+    rather than scheduled. Verified absent on main at `2698edbf`: the
+    section carries exactly three `translator` bullets, none of them
+    `/summary`. Add the missing bullet in the established shape, then
+    name the leg in the script.
+  - >-
+    SPEC GAP 2 — `infochat.digest.translation-max-per-render` has no
+    §Rate limiting entry, unlike the M1-746 and M1-755 translator legs
+    which each got one. M1-756 shipped the control
+    (`application.properties:631`, default 5) and documented it only
+    under §Secrets handling (`security.md:1905`). Code is therefore
+    STRICTER than spec, which is the dangerous direction: removing or
+    widening the budget later would need no spec amendment and would
+    trip no review. Add the §Rate limiting entry matching the shape the
+    `/saved` display-hit entry already uses. Deferred from M1-756 rather
+    than found independently — it was raised at that ticket's round-3
+    audit and left rather than reopen a CLEAN gate for one paragraph.
   - mvn verify from the repo root is green.
 test_plan:
   adds:

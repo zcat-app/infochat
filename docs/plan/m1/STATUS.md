@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 769 |
 | deferred | 0 |
 | abandoned | 23 |
-| **total** | **797** |
+| **total** | **798** |
 
 ---
 
@@ -30,6 +30,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-760 — Re-drive posts whose ingest translation exhausted its attempts (complexity: medium, risk: medium)
 - M1-761 — Extend the translator target-script check to the display-hit leg (complexity: medium, risk: medium)
 - M1-762 — Localization cleanup after Turkish enablement (complexity: medium, risk: low)
+- M1-763 — Timed-out digest render is never cancelled and keeps spending LLM calls (complexity: medium, risk: medium)
 
 ---
 
@@ -1014,4 +1015,5 @@ M1-756 (done)
 M1-757 (done)
 M1-760 (pending) ← runnable
 M1-762 (pending) ← runnable
+M1-763 (pending) ← runnable
 ```
