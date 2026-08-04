@@ -471,12 +471,12 @@ or `deployment.md`. Each one corresponds to at least one named test.
   English with a one-line note; the user does not see a hung response.
 - **Localization bundle completeness** (decision D43,
   `commands.md` §Discovery — Bundle composition): CI fails when
-  any shipped language bundle (`en`, `cs` in v1) is missing a key
-  present in the registry. The `en` baseline is the registry, so
-  a missing key in `en` is a startup-time error in the running
-  service (matching the `commands.md` commitment); CI runs the
-  same check at build time on every shipped bundle so a missing
-  `cs` key is caught before merge.
+  any shipped language bundle (`en`, `cs`, `es`, `ru` and `tr` in
+  v1) is missing a key present in the registry. The `en` baseline
+  is the registry, so a missing key in `en` is a startup-time
+  error in the running service (matching the `commands.md`
+  commitment); CI runs the same check at build time on every
+  shipped bundle so a missing `cs` key is caught before merge.
 
 ### Messaging
 

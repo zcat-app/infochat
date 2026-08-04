@@ -368,7 +368,7 @@ public class DigestRenderer {
             // FULL loop below (no categorization reorders the lead list).
             StringBuilder leadSb = new StringBuilder();
             leadSb.append(bundleLoader.get(BundleKeys.REPLY_DIGEST_LEAD_HEADER, langCode)
-                    .toUpperCase(Locale.ROOT));
+                    .toUpperCase(Locale.forLanguageTag(langCode)));
             for (ClusterProse cp : leadProse) {
                 leadSb.append("\n\n");
                 appendClusterProse(leadSb, cp, langCode);
@@ -735,16 +735,26 @@ public class DigestRenderer {
      * language — never routed through the translation pipeline (that is for
      * LLM prose only). Uppercased in code: v1 output is plain text, so caps
      * are the strongest available header anchor.
+     *
+     * <p>The case pass runs under the SCOPE language, not {@link Locale#ROOT}
+     * (M1-762): the text being cased is translated prose, and Turkish maps
+     * {@code i} to {@code İ}, so a ROOT pass ships {@code DIĞER HABERLER} where
+     * the language requires {@code DİĞER HABERLER}. It stays over the COMPOSED
+     * header (the pre-M1-762 shape), which is what casts the {@code
+     * {n,choice,…}} plural sub-messages the cs and tr values carry as the
+     * translated prose they are; {@link #headerTag} is what keeps the
+     * interpolated tag out of that pass's reach.</p>
      */
     private String sectionHeader(CategorySection section, String langCode) {
         String tag = section.tag();
         if (tag == null) {
             return bundleLoader.get(BundleKeys.REPLY_DIGEST_CATEGORY_OTHER, langCode)
-                    .toUpperCase(Locale.ROOT);
+                    .toUpperCase(Locale.forLanguageTag(langCode));
         }
         return MessageFormat.format(
-                        bundleLoader.get(BundleKeys.REPLY_DIGEST_CATEGORY_HEADER, langCode), tag)
-                .toUpperCase(Locale.ROOT);
+                        bundleLoader.get(BundleKeys.REPLY_DIGEST_CATEGORY_HEADER, langCode),
+                        headerTag(tag))
+                .toUpperCase(Locale.forLanguageTag(langCode));
     }
 
     /**
@@ -754,7 +764,10 @@ public class DigestRenderer {
      * Digest-only keys: {@link #sectionHeader}'s two keys are shared with
      * {@code /summary}'s render forms (out of scope for M1-732), so the
      * count must not leak into those bytes. The cs values carry a
-     * {@code {N,choice,...}} plural shape (D43 twin).
+     * {@code {N,choice,...}} plural shape (D43 twin) whose selected
+     * sub-message is translated prose, so it is cased by the scope-language
+     * pass inherited from {@link #sectionHeader} along with the rest of the
+     * composed header.
      */
     private String sectionCountHeader(CategorySection section, String langCode) {
         String tag = section.tag();
@@ -762,12 +775,27 @@ public class DigestRenderer {
             return MessageFormat.format(
                             bundleLoader.get(BundleKeys.REPLY_DIGEST_CATEGORY_OTHER_COUNT, langCode),
                             section.clusters().size())
-                    .toUpperCase(Locale.ROOT);
+                    .toUpperCase(Locale.forLanguageTag(langCode));
         }
         return MessageFormat.format(
                         bundleLoader.get(BundleKeys.REPLY_DIGEST_CATEGORY_HEADER_COUNT, langCode),
-                        tag, section.clusters().size())
-                .toUpperCase(Locale.ROOT);
+                        headerTag(tag), section.clusters().size())
+                .toUpperCase(Locale.forLanguageTag(langCode));
+    }
+
+    /**
+     * The category tag as it appears inside a header: upper-cased under
+     * {@link Locale#ROOT}, never the scope locale. Tags are an English
+     * controlled vocabulary (D38), so a scope-language pass must not reach
+     * them — under Turkish, {@code ai} would render {@code Aİ} instead of
+     * {@code AI}, trading one wrong header for another (M1-762). Pre-casing
+     * here is what makes the header's own scope-locale pass a no-op over the
+     * tag: the JDK's language-specific upper-casing rules (Turkish, Azeri,
+     * Lithuanian) all key on LOWER-case input, so an already-upper-cased
+     * ASCII tag is a fixed point of every locale.
+     */
+    private static String headerTag(String tag) {
+        return tag.toUpperCase(Locale.ROOT);
     }
 
     /**

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 769 |
+| done | 770 |
 | deferred | 0 |
 | abandoned | 23 |
 | **total** | **798** |
@@ -29,7 +29,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-759 — Anchor-first headline display: reader-language line, bracketed original beneath (complexity: high, risk: high)
 - M1-760 — Re-drive posts whose ingest translation exhausted its attempts (complexity: medium, risk: medium)
 - M1-761 — Extend the translator target-script check to the display-hit leg (complexity: medium, risk: medium)
-- M1-762 — Localization cleanup after Turkish enablement (complexity: medium, risk: low)
 - M1-763 — Timed-out digest render is never cancelled and keeps spending LLM calls (complexity: medium, risk: medium)
 
 ---
@@ -66,6 +65,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-762 | Localization cleanup after Turkish enablement | 2026-08-04 | round 1 APPROVE |
 | M1-756 | Display-time hit translation for digest headlines and the degraded renderers | 2026-08-04 | round 1 APPROVE |
 | M1-755 | Display-time translation of /saved list headlines | 2026-08-04 | round 2 APPROVE |
 | M1-720 | Turkish (tr) localization bundle and enablement | 2026-08-04 | round 2 APPROVE |
@@ -75,7 +75,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-754 | Parked-source re-probe ladder + park-reason discriminator + recurring parked-set signal | 2026-08-03 | round 1 APPROVE |
 | M1-753 | RssFeedParser rejects an entire feed that exceeds MAX_ITEMS instead of truncating, so a large legitimate archive feed can never be ingested at all | 2026-08-03 | round 1 APPROVE |
 | M1-752 | A source parked in status='failed' is dark forever and, after one notification, silently — decide whether D42's no-automatic-recovery stance survives | 2026-08-03 | round 1 APPROVE |
-| M1-751 | Tagger prompt renders the controlled vocabulary in a per-JVM-random order; make it deterministic | 2026-08-03 | round 1 APPROVE |
 
 ---
 
@@ -1014,6 +1013,6 @@ M1-756 (done)
   └── M1-759 (pending) ← runnable
 M1-757 (done)
 M1-760 (pending) ← runnable
-M1-762 (pending) ← runnable
+M1-762 (done)
 M1-763 (pending) ← runnable
 ```

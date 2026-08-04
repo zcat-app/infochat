@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -65,6 +66,14 @@ class BundleLoaderTest {
      * to catch a silent rewrite of the probe value.
      */
     private static final String FALLBACK_PROBE_EXPECTED_VALUE = "fallback-probe-en-only-value";
+
+    /**
+     * A {@code {n}} argument reference — the only thing that makes a bundle
+     * value a {@link java.text.MessageFormat} pattern rather than a literal
+     * string. MessageFormat indexes arguments numerically, so this is the
+     * complete shape; it is what scopes the apostrophe guard below.
+     */
+    private static final Pattern MESSAGE_FORMAT_PLACEHOLDER = Pattern.compile("\\{\\d");
 
     @Inject
     BundleLoader bundleLoader;
@@ -143,6 +152,52 @@ class BundleLoaderTest {
                             + "en but missing here, or an orphan key here absent from en, both "
                             + "fail D43's full-keyset completeness invariant");
         }
+    }
+
+    @Test
+    void noPlaceholderBearingValueCarriesAnUndoubledApostropheInAnyShippedBundle() throws Exception {
+        // MessageFormat uses ' as its QUOTING character, so an undoubled
+        // apostrophe in a pattern makes everything after it literal text:
+        // "This group's digest mode is already {0}." renders as
+        // "This groups digest mode is already {0}." — the apostrophe eaten and
+        // the placeholder shipped verbatim to users (M1-762 item 1, a live
+        // defect no per-handler test could see, because those tests build
+        // their expected value with the same format call the handler makes
+        // and so compare broken output against itself).
+        //
+        // Scoped to values that CARRY a placeholder because only those reach
+        // MessageFormat.format; en alone holds dozens of legitimate
+        // apostrophes in plain non-pattern values, so a blanket
+        // no-apostrophe rule would be wrong rather than merely strict.
+        Set<String> supported = bundleLoader.supportedLanguages();
+        assertFalse(supported.isEmpty(),
+                "BundleLoader.supportedLanguages() must be non-empty; the MessageFormat "
+                        + "quoting check would silently pass against an empty language set");
+
+        List<String> offenders = new ArrayList<>();
+        for (String lang : supported) {
+            // Read each bundle's OWN values off the classpath resource, same
+            // as the completeness checks above: the 2-arg accessor's en
+            // fallback would hide a non-en bundle's own broken pattern behind
+            // a clean en one.
+            Properties ownKeys = loadOwnKeys(lang);
+            for (String key : ownKeys.stringPropertyNames()) {
+                String value = ownKeys.getProperty(key);
+                if (!MESSAGE_FORMAT_PLACEHOLDER.matcher(value).find()) {
+                    continue;
+                }
+                // '' is the only legal way to put a literal apostrophe in a
+                // pattern, so stripping the doubled pairs leaves exactly the
+                // undoubled offenders behind.
+                if (value.replace("''", "").indexOf('\'') >= 0) {
+                    offenders.add(lang + ".properties " + key + " = " + value);
+                }
+            }
+        }
+        assertTrue(offenders.isEmpty(),
+                "every apostrophe in a MessageFormat pattern value must be doubled (' -> ''), "
+                        + "or the quote swallows the remainder of the pattern and its "
+                        + "placeholders reach users unsubstituted: " + offenders);
     }
 
     @Test

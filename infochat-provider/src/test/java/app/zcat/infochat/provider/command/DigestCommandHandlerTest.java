@@ -257,8 +257,18 @@ class DigestCommandHandlerTest {
 
         OutboundMessage result = handler.handle(scope, "/digest normal");
 
-        assertEquals(MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_DIGEST_MODE_ALREADY), "normal"), result.text());
+        // Assert against a LITERAL expectation, never a re-derivation of the
+        // handler's own MessageFormat.format(bundleLoader.get(...)) call: that
+        // shape compares the handler's output against itself, so both sides
+        // broke identically and the assertion stayed green while the en value's
+        // undoubled apostrophe made MessageFormat quote the rest of the pattern
+        // and emit {0} verbatim to users (M1-762 item 1).
+        assertTrue(result.text().contains("normal"),
+                "already-in-mode reply must interpolate the mode literal: " + result.text());
+        assertFalse(result.text().contains("{0}"),
+                "already-in-mode reply must not emit the raw placeholder — an undoubled "
+                        + "apostrophe in the bundle value makes MessageFormat treat the "
+                        + "remainder as quoted text: " + result.text());
         assertEquals("normal", getDigestMode(groupId));
         assertEquals(0, countAuditRows("DIGEST_MODE_SET", groupId));
     }

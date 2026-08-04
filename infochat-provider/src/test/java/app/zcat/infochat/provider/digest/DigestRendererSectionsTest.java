@@ -280,6 +280,81 @@ class DigestRendererSectionsTest {
         assertEquals(0, rollupGenerator.callCount(), "full makes no roll-up calls");
     }
 
+    // ----- M1-762: header case follows the scope language --------------------
+
+    @Test
+    void turkishScopeCasesSectionHeadersWithTheScopeLanguage() {
+        // Turkish uppercases i to İ; Locale.ROOT does not. The pre-M1-762
+        // renderer cased every header under ROOT and so shipped
+        // DIĞER HABERLER — a letter the Turkish word does not contain. Only a
+        // Turkish-scope assertion separates the two implementations: en, cs,
+        // es and ru all case identically under ROOT and under their own
+        // locale, which is exactly why every other test in this class stayed
+        // green while the defect was live.
+        //
+        // The lead header (reply.digest.lead.header) is cased by the same
+        // change but is NOT pinned here: its tr value "öne çıkan haberler"
+        // carries no dotted i, so it upper-cases identically either way and an
+        // assertion on it would be vacuous.
+        noLead();
+        proseGenerator.setResponseText("prose");
+        rollupGenerator.setResponse("synthesis");
+        List<Post> posts = turkishScopeFixture();
+
+        String full = sectionByTag(
+                renderer.renderSections(posts, "tr", DigestMode.FULL, GROUP_ID), null).text();
+        assertTrue(full.startsWith("DİĞER HABERLER"),
+                "FULL cases reply.digest.category.other under the tr scope: " + full);
+
+        String normal = sectionByTag(
+                renderer.renderSections(posts, "tr", DigestMode.NORMAL, GROUP_ID), null).text();
+        assertTrue(normal.startsWith("DİĞER HABERLER — 1 HABER"),
+                "NORMAL cases reply.digest.category.other_count under the tr scope: " + normal);
+    }
+
+    @Test
+    void turkishScopeLeavesTheInterpolatedCategoryTagEnglishCased() {
+        // The trap a blanket ROOT → scope-locale swap walks into: the tag is
+        // interpolated into the header BEFORE the case pass, so casing the
+        // composed string under tr would turn the controlled-vocabulary tag
+        // "ai" into "Aİ" — trading one wrong header for another. Tags are an
+        // English controlled vocabulary (D38), so the prose cases under tr
+        // while the tag stays ROOT-cased: AI HABERLERİ, never Aİ HABERLERİ.
+        noLead();
+        proseGenerator.setResponseText("prose");
+        rollupGenerator.setResponse("synthesis");
+        List<Post> posts = turkishScopeFixture();
+
+        String full = sectionByTag(
+                renderer.renderSections(posts, "tr", DigestMode.FULL, GROUP_ID), "ai").text();
+        assertTrue(full.startsWith("AI HABERLERİ"),
+                "the tag stays English-cased while the translated prose cases under tr: " + full);
+        assertFalse(full.contains("Aİ"),
+                "Turkish casing must not reach the tag: " + full);
+
+        String normal = sectionByTag(
+                renderer.renderSections(posts, "tr", DigestMode.NORMAL, GROUP_ID), "ai").text();
+        assertTrue(normal.startsWith("AI HABERLERİ — 3 HABER"),
+                "the count header keeps the same tag/prose split: " + normal);
+        assertFalse(normal.contains("Aİ"),
+                "Turkish casing must not reach the tag in the count header: " + normal);
+    }
+
+    /**
+     * Three {@code ai} clusters (a qualifying category at min-clusters 3) plus
+     * one untagged cluster for the Other bucket, so a single render exercises
+     * both the tagged and the untagged header form. The posts carry no source
+     * language, so M1-756's display-hit translation never engages under the
+     * {@code tr} scope these two tests render.
+     */
+    private static List<Post> turkishScopeFixture() {
+        return List.of(
+                post("ai-1", "AI 1", List.of("ai")),
+                post("ai-2", "AI 2", List.of("ai")),
+                post("ai-3", "AI 3", List.of("ai")),
+                post("u1", "Untagged", List.of()));
+    }
+
     // ----- M1-724: prominence ordering within sections --------------------
 
     /**

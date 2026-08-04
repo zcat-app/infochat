@@ -218,13 +218,13 @@ them to the marked region — doing so would red the build.
   (`help.cmd.<command>.usage`, `help.cmd.<command>.examples`), a
   shared examples-header key, and a bot-admin-only usage-suffix key
   for `/list-sources`; the bundle-completeness CI covers each key
-  in `en` and `cs`. An enabled asset command renders its existing
-  dynamic short line (whose parenthetical already lists only the
-  enabled sub-verbs, per §Asset commands); per-asset detail blocks
-  are not in v1. `/help <unknown>` mirrors the unknown-tag
-  friendly-error shape: fuzzy suggestions drawn **only from the
-  caller-visible command set** (no admin-command existence leak),
-  pointing the user back at bare `/help`.
+  in `en`, `cs`, `es`, `ru` and `tr`. An enabled asset command
+  renders its existing dynamic short line (whose parenthetical
+  already lists only the enabled sub-verbs, per §Asset commands);
+  per-asset detail blocks are not in v1. `/help <unknown>` mirrors
+  the unknown-tag friendly-error shape: fuzzy suggestions drawn
+  **only from the caller-visible command set** (no admin-command
+  existence leak), pointing the user back at bare `/help`.
 
   **Intent-aware guidance.** Unknown-command suggestions are
   matched by intent, not by shared prefix alone: a deterministic
@@ -1611,10 +1611,10 @@ names) whose embeddings fall outside the semantic threshold.
 
 **Retrieval provenance is explicit in every reply** (decision D58). Every
 successful chat reply carries a deterministic, bundle-localized notice
-(D43 en/cs pair; plain text per D30) stating either that the answer is
-grounded in the user's feed — with the count of distinct posts consulted
-across the whole turn (pre-fetch plus model-initiated post-corpus tool
-calls) — or that it is not based on feed posts. The
+(D43 en/cs/es/ru/tr bundles; plain text per D30) stating either that the
+answer is grounded in the user's feed — with the count of distinct posts
+consulted across the whole turn (pre-fetch plus model-initiated
+post-corpus tool calls) — or that it is not based on feed posts. The
 previously-silent empty-retrieval path is silent no more: the user can
 always tell a "found nothing" answer from a "didn't look" answer (the
 wording also covers the breaker-open pre-fetch skip truthfully). The
@@ -1690,9 +1690,9 @@ answers cover the questions no single runtime artefact can compose —
 actually erase", "who can change a source's tags", "unfollow vs delete",
 and the like. The corpus is in-code (`HelpTopicCorpus.CORPUS`, mirroring
 the CATALOGUE precedent) and the served answer for each topic is reviewed
-product copy flowing through the bundle machinery (D43 en/cs pair; plain
-text per D30) — never a raw USER_GUIDE.md slice, so the runtime depends on
-no markdown heading structure. The embedded match surface is intent-shaped
+product copy flowing through the bundle machinery (D43 en/cs/es/ru/tr
+bundles; plain text per D30) — never a raw USER_GUIDE.md slice, so the
+runtime depends on no markdown heading structure. The embedded match surface is intent-shaped
 (title + intent words, mirroring `CommandIntentIndexBuilder.composeIntentText`),
 NOT the answer body; the served surface is composed at delivery time from
 the in-memory corpus's bundle key (match-not-assert, carried to topics from

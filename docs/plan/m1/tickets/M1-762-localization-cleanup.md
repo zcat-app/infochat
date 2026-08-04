@@ -1,7 +1,7 @@
 ---
 id: M1-762
 title: "Localization cleanup after Turkish enablement"
-status: pending
+status: done
 created: 2026-08-04
 last_updated: 2026-08-04
 blocked_by: []
@@ -116,12 +116,40 @@ spec_refs:
   - docs/spec/llm.md §Translation flow
 decision_refs:
   - D43
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-04
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 229
+      removed: 48
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-04
+  verdict: WARN
+  warnings:
+    - >-
+      lint-ticket.py: PASS (0 blockers, 0 warnings).
+    - >-
+      Self-check, census truth: Class A re-run returns exactly the one
+      documented row; Class C re-run returns the documented nine rows
+      (eight stale). Class B re-run returns the same five
+      `DigestRenderer` sites (same bundle keys, same semantics) but at
+      shifted line numbers — M1-756 (2698edbf) landed in that file after
+      the ticket was authored. Census table corrected inline
+      (304/669/673/691/696 → 371/743/747/765/770); no scope or intent
+      change.
+  blockers: []
 ---
 
 # M1-762: Localization cleanup after Turkish enablement
@@ -181,11 +209,11 @@ grep -rn 'toUpperCase(\|toLowerCase(' --include=*.java infochat-provider/src/mai
 
 | Site | Disposition |
 |---|---|
-| `DigestRenderer.java:304` (`reply.digest.lead.header`) | fix (item 3) |
-| `DigestRenderer.java:669` (`reply.digest.category.other`) | fix (item 3) |
-| `DigestRenderer.java:673` (`reply.digest.category.header` + tag) | fix — tag must stay ROOT-cased |
-| `DigestRenderer.java:691` (`reply.digest.category.other_count`) | fix (item 3) |
-| `DigestRenderer.java:696` (`reply.digest.category.header_count` + tag) | fix — tag must stay ROOT-cased |
+| `DigestRenderer.java:371` (`reply.digest.lead.header`) | fix (item 3) |
+| `DigestRenderer.java:743` (`reply.digest.category.other`) | fix (item 3) |
+| `DigestRenderer.java:747` (`reply.digest.category.header` + tag) | fix — tag must stay ROOT-cased |
+| `DigestRenderer.java:765` (`reply.digest.category.other_count`) | fix (item 3) |
+| `DigestRenderer.java:770` (`reply.digest.category.header_count` + tag) | fix — tag must stay ROOT-cased |
 | `DigestCommandHandler.java:276` | out-of-scope: ASCII literal, JVM-default locale |
 | `QuarantineReviewListener.java:158` | out-of-scope: ASCII literal, observability label only |
 | `AssetRegistry.java:215` | out-of-scope: `Character.toUpperCase(char)` takes no locale; English asset names |
