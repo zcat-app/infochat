@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 773 |
 | deferred | 0 |
 | abandoned | 23 |
-| **total** | **801** |
+| **total** | **803** |
 
 ---
 
@@ -28,6 +28,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-758 — switch-llm.sh: translator now carries private user messages (complexity: medium, risk: medium)
 - M1-759 — Anchor-first headline display: reader-language line, bracketed original beneath (complexity: high, risk: high)
 - M1-760 — Re-drive posts whose ingest translation exhausted its attempts (complexity: medium, risk: medium)
+- M1-767 — Aggregate system LLM budget for the unmetered scheduled digest (complexity: medium, risk: medium)
+- M1-768 — Redteam run-gate must always diff working tree vs fork point (complexity: low, risk: low)
 
 ---
 
@@ -1017,4 +1019,6 @@ M1-760 (pending) ← runnable
 M1-762 (done)
 M1-763 (done)
 M1-764 (done)
+M1-767 (pending) ← runnable
+M1-768 (pending) ← runnable
 ```
