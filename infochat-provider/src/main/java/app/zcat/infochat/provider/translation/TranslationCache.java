@@ -23,7 +23,14 @@ import java.util.Optional;
  * <p>The cached value is the <strong>post-sanitizer-2 translated
  * text</strong>: a cache hit short-circuits both the translator
  * call AND the sanitizer-2 pass (spec §Pipeline order lines
- * 263-264).
+ * 263-264). One exception, in the display-hit keyspace only: the
+ * leg records a compile-time marker constant there to remember that
+ * its target-script check REJECTED a headline's translation, so
+ * later renders converge instead of re-calling the translator. That
+ * value is never a translation and never reaches a reader — the leg
+ * recognises it on read and returns its fallback — but a consumer
+ * of this cache should not assume every stored value is translated
+ * prose (M1-761).
  *
  * <p>{@code maximumSize(10_000)} is a memory-safety belt, not a
  * spec commitment. At ~2 KB per translated summary the worst case
@@ -63,14 +70,17 @@ public class TranslationCache {
     /**
      * Store a translation result. The value MUST be the post-sanitizer-2
      * translated text — the caller ({@code TranslationPipeline}) runs
-     * sanitizer-2 before invoking this method.
+     * sanitizer-2 before invoking this method — or, in the display-hit
+     * keyspace, that leg's own rejection marker (see the class javadoc);
+     * both are safe to hand back unsanitized on a hit.
      *
      * @param englishText              post-sanitizer-1 English text;
      *                                 never null.
      * @param toLang                   ISO 639-1 target language code;
      *                                 never null.
      * @param sanitized2TranslatedValue post-sanitizer-2 translated
-     *                                  text; never null.
+     *                                  text, or the display-hit leg's
+     *                                  rejection marker; never null.
      */
     public void put(String englishText,
                     String toLang,
