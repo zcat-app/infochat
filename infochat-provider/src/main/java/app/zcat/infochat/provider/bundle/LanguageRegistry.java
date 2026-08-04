@@ -47,8 +47,8 @@ public class LanguageRegistry {
     public record EnabledLanguage(String code, UnicodeScript script) {}
 
     /**
-     * The declared enabled set — exactly {@code {en, cs, es, ru}}, the same
-     * codes users can select today. Flipping an entry is a ticketed,
+     * The declared enabled set — exactly {@code {en, cs, es, ru, tr}}, the
+     * same codes users can select today. Flipping an entry is a ticketed,
      * reviewed change with measured evidence behind it.
      *
      * <p>{@code es} joined in M1-718. What cleared it was not a
@@ -60,12 +60,22 @@ public class LanguageRegistry {
      * class exists to enforce is therefore met by construction rather
      * than by measurement — see the ticket for why the embedder-swap
      * gate it was originally filed behind no longer applies.</p>
+     *
+     * <p>{@code tr} joined in M1-720 on that same reasoning, which it
+     * relies on more heavily than the others: Turkish scored worst of the
+     * three candidate languages on the retired embedder, because heavy
+     * suffixation fragments under an English-trained tokenizer. The pivot
+     * makes those numbers inapplicable rather than merely better — no
+     * Turkish text reaches the embedder at all — so enabling it is a
+     * presentation-layer decision only. Latin script, so it adds no new
+     * obligation to the script-aware checks below.</p>
      */
     private static final List<EnabledLanguage> ENABLED_LANGUAGES = List.of(
             new EnabledLanguage("en", UnicodeScript.LATIN),
             new EnabledLanguage("cs", UnicodeScript.LATIN),
             new EnabledLanguage("es", UnicodeScript.LATIN),
-            new EnabledLanguage("ru", UnicodeScript.CYRILLIC));
+            new EnabledLanguage("ru", UnicodeScript.CYRILLIC),
+            new EnabledLanguage("tr", UnicodeScript.LATIN));
 
     private static final Set<String> ENABLED_CODES =
             ENABLED_LANGUAGES.stream()

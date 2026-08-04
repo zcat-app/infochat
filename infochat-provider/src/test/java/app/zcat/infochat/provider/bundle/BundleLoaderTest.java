@@ -30,8 +30,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * a bilateral one: every {@link BundleKeys} constant must be present
  * with a non-empty value in EVERY {@link BundleLoader#supportedLanguages()}
  * entry — {@code en.properties}, {@code cs.properties},
- * {@code es.properties} and {@code ru.properties} in
- * v1. M1-474 gives that check the teeth D43 mandates: it now reads each
+ * {@code es.properties}, {@code ru.properties} and {@code tr.properties}
+ * in v1. M1-474 gives that check the teeth D43 mandates: it now reads each
  * shipped bundle's OWN key set directly from the classpath resource
  * rather than calling {@link BundleLoader#get(String, String)}, whose
  * en fallback (a key missing from {@code cs} silently resolves to the
@@ -264,6 +264,28 @@ class BundleLoaderTest {
                 "UTF-8 round-trip through bytes must preserve the ru.properties value");
     }
 
+    @Test
+    void twoArgAccessorReturnsTurkishOrthographyRoundtripped() {
+        // The tr counterpart of the two checks above (M1-720), same
+        // placeholder-bundle rationale. Turkish is back on Latin script, so
+        // unlike ru a mis-decode does not mojibake the whole value — it
+        // mangles exactly the letters that make the text Turkish: dotless ı
+        // (U+0131) and ğ (U+011F) have no ISO-8859-1 representation at all,
+        // so a bundle that looked fine in review would reach users with its
+        // distinguishing characters replaced.
+        String trValue = bundleLoader.get(BundleKeys.REPLY_LANG_SUCCESS, "tr");
+        assertNotNull(trValue,
+                "reply.lang.success must resolve in tr.properties");
+        assertTrue(containsAnyTurkishOrthography(trValue),
+                "tr.properties reply.lang.success must carry at least one Turkish "
+                        + "orthographic character (the bundle discipline forbids "
+                        + "placeholder English strings); got: " + trValue);
+        byte[] trBytes = trValue.getBytes(StandardCharsets.UTF_8);
+        String trRoundtripped = new String(trBytes, StandardCharsets.UTF_8);
+        assertEquals(trValue, trRoundtripped,
+                "UTF-8 round-trip through bytes must preserve the tr.properties value");
+    }
+
     private static Properties loadOwnKeys(String lang) throws IOException {
         // Mirror BundleLoader's load path (InputStreamReader UTF-8) so cs
         // diacritics decode identically; reading the resource directly is
@@ -307,6 +329,22 @@ class BundleLoaderTest {
         // Spanish has that English does not, so their presence proves the
         // value is not English text left in place.
         for (char ch : new char[] {'á', 'é', 'í', 'ó', 'ú', 'ü', 'ñ', 'Á', 'É', 'Í', 'Ó', 'Ú', 'Ñ', '¿', '¡'}) {
+            if (s.indexOf(ch) >= 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsAnyTurkishOrthography(String s) {
+        // The letters Turkish has that English does not. Deliberately
+        // excludes the ö/ü the Spanish and Czech sets also carry would-be
+        // duplicates of: what is listed here is the dotted/dotless i pair
+        // and the cedilla/breve forms, which are Turkish-specific
+        // codepoints — Turkish ş/ç (U+015F, U+00E7) are NOT the Czech š/č
+        // (carons), so neither language's check can pass on the other's
+        // bundle and a copy-paste between them still fails.
+        for (char ch : new char[] {'ç', 'ğ', 'ı', 'ş', 'Ç', 'Ğ', 'İ', 'Ş'}) {
             if (s.indexOf(ch) >= 0) {
                 return true;
             }

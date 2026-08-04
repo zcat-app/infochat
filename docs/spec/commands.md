@@ -199,8 +199,8 @@ them to the marked region — doing so would red the build.
   the per-command lines for the caller's permitted set in a
   fixed order, then the footer. CI's bundle-completeness check
   asserts that every command in the catalogue has a help-line key
-  in every shipped language bundle (`en`, `cs`, `es` and `ru` in v1 per
-  `llm.md` §Translation flow), and that the header / footer keys
+  in every shipped language bundle (`en`, `cs`, `es`, `ru` and `tr` in
+  v1 per `llm.md` §Translation flow), and that the header / footer keys
   exist. This commitment fixes the bundle structure so adding a
   further language is a deterministic drop-in.
 
@@ -987,7 +987,8 @@ and makes the digest query depend on row presence.
   chat mode blocked, so their `chat_session` cannot grow; auto-compress
   never fires during probation (correct by construction).
 - `/lang <code>` — sets per-scope output language. v1 enables English,
-  Czech, Spanish and Russian; the accepted codes come from an explicit enabled set
+  Czech, Spanish, Russian and Turkish; the accepted codes come from an
+  explicit enabled set
   (`LanguageRegistry`), so a bundle present on the classpath is not
   selectable unless declared enabled. DM: own scope. Group: group
   admin only. An unsupported code

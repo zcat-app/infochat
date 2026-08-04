@@ -35,15 +35,15 @@ class LanguageRegistryTest {
     }
 
     @Test
-    void enabledSetIsExactlyEnCsEsAndRu() {
-        LanguageRegistry registry = registryOverLoaded(Set.of("en", "cs", "es", "ru"));
+    void enabledSetIsExactlyEnCsEsRuAndTr() {
+        LanguageRegistry registry = registryOverLoaded(Set.of("en", "cs", "es", "ru", "tr"));
 
         // Exact set equality, never contains(): the assertion has to fail
         // when the set GROWS, not only when it shrinks. Enabling a language
         // is the reviewed, ticketed decision this class exists to force —
         // a containment check would let an undeclared addition ship silently.
-        assertEquals(Set.of("en", "cs", "es", "ru"), registry.enabledLanguages(),
-                "the enabled set must be exactly {en, cs, es, ru} — the same codes users "
+        assertEquals(Set.of("en", "cs", "es", "ru", "tr"), registry.enabledLanguages(),
+                "the enabled set must be exactly {en, cs, es, ru, tr} — the same codes users "
                         + "can select today; widening it is a ticketed, reviewed change");
     }
 
@@ -53,9 +53,9 @@ class LanguageRegistryTest {
         // BundleLoader.LOADED_LANGUAGES (stubbed) — but NOT declared
         // enabled. The registry must still reject it: loading does not
         // imply availability.
-        LanguageRegistry registry = registryOverLoaded(Set.of("en", "cs", "es", "ru", "th"));
+        LanguageRegistry registry = registryOverLoaded(Set.of("en", "cs", "es", "ru", "tr", "th"));
 
-        assertEquals(Set.of("en", "cs", "es", "ru"), registry.enabledLanguages(),
+        assertEquals(Set.of("en", "cs", "es", "ru", "tr"), registry.enabledLanguages(),
                 "a loaded-but-undeclared bundle must not widen the enabled set");
         assertFalse(registry.isEnabled("th"),
                 "loaded bundle present, yet 'th' must be rejected — it was never declared enabled");
@@ -76,6 +76,10 @@ class LanguageRegistryTest {
                 "cs must declare Latin");
         assertEquals(Optional.of(UnicodeScript.LATIN), LanguageRegistry.scriptOf("es"),
                 "es must declare Latin");
+        assertEquals(Optional.of(UnicodeScript.LATIN), LanguageRegistry.scriptOf("tr"),
+                "tr must declare Latin — Turkish adds no new script, but every enabled "
+                        + "language must still declare one or condition (d) has nothing to "
+                        + "check a Turkish reply against");
         // A scope_preferences row can outlive its code's declaration, so an
         // undeclared code yields no expectation rather than a guessed one.
         assertEquals(Optional.empty(), LanguageRegistry.scriptOf("th"),
