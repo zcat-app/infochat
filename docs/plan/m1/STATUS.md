@@ -29,7 +29,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-758 — switch-llm.sh: translator now carries private user messages (complexity: low, risk: medium)
 - M1-760 — Re-drive posts whose ingest translation exhausted its attempts (complexity: medium, risk: medium)
 - M1-761 — Extend the translator target-script check to the display-hit leg (complexity: medium, risk: medium)
-- M1-762 — Locale-aware uppercase for digest section headers (complexity: low, risk: low)
+- M1-762 — Localization cleanup after Turkish enablement (complexity: medium, risk: low)
 
 ---
 
@@ -966,7 +966,6 @@ M1-716 (done)
   ├── M1-719 (done)
   │     └── M1-761 (pending) ← runnable
   └── M1-720 (done)
-        └── M1-762 (pending) ← runnable
 M1-721 (done)
   └── M1-722 (abandoned) [see above]
 M1-723 (done)
@@ -1013,4 +1012,5 @@ M1-756 (pending) ← runnable
   └── M1-759 (pending)
 M1-757 (done)
 M1-760 (pending) ← runnable
+M1-762 (pending) ← runnable
 ```
