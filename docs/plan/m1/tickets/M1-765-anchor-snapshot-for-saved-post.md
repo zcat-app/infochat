@@ -8,7 +8,7 @@ blocked_by:
   - M1-759
 files_budget: 7
 files_scope:
-  - infochat-core/src/main/resources/db/migration/V77__saved_post_english_anchor.sql
+  - infochat-core/src/main/resources/db/migration/V78__saved_post_english_anchor.sql
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SaveCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SavedCommandHandler.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SaveCommandHandlerTest.java
@@ -44,7 +44,7 @@ out_of_scope:
     `post.body_en` are read-only inputs here, as in M1-759.
 acceptance:
   - >-
-    MIGRATION. `V77__saved_post_english_anchor.sql` adds
+    MIGRATION. `V78__saved_post_english_anchor.sql` adds
     `saved_post.title_en TEXT` and `saved_post.body_en TEXT`, both
     NULLABLE with no default. Nullable is the point and differs from
     V76's `source_language TEXT NOT NULL DEFAULT 'en'`: for the language
@@ -153,5 +153,12 @@ translator never produced.
 - `blocked_by: M1-759` is a real dependency, not sequencing preference:
   this ticket feeds an anchor into a derivation and an anchor-absent
   branch that M1-759 introduces.
+- The version is **V78, not V77**: V77 is claimed by M1-760
+  (`V77__post_translation_redrive.sql`) and that claim lives only in the
+  ticket, not on disk, so the migration directory's max version does not
+  reveal it. Re-check the CLAIMANTS — `grep -oE "V[0-9]+__" over
+  `docs/plan/m1/tickets/` — at `start`, since another ticket may claim
+  V78 in the meantime. Both tickets are `migration_touch: true`, so they
+  serialize against each other at start regardless.
 - The companion follow-up from the same M1-759 pass is M1-766 (the
   degraded render paths). The two are independent and share no files.
