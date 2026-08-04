@@ -29,7 +29,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>M1-060 widened the original M1-035c en-only completeness check to
  * a bilateral one: every {@link BundleKeys} constant must be present
  * with a non-empty value in EVERY {@link BundleLoader#supportedLanguages()}
- * entry — i.e. both {@code en.properties} and {@code cs.properties} in
+ * entry — {@code en.properties}, {@code cs.properties},
+ * {@code es.properties} and {@code ru.properties} in
  * v1. M1-474 gives that check the teeth D43 mandates: it now reads each
  * shipped bundle's OWN key set directly from the classpath resource
  * rather than calling {@link BundleLoader#get(String, String)}, whose
@@ -237,6 +238,30 @@ class BundleLoaderTest {
         String roundtripped = new String(esBytes, StandardCharsets.UTF_8);
         assertEquals(esValue, roundtripped,
                 "UTF-8 round-trip through bytes must preserve the es.properties value");
+    }
+
+    @Test
+    void twoArgAccessorReturnsCyrillicRoundtripped() {
+        // The ru bundle is the first non-Latin script to ship, so it is the
+        // first that can be broken by a load path decoding through
+        // ISO-8859-1 — which would turn every Cyrillic character into
+        // mojibake rather than merely mangling the occasional diacritic.
+        String ruValue = bundleLoader.get(BundleKeys.REPLY_LANG_SUCCESS, "ru");
+        assertNotNull(ruValue,
+                "reply.lang.success must resolve in ru.properties");
+        // At least one Cyrillic character: a plain-ASCII value here would
+        // mean the ru bundle shipped English placeholder text, which the
+        // key-parity checks above cannot see (they assert presence, not
+        // that the value was actually translated).
+        assertTrue(ruValue.codePoints().anyMatch(
+                        codePoint -> Character.UnicodeScript.of(codePoint)
+                                == Character.UnicodeScript.CYRILLIC),
+                "ru.properties reply.lang.success must carry at least one Cyrillic "
+                        + "character; got: " + ruValue);
+        byte[] ruBytes = ruValue.getBytes(StandardCharsets.UTF_8);
+        String roundtripped = new String(ruBytes, StandardCharsets.UTF_8);
+        assertEquals(ruValue, roundtripped,
+                "UTF-8 round-trip through bytes must preserve the ru.properties value");
     }
 
     private static Properties loadOwnKeys(String lang) throws IOException {

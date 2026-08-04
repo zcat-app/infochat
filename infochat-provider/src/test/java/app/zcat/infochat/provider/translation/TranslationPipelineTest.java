@@ -178,6 +178,70 @@ class TranslationPipelineTest {
                 "identical-output fallback must NOT populate the cache");
     }
 
+    @Test
+    void fallsBackToEnglishWhenOutputCarriesNoTargetScript() {
+        String input = "English prose the translator refuses to translate.";
+        // Condition (d): a translator that answers a ru-scope request in
+        // English. The reply is neither blank nor byte-identical to the
+        // input, so (b) and (c) both pass it — this is the exact failure
+        // only the target-script check can see.
+        translatorStub.setResponseText("Sorry, I cannot translate that text.");
+
+        String result = pipeline.run(input, "ru");
+
+        assertEquals(input + "\n" + bundleLoaderStub.noteFor("ru"), result,
+                "output with zero Cyrillic characters must return the English text "
+                        + "plus the fallback note");
+        assertEquals(BundleKeys.REPLY_TRANSLATION_UNAVAILABLE, bundleLoaderStub.lastKey(),
+                "the note must be resolved from the translation-unavailable bundle key");
+        assertEquals("ru", bundleLoaderStub.lastLang(),
+                "the note must be resolved in the scope language");
+        assertEquals(0, sanitizer.sanitizeCallCount(),
+                "no-target-script fallback must NOT invoke sanitizer-2");
+        assertTrue(cache.get(input, "ru").isEmpty(),
+                "no-target-script fallback must NOT populate the cache");
+    }
+
+    @Test
+    void runWithRuScopeDeliversOutputCarryingCyrillic() {
+        String input = "English prose the translator handles correctly.";
+        // The control for the check above: one Cyrillic character is the
+        // whole threshold, and real Russian prose keeps Latin fragments
+        // (proper nouns, numbers) that must not trip it.
+        translatorStub.setResponseText("Обзор новостей Bitcoin за 2026 год");
+
+        String result = pipeline.run(input, "ru");
+
+        assertEquals("Обзор новостей Bitcoin за 2026 год", result,
+                "a translation carrying Cyrillic must be delivered unchanged");
+        assertFalse(result.contains(bundleLoaderStub.noteFor("ru")),
+                "a valid Cyrillic translation must NOT append the fallback note");
+        assertEquals(1, sanitizer.sanitizeCallCount(),
+                "the happy path must invoke sanitizer-2 exactly once");
+        assertTrue(cache.get(input, "ru").isPresent(),
+                "the happy path must populate the cache");
+    }
+
+    @Test
+    void latinTargetIsNotSubjectedToTheTargetScriptCheck() {
+        String input = "English text whose translation carries no letters at all.";
+        // Spec §Failure handling scopes (d) to non-Latin targets: for a
+        // Latin target, byte-identity — condition (b) — IS the check, and
+        // the character test can never fire against Latin English input.
+        // A letterless cs translation is therefore delivered, not refused;
+        // this pins that adding ru left cs behavior byte-for-byte unchanged.
+        translatorStub.setResponseText("2026 — 42 %");
+
+        String result = pipeline.run(input, "cs");
+
+        assertEquals("2026 — 42 %", result,
+                "a Latin-target translation must not be tested for target-script characters");
+        assertFalse(result.contains(bundleLoaderStub.noteFor("cs")),
+                "a Latin-target translation must NOT append the fallback note");
+        assertTrue(cache.get(input, "cs").isPresent(),
+                "a Latin-target translation must populate the cache");
+    }
+
     // -- test stubs --
 
     /**

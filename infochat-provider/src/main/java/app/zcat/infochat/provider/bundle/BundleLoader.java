@@ -35,8 +35,8 @@ import java.util.Set;
  * from the classpath because (a) auto-discovery is fragile under
  * different classloader topologies and (b) the spec's "bundle drop-in"
  * intent is satisfied by the list + the new properties file together:
- * adding a third language is one source-file drop plus a one-character
- * edit to the list (e.g. {@code List.of("en", "cs", "pl")}).</p>
+ * adding a language is one source-file drop plus a one-entry edit to
+ * the list (e.g. {@code List.of("en", "cs", "es", "ru", "pl")}).</p>
  *
  * <p>Both accessors throw {@link IllegalStateException} on a missing
  * key after the en fallback fails. Silently returning the empty string
@@ -56,7 +56,7 @@ public class BundleLoader {
      * bilateral parity against {@link BundleKeys} for every loaded
      * bundle at build time.
      */
-    private static final List<String> LOADED_LANGUAGES = List.of("en", "cs", "es");
+    private static final List<String> LOADED_LANGUAGES = List.of("en", "cs", "es", "ru");
 
     /** The fallback language used by both accessors when a key is missing in the target. */
     private static final String FALLBACK_LANGUAGE = "en";

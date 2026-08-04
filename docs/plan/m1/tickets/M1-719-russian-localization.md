@@ -1,21 +1,23 @@
 ---
 id: M1-719
 title: "Russian (ru) localization and target-script check"
-status: pending
+status: done
 created: 2026-07-30
 last_updated: 2026-08-04
 blocked_by:
   - M1-716
   - M1-746
-files_budget: 8
+files_budget: 9
 files_scope:
   - infochat-provider/src/main/resources/bundles/ru.properties
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleLoader.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/LanguageRegistry.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/translation/TranslationPipeline.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/bundle/BundleLoaderTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/bundle/LanguageRegistryTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/translation/TranslationPipelineTest.java
   - docs/spec/commands.md
+  - docs/spec/llm.md
 out_of_scope:
   - >-
     The `en`, `cs` and `es` bundles. Existing key VALUES must not be
@@ -67,11 +69,26 @@ acceptance:
     The expected script per language is read from `LanguageRegistry`, not
     hardcoded in `TranslationPipeline`, so a fourth script needs no
     pipeline edit
+  - >-
+    `LanguageRegistryTest`'s two enabled-set assertions are retargeted to
+    include `ru` and keep EXACT set equality — never a `contains` — and
+    `loadedBundleIsNotEnabledUnlessDeclared` goes on proving that a
+    loaded-but-undeclared bundle stays rejected. That property is the
+    whole point of M1-716's loaded-vs-enabled decoupling and is pinned
+    nowhere else.
+  - >-
+    The two spec sentences that enumerate the shipped bundle set name
+    `ru`: `docs/spec/commands.md` §Conversation control ("v1 enables
+    English and Czech") and §Discovery /help, and `docs/spec/llm.md`
+    §Translation flow ("v1 ships `en` and `cs` (Czech) bundles"). Both
+    are cited in `spec_refs`; leaving either stale would make the diff
+    contradict its own cited spec.
   - mvn -pl infochat-provider -am verify is green
 test_plan:
   adds: []
   modifies:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/bundle/BundleLoaderTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/bundle/LanguageRegistryTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/translation/TranslationPipelineTest.java
   preserves:
     - all tests currently green on main
@@ -81,12 +98,43 @@ spec_refs:
   - docs/spec/commands.md §Conversation control
 decision_refs:
   - D43
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-04
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 1137
+      removed: 44
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-04
+  verdict: WARN
+  warnings:
+    - "scripts/lint-ticket.py: PASS (0 blockers, 0 warnings)"
+    - >-
+      self-check budget-breach: adding `ru` to the enabled set breaks
+      LanguageRegistryTest's two {en, cs} equality assertions, and shipping a
+      third bundle falsifies docs/spec/llm.md §Translation flow. Both paths
+      added to files_scope, files_budget 8→9, one acceptance item each.
+    - >-
+      self-check census re-run: 430 BundleKeys constants and 440 en keys today
+      (ticket recorded 421 as of 2026-07-30). §Census figure refreshed; the
+      en-only test.fallback.probe asymmetry re-confirmed as the sole delta
+      between the en and cs keysets.
+    - >-
+      self-check ticket-vs-code: the §Census line references to conditions
+      (b)/(c) and the (d)-is-unreachable comment were stale — M1-747 and
+      M1-755 grew TranslationPipeline. Refreshed; the claims themselves hold.
 ---
 
 ## Context
@@ -124,7 +172,8 @@ The class is every key `BundleKeys` declares. Re-runnable inventory:
 ```
 grep -cE '^\s+public static final String [A-Z_]+ =' \
   infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
-# 421 as of 2026-07-30
+# 421 as of 2026-07-30; 430 as of 2026-08-04 (440 keys in en.properties,
+# 439 in cs — the delta is the en-only probe below)
 
 grep -oE '^[A-Za-z0-9_.-]+=' infochat-provider/src/main/resources/bundles/en.properties | sort
 ```
@@ -141,10 +190,17 @@ the test is the gate.
 Second class in this ticket, and the reason it is `complexity: medium`:
 every `TranslationPipeline` failure condition. `(b)` blank output and `(c)`
 output identical to input are implemented at
-`TranslationPipeline.java:106-112`; `(d)` zero target-script characters is
-absent, with the comment at `:103-105` stating why. Confirm at `start` that
+`TranslationPipeline.java:120-125`; `(d)` zero target-script characters is
+absent, with the comment at `:113-119` stating why. Confirm at `start` that
 `(b)` and `(c)` are untouched by the `(d)` addition — all three are one
 fallback decision and the existing two are the regression surface.
+
+The class has a second member since the ticket was written: M1-747 added
+`runForDisplayHit`, which applies `(a)` and blank-output but deliberately
+NOT identical-to-input (a proper-noun headline may legitimately translate
+to itself). `(d)` stays off that leg for the same reason — an all-Latin
+headline is a normal Russian-scope hit, not a translator failure — so the
+`(d)` addition lands on `run` only, where the operand is generated prose.
 
 ## Acceptance
 
@@ -161,6 +217,12 @@ See frontmatter `out_of_scope`.
 the `LanguageRegistry` record rather than in a `TranslationPipeline` switch
 means a future Thai or Japanese bundle inherits the check for free. This is
 the reason M1-716 introduces a record per language instead of a bare set.
+The Latin carve-out is the spec's, not a shortcut: `llm.md` §Failure
+handling scopes `(d)` to non-Latin targets and says Latin targets are
+covered by byte-identity, i.e. `(b)`. The pipeline therefore reads each
+language's declared script from the registry and skips the character test
+for Latin-script targets — which is also what keeps `cs` and `es` behavior
+byte-for-byte unchanged.
 
 **Cyrillic needs no normalization change.** Unlike Persian or Devanagari,
 Russian does not use ZWNJ/ZWJ, so the inbound

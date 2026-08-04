@@ -2,6 +2,8 @@ package app.zcat.infochat.provider.bundle;
 
 import org.junit.jupiter.api.Test;
 
+import java.lang.Character.UnicodeScript;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -33,11 +35,15 @@ class LanguageRegistryTest {
     }
 
     @Test
-    void enabledSetIsExactlyEnCsAndEs() {
-        LanguageRegistry registry = registryOverLoaded(Set.of("en", "cs", "es"));
+    void enabledSetIsExactlyEnCsEsAndRu() {
+        LanguageRegistry registry = registryOverLoaded(Set.of("en", "cs", "es", "ru"));
 
-        assertEquals(Set.of("en", "cs", "es"), registry.enabledLanguages(),
-                "the enabled set must be exactly {en, cs, es} — the same codes users "
+        // Exact set equality, never contains(): the assertion has to fail
+        // when the set GROWS, not only when it shrinks. Enabling a language
+        // is the reviewed, ticketed decision this class exists to force —
+        // a containment check would let an undeclared addition ship silently.
+        assertEquals(Set.of("en", "cs", "es", "ru"), registry.enabledLanguages(),
+                "the enabled set must be exactly {en, cs, es, ru} — the same codes users "
                         + "can select today; widening it is a ticketed, reviewed change");
     }
 
@@ -47,14 +53,33 @@ class LanguageRegistryTest {
         // BundleLoader.LOADED_LANGUAGES (stubbed) — but NOT declared
         // enabled. The registry must still reject it: loading does not
         // imply availability.
-        LanguageRegistry registry = registryOverLoaded(Set.of("en", "cs", "es", "th"));
+        LanguageRegistry registry = registryOverLoaded(Set.of("en", "cs", "es", "ru", "th"));
 
-        assertEquals(Set.of("en", "cs", "es"), registry.enabledLanguages(),
+        assertEquals(Set.of("en", "cs", "es", "ru"), registry.enabledLanguages(),
                 "a loaded-but-undeclared bundle must not widen the enabled set");
         assertFalse(registry.isEnabled("th"),
                 "loaded bundle present, yet 'th' must be rejected — it was never declared enabled");
         assertTrue(registry.isEnabled("cs"),
                 "control: a declared code stays enabled");
+    }
+
+    @Test
+    void eachEnabledLanguageDeclaresItsScriptAndUnknownCodesDeclareNone() {
+        // The script is the registry's to own: TranslationPipeline's
+        // failure condition (d) reads it from here so a fourth script is a
+        // registry entry, not a pipeline edit.
+        assertEquals(Optional.of(UnicodeScript.CYRILLIC), LanguageRegistry.scriptOf("ru"),
+                "ru must declare Cyrillic — the script condition (d) tests translator output for");
+        assertEquals(Optional.of(UnicodeScript.LATIN), LanguageRegistry.scriptOf("en"),
+                "en must declare Latin");
+        assertEquals(Optional.of(UnicodeScript.LATIN), LanguageRegistry.scriptOf("cs"),
+                "cs must declare Latin");
+        assertEquals(Optional.of(UnicodeScript.LATIN), LanguageRegistry.scriptOf("es"),
+                "es must declare Latin");
+        // A scope_preferences row can outlive its code's declaration, so an
+        // undeclared code yields no expectation rather than a guessed one.
+        assertEquals(Optional.empty(), LanguageRegistry.scriptOf("th"),
+                "an undeclared code must declare no script");
     }
 
     @Test

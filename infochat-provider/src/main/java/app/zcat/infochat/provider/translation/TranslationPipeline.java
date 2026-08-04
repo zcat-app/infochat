@@ -4,6 +4,7 @@ import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.messaging.TranslationProvider;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.bundle.LanguageRegistry;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.render.DisplayHeadline;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -12,6 +13,7 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.Character.UnicodeScript;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -73,9 +75,10 @@ public class TranslationPipeline {
      * @param scopeLanguage  ISO 639-1 code from
      *     {@code scope_preferences.language}; never null.
      * @return the translated, sanitized text; or, on any reachable
-     *     fallback condition (provider error, blank output, or output
-     *     identical to the input), the English text plus a one-line
-     *     localized note. Never null.
+     *     fallback condition (provider error, blank output, output
+     *     identical to the input, or — for a non-Latin target — output
+     *     carrying no character of the target script), the English text
+     *     plus a one-line localized note. Never null.
      */
     public String run(String postSanitizer1English,
                                String scopeLanguage) {
@@ -114,13 +117,36 @@ public class TranslationPipeline {
         // (spec §Failure handling conditions b and c). (c) blank output and
         // (b) output byte-identical to the English input both mean the
         // translator produced nothing usable; fall back to English + note
-        // rather than deliver an empty or untranslated message. Condition (d)
-        // (zero target-script characters) is unreachable in v1 — cs is the
-        // only non-English language and is Latin-script — so it is not built.
+        // rather than deliver an empty or untranslated message.
         if (translated.isBlank() || translated.equals(postSanitizer1English)) {
             LOG.warn("TranslationPipeline: translator returned unusable output for "
                     + "target_language={} (blank or identical to input); falling back "
                     + "to English with a note", scopeLanguage);
+            return fallbackWithNote(postSanitizer1English, scopeLanguage);
+        }
+
+        // Condition (d): for a non-Latin target, output carrying zero
+        // target-script characters. This is the failure (b) and (c) cannot
+        // see — a translator that answers a ru-scope request in English
+        // returns prose that is neither blank nor byte-identical to the
+        // input, so without this check the user is delivered untranslated
+        // English with no "(translation unavailable)" note.
+        //
+        // Scoped to non-Latin targets by the spec itself (llm.md §Failure
+        // handling: "for non-Latin target scripts the output contains zero
+        // target-script characters; for Latin target scripts the output is
+        // byte-identical to the input"). The input is always English, so
+        // for a Latin target the character test can never fire — byte
+        // identity, i.e. (b) above, IS the Latin form of this condition.
+        // The expected script is declared per language in LanguageRegistry,
+        // so a fourth script needs no edit here.
+        UnicodeScript targetScript = LanguageRegistry.scriptOf(scopeLanguage).orElse(null);
+        if (targetScript != null
+                && targetScript != UnicodeScript.LATIN
+                && !containsScript(translated, targetScript)) {
+            LOG.warn("TranslationPipeline: translator returned no {} characters for "
+                    + "target_language={}; falling back to English with a note",
+                    targetScript, scopeLanguage);
             return fallbackWithNote(postSanitizer1English, scopeLanguage);
         }
 
@@ -136,6 +162,21 @@ public class TranslationPipeline {
         translationCache.put(postSanitizer1English, scopeLanguage, sanitized);
 
         return sanitized;
+    }
+
+    /**
+     * Whether {@code text} carries at least one character of
+     * {@code script}. Code points, not chars, so a supplementary-plane
+     * target script is read as one character rather than two unpaired
+     * surrogates of script UNKNOWN.
+     *
+     * <p>One character is the whole threshold ("contains zero
+     * target-script characters" is the spec's wording): a proportion
+     * would misfire on legitimate prose, whose proper nouns, URLs,
+     * numbers and command tokens stay Latin in every target language.</p>
+     */
+    private static boolean containsScript(String text, UnicodeScript script) {
+        return text.codePoints().anyMatch(codePoint -> UnicodeScript.of(codePoint) == script);
     }
 
     /**

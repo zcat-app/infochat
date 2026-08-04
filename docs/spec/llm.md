@@ -320,8 +320,9 @@ Adding a fallback chain is a v2 candidate.
   depend on user content — `/help` output, friendly-error
   templates, the banned-user fixed reply, progress-notifier stage
   strings, the "source already existed, tags updated" line, etc. —
-  is looked up by key in a localization bundle. v1 ships **`en` and
-  `cs` (Czech) bundles**. A loaded bundle does not by itself make a
+  is looked up by key in a localization bundle. v1 ships **`en`,
+  `cs` (Czech), `es` (Spanish) and `ru` (Russian) bundles**. A loaded
+  bundle does not by itself make a
   language selectable: `/lang` accepts only codes from the declared
   enabled set (`LanguageRegistry`), so enabling a language is a
   deliberate, reviewed change gated on measured quality — never a
@@ -574,7 +575,7 @@ Exact metric names and labels live in design notes.
 - Embedding batch size per profile (the batch-shaped SPI is spec; the
   exact size is design)
 - Embedding model identity row shape, override flag property key, and re-embed procedure
-- Localization-bundle structure and key naming (the `en`/`cs`
+- Localization-bundle structure and key naming (the `en`/`cs`/`es`/`ru`
   commitment is spec; the exact bundle file format and keys are
   design — see also `messaging.md`)
 - Metric names, label sets, and dashboards

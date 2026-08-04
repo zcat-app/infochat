@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 766 |
+| done | 767 |
 | deferred | 0 |
 | abandoned | 23 |
 | **total** | **796** |
@@ -25,11 +25,11 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-719 — Russian (ru) localization and target-script check (complexity: medium, risk: medium)
 - M1-720 — Turkish (tr) localization bundle and enablement (complexity: low, risk: low)
 - M1-756 — Display-time hit translation for digest headlines and the degraded renderers (complexity: medium, risk: medium)
 - M1-758 — switch-llm.sh: translator now carries private user messages (complexity: low, risk: medium)
 - M1-760 — Re-drive posts whose ingest translation exhausted its attempts (complexity: medium, risk: medium)
+- M1-761 — Extend the translator target-script check to the display-hit leg (complexity: medium, risk: medium)
 
 ---
 
@@ -47,7 +47,6 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-759 — blocked_by: M1-756 (pending)
-- M1-761 — blocked_by: M1-719 (pending)
 
 ---
 
@@ -67,6 +66,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-755 | Display-time translation of /saved list headlines | 2026-08-04 | round 2 APPROVE |
+| M1-719 | Russian (ru) localization and target-script check | 2026-08-04 | round 1 APPROVE |
 | M1-718 | Spanish (es) localization bundle and enablement | 2026-08-04 | round 1 APPROVE |
 | M1-757 | Drain the pagination cap-hit flag on the tick failure path | 2026-08-03 | round 1 APPROVE |
 | M1-754 | Parked-source re-probe ladder + park-reason discriminator + recurring parked-set signal | 2026-08-03 | round 1 APPROVE |
@@ -75,7 +75,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-751 | Tagger prompt renders the controlled vocabulary in a per-JVM-random order; make it deterministic | 2026-08-03 | round 1 APPROVE |
 | M1-750 | Source language plumbing: --lang + bootstrap validation | 2026-08-03 | round 1 APPROVE |
 | M1-749 | English anchor: ingest translation + embedding gate | 2026-08-03 | round 2 APPROVE |
-| M1-748 | Investigate why no similarity threshold separates true from false matches, and whether a single global threshold is the right model at all | 2026-08-03 | round 1 APPROVE |
 
 ---
 
@@ -964,8 +963,8 @@ M1-714 (done)
 M1-715 (done)
 M1-716 (done)
   ├── M1-718 (done)
-  ├── M1-719 (pending) ← runnable
-  │     └── M1-761 (pending)
+  ├── M1-719 (done)
+  │     └── M1-761 (pending) ← runnable
   └── M1-720 (pending) ← runnable
 M1-721 (done)
   └── M1-722 (abandoned) [see above]
@@ -999,7 +998,7 @@ M1-749 (done)
   ├── M1-746 (done)
   │     ├── M1-717 (abandoned) [see above]
   │     ├── M1-718 (done) [see above]
-  │     ├── M1-719 (pending) [see above]
+  │     ├── M1-719 (done) [see above]
   │     ├── M1-720 (pending) [see above]
   │     └── M1-758 (pending) ← runnable
   ├── M1-747 (done)
