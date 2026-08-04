@@ -237,6 +237,24 @@ public class LlmOutputSanitizer {
         if (matches.isEmpty()) {
             return;
         }
+        // Park an already-armed interrupt across the write, restore it after
+        // (M1-763). DigestWorker cancels a digest render that overruns its slot
+        // window by interrupting the render's VIRTUAL thread, and that render
+        // goes on to sanitize prose it generated before the interrupt landed.
+        // On a virtual thread an armed interrupt flag makes JDBC socket I/O
+        // fail with "Closed by interrupt" (a platform thread is unaffected,
+        // which is why this is invisible to any test that does not use a
+        // virtual thread) — so without this park the row below is never
+        // written and the durability commitment documented above silently
+        // becomes best-effort under cancellation.
+        //
+        // Restoring the flag is the other half of the contract: clearing it
+        // permanently would let the cancelled render resume full-speed LLM
+        // calls, undoing the spend ceiling the cancellation exists to impose.
+        // An interrupt arriving DURING the write is still a genuine failure
+        // and stays on the fail-loud path below; only a pre-armed flag, which
+        // says nothing about this connection's health, is parked.
+        boolean callerWasInterrupted = Thread.interrupted();
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             for (Map.Entry<String, Integer> aggregated : aggregateMatchCounts(matches).entrySet()) {
@@ -263,6 +281,10 @@ public class LlmOutputSanitizer {
             // partial-write case leaves audit_log unchanged.
             throw new IllegalStateException(
                     "LlmOutputSanitizer: failed to durably audit-log sanitizer hits", e);
+        } finally {
+            if (callerWasInterrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 

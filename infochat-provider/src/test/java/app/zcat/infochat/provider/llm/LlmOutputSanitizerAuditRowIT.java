@@ -12,9 +12,12 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -155,6 +158,51 @@ class LlmOutputSanitizerAuditRowIT {
         long after = countLlmOutputSanitizedRows();
         assertEquals(0L, after - before,
                 "no audit row may persist when the audit-write path failed");
+    }
+
+    @Test
+    void auditRowStillLandsWhenTheCallingVirtualThreadIsInterrupted() throws Exception {
+        // M1-763. DigestWorker cancels a digest render that overruns its slot
+        // window by interrupting the render's virtual thread; the render then
+        // goes on to sanitize prose it had already generated before the
+        // interrupt landed (DigestRenderer batches every prose call, then
+        // sanitizes in a later loop). On a virtual thread an armed interrupt
+        // flag makes JDBC socket I/O fail with "Closed by interrupt", so
+        // without the park-and-restore in emitAuditRows this sanitize() throws
+        // and the LLM_OUTPUT_SANITIZED row is silently lost — exactly the
+        // detection signal the spec's "counted, never throttled" promise
+        // exists to guarantee.
+        //
+        // The thread MUST be virtual. An interrupted PLATFORM thread completes
+        // socket I/O normally, so this same test run on the JUnit thread
+        // passes against the unfixed sanitizer and proves nothing.
+        long before = countLlmOutputSanitizedRows();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicBoolean interruptSurvived = new AtomicBoolean();
+
+        Thread cancelledRender = Thread.ofVirtual().unstarted(() -> {
+            Thread.currentThread().interrupt();   // the state DigestWorker leaves behind
+            try {
+                sanitizer.sanitize("Run /ban now");
+                interruptSurvived.set(Thread.currentThread().isInterrupted());
+            } catch (Throwable t) {
+                failure.set(t);
+            }
+        });
+        cancelledRender.start();
+        cancelledRender.join(30_000);
+
+        assertNull(failure.get(),
+                "the audit write must survive an already-interrupted caller; instead: "
+                        + failure.get());
+        assertEquals(1L, countLlmOutputSanitizedRows() - before,
+                "a closed-list hit found by a cancelled render must still be audited — "
+                        + "the durability promise is not conditional on the caller's "
+                        + "interrupt state");
+        assertTrue(interruptSurvived.get(),
+                "the interrupt must still be armed when sanitize() returns, or the "
+                        + "cancelled render resumes full-speed LLM calls and the cancel "
+                        + "stops costing anything");
     }
 
     private long countLlmOutputSanitizedRows() throws SQLException {

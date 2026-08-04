@@ -11,11 +11,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -212,11 +212,17 @@ public class DigestWorker {
                 content = degradedRenderer.render(collection.posts());
                 isDegraded = true;
             } else {
-                CompletableFuture<List<RenderedSection>> renderFuture = CompletableFuture.supplyAsync(
+                // submit(), NOT CompletableFuture.supplyAsync(): the latter's
+                // cancel(boolean) documents that mayInterruptIfRunning "has no
+                // effect in this implementation because interrupts are not used
+                // to control processing", so the cancel below was a no-op and an
+                // overrunning render kept spending LLM calls to completion.
+                // submit() hands back the executor's own Future, whose
+                // cancel(true) interrupts the render thread. (M1-763)
+                Future<List<RenderedSection>> renderFuture = renderExecutor.submit(
                         () -> digestRenderer.renderSections(
                                 collection.posts(), meta.language(), meta.digestMode(),
-                                slot.groupId()),
-                        renderExecutor);
+                                slot.groupId()));
                 try {
                     renderedSections = renderFuture.get(remaining.toMillis(), TimeUnit.MILLISECONDS);
                     // NEVER re-render after renderSections() — a second render
@@ -234,6 +240,19 @@ public class DigestWorker {
                     // past the slot window after we have already degraded — the
                     // get(timeout) above stops waiting but does not stop the work
                     // behind the future. (M1-494 13#F4)
+                    //
+                    // The interrupt reaches the SPEND, not just the future: every
+                    // generative call in the render bottoms out in one
+                    // interruptible HttpClient.send (LlmHttpSupport.sendForBody),
+                    // whose InterruptedException catch RE-ARMS the interrupt flag
+                    // instead of swallowing it — so each remaining call in the
+                    // render fails fast without opening a socket. That re-arm is
+                    // load-bearing: anything on the render path that consumes the
+                    // flag without restoring it would let the spend resume.
+                    // The render LOOP still runs to completion (each failed call
+                    // degrades one item and continues, by design) and its result
+                    // is discarded here — the property this buys is zero further
+                    // provider calls, not a promptly-dead thread. (M1-763)
                     renderFuture.cancel(true);
                     content = degradedRenderer.render(collection.posts());
                     isDegraded = true;

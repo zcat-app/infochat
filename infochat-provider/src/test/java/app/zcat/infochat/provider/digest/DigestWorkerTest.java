@@ -20,14 +20,17 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
 import java.sql.SQLException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -167,6 +170,57 @@ class DigestWorkerTest {
         assertEquals(1, cacheRepository.upsertCount());
         assertEquals("Headlines only", cacheRepository.lastContent());
         assertTrue(cacheRepository.lastIsDegraded());
+    }
+
+    @Test
+    void execute_renderOverrunningWindow_stopsSpendingProviderCalls() throws Exception {
+        // M1-763: the worker's get(timeout) stops WAITING; before this ticket
+        // the cancel that followed was CompletableFuture.cancel(true), whose
+        // mayInterruptIfRunning flag is documented as having no effect — so the
+        // orphaned render ran on past the slot window, spending per-cluster
+        // prose, per-section roll-up and (since M1-756) per-headline translator
+        // calls for a digest whose bytes had already been thrown away.
+        //
+        // The assertion is on SPEND, deliberately not on renderFuture's state:
+        // an isCancelled() assertion passes against the broken code too.
+        postCollector.seed(testPosts(), 1, 1);
+        degradedRenderer.setResponse("Headlines only");
+        SpendCountingRenderer render = new SpendCountingRenderer();
+        worker.digestRenderer = render;
+
+        // Pinned clock so the render budget is EXACTLY one second regardless of
+        // machine load — Duration.between(clock.instant(), windowEnd) cannot
+        // drift into the already-expired branch and skip the render entirely.
+        Instant pinnedNow = Instant.parse("2026-08-04T08:00:00Z");
+        worker.clock = Clock.fixed(pinnedNow, ZoneOffset.UTC);
+        DigestSlot slot = new DigestSlot(GROUP_ID, "UTC", "morning",
+                pinnedNow.minusSeconds(3600), pinnedNow.plusSeconds(1));
+
+        // The worker blocks for the whole budget, so the execution runs on its
+        // own thread and the test waits for the render to be genuinely in
+        // flight — otherwise a cancel landing before the task starts would make
+        // "no calls" true for the wrong reason.
+        Thread execution = new Thread(() -> worker.execute(slot));
+        execution.start();
+        assertTrue(render.renderStarted.await(5, TimeUnit.SECONDS),
+                "the render must actually be in flight before the window closes");
+        execution.join(15_000);
+
+        assertTrue(cacheRepository.lastIsDegraded(),
+                "the overrun must still degrade — this ticket changes only the "
+                        + "fate of the orphaned render");
+        assertEquals("Headlines only", cacheRepository.lastContent());
+
+        assertTrue(render.renderFinished.await(8, TimeUnit.SECONDS),
+                "the orphaned render was never interrupted — it is still running "
+                        + "past the slot window, which is the defect itself");
+        assertEquals(SpendCountingRenderer.CALL_SITES, render.attemptedCalls.get(),
+                "the render loop keeps iterating after the interrupt (each failed "
+                        + "call degrades one item and continues) — so a zero spend "
+                        + "count means calls were suppressed, not that the loop died");
+        assertEquals(0, render.completedCalls.get(),
+                "a render that overran its slot window must issue NO further "
+                        + "provider calls once the worker has degraded");
     }
 
     @Test
@@ -561,6 +615,84 @@ class DigestWorkerTest {
 
         @Override public void flush() {}
         @Override public void close() {}
+    }
+
+    /**
+     * A renderer shaped like a real render's spend loop, so the worker test can
+     * assert on provider calls instead of on the future's own state.
+     *
+     * <p>Two production behaviours are modelled here because the
+     * no-further-spend property rests on them, and a stub that omitted either
+     * would report a pass the real stack does not earn:
+     * <ul>
+     *   <li>the LLM floor ({@code LlmHttpSupport.sendForBody}) blocks in an
+     *       interruptible {@code HttpClient.send} that opens no socket when the
+     *       interrupt flag is already set, and RE-ARMS the flag rather than
+     *       swallowing it;</li>
+     *   <li>every generative call site ({@code SummaryProseGenerator},
+     *       {@code CategoryRollupGenerator}, {@code TranslationPipeline})
+     *       catches the resulting unchecked exception, degrades that one item
+     *       and CONTINUES the loop.</li>
+     * </ul>
+     * So an interrupted render keeps iterating to the end — what must stop is
+     * the spend, which is why {@code attemptedCalls} and {@code completedCalls}
+     * are counted separately.
+     *
+     * <p>Local to this test rather than folded into
+     * {@link RecordingDigestRenderer}: that stub returns immediately and is
+     * shared by every other worker test, none of which want a call loop.
+     */
+    private static final class SpendCountingRenderer extends DigestRenderer {
+        /** More than one, so "stopped spending" is distinguishable from "ran once". */
+        static final int CALL_SITES = 5;
+
+        private final CountDownLatch renderStarted = new CountDownLatch(1);
+        private final CountDownLatch renderFinished = new CountDownLatch(1);
+        private final CountDownLatch neverReleased = new CountDownLatch(1);
+        private final AtomicInteger attemptedCalls = new AtomicInteger();
+        private final AtomicInteger completedCalls = new AtomicInteger();
+
+        @Override
+        public List<RenderedSection> renderSections(List<Post> posts, String langCode,
+                                                    DigestMode mode, UUID groupId) {
+            renderStarted.countDown();
+            try {
+                for (int i = 0; i < CALL_SITES; i++) {
+                    attemptedCalls.incrementAndGet();
+                    try {
+                        providerCall(i == 0);
+                        completedCalls.incrementAndGet();
+                    } catch (IllegalStateException callFailed) {
+                        // Degrade this one item and keep going, exactly as the
+                        // real per-item catches do.
+                    }
+                }
+            } finally {
+                renderFinished.countDown();
+            }
+            return List.of(new RenderedSection(null, "orphaned prose"));
+        }
+
+        /** One generative call, with the interruptibility of the real LLM floor. */
+        private void providerCall(boolean blocking) {
+            if (Thread.interrupted()) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("interrupted before send");
+            }
+            if (!blocking) {
+                return;
+            }
+            try {
+                // The in-flight call the worker's deadline expires under. Bounded
+                // rather than indefinite so an interrupt that never arrives still
+                // terminates the suite — that path is the defect this test
+                // exists to catch, and it fails on the spend count below.
+                neverReleased.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("interrupted during send");
+            }
+        }
     }
 
     private static final class StubBundleLoader extends BundleLoader {
