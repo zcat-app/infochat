@@ -54,6 +54,39 @@ public class TranslationPipeline {
      */
     private static final Pattern ISO_639_SHAPE = Pattern.compile("[A-Za-z]{2,3}");
 
+    /**
+     * Display-hit cache value recording that condition (d) rejected this
+     * headline's translation, so later renders converge instead of
+     * re-calling the translator. It occupies the SAME key a translation
+     * would, which is what lets the callers that decide a row is free by
+     * probing that key ({@code SavedCommandHandler},
+     * {@code DigestRenderer}) inherit the fix unchanged.
+     *
+     * <p>UNFORGEABLE by the translator, which is what makes an in-band
+     * marker safe here: every value this leg writes has passed
+     * {@link DisplayHeadline#prepareTranslatedHeadline}, whose flatten
+     * collapses each {@code (?:\R|\s)+} run to one space, and nothing
+     * downstream can reintroduce a line separator — the sanitizer emits
+     * only fixed literals and text recomposed from already-flattened
+     * input, and NFKC has no mapping that produces one. A value carrying
+     * U+000A therefore cannot arise from translator output, however that
+     * output is steered. The leading newline is the whole guarantee; the
+     * trailing text is for a human reading a cache dump.
+     *
+     * <p>UNRENDERABLE: the cache-read path returns the fallback before
+     * {@link #finishDisplayHit}, so this can never be truncated, marked
+     * or delivered.
+     *
+     * <p>Expires with the entry it replaces — one 24h TTL for the whole
+     * cache — so a rejection is not retried for up to a day. Accepted
+     * deliberately: a (d) failure is a SUCCESSFUL call returning unusable
+     * content, so retrying the same prompt against a temperature-0 model
+     * buys little, and a provider that is actually down throws instead,
+     * taking the condition-(a) path, which records nothing.
+     */
+    private static final String REJECTED_BY_TARGET_SCRIPT_CHECK =
+            "\ntarget-script check rejected this translation";
+
     @Inject
     TranslationCache translationCache;
 
@@ -131,22 +164,11 @@ public class TranslationPipeline {
         // returns prose that is neither blank nor byte-identical to the
         // input, so without this check the user is delivered untranslated
         // English with no "(translation unavailable)" note.
-        //
-        // Scoped to non-Latin targets by the spec itself (llm.md §Failure
-        // handling: "for non-Latin target scripts the output contains zero
-        // target-script characters; for Latin target scripts the output is
-        // byte-identical to the input"). The input is always English, so
-        // for a Latin target the character test can never fire — byte
-        // identity, i.e. (b) above, IS the Latin form of this condition.
-        // The expected script is declared per language in LanguageRegistry,
-        // so a fourth script needs no edit here.
-        UnicodeScript targetScript = LanguageRegistry.scriptOf(scopeLanguage).orElse(null);
-        if (targetScript != null
-                && targetScript != UnicodeScript.LATIN
-                && !containsScript(translated, targetScript)) {
+        UnicodeScript missingScript = missingTargetScript(translated, scopeLanguage);
+        if (missingScript != null) {
             LOG.warn("TranslationPipeline: translator returned no {} characters for "
                     + "target_language={}; falling back to English with a note",
-                    targetScript, scopeLanguage);
+                    missingScript, scopeLanguage);
             return fallbackWithNote(postSanitizer1English, scopeLanguage);
         }
 
@@ -162,6 +184,32 @@ public class TranslationPipeline {
         translationCache.put(postSanitizer1English, scopeLanguage, sanitized);
 
         return sanitized;
+    }
+
+    /**
+     * Condition (d) of {@code llm.md} §Failure handling, shared by both
+     * legs: the script the target language's prose is written in, when
+     * {@code text} carries none of it — or null when the condition does
+     * not apply, i.e. the target declares no script, the target is Latin,
+     * or the script is present.
+     *
+     * <p>Scoped to non-Latin targets by the spec itself ("for non-Latin
+     * target scripts the output contains zero target-script characters;
+     * for Latin target scripts the output is byte-identical to the
+     * input"): against a Latin target the spec's own form of the
+     * condition is byte identity, which is condition (b) on the prose leg
+     * and, on the display-hit leg, deliberately not a failure at all. The
+     * expected script is declared per language in
+     * {@link LanguageRegistry}, so a fourth script needs no edit here.</p>
+     */
+    private static @Nullable UnicodeScript missingTargetScript(String text, String scopeLanguage) {
+        UnicodeScript targetScript = LanguageRegistry.scriptOf(scopeLanguage).orElse(null);
+        if (targetScript == null
+                || targetScript == UnicodeScript.LATIN
+                || containsScript(text, targetScript)) {
+            return null;
+        }
+        return targetScript;
     }
 
     /**
@@ -195,7 +243,8 @@ public class TranslationPipeline {
      *
      * <p>Translating leg, order load-bearing: translator call → pre-bound
      * at {@link DisplayHeadline#BODY_SCAN_LIMIT} → flatten to one line →
-     * sanitizer-2 → cache write → truncate → marker. The pre-bound runs
+     * sanitizer-2 → target-script check → cache write → truncate →
+     * marker. The pre-bound runs
      * FIRST because the reply is otherwise bounded only by the provider's
      * 1-8 MiB body cap, and a hostile endpoint's in-cap reply must not buy
      * megabytes of NFKC + closed-list scanning before the 200-char display
@@ -210,14 +259,15 @@ public class TranslationPipeline {
      * so the audit sees the full output. The sanitize unit is ONE post's
      * headline per call (M1-697).
      *
-     * <p>The CACHE-HIT path applies NO transform: truncate + marker only.
-     * Every value this leg can read back was written by this leg — hence
-     * already flattened AND sanitized — because display-hit entries occupy
-     * a keyspace disjoint from the prose leg's (see
-     * {@link #displayHitCacheLanguage}). A read-path rewrite of a
-     * sanitized value is exactly the post-sanitize-rewrite ordering
-     * {@link DisplayHeadline} forbids. [redteam 2026-08-03,
-     * medium/INJECTION]
+     * <p>The CACHE-HIT path applies NO transform: truncate + marker only,
+     * or — for a stored {@link #REJECTED_BY_TARGET_SCRIPT_CHECK} — the
+     * fallback with note and nothing else. Every value this leg can read
+     * back was written by this leg — hence already flattened AND
+     * sanitized — because display-hit entries occupy a keyspace disjoint
+     * from the prose leg's (see {@link #displayHitCacheLanguage}). A
+     * read-path rewrite of a sanitized value is exactly the
+     * post-sanitize-rewrite ordering {@link DisplayHeadline} forbids.
+     * [redteam 2026-08-03, medium/INJECTION]
      *
      * @param displayHeadline  the rendered headline; never null (may be
      *     empty — the renderer's omission contract)
@@ -233,9 +283,11 @@ public class TranslationPipeline {
      * @return the translated, sanitized, bounded headline plus the
      *     machine-translation marker; the input unchanged on any no-op
      *     leg (or when the translation is byte-identical to the input);
-     *     or, on translator failure or blank output, the original
-     *     headline plus the one-line unavailable note. Never null, never
-     *     empty for a non-empty input.
+     *     or, on translator failure, blank output, or — for a non-Latin
+     *     target — a differing translation carrying no character of the
+     *     target script, the original headline plus the one-line
+     *     unavailable note. Never null, never empty for a non-empty
+     *     input.
      */
     public String runForDisplayHit(String displayHeadline,
                                    @Nullable String sourceLanguage,
@@ -261,7 +313,13 @@ public class TranslationPipeline {
         // exists to prevent. [redteam 2026-08-03, medium/INJECTION]
         var cached = translationCache.get(displayHeadline, cacheLanguage);
         if (cached.isPresent()) {
-            return finishDisplayHit(displayHeadline, cached.get(), scopeLanguage);
+            // A recorded condition-(d) rejection short-circuits to the same
+            // fallback the rejecting render produced. Tested BEFORE
+            // finishDisplayHit, which is what makes the marker unrenderable:
+            // it can never be truncated, marked, or reach a reader.
+            return REJECTED_BY_TARGET_SCRIPT_CHECK.equals(cached.get())
+                    ? fallbackWithNote(displayHeadline, scopeLanguage)
+                    : finishDisplayHit(displayHeadline, cached.get(), scopeLanguage);
         }
 
         String translated;
@@ -286,6 +344,42 @@ public class TranslationPipeline {
         // One call, not three: DisplayHeadline owns the bound → flatten →
         // sanitize order so this leg cannot sequence it wrongly.
         String sanitized = DisplayHeadline.prepareTranslatedHeadline(translated, llmOutputSanitizer);
+
+        // Condition (d), threaded between two obligations this leg carries
+        // and the prose leg does not (M1-761). It is evaluated on the
+        // SANITIZED form and only for a translation that DIFFERS from the
+        // input, because that is exactly the form and comparison
+        // finishDisplayHit's passthrough uses: a headline that translates
+        // to itself is a proper noun, not a refusal, so (d) must never see
+        // it — placed ahead of that passthrough the check would refuse
+        // precisely the headlines the passthrough exists to deliver. And
+        // it runs BEFORE the cache write below rather than after, because
+        // this leg writes the cache on the fresh path before rendering,
+        // where run() reaches its write only once every check has passed;
+        // after the write, a rejected translation would be served to every
+        // subsequent render of the same headline for the whole TTL.
+        if (!sanitized.equals(displayHeadline)) {
+            UnicodeScript missingScript = missingTargetScript(sanitized, scopeLanguage);
+            if (missingScript != null) {
+                LOG.warn("TranslationPipeline: display-hit translator returned no {} characters "
+                        + "for target_language={}; falling back to the original headline "
+                        + "with a note", missingScript, scopeLanguage);
+                // Record the REJECTION, never the rejected text. Without this
+                // the leg never converges: /saved and /summary re-render the
+                // same headline, so each render re-calls the translator and —
+                // because both decide a row is free by probing this key
+                // themselves — re-spends a per-render budget slot and the
+                // per-user LLM bucket token security.md §Rate limiting says a
+                // fully-converged page never draws. Same key as a translation
+                // precisely so those probes need no edit. The digest leg pays
+                // nothing either way: it renders a post in one window only.
+                // [redteam 2026-08-04, low/DOS]
+                translationCache.put(displayHeadline, cacheLanguage,
+                        REJECTED_BY_TARGET_SCRIPT_CHECK);
+                return fallbackWithNote(displayHeadline, scopeLanguage);
+            }
+        }
+
         // Cached even when byte-identical to the input (unlike run()'s
         // condition (b)): a short headline can translate to itself
         // legitimately — a proper noun is not a failure — and caching it
@@ -351,13 +445,16 @@ public class TranslationPipeline {
 
     /**
      * Shared fallback for every reachable failure condition on both legs
-     * (prose a/b/c, display-hit provider-error/blank): return the original
-     * text — post-sanitizer-1 English for prose, the untranslated headline
-     * for a display hit — with a one-line note, resolved from the
+     * (prose a/b/c/d, display-hit provider-error/blank/d): return the
+     * original text — post-sanitizer-1 English for prose, the untranslated
+     * headline for a display hit — with a one-line note, resolved from the
      * localization bundle in the scope language (D43) so the user is told
      * why the text is not in their language. The note carries no
-     * interpolated user content. The cache is NOT written on this path —
-     * the cache stores translated forms only (spec §Pipeline order step 5).
+     * interpolated user content. This method never writes the cache, and
+     * no fallback stores a translated form (spec §Pipeline order step 5);
+     * the display-hit (d) caller separately records
+     * {@link #REJECTED_BY_TARGET_SCRIPT_CHECK} before calling in, which is
+     * what lets that leg converge rather than re-translate every render.
      */
     private String fallbackWithNote(String originalText, String scopeLanguage) {
         String note = bundleLoader.get(BundleKeys.REPLY_TRANSLATION_UNAVAILABLE, scopeLanguage);

@@ -428,6 +428,121 @@ class DisplayHitTranslationTest {
                 "the identity result must be cached — one translator call across two renders");
     }
 
+    // ----- condition (d): target script (M1-761) ------------------------
+
+    @Test
+    void latinOnlyTranslationForARuScopeFallsBackUnmarkedAndDiscardsTheText() {
+        // The failure only condition (d) can see on this leg: a translator
+        // answering a ru-scope request in English returns a headline that
+        // is neither blank nor byte-identical to the input, so every check
+        // the leg had before M1-761 passes it — and it reaches the reader
+        // under the D30 marker asserting a machine produced it in their
+        // language.
+        translatorStub.setResponseText("Sorry, I cannot translate that headline.");
+
+        String result = runDisplayHit("en", "ru");
+
+        assertEquals(HEADLINE + "\n" + note("ru"), result,
+                "a translation carrying zero Cyrillic characters must fall back to the "
+                        + "ORIGINAL headline plus the existing unavailable note");
+        assertFalse(result.contains(marker("ru")),
+                "text the check has just judged untranslated must never carry the "
+                        + "machine-translation marker");
+        assertFalse(cache.get(HEADLINE, displayKeyspace("ru")).orElseThrow()
+                        .contains("Sorry, I cannot translate that headline."),
+                "the REJECTED TEXT must never be cached — only the fact of the rejection, "
+                        + "or a later render would serve the rejected translation");
+    }
+
+    @Test
+    void rejectedHeadlineConvergesInsteadOfRetranslatingOnEveryRender() {
+        // [redteam 2026-08-04, low/DOS] Without a recorded rejection this
+        // leg never converges: /saved and /summary re-render the same
+        // headline, and because both decide a row is free by probing this
+        // key themselves, each render re-spends a per-render budget slot
+        // and the per-user LLM token security.md §Rate limiting says a
+        // fully-converged page never draws. Recording under the SAME key a
+        // translation would use is what carries the fix to those callers
+        // with no edit to either.
+        translatorStub.setResponseText("Sorry, I cannot translate that headline.");
+
+        String first = runDisplayHit("en", "ru");
+        String second = runDisplayHit("en", "ru");
+
+        assertEquals(first, second, "a re-render must return the same fallback, not drift");
+        assertEquals(HEADLINE + "\n" + note("ru"), second);
+        assertEquals(1, translatorStub.callCount(),
+                "the recorded rejection must make the second render a cache HIT — one "
+                        + "translator call across two renders");
+        assertTrue(cache.get(HEADLINE, displayKeyspace("ru")).isPresent(),
+                "the probing callers read presence on THIS key to decide a row is free, so "
+                        + "the rejection must occupy it rather than a separate partition");
+    }
+
+    @Test
+    void recordedRejectionIsNeverRenderedToTheReader() {
+        // The in-band marker is safe only because it cannot reach a reader:
+        // the cache-read path returns the fallback BEFORE finishDisplayHit,
+        // so the stored value is never truncated, never marked, never
+        // delivered. Its unforgeability is structural — every value this
+        // leg writes passes DisplayHeadline.prepareTranslatedHeadline,
+        // whose flatten collapses every (?:\R|\s)+ run to one space, so no
+        // translator output can carry the U+000A this marker leads with.
+        translatorStub.setResponseText("Sorry, I cannot translate that headline.");
+        runDisplayHit("en", "ru");
+
+        String stored = cache.get(HEADLINE, displayKeyspace("ru")).orElseThrow();
+        String rendered = runDisplayHit("en", "ru");
+
+        assertTrue(stored.startsWith("\n"),
+                "the marker must lead with a line separator — the one byte "
+                        + "prepareTranslatedHeadline's flatten guarantees no translation can carry");
+        assertFalse(rendered.contains(stored.strip()),
+                "no part of the stored marker may surface in what the reader sees");
+        assertEquals(HEADLINE + "\n" + note("ru"), rendered,
+                "a hit on the marker renders exactly the fallback, with no truncate or marker step");
+    }
+
+    @Test
+    void cyrillicTranslationForARuScopeIsDeliveredMarkedAndCached() {
+        // The control for the check above: one Cyrillic character is the
+        // whole threshold, and real Russian prose keeps Latin fragments
+        // (proper nouns, tickers, numbers) that must not trip it.
+        translatorStub.setResponseText("Обзор новостей Bitcoin за 2026 год");
+
+        String result = runDisplayHit("en", "ru");
+
+        assertEquals("Обзор новостей Bitcoin за 2026 год " + marker("ru"), result,
+                "a translation carrying Cyrillic must be delivered with the marker");
+        assertFalse(result.contains(note("ru")),
+                "a valid Cyrillic translation must NOT append the fallback note");
+        assertEquals("Обзор новостей Bitcoin за 2026 год",
+                cache.get(HEADLINE, displayKeyspace("ru")).orElseThrow(),
+                "the cached value is the sanitized translation WITHOUT the marker");
+    }
+
+    @Test
+    void identityTranslationForARuScopeStillPassesThroughUnmarked() {
+        // The ORDERING M1-761 exists for. HEADLINE is all-Latin, so a
+        // translation byte-identical to it carries zero Cyrillic — placed
+        // ahead of the passthrough, condition (d) would refuse exactly the
+        // headlines (proper nouns, tickers) the passthrough exists to
+        // deliver, turning every one of them into a fallback note for a
+        // non-Latin scope.
+        translatorStub.setResponseText(HEADLINE);
+
+        String result = runDisplayHit("en", "ru");
+
+        assertEquals(HEADLINE, result,
+                "an identity translation must pass through unchanged even for a non-Latin target");
+        assertFalse(result.contains(marker("ru")),
+                "marking an identity translation would label the publisher's own words machine output");
+        assertFalse(result.contains(note("ru")),
+                "the identity passthrough is not a condition-(d) failure");
+        assertTrue(cache.get(HEADLINE, displayKeyspace("ru")).isPresent(),
+                "the passthrough short-circuits (d), not the cache write this leg does deliberately");
+    }
+
     // ----- {{SOURCE_LANGUAGE}} prompt slot ------------------------------
 
     @Test
