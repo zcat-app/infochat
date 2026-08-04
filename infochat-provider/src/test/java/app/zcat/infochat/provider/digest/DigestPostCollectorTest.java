@@ -112,19 +112,59 @@ class DigestPostCollectorTest {
         }
     }
 
+    @Test
+    void collectForGroup_projectsDeclaredSourceLanguageInBothTagModes() throws SQLException {
+        // M1-756: without this projection the digest's display-hit
+        // translation leg is dead on arrival and SILENTLY so. mapPost's
+        // shorter Post overload hard-codes sourceLanguage to NULL, which
+        // the pipeline reads as "unknown — never translate", so every
+        // digest row would no-op forever with no error anywhere. Both
+        // SELECTs already JOIN source, so both must project s.language.
+        for (String tagMode : List.of("ALL", "EXPLICIT")) {
+            StubDataSource dataSource = new StubDataSource(
+                    tagMode, 1L, 1L,
+                    List.of(new PostRow(UUID.randomUUID(), "uid-cs", UUID.randomUUID(), "CT24",
+                            "Titulek", "https://ct24.example/1", "body",
+                            Instant.parse("2026-05-25T10:00:00Z"),
+                            new String[]{"security"}, new String[]{"factual"},
+                            null, null, null, null, "cs")));
+            collector.dataSource = dataSource;
+
+            DigestPostCollector.CollectionResult result =
+                    collector.collectForGroup(GROUP_ID, SINCE);
+
+            assertEquals(1, result.posts().size());
+            assertEquals("cs", result.posts().getFirst().sourceLanguage(),
+                    "mode " + tagMode + ": the source's declared language reaches the Post");
+            assertTrue(dataSource.lastPostsSql().contains("s.language"),
+                    "mode " + tagMode + ": the post SELECT must project the joined source's "
+                            + "language; got: " + dataSource.lastPostsSql());
+        }
+    }
+
     // ----- JDBC stubs (no Mockito) -----------------------------------------
 
     record PostRow(UUID id, String uid, UUID sourceId, String displayName,
                    String title, String url, String body, Instant publishedAt,
                    String[] tags, String[] classification,
                    Integer reposts, Integer likes, String kind,
-                   Integer sourceWindowPosts) {
+                   Integer sourceWindowPosts, String language) {
         /** Pre-M1-724 shape: no prominence signals (all NULL). */
         PostRow(UUID id, String uid, UUID sourceId, String displayName,
                 String title, String url, String body, Instant publishedAt,
                 String[] tags) {
             this(id, uid, sourceId, displayName, title, url, body, publishedAt,
-                    tags, new String[]{"unknown"}, null, null, null, null);
+                    tags, new String[]{"unknown"}, null, null, null, null, "en");
+        }
+
+        /** Pre-M1-756 shape: no declared source language. */
+        PostRow(UUID id, String uid, UUID sourceId, String displayName,
+                String title, String url, String body, Instant publishedAt,
+                String[] tags, String[] classification,
+                Integer reposts, Integer likes, String kind,
+                Integer sourceWindowPosts) {
+            this(id, uid, sourceId, displayName, title, url, body, publishedAt,
+                    tags, classification, reposts, likes, kind, sourceWindowPosts, "en");
         }
     }
 
@@ -137,6 +177,10 @@ class DigestPostCollectorTest {
         private final long tagVer;
         private final long srcVer;
         private final List<PostRow> posts;
+        /** The post SELECT this stub was handed — the projection is asserted on it. */
+        private final AtomicReference<String> lastPostsSql = new AtomicReference<>();
+
+        String lastPostsSql() { return lastPostsSql.get(); }
 
         StubDataSource(String tagMode, long tagVer, long srcVer, List<PostRow> posts) {
             this.tagMode = tagMode;
@@ -176,6 +220,9 @@ class DigestPostCollectorTest {
 
         private PreparedStatement newPreparedStatement(String sql) {
             boolean isScopePrefs = sql.contains("scope_preferences");
+            if (!isScopePrefs) {
+                lastPostsSql.set(sql);
+            }
             AtomicReference<Timestamp> capturedTimestamp = new AtomicReference<>();
             return (PreparedStatement) Proxy.newProxyInstance(
                     PreparedStatement.class.getClassLoader(),
@@ -252,6 +299,7 @@ class DigestPostCollectorTest {
                                 case "url" -> row.url();
                                 case "body" -> row.body();
                                 case "kind" -> row.kind();
+                                case "language" -> row.language();
                                 default -> null;
                             };
                         }

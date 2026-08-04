@@ -214,7 +214,8 @@ public class DigestWorker {
             } else {
                 CompletableFuture<List<RenderedSection>> renderFuture = CompletableFuture.supplyAsync(
                         () -> digestRenderer.renderSections(
-                                collection.posts(), meta.language(), meta.digestMode()),
+                                collection.posts(), meta.language(), meta.digestMode(),
+                                slot.groupId()),
                         renderExecutor);
                 try {
                     renderedSections = renderFuture.get(remaining.toMillis(), TimeUnit.MILLISECONDS);

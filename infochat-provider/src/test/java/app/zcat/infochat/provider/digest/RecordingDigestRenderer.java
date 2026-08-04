@@ -5,6 +5,7 @@ import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 
 /**
@@ -20,6 +21,10 @@ import java.util.concurrent.CountDownLatch;
  * A single-section list makes the worker's {@code "\n\n"} join equal the
  * configured response verbatim (the property {@code DigestWorkerClockTest:86}
  * asserts).
+ *
+ * <p>The {@code groupId} argument (M1-756) is ignored for the same reason
+ * as the mode: it selects the display-hit translation cache partition,
+ * which is rendering, not orchestration.
  */
 final class RecordingDigestRenderer extends DigestRenderer {
     private String response = "default prose";
@@ -45,7 +50,8 @@ final class RecordingDigestRenderer extends DigestRenderer {
     }
 
     @Override
-    public List<RenderedSection> renderSections(List<Post> posts, String langCode, DigestMode mode) {
+    public List<RenderedSection> renderSections(List<Post> posts, String langCode,
+                                                DigestMode mode, UUID groupId) {
         calls++;
         if (entered != null) {
             entered.countDown();

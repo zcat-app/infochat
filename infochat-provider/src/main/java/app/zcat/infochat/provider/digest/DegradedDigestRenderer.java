@@ -38,6 +38,19 @@ import jakarta.inject.Inject;
  * the closed-list pass has no leading-boundary rule, so an ordinary feed
  * url pathed {@code /audit}, {@code /pending}, {@code /digest} or
  * {@code /lang} would be rewritten to {@code [redacted command]}.
+ *
+ * <p><b>These headlines are never translated (M1-756)</b>, unlike the
+ * normal-mode digest headlines {@code DigestRenderer.appendHeadlines}
+ * routes through the display-hit leg. The reason is the SPEC PIN, not the
+ * translator's cost: {@code docs/spec/security.md} §Failure handling pins
+ * degraded output to headlines + URLs + UIDs with NO LLM calls, and that
+ * shape is exactly what this renderer exists to produce — the same pin
+ * {@code ClusterBlockRenderer} cites for its own degraded skip. The cost
+ * argument alone would not carry: the translator is a different
+ * {@code ModelTask.TRANSLATOR} route than the summarizer whose failure
+ * fell back here, and a cache hit makes no provider call at all. A reader
+ * in a non-English scope therefore sees source-language headlines when a
+ * slot degrades; that is the degradation, and it is intended.
  */
 @ApplicationScoped
 public class DegradedDigestRenderer {

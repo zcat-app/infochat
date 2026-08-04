@@ -44,6 +44,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class DigestRendererSectionsTest {
 
+    /**
+     * The broadcast scope every render in this class runs under (M1-756).
+     * Every one of them renders an {@code "en"} scope, so the display-hit
+     * leg short-circuits and this id only ever names a cache partition
+     * nothing writes to — the section-byte pins below are unaffected by it.
+     */
+    private static final UUID GROUP_ID =
+            UUID.fromString("22222222-2222-2222-2222-222222222222");
+
     private DigestRenderer renderer;
     private RecordingSummaryProseGenerator proseGenerator;
     private RecordingCategoryRollupGenerator rollupGenerator;
@@ -85,7 +94,7 @@ class DigestRendererSectionsTest {
                 post("c3", "Crypto 3", List.of("crypto")),
                 post("u1", "Untagged", List.of()));
 
-        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.FULL);
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.FULL, GROUP_ID);
 
         // Arrays.asList, not List.of: List.of is null-hostile and the Other
         // bucket's tag is null by construction (DigestCategorizer.CategorySection).
@@ -105,7 +114,7 @@ class DigestRendererSectionsTest {
                 post("a2", "AI 2", List.of("ai")),
                 post("a3", "AI 3", List.of("ai")));
 
-        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.FULL);
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.FULL, GROUP_ID);
 
         String affordance =
                 "@mention me to go deeper on any story, or ask about a topic you don't see here.";
@@ -132,7 +141,7 @@ class DigestRendererSectionsTest {
         proseGenerator.setResponseText("capped prose");
 
         List<RenderedSection> sections =
-                renderer.renderSections(twelveCategoryPosts(), "en", DigestMode.FULL);
+                renderer.renderSections(twelveCategoryPosts(), "en", DigestMode.FULL, GROUP_ID);
 
         assertEquals(8, sections.size(), "12 categories capped to 8 sections");
         String overflow = "4 more categories are not shown";
@@ -153,7 +162,7 @@ class DigestRendererSectionsTest {
                 post("s2", "Sec 2", List.of("security")),
                 post("s3", "Sec 3", List.of("security")));
 
-        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.FULL);
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.FULL, GROUP_ID);
 
         assertEquals(1, sections.size());
         assertFalse(sections.getFirst().text().contains("not shown"),
@@ -166,7 +175,7 @@ class DigestRendererSectionsTest {
         renderer.digestCategorizer = newCategorizer(3, 8);
         proseGenerator.setResponseText("surviving prose");
 
-        renderer.renderSections(twelveCategoryPosts(), "en", DigestMode.FULL);
+        renderer.renderSections(twelveCategoryPosts(), "en", DigestMode.FULL, GROUP_ID);
 
         // D62 already commits that capped-out CLUSTERS waste no LLM calls;
         // the section cap extends the same property to whole sections. A
@@ -210,7 +219,7 @@ class DigestRendererSectionsTest {
         }
 
         List<RenderedSection> sections =
-                renderer.renderSections(posts, "en", DigestMode.NORMAL);
+                renderer.renderSections(posts, "en", DigestMode.NORMAL, GROUP_ID);
 
         assertEquals(1, sections.size());
         String text = sections.getFirst().text();
@@ -239,7 +248,7 @@ class DigestRendererSectionsTest {
                 post("s3", "Sec 3", List.of("security")));
 
         List<RenderedSection> sections =
-                renderer.renderSections(posts, "en", DigestMode.BRIEF);
+                renderer.renderSections(posts, "en", DigestMode.BRIEF, GROUP_ID);
 
         String text = sections.getFirst().text();
         assertTrue(text.startsWith("SECURITY NEWS — 3 STORIES"),
@@ -261,7 +270,7 @@ class DigestRendererSectionsTest {
                 post("s3", "Sec 3", List.of("security")));
 
         List<RenderedSection> sections =
-                renderer.renderSections(posts, "en", DigestMode.FULL);
+                renderer.renderSections(posts, "en", DigestMode.FULL, GROUP_ID);
 
         String text = sections.getFirst().text();
         assertTrue(text.startsWith("SECURITY NEWS\n"),
@@ -283,7 +292,7 @@ class DigestRendererSectionsTest {
     void prominenceReorderingLeavesSectionMembershipIdentical() {
         noLead(); // within-section reorder is the subject; lead extraction is covered below
         List<RenderedSection> sections =
-                renderer.renderSections(prominenceFixture(), "en", DigestMode.NORMAL);
+                renderer.renderSections(prominenceFixture(), "en", DigestMode.NORMAL, GROUP_ID);
 
         assertEquals(3, sections.size());
         assertEquals(Set.of("AI 1", "AI 2", "AI 3"), headlineTitles(sectionByTag(sections, "ai")));
@@ -302,7 +311,7 @@ class DigestRendererSectionsTest {
     void sectionHeadIsTheHighestScoringClusterNotTheNewest() {
         noLead(); // within-section head selection is the subject; the lead's cross-digest selection is below
         List<RenderedSection> sections =
-                renderer.renderSections(prominenceFixture(), "en", DigestMode.NORMAL);
+                renderer.renderSections(prominenceFixture(), "en", DigestMode.NORMAL, GROUP_ID);
 
         String ai = sectionByTag(sections, "ai").text();
         String security = sectionByTag(sections, "security").text();
@@ -327,7 +336,7 @@ class DigestRendererSectionsTest {
     void lowScoringSectionStillRendersItsOwnHead() {
         noLead(); // the no-starvation property is the subject; with-lead section behavior is covered below
         List<RenderedSection> sections =
-                renderer.renderSections(prominenceFixture(), "en", DigestMode.NORMAL);
+                renderer.renderSections(prominenceFixture(), "en", DigestMode.NORMAL, GROUP_ID);
 
         RenderedSection other = sectionByTag(sections, null);
         assertTrue(other.text().contains("Untagged"),
@@ -390,7 +399,7 @@ class DigestRendererSectionsTest {
     void leadHoldsTopClustersByProminenceAcrossTheWholeDigest() {
         proseGenerator.setEchoTitle(true);
         List<RenderedSection> sections =
-                renderer.renderSections(prominenceFixture(), "en", DigestMode.NORMAL);
+                renderer.renderSections(prominenceFixture(), "en", DigestMode.NORMAL, GROUP_ID);
 
         RenderedSection lead = sections.getFirst();
         assertEquals(DigestRenderer.LEAD_TAG, lead.tag(),
@@ -426,7 +435,7 @@ class DigestRendererSectionsTest {
                 post("s4", "Sec 4", List.of("security")),
                 post("a4", "AI 4", List.of("ai")));
 
-        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.NORMAL);
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.NORMAL, GROUP_ID);
 
         assertEquals(DigestRenderer.LEAD_TAG, sections.getFirst().tag());
         for (String title : List.of("Sec 1", "AI 1", "Sec 2", "AI 2",
@@ -452,7 +461,7 @@ class DigestRendererSectionsTest {
             posts.add(post("sec-" + i, "Story sec " + i, List.of("security")));
         }
 
-        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.NORMAL);
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.NORMAL, GROUP_ID);
 
         assertEquals(DigestRenderer.LEAD_TAG, sections.getFirst().tag());
         assertTrue(sections.getFirst().text().contains("Story sec 0"),
@@ -478,7 +487,7 @@ class DigestRendererSectionsTest {
                 post("a2", "AI 2", List.of("ai")),
                 post("a3", "AI 3", List.of("ai")));
 
-        List<RenderedSection> withLead = renderer.renderSections(six, "en", DigestMode.NORMAL);
+        List<RenderedSection> withLead = renderer.renderSections(six, "en", DigestMode.NORMAL, GROUP_ID);
 
         assertEquals(DigestRenderer.LEAD_TAG, withLead.getFirst().tag(),
                 "six clusters >= the default lead-minimum: the lead renders");
@@ -486,7 +495,7 @@ class DigestRendererSectionsTest {
 
         List<Post> five = six.subList(0, 5);
         List<RenderedSection> withoutLead =
-                renderer.renderSections(five, "en", DigestMode.NORMAL);
+                renderer.renderSections(five, "en", DigestMode.NORMAL, GROUP_ID);
 
         assertTrue(withoutLead.stream().noneMatch(s -> DigestRenderer.LEAD_TAG.equals(s.tag())),
                 "five clusters < the default lead-minimum: NO lead section at all");
@@ -514,7 +523,7 @@ class DigestRendererSectionsTest {
                 post("c2", "Crypto 2", List.of("crypto"), 300),
                 post("c3", "Crypto 3", List.of("crypto"), 300));
 
-        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.NORMAL);
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.NORMAL, GROUP_ID);
 
         assertEquals(DigestRenderer.LEAD_TAG, sections.getFirst().tag());
         assertTrue(sections.getFirst().text().contains("Crypto 1"),
@@ -552,7 +561,7 @@ class DigestRendererSectionsTest {
                 post("s5", "Sec 5", List.of("security")),
                 post("a5", "AI 5", List.of("ai")));
 
-        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.NORMAL);
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.NORMAL, GROUP_ID);
 
         RenderedSection lead = sections.getFirst();
         assertEquals(DigestRenderer.LEAD_TAG, lead.tag());
@@ -587,7 +596,7 @@ class DigestRendererSectionsTest {
                 post("s3", "Sec 3", List.of("security")),
                 post("a3", "AI 3", List.of("ai")));
 
-        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.NORMAL);
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.NORMAL, GROUP_ID);
 
         String affordance =
                 "@mention me to go deeper on any story, or ask about a topic you don't see here.";
@@ -623,7 +632,7 @@ class DigestRendererSectionsTest {
                 post("s4", "Sec 4", List.of("security")),
                 post("a4", "AI 4", List.of("ai")));
 
-        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.BRIEF);
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.BRIEF, GROUP_ID);
 
         assertTrue(sections.stream().noneMatch(s -> DigestRenderer.LEAD_TAG.equals(s.tag())),
                 "brief renders NO lead section, even above the minimum");
@@ -652,7 +661,7 @@ class DigestRendererSectionsTest {
                 post("s5", "Sec 5", List.of("security")),
                 post("a5", "AI 5", List.of("ai")));
 
-        renderer.renderSections(posts, "en", DigestMode.NORMAL);
+        renderer.renderSections(posts, "en", DigestMode.NORMAL, GROUP_ID);
 
         assertEquals(3, proseGenerator.callCount(),
                 "lead prose runs for exactly the lead-size promoted clusters, no others");
@@ -678,7 +687,7 @@ class DigestRendererSectionsTest {
                 post("s4", "Sec 4", List.of("security")),
                 post("a4", "AI 4", List.of("ai")));
 
-        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.FULL);
+        List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.FULL, GROUP_ID);
 
         assertEquals(DigestRenderer.LEAD_TAG, sections.getFirst().tag(),
                 "full renders the lead first too");

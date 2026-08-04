@@ -1898,6 +1898,26 @@ sources). Application code uses the soft-delete column.
   display-hit cache per (user, language) for 24h — process-local, never
   persisted, bounded, and `/forget` does not drain it: the same accepted
   residual as the query-anchoring cache below.
+- **`translator` also carries the periodic digest's SOURCE-AUTHORED feed
+  headlines (M1-756).** The digest's normal-mode headlines run through
+  the same display-hit leg, so for a group on a non-English `/lang` a
+  budgeted number of raw feed headlines
+  (`infochat.digest.translation-max-per-render`) reaches
+  `ModelTask.TRANSLATOR` at each digest slot. What is new is the data
+  class on that path, not the schedule: the scheduled render ALREADY
+  sends LLM-authored text through the same task — one per-cluster prose
+  translation for the lead in every non-brief mode and for every cluster
+  in `full`, plus one per-section roll-up — and those legs carry no
+  per-render budget at all. **The headline budget is therefore not the
+  size of the digest's unattended translator exposure**, and an operator
+  must not size remote-routing consent from it; the digest's own prose
+  and roll-up legs dominate it, and the Collector's ingest translation
+  worker is a separate continuously-scheduled consumer of the same task.
+  The disclosure text `prod/switch-llm.sh` prints at switch time must
+  name this surface (M1-758 owns that text, alongside the M1-746
+  query-anchoring and M1-755 saved-headline legs). The enumeration in
+  this section is still incomplete for the unattended legs named above —
+  they predate this entry and are not M1-756's to document.
 - The translation of that query is retained in an in-memory cache for 24h
   (per (scope, query-hash, language), M1-746). This is **user-authored
   content**, so it is deliberately outside the premise of the

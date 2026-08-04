@@ -133,7 +133,15 @@ public class DigestPostCollector {
                 rs.getObject("reposts", Integer.class),
                 rs.getObject("likes", Integer.class),
                 rs.getString("kind"),
-                rs.getObject("source_window_posts", Integer.class));
+                rs.getObject("source_window_posts", Integer.class),
+                // Declared per source (V7, NOT NULL DEFAULT 'en'), never
+                // inferred from the body — the display-hit translation
+                // no-op decision reads it (M1-747). The FULL constructor is
+                // load-bearing here: the shorter overload hard-codes this
+                // to NULL, which means "unknown, never translate", so a
+                // projection without it would leave the digest permanently
+                // untranslated with no error anywhere (M1-756).
+                rs.getString("language"));
     }
 
     private static final String SCOPE_PREFS_SQL = """
@@ -149,7 +157,7 @@ public class DigestPostCollector {
     private static final String POSTS_ALL_SQL = """
             SELECT p.id, p.uid, p.source_id, s.display_name, p.title,
                    p.url, p.body, p.published_at, p.tags, p.classification,
-                   p.reposts, p.likes, s.kind,
+                   p.reposts, p.likes, s.kind, s.language,
                    COUNT(*) OVER (PARTITION BY p.source_id)::int AS source_window_posts
               FROM post p
               JOIN source s ON s.id = p.source_id
@@ -169,7 +177,7 @@ public class DigestPostCollector {
     private static final String POSTS_EXPLICIT_SQL = """
             SELECT p.id, p.uid, p.source_id, s.display_name, p.title,
                    p.url, p.body, p.published_at, p.tags, p.classification,
-                   p.reposts, p.likes, s.kind,
+                   p.reposts, p.likes, s.kind, s.language,
                    COUNT(*) OVER (PARTITION BY p.source_id)::int AS source_window_posts
               FROM post p
               JOIN source s ON s.id = p.source_id

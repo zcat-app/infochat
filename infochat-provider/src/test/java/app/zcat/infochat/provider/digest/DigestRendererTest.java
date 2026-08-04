@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.digest;
 
+import app.zcat.infochat.messaging.TranslationProvider;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.digest.DigestRenderer.DigestMode;
 import app.zcat.infochat.provider.summary.ClusterTraversal;
@@ -10,6 +11,8 @@ import app.zcat.infochat.provider.summary.EmptyEdgeSource;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
 import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
+import app.zcat.infochat.provider.translation.TranslationCache;
+import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -18,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newEnShortCircuitPipeline;
@@ -34,13 +38,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class DigestRendererTest {
 
+    /** The broadcast scope — the display-hit cache-partition dimension (M1-756). */
+    private static final UUID GROUP_ID =
+            UUID.fromString("33333333-3333-3333-3333-333333333333");
+
+    /** The cs bundle's machine-translation marker, appended by the display-hit leg. */
+    private static final String CS_MARKER = "[strojový překlad]";
+
     private DigestRenderer renderer;
+    private BundleLoader bundleLoader;
     private RecordingSummaryProseGenerator proseGenerator;
     private RecordingCategoryRollupGenerator rollupGenerator;
 
     @BeforeEach
     void setUp() throws Exception {
-        BundleLoader bundleLoader = newRealBundleLoader();
+        bundleLoader = newRealBundleLoader();
         renderer = new DigestRenderer();
         renderer.clusterTraversal = new ClusterTraversal(new EmptyEdgeSource(), 3);
         proseGenerator = new RecordingSummaryProseGenerator();
@@ -49,16 +61,22 @@ class DigestRendererTest {
         renderer.categoryRollupGenerator = rollupGenerator;
         renderer.llmOutputSanitizer = SanitizerTestDoubles.noAuditSanitizer();
         renderer.translationPipeline = newEnShortCircuitPipeline(bundleLoader);
+        renderer.translationCache = new TranslationCache();
         renderer.digestCategorizer = newCategorizer(3);
         renderer.bundleLoader = bundleLoader;
         renderer.categoryItemCap = 12;
         renderer.categoryHeadlineCount = 5;
+        renderer.translationMaxPerRender = 5;
     }
 
     /** The pre-M1-732 {@code render()} shape: renderSections at the given mode, joined with {@code "\n\n"}. */
     private String renderJoined(List<Post> posts, DigestMode mode) {
+        return renderJoined(posts, mode, "en");
+    }
+
+    private String renderJoined(List<Post> posts, DigestMode mode, String langCode) {
         return String.join("\n\n",
-                renderer.renderSections(posts, "en", mode).stream()
+                renderer.renderSections(posts, langCode, mode, GROUP_ID).stream()
                         .map(DigestRenderer.RenderedSection::text)
                         .toList());
     }
@@ -234,7 +252,7 @@ class DigestRendererTest {
                 post("s3", "Sec 3", List.of("security")));
 
         List<DigestRenderer.RenderedSection> sections =
-                renderer.renderSections(posts, "en", DigestMode.FULL);
+                renderer.renderSections(posts, "en", DigestMode.FULL, GROUP_ID);
 
         assertFalse(sections.isEmpty(), "fixture: at least one section rendered");
         for (DigestRenderer.RenderedSection section : sections) {
@@ -314,7 +332,7 @@ class DigestRendererTest {
                 post("s3", "Sec 3", List.of("security")));
 
         List<DigestRenderer.RenderedSection> sections =
-                renderer.renderSections(posts, "en", DigestMode.FULL);
+                renderer.renderSections(posts, "en", DigestMode.FULL, GROUP_ID);
 
         assertFalse(sections.isEmpty(), "fixture: at least one section rendered");
         String text = sections.stream()
@@ -357,26 +375,228 @@ class DigestRendererTest {
             }
         }
 
-        renderer.renderSections(posts, "en", DigestMode.BRIEF);
+        renderer.renderSections(posts, "en", DigestMode.BRIEF, GROUP_ID);
         assertEquals(8, rollupGenerator.callCount(),
                 "brief: exactly one roll-up call per surviving section");
         assertEquals(0, proseGenerator.callCount(),
                 "brief: ZERO SummaryProseGenerator calls");
 
-        renderer.renderSections(posts, "en", DigestMode.NORMAL);
+        renderer.renderSections(posts, "en", DigestMode.NORMAL, GROUP_ID);
         assertEquals(16, rollupGenerator.callCount(),
                 "normal: exactly one roll-up call per surviving section");
         assertEquals(0, proseGenerator.callCount(),
                 "normal: ZERO SummaryProseGenerator calls");
 
-        renderer.renderSections(posts, "en", DigestMode.FULL);
+        renderer.renderSections(posts, "en", DigestMode.FULL, GROUP_ID);
         assertEquals(16, rollupGenerator.callCount(),
                 "full: no roll-up calls");
         assertEquals(40, proseGenerator.callCount(),
                 "full: one prose call per rendered cluster (the cap is lifted)");
     }
 
+    // ----- M1-756 display-hit translation -----------------------------------
+
+    @Test
+    void normalModeHeadlinesTranslateForNonEnScope() throws Exception {
+        // The digest reaches parity with /summary and /saved: a cs group
+        // reading en-source headlines gets them through the display-hit
+        // leg, marked as machine-translated, inside the UNCHANGED
+        // "· <headline>  <url>" line.
+        AtomicInteger calls = new AtomicInteger();
+        wireTranslator(calls, "Přeložený titulek");
+        List<Post> posts = taggedPosts(3, "en", "ai");
+
+        String result = renderJoined(posts, DigestMode.NORMAL, "cs");
+
+        assertEquals(3, calls.get(), "one translator call per rendered headline");
+        assertTrue(result.contains("· Přeložený titulek " + CS_MARKER + "  https://example.com/ai0"),
+                "the translated headline replaces the original in the same line shape; got: "
+                        + result);
+        assertFalse(result.contains("Headline ai 0"),
+                "the untranslated source headline must not also render; got: " + result);
+    }
+
+    @Test
+    void enScopeMakesZeroTranslatorCallsAndRendersHeadlinesVerbatim() throws Exception {
+        // The M1-747 acceptance property, extended to the digest: an en
+        // scope short-circuits in the pipeline, so the provider spy must
+        // see nothing and the bytes must be the source headlines exactly —
+        // this is what keeps every persisted-section byte pin valid.
+        AtomicInteger calls = new AtomicInteger();
+        wireTranslator(calls, "Přeložený titulek");
+        List<Post> posts = taggedPosts(3, "cs", "ai");
+
+        String result = renderJoined(posts, DigestMode.NORMAL, "en");
+
+        assertEquals(0, calls.get(),
+                "an en scope must make ZERO translator calls; got: " + result);
+        assertTrue(result.contains("· Headline ai 0  https://example.com/ai0"),
+                "en headlines render byte-identical to the source; got: " + result);
+        assertFalse(result.contains(CS_MARKER),
+                "no machine-translation marker on an untranslated headline; got: " + result);
+    }
+
+    @Test
+    void unknownSourceLanguageMakesNoTranslatorCall() throws Exception {
+        // D29 declared-never-inferred: a NULL source language is "unknown",
+        // and unknown never translates — the same no-op every hand-built
+        // Post fixture in this class relies on.
+        AtomicInteger calls = new AtomicInteger();
+        wireTranslator(calls, "Přeložený titulek");
+        List<Post> posts = List.of(
+                post("n1", "Headline 0", List.of("ai")),
+                post("n2", "Headline 1", List.of("ai")),
+                post("n3", "Headline 2", List.of("ai")));
+
+        String result = renderJoined(posts, DigestMode.NORMAL, "cs");
+
+        assertEquals(0, calls.get(),
+                "a null source language must never reach the translator; got: " + result);
+        assertTrue(result.contains("· Headline 0  https://example.com/n1"),
+                "the headline renders untranslated; got: " + result);
+    }
+
+    @Test
+    void perRenderBudgetBoundsGenerativeCallsAcrossTheWholeRender() throws Exception {
+        // The metering acceptance: the digest is a scheduled broadcast with
+        // no user in the loop, so the ONLY bound on its generative surface
+        // is this budget. It is per RENDER, not per section — two sections
+        // of three translatable headlines each must still spend only the
+        // configured allowance, and the rows past it render untranslated
+        // AND unmarked.
+        // The lead is disabled: at 6 clusters it would fire, and its
+        // per-cluster PROSE runs through the translator too — a different
+        // leg whose calls would confound this leg's accounting.
+        renderer.leadMinimum = Integer.MAX_VALUE;
+        renderer.translationMaxPerRender = 2;
+        AtomicInteger calls = new AtomicInteger();
+        wireTranslator(calls, "Přeložený titulek");
+        List<Post> posts = new ArrayList<>();
+        posts.addAll(taggedPosts(3, "en", "ai"));
+        posts.addAll(taggedPosts(3, "en", "crypto"));
+
+        String result = renderJoined(posts, DigestMode.NORMAL, "cs");
+
+        assertEquals(2, calls.get(),
+                "the budget bounds the WHOLE render, not each section; got: " + result);
+        assertEquals(2, countOccurrences(result, CS_MARKER),
+                "exactly the budgeted headlines carry the marker; got: " + result);
+        assertTrue(result.contains("Headline crypto 2"),
+                "a headline past the budget renders untranslated; got: " + result);
+    }
+
+    @Test
+    void cacheHitsCostNoBudget() throws Exception {
+        // A digest re-rendered over a converged corpus must not be
+        // throttled by its own history: entries already in the display-hit
+        // keyspace are served with no provider call, so they must not
+        // consume the generative allowance. Budget 1 + 2 pre-cached
+        // headlines => 3 translated headlines from ONE provider call.
+        renderer.translationMaxPerRender = 1;
+        AtomicInteger calls = new AtomicInteger();
+        wireTranslator(calls, "Přeložený titulek");
+        String keyspace = TranslationPipeline.displayHitCacheLanguage("group", GROUP_ID, "cs");
+        renderer.translationCache.put("Headline ai 0", keyspace, "Titulek nula");
+        renderer.translationCache.put("Headline ai 1", keyspace, "Titulek jedna");
+        List<Post> posts = taggedPosts(3, "en", "ai");
+
+        String result = renderJoined(posts, DigestMode.NORMAL, "cs");
+
+        assertEquals(1, calls.get(),
+                "the two cache hits cost no provider call; got: " + result);
+        assertTrue(result.contains("Titulek nula") && result.contains("Titulek jedna"),
+                "cached translations still render; got: " + result);
+        assertTrue(result.contains("Přeložený titulek"),
+                "the one budgeted miss still calls the translator; got: " + result);
+    }
+
+    @Test
+    void degradedProseMakesNoTranslatorCallWhileNonDegradedDoes() throws Exception {
+        // security.md §Failure handling pins degraded output to headlines +
+        // URLs + UIDs with NO LLM calls. The pin is asserted against its
+        // own control: the SAME fixture in the SAME cs scope translates on
+        // the non-degraded arm, so a zero count on the degraded arm is a
+        // real skip and not a fixture that could never have translated.
+        List<Post> posts = List.of(
+                post("d1", "Sec 1", List.of("security")),
+                post("d2", "Sec 2", List.of("security")),
+                post("d3", "Sec 3", List.of("security")));
+
+        AtomicInteger degradedCalls = new AtomicInteger();
+        wireTranslator(degradedCalls, "Přeložená próza");
+        proseGenerator.setDegradedMode(true);
+        String degraded = renderJoined(posts, DigestMode.FULL, "cs");
+        assertEquals(0, degradedCalls.get(),
+                "a degraded cluster must make ZERO translator calls; got: " + degraded);
+        assertFalse(degraded.contains(CS_MARKER),
+                "no machine-translation marker on degraded output; got: " + degraded);
+
+        AtomicInteger healthyCalls = new AtomicInteger();
+        wireTranslator(healthyCalls, "Přeložená próza");
+        proseGenerator.setDegradedMode(false);
+        proseGenerator.setResponseText("Healthy prose");
+        renderJoined(posts, DigestMode.FULL, "cs");
+        assertTrue(healthyCalls.get() > 0,
+                "control: the non-degraded arm DOES translate, so the zero above is a skip");
+    }
+
     // ----- helpers ----------------------------------------------------------
+
+    /**
+     * Replaces the setUp pipeline with one whose translator is a counting
+     * stub — {@code newEnShortCircuitPipeline}'s identity translator cannot
+     * exercise the translating leg (an identity translation is delivered
+     * unmarked). Shares the renderer's {@link TranslationCache} instance so
+     * a pre-seeded entry is visible to both the budget probe and the
+     * pipeline, exactly as the single CDI bean is in production.
+     */
+    private void wireTranslator(AtomicInteger callCounter, String response) throws Exception {
+        TranslationPipeline pipeline = new TranslationPipeline();
+        var cacheField = TranslationPipeline.class.getDeclaredField("translationCache");
+        cacheField.setAccessible(true);
+        cacheField.set(pipeline, renderer.translationCache);
+        var providerField = TranslationPipeline.class.getDeclaredField("translationProvider");
+        providerField.setAccessible(true);
+        providerField.set(pipeline, (TranslationProvider) (text, from, to) -> {
+            callCounter.incrementAndGet();
+            return response;
+        });
+        var sanitizerField = TranslationPipeline.class.getDeclaredField("llmOutputSanitizer");
+        sanitizerField.setAccessible(true);
+        sanitizerField.set(pipeline, SanitizerTestDoubles.noAuditSanitizer());
+        var bundleLoaderField = TranslationPipeline.class.getDeclaredField("bundleLoader");
+        bundleLoaderField.setAccessible(true);
+        bundleLoaderField.set(pipeline, bundleLoader);
+        renderer.translationPipeline = pipeline;
+    }
+
+    /**
+     * {@code count} singleton-cluster posts under one tag, each declaring
+     * {@code sourceLanguage}. Titles carry the TAG because the display-hit
+     * cache is keyed on headline text: two sections sharing a headline
+     * string would make the second section's row a free cache hit, which
+     * would silently invalidate the budget accounting.
+     */
+    private static List<Post> taggedPosts(int count, String sourceLanguage, String tag) {
+        List<Post> posts = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            String uid = tag + i;
+            posts.add(new Post(
+                    UUID.randomUUID(), uid, UUID.randomUUID(), "TestSrc",
+                    "Headline " + tag + " " + i, "https://example.com/" + uid, "body",
+                    Instant.now(), List.of(tag), List.of("unknown"),
+                    null, null, null, null, sourceLanguage));
+        }
+        return posts;
+    }
+
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        for (int i = haystack.indexOf(needle); i >= 0; i = haystack.indexOf(needle, i + needle.length())) {
+            count++;
+        }
+        return count;
+    }
 
     private static DigestCategorizer newCategorizer(int minClusters) {
         DigestCategorizer categorizer = new DigestCategorizer();

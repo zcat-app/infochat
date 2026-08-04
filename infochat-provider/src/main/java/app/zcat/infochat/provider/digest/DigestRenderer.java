@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
@@ -24,6 +25,7 @@ import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
+import app.zcat.infochat.provider.translation.TranslationCache;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -79,6 +81,17 @@ public class DigestRenderer {
     @Inject
     TranslationPipeline translationPipeline;
 
+    /**
+     * Consulted ONLY to tell a cache hit from a miss before spending
+     * {@link #translationMaxPerRender} (M1-756) — the pipeline owns every
+     * read and write of the entry itself. A hit makes no provider call, so
+     * charging it against a generative budget would shrink the translated
+     * portion of a digest the more often that digest had been rendered.
+     * The /saved leg draws the same distinction the same way (M1-755).
+     */
+    @Inject
+    TranslationCache translationCache;
+
     @Inject
     BundleLoader bundleLoader;
 
@@ -94,6 +107,42 @@ public class DigestRenderer {
      */
     @ConfigProperty(name = "infochat.digest.category-headline-count", defaultValue = "5")
     int categoryHeadlineCount = 5;
+
+    /**
+     * Generative display-hit translator calls allowed per {@link
+     * #renderSections} invocation (M1-756). Without this bound one render
+     * would translate up to {@code max-categories} ×
+     * {@link #categoryHeadlineCount} = 8 × 5 = 40 headlines. Bounded, a
+     * group's HEADLINE worst case is 5 per render and 10 per day (two
+     * slots) — the same per-invocation budget {@code /saved} spends
+     * ({@code infochat.save.translation-max-per-page}) at a strictly lower
+     * invocation rate. It bounds THIS leg only: {@link
+     * #appendClusterProse} and {@link CategoryRollupGenerator} reach the
+     * same {@code ModelTask.TRANSLATOR} on the same render with no
+     * per-render budget of their own, so this key is not a bound on the
+     * render's translator cost as a whole.
+     *
+     * <p>TWO ROUTES reach this render, and they are metered differently
+     * [redteam 2026-08-04, low/DOS]. The SCHEDULED route
+     * ({@code DigestScheduler} → {@code DigestWorker.executeSlot}) has no
+     * user in the loop, so no per-user or per-group bucket is drawn and
+     * this budget is the only rate-limiting control that exists on it. The
+     * USER-INITIATED route is {@code /retry --digest}, which reaches the
+     * very same render via {@code DigestRetryService.fallbackRerun} →
+     * {@code DigestWorker.execute}; there {@code RetryCommandHandler} has
+     * already drawn the per-user LLM token AND the D47 per-group
+     * sub-bucket (refunding the former if the group cap rejects), and
+     * {@code DigestRetryService} adds a per-group cooldown. So this budget
+     * is the sole meter on one route and an inner bound on the other; it
+     * is never a substitute for caps that "do not apply to the digest".
+     *
+     * <p>Rows past the budget render untranslated AND unmarked: an
+     * untranslated headline in the reader's list is a degradation, not a
+     * translation to be labelled. Field-initialized to the documented
+     * default — the {@link #categoryHeadlineCount} pattern.
+     */
+    @ConfigProperty(name = "infochat.digest.translation-max-per-render", defaultValue = "5")
+    int translationMaxPerRender = 5;
 
     /**
      * Clusters promoted to the lead section (M1-725). Field-initialized to
@@ -126,6 +175,14 @@ public class DigestRenderer {
      * out of the batched modes on this marker.
      */
     static final String LEAD_TAG = "LEAD";
+
+    /**
+     * The display-hit cache-partition kind for every digest render
+     * (M1-756). Constant, not a parameter: the periodic digest is a group
+     * broadcast and has no other scope to run under, so admitting a second
+     * value here would only create a way to mis-partition the cache.
+     */
+    private static final String SCOPE_KIND = "group";
 
     /**
      * Per-group digest verbosity ({@code groups.digest_mode}, V67, M1-732).
@@ -187,10 +244,20 @@ public class DigestRenderer {
      * carries no footer, and the closing affordance stays on the LAST
      * category section — {@code DigestDelivery} splits the lead into its
      * own first message on this marker in the batched modes.
+     *
+     * <p>{@code groupId} is the broadcast's scope identity, required
+     * (M1-756) because the NORMAL-mode headlines run through the
+     * display-hit translation leg, whose cache is partitioned per
+     * {@code (scopeKind, scopeId, scopeLanguage)}. The renderer is
+     * {@code @ApplicationScoped} and therefore holds no per-render scope of
+     * its own; the caller's {@code slot.groupId()} is the only source. The
+     * scope KIND is the literal {@code "group"} — the periodic digest
+     * broadcasts to groups and nothing else.
      */
     public List<RenderedSection> renderSections(List<EligiblePostQuery.Post> posts,
                                                 String langCode,
-                                                DigestMode mode) {
+                                                DigestMode mode,
+                                                UUID groupId) {
         List<Cluster> clusters = clusterTraversal.cluster(posts);
         List<CategorySection> allSections = digestCategorizer.categorize(clusters);
         // M1-724 prominence ranking: score every cluster (urgent gate →
@@ -309,6 +376,12 @@ public class DigestRenderer {
             rendered.add(new RenderedSection(LEAD_TAG, leadSb.toString()));
         }
         int proseIndex = 0;
+        // ONE generative translator budget for the WHOLE render, not one
+        // per section: the bound this exists to enforce is on the digest a
+        // group receives, and a per-section budget would multiply by the
+        // section count (M1-756). appendHeadlines spends from it and hands
+        // back what is left.
+        int translationBudget = translationMaxPerRender;
         for (int sectionIdx = 0; sectionIdx < sections.size(); sectionIdx++) {
             CategorySection section = sections.get(sectionIdx);
             StringBuilder sb = new StringBuilder();
@@ -337,7 +410,8 @@ public class DigestRenderer {
                     sb.append("\n\n").append(rollup.get());
                 }
                 if (mode == DigestMode.NORMAL) {
-                    appendHeadlines(sb, section);
+                    translationBudget =
+                            appendHeadlines(sb, section, langCode, groupId, translationBudget);
                 }
                 sb.append("\n\n").append(shortFooter(section, langCode));
             }
@@ -708,6 +782,15 @@ public class DigestRenderer {
      */
     private void appendClusterProse(StringBuilder sb, ClusterProse cp, String langCode) {
         if (cp.degraded()) {
+            // No translator call on the degraded arm (M1-756), and the
+            // reason is the SPEC PIN, not a cost story: security.md
+            // §Failure handling pins degraded output to headlines + URLs +
+            // UIDs with no LLM calls, which is the same pin
+            // ClusterBlockRenderer cites for its own degraded skip. The
+            // cost argument would NOT carry on its own — the translator is
+            // a different ModelTask.TRANSLATOR route than the summarizer
+            // whose failure produced this branch, and a cache hit makes no
+            // provider call at all.
             sb.append(SummaryProseGenerator.degradedProseFor(cp.cluster(), llmOutputSanitizer));
         } else {
             String sanitized = llmOutputSanitizer.sanitize(cp.prose());
@@ -730,13 +813,52 @@ public class DigestRenderer {
      * headline (a post with no renderable text) drops its separator — the
      * DegradedDigestRenderer idiom — and a cluster with neither headline
      * nor URL contributes no line.
+     *
+     * <p>Each headline then runs through the display-hit translation leg
+     * (M1-756) — the SAME entry point, no-op legs, §10 controls, fallback
+     * and cache {@code /summary} uses, over the {@link DisplayHeadline}
+     * OUTPUT, so the translator's input is sanitized and capped by
+     * construction. The line SHAPE is unchanged: the translated string
+     * simply replaces the untranslated one.
+     *
+     * <p>Metering: a cache hit makes no provider call and so renders free,
+     * while a miss spends one slot of {@code translationBudget} (the row
+     * that spends the last slot still calls). Past the budget the headline
+     * renders untranslated and unmarked. Returns the REMAINING budget so
+     * one allowance covers the whole render across sections.
      */
-    private void appendHeadlines(StringBuilder sb, CategorySection section) {
+    private int appendHeadlines(StringBuilder sb, CategorySection section,
+                                String langCode, UUID groupId, int translationBudget) {
         int shown = Math.min(section.clusters().size(), categoryHeadlineCount);
         List<String> lines = new ArrayList<>(shown);
+        int budgetLeft = translationBudget;
         for (int i = 0; i < shown; i++) {
             EligiblePostQuery.Post p = section.clusters().get(i).posts().getFirst();
             String headline = DisplayHeadline.of(p, llmOutputSanitizer);
+            if (translatesUnderThisScope(headline, p.sourceLanguage(), langCode)) {
+                // The cache probe is what keeps an already-converged digest
+                // from being throttled by its own history: the pipeline
+                // would serve these from the cache without a provider call,
+                // so they must not consume the generative allowance.
+                // Accepted residual (the /saved precedent, M1-755): the
+                // probe and the pipeline's own read are separate lookups,
+                // so a TTL expiry or size eviction landing between them
+                // turns a hit this loop counted as free into a provider
+                // call it did not budget. The bound is per-render-budget
+                // plus that race, not an exact ceiling; nothing an
+                // attacker steers, since neither eviction trigger is
+                // reachable from feed content.
+                String displayHitKey = TranslationPipeline.displayHitCacheLanguage(
+                        SCOPE_KIND, groupId, langCode);
+                boolean cacheHit = translationCache.get(headline, displayHitKey).isPresent();
+                if (cacheHit || budgetLeft > 0) {
+                    if (!cacheHit) {
+                        budgetLeft--;
+                    }
+                    headline = translationPipeline.runForDisplayHit(
+                            headline, p.sourceLanguage(), SCOPE_KIND, groupId, langCode);
+                }
+            }
             String url = p.url();
             boolean hasUrl = url != null && !url.isEmpty();
             if (headline.isEmpty() && !hasUrl) {
@@ -757,5 +879,25 @@ public class DigestRenderer {
         if (!lines.isEmpty()) {
             sb.append("\n\n").append(String.join("\n", lines));
         }
+        return budgetLeft;
+    }
+
+    /**
+     * Whether a headline can reach the translator at all under this scope
+     * — the pipeline's own no-op conditions, restated here ONLY so a
+     * guaranteed no-op never draws from the generative budget or probes
+     * the cache. The pipeline stays the authority: every value that gets
+     * past this predicate is still handed to
+     * {@link TranslationPipeline#runForDisplayHit}, which re-decides.
+     * A null {@code sourceLanguage} is "unknown — never translate" per
+     * D29's declared-never-inferred rule.
+     */
+    private static boolean translatesUnderThisScope(String headline,
+                                                    @Nullable String sourceLanguage,
+                                                    String langCode) {
+        return !headline.isEmpty()
+                && !"en".equalsIgnoreCase(langCode)
+                && sourceLanguage != null
+                && !sourceLanguage.equalsIgnoreCase(langCode);
     }
 }
