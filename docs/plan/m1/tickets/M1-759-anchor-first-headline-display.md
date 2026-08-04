@@ -76,7 +76,7 @@ out_of_scope:
     ticket `/saved` can only ever render the anchor-ABSENT form. Adding
     the columns is precedented (V76 snapshotted `source_language` at
     `/save` time via `SaveCommandHandler`'s existing post->source join)
-    but needs a migration this ticket excludes. Follow-up ticket.
+    but needs a migration this ticket excludes. Follow-up: M1-765.
   - >-
     DEGRADED-SURFACE PARITY. `DegradedDigestRenderer` and
     `SummaryProseGenerator.degradedProseFor` call
@@ -84,7 +84,7 @@ out_of_scope:
     rendering the original. That is why the anchor must enter through a
     NEW entry point rather than by changing `of(Post, …)`. Giving the
     degraded path the anchor — where a column read still works with no
-    LLM — is a follow-up ticket.
+    LLM — is a follow-up: M1-766.
   - >-
     Digest selection, ordering, category caps, or the per-render
     translator budget landed by M1-756. If the taller block proves too
@@ -440,7 +440,7 @@ grep -rn "p\.title" --include=*.java infochat-provider/src/main
 | `summary/EligiblePostQuery.java:283` | IN — project the anchor |
 | `digest/DigestPostCollector.java:158` AND `:178` | IN — TWO separate SQL blocks; both get the anchor, or the two queries render inconsistently |
 | `command/RetryCommandHandler.java:90` | IN — project the anchor (the third site the pre-refine ticket omitted) |
-| `command/SaveCommandHandler.java:115` | OUT — the `/save` snapshot WRITE; storing the anchor needs `saved_post` columns (follow-up ticket) |
+| `command/SaveCommandHandler.java:115` | OUT — the `/save` snapshot WRITE; storing the anchor needs `saved_post` columns (M1-765) |
 | `summary/SummaryProseGenerator.java:181` | OUT — prompt input; stays untranslated and anchor-free (M1-747) |
 | `digest/CategoryRollupGenerator.java:329` | OUT — prompt input via the `(String, String, sanitizer)` overload |
 | `chat/tool/GetPostTool.java:62` | OUT — D21 chat-mode |
@@ -456,10 +456,12 @@ grep -rn "p\.title" --include=*.java infochat-provider/src/main
   resolution. Its findings on `/saved`, `/retry` and the marker are all
   folded in above. A fresh pass is still required and may surface
   blockers the first did not audit.
-- Two follow-up tickets are owed and are named in `out_of_scope`: a
-  `saved_post` English-anchor snapshot (migration, following V76's
-  pattern), and degraded-surface parity for `DegradedDigestRenderer` /
-  `SummaryProseGenerator.degradedProseFor`.
+- Two follow-ups are filed and blocked on this ticket: M1-765 (the
+  `saved_post` English-anchor snapshot, migration, following V76's
+  pattern) and M1-766 (degraded-surface parity for
+  `DegradedDigestRenderer` / `SummaryProseGenerator.degradedProseFor`).
+  They are independent of each other and share no files, so they can run
+  in parallel once this lands.
 - Sequenced after the es/tr/ru bundle work by intent, not by dependency:
   `blocked_by` names only M1-756. Those bundles have since landed
   (M1-716/718/719/720). Renderer overlap is with M1-756 and M1-762
