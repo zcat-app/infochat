@@ -38,11 +38,17 @@ out_of_scope:
     call back on the scheduled digest path that M1-756's cost model
     excludes.
   - >-
-    NEW BUNDLE KEYS. The bracket is punctuation, not localized text,
-    precisely so this ticket adds no key while es/tr/ru are in flight. The
-    `originál:`-style LABEL form is the better long-term affordance and is
-    deliberately deferred until those bundles have settled; do not add it
-    here.
+    NEW BUNDLE KEYS. The bracket is punctuation, not localized text, so
+    this ticket adds no key. BUT THE STATED DEFERRAL CONDITION HAS FIRED:
+    the `originál:`-style LABEL form was held back "until those bundles
+    have settled", and they have — es/tr/ru all landed
+    (M1-716/718/719/720), so `BundleLoaderTest`'s bilateral keyset parity
+    no longer races anyone and nothing BLOCKS the key. The label stays out
+    of this ticket by an OPEN DESIGN DECISION, not by an expired
+    constraint: adopting it would change the layout this ticket specifies,
+    the unbracketed-line invariant in §"Why the bracket", and the spoofing
+    analysis in §"Known wrinkle". That is a separate ticket. Do not add it
+    here without that decision, and do not cite the race as the reason.
   - >-
     THE D30 MARKER's text, placement or suppression rule. It stays
     appended after truncation, and a self-identical translation stays
@@ -198,9 +204,18 @@ means "original alongside a translation", primary slot means "original
 because no translation exists" — so no second affordance is needed.
 
 A localized `originál:` label reads better and is the intended end state.
-It is NOT in this ticket: it needs a bundle key, `BundleLoaderTest`
-enforces bilateral keyset parity, and three concurrent sessions are adding
-es/tr/ru bundles. A key added here breaks whichever side merges second.
+It is NOT in this ticket — but the reason has CHANGED, and the change
+matters. It was BLOCKED: the label needs a bundle key, `BundleLoaderTest`
+enforces bilateral keyset parity, and three concurrent sessions were
+adding es/tr/ru bundles, so a key added here would have broken whichever
+side merged second. Those bundles have all landed (M1-716/718/719/720),
+so nothing blocks the key any more.
+
+What keeps the label out now is a design choice, not a race. Adopting it
+changes the layout in `acceptance:`, the unbracketed-line invariant
+above, and the spoofing analysis below — the bracket's cosmetic-spoof
+wrinkle is an argument FOR the label, so the two cannot be weighed
+separately. That weighing is its own ticket; this one ships the bracket.
 
 ## Known wrinkle, to be carried into the redteam
 
@@ -219,5 +234,11 @@ discovered. It is one more reason the label form is the better end state.
   `acceptance:` (per-message worst case) must be answered in that sidecar
   BEFORE code, because a cap breach invalidates the layout.
 - Sequenced after the es/tr/ru bundle work by intent, not by dependency:
-  `blocked_by` names only M1-756. If those sessions are still open when
-  this is picked up, check `git worktree list` for renderer overlap first.
+  `blocked_by` names only M1-756. Those bundles have since landed
+  (M1-716/718/719/720), so the remaining renderer overlap is with M1-756
+  and M1-762 — both share `DigestRenderer.java` and
+  `DigestRendererSectionsTest.java` with this ticket, and M1-761 shares
+  `TranslationPipeline.java` and `DisplayHitTranslationTest.java`. All
+  four must be merged before this starts; check `git worktree list` as
+  well as ticket status, since a worktree-local branch is invisible to
+  the frontmatter.

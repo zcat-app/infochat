@@ -87,13 +87,21 @@ acceptance:
     to before — `DigestRendererTest` and the rest of
     `DigestRendererSectionsTest` pass unmodified.
   - >-
-    The three spec sentences that still enumerate a two-bundle v1 name
-    all five: `commands.md` §Discovery ("the bundle-completeness CI
-    covers each key in `en` and `cs`"), `verification.md`
-    §Localization bundle completeness ("any shipped language bundle
-    (`en`, `cs` in v1)"), and `decisions.md` D43 ("v1 ships **`en` and
-    `cs` (Czech)** bundles"). All three were left stale by M1-718 and
-    M1-719; none is a decision change, only a factual sync.
+    EVERY spec sentence that still enumerates a two-bundle v1 names all
+    five. There are EIGHT, not the three an earlier draft of this ticket
+    listed — the short count was the defect, so the sweep in §Census
+    Class C is the authority, not this list: `commands.md` §Discovery
+    ("each key in `en` and `cs`"), `commands.md` D68 chat-provenance
+    notice and topic-answer sentences (both "D43 en/cs pair"),
+    `verification.md` §Localization bundle completeness ("any shipped
+    language bundle (`en`, `cs` in v1)"), and four rows in
+    `decisions.md` — D29 ("v1 ships English + Czech"), D43 ("v1 ships
+    **`en` and `cs` (Czech)** bundles"), D58 ("bundle-localized (D43
+    en/cs; D30 plain-text)") and D68 ("D43 en/cs pair"). All were left
+    stale by M1-718/719/720; none is a decision change, only a factual
+    sync. `commands.md` §Asset commands is NOT in the list — M1-720
+    already updated it to the five-bundle form, so re-editing it would be
+    churn.
   - mvn verify is green
 test_plan:
   adds: []
@@ -183,6 +191,31 @@ grep -rn 'toUpperCase(\|toLowerCase(' --include=*.java infochat-provider/src/mai
 | `AssetRegistry.java:215` | out-of-scope: `Character.toUpperCase(char)` takes no locale; English asset names |
 | every other returned site | out-of-scope: all pass `Locale.ROOT` deliberately on identifiers, enum names, URLs, scheme/host, window suffixes and currency codes — machine tokens that MUST fold locale-independently |
 
+**Class C — spec sentences still enumerating a two-bundle v1.** Item 4.
+Enumerated by command, because the hand-written list in the first draft
+of this ticket was short by five:
+
+```
+grep -rn "English + Czech\|en\` and \`cs\|\`en\`, \`cs\|en/cs" docs/spec/
+```
+
+| Site | Stale text | Disposition |
+|---|---|---|
+| `commands.md` §Discovery | "each key in `en` and `cs`" | fix |
+| `commands.md` D68 provenance notice | "D43 en/cs pair" | fix |
+| `commands.md` D68 topic answer | "D43 en/cs pair" | fix |
+| `verification.md` §Localization bundle completeness | "(`en`, `cs` in v1)" | fix |
+| `decisions.md` D29 | "v1 ships English + Czech" | fix |
+| `decisions.md` D43 | "v1 ships **`en` and `cs` (Czech)** bundles" | fix |
+| `decisions.md` D58 | "bundle-localized (D43 en/cs; D30 plain-text)" | fix |
+| `decisions.md` D68 | "D43 en/cs pair" | fix |
+| `commands.md` §Asset commands | already lists all five | no action (M1-720) |
+
+Run as of 2026-08-04 the sweep returns nine rows, eight of them stale.
+All eight live in the three files already in `files_scope`, so fixing
+them all is not a budget breach. If a re-run returns a site absent from
+this table, add the row before starting.
+
 ## Acceptance
 
 See frontmatter.
@@ -237,7 +270,16 @@ item 2's existing test.
 **Item 4 is a factual sync, not a decision change.** D43's substance (two
 paths: deterministic strings from the bundle, LLM prose through the
 translator) is untouched; only its parenthetical count of shipped bundles
-is stale. Do not treat it as a spec amendment.
+is stale. The same holds for D29, D58 and D68 — each names the bundle
+pair in passing while deciding something else entirely. Do not treat any
+of them as a spec amendment.
+
+**Item 4's census was originally short**, listing three sites when the
+sweep returns eight. That is the failure mode this ticket exists to
+catch elsewhere (item 2's vacuous test), so the count is pinned by a
+command rather than by a hand-written list — see §Census Class C. Re-run
+it at implementation time; if it returns a site absent from the
+acceptance list, add the row before starting.
 
 - Adjacent code: `DigestRenderer.sectionHeader` / `sectionCountHeader`
 - Related: M1-720 §Round 1 rework, which records these three spec sites

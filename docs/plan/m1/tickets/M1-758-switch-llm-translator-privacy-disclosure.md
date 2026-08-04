@@ -6,6 +6,7 @@ created: 2026-08-03
 last_updated: 2026-08-03
 blocked_by:
   - M1-746
+  - M1-756
 files_budget: 3
 files_scope:
   - prod/switch-llm.sh
@@ -48,6 +49,20 @@ acceptance:
     asserting "chat carries PRIVATE user DMs" as the sole private-data task)
     is corrected to match, so the next reader does not restore the old
     grouping from the comment.
+  - >-
+    THE DISCLOSURE NAMES EVERY TRANSLATOR LEG `docs/spec/security.md`
+    §Secrets handling enumerates, not just M1-746's. This ticket was
+    filed against a one-leg world and its title still reads that way, but
+    the section already enumerates TWO on main — the query-anchoring leg
+    (M1-746: the user's raw chat message) and the saved-post headlines
+    (M1-755) — and M1-756 adds a THIRD, the periodic digest's
+    source-authored feed headlines, whose own security.md bullet states
+    "M1-758 owns that text". Sync the script against that section as it
+    stands when this ticket runs, not against the single-leg framing
+    above; a disclosure naming one of three is the same defect in
+    smaller form. `blocked_by` includes M1-756 for exactly this reason —
+    the files do not collide, but landing first would ship a disclosure
+    already known to be incomplete.
   - mvn verify from the repo root is green.
 test_plan:
   adds:
