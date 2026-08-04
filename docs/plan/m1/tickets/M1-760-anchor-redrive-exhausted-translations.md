@@ -7,6 +7,7 @@ last_updated: 2026-08-04
 blocked_by: []
 files_budget: 6
 files_scope:
+  - infochat-core/src/main/resources/db/migration/V77__post_translation_redrive.sql
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/translation/IngestTranslationWorker.java
   - infochat-collector/src/main/resources/application.properties
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/translation/IngestTranslationWorkerTest.java
@@ -14,7 +15,7 @@ complexity: medium
 risk: medium
 round_cap: 2
 security_relevant: false
-migration_touch: false
+migration_touch: true
 out_of_scope:
   - >-
     THE DISPLAY SIDE. How a missing anchor RENDERS is M1-759 (bracketed
@@ -40,20 +41,53 @@ out_of_scope:
     more persistent immediate one.
 acceptance:
   - >-
-    A post with a non-English source whose anchor fields are NULL and
-    whose `translation_done` is TRUE — the exhausted-attempts terminal
-    state — is re-enumerated for translation on a backoff schedule rather
-    than being dark forever. The discriminator is exactly
-    `source.language <> 'en' AND title_en IS NULL AND translation_done`;
-    an English-source post also has NULL anchors by design (the worker
-    flips its cursor with no translator call) and MUST NOT be enumerated.
+    Membership in the re-drive set is a DURABLE STAMP written by the
+    releasing path, never a predicate derived from the post's columns.
+    `releaseNull` — and only `releaseNull` — stamps the ladder when the
+    two-attempt budget is exhausted. The other three callers of
+    `persistTranslation` MUST NOT stamp: the English-source
+    short-circuit (NULL anchors by design, no translator call ever), the
+    no-body arm, and `releaseRefused`. A derived predicate
+    (`source.language <> 'en' AND title_en IS NULL AND translation_done`)
+    is REJECTED as the discriminator precisely because it cannot separate
+    those states — `releaseNull` and `releaseRefused` write byte-identical
+    rows (`IngestTranslationWorker.java:523` and `:543`), so a derived
+    predicate would re-drive refusals, contradicting the standing decision
+    at `IngestTranslationWorker.java:296-300` that a structured refusal is
+    never retried. Migration V77 carries the stamp; V66's
+    `post.tagger_sweep_attempts` is the in-repo precedent for per-post
+    re-drive bookkeeping on `post` (additive columns, PG fast default, no
+    table rewrite, no new GRANTs — the collector holds table-level UPDATE
+    on `post` per `V7__joins_post.sql:222`).
   - >-
     The ladder is bounded and terminal: a fixed number of re-drives on
     exponential backoff, then the post is left alone permanently. Follow
     M1-754's parked-source re-probe ladder for the shape — it is the
     in-repo precedent for "retry a terminal state on a slow ladder without
     starving the healthy path" — including a separate scheduling path so
-    re-drives cannot delay first-pass translation.
+    re-drives cannot delay first-pass translation. Here that separate path
+    is a SECOND `@Scheduled` method on `IngestTranslationWorker` with its
+    own poll-interval and its own batch cap, so a re-drive backlog can
+    never consume first-pass batch capacity.
+  - >-
+    The whole ladder must complete INSIDE the partition scan window, which
+    is `infochat.partitions.retention-days.post` widened by
+    `PartitionScan.PARTITION_SCAN_SLACK` (2 days) — 32 days on the default
+    profile but only 16 on `%pi`, where retention is 14 days. A rung
+    scheduled past that floor is silently unreachable, so the configured
+    first-delay/factor/ceiling/cap must sum to less than the `%pi` window.
+    M1-754's own values (ceiling 4d, cap 10) overrun it and MUST NOT be
+    copied verbatim.
+  - >-
+    A post re-hidden to `QUARANTINED` (or advanced to `NEEDS_REVIEW`) by
+    `ReEvaluationJob` is NOT re-driven. The first-pass pickup gets this for
+    free from its `status = 'RAW'` filter, which
+    `IngestTranslationWorker.java:79` records as what "mechanically
+    excludes quarantined posts"; the re-drive path runs on posts that have
+    long since left `RAW`, so it must carry an explicit equivalent
+    exclusion or that control is lost on the new path (engineering-rules
+    §10). A post whose status later returns to a releasable state may be
+    re-driven again on its remaining rungs.
   - >-
     A successful re-drive writes `title_en`/`body_en` through the SAME
     `persistTranslation` path, so the anchor lands sanitized and atomic
@@ -61,8 +95,12 @@ acceptance:
   - >-
     Time that drives the backoff decision is read from the injected
     `java.time.Clock` per CLAUDE.md §"Injectable time in decision logic",
-    never `Instant.now()` or SQL `now()`. `ReEvaluationJob` (M1-444) is
-    the reference implementation. Tests pin it with
+    never `Instant.now()` or SQL `now()`. This component both WRITES the
+    next-re-drive stamp and READS it back to decide dueness, so both sides
+    use the same injected Clock — moving only the read would be an
+    app-vs-DB skew bug. `ReprobeScheduler` is the reference implementation
+    for the write-and-read-back case; `ReEvaluationJob` (M1-444) for the
+    scan window. Tests pin it with
     `QuarkusMock.installMockForType(Clock.fixed(...), Clock.class)`.
   - >-
     Re-drive volume is observable: the count of posts in the
@@ -80,6 +118,10 @@ test_plan:
       Every first-pass translation test, including the English-source
       short-circuit (cursor flipped, no translator call) and the
       two-attempt exhaustion release.
+    - >-
+      The structured-refusal arm stays terminal: a post released by
+      `releaseRefused` is never re-driven, so the "a retry would buy the
+      same refusal at twice the tokens" decision survives this change.
     - all tests currently green on main
 spec_refs:
   - docs/spec/llm.md §Translation flow
@@ -132,15 +174,45 @@ every surface; a display retry pays per render, per scope, forever.
 The exhausted-anchor state and its neighbours, so the enumeration
 predicate is provably narrow:
 
-| `source.language` | `title_en` | `translation_done` | Meaning | Re-drive |
-|---|---|---|---|---|
-| `en` | NULL | TRUE | English post, nothing to translate | **no** |
-| non-`en` | NULL | FALSE | not yet attempted / in flight | no — first pass owns it |
-| non-`en` | NULL | TRUE | **attempts exhausted** | **yes** |
-| non-`en` | present | TRUE | translated | no |
+| `source.language` | `title_en` | `translation_done` | Releasing path | Meaning | Re-drive |
+|---|---|---|---|---|---|
+| `en` | NULL | TRUE | English short-circuit | nothing to translate | **no** |
+| non-`en` | NULL | FALSE | — | not yet attempted / in flight | no — first pass owns it |
+| non-`en` | NULL | TRUE | `releaseNull` | **attempts exhausted** | **yes** |
+| non-`en` | NULL | TRUE | `releaseRefused` | model refused an action request | **no** — standing decision |
+| non-`en` | NULL | TRUE | never ran | pre-V74 row on a source later switched to non-`en` | no — first pass never owned it |
+| non-`en` | present | TRUE | `persistTranslation` | translated | no |
 
-The first row is why `title_en IS NULL` alone is not the predicate: it
-matches the entire current corpus.
+Two rows drive the design. The first row is why `title_en IS NULL` alone
+is not a predicate: it matches the entire current corpus. Rows 3, 4 and 5
+are why NO column predicate works at all — all three are byte-identical
+on disk, and only one of them should be re-driven. That is what forces
+the durable stamp, and with it the migration.
+
+## Why a durable stamp rather than a derived predicate
+
+The ticket was authored with `migration_touch: false`, assuming the
+exhausted set could be recognised from the columns already on `post`.
+The start-time self-check falsified that, and the alternative — deriving
+each rung's due-time from `fetched_at` and the injected Clock, with no
+new state — fails on three counts:
+
+- It cannot separate `releaseNull` from `releaseRefused`. Both write
+  `persistTranslation(row, null, null)` and nothing else durable
+  distinguishes them, so a derived ladder re-feeds action-request content
+  to the model on a schedule.
+- It loses work in exactly the burst this ticket exists for. A translator
+  outage exhausts a whole cohort at once; they all share one rung window,
+  the per-tick batch cap truncates it, the window expires, and the
+  remainder skip that rung with no record. A durable stamp leaves them
+  due until they are actually served.
+- Anchoring on `fetched_at` misfires for a post `ReEvaluationJob`
+  re-queued days after fetch: it can exhaust after its whole ladder has
+  already elapsed, taking zero re-drives and emitting no signal.
+
+The stamp costs one additive migration. V66 (`tagger_sweep_attempts`,
+M1-736) is the same problem solved the same way, and `post` has taken
+attempt/timestamp columns four times already (V21, V52, V66 ×2).
 
 ## Notes
 
@@ -151,3 +223,13 @@ matches the entire current corpus.
   non-empty in the live corpus. If it is empty because no non-English
   source has ever been added, this ticket is preventative — say so in the
   commit rather than implying it repaired live rows.
+- V77 does NOT backfill. Rows already sitting in the exhausted state
+  before the migration keep an unset stamp and are never re-driven, which
+  is correct precisely because they are indistinguishable from the
+  refusal and never-attempted rows above. The current corpus is 100%
+  English and V74 is recent, so that set is expected to be empty; if the
+  live check finds otherwise, raise it rather than adding a backfill
+  UPDATE under this ticket.
+- `migration_touch: true` (set by this refine) serializes the start:
+  `docs/process/workflow.md:337` bars a parallel start while any other
+  ticket is in flight. M1-758 and M1-759 were live when this was written.
