@@ -40,8 +40,20 @@ deviation IN THE AGENT PROMPT ("do NOT re-derive with `git diff main...<branch>`
 yields an empty diff"). The prompt-level warning matters: the agent will otherwise try to
 re-derive the range itself and silently audit nothing. M1-651 ran this three times.
 
-**Why:** the redteam skill's algorithm assumes either a merged (`done`) commit or a
-branch with impl commits; it has NO working-tree form. The run-flow redteam gate runs on
+**FIXED IN THE SKILL 2026-08-04 (M1-768) — the advice above is now history, not a
+standing workaround.** The skill briefly grew a count-based split (count==0 → working
+tree, count>0 → commit range `main...<branch>`) that fixed the empty case but created a
+worse one: `escalate.md`'s refine arm commits the ticket file **on the per-ticket
+branch**, so at a round-2 re-audit the count is 1, the commit range holds only that
+ticket-file commit, and the refuse-on-empty guard does NOT fire — a docs-only audit is
+persisted to `redteam_audits:` looking legitimate (observed M1-763 and M1-764, one day
+apart). M1-768 removed the split: `redteam/SKILL.md` step 1's branch form is now
+**always** working-tree-vs-fork-point, whatever the commit count. Do not re-add a
+count check; it is a superset of the commit range, so it is correct for a committed
+branch too. The inventory-noise half below is still unfixed and still applies.
+
+**Why:** the redteam skill's algorithm assumed either a merged (`done`) commit or a
+branch with impl commits; it had NO working-tree form. The run-flow redteam gate runs on
 an uncommitted tree (same state the code-reviewer audits).
 
 **How to apply:** audit the actual implementation = the **working-tree code diff vs the
