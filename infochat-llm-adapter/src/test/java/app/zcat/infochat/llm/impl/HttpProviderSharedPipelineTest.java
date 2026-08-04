@@ -14,7 +14,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -34,6 +37,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Each provider POSTs to its own endpoint ({@code /messages} vs
  * {@code /chat/completions}); both contexts return the same canned reply
  * so the only variable is which provider issued the call.
+ *
+ * <p>The class also pins the third shared-pipeline property that has no
+ * per-provider variant: an already-armed caller interrupt costs zero
+ * outbound requests and survives the call — see
+ * {@link #interruptedCallerSendsNoRequestAndKeepsTheInterruptArmed}.
  */
 class HttpProviderSharedPipelineTest {
 
@@ -43,9 +51,12 @@ class HttpProviderSharedPipelineTest {
 
     private HttpServer mockServer;
     private Map<String, LlmProvider> providers;
+    /** Requests the mock server actually handled, so "no request was sent" can be asserted. */
+    private AtomicInteger requestsServed;
 
     @BeforeEach
     void setUp() throws Exception {
+        requestsServed = new AtomicInteger();
         mockServer = HttpServer.create(new InetSocketAddress(0), 0);
         String baseUrl = "http://localhost:" + mockServer.getAddress().getPort();
 
@@ -205,10 +216,93 @@ class HttpProviderSharedPipelineTest {
         }
     }
 
+    @Test
+    void interruptedCallerSendsNoRequestAndKeepsTheInterruptArmed() throws Exception {
+        // M1-763 made a timed-out digest render stop spending LLM calls by
+        // interrupting the render thread. That works only because of a
+        // two-part contract at the transport floor which nothing else in
+        // the suite exercises: HttpClient.send fails fast when the caller's
+        // interrupt flag is ALREADY armed — throwing InterruptedException
+        // without opening a socket, and clearing the flag as it goes — and
+        // LlmHttpSupport.sendForBody's catch re-arms the flag before
+        // rethrowing, so the NEXT call in that render is a no-op too.
+        // Break either half and an orphaned render silently resumes
+        // full-speed spend with nothing failing: DigestWorkerTest asserts
+        // on a stub rather than the transport, and docs/spec/security.md
+        // §Rate limiting has no aggregate LLM budget to catch it.
+        //
+        // Both thread types run, because the shape production uses is the
+        // VIRTUAL one — DigestWorker submits the render to
+        // newVirtualThreadPerTaskExecutor() and cancels it with cancel(true).
+        // Parity measures identical today (the entry check fires before any
+        // socket work), but a characterization test earns its keep by
+        // catching a FUTURE JDK change, which would land on the virtual side
+        // where a platform-only leg is not looking. This codebase already
+        // records one interrupt behaviour that does diverge by thread type:
+        // LlmOutputSanitizerAuditRowIT's in-flight socket abort.
+        byte[] body = "{\"error\":\"overloaded\"}".getBytes(StandardCharsets.UTF_8);
+        respondToBothEndpoints(503, body);
+        LlmProvider provider = providers.get("AnthropicProvider");
+
+        assertArmedInterruptCostsNoRequest("platform", Thread.ofPlatform(), provider);
+        assertArmedInterruptCostsNoRequest("virtual", Thread.ofVirtual(), provider);
+
+        // Control leg: the same call on a non-interrupted thread DOES reach
+        // the server. Without it a counter that could never increment would
+        // satisfy the zero-request assertion above vacuously.
+        LlmCallFailedException served = assertThrows(LlmCallFailedException.class,
+            () -> provider.generate(ModelTask.SUMMARIZER, "sys", "usr"),
+            "the control call must surface the canned non-2xx");
+        assertTrue(served.getMessage().contains("non-2xx status 503"),
+            "the control call must reach the server, not fail earlier; got: " + served.getMessage());
+        assertEquals(1, requestsServed.get(),
+            "the control call must be counted, proving the counter can increment");
+    }
+
+    /**
+     * One leg of {@link #interruptedCallerSendsNoRequestAndKeepsTheInterruptArmed}:
+     * arm the interrupt on a fresh thread of the given kind, call {@code provider},
+     * and assert the call throws, leaves the flag armed, and sends nothing.
+     *
+     * <p>Running on a fresh thread rather than the caller's is what keeps the
+     * armed flag out of JUnit's thread — the leg's thread dies carrying it, so
+     * no later test in this JVM can inherit it. Assertions raise on that thread,
+     * where JUnit cannot see them, so the throwable is carried back and rethrown
+     * here; without that hand-off a failing leg would pass silently.
+     */
+    private void assertArmedInterruptCostsNoRequest(String label, Thread.Builder builder,
+                                                    LlmProvider provider) throws InterruptedException {
+        int before = requestsServed.get();
+        AtomicReference<Throwable> legFailure = new AtomicReference<>();
+        Thread leg = builder.unstarted(() -> {
+            try {
+                Thread.currentThread().interrupt();
+                LlmCallFailedException ex = assertThrows(LlmCallFailedException.class,
+                    () -> provider.generate(ModelTask.SUMMARIZER, "sys", "usr"),
+                    label + ": an already-armed interrupt must surface as LlmCallFailedException");
+                assertTrue(Thread.currentThread().isInterrupted(),
+                    label + ": sendForBody must re-arm the flag HttpClient.send cleared; got: "
+                        + ex.getMessage());
+                assertEquals(before, requestsServed.get(),
+                    label + ": an already-armed interrupt must cost zero outbound requests");
+            } catch (Throwable t) {
+                legFailure.set(t);
+            }
+        });
+        leg.start();
+        leg.join();
+
+        Throwable failed = legFailure.get();
+        if (failed != null) {
+            throw new AssertionError("interrupt contract failed on the " + label + " thread", failed);
+        }
+    }
+
     /** Serve {@code (status, body)} on both providers' endpoints, then start. */
     private void respondToBothEndpoints(int status, byte[] body) {
         for (String path : List.of("/messages", "/chat/completions")) {
             mockServer.createContext(path, exchange -> {
+                requestsServed.incrementAndGet();
                 exchange.sendResponseHeaders(status, body.length);
                 try (OutputStream os = exchange.getResponseBody()) {
                     os.write(body);

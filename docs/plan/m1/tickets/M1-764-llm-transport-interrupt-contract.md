@@ -1,7 +1,7 @@
 ---
 id: M1-764
 title: "Pin the LLM transport's interrupt contract with a test"
-status: pending
+status: done
 created: 2026-08-04
 last_updated: 2026-08-04
 blocked_by: []
@@ -58,6 +58,20 @@ acceptance:
     `respondToBothEndpoints`; count invocations in the handler (or assert
     on a request counter) so "no request" is asserted, not assumed.
   - >-
+    THE SAME THREE ASSERTIONS RUN ON BOTH A PLATFORM AND A VIRTUAL THREAD,
+    as two independent legs of the one test. Round-1 redteam (low, DOS)
+    found the platform-only form *asserted* thread-type independence in a
+    comment rather than testing it, while the production path this guards
+    runs virtual — `DigestWorker` submits the render to
+    `Executors.newVirtualThreadPerTaskExecutor()` and cancels it with
+    `renderFuture.cancel(true)`. This repo already records one interrupt
+    behaviour that DOES diverge by thread type
+    (`LlmOutputSanitizerAuditRowIT`'s in-flight socket abort), so parity
+    here is a fact to pin, not to assume. A bare `Thread.ofVirtual()` is
+    sufficient — do NOT import that IT's Quarkus fixture. Each leg asserts
+    on its own, so a future divergence fails the suite instead of being
+    averaged away by the passing leg.
+  - >-
     The test clears the interrupt flag before it returns (a
     `Thread.interrupted()` in a `finally`, or run the body on its own
     thread), so an armed flag cannot leak into whichever test JUnit runs
@@ -86,13 +100,97 @@ spec_refs:
   - docs/spec/security.md §Rate limiting
   - docs/spec/llm.md §Failure handling
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-04
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: WARN
+      assertion_adequacy: PASS
+    diff_stats:
+      files: 5
+      added: 387
+      removed: 16
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-redteam_audits: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-08-04
+    category: DOS
+    severity: low
+    promise: |
+      docs/spec/security.md §Rate limiting, Per-group LLM rate (D47):
+      "Periodic digests do NOT count against user-initiated per-group LLM
+      budget (they are system-initiated; the aggregate system LLM budget is
+      the backstop for digest cost)." The digest render is therefore the one
+      LLM-spending surface the threat model exempts from every per-user and
+      per-group bucket, and it names a single backstop for it.
+    gap: |
+      The named backstop does not exist in code (pre-existing; recorded at
+      the spec site under M1-758 and explicitly listed in this ticket's
+      out_of_scope). What this diff DOES is install the sole regression
+      guard for the mechanism standing in for the missing backstop —
+      M1-763's interrupt-driven render cancel — on the JUnit PLATFORM
+      thread, while the production path runs on a VIRTUAL thread
+      (DigestWorker.java:59-60 newVirtualThreadPerTaskExecutor, submitted
+      at :222, cancelled at :256). The diff asserts thread-type
+      independence in a comment rather than testing it, and the repo's own
+      LlmOutputSanitizerAuditRowIT:169-178 records that interrupt-plus-
+      socket semantics DO diverge by thread type for the adjacent leg of
+      the same cancellation path.
+    repro: |
+      1. Operator routes SUMMARIZER/TRANSLATOR remote (remote-llm/DeepSeek)
+         and a group runs digest_mode=full over a large post set.
+      2. Render overruns slot.windowEnd(); DigestWorker times out, degrades
+         and calls renderFuture.cancel(true).
+      3. The render loop continues by design. Every remaining generative
+         call is a no-op ONLY IF HttpClient.send's already-armed-interrupt
+         entry check fires identically on the virtual thread carrying the
+         render. A JDK upgrade or a virtual-thread-specific send path would
+         break that without this test noticing.
+      4. Nothing fails: the new guard passes (platform thread),
+         DigestWorkerTest asserts on a stub, and §Rate limiting's named
+         aggregate backstop does not exist to cap the volume.
+    suggested_fix_class: other
+redteam_audits:
+  - date: 2026-08-04
+    verdict: FINDINGS
+    base: 2722b68c28758c464ddd79810e726ba2046aaf3e
+    head: working-tree (uncommitted branch m1/M1-764-pin-the-llm-transports-interru)
+    verdict_file: docs/plan/m1/redteam/M1-764-2026-08-04.md
+    findings_count: 1
+    out_of_model_count: 0
+    note: |
+      Round 1 at the /m1-tick run gate, ahead of review. The single low
+      finding disputes the ticket body's §"Thread type: platform is fine
+      here" decision, arguing the guard should execute on the shape
+      production uses. The missing aggregate LLM budget it cites as context
+      is pre-existing and already in this ticket's out_of_scope. Resolved
+      via escalate -> refine (commit a0a23ab4); superseded by the round-2
+      re-audit below.
+  - date: 2026-08-04
+    verdict: CLEAN
+    base: 2722b68c28758c464ddd79810e726ba2046aaf3e
+    head: working-tree (branch @ a0a23ab4 + uncommitted test)
+    verdict_file: docs/plan/m1/redteam/M1-764-2026-08-04-r2.md
+    out_of_model_count: 0
+    note: |
+      Re-audit of the remediated diff, as required when an in-branch fix
+      invalidates the audit it answers. The prompt carried round 1's
+      finding verbatim, told the auditor not to assume closure, and
+      explicitly authorised CLEAN. The round-1 finding entry above is kept
+      rather than reset to [] because it is the recorded cause of the
+      refine commit.
+clarity_check:
+  date: 2026-08-04
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 
@@ -132,15 +230,27 @@ A test-only diff introduces no new attack surface, so a CLEAN verdict is the
 expected outcome — the flag is set so the gate is not skipped on a control
 whose regression is invisible, not because the diff is suspected.
 
-## Thread type: platform is fine here
+## Thread type: assert both, do not assume parity
 
 M1-763's audit test had to run on a **virtual** thread, because that case
 depended on in-flight socket I/O aborting (`SocketException: Closed by
-interrupt`), which platform threads do not do. **This test does not.** The
-`HttpClient.send` entry check is thread-type independent — verified on a
-platform thread (0 ms, no socket). Write it as an ordinary unit test; do not
-copy the virtual-thread machinery from `LlmOutputSanitizerAuditRowIT`, which
-is there for a different reason.
+interrupt`), which platform threads do not do. This case is different in
+kind: the `HttpClient.send` entry check fires before any socket work, so
+thread type should not matter — measured identical on both (JDK 25.0.3:
+`InterruptedException`, flag cleared, zero requests, 0–2 ms).
+
+The original ticket concluded from that measurement that a plain
+platform-thread unit test sufficed. Round-1 redteam disagreed, and it was
+right on the point that matters: the *production* path runs virtual, and a
+characterization test earns its keep by catching a **future** JDK change —
+which, if it ever came, would land on the virtual side, where a
+platform-only test is not looking. Measuring parity once is not the same as
+pinning it. So both legs run, each asserting independently.
+
+What still does NOT belong here is `LlmOutputSanitizerAuditRowIT`'s Quarkus
+fixture; a bare `Thread.ofVirtual()` covers this. Running each leg on its
+own fresh thread also satisfies the flag-hygiene item for free — the thread
+dies carrying the flag, so nothing can leak into the next test.
 
 ## The other half, deliberately not in scope
 
