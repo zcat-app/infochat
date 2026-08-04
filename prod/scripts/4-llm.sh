@@ -479,8 +479,26 @@ case "$backend" in
     # after. At setup the remote backend routes the seven GENERATIVE tasks — chat
     # included — to the remote endpoint (set_llm_base_urls below); embeddings run
     # LOCALLY on a co-started Ollama nomic embedder and never leave the machine
-    # (D54). switch-llm.sh can later move generative tasks back to local one at a
-    # time; embeddings are always local and switch-llm.sh never touches them.
+    # (D54). switch-llm.sh can later re-route the deployment back to a local
+    # backend — for ALL generative tasks at once, not one at a time (M1-603/D56
+    # made it one backend choice for the whole deployment); a single task can
+    # still be kept local by hand-pinning its per-task base-url, but EVERY
+    # switch that proceeds deletes such pins (:352-355) and only announces them
+    # afterwards. The M1-605 gate refuses an Enter-default run over a pinned
+    # config and exits without writing, so "declining" means not switching at
+    # all — there is no prompt that lets an operator switch AND keep a pin.
+    # Do not restate this as a declinable consent prompt: the printed block
+    # below says the opposite because the opposite is what the code does.
+    # Embeddings are always local and switch-llm.sh never touches them.
+    #
+    # This block and prod/switch-llm.sh Phase 4 are the two RUNTIME renderings
+    # of docs/spec/security.md §Secrets handling; SETUP_GUIDE.md §"Switching
+    # your AI backend later" is the long form both point at. This one prints
+    # EARLIER and to MORE operators — an operator who picks remote here and
+    # never re-routes sees only this text — so it must not be the weaker of
+    # the two. Never state or imply that an English-only deployment sends
+    # nothing through translator: the ingest leg is gated on the SOURCE's
+    # language, not on any scope's /lang.
     echo
     echo "PRIVACY DISCLOSURE — choosing 'remote' sends the following GENERATIVE tasks"
     echo "to the remote provider (embeddings are NOT sent — see the last line):"
@@ -489,16 +507,31 @@ case "$backend" in
     echo "  -  security / tagger / entity / classifier — moderation, tagging, entity"
     echo "     extraction and post-kind classification over fetched PUBLIC posts;"
     echo "     exposes your source list / topic interests, not private user data."
-    echo "  -  summarizer — summaries of the posts you query; exposes which topics / posts you read."
-    echo "  -  translator — translation of the bot's replies; exposes the bot-reply text (can echo your queries)."
+    echo "  -  summarizer — ingest-time abstracts of EVERY long fetched PUBLIC post"
+    echo "     (BodySummaryWorker, on a timer, no user present) plus summaries of the"
+    echo "     posts you query; exposes your source list / topic interests and which"
+    echo "     posts you read."
+    echo "  !! translator — carries PRIVATE user text, and runs UNATTENDED. Two things:"
+    echo "           1. For any chat or group whose /lang is not English, it sends your"
+    echo "              messages and what you read — including your search query, which"
+    echo "              on every chat turn IS your raw message, truncated, NOT redacted."
+    echo "           2. Regardless of /lang, even if every scope is English: it sends the"
+    echo "              full TITLE AND BODY of every post from a non-English source, on a"
+    echo "              timer, forever, with no user present. This is gated on the SOURCE's"
+    echo "              language, not yours — an all-English deployment is NOT exempt."
+    echo "           Full leg-by-leg list: SETUP_GUIDE.md, \"Switching your AI backend later\"."
     echo "  -  embeddings — run LOCALLY: a small Ollama nomic embedder is started on"
     echo "     this machine, so the post content for vectorization NEVER leaves it (D54)."
     echo "To keep chat (and every generative task) local too, pick 'ollama'/'llamacpp'"
     echo "now, or switch the whole deployment back to a local backend later with"
-    echo "./prod/switch-llm.sh (a per-task infochat.llm.<task>.base-url override in"
-    echo "the runtime application.properties can still pin one task by hand; the"
-    echo "pinned task does NOT inherit the shared api-key — set the per-task"
-    echo "infochat.llm.<task>.api-key explicitly if the pinned route needs one)."
+    echo "./prod/switch-llm.sh, which re-routes ALL generative tasks at once. To keep"
+    echo "just one task (say translator) local while the rest go remote, hand-pin its"
+    echo "infochat.llm.<task>.base-url in the runtime application.properties. TWO"
+    echo "CAVEATS: every switch-llm.sh run that PROCEEDS deletes such pins (its only"
+    echo "guard is refusing an Enter-default run over a pinned config and writing"
+    echo "nothing — there is no way to switch AND keep a pin), so re-apply the pin"
+    echo "after any switch; and a pinned task does NOT inherit the shared api-key"
+    echo "(set the per-task infochat.llm.<task>.api-key if the pinned route needs one)."
     echo
     # Remote provider dialect (M1-614): openai-compatible (default — the generic
     # OpenAI-family path: NanoGPT, OpenAI, OpenRouter) or deepseek (the dedicated

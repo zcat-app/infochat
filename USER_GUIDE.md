@@ -121,7 +121,7 @@ By default you get **everything** from your subscribed sources. The moment you
 
 | Command | What it does |
 |---|---|
-| `/lang <code>` | Set the language the bot answers you in — its summaries and chat replies (English and Czech in v1; original posts aren't translated) |
+| `/lang <code>` | Set the language the bot answers you in — its summaries and chat replies, and the headlines of the posts it shows you (English, Czech, Spanish, Russian and Turkish in v1; a translated headline shows the original in square brackets underneath) |
 | `/stop` | Cancel whatever the bot is currently working on for you |
 | `/retry` | Re-generate the last summary's wording (same posts) |
 | `/clear` | Clear the current conversation's short-term context (asks to confirm) |
@@ -295,8 +295,26 @@ if a shared source should go.)
 /lang cs
 ```
 
-Replies now come in Czech. (The original posts themselves are never
-translated — only the bot's own wording.)
+Replies now come in Czech — the bot's own wording, and the headlines of the
+posts it shows you. When the bot translates a headline for you, it shows the
+translation with the original headline in square brackets underneath:
+
+```text
+Přeložený titulek
+[Original headline]
+```
+
+A headline with no bracketed line under it is shown exactly as the publisher
+wrote it — either it is already in your language, or it was not translated:
+each `/saved` page and each digest translates only a limited number of
+headlines, and anything past that — or anything in a degraded reply — is
+shown in the source's own language.
+
+The stored post is never rewritten — a post from a non-English source is
+translated to English once when it is fetched, into a separate field kept
+alongside the untouched original. That does mean post text reaches the
+translation model, whichever machine your operator runs it on; see
+[Privacy](#your-privacy-and-your-data).
 
 ---
 

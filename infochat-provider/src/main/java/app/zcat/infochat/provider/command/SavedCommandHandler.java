@@ -391,7 +391,7 @@ public class SavedCommandHandler implements CommandHandler {
         // page's cache-miss rows to untranslated (the listing itself
         // stays cheap and usable). The per-page translator budget then
         // bounds the invocation's generative count; rows beyond it
-        // render untranslated, unmarked (the M1-747 degraded-cluster
+        // render untranslated, unbracketed (the M1-747 degraded-cluster
         // precedent).
         boolean llmTokenHeld = false;
         int translationBudget = translationMaxPerPage;
@@ -417,8 +417,8 @@ public class SavedCommandHandler implements CommandHandler {
                 // Display-hit translation (M1-755): a no-op for en scopes,
                 // same-language hits, and null source language — the
                 // pipeline owns the decision, the controls (pre-bound →
-                // flatten → sanitizer-2 → re-truncate → marker) and the
-                // fallback. Input is the DisplayHeadline OUTPUT, so the
+                // flatten → sanitizer-2 → re-truncate → bracketed original
+                // line) and the fallback. Input is the DisplayHeadline OUTPUT, so the
                 // headline is capped before the translator call by
                 // construction. The cache partition is per-USER
                 // (hit/saved/<userId>/<effectiveLanguage>) — the list is

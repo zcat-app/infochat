@@ -928,10 +928,28 @@ What is and isn't translated
 Translated:                                                                                                                                                                                                                                           
 - Bot's outgoing prose (summaries, error messages, /help text)
 - Cluster headers, classification labels in summaries                                                                                                                                                                                                 
+- Post headlines at DISPLAY time, into the reader's language. AS SHIPPED this
+  translates FROM the post's own source language — `runForDisplayHit` passes
+  `Locale.of(sourceLanguage)` — NOT from the English anchor field, which no
+  Provider query reads. The translation becomes the primary line and the
+  ORIGINAL headline renders on a bracketed line beneath it — literal brackets
+  wrapping the already-sanitized original, no bundle-resolved label — so the
+  render attributes nothing to the bot: the bracketed line is publisher text,
+  and an unbracketed headline is shown as published (already in the reader's
+  language, over the per-render budget, degraded, or a translation that came
+  back byte-identical). `docs/spec/llm.md` §D29 display-leg amendment
+  additionally describes anchor-sourced translation (the display translator
+  reading the English anchor field, English readers served from the anchor
+  column) that no shipped code implements; the shipped behaviour is what this
+  list records
+- Post bodies at INGEST time, once, into the derived English anchor field (D29)                                                                                                                                                                                                 
                                                                                  
 Never translated:                                                                                                                                                                                                                                     
-- Post bodies (must remain in source language for retrieval determinism)         
-- Post titles (used as identifiers; translation would break "show me UID p-a91")                                                                                                                                                                      
+- The STORED post row — ingest writes a separate derived field and never
+  rewrites post.body/post.title. This is the whole of what D29's "never
+  rewritten" guarantees; it is not a claim about the render, and retrieval
+  determinism comes from every arm reading the ONE English anchor field, not
+  from leaving bodies untranslated         
 - Source names, tag names, command names                                         
 - UIDs, topic IDs                                                                                                                                                                                                                                     
                                                                                                                                                                                                                                                       
@@ -1100,7 +1118,7 @@ outcome ∈ {ok, retry, fallback, fail}.
                                                                                                                                                                                                                                                       
 When infochat.llm.*.provider is a remote provider:
                                                                                                                                                                                                                                                       
-- Post bodies are sent to the remote provider as part of security / tagger / entity / classifier / summarizer / chat-agent calls. **Embeddings are NOT sent** — they always run on a local nomic-768 backend (D54); even the `remote-llm` profile / `remote` backend co-starts a local Ollama nomic embedder, so post content for vectorization never leaves the machine.                                                                                                                                 
+- Post bodies are sent to the remote provider as part of security / tagger / entity / classifier / summarizer / chat-agent **and translator** calls. The translator leg is the largest of these and the least obvious: the Collector's ingest translation worker sends the full untruncated title AND body of every post whose SOURCE language is non-English, on a schedule, gated on `source.language` rather than on any scope's `/lang` — so an English-only deployment is not exempt (M1-758; `docs/spec/security.md` §Secrets handling is the authoritative enumeration). **Embeddings are NOT sent** — they always run on a local nomic-768 backend (D54); even the `remote-llm` profile / `remote` backend co-starts a local Ollama nomic embedder, so post content for vectorization never leaves the machine.                                                                                                                                 
 - This is explicit operator opt-in. Local profiles (laptop/vps/pi) default to local Ollama; no remote calls happen unless config changes.                                                                                                             
 - On startup, if any task's provider is remote, log a single redacted line at WARN: LLM task=summarizer provider=anthropic base-url=https://api.anthropic.com. This makes "did I accidentally enable remote?" easy to audit.                          
 - API keys come from environment variables (e.g., ANTHROPIC_API_KEY), never from the DB.                                                                                                                                                              

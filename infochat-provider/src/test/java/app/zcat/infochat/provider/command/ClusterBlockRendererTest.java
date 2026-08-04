@@ -156,15 +156,15 @@ class ClusterBlockRendererTest {
     }
 
     @Test
-    void csScopeTranslatesHeadlineOfDifferingSourceLanguagePostWithMarker() throws Exception {
+    void csScopeTranslatesHeadlineOfDifferingSourceLanguagePostWithBracketedOriginal() throws Exception {
         // The renderer-level pin for the M1-747 display-hit wiring: without
         // this case, deleting the runForDisplayHit call in appendClusterBlock
         // would keep every test green (the pipeline-level tests prove the leg
         // works WHEN called; only this proves the renderer calls it). The
-        // real bundle marker is asserted so the cs value's presence is pinned
-        // end to end. NON-degraded prose on purpose: a degraded cluster
-        // skips the leg (see the degraded pin below), so only this shape
-        // exercises the wiring.
+        // two-line render — translation, then the bracketed original — is
+        // asserted end to end. NON-degraded prose on purpose: a degraded
+        // cluster skips the leg (see the degraded pin below), so only this
+        // shape exercises the wiring.
         ClusterBlockRenderer translatingRenderer = new ClusterBlockRenderer(
                 SanitizerTestDoubles.noAuditSanitizer(),
                 translatingPipeline((text, from, to) -> "Přeložený titulek"),
@@ -177,8 +177,8 @@ class ClusterBlockRendererTest {
                 SCOPE_KIND, SCOPE_ID);
         String rendered = out.toString();
 
-        assertTrue(rendered.startsWith("[topic_id=t-1]\nPřeložený titulek [strojový překlad]\n"),
-                "cs-scope block must lead with the translated, marker-suffixed headline; got: "
+        assertTrue(rendered.startsWith("[topic_id=t-1]\nPřeložený titulek\n[Original headline]\n"),
+                "cs-scope block must lead with the translated headline over the bracketed original; got: "
                         + rendered);
     }
 
@@ -211,9 +211,9 @@ class ClusterBlockRendererTest {
         assertEquals(0, translatorCalls.get(),
                 "a degraded cluster must make ZERO translator calls; got a call for: " + rendered);
         assertTrue(rendered.startsWith("[topic_id=t-1]\nOriginal headline\n"),
-                "the degraded headline renders untranslated and unmarked; got: " + rendered);
-        assertFalse(rendered.contains("[strojový překlad]"),
-                "no machine-translation marker on an untranslated degraded headline; got: "
+                "the degraded headline renders untranslated and unbracketed; got: " + rendered);
+        assertFalse(rendered.contains("[Original headline]"),
+                "no bracketed original on an untranslated degraded headline; got: "
                         + rendered);
     }
 
@@ -245,7 +245,7 @@ class ClusterBlockRendererTest {
      * wired reflectively like
      * {@code TranslationFixtures.newEnShortCircuitPipeline} — that fixture's
      * identity translator cannot exercise the translating leg (an identity
-     * translation is deliberately delivered unmarked).
+     * translation is deliberately delivered unbracketed).
      */
     private TranslationPipeline translatingPipeline(TranslationProvider translator) throws Exception {
         TranslationPipeline pipeline = new TranslationPipeline();

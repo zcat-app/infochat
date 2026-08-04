@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 774 |
+| done | 775 |
 | deferred | 0 |
 | abandoned | 23 |
 | **total** | **803** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-758 — switch-llm.sh: translator now carries private user messages (complexity: medium, risk: medium)
 - M1-759 — Anchor-first headline display: reader-language line, bracketed original beneath (complexity: high, risk: high)
 - M1-760 — Re-drive posts whose ingest translation exhausted its attempts (complexity: medium, risk: medium)
 - M1-767 — Aggregate system LLM budget for the unmetered scheduled digest (complexity: medium, risk: medium)
@@ -70,11 +69,11 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-763 | Timed-out digest render is never cancelled and keeps spending LLM calls | 2026-08-04 | round 1 APPROVE |
 | M1-762 | Localization cleanup after Turkish enablement | 2026-08-04 | round 1 APPROVE |
 | M1-761 | Extend the translator target-script check to the display-hit leg | 2026-08-04 | round 1 APPROVE |
+| M1-758 | Correct every operator-facing LLM exposure disclosure | 2026-08-04 | round 1 APPROVE |
 | M1-756 | Display-time hit translation for digest headlines and the degraded renderers | 2026-08-04 | round 1 APPROVE |
 | M1-755 | Display-time translation of /saved list headlines | 2026-08-04 | round 2 APPROVE |
 | M1-720 | Turkish (tr) localization bundle and enablement | 2026-08-04 | round 2 APPROVE |
 | M1-719 | Russian (ru) localization and target-script check | 2026-08-04 | round 1 APPROVE |
-| M1-718 | Spanish (es) localization bundle and enablement | 2026-08-04 | round 1 APPROVE |
 
 ---
 
@@ -1000,7 +999,7 @@ M1-749 (done)
   │     ├── M1-718 (done) [see above]
   │     ├── M1-719 (done) [see above]
   │     ├── M1-720 (done) [see above]
-  │     └── M1-758 (pending) ← runnable
+  │     └── M1-758 (done)
   ├── M1-747 (done)
   │     └── M1-755 (done)
   └── M1-750 (done)
@@ -1009,7 +1008,7 @@ M1-752 (done)
   └── M1-754 (done)
 M1-753 (done)
 M1-756 (done)
-  ├── M1-758 (pending) [see above]
+  ├── M1-758 (done) [see above]
   └── M1-759 (pending) ← runnable
         ├── M1-765 (pending)
         └── M1-766 (pending)

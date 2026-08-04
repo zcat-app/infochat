@@ -453,9 +453,17 @@ or `deployment.md`. Each one corresponds to at least one named test.
   `/lang` set to a non-English code, a fixture run that produces a
   `/summary` and a periodic digest exercises the
   `TranslationProvider`. A spy on the **presentation** path asserts
-  that no call argument equals or contains the body of any `post` row;
-  only presentation strings (cluster prose, headers, system phrasing)
-  reach it. The ingest-time English-anchor translation is a SEPARATE
+  that every call argument is either bot-authored prose (cluster prose,
+  headers, system phrasing) or a `DisplayHeadline`-derived headline, and
+  that no call writes back to the `post` row. **The pre-amendment form
+  of this clause — "no call argument equals or contains the body of any
+  `post` row; only presentation strings reach it" — is RETIRED, because
+  the display leg below puts source-authored headlines on this path
+  deliberately**: a post whose title is empty yields a headline derived
+  from its body, which for a short body is that body exactly. What the
+  requirement still denies is an UNBOUNDED body reaching the
+  translator — every source-authored argument is cut by
+  `DisplayHeadline`. The ingest-time English-anchor translation is a SEPARATE
   path writing a derived field, and the property it must prove is the
   complement: the original `post.body` is byte-identical before and
   after that translation. What the user is SHOWN is a separate

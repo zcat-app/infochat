@@ -397,6 +397,59 @@ class SwitchLlmWiringTest {
                 "no remote task means no privacy disclosure:\n" + local.output);
     }
 
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void privacyDisclosurePutsTranslatorInTheLoudTierWithBothExposureFacts(@TempDir Path tmp)
+            throws Exception {
+        // M1-758. The translator carries seven legs (docs/spec/security.md
+        // §Secrets handling). Printing all seven buries the one decision the
+        // operator is making, so the disclosure states the two facts that drive
+        // it and points at SETUP_GUIDE.md for the breakdown. This test pins both
+        // facts and the pointer: dropping either fact leaves a disclosure that
+        // reads complete while understating the surface, which the script's own
+        // Phase 4 comment calls a security defect.
+        RunResult r = runSwitch(tmp, BASELINE_OLD_FORMAT_OLLAMA, null, STDIN_SWITCH_TO_REMOTE_WITH_KEY);
+
+        assertTrue(r.output.contains("!! translator — carries PRIVATE user text"),
+                "translator must sit in the loud/private tier beside chat, not read as"
+                        + " topic-interest exposure:\n" + r.output);
+
+        // Fact 1 — the /lang-gated legs carry private user text, and the query
+        // leg is the raw message. "we send your query" alone reads as sanitized.
+        assertTrue(r.output.contains("IS your raw message, truncated, NOT redacted"),
+                "the disclosure must say the search query is the user's raw, unredacted"
+                        + " message — not a sanitized derivative:\n" + r.output);
+
+        // Fact 2 — the ingest leg, which NO scope's /lang gates. This is the
+        // claim an earlier revision got backwards (it told the operator an en
+        // deployment "sends nothing"), so it is pinned by three separate
+        // properties: full bodies, source-gated, and en-not-exempt.
+        assertTrue(r.output.contains("full TITLE AND BODY"),
+                "the ingest leg sends whole posts, not headlines; a disclosure that implies"
+                        + " headlines understates it:\n" + r.output);
+        assertTrue(r.output.contains("gated on the SOURCE's"),
+                "the ingest leg must be attributed to the SOURCE's language, or the reader"
+                        + " assumes their own /lang controls it:\n" + r.output);
+        assertTrue(r.output.contains("all-English deployment is NOT exempt"),
+                "an en-only operator must be told they are NOT exempt — this is the exact"
+                        + " claim the round-1 text got backwards:\n" + r.output);
+
+        // The pointer is load-bearing: it is where the other five legs live.
+        assertTrue(r.output.contains("SETUP_GUIDE.md"),
+                "the short disclosure must point at the full leg-by-leg list:\n" + r.output);
+
+        // A negative claim about the whole task is only legal if EVERY leg is
+        // gated on the condition. The ingest leg is not, so no wording may say
+        // an en scope sends nothing. (assertFalse here targets wording that is
+        // actually false — never a still-true exposure claim.)
+        assertFalse(r.output.contains("sends nothing"),
+                "no blanket 'sends nothing' claim may appear: the ingest leg ignores every"
+                        + " scope's /lang, so the negative is false:\n" + r.output);
+        assertFalse(r.output.contains("strict no-op"),
+                "'strict no-op' is true of the /lang-gated legs but false of the task, and"
+                        + " it appears under the task heading:\n" + r.output);
+    }
+
     // --- recreate command (acceptance item 7) -----------------------------------
 
     @Test

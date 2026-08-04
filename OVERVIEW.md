@@ -287,10 +287,14 @@ all three as requirements — see `docs/spec/architecture.md` §Hardware profile
 
 > **Privacy note.** The local profiles keep all content on your own
 > infrastructure. `remote-llm` — or routing any individual task to a cloud API —
-> is an explicit opt-in to send the content being processed (public post bodies
-> for ingest tasks; private chat messages if chat is routed remotely) to that
-> external provider. See [SETUP_GUIDE.md](SETUP_GUIDE.md) and
-> [docs/spec/security.md](docs/spec/security.md).
+> is an explicit opt-in to send the content being processed to that external
+> provider: public post bodies for the ingest tasks, private chat messages if
+> `chat` is routed remotely, and — if `translator` is routed remotely — both
+> your messages and the full text of every non-English post, the latter on a
+> timer with no user present. See
+> [SETUP_GUIDE.md](SETUP_GUIDE.md) for the leg-by-leg breakdown and
+> [docs/spec/security.md](docs/spec/security.md) §Secrets handling for the
+> authoritative enumeration.
 
 → [docs/spec/architecture.md](docs/spec/architecture.md) §Hardware profiles ·
 [docs/design/01-architecture.md](docs/design/01-architecture.md) §1.7.

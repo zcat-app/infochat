@@ -42,9 +42,6 @@ class DigestRendererTest {
     private static final UUID GROUP_ID =
             UUID.fromString("33333333-3333-3333-3333-333333333333");
 
-    /** The cs bundle's machine-translation marker, appended by the display-hit leg. */
-    private static final String CS_MARKER = "[strojový překlad]";
-
     private DigestRenderer renderer;
     private BundleLoader bundleLoader;
     private RecordingSummaryProseGenerator proseGenerator;
@@ -400,8 +397,8 @@ class DigestRendererTest {
     void normalModeHeadlinesTranslateForNonEnScope() throws Exception {
         // The digest reaches parity with /summary and /saved: a cs group
         // reading en-source headlines gets them through the display-hit
-        // leg, marked as machine-translated, inside the UNCHANGED
-        // "· <headline>  <url>" line.
+        // leg — translation first, the bracketed original beneath it, and
+        // the URL on its own line.
         AtomicInteger calls = new AtomicInteger();
         wireTranslator(calls, "Přeložený titulek");
         List<Post> posts = taggedPosts(3, "en", "ai");
@@ -409,11 +406,12 @@ class DigestRendererTest {
         String result = renderJoined(posts, DigestMode.NORMAL, "cs");
 
         assertEquals(3, calls.get(), "one translator call per rendered headline");
-        assertTrue(result.contains("· Přeložený titulek " + CS_MARKER + "  https://example.com/ai0"),
-                "the translated headline replaces the original in the same line shape; got: "
+        assertTrue(result.contains(
+                "· Přeložený titulek\n[Headline ai 0]\nhttps://example.com/ai0"),
+                "a translated headline renders over the bracketed original with the URL beneath; got: "
                         + result);
-        assertFalse(result.contains("Headline ai 0"),
-                "the untranslated source headline must not also render; got: " + result);
+        assertFalse(result.contains("· Headline ai 0"),
+                "the untranslated source headline must not render as the primary line; got: " + result);
     }
 
     @Test
@@ -432,8 +430,8 @@ class DigestRendererTest {
                 "an en scope must make ZERO translator calls; got: " + result);
         assertTrue(result.contains("· Headline ai 0  https://example.com/ai0"),
                 "en headlines render byte-identical to the source; got: " + result);
-        assertFalse(result.contains(CS_MARKER),
-                "no machine-translation marker on an untranslated headline; got: " + result);
+        assertFalse(result.contains("[Headline ai 0]"),
+                "no bracketed original on an untranslated headline; got: " + result);
     }
 
     @Test
@@ -463,7 +461,7 @@ class DigestRendererTest {
         // is this budget. It is per RENDER, not per section — two sections
         // of three translatable headlines each must still spend only the
         // configured allowance, and the rows past it render untranslated
-        // AND unmarked.
+        // AND unbracketed.
         // The lead is disabled: at 6 clusters it would fire, and its
         // per-cluster PROSE runs through the translator too — a different
         // leg whose calls would confound this leg's accounting.
@@ -479,8 +477,8 @@ class DigestRendererTest {
 
         assertEquals(2, calls.get(),
                 "the budget bounds the WHOLE render, not each section; got: " + result);
-        assertEquals(2, countOccurrences(result, CS_MARKER),
-                "exactly the budgeted headlines carry the marker; got: " + result);
+        assertEquals(2, countOccurrences(result, "[Headline "),
+                "exactly the budgeted headlines carry the bracketed original; got: " + result);
         assertTrue(result.contains("Headline crypto 2"),
                 "a headline past the budget renders untranslated; got: " + result);
     }
@@ -528,8 +526,8 @@ class DigestRendererTest {
         String degraded = renderJoined(posts, DigestMode.FULL, "cs");
         assertEquals(0, degradedCalls.get(),
                 "a degraded cluster must make ZERO translator calls; got: " + degraded);
-        assertFalse(degraded.contains(CS_MARKER),
-                "no machine-translation marker on degraded output; got: " + degraded);
+        assertFalse(degraded.contains("[Sec 1]"),
+                "no bracketed original on degraded output; got: " + degraded);
 
         AtomicInteger healthyCalls = new AtomicInteger();
         wireTranslator(healthyCalls, "Přeložená próza");
@@ -546,7 +544,7 @@ class DigestRendererTest {
      * Replaces the setUp pipeline with one whose translator is a counting
      * stub — {@code newEnShortCircuitPipeline}'s identity translator cannot
      * exercise the translating leg (an identity translation is delivered
-     * unmarked). Shares the renderer's {@link TranslationCache} instance so
+     * unbracketed). Shares the renderer's {@link TranslationCache} instance so
      * a pre-seeded entry is visible to both the budget probe and the
      * pipeline, exactly as the single CDI bean is in production.
      */

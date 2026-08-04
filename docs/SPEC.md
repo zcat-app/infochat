@@ -255,7 +255,10 @@ choices that shape every section.
   `messaging.md` §Required SPI surface.
 - **TranslationProvider**: SPI for bot-output translation (decision D43).
   Translates bot-generated prose into the scope's configured language.
-  Source post bodies are never translated. v1 implementations: English
+  A source post's stored body is never *rewritten* — a non-English post is
+  translated to English once at ingest into an additional derived field, and
+  a retrieved post's rendered headline may be translated at display time
+  (D29). v1 implementations: English
   (pass-through) + Czech. See `llm.md` §Translation flow.
 - **Outbox**: the persist-before-enqueue pattern for ingest. A post is
   written to the DB with `status = 'RAW'` before it is enqueued for

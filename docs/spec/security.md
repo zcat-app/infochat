@@ -1667,7 +1667,7 @@ share a cost profile share a bucket:
   fully-converged page never draw), plus a per-page translator-call
   budget (`infochat.save.translation-max-per-page`, default 5) bounding
   the per-invocation generative count — rows beyond the budget render
-  untranslated, unmarked, and a rejected draw degrades the page's
+  untranslated, unbracketed, and a rejected draw degrades the page's
   cache-miss rows the same way (cached translations still render: they
   cost no generative call). In group scope the D47 per-group LLM
   sub-bucket is drawn alongside the per-user token (the
@@ -1682,6 +1682,32 @@ share a cost profile share a bucket:
   is disclosed under §Secrets handling. The leg shares
   `ModelTask.TRANSLATOR` with the ingest, query-anchoring and
   /summary presentation legs.
+- **Periodic-digest headline translation (M1-756)** — the presentation
+  translation leg on the scheduled digest surface. The scheduled render
+  is system-initiated, so it draws NO per-user bucket token and no
+  per-group LLM sub-bucket (the digest carve-out on the per-group LLM
+  rate below) — a `/retry --digest` re-roll runs the same leg but is
+  user-initiated and stays metered by the per-minute bucket (D61), so
+  this unmetered posture is the SCHEDULED render's alone. Its only
+  volume bound is a per-render translator-call
+  budget (`infochat.digest.translation-max-per-render`, default 5)
+  capping how many raw feed headlines one render sends to
+  `ModelTask.TRANSLATOR` — headlines beyond the budget render
+  untranslated and unbracketed, the same degraded shape the `/saved` page
+  uses, and cached translations still render because they cost no
+  generative call. Stated here because the control ships in code: a
+  budget documented only as an exposure note under §Secrets handling
+  could be widened or removed without a spec amendment, which is the
+  dangerous direction for a limit whose whole job is bounding
+  unattended generative volume. **The budget bounds the headline leg
+  only** — the same render's per-cluster prose translations and its
+  per-section roll-up translations carry no per-render budget at all,
+  so this number is not the size of the digest's generative load, and
+  an operator must not size remote-routing consent from it (the same
+  caveat §Secrets handling attaches to the exposure). What the leg
+  sends to the backend is disclosed under §Secrets handling. The leg
+  shares `ModelTask.TRANSLATOR` with the ingest, query-anchoring,
+  `/saved` and `/summary` legs.
 - **Per-user interruptible concurrency** — not a rate
   bucket: a ceiling on one sender's CONCURRENT interruptible
   requests (the D35 interruptible class: chat replies, on-demand
@@ -1875,9 +1901,14 @@ sources). Application code uses the soft-delete column.
 - The post-setup `prod/switch-llm.sh` backend switcher records the LLM API key in
   `secrets.env` through the same dotenv-escaped channel and prints a per-task
   privacy disclosure naming exactly which generative tasks now call a remote
-  provider and what each exposes — `chat` (private user messages) flagged loudest,
-  the ingest tasks (`security`/`tagger`/`entity`/`classifier`) as topic-interest exposure over
-  public posts — see `SETUP_GUIDE.md` §"Switching your AI backend later".
+  provider and what each exposes — `chat` AND `translator` (both carry private
+  user text) flagged loudest, the ingest tasks
+  (`security`/`tagger`/`entity`/`classifier`) as topic-interest exposure over
+  public posts — see `SETUP_GUIDE.md` §"Switching your AI backend later". The
+  install-time wizard (`prod/scripts/4-llm.sh`) prints the same disclosure
+  before the operator commits to a remote endpoint; it is the EARLIER of the
+  two consent surfaces and the only one an operator who never re-routes ever
+  sees, so it carries the same claims at no less strength.
 - **`translator` carries private user messages too (M1-746, D58).** The
   query-anchoring leg (§Rate limiting) sends the user's search query to
   `ModelTask.TRANSLATOR`, and on the D28 pre-fetch path that query IS the
@@ -1915,9 +1946,55 @@ sources). Application code uses the soft-delete column.
   worker is a separate continuously-scheduled consumer of the same task.
   The disclosure text `prod/switch-llm.sh` prints at switch time must
   name this surface (M1-758 owns that text, alongside the M1-746
-  query-anchoring and M1-755 saved-headline legs). The enumeration in
-  this section is still incomplete for the unattended legs named above —
-  they predate this entry and are not M1-756's to document.
+  query-anchoring and M1-755 saved-headline legs).
+- **`translator` also carries the headlines of the posts a `/summary`
+  run returns (M1-747).** `/summary` (and the `/retry` re-roll of one)
+  renders its cluster blocks through the same display-hit leg as
+  `/saved` and the digest, so for a scope on a non-English `/lang` each
+  rendered headline — the retrieved post's snapshot `title`, or its
+  `body` prefix when the title is empty — reaches
+  `ModelTask.TRANSLATOR`, which may be remote. The data class is the
+  digest's (source-authored feed text); what the *user-initiated*
+  trigger adds is that the selection discloses which posts that user
+  asked about, the signal the `summarizer` disclosure already names.
+  Unlike the digest and the `/saved` page this leg carries no
+  translator-call budget of its own — the per-invocation generative
+  count is bounded by the number of clusters the run renders (one call
+  per non-degraded cluster; a degraded cluster skips the leg, per
+  §Failure handling) and by the per-user LLM bucket the `/summary`
+  invocation itself draws (§Rate limiting). The per-cluster prose and
+  per-section roll-up translations the M1-756 entry describes are
+  reached by this surface too, not by the scheduled digest alone —
+  `/summary` renders through the same `DigestRenderer` entry points —
+  so they are unbudgeted on a user-initiated path as well.
+- **`translator` also carries the bot's own REPLY prose (pre-existing;
+  enumerated by M1-758).** For a scope on a non-English `/lang` the
+  chat-mode reply is translated before delivery, so the reply text —
+  which quotes and paraphrases the user's private message — reaches
+  `ModelTask.TRANSLATOR`. This is the ORIGINAL translator leg, older
+  than every entry above; it is enumerated here because a section that
+  lists the newer legs and omits the oldest reads as complete while
+  understating the surface. Chat memory stays English-canonical: only
+  the delivered reply is translated.
+- **`translator` ALSO runs on a leg that NO scope's `/lang` gates
+  (pre-existing; enumerated by M1-758).** The Collector's ingest
+  translation worker translates fetched posts to the D29 corpus anchor
+  language on a schedule, gated on the **source's** declared
+  `language` column (V74) — never on any scope's `/lang` — and it sends
+  the post's full title AND untruncated body, not a headline. Two
+  consequences the other entries do not carry, both of which an
+  operator sizing a backend switch must have: a deployment whose every
+  scope is `en` is **not** exempt, because one non-English source is
+  enough to activate it; and it is unattended and continuous, so its
+  volume is bounded by the ingest rate rather than by any user action.
+  **No disclosure may state or imply that an `en`-only deployment sends
+  nothing through `translator`.**
+  The enumeration above covers every production call site reaching
+  `ModelTask.TRANSLATOR` as of M1-758. It is a snapshot, not a
+  guarantee: a new call site is a new leg, and the disclosure texts
+  (`prod/switch-llm.sh` Phase 4 and `SETUP_GUIDE.md` §"Switching your
+  AI backend later") are corrected against THIS section, so a leg
+  missing here propagates into both.
 - The translation of that query is retained in an in-memory cache for 24h
   (per (scope, query-hash, language), M1-746). This is **user-authored
   content**, so it is deliberately outside the premise of the

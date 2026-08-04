@@ -1,6 +1,7 @@
 package app.zcat.infochat.llm.wiring;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -132,6 +133,75 @@ class RemoteLlmWiringTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
+    void installTimeDisclosurePutsTranslatorInTheLoudTierWithBothExposureFacts(@TempDir Path tmp)
+            throws Exception {
+        // M1-758. This is the EARLIER of the two runtime privacy disclosures and
+        // reaches MORE operators: it prints before the operator types the remote
+        // URL/key, and an operator who picks remote here and never runs
+        // prod/switch-llm.sh sees only this text. It must therefore carry the same
+        // two facts the switcher's Phase 4 block does, not the weaker pre-M1-746
+        // wording that framed translator as bot-reply echo in the public-post tier.
+        WizardRun run = runWizardCapturingOutput(tmp,
+                "remote\n" + "\n" + REMOTE_BASE_URL + "\n" + REMOTE_MODEL + "\n"
+                        + REMOTE_API_KEY + "\n" + ACCEPT_TIMING_DEFAULTS);
+
+        assertTrue(run.output().contains("!! translator — carries PRIVATE user text"),
+                "translator must sit in the loud/private tier beside chat at INSTALL time,"
+                        + " not among the public-post tasks:\n" + run.output());
+        // Target the pre-M1-746 framing by what is FALSE about it — its tier
+        // placement and its "only bot prose" scope — never by a substring of the
+        // reply-prose leg's natural phrasing. That leg is real (ChatAgent:558)
+        // and spec-enumerated, so an assertion barring the words used to describe
+        // it would make the suite block a TRUE exposure claim from being spelled
+        // out, which is the anti-pattern this ticket exists to remove.
+        assertFalse(run.output().contains("-  translator"),
+                "translator must not sit in the '-' (public-post / topic-interest) tier"
+                        + " the block itself defines as 'not private user data':\n" + run.output());
+        assertFalse(run.output().contains("exposes the bot-reply text (can echo your queries)"),
+                "the pre-M1-746 wording scoped translator to bot-prose echo, which"
+                        + " understates six of its seven legs:\n" + run.output());
+
+        // Fact 1 — the /lang-gated legs carry private user text.
+        assertTrue(run.output().contains("IS your raw message, truncated, NOT redacted"),
+                "the search query is the user's raw, unredacted message:\n" + run.output());
+        // Fact 2 — the ingest leg, which no scope's /lang gates.
+        assertTrue(run.output().contains("full TITLE AND BODY"),
+                "the ingest leg sends whole posts, not headlines:\n" + run.output());
+        assertTrue(run.output().contains("gated on the SOURCE's"),
+                "the ingest leg must be attributed to the SOURCE's language:\n" + run.output());
+        assertTrue(run.output().contains("all-English deployment is NOT exempt"),
+                "an en-only operator must be told they are NOT exempt:\n" + run.output());
+        assertFalse(run.output().contains("sends nothing"),
+                "no blanket 'sends nothing' claim: the ingest leg ignores every scope's"
+                        + " /lang, so the negative is false:\n" + run.output());
+
+        // The mitigation advice must not promise per-task routing the switcher
+        // cannot deliver (M1-603/D56: one backend for the whole deployment), nor
+        // a pin-survival guard it does not have. switch-llm.sh's M1-605 gate only
+        // REFUSES a bare-Enter run over a pinned config; a run that proceeds
+        // deletes every pin unconditionally. Advising a pin without that caveat
+        // hands the operator a control they think protects them and does not.
+        assertTrue(run.output().contains("re-apply the pin"),
+                "hand-pinning is only safe advice if the operator is told the pin does"
+                        + " not survive a switch:\n" + run.output());
+        assertFalse(run.output().contains("decline its consent prompt"),
+                "there is no prompt that lets an operator switch AND keep a pin;"
+                        + " promising one invents a safeguard:\n" + run.output());
+        assertFalse(run.output().contains("one at a time"),
+                "the switcher re-routes ALL generative tasks at once; promising per-task"
+                        + " moves sends the operator to a tool that cannot do it:\n" + run.output());
+
+        // Per-task parity with the switch-time block: this disclosure reaches more
+        // operators, so no task's line may be weaker here. summarizer's unattended
+        // whole-body leg (BodySummaryWorker, @Scheduled) is the one that diverged.
+        assertTrue(run.output().contains("abstracts of EVERY long fetched PUBLIC post"),
+                "summarizer's unattended ingest-time leg must be disclosed here too —"
+                        + " 'summaries of the posts you query' reads as per-request:\n"
+                        + run.output());
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
     void remoteBackendDeepseekWritesProviderAndFixedModel(@TempDir Path tmp) throws Exception {
         // stdin: backend=remote, dialect=deepseek, base-url Enter (accepts the
         // https://api.deepseek.com default), NO model prompt (deepseek pins one
@@ -186,7 +256,14 @@ class RemoteLlmWiringTest {
     // --- helpers (trimmed mirror of LlamacppWiringTest) -------------------------
 
     /** Run prod/scripts/4-llm.sh with a fake docker on PATH; return generated props. */
+    /** The captured stdout and parsed props of one wizard run. */
+    private record WizardRun(String output, Map<String, String> props) {}
+
     private Map<String, String> runWizard(Path tmp, String stdin) throws Exception {
+        return runWizardCapturingOutput(tmp, stdin).props();
+    }
+
+    private WizardRun runWizardCapturingOutput(Path tmp, String stdin) throws Exception {
         Path repoRoot = repoRoot();
         Path runtime = Files.createDirectories(tmp.resolve("runtime"));
         // Seed the profile 1-profile.sh would have written. remote-llm is the
@@ -212,7 +289,7 @@ class RemoteLlmWiringTest {
         int rc = p.waitFor();
         assertEquals(0, rc, "4-llm.sh must exit 0; output:\n" + output);
 
-        return parseProps(runtime.resolve("application.properties"));
+        return new WizardRun(output, parseProps(runtime.resolve("application.properties")));
     }
 
     /**

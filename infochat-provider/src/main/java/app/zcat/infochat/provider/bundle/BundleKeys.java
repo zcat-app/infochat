@@ -2019,15 +2019,6 @@ public final class BundleKeys {
     /** One-line note appended to the English text on any translation fallback. No tokens; resolved via the 2-arg accessor in the scope language. */
     public static final String REPLY_TRANSLATION_UNAVAILABLE = "reply.translation.unavailable";
 
-    /**
-     * Marker appended (space-separated, after truncation) to a
-     * machine-translated display-hit headline (M1-747, D29) so the reader
-     * can tell machine translation from the publisher's own words. No
-     * tokens; plain text per D30; resolved via the 2-arg accessor in the
-     * scope language.
-     */
-    public static final String REPLY_TRANSLATION_HIT_MARKER = "reply.translation.hit_marker";
-
     // ----- Topic-grouped periodic digest (M1-641, D62) ------------------------
     // Per docs/spec/commands.md §Periodic group digests. The non-degraded
     // digest renders its clusters under deterministic category headers —

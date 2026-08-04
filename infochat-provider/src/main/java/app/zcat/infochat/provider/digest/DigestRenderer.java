@@ -136,9 +136,9 @@ public class DigestRenderer {
      * is the sole meter on one route and an inner bound on the other; it
      * is never a substitute for caps that "do not apply to the digest".
      *
-     * <p>Rows past the budget render untranslated AND unmarked: an
+     * <p>Rows past the budget render untranslated AND unbracketed: an
      * untranslated headline in the reader's list is a degradation, not a
-     * translation to be labelled. Field-initialized to the documented
+     * translation to be attributed. Field-initialized to the documented
      * default — the {@link #categoryHeadlineCount} pattern.
      */
     @ConfigProperty(name = "infochat.digest.translation-max-per-render", defaultValue = "5")
@@ -846,13 +846,15 @@ public class DigestRenderer {
      * (M1-756) — the SAME entry point, no-op legs, §10 controls, fallback
      * and cache {@code /summary} uses, over the {@link DisplayHeadline}
      * OUTPUT, so the translator's input is sanitized and capped by
-     * construction. The line SHAPE is unchanged: the translated string
-     * simply replaces the untranslated one.
+     * construction. A translated headline renders as two lines — the
+     * translation, then the bracketed original — with the URL on its own
+     * line beneath; an untranslated one keeps the single-line
+     * "headline  url" shape.
      *
      * <p>Metering: a cache hit makes no provider call and so renders free,
      * while a miss spends one slot of {@code translationBudget} (the row
      * that spends the last slot still calls). Past the budget the headline
-     * renders untranslated and unmarked. Returns the REMAINING budget so
+     * renders untranslated. Returns the REMAINING budget so
      * one allowance covers the whole render across sections.
      */
     private int appendHeadlines(StringBuilder sb, CategorySection section,
@@ -896,7 +898,11 @@ public class DigestRenderer {
             if (!headline.isEmpty()) {
                 line.append(headline);
                 if (hasUrl) {
-                    line.append("  ");
+                    // A translated headline is two lines (translation, then
+                    // the bracketed original), so the URL drops to its own
+                    // line beneath them; an untranslated one keeps the
+                    // inline "headline  url" shape.
+                    line.append(headline.contains("\n") ? "\n" : "  ");
                 }
             }
             if (hasUrl) {

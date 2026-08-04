@@ -74,7 +74,7 @@ public class TranslationPipeline {
      * trailing text is for a human reading a cache dump.
      *
      * <p>UNRENDERABLE: the cache-read path returns the fallback before
-     * {@link #finishDisplayHit}, so this can never be truncated, marked
+     * {@link #finishDisplayHit}, so this can never be truncated, bracketed
      * or delivered.
      *
      * <p>Expires with the entry it replaces — one 24h TTL for the whole
@@ -244,7 +244,7 @@ public class TranslationPipeline {
      * <p>Translating leg, order load-bearing: translator call → pre-bound
      * at {@link DisplayHeadline#BODY_SCAN_LIMIT} → flatten to one line →
      * sanitizer-2 → target-script check → cache write → truncate →
-     * marker. The pre-bound runs
+     * bracketed original line. The pre-bound runs
      * FIRST because the reply is otherwise bounded only by the provider's
      * 1-8 MiB body cap, and a hostile endpoint's in-cap reply must not buy
      * megabytes of NFKC + closed-list scanning before the 200-char display
@@ -259,15 +259,16 @@ public class TranslationPipeline {
      * so the audit sees the full output. The sanitize unit is ONE post's
      * headline per call (M1-697).
      *
-     * <p>The CACHE-HIT path applies NO transform: truncate + marker only,
-     * or — for a stored {@link #REJECTED_BY_TARGET_SCRIPT_CHECK} — the
-     * fallback with note and nothing else. Every value this leg can read
-     * back was written by this leg — hence already flattened AND
-     * sanitized — because display-hit entries occupy a keyspace disjoint
-     * from the prose leg's (see {@link #displayHitCacheLanguage}). A
-     * read-path rewrite of a sanitized value is exactly the
-     * post-sanitize-rewrite ordering {@link DisplayHeadline} forbids.
-     * [redteam 2026-08-03, medium/INJECTION]
+     * <p>The CACHE-HIT path applies NO transform: truncate + bracketed
+     * original only, or — for a stored
+     * {@link #REJECTED_BY_TARGET_SCRIPT_CHECK} — the fallback with note
+     * and nothing else. Every value this leg can read back was written by
+     * this leg — hence already flattened AND sanitized — because
+     * display-hit entries occupy a keyspace disjoint from the prose leg's
+     * (see {@link #displayHitCacheLanguage}). A read-path rewrite of a
+     * sanitized value is exactly the post-sanitize-rewrite ordering
+     * {@link DisplayHeadline} forbids. [redteam 2026-08-03,
+     * medium/INJECTION]
      *
      * @param displayHeadline  the rendered headline; never null (may be
      *     empty — the renderer's omission contract)
@@ -280,9 +281,10 @@ public class TranslationPipeline {
      *     dimension; never null
      * @param scopeLanguage  ISO 639-1 code from
      *     {@code scope_preferences.language}; never null
-     * @return the translated, sanitized, bounded headline plus the
-     *     machine-translation marker; the input unchanged on any no-op
-     *     leg (or when the translation is byte-identical to the input);
+     * @return the translated, sanitized, bounded headline with the original
+     *     headline on a bracketed line beneath it; the input unchanged on
+     *     any no-op leg (or when the translation is byte-identical to the
+     *     input);
      *     or, on translator failure, blank output, or — for a non-Latin
      *     target — a differing translation carrying no character of the
      *     target script, the original headline plus the one-line
@@ -305,7 +307,7 @@ public class TranslationPipeline {
         String cacheLanguage = displayHitCacheLanguage(scopeKind, scopeId, scopeLanguage);
 
         // Cache hit: deliver the stored bytes with NO transform — truncate
-        // + marker only, both applied OUTSIDE the cache. The disjoint,
+        // + bracketed original only, both applied OUTSIDE the cache. The disjoint,
         // per-scope keyspace guarantees the value was written by this leg,
         // i.e. flattened before sanitizer-2 ran, so there is nothing left
         // to rewrite — and rewriting here would be a rewrite AFTER
@@ -315,11 +317,12 @@ public class TranslationPipeline {
         if (cached.isPresent()) {
             // A recorded condition-(d) rejection short-circuits to the same
             // fallback the rejecting render produced. Tested BEFORE
-            // finishDisplayHit, which is what makes the marker unrenderable:
-            // it can never be truncated, marked, or reach a reader.
+            // finishDisplayHit, which is what makes the sentinel
+            // unrenderable: it can never be truncated, bracketed, or reach
+            // a reader.
             return REJECTED_BY_TARGET_SCRIPT_CHECK.equals(cached.get())
                     ? fallbackWithNote(displayHeadline, scopeLanguage)
-                    : finishDisplayHit(displayHeadline, cached.get(), scopeLanguage);
+                    : finishDisplayHit(displayHeadline, cached.get());
         }
 
         String translated;
@@ -385,7 +388,7 @@ public class TranslationPipeline {
         // legitimately — a proper noun is not a failure — and caching it
         // spares the translator call on every subsequent render.
         translationCache.put(displayHeadline, cacheLanguage, sanitized);
-        return finishDisplayHit(displayHeadline, sanitized, scopeLanguage);
+        return finishDisplayHit(displayHeadline, sanitized);
     }
 
     /**
@@ -424,23 +427,31 @@ public class TranslationPipeline {
 
     /**
      * Shared tail of the display-hit fresh and cached paths: bound the
-     * flattened, sanitized translation at {@code DisplayHeadline.MAX_LENGTH}
-     * with the marker-safe cut, then append the machine-translation marker
-     * (D30 plain text, resolved in the scope language). The marker is
-     * appended AFTER truncation so the cut can never produce a half-marker.
-     * A translation byte-identical to the input is delivered unmarked and
-     * unchanged — marking it would label the publisher's own words machine
-     * output.
+     * flattened, sanitized translation at {@code DisplayHeadline.MAX_LENGTH},
+     * then put the ORIGINAL headline on a bracketed line beneath it
+     * (docs/spec/llm.md §D29 display leg). The bracket implies one
+     * direction only: a bracketed line means the line above it is this
+     * leg's translation. The converse — an unbracketed line means the text
+     * is already in the reader's language — describes the D29 TARGET
+     * render (M1-759), not this leg: {@link #runForDisplayHit}'s entry
+     * guard returns the input untouched when the source language is absent
+     * or malformed, and a caller whose per-render translation budget is
+     * spent skips this leg entirely, both rendering source-language text
+     * with no bracket. The original is the leg's input — already bounded,
+     * flattened and sanitized by
+     * {@link DisplayHeadline} — so the brackets wrap publisher text that
+     * needs no further transform, and no bundle-resolved label is involved:
+     * the bracketed line carries no claim about who produced the
+     * translation. A translation byte-identical to the input is delivered
+     * unchanged and unbracketed — there is nothing to attribute.
      */
     private String finishDisplayHit(String displayHeadline,
-                                    String flattenedSanitized,
-                                    String scopeLanguage) {
+                                    String flattenedSanitized) {
         if (flattenedSanitized.equals(displayHeadline)) {
             return displayHeadline;
         }
         String bounded = DisplayHeadline.truncate(flattenedSanitized);
-        String marker = bundleLoader.get(BundleKeys.REPLY_TRANSLATION_HIT_MARKER, scopeLanguage);
-        return bounded + " " + marker;
+        return bounded + "\n[" + displayHeadline + "]";
     }
 
     /**

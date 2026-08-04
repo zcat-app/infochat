@@ -284,7 +284,7 @@ one:
 |---|---|---|---|
 | **ollama** *(default, easiest)* | Most people | Nothing — it downloads the models for you (~5 GB) | Free, fully private (runs on your machine) |
 | **llamacpp** | Advanced users who want a specific model | Nothing for the defaults — it uses pinned, checksum-verified models (~4.5 GB); advanced users can paste their own model ("GGUF") URLs | Free, fully private |
-| **remote** | Best quality / weak hardware | A cloud AI account and key (any OpenAI-compatible API) | Costs money; your prompts go to that provider |
+| **remote** | Best quality / weak hardware | A cloud AI account and key (any OpenAI-compatible API) | Costs money; your prompts, your private chat messages, and the full text of any non-English post go to that provider — the wizard shows the full disclosure before you commit |
 
 Not sure? Choose **ollama** — it just works and keeps everything on your
 machine. (Note: if you picked the **remote-llm** profile in step 1, you must
@@ -312,11 +312,14 @@ your token budget on hidden reasoning, and it fills in `https://api.deepseek.com
 and the `deepseek-v4-flash` model for you. For **openai-compatible** the wizard
 asks for the base URL and the model name to use. Either way it then asks for your
 API key (stored in `secrets.env`, never in plain config). Only the generative
-tasks — chat, summaries, tagging — use the remote provider; **embeddings always
+tasks — all seven of them, including `chat` and `translator`, which carry
+private user text — use the remote provider; **embeddings always
 run locally**. The wizard starts a small Ollama alongside and downloads the nomic
 embedder for you, so your remote provider does **not** need to offer an
 embeddings model, and the post content used to match posts by meaning never
-leaves your machine.
+leaves your machine. The wizard prints a per-task disclosure before you type
+your key; the leg-by-leg detail for `translator` is under
+[Switching your AI backend later](#what-translator-sends-leg-by-leg).
 
 ### Step 5 — Your sources (optional customization)
 
@@ -553,22 +556,69 @@ Use the switcher (you don't re-run the whole wizard):
 ./prod/switch-llm.sh
 ```
 
-It asks, for each AI task, which backend to use — `remote` (a cloud API),
-`ollama`, or `llamacpp` — defaulting to whatever that task uses now. Press Enter
-to keep a task as-is; pressing Enter for everything changes nothing. It never
+It asks **once** which backend to use — `remote` (a cloud API), `ollama`, or
+`llamacpp` — and applies that choice to **every** AI task, defaulting to
+whatever the deployment uses now. Pressing Enter changes nothing. It never
 touches **embeddings** (the "match posts by meaning" model stays local and fixed,
 because changing it would break your stored posts).
 
+If you want one task on a different backend from the rest — the usual reason is
+keeping `chat` and `translator` local because they carry private text — the
+switcher cannot express that. Hand-pin that task's
+`infochat.llm.<task>.base-url` in your runtime `application.properties`
+instead.
+
+**A hand-pin does not survive a switch.** Any switcher run that goes through
+deletes every per-task pin; it prints which ones it removed, but only after
+the decision. Its one safeguard is that it *refuses* a bare-Enter run over a
+pinned config and writes nothing — so "declining" means not switching at all,
+not switching while keeping the pin. Re-apply your pins after every switch.
+
 Before writing anything it **backs up** your config and prints a **rollback**
 command, then a **privacy disclosure** naming exactly which tasks now call the
-remote provider and what each one exposes — loudest for **chat** (it sends your
-private messages), versus the ingest tasks (`security`/`tagger`/`entity`/`classifier`), which
+remote provider and what each one exposes — loudest for **chat** and
+**translator** (both send private user text), versus the ingest tasks
+(`security`/`tagger`/`entity`/`classifier`), which
 only ever see the **public** posts infochat fetches (your topic interests and
 source list, not private data). Finally it prints the one command to apply the
 change, recreating the containers so the new key takes effect. The switcher is
 fully interactive and walks you through each task, so there is nothing to
 memorize; the per-task config it writes is documented in
 [docs/design/07-deployment.md](docs/design/07-deployment.md).
+
+### What `translator` sends, leg by leg
+
+The switcher's disclosure keeps this short and points here. `translator` is
+easy to underestimate — it sounds like it only renders the bot's replies, but
+seven separate things reach it. Six depend on a chat or group having a
+non-English `/lang`:
+
+- **The bot's reply to you** — the reply text itself, which quotes and
+  paraphrases what you said.
+- **Your search query** — on every chat turn this is your raw message,
+  shortened but not stripped of anything.
+- **Headlines of posts you saved**, each time `/saved` lists them.
+- **Headlines of posts a `/summary` returns** — which also reveals what you
+  asked about.
+- **Headlines in the periodic group digest**, sent on a timer with nobody
+  present. This one is capped per digest
+  (`infochat.digest.translation-max-per-render`, default 5).
+- **The written summaries and section round-ups** in a digest or `/summary`.
+  These are **not** capped, so the headline cap above is not the size of the
+  exposure — don't size your decision from it.
+
+The seventh does **not** depend on your `/lang` at all:
+
+- **The full title and body of every post from a non-English source.** This is
+  decided by the *source's* language, not yours, and runs on a timer for as
+  long as infochat is up. If you set every chat to English and add one
+  non-English source, whole posts still go to the remote provider. An
+  all-English deployment is not exempt.
+
+If that last one is the dealbreaker, keep `translator` on a local backend by
+hand-pinning `infochat.llm.translator.base-url` as described above — the
+switcher itself cannot leave one task behind, and it deletes the pin on every
+run that proceeds, so re-apply it after any switch.
 
 ---
 

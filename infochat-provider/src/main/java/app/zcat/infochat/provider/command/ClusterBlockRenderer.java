@@ -51,7 +51,7 @@ import java.util.UUID;
  * cache/provider temporal variance the {@code summary:} field's translation
  * already has — replay parity is preserved because /retry re-projects the
  * post's source language (not because the leg is pure). Degraded clusters
- * are excepted: they render the headline untranslated and unmarked, because
+ * are excepted: they render the headline untranslated and unbracketed, because
  * the degraded branch exists precisely because the LLM path failed and
  * {@code security.md} §Failure handling pins its shape as zero LLM calls
  * (redteam 2026-08-03, low/DOS). The order of the
@@ -118,10 +118,11 @@ final class ClusterBlockRenderer {
             // Display-hit translation (M1-747): a no-op for en scopes,
             // same-language hits, and null source language — the pipeline
             // owns the decision, the controls (pre-bound → flatten →
-            // sanitizer-2 → re-truncate → marker) and the fallback. Input
-            // is the DisplayHeadline OUTPUT, so the snippet is capped
-            // before the translator call by construction. A DEGRADED
-            // cluster skips the leg outright — untranslated, unmarked:
+            // sanitizer-2 → re-truncate → bracketed original line) and the
+            // fallback. Input is the DisplayHeadline OUTPUT, so the snippet
+            // is capped before the translator call by construction. A
+            // DEGRADED cluster skips the leg outright — untranslated,
+            // unbracketed:
             // the branch exists because the LLM path failed, and turning
             // the cost-shedding path into one translator round-trip per
             // cluster would invert it (security.md §Failure handling pins

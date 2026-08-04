@@ -395,15 +395,15 @@ class SavedCommandHandlerTest {
     }
 
     @Test
-    void csScopeTranslatesHeadlineOfDifferingSourceLanguageRowWithMarker() throws Exception {
+    void csScopeTranslatesHeadlineOfDifferingSourceLanguageRowWithBracketedOriginal() throws Exception {
         // M1-755 renderer-wiring pin (the M1-747 precedent): without this
         // case, deleting the runForDisplayHit call in buildReply would keep
         // every pipeline-level test green — those prove the leg works WHEN
         // called; only this proves the /saved renderer calls it. The saved
         // row's snapshot language ('en', the V76 default) differs from the
         // cs scope, so the headline routes through the translating leg and
-        // renders the translated, marker-suffixed headline through the REAL
-        // pipeline (real cache, real sanitizer-2, real bundle marker).
+        // renders the translated headline with the bracketed original
+        // through the REAL pipeline (real cache, real sanitizer-2).
         String contactId = PREFIX + "xlate-actor";
         inboundContext.setEffectiveLanguage("cs");
         UUID userId = seedUser(contactId);
@@ -419,12 +419,11 @@ class SavedCommandHandlerTest {
 
         assertTrue(reply.text().contains("Přeložený titulek"),
                 "cs-scope /saved must render the translated headline; got: " + reply.text());
-        assertTrue(reply.text().contains(
-                        bundleLoader.get(BundleKeys.REPLY_TRANSLATION_HIT_MARKER, "cs")),
-                "the translated headline must carry the machine-translation marker; got: "
+        assertTrue(reply.text().contains("Přeložený titulek\n[Original title]"),
+                "the translated headline must render over the bracketed original; got: "
                         + reply.text());
-        assertFalse(reply.text().contains("Original title"),
-                "the English headline must be REPLACED by the translation, not appended; got: "
+        assertFalse(reply.text().contains("] Original title"),
+                "the English headline must move to the bracketed line, not stay primary; got: "
                         + reply.text());
         assertEquals(1, mockLlm.callCount(),
                 "one row, one translator call — the cs-scope render must exercise the leg");

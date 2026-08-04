@@ -47,7 +47,8 @@ LLAMACPP_EMBED_URL="http://llamacpp-embeddings:8080/v1"
 # The seven generative task config families (embeddings is deliberately
 # excluded). Since M1-603 the endpoint/key are the SHARED default keys; this
 # list drives the per-task model lines, the old-format-line sweep, and the
-# per-task privacy disclosure.
+# per-task privacy disclosure — whose loud/private tier is chat AND translator
+# (M1-758), not chat alone; Phase 4 carries the per-leg detail and the reason.
 LLM_TASKS="security tagger entity classifier summarizer chat translator"
 VALID_BACKENDS="remote ollama llamacpp"
 
@@ -384,15 +385,41 @@ fi
 
 # --- Phase 4: privacy disclosure naming exactly the now-remote tasks. -----------
 # One backend for the whole deployment means remote routes ALL seven tasks; the
-# exposure still differs per task: chat carries PRIVATE user DMs (loudest); the
-# ingest tasks run over fetched PUBLIC posts (topic-interest / source-list
-# exposure, not private user data). A wrong claim here is a security defect, so
-# the text is per-task, never a blanket "privacy sacrificed" line.
+# exposure still differs per task: chat AND translator carry PRIVATE user text
+# (loudest tier, printed above the loop); the ingest tasks run over fetched
+# PUBLIC posts (topic-interest / source-list exposure, not private user data).
+# A wrong claim here is a security defect, so the text is per-task, never a
+# blanket "privacy sacrificed" line — and never a NEGATIVE claim ("task X sends
+# nothing when Y") unless every leg of that task is gated on Y.
+#
+# translator earned the loud tier at M1-746 and carries SEVEN distinct legs
+# (enumerated in docs/spec/security.md §Secrets handling, which is the
+# authority this text is kept in sync with). Printing all seven here buries
+# the decision in ~30 lines an operator skims, so the block states the two
+# facts that actually drive the choice and points at SETUP_GUIDE.md for the
+# breakdown. The two facts are chosen because they are the ones a reader
+# CANNOT infer from the other:
+#   1. it carries private user text, like chat  — legs gated on a scope's /lang;
+#   2. it also ships whole post titles+bodies continuously, gated on the
+#      SOURCE's language and NOT on any scope's /lang, so an all-English
+#      deployment is NOT exempt (IngestTranslationWorker, @Scheduled).
+# Fact 2 is the one an earlier revision of this text got backwards, claiming
+# an /lang en scope "sends nothing" — never state that. translator has NO case
+# branch below; the loop deliberately prints nothing for it.
 if [[ "$backend" == "remote" ]]; then
   echo
   echo "PRIVACY DISCLOSURE — these tasks now call a REMOTE provider:"
   echo "  !! chat — YOUR PRIVATE MESSAGES to the bot are sent to the remote provider."
   echo "           This is the most sensitive exposure: your direct conversations."
+  echo "  !! translator — carries PRIVATE user text, and runs UNATTENDED. Two things:"
+  echo "           1. For any chat or group whose /lang is not English, it sends your"
+  echo "              messages and what you read — including your search query, which"
+  echo "              on every chat turn IS your raw message, truncated, NOT redacted."
+  echo "           2. Regardless of /lang, even if every scope is English: it sends the"
+  echo "              full TITLE AND BODY of every post from a non-English source, on a"
+  echo "              timer, forever, with no user present. This is gated on the SOURCE's"
+  echo "              language, not yours — an all-English deployment is NOT exempt."
+  echo "           Full leg-by-leg list: SETUP_GUIDE.md, \"Switching your AI backend later\"."
   for task in $LLM_TASKS; do
     case "$task" in
       security)   echo "  -  security — moderation over fetched PUBLIC posts; exposes your source list / topic interests, not private user data." ;;
@@ -400,7 +427,6 @@ if [[ "$backend" == "remote" ]]; then
       entity)     echo "  -  entity — entity extraction over fetched PUBLIC posts; exposes your topic interests." ;;
       classifier) echo "  -  classifier — post-kind classification over fetched PUBLIC posts; exposes your topic interests." ;;
       summarizer) echo "  -  summarizer — ingest-time abstracts of EVERY long fetched PUBLIC post (BodySummaryWorker) plus summaries of the posts you query; exposes your source list / topic interests and which posts you read." ;;
-      translator) echo "  -  translator — translation of the bot's replies to you; exposes the bot-reply text (which can echo your queries)." ;;
     esac
   done
 fi
