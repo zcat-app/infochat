@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 772 |
 | deferred | 0 |
 | abandoned | 23 |
-| **total** | **798** |
+| **total** | **799** |
 
 ---
 
@@ -28,6 +28,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-758 — switch-llm.sh: translator now carries private user messages (complexity: medium, risk: medium)
 - M1-759 — Anchor-first headline display: reader-language line, bracketed original beneath (complexity: high, risk: high)
 - M1-760 — Re-drive posts whose ingest translation exhausted its attempts (complexity: medium, risk: medium)
+- M1-764 — Pin the LLM transport's interrupt contract with a test (complexity: low, risk: low)
 
 ---
 
@@ -1013,4 +1014,5 @@ M1-757 (done)
 M1-760 (pending) ← runnable
 M1-762 (done)
 M1-763 (done)
+M1-764 (pending) ← runnable
 ```
