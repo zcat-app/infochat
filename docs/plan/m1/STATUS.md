@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-758 — switch-llm.sh: translator now carries private user messages (complexity: low, risk: medium)
+- M1-758 — switch-llm.sh: translator now carries private user messages (complexity: medium, risk: medium)
 - M1-759 — Anchor-first headline display: reader-language line, bracketed original beneath (complexity: high, risk: high)
 - M1-760 — Re-drive posts whose ingest translation exhausted its attempts (complexity: medium, risk: medium)
 - M1-761 — Extend the translator target-script check to the display-hit leg (complexity: medium, risk: medium)

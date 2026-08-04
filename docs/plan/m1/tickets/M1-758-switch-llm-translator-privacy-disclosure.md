@@ -3,7 +3,7 @@ id: M1-758
 title: "switch-llm.sh: translator now carries private user messages"
 status: pending
 created: 2026-08-03
-last_updated: 2026-08-03
+last_updated: 2026-08-04
 blocked_by:
   - M1-746
   - M1-756
@@ -12,7 +12,7 @@ files_scope:
   - prod/switch-llm.sh
   - infochat-provider/src/test/java/app/zcat/infochat/provider/wiring/SwitchLlmWiringTest.java
   - docs/spec/security.md
-complexity: low
+complexity: medium
 risk: medium
 round_cap: 2
 security_relevant: true
