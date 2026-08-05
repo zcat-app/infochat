@@ -97,8 +97,19 @@ gfx1151 box:
   fp8/int8 checkpoints are pointless here: `torch._scaled_mm` requires ROCm
   MI300+, so gfx1151 has no fp8 matmul and quantized weights only add dequant
   overhead.
-- An ESRGAN upscale pass (e.g. 4x-UltraSharp) can trade sampling resolution for
-  a cheap enlarge; not measured.
+- **Optional upscale stage — in scope, deliberately deferred (2026-08-05).** An
+  ESRGAN pass (e.g. 4x-UltraSharp, ~64 MB) enlarges cheaply, letting the sampler
+  run at a lower resolution and the output land at a higher one. **Adding it
+  later costs infochat almost nothing:** the upscaler is just nodes inside the
+  ComfyUI graph, so there is no SPI change, no new egress, no new security
+  surface (user text still reaches only `CLIPTextEncode.text`), and no new flag
+  — provided `--ratio|-r` is specified as *output* size, leaving the server free
+  to hit it by sampling higher or by upscaling. The only infochat-visible costs
+  are a few seconds of added latency (shifting the queue/rate-cap budget) and a
+  larger attachment. Not measured; at 4.38 s it is not needed to ship.
+- **Unverified:** the attachment size limits SimpleX and Signal impose. Those
+  bound maximum output resolution however the pixels are produced, so they need
+  checking before `--ratio` accepts large sizes.
 
 **Prerequisites / tensions:**
 
