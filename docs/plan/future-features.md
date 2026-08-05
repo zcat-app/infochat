@@ -71,19 +71,67 @@ product. Determinism-clean: the transcript simply becomes the query text.
 messaging affordance and the transcription backend is self-contained.
 
 ### B2. `/image` — generate and return an image
-**What:** `/image [-r WxH] -d "description"` → generate an image via a backend and
-return it, or return text explaining why it wasn't possible.
+**What:** `/image [--ratio|-r <WxH>] [--prompt|-p] "{description}"` → generate an
+image via a local backend and return it, or return text explaining why it wasn't
+possible. The "return text why it failed" graceful-degradation instinct is
+correct and should be the contract.
 
-**Current state — not carriable today** (outbound has no attachment field).
+**Current state — not carriable today** (outbound has no attachment field), but
+**the backend is proven local and fast** as of the spike below.
 
-**Prerequisites / tensions:** needs the outbound half of the media SPI + an
-image-gen backend. **Privacy/cost tension:** local generation (e.g. Stable
-Diffusion) is heavy on a CPU-only VPS (current profile); remote generation means
-prompt data leaves the box, which cuts against the privacy-first posture. The
-"return text why it failed" graceful-degradation instinct is correct and should
-be the contract.
+**Backend — measured on this host 2026-08-05, not estimated.** ComfyUI (manual
+install; ROCm 7.13 torch lives in conda env `py314` only) on the Strix Halo /
+gfx1151 box:
 
-**Verdict: `v2-milestone`.**
+- **Mage-Flow Turbo** (4.1B, MIT, `Comfy-Org/Mage-Flow`) — **4.38 s** per
+  1024x1024 image steady-state; 15 s on the first run (model load). Settings
+  4 steps / cfg 1.0. Needs the `qwen3vl_4b` text encoder + `mage_flow_vae` and
+  the **Flux2 latent format: 128 channels, downscale ratio 16** — a 16-channel
+  SD3/Z-Image latent node sails through sampling and then fails at VAE decode.
+- Comparison points: Z-Image Turbo (5.9B) **21 s** measured; Krea 2 Turbo
+  (13.1B) ~46 s and Krea 2 raw ~5 min, both estimated, not run.
+- Launch flags are load-bearing on gfx1151: `--disable-mmap` (without it the
+  first image took **11 minutes** — a ROCm mmap bug above 64GB), plus
+  `--bf16-vae`, `--highvram`, and env
+  `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1` (**10.2x** attention, measured).
+  fp8/int8 checkpoints are pointless here: `torch._scaled_mm` requires ROCm
+  MI300+, so gfx1151 has no fp8 matmul and quantized weights only add dequant
+  overhead.
+- An ESRGAN upscale pass (e.g. 4x-UltraSharp) can trade sampling resolution for
+  a cheap enlarge; not measured.
+
+**Prerequisites / tensions:**
+
+- Needs the outbound half of the media SPI (see the §B header).
+- **The privacy/cost tension recorded 2026-07-13 is resolved.** That entry
+  assumed local generation was too heavy for the deployment profile and that
+  remote generation would leak prompts. At 4.38 s and never leaving the host,
+  local generation now *supports* the privacy-first posture instead of cutting
+  against it. The tension returns only on a CPU-only VPS profile.
+- **No MCP, and not an LLM tool.** ComfyUI exposes plain HTTP (`POST /prompt`,
+  poll `/history`, `GET /view`) — deterministic Java calls it directly. Exposing
+  generation as an LLM-callable tool would collide with the
+  deterministic-retrieval principle and widen the injection surface for nothing.
+- **Build the workflow graph server-side.** ComfyUI's API accepts an entire
+  graph, and its nodes execute Python and touch the filesystem. User text must
+  reach exactly one field (`CLIPTextEncode.text`) as a JSON string value;
+  anything looser is remote code execution.
+- **Bind ComfyUI to `127.0.0.1`** — it ships no authentication of any kind.
+- Provider→ComfyUI is new egress: route it through `infochat-ssrf` or record an
+  explicit configured-internal exemption.
+- **GPU contention:** one GPU, ~4.4 s held per image. Requests must queue behind
+  a per-user rate cap, or image traffic starves any local LLM task and the
+  digest pipeline.
+- **Content liability is the open question, and it is specific to B2.** A
+  user-supplied prompt steers an image model whose output the bot then delivers
+  under its own identity — a different risk class from text output, addressed by
+  neither the threat model nor the probation system today. Needs a `/redteam`
+  pass at design time plus a gating decision (probation-only? admin-only?
+  classifier pre-filter? fixed-template prompts?).
+
+**Verdict: `v2-milestone`** — the backend is proven; the plumbing and the content
+policy are the actual work. **User priority (2026-08-05): B2 ahead of B1/B3**,
+against the §B header's voice-in → image → read sequencing.
 
 ### B3. `/read` — return the last answer as audio (TTS)
 **What:** `/read` sends the previous answer back as a playable audio file.
