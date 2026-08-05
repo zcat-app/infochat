@@ -315,6 +315,35 @@ Adding a fallback chain is a v2 candidate.
   bracketed original takes the primary slot and the repair is a
   collector-side re-drive, not a display-time retry, which would
   reintroduce a translator call on the scheduled digest path.
+  **What backs the bracket (D29 (c), amended 2026-08-05).** It is a
+  rendering rule, not a language proof: languages are declared, never
+  inferred, so "unbracketed" means the line came from a channel contracted
+  to produce the reader's language and passed the mechanical checks
+  §Failure handling names below. Two enforcement points, both mechanical:
+  the ingest leg refuses to STORE an anchor byte-identical to the input it
+  was handed, and the render refuses to PROMOTE an anchor that still
+  carries every one of the publisher's words in the publisher's order,
+  degrading to the bracketed shape instead. The render check is the
+  load-bearing one — being evaluated on the final rendered strings it
+  covers every reduction the render applies, rather than a list of them —
+  and it is applied at BOTH translation hops by one shared predicate: a
+  non-English reader is translated twice (source to English at ingest,
+  English to their own language at display), so the display translator's
+  reply is held to the same test as the anchor, and a reply still carrying
+  every word of its input in order is treated as no translation.
+  It is bounded, and the bound is stated: it catches a derivation built by
+  ADDING to the original — padding between words or at either end, visible
+  or not — for a headline that fits inside the display cut. It does not
+  catch one built by CHANGING it (a character inserted inside a word, a
+  reworded line, a fluent mistranslation, third-language output), nor — on
+  the ANCHOR hop, whose operands are the rendered lines — ANY insertion at
+  or before the cut on a headline longer than it, a leading pad being only
+  the most obvious form: material added ahead of the cut shifts it and so
+  alters the tail rather than extending it. Only an addition past the cut
+  is still caught there, because truncation discards it. Both render
+  unbracketed. Those residuals follow
+  from refusing language inference and are stated, not closed; D29 (c)
+  records why the second one is not worth a second evaluation pass.
 - **Deterministic strings come from a localization bundle, not the
   translator (decision D43).** Anything the bot says that does not
   depend on user content — `/help` output, friendly-error

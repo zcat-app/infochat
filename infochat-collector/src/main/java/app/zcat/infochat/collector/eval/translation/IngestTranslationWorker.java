@@ -45,6 +45,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.UnaryOperator;
 
 /**
  * Collector-side scheduled poller that writes {@code post.title_en} /
@@ -141,6 +142,37 @@ import java.util.UUID;
  * {@code translation_done=FALSE} and the next tick re-picks the post;
  * a re-delivered post is simply translated again (idempotent).
  *
+ * <h2>Echo check</h2>
+ *
+ * <p>A reply identical to the input is not a translation, so storing one
+ * as the anchor writes a known non-translation into a column read as
+ * English. {@link #anchorField} drops such a field to NULL, per field,
+ * and {@link #persistAnchor} notifies under
+ * {@link #ERROR_CLASS_TRANSLATION_ECHO}. The post still releases with
+ * {@code translation_done=TRUE} and NO re-drive stamp — an echo is a
+ * COMPLETED attempt, not an exhausted one, so it must not enter M1-760's
+ * ladder or an untranslatable post re-drives forever.
+ *
+ * <p><b>This check is the STORAGE-side half, and it is deliberately
+ * bounded to byte identity.</b> The condition is the one
+ * {@code docs/spec/llm.md} §Failure handling names for a Latin target
+ * ("the output is byte-identical to the input"), applied to the value
+ * about to be persisted rather than to the raw reply. It is NOT the
+ * control behind D29 (c)'s bracket promise, and must not grow into one:
+ * that promise is about the line a READER IS SHOWN, which is produced by
+ * reductions this module cannot observe (the provider's flatten, its
+ * 2000-char scan bound and its 200-char display cut) and cannot mirror
+ * without judging a full-length body by a 200-char prefix. The render
+ * owns its own half — {@code DisplayHeadline.usesAnchor} refuses to treat
+ * an anchor that DISPLAYS as the original as evidence of translation —
+ * and that is where a reduction-based evasion is closed, on the final
+ * strings. (M1-771; the 2026-08-05 red-team rounds 2 and 3 each found one
+ * more render reduction this side had not mirrored.)
+ *
+ * <p>Beyond byte identity the check stops: a lightly-reworded original,
+ * or fluent prose in the wrong language, is a stated residual — detecting
+ * either needs language identification, which D29 refuses.
+ *
  * <h2>Controls carried across onto LLM-authored text</h2>
  *
  * <p>{@code title_en}/{@code body_en} are LLM-authored text derived from
@@ -196,6 +228,9 @@ public class IngestTranslationWorker {
 
     /** Canonical error class emitted when the model answers with the refusal marker. */
     public static final String ERROR_CLASS_TRANSLATION_REFUSAL = "translator.refusal";
+
+    /** Canonical error class emitted when the model echoes its input instead of translating. */
+    public static final String ERROR_CLASS_TRANSLATION_ECHO = "translator.echo";
 
     /**
      * The structured refusal marker (docs/design/04-security.md §4.3
@@ -391,9 +426,7 @@ public class IngestTranslationWorker {
         }
         switch (outcome.kind()) {
             case TRANSLATED -> {
-                persistTranslation(row,
-                    outcome.title() == null ? null : cleanTitle(row, outcome.title()),
-                    outcome.body() == null ? null : cleanBody(row, outcome.body()));
+                persistAnchor(row, outcome);
                 LOG.info("IngestTranslationWorker: re-drive attempt {} of {} anchored post_id={}",
                     attemptNumber, redriveCap, row.id());
             }
@@ -444,10 +477,9 @@ public class IngestTranslationWorker {
         if (outcome != null) {
             switch (outcome.kind()) {
                 // TRANSLATED — normalize + sanitize the model output, then
-                // persist (a NULL body value means the post had no body).
-                case TRANSLATED -> persistTranslation(row,
-                    outcome.title() == null ? null : cleanTitle(row, outcome.title()),
-                    outcome.body() == null ? null : cleanBody(row, outcome.body()));
+                // persist (a NULL body value means the post had no body, and
+                // an echoed field also persists NULL — see anchorTitle).
+                case TRANSLATED -> persistAnchor(row, outcome);
                 // REFUSAL — the model reported an action request with the
                 // structured marker: persist NULL + notify under the refusal
                 // error class. Not retried — the content asked for action;
@@ -569,28 +601,162 @@ public class IngestTranslationWorker {
     }
 
     /**
-     * Control (a)+(b) for the title field: NFKC + the metadata-field
-     * strip (bidi/zero-width AND ISO control — the same boundary
-     * PostPersister applies to an original title), then the shared
-     * sanitizer pipeline. Unconditional, no fenced-code carve-out.
+     * The TRANSLATED arm's tail, shared by the first pass and the re-drive:
+     * decide each field, write both with the cursor in one statement, and
+     * only then announce an echo. The notification is deliberately last —
+     * see {@link #notifyEcho}. One notification per post, not per field:
+     * the operator signal is "this source is not being translated", which a
+     * second row would not sharpen.
      */
-    private String cleanTitle(PostRow row, String translated) {
-        String normalized = IngestTextNormalizer.stripMetadataField(
-            Normalizer.normalize(translated, Normalizer.Form.NFKC));
-        return sanitize(row, normalized);
+    private void persistAnchor(PostRow row, ParseOutcome outcome) {
+        AnchorDecision title = anchorTitle(row, outcome.title());
+        AnchorDecision body = anchorBody(row, outcome.body());
+        persistTranslation(row, title.value(), body.value());
+        if (title.echoed() || body.echoed()) {
+            notifyEcho(row);
+        }
     }
 
     /**
-     * Control (a)+(b) for the body field: NFKC + the bidi/zero-width
-     * strip (the same composition as Stage 1's
-     * {@code Stage1Pipeline.unicodeNormalize} — control characters stay,
-     * a body legitimately spans lines), then the shared sanitizer
-     * pipeline. Unconditional, no fenced-code carve-out.
+     * The {@code title_en} decision for a TRANSLATED outcome — see
+     * {@link #anchorField}. Judged per field so a headline that
+     * legitimately translates to itself — a proper noun — does not cost
+     * the post its body anchor.
      */
-    private String cleanBody(PostRow row, String translated) {
-        String normalized = IngestTextNormalizer.stripBidiAndZeroWidth(
-            Normalizer.normalize(translated, Normalizer.Form.NFKC));
-        return sanitize(row, normalized);
+    AnchorDecision anchorTitle(PostRow row, @Nullable String translated) {
+        return anchorField(row, "title", row.title(), translated,
+            IngestTranslationWorker::normalizeTitle);
+    }
+
+    /**
+     * The {@code body_en} decision — the {@link #anchorTitle} rule for the
+     * body field (a {@code null} {@code translated} here means the post had
+     * no body text).
+     */
+    AnchorDecision anchorBody(PostRow row, @Nullable String translated) {
+        return anchorField(row, "body", row.body(), translated,
+            IngestTranslationWorker::normalizeBody);
+    }
+
+    /**
+     * One field's anchor decision: the normalized + sanitized translation,
+     * or SQL NULL when the model ECHOED the input it was handed.
+     *
+     * <p>The echo condition is the Latin-target form of the spec's "did it
+     * translate" test (docs/spec/llm.md §Failure handling: "for Latin
+     * target scripts the output is byte-identical to the input") — the only
+     * mechanically-checkable form available here, since the anchor's target
+     * is English and D29 refuses to infer a language from text. It is the
+     * same condition {@code TranslationPipeline} applies as condition (b).
+     *
+     * <p><b>Byte identity, and nothing stronger.</b> The comparison is
+     * {@link String#equals} on the two sides reduced only by the pass this
+     * field already receives ({@code normalize}) plus {@link String#strip}
+     * — the latter because {@link #parseTranslation} hands the reply back
+     * already stripped, so an unstripped original would otherwise never
+     * compare equal to its own echo. Widening it further is out of bounds
+     * by design, not by omission: see the class javadoc §Echo check for
+     * why the reduction-based evasions belong to
+     * {@code DisplayHeadline.usesAnchor} instead. [M1-771 red-team
+     * 2026-08-05 rounds 2 and 3]
+     *
+     * <p>The comparison runs on the parsed reply AND again on the final
+     * sanitized value, because the sanitizer runs after normalization and
+     * REWRITES what it matches: a closed-list token becomes
+     * {@code LlmOutputSanitizerCore.REDACTED_COMMAND_REPLACEMENT}, which an
+     * original carrying that same literal would then equal. Only a test on
+     * the final value sees that one. [red-team 2026-08-05 round 1]
+     *
+     * <p>An echo is only LOGGED here. Its durable notification has to land
+     * after {@link #persistTranslation}, so the caller emits it — see
+     * {@link #notifyEcho}.
+     */
+    private AnchorDecision anchorField(PostRow row, String fieldName,
+                                       @Nullable String original,
+                                       @Nullable String translated,
+                                       UnaryOperator<String> normalize) {
+        if (translated == null) {
+            return AnchorDecision.absent();
+        }
+        String normalizedTranslation = normalize.apply(translated);
+        if (original == null) {
+            // The post carries no text in this field, so there is nothing
+            // the model could have echoed.
+            return AnchorDecision.anchored(sanitize(row, normalizedTranslation));
+        }
+        String originalForm = normalize.apply(original).strip();
+        if (normalizedTranslation.strip().equals(originalForm)) {
+            logEcho(row, fieldName);
+            return AnchorDecision.echo();
+        }
+        String cleaned = sanitize(row, normalizedTranslation);
+        if (cleaned.strip().equals(originalForm)) {
+            logEcho(row, fieldName);
+            return AnchorDecision.echo();
+        }
+        return AnchorDecision.anchored(cleaned);
+    }
+
+    /**
+     * The per-field WARN. Log-only by design: it runs before
+     * {@link #persistTranslation}, and the durable notification must not —
+     * see {@link #notifyEcho}.
+     */
+    private void logEcho(PostRow row, String fieldName) {
+        LOG.warn("IngestTranslationWorker: translator echoed the {} it was given for post_id={} "
+            + "(error_class={}); storing NULL rather than a non-translation",
+            fieldName, row.id(), ERROR_CLASS_TRANSLATION_ECHO);
+    }
+
+    /**
+     * An echoed post is a translator that produced nothing, and it has to
+     * be as visible as the sibling REFUSAL arm: both are outcomes an
+     * upstream author can steer the model into, and the echo leaves NO
+     * other trace — the post releases with the cursor advanced, writes no
+     * re-drive stamp, and {@link #countAwaitingRedrive} counts stamped rows
+     * only. Its own error class keeps a steered source distinguishable from
+     * ordinary LLM-failure noise. Throttled, so a feed echoing every post
+     * costs one notification per window rather than one per post.
+     *
+     * <p>Emitted AFTER {@link #persistTranslation}, exactly as
+     * {@link #releaseRefused} orders its own pair. {@code notifyOnce}
+     * writes {@code admin_notification_state}; ahead of the persist, a
+     * failing write would abort {@link #processOne} with
+     * {@code translation_done=FALSE} still set, and the next tick would
+     * re-pick the post and re-spend a TRANSLATOR call — unboundedly, for a
+     * post that reliably echoes. [redteam 2026-08-05 round 2, out-of-model]
+     */
+    private void notifyEcho(PostRow row) {
+        throttledAdminNotifier.notifyOnce(
+            ERROR_CLASS_TRANSLATION_ECHO,
+            ERROR_CLASS_TRANSLATION_ECHO,
+            "Ingest translation echoed its input for post_id=" + row.id());
+    }
+
+    /**
+     * Control (a) for the title field: NFKC + the metadata-field strip
+     * (bidi/zero-width AND ISO control — the same boundary PostPersister
+     * applies to an original title). Separate from {@link #sanitize} so the
+     * echo test can reduce the ORIGINAL through the identical transform
+     * without sanitizing it: a sanitizer hit writes an
+     * {@code LLM_OUTPUT_SANITIZED} audit row, and feed content is not LLM
+     * output.
+     */
+    private static String normalizeTitle(String text) {
+        return IngestTextNormalizer.stripMetadataField(
+            Normalizer.normalize(text, Normalizer.Form.NFKC));
+    }
+
+    /**
+     * Control (a) for the body field: NFKC + the bidi/zero-width strip (the
+     * same composition as Stage 1's {@code Stage1Pipeline.unicodeNormalize}
+     * — control characters stay, a body legitimately spans lines). Kept
+     * separate from {@link #sanitize} for the reason {@link #normalizeTitle}
+     * gives.
+     */
+    private static String normalizeBody(String text) {
+        return IngestTextNormalizer.stripBidiAndZeroWidth(
+            Normalizer.normalize(text, Normalizer.Form.NFKC));
     }
 
     /**
@@ -1028,6 +1194,29 @@ public class IngestTranslationWorker {
      */
     record ParseOutcome(Kind kind, @Nullable String title, @Nullable String body) {
         enum Kind { TRANSLATED, REFUSAL }
+    }
+
+    /**
+     * One field's anchor decision: the value to persist ({@code null} is
+     * SQL NULL) and whether that null is an ECHO rather than an absent
+     * field. The caller cannot infer the difference — both persist NULL —
+     * and it has to know, because only an echo is worth notifying about.
+     */
+    record AnchorDecision(@Nullable String value, boolean echoed) {
+        /** The field carries a translation. */
+        static AnchorDecision anchored(String value) {
+            return new AnchorDecision(value, false);
+        }
+
+        /** The outcome carried no value for this field (a post with no body). */
+        static AnchorDecision absent() {
+            return new AnchorDecision(null, false);
+        }
+
+        /** The model handed back what it was given. */
+        static AnchorDecision echo() {
+            return new AnchorDecision(null, true);
+        }
     }
 
     /** Per-attempt result classification driving the single retry. */

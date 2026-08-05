@@ -1759,7 +1759,12 @@ share a cost profile share a bucket:
   untranslated and, per D29 (c), BRACKETED, the same degraded shape the
   `/saved` page uses: an unbracketed line always means the reader's own
   language, so a budget exhaustion must not silently emit a bare foreign
-  line (M1-759). The bracket is renderer-added punctuation and costs no
+  line (M1-759). That invariant is bounded as D29 (c)'s 2026-08-05
+  amendment states — a rendering rule backed by two mechanical checks, not
+  a proof that the line is in the reader's language — and this budget path
+  is on its deterministic side: the render KNOWS it skipped the
+  translation, so the bracket here is decided by the code, never inferred
+  from model output. The bracket is renderer-added punctuation and costs no
   generative call, and cached translations still render because they
   cost no generative call either. Stated here because the control ships in code: a
   budget documented only as an exposure note under §Secrets handling

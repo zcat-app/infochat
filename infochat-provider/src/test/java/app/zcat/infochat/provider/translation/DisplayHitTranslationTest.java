@@ -485,6 +485,74 @@ class DisplayHitTranslationTest {
                 "the identity result must be cached — one translator call across two renders");
     }
 
+    // ----- echo check: the second translation hop (M1-771) --------------
+
+    @Test
+    void paddedEchoIsReportedAsANoOpAndStillConvergesOnTheCache() {
+        // The hop this closes: a cs reader's headline is translated TWICE
+        // (source → English at ingest, English → cs here), and byte
+        // identity guards only the exact echo — one added character clears
+        // it and the reader is handed English beneath an unbracketed line
+        // claiming Czech. NO_OP rather than FALLBACK because
+        // primaryInReaderLanguage brackets a NO_OP on every path that can
+        // reach this leg, so the note would only fire on the walk's
+        // accepted false positives.
+        translatorStub.setResponseText(HEADLINE + ".");
+
+        TranslationPipeline.DisplayHit first = hitFor(HEADLINE, "en", "cs");
+        TranslationPipeline.DisplayHit second = hitFor(HEADLINE, "en", "cs");
+
+        assertEquals(TranslationPipeline.DisplayHitOutcome.NO_OP, first.outcome(),
+                "a reply that still carries every word of its input in order is the input "
+                        + "padded, not a translation");
+        assertEquals(HEADLINE, first.headline(),
+                "the reader must be shown the INPUT, never the padded echo");
+        assertNull(first.note());
+        assertEquals(TranslationPipeline.DisplayHitOutcome.NO_OP, second.outcome(),
+                "the CACHE-HIT path must re-answer the same way — the check sits in the "
+                        + "shared tail precisely so a cached echo cannot be promoted later");
+        assertEquals(1, translatorStub.callCount(),
+                "the cached echo is what makes the leg converge: one translator call across "
+                        + "two renders, with no rejection sentinel needed");
+    }
+
+    @Test
+    void echoPaddedWithAnImperceptibleCodePointIsAlsoANoOp() {
+        // U+2800 BRAILLE PATTERN BLANK: category So, so neither the Cf nor
+        // the Mn strip sees it, and it is not whitespace. The walk needs no
+        // knowledge of the padding character, which is the whole reason it
+        // replaced an equality test on the anchor hop.
+        String braille = Character.toString(0x2800);
+        translatorStub.setResponseText(braille + HEADLINE + braille);
+
+        TranslationPipeline.DisplayHit hit = hitFor(HEADLINE, "en", "cs");
+
+        assertEquals(TranslationPipeline.DisplayHitOutcome.NO_OP, hit.outcome(),
+                "padding the check cannot name must not buy a TRANSLATED verdict");
+        assertEquals(HEADLINE, hit.headline());
+    }
+
+    @Test
+    void echoOfACutLengthHeadlineIsJudgedBeforeTheDisplayCut() {
+        // The anchor hop's stated residual (red-team 2026-08-05 round 5)
+        // must not reappear here. Its input is a rendered headline, so it
+        // arrives at the display cut's own length; a LEADING pad then
+        // pushes the reply past that cut, and judging the reply AFTER
+        // truncate would discard exactly the tail whose match proves the
+        // echo. Fixture built through the real truncate so the length is
+        // the production one rather than a guess.
+        String cutHeadline = DisplayHeadline.truncate("Povoden zasahla Prahu a okoli ".repeat(11));
+        translatorStub.setResponseText("." + cutHeadline);
+
+        TranslationPipeline.DisplayHit hit = hitFor(cutHeadline, "en", "cs");
+
+        assertTrue(cutHeadline.endsWith("…"),
+                "the fixture must actually have been cut, or it proves nothing");
+        assertEquals(TranslationPipeline.DisplayHitOutcome.NO_OP, hit.outcome(),
+                "a leading pad on a cut-length headline must still be seen as the echo it is");
+        assertEquals(cutHeadline, hit.headline());
+    }
+
     // ----- condition (d): target script (M1-761) ------------------------
 
     @Test

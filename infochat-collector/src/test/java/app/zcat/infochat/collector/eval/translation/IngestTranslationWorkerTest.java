@@ -23,7 +23,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Pure unit test (no DB, no CDI) for
  * {@link IngestTranslationWorker#parseTranslation} (the parse /
- * refusal / schema-violation rules) and
+ * refusal / schema-violation rules),
+ * {@link IngestTranslationWorker#anchorTitle} /
+ * {@link IngestTranslationWorker#anchorBody} (which value each field
+ * persists, and whether a NULL is an echo) and
  * {@link IngestTranslationWorker#renderPrompt}. The DB-backed
  * {@code processOne} surfaces (the en-never-dispatched boundary, the
  * non-English dispatch, idempotency, the retry-exhaustion release, and
@@ -43,7 +46,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>The worker is constructed directly and its {@code @PostConstruct}
  * {@code init()} run by hand so the parse path's {@code ObjectMapper}
  * and the classpath-loaded prompt are available; the DB / router /
- * notifier collaborators are never touched by these methods.
+ * notifier collaborators are never touched by these methods. The echo
+ * NOTIFICATION is deliberately not among them — it is emitted by
+ * {@code persistAnchor} after the persist lands, so what these tests pin
+ * is the {@code echoed()} flag the notification is keyed off.
  */
 class IngestTranslationWorkerTest {
 
@@ -120,6 +126,127 @@ class IngestTranslationWorkerTest {
         assertNull(worker.parseTranslation("{\"other\":1}"), "wrong object shape");
         assertNull(worker.parseTranslation("{\"title\":42,\"body\":\"x\"}"), "non-textual title");
         assertNull(worker.parseTranslation("{\"title\":\"x\"}"), "missing body field");
+    }
+
+    @Test
+    void anchor_echoedTitlePersistsNullWhileTranslatedBodyKeepsItsAnchor() {
+        IngestTranslationWorker.PostRow row = row("Bohemia", "Povoden zasahla Prahu.");
+
+        assertEcho(worker.anchorTitle(row, "Bohemia"),
+            "a title handed back verbatim is not a translation and must not become the anchor");
+        assertEquals("The flood hit Prague.",
+            worker.anchorBody(row, "The flood hit Prague.").value(),
+            "the two fields are judged independently: a title that legitimately translates to "
+                + "itself must not cost the post its body anchor");
+    }
+
+    @Test
+    void anchor_echoOfBothFieldsIsACompletedAttemptNotAFailure() {
+        IngestTranslationWorker.PostRow row = row("Bohemia", "Praha");
+
+        // Both fields drop to NULL and the TRANSLATED arm still reaches
+        // persistTranslation — the single statement that sets
+        // translation_done=TRUE and clears next_translation_redrive_at. An
+        // echo therefore never enters M1-760's re-drive ladder, which exists
+        // for exhausted ATTEMPTS; an untranslatable post would otherwise
+        // re-drive forever.
+        assertEcho(worker.anchorTitle(row, "Bohemia"), "echoed title stores NULL title_en");
+        assertEcho(worker.anchorBody(row, "Praha"), "echoed body stores NULL body_en");
+    }
+
+    @Test
+    void anchor_echoOfAnUntrimmedOriginalIsStillAnEcho() {
+        // post.title is stored with its whitespace intact (PostPersister
+        // strips bidi/zero-width/control codepoints, never spaces) while
+        // parseTranslation strips the reply, so a raw comparison would let a
+        // feed defeat the check by padding its own title with one space.
+        IngestTranslationWorker.PostRow row = row("  Bohemia  ", "\tPraha\n");
+
+        assertEcho(worker.anchorTitle(row, "Bohemia"),
+            "the echo is judged against the reduced original, matching the strip "
+                + "parseTranslation already applied to the reply");
+        assertEcho(worker.anchorBody(row, "Praha"), "same symmetry on the body field");
+    }
+
+    @Test
+    void anchor_echoPaddedWithCodepointsTheCleanPassRemovesIsStillAnEcho() {
+        // Red-team 2026-08-05 round 1 (low/INJECTION): the reply is not what
+        // gets stored. A raw-only comparison passes on "original + U+200B",
+        // and the normalize pass then reduces it to exactly the original —
+        // the non-translation the check exists to reject, stored as the
+        // anchor and rendered UNBRACKETED to an English reader.
+        //
+        // Built from hex rather than written literally, so this source stays
+        // free of invisible characters (the IngestTextNormalizer convention).
+        String zeroWidthSpace = Character.toString(0x200B);
+        String rightToLeftOverride = Character.toString(0x202E);
+        IngestTranslationWorker.PostRow row = row("Bohemia", "Praha");
+
+        assertEcho(worker.anchorTitle(row, "Bohemia" + zeroWidthSpace),
+            "a zero-width space cannot buy a passthrough: the strip removes it");
+        assertEcho(worker.anchorTitle(row, rightToLeftOverride + "Bohemia"),
+            "nor can a bidi control");
+        assertEcho(worker.anchorBody(row, "\uFF30\uFF52\uFF41\uFF48\uFF41"),
+            "nor can a fullwidth variant, which NFKC folds back onto the original");
+    }
+
+    @Test
+    void anchor_replyDifferingOnlyBeyondWhatStorageSeesIsNotJudgedHere() {
+        // The scope boundary, made executable. A reply that survives the
+        // normalize pass is a DIFFERENT stored value, so this check anchors
+        // it — even where the RENDER may later reduce the two onto one line
+        // (whitespace runs, invisible marks, the 200-char display cut).
+        // That question is DisplayHeadline.usesAnchor's, asked of the final
+        // rendered strings; mirroring the render from here is what the
+        // 2026-08-05 red-team rounds 2 and 3 showed cannot converge, and
+        // what round 3's own repro (a divergence past char 200) cannot be
+        // closed by at all without judging a full body by its first 200
+        // characters. [M1-771]
+        IngestTranslationWorker.PostRow row = row("Povoden  zasahla  Prahu", "Praha");
+        String wordJoiner = Character.toString(0x2060);
+
+        assertFalse(worker.anchorTitle(row, "Povoden zasahla Prahu").echoed(),
+            "a collapsed whitespace run is a different stored value; display equality is "
+                + "the render's question");
+        assertFalse(worker.anchorBody(row, "Praha" + wordJoiner).echoed(),
+            "U+2060 survives the normalize pass, so storage genuinely holds two values");
+    }
+
+    @Test
+    void anchor_ordinaryTranslationIsUnaffected() {
+        IngestTranslationWorker.PostRow row = row("Povoden zasahla Prahu", "Vltava se vylila.");
+
+        assertEquals("Flood hits Prague", worker.anchorTitle(row, "Flood hits Prague").value(),
+            "a real translation is stored as the anchor exactly as before");
+        assertFalse(worker.anchorTitle(row, "Flood hits Prague").echoed(),
+            "and is not reported as an echo");
+        assertEquals("The Vltava burst its banks.",
+            worker.anchorBody(row, "The Vltava burst its banks.").value());
+    }
+
+    @Test
+    void anchor_anAbsentFieldIsNotAnEcho() {
+        // Both persist NULL, so the flag is the only thing that tells them
+        // apart — and persistAnchor keys the admin notification off it. A
+        // post with no body must not page anyone.
+        IngestTranslationWorker.PostRow bodiless = row("Povoden zasahla Prahu", null);
+
+        IngestTranslationWorker.AnchorDecision absent = worker.anchorBody(bodiless, null);
+        assertNull(absent.value(), "a post with no body still stores NULL body_en");
+        assertFalse(absent.echoed(), "but that NULL is an absent field, not an echo");
+        assertEquals("Some body", worker.anchorBody(bodiless, "Some body").value(),
+            "a null original cannot be echoed");
+    }
+
+    /**
+     * An echo: NULL is persisted for the field AND the decision is flagged,
+     * which is what {@code persistAnchor} keys the throttled
+     * {@code translator.echo} notification off after the write lands.
+     */
+    private static void assertEcho(IngestTranslationWorker.AnchorDecision decision,
+                                   String message) {
+        assertNull(decision.value(), message);
+        assertTrue(decision.echoed(), message + " — and is reported as an echo");
     }
 
     @Test
@@ -229,6 +356,12 @@ class IngestTranslationWorkerTest {
             .withProfile(profile)
             .withSources(new PropertiesConfigSource(url))
             .build();
+    }
+
+    /** A cs-source post row carrying the ORIGINAL title/body the model is handed. */
+    private static IngestTranslationWorker.PostRow row(String title, @Nullable String body) {
+        return new IngestTranslationWorker.PostRow(
+            UUID.randomUUID(), Instant.EPOCH, title, body, "cs");
     }
 
     private static <T> T require(@Nullable T value) {

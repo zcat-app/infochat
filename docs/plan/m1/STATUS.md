@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 784 |
+| done | 785 |
 | deferred | 0 |
 | abandoned | 23 |
 | **total** | **809** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-771 — Echo check on the ingest anchor write (complexity: low, risk: medium)
 - M1-774 — Intake rejections skip the confirm drain and the anchor clear (complexity: medium, risk: low)
 
 ---
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-772 | Slash-command arguments end at the first line | 2026-08-06 | round 1 APPROVE |
+| M1-771 | Echo check on the ingest anchor write | 2026-08-06 | round 1 APPROVE |
 | M1-773 | Parity-gate trigger misses a rename or delete | 2026-08-05 | round 1 APPROVE |
 | M1-770 | Doc-only commits must run the parity gates | 2026-08-05 | round 2 APPROVE |
 | M1-769 | Render-scoped exact LLM call accounting and per-call bound for the digest budget | 2026-08-05 | round 1 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-765 | Anchor snapshot for saved posts | 2026-08-05 | round 1 APPROVE |
 | M1-760 | Re-drive posts whose ingest translation exhausted its attempts | 2026-08-05 | round 2 APPROVE |
 | M1-759 | Anchor-first headline display: reader-language line, bracketed original beneath | 2026-08-05 | round 1 APPROVE |
-| M1-768 | Redteam run-gate must always diff working tree vs fork point | 2026-08-04 | round 1 APPROVE |
 
 ---
 
@@ -1019,7 +1018,7 @@ M1-767 (done)
   └── M1-769 (done)
 M1-768 (done)
 M1-770 (done)
-M1-771 (pending) ← runnable
+M1-771 (done)
 M1-772 (done)
 M1-773 (done)
 M1-774 (pending) ← runnable

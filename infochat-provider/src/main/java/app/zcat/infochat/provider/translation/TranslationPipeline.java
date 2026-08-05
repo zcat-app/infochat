@@ -232,11 +232,18 @@ public class TranslationPipeline {
         /** The provider returned a translation differing from the input. */
         TRANSLATED,
         /**
-         * No translation was needed or none was applied: an {@code en}
-         * scope, an unknown or non-ISO source language, a source already
-         * in the reader's language, an empty headline, or a translation
-         * byte-identical to its input. In every case the headline is the
-         * publisher's own words or already in the reader's language.
+         * No translation was needed, or one was returned and not accepted:
+         * an {@code en} scope, an unknown or non-ISO source language, a
+         * source already in the reader's language, an empty headline, a
+         * translation byte-identical to its input, or one that still
+         * displays as its input (M1-771). The headline is therefore the
+         * text this leg was HANDED — which on the anchored path is the
+         * post's English anchor, not the reader's language and not the
+         * publisher's own words. What that means for the reader is
+         * {@link TranslationPipeline#primaryInReaderLanguage}'s decision,
+         * never this enum's:
+         * it reads NO_OP against the declared languages and brackets
+         * accordingly.
          */
         NO_OP,
         /** A translation was ATTEMPTED AND FAILED; {@code note} says so. */
@@ -327,7 +334,8 @@ public class TranslationPipeline {
      *
      * <p>Translating leg, order load-bearing: translator call → pre-bound
      * at {@link DisplayHeadline#BODY_SCAN_LIMIT} → flatten to one line →
-     * sanitizer-2 → target-script check → cache write → truncate.
+     * sanitizer-2 → target-script check → cache write → echo check →
+     * truncate.
      * The pre-bound runs
      * FIRST because the reply is otherwise bounded only by the provider's
      * 1-8 MiB body cap, and a hostile endpoint's in-cap reply must not buy
@@ -530,9 +538,50 @@ public class TranslationPipeline {
      * can translate to itself legitimately (a proper noun is not a
      * failure), and those are the publisher's own words, which the renderer
      * must not label as derived.
+     *
+     * <p><b>A reply that merely PADS its input is the same no-op (M1-771),
+     * and byte identity alone cannot see it</b> — one added character
+     * clears it, which is how a hostile or steered endpoint hands a
+     * {@code cs}/{@code es}/{@code tr} reader English under an unbracketed
+     * line claiming their language. {@code missingTargetScript} does not
+     * cover it either: it returns null the moment the target script is
+     * Latin. So the same word walk the anchor hop applies is CALLED here —
+     * see {@link DisplayHeadline#displaysAsTheOriginal} for why one shared
+     * predicate rather than a second copy.
+     *
+     * <p>Three placement consequences, each load-bearing:
+     * <ul>
+     *   <li><b>NO_OP, not {@link #displayFallback}.</b> Every path that
+     *       reaches the translating leg has already established a non-null,
+     *       ISO-shaped source language differing from a non-{@code en}
+     *       scope, and on all of those {@link #primaryInReaderLanguage}
+     *       reads NO_OP as "not in the reader's language" — so the line is
+     *       bracketed either way and the fallback's only added effect would
+     *       be a spurious "translation unavailable" note on the accepted
+     *       false positives (a proper-noun headline the walk matches).
+     *       Unlike condition (d), whose false-positive rate is nil, the
+     *       walk has a stated one, so it degrades to the quieter shape.</li>
+     *   <li><b>Here rather than beside condition (d)</b>, so the CACHE-HIT
+     *       path is covered by the same test: an echo written to the cache
+     *       before this check ran would otherwise be promoted on every
+     *       later render. It also makes the rejection sentinel unnecessary
+     *       — the cached echo is inert, since a hit re-answers no-op and
+     *       renders the INPUT, and the entry is what stops the leg
+     *       re-calling the translator every render.</li>
+     *   <li><b>Before {@link DisplayHeadline#truncate}</b>, which is what
+     *       keeps the display hop clear of the anchor hop's leading-pad
+     *       residual (red-team 2026-08-05 round 5): truncating the reply
+     *       first would cut exactly the tail whose match proves the
+     *       echo.</li>
+     * </ul>
+     * The equality test stays in front of the walk rather than being
+     * subsumed by it: for an all-invisible headline the walk has no word to
+     * match and answers false, and that headline's own echo must stay the
+     * publisher's words.
      */
     private DisplayHit finishDisplayHit(String displayHeadline, String flattenedSanitized) {
-        if (flattenedSanitized.equals(displayHeadline)) {
+        if (flattenedSanitized.equals(displayHeadline)
+                || DisplayHeadline.displaysAsTheOriginal(displayHeadline, flattenedSanitized)) {
             return noOp(displayHeadline);
         }
         return new DisplayHit(DisplayHitOutcome.TRANSLATED,

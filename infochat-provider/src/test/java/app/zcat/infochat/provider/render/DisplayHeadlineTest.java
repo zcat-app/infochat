@@ -477,6 +477,138 @@ class DisplayHeadlineTest {
         assertEquals("Ordinary title", headline.originalLine());
     }
 
+    @Test
+    void usesAnchorRefusesAnAnchorThatDisplaysAsTheOriginal() {
+        // D29 (c)'s bracket promises an English reader that an unbracketed
+        // line is English. The only thing behind that is an anchor column
+        // written from LLM output, which security.md §Trust boundaries item 9
+        // declares untrusted. An anchor that displays as the publisher's own
+        // words is evidence it was never translated, so it must not be
+        // promoted — otherwise subordinateFor suppresses the bracketed
+        // original for repeating the primary and the reader gets one bare
+        // foreign line. (M1-771.)
+        DisplayHeadline.AnchoredHeadline echoed = DisplayHeadline.anchorFirst(
+                "Povoden zasahla Prahu", null, "Povoden zasahla Prahu", null, sanitizer);
+
+        assertTrue(echoed.anchored(), "the flag still records where the line CAME from");
+        assertFalse(DisplayHeadline.usesAnchor(echoed, "cs", "en"),
+                "but an anchor identical to the original must not be presented as English");
+    }
+
+    @Test
+    void usesAnchorRefusesAnAnchorPaddedWithInvisibleCodePoints() {
+        // Padding an otherwise-verbatim echo is the cheapest evasion of a byte
+        // comparison, and enumerating the code points is what fails: the check
+        // drops the Cf and Mn CATEGORIES instead. U+2060 is Cf; U+034F and the
+        // U+FE00..FE0F variation selectors are Mn, NOT Cf — a Cf-only form of
+        // this check was reported closed while those still cleared it.
+        // Built from hex so this source carries no invisible characters.
+        String original = "Povoden zasahla Prahu";
+        String[] invisibles = {
+                Character.toString(0x2060),   // WORD JOINER (Cf)
+                Character.toString(0x00AD),   // SOFT HYPHEN (Cf)
+                Character.toString(0x034F),   // COMBINING GRAPHEME JOINER (Mn)
+                Character.toString(0xFE0F),   // VARIATION SELECTOR-16 (Mn)
+        };
+        for (String invisible : invisibles) {
+            DisplayHeadline.AnchoredHeadline padded = DisplayHeadline.anchorFirst(
+                    original, null, original + invisible, null, sanitizer);
+
+            assertFalse(DisplayHeadline.usesAnchor(padded, "cs", "en"),
+                    "a difference the reader cannot see cannot make an echo a translation; "
+                            + "failed for U+" + Integer.toHexString(invisible.codePointAt(0)));
+        }
+    }
+
+    @Test
+    void usesAnchorRefusesAnAnchorDivergingOnlyPastTheDisplayCut() {
+        // Red-team 2026-08-05 round 3 (low/INJECTION), and the case that
+        // settled WHERE this check belongs. post.body has no write-path length
+        // cap and IS the headline for every titleless source, so an anchor may
+        // differ from the original only beyond MAX_LENGTH — a divergence
+        // truncate discards before either line reaches the reader. No
+        // adversarial precision is needed: a partial translation that leaves
+        // the first 200 characters alone does it. Asked HERE the reductions
+        // have already run, so the cut costs nothing to cover; asked at the
+        // ingest write it could only be covered by judging a full-length body
+        // on its first 200 characters.
+        String longBody = "Povoden zasahla Prahu. ".repeat(20);
+        DisplayHeadline.AnchoredHeadline pastTheCut = DisplayHeadline.anchorFirst(
+                "", longBody, null, longBody + " Hotovo", sanitizer);
+
+        assertTrue(longBody.length() > DisplayHeadline.MAX_LENGTH, "fixture must exceed the cut");
+        assertFalse(DisplayHeadline.usesAnchor(pastTheCut, "cs", "en"),
+                "two lines the reader sees as one are one, whatever the stored values were");
+    }
+
+    @Test
+    void usesAnchorRefusesAnEchoPaddedOutsideTheStrippedCategories() {
+        // Red-team 2026-08-05 round 4 (low/INJECTION). U+2800 BRAILLE
+        // PATTERN BLANK is category So — a real printable character that
+        // happens to carry no ink — so displayForm does not drop it and an
+        // EQUALITY test called the two lines different. Widening the strip
+        // with a third category was rejected as the same treadmill: the walk
+        // below needs no knowledge of the character at all, because padding
+        // it around or between words leaves every word intact and in order.
+        String original = "Povoden zasahla Prahu";
+        String brailleBlank = Character.toString(0x2800);
+        String[] echoes = {
+                original + brailleBlank,                    // padded at the end
+                brailleBlank + original,                    // padded at the start
+                "Povoden" + brailleBlank + "zasahla Prahu", // substituted for a space
+                original + ".",                             // a visible pad works too
+        };
+        for (String echo : echoes) {
+            DisplayHeadline.AnchoredHeadline padded = DisplayHeadline.anchorFirst(
+                    original, null, echo, null, sanitizer);
+
+            assertFalse(DisplayHeadline.usesAnchor(padded, "cs", "en"),
+                    "the publisher's words survive in order, so this is not a translation; "
+                            + "failed for: " + echo);
+        }
+    }
+
+    @Test
+    void usesAnchorTreatsAnAllInvisibleOriginalAsNoMatch() {
+        // The degenerate boundary: a title of nothing but dropped code points
+        // reduces to "". Matching zero words must not vacuously report every
+        // translation on the post as an echo — the walk never advances, so it
+        // reports no match. Feed text is untrusted, so this is reachable.
+        String invisibleOnly = Character.toString(0x2060) + Character.toString(0x00AD);
+        DisplayHeadline.AnchoredHeadline headline = DisplayHeadline.anchorFirst(
+                invisibleOnly, null, "Flood hits Prague", null, sanitizer);
+
+        assertTrue(DisplayHeadline.usesAnchor(headline, "cs", "en"),
+                "an original with no visible words must not swallow a genuine translation");
+    }
+
+    @Test
+    void usesAnchorKeepsAGenuineTranslation() {
+        DisplayHeadline.AnchoredHeadline translated = DisplayHeadline.anchorFirst(
+                "Povoden zasahla Prahu", null, "Flood hits Prague", null, sanitizer);
+
+        assertTrue(DisplayHeadline.usesAnchor(translated, "cs", "en"),
+                "an anchor that reads differently is still the reader's line");
+        assertFalse(DisplayHeadline.usesAnchor(translated, "cs", "cs"),
+                "and a reader of the source language still gets the publisher's own words");
+    }
+
+    @Test
+    void usesAnchorLeavesTheAnchorAbsentPathAlone() {
+        // The guard is conditioned on anchored() FIRST, and load-bearingly so:
+        // an English post carries a NULL anchor, so its reader line and its
+        // original line are THE SAME STRING by construction. A display-equality
+        // test applied without the flag would report every English post as an
+        // echo and bracket the entire English corpus.
+        DisplayHeadline.AnchoredHeadline noAnchor = DisplayHeadline.anchorFirst(
+                "Bitcoin hits $100k", "body text", null, null, sanitizer);
+
+        assertEquals(noAnchor.readerLine(), noAnchor.originalLine(),
+                "the anchor-absent branch renders one string into both slots");
+        assertFalse(noAnchor.anchored(),
+                "so the flag, not the comparison, is what keeps this path unbracketed");
+    }
+
     private static void assertNoUnpairedSurrogate(String s) {
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);

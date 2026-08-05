@@ -194,12 +194,15 @@ public final class DisplayHeadline {
      *                     {@code coalesce(title_en, title)} shape
      *                     {@code EmbeddingWorker} already reads by
      * @param originalLine the publisher's own words, always
-     * @param anchored     whether {@code readerLine} came from the anchor.
-     *                     Carried as a flag rather than inferred by
-     *                     comparing the two strings: an anchor that
-     *                     translates to itself (a proper noun) is
-     *                     byte-equal to its original and would sniff as
-     *                     "not anchored"
+     * @param anchored     whether {@code readerLine} came from the anchor —
+     *                     PROVENANCE only, deliberately not "and it is
+     *                     therefore a translation". Whether the anchor may
+     *                     be PRESENTED as the reader's language is a
+     *                     second question, answered by
+     *                     {@link #usesAnchor}: an anchor that displays as
+     *                     the original is not evidence of translation, and
+     *                     M1-771 makes that case degrade to the bracketed
+     *                     shape rather than trusting this flag alone
      */
     public record AnchoredHeadline(String readerLine, String originalLine, boolean anchored) {
 
@@ -343,22 +346,198 @@ public final class DisplayHeadline {
 
     /**
      * Whether the English anchor is what this reader should see in the
-     * primary slot. True only when an anchor exists AND the reader does
-     * not already read the post's declared source language: for a Czech
-     * reader of a Czech-source post the publisher's own words ARE the
-     * reader-language line, and promoting the anchor would show that
-     * reader English. D29's collapse is scoped to "a headline whose source
-     * language differs from the reader's" for exactly this reason.
+     * primary slot. True only when an anchor exists, that anchor does not
+     * still CARRY the publisher's own words in the publisher's order, AND
+     * the reader does not already read the post's declared source language:
+     * for a Czech reader of a Czech-source post the publisher's own words
+     * ARE the reader-language line, and promoting the anchor would show
+     * that reader English. D29's collapse is scoped to "a headline whose
+     * source language differs from the reader's" for exactly this reason.
      *
      * <p>A NULL or non-ISO source language does NOT suppress the anchor:
      * unknown means "never translate", not "never anchor", and the anchor
      * is a column read either way.
+     *
+     * <p><b>The word-subsequence clause is the enforcement point for
+     * D29 (c)</b> (M1-771). The bracket promises a reader that an
+     * unbracketed line is in their language; the only thing standing
+     * behind that is an anchor column written from LLM output, which
+     * {@code docs/spec/security.md} §Trust boundaries item 9 declares
+     * untrusted. When the anchor still carries every one of the
+     * publisher's words in the publisher's order, that IS the evidence the
+     * anchor is not a translation, so it must not be promoted: returning
+     * false puts the original in the primary slot and lets
+     * {@link app.zcat.infochat.provider.translation.TranslationPipeline#primaryInReaderLanguage}
+     * bracket it — the same degraded shape D29 (c) already specifies for
+     * an ABSENT anchor.
+     *
+     * <p><b>Why here and not at the ingest write.</b> The collector's echo
+     * check ({@code IngestTranslationWorker}) sees the value it stores; it
+     * cannot see the value a reader is SHOWN, which this class then
+     * reduces by {@link #boundForScan}, {@link #flattenToOneLine},
+     * {@link LlmOutputSanitizer#sanitize} and {@link #truncate}. Three
+     * successive 2026-08-05 red-team rounds each named one more of those
+     * reductions as an evasion, and mirroring them collector-side is not
+     * merely a treadmill but wrong in principle — the 200-char display cut
+     * would have to judge a full-length body by its first 200 characters.
+     * Evaluated HERE the question needs no mirroring at all: both operands
+     * are already the final strings, so every present and future reduction
+     * is covered by construction.
+     *
+     * <p>False positives are accepted and are the safe direction: a
+     * headline that legitimately translates to itself — a proper-noun
+     * title — renders bracketed instead of bare. That costs one bracket
+     * per render and is reversible; the same false positive at the ingest
+     * write costs the anchor permanently.
      */
     public static boolean usesAnchor(AnchoredHeadline headline,
                                      @Nullable String sourceLanguage,
                                      String scopeLanguage) {
         return headline.anchored()
+                && !displaysAsTheOriginal(headline.originalLine(), headline.readerLine())
                 && !(sourceLanguage != null && sourceLanguage.equalsIgnoreCase(scopeLanguage));
+    }
+
+    /**
+     * Whether {@code derived} still carries every one of {@code original}'s
+     * words, in {@code original}'s order — i.e. whether the "translation"
+     * is the text it was derived from with material merely inserted around
+     * or between its words. See {@link #usesAnchor} for why the question is
+     * asked at all.
+     *
+     * <p><b>ONE predicate, BOTH translation hops (M1-771).</b> A
+     * non-English reader is translated twice — source to English at
+     * ingest, English to their own language at display — so a check on the
+     * anchor alone still leaves the second hop able to hand that reader
+     * English beneath a line claiming their language. The display-hit leg
+     * ({@code TranslationPipeline.runForDisplayHit}) therefore CALLS this
+     * method on its own input/reply pair. Called, never copied: two
+     * divergent copies of one check is exactly what M1-771's first three
+     * red-team rounds were, and a copy drifts the moment either side is
+     * tuned.
+     *
+     * <p><b>Word-subsequence rather than equality, and the difference is
+     * the control.</b> Equality is defeated by adding ONE character, and
+     * whether that character is caught then depends on {@link #displayForm}
+     * happening to know it — which is a list, and a list can be stepped
+     * around. This test does not need to know what the added character IS:
+     * padding leaves every word intact and in order, and so does
+     * substituting it for a space between two words. It subsumes equality
+     * for any original with at least one visible word (a line trivially
+     * contains its own words in order), so nothing the equality form
+     * caught is lost. [M1-771 red-team 2026-08-05 round 4,
+     * where U+2800 BRAILLE PATTERN BLANK — category So, so neither Cf nor
+     * Mn, and blank rather than invisible — padded a verbatim echo past
+     * the equality form.]
+     *
+     * <p>{@link #displayForm} still runs on both sides, because the two
+     * catch DIFFERENT things: the word walk covers anything added between
+     * or around words, the category strip covers an invisible code point
+     * inserted INSIDE a word, which would otherwise break that word's
+     * match. Their union is wider than either.
+     *
+     * <p><b>Where this deliberately stops — two places, both by decision
+     * rather than oversight.</b>
+     * <ul>
+     *   <li>A character the strip does not know, inserted INSIDE a word,
+     *       still evades. The next rung is a character-level subsequence
+     *       walk and the rung after that a similarity score; neither is
+     *       built, because each buys a narrower evasion class at a steeply
+     *       worse false-positive rate and the failure they would catch
+     *       renders as a visibly mangled word, which tells the reader what
+     *       a bracket would.</li>
+     *   <li>On a line longer than {@link #MAX_LENGTH}, ANY insertion AT
+     *       OR BEFORE the cut evades WHEN THE CALLER'S OPERANDS ARRIVE
+     *       TRUNCATED, which is {@link #usesAnchor}'s case — a leading pad
+     *       is only its most obvious form. Material added ahead of the cut
+     *       shifts it, so the anchor's tail is ALTERED rather than merely
+     *       extended and the last word's match fails. Only an addition
+     *       AFTER the cut is unaffected, because truncation discards it.
+     *       Closing it for that caller
+     *       would need a SECOND walk on the pre-cut strings, since the
+     *       post-cut evaluation is exactly what catches a divergence
+     *       BEYOND the cut (red-team round 3): the two cases want opposite
+     *       evaluation points, and the pair was judged not worth it for a
+     *       residual whose reader-facing outcome is identical to the one
+     *       above. The display-hit caller does NOT carry this residual —
+     *       it compares its reply before the cut. [red-team 2026-08-05
+     *       round 5; recorded in D29 (c)]</li>
+     * </ul>
+     *
+     * <p>False positives are accepted, and are the safe direction — a
+     * genuine translation that happens to carry the original's words in
+     * order (a two-letter original like {@code AI}, a numeric headline, or
+     * a translator that quotes the source in parentheses) renders
+     * bracketed instead of bare. One bracket per render, reversible.
+     *
+     * <p>A reduced original with NO words matches nothing: {@code from}
+     * stays at zero, so a title composed entirely of dropped code points
+     * cannot vacuously swallow every genuine translation on the post. Feed
+     * text is untrusted, so that is a boundary case rather than a
+     * hypothetical. It is also the ONE case where this does not subsume
+     * byte equality — an all-invisible original is byte-equal to its own
+     * echo and still answers false — so a caller for which the
+     * byte-identical reply is a meaningful outcome tests equality itself
+     * rather than relying on this.
+     *
+     * <p>Still NOT a language check — D29 refuses to infer a language from
+     * text, so a fluent mistranslation, or an edit that CHANGES a word
+     * rather than adding to it, passes here and remains the stated
+     * residual it has always been.
+     *
+     * @param original the text the derivation started from — the
+     *                 publisher's rendered line for the anchor hop, the
+     *                 headline handed to the translator for the display hop
+     * @param derived  what that channel returned for it
+     */
+    public static boolean displaysAsTheOriginal(String original, String derived) {
+        String anchor = displayForm(derived);
+        int from = 0;
+        for (String word : displayForm(original).split("\\s+")) {
+            if (word.isEmpty()) {
+                continue;
+            }
+            int at = anchor.indexOf(word, from);
+            if (at < 0) {
+                return false;
+            }
+            from = at + word.length();
+        }
+        return from > 0;
+    }
+
+    /**
+     * A line reduced to what a reader can actually perceive: invisible
+     * code points dropped, by Unicode general CATEGORY rather than by
+     * enumeration.
+     *
+     * <p>Both categories are load-bearing and neither subsumes the other.
+     * Format (Cf) covers U+00AD SOFT HYPHEN, U+2060 WORD JOINER and the
+     * zero-width set; nonspacing mark (Mn) covers U+034F COMBINING
+     * GRAPHEME JOINER and the U+FE00..U+FE0F variation selectors, which
+     * are NOT Cf — an earlier Cf-only form of this check was reported
+     * closed while those still padded a verbatim echo past it. Naming
+     * individual code points is what fails here; the category is the
+     * property that matters.
+     *
+     * <p>Dropping Mn wholesale cannot merge two genuinely different
+     * headlines: NFKC has already run, so ordinary accented Latin text is
+     * PRECOMPOSED (U+00FA, category Ll) and untouched by this. What
+     * remains as Mn is the marks with no composed form, and for those to
+     * decide the comparison the two lines would have to agree on every
+     * base character already — which is an echo, not a translation.
+     *
+     * <p>Comparison only. Nothing built here is rendered or stored.
+     */
+    private static String displayForm(String line) {
+        StringBuilder visible = new StringBuilder(line.length());
+        line.codePoints()
+                .filter(codePoint -> {
+                    int type = Character.getType(codePoint);
+                    return type != Character.FORMAT && type != Character.NON_SPACING_MARK;
+                })
+                .forEach(visible::appendCodePoint);
+        return visible.toString();
     }
 
     /**
