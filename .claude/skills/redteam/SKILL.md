@@ -187,9 +187,45 @@ The verdict file's frontmatter carries `target`, `date`, `base`, `head`, `verdic
 
 **Lifecycle-path exemption alignment.** The verdict file at `docs/plan/<active-milestone>/redteam/<slug>-<date>.md` is a workflow-byproduct of `/redteam`, NOT a developer choice — analogous to STATUS.md and the ticket file being byproducts of `/m1-tick`. When a single-ticket audit runs at the `/m1-tick run` gate — after implementation, ahead of `/m1-tick review` — the new audit file appears in the working tree, is visible to the reviewer in the diff it then evaluates, and gets folded into the eventual ticket commit. The exemption is what makes that ordering safe: without it the reviewer would read its own gate's byproduct as an out-of-scope file. The reviewer's lifecycle-path exemption (see `docs/process/reviewer-prompt.md` §"Lifecycle-path exemption") MUST include this directory; the reviewer prompt template lists the exempt paths and is updated in lockstep with this rule.
 
-### 8. Escalate findings to the lifecycle workflow
+### 8. Resolve each finding — ALWAYS BY ASKING, NEVER BY ASSUMING
 
-Findings DO NOT auto-rewrite tickets or auto-fire the milestone-driver's escalate. Cross-skill auto-invocation creates state-machine coupling that is hard to reason about. Instead:
+Findings DO NOT auto-rewrite tickets or auto-fire the milestone-driver's escalate. Cross-skill auto-invocation creates state-machine coupling that is hard to reason about.
+
+**THE HARD RULE — the disposition of every finding is the USER'S decision, without exception.**
+
+For each FINDING (out-of-model items too — see the cross-cutting rule), the skill MUST put the in-scope-vs-defer choice to the user via a blocking `AskUserQuestion`, with a recommendation attached, BEFORE any of the following:
+
+- writing, drafting, or allocating an ID for a follow-up / remediation ticket;
+- editing the operand ticket's `acceptance`, `out_of_scope`, `files_budget`, or any other frontmatter beyond the `redteam_findings:` / `redteam_audits:` audit record that step 7 requires;
+- changing any source, test, or config file in response to the finding;
+- writing a `disposition:` that records a resolution the user did not choose.
+
+There is **no** "obviously out of scope" exemption, and none of the following licenses deciding it yourself — they are the arguments that have produced this failure repeatedly, and every one of them is an input to the user's decision, not a substitute for it:
+
+- the finding is pre-existing / predates the diff;
+- an `out_of_scope` item appears to fence it;
+- the engineering rules' "file a follow-up ticket, don't fix it inline" guidance;
+- the fix looks large, risky, or off-topic;
+- the ticket is mid-flight and you judge the diff already big enough;
+- you already stated the recommendation in chat and read no objection into the silence.
+
+**Recommend, then ask — never recommend INSTEAD of asking.** Always state which option you would pick and why, in one or two sentences, as part of the question. A recommendation is what makes the question cheap to answer; it is not permission to skip it. Put the recommended option first and mark it `(Recommended)`.
+
+The question, per finding (or grouped when several share one disposition, provided the grouping is stated):
+
+```
+Finding <n> (<severity>/<category>): <one-line summary>
+How should this be resolved?
+  1. Fix within the current ticket's scope   — refine acceptance if needed, fix in-branch, then re-audit
+  2. Defer to a new follow-up ticket         — record the disposition, leave the branch as-is
+  3. Disposition as a stated residual        — no fix, no ticket; the reasoning is recorded on the ticket
+  4. Raise a spec amendment                  — the threat model, not the code, is what is wrong
+Recommendation: <n>, because <reason>.
+```
+
+If the user declines to choose, or answers something the options do not cover, STOP and surface it — do not fall back to a default.
+
+Only after the user has chosen does the skill print the mechanical next-step templates below and (on the user's word) act.
 
 - Print a one-screen summary in chat (count by severity, count by category).
 - The recommendation templates below use placeholders that MUST be substituted before printing to chat. None of the literal placeholder strings (`/<driver>`, `M<N>-NNN`, `<milestone>`, `<new-id>`) may appear in user-facing chat output.
@@ -228,7 +264,8 @@ The adversary subagent never edits files, runs commands, or fires escalations on
 
 - **Read-only on implementation surfaces.** This skill never edits code, commits, or pushes. It only reads, spawns the subagent, writes workflow scratch under `target/` (captured diff, inventory files, rendered prompt; the subagent Writes the raw verdict there), and writes audit artifacts: the assembled verdict file under `docs/plan/<active-milestone>/redteam/<slug>-<date>.md` (always, per step 7), and on single-ticket targets the `redteam_findings:` + `redteam_audits:` frontmatter blocks on the ticket file. No source-code, test, or property-file writes.
 - **Fresh context for the adversary.** The subagent must NOT be given conversation history, design notes (`docs/design/**`), or ticket bodies. It sees only the threat model and the diff. Anchoring it on implementer rationale defeats the point.
-- **No auto-escalation.** Recommend, don't execute. The user (or Claude in the next turn) decides which findings become tickets.
+- **No auto-escalation, and NO SELF-DISPOSITION.** Recommend, don't execute — and never let the recommendation stand in for the question. The user decides, per finding, whether it is fixed in the current ticket's scope, deferred to a new ticket, dispositioned as a stated residual, or raised as a spec amendment (step 8's blocking `AskUserQuestion`). Filing a follow-up ticket is NOT the safe default and NOT a neutral act: it silently converts "this is a live defect on the branch in front of you" into "this is someone's problem later", which is exactly the call the user reserved. Deciding it yourself is a process violation regardless of how well-reasoned the deferral is, and regardless of whether the finding is pre-existing or fenced by `out_of_scope`.
+- **Out-of-model items get the same question.** They are advisory as FINDINGS, not as decisions: the user still chooses whether to widen the threat model, file a ticket, or drop them. Do not silently fold one into a ticket you are drafting for something else.
 - **If `docs/spec/security.md` does not exist or is empty, REFUSE.** The threat model is the system's commitments; without it the audit has nothing to compare against.
 - **Severity language is canonical.** `critical | high | medium | low`, no synonyms. The redteam subagent's prompt enforces this; if it returns "blocker" or "info" or similar, treat as parse failure.
 - **Out-of-model findings are advisory only.** They flag potential threat-model gaps but are not failures. The user decides whether to extend the model.

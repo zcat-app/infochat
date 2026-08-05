@@ -68,13 +68,22 @@ threat model):
    table shows which auditor flagged what severity. The per-cluster
    detail includes the verbatim PROMISE/GAP for each finding.
 
-5. **Surface findings to the user.** Do NOT auto-escalate. The
+5. **Resolve each finding by ASKING — never by assuming.** Do NOT
+   auto-escalate, and do NOT disposition anything yourself. The
    cross-examination report is the surface for a design discussion, not
-   an automatic rework trigger. The user decides which findings become
-   remediation tickets, spec amendments, or accepted residual risk —
-   exactly as `/redteam` does for single-auditor findings (see
+   an automatic rework trigger and not a licence to decide. For EVERY
+   finding — corroborated, single-auditor and out-of-model alike — ask
+   the user to choose: (1) fix within the current ticket's scope,
+   (2) defer to a new follow-up ticket, (3) accept as a stated residual,
+   (4) raise a spec amendment. Attach your recommendation to the
+   question; it does not replace the question. Ask BEFORE drafting a
+   ticket, allocating an ID, editing the operand ticket beyond its audit
+   record, touching a source file, or writing a `disposition.md`.
+   "It is pre-existing", "`out_of_scope` fences it" and "the engineering
+   rules say file a follow-up" are inputs to that decision, never
+   substitutes for it. Same rule and same wording as
    [`.claude/skills/redteam/SKILL.md`](../../.claude/skills/redteam/SKILL.md)
-   §8).
+   §8 — keep the two halves in lockstep.
 
 6. **Commit the durable subset of the evidence directory.** In
    `docs/plan/m1/redteam-multi/<slug>-<date>[-rN]/`, the durable audit

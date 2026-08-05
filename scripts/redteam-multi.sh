@@ -632,6 +632,27 @@ cmd_run() {
 
     printf '\nEvidence directory: %s\n' "$run_dir"
     printf 'Commit this directory alongside docs/plan/m1/redteam/ as the audit record.\n'
+
+    # The disposition rule is printed HERE, at the end of the run, because that
+    # is the moment the reading agent decides what to do with the findings —
+    # and the failure this guards against is an agent that has just read a
+    # well-reasoned verdict and files a follow-up ticket on its own judgement.
+    # The rule lives in .claude/skills/redteam/SKILL.md §8; it is repeated on
+    # stdout so it reaches an agent driving the script directly, without the
+    # skill loaded.
+    printf '\n'
+    printf 'NEXT STEP — DO NOT DECIDE THIS YOURSELF:\n'
+    printf '  Every finding (corroborated, single-auditor, and out-of-model alike)\n'
+    printf '  needs the USER to choose its disposition:\n'
+    printf '    1. fix within the current ticket scope\n'
+    printf '    2. defer to a new follow-up ticket\n'
+    printf '    3. accept as a stated residual\n'
+    printf '    4. raise a spec amendment\n'
+    printf '  ASK, with your recommendation attached, BEFORE drafting any ticket,\n'
+    printf '  allocating an ID, editing the operand ticket beyond its audit record,\n'
+    printf '  touching a source file, or writing a disposition.\n'
+    printf '  "It is pre-existing", "out_of_scope fences it" and "the rules say file\n'
+    printf '  a follow-up" are inputs to that decision, NEVER substitutes for it.\n'
 }
 
 [ $# -ge 1 ] || { usage; exit 2; }

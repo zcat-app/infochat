@@ -89,12 +89,25 @@ skill discovery from both trees outright (harness-mapping §6.3).
    the side-by-side table shows which auditor flagged what severity; the
    per-cluster detail carries the verbatim PROMISE/GAP.
 
-5. **Surface findings to the user — do NOT auto-escalate.** The report is the
-   surface for a design discussion, not an automatic rework trigger — exactly as
-   `/redteam` treats single-auditor findings (see [`../redteam/SKILL.md`](../redteam/SKILL.md)
-   §8). The user decides which findings become remediation tickets, spec
-   amendments, or accepted residual risk. Findings reach the lifecycle workflow
-   only when the user runs `/m1-tick escalate <id> redteam-finding`.
+5. **Resolve each finding by ASKING — never by assuming.** The report is the
+   surface for a design discussion, not an automatic rework trigger, and it is
+   equally not a licence to disposition anything yourself. Apply
+   [`../redteam/SKILL.md`](../redteam/SKILL.md) §8 verbatim, including its HARD
+   RULE: for every finding (corroborated, single-auditor, and out-of-model
+   alike) put the in-scope / defer / residual / spec-amend choice to the user in
+   a blocking `AskUserQuestion` with your recommendation attached, BEFORE
+   drafting a follow-up ticket, allocating an ID, editing the operand ticket
+   beyond its audit record, touching any source file, or writing a
+   `disposition.md` that records a resolution the user did not choose. "It is
+   pre-existing", "`out_of_scope` fences it", and "the engineering rules say
+   file a follow-up" are inputs to the user's decision, never substitutes for
+   it. Findings reach the lifecycle workflow only when the user runs
+   `/m1-tick escalate <id> redteam-finding`.
+
+   The multi-auditor shape adds one decision the single-auditor skill does not
+   have, and it is the user's too: whether a **single-auditor** finding is a
+   real defect the others missed or a false positive to drop. Never resolve a
+   falsification candidate on your own reading of the cross-examination.
 
 6. **Commit the durable subset of the evidence directory.** In
    `docs/plan/m1/redteam-multi/<slug>-<date>[-rN]/`, the durable audit record is

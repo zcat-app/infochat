@@ -141,6 +141,22 @@ def main(argv):
     out.append("Run directory: `" + run_dir + "`\n")
     out.append("Auditors: " + ", ".join(auditors) + "\n\n")
 
+    # Stated at the top of the report, not the bottom: this file is the thing
+    # an agent reads to decide what to do about the findings, so the "you do
+    # not get to decide" rule has to arrive before the findings do. Guards the
+    # recurring failure where a well-reasoned verdict is answered by silently
+    # filing a follow-up ticket. Canonical text: .claude/skills/redteam/SKILL.md
+    # section 8.
+    out.append("> **Disposition is the USER's decision, per finding.** Before drafting a\n")
+    out.append("> follow-up ticket, allocating an ID, editing the operand ticket beyond its\n")
+    out.append("> audit record, touching a source file, or writing a disposition, ASK the\n")
+    out.append("> user to choose: (1) fix in the current ticket's scope, (2) defer to a new\n")
+    out.append("> ticket, (3) accept as a stated residual, (4) raise a spec amendment.\n")
+    out.append("> Attach your recommendation to the question -- it does not replace it.\n")
+    out.append("> This applies to corroborated, single-auditor and out-of-model items\n")
+    out.append("> alike, and to findings that are pre-existing or apparently fenced by\n")
+    out.append("> `out_of_scope`; those facts are inputs to the decision, not substitutes.\n\n")
+
     out.append("## Summary\n\n")
     out.append("- " + str(len(clusters)) + " distinct finding cluster(s) across all auditors.\n")
     out.append("- " + str(corroborated) + " corroborated (flagged by >=2 auditors).\n")
