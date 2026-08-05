@@ -134,6 +134,17 @@ import java.util.function.Consumer;
  *       {@code error.command.body_too_large} reply and stops at the
  *       same position as the chat-mode cap — before the parser
  *       ({@code handleSlash}) and any DB write;</li>
+ *   <li>single-line rule (M1-772): a slash body carrying any line
+ *       boundary gets the fixed {@code error.command.multiline} reply
+ *       and stops at the same position as the two caps — see
+ *       {@link #isMultiLineCommand}. Unlike the caps it first drains
+ *       any pending confirm for this {@code (actor.id, scope)} and
+ *       acknowledges the cancellation: the rejected body dispatches
+ *       nothing, so it is unconditionally the "any other input" that
+ *       spec §Surface conventions says closes the armed window, and it
+ *       is reachable by a body a user can type by accident. The drain
+ *       is an in-memory removal; the step-4.6 anchor clear stays behind
+ *       the return because it is a DB write;</li>
  *   <li>5 slow-start probation gate (M1-045): if the step-1
  *       {@link UserSnapshot#inProbation(Instant)} (from the snapshot's
  *       {@code probation_until}) is true AND the command is NOT in
@@ -626,7 +637,8 @@ public class InboundRouter {
             // the user's UUID — available right here from the snapshot
             // (guaranteed present: DM-empty returned at step 2). Group
             // scope ids resolve at step 4.1; group replies before that
-            // point (ban, approval gate, body caps) render the "en"
+            // point (ban, approval gate, body caps, and the single-line
+            // rejection with its confirm-cancellation) render the "en"
             // context default — correct for pending/rejected groups,
             // which can never have dispatched /lang, and a documented
             // limitation for the banned-user-in-group reply. ONE
@@ -722,6 +734,48 @@ public class InboundRouter {
             if (normalized.startsWith("/") && normalized.length() > commandBodyCap) {
                 sendReply(msg.scope(),
                         bundleLoader.get(BundleKeys.ERROR_COMMAND_BODY_TOO_LARGE, inboundContext.effectiveLanguage()),
+                        adapterName);
+                return;
+            }
+
+            // Single-line rule (commands.md §Surface conventions), see
+            // isMultiLineCommand. Placed beside the body cap above and
+            // sharing its ordering rationale — after the authorization
+            // gates, before handleSlash and before every DB write. That
+            // position is what keeps this a router-only change: no handler
+            // ever receives a multi-line body, so every handler keeps its
+            // existing rawText contract (SummaryCommandHandler still
+            // hashes the whole body it was sent; the endsWith(" confirm")
+            // suffix tests and GetSourcesCommandHandler's re-serialization
+            // are untouched).
+            //
+            // The step-4.5 confirm drain is carried across the return
+            // rather than skipped (M1-772 redteam finding 1). A rejected
+            // body dispatches nothing, so it can never redeem a pending
+            // confirm: it is unconditionally "any other input" under spec
+            // §Surface conventions, INCLUDING the shapes isConfirmShape
+            // would accept on one line ("/ban x\nnote confirm" both starts
+            // with the prefix and ends with " confirm"). Draining
+            // unconditionally is therefore both simpler than mirroring the
+            // step-4.5 predicate and strictly safer — it keeps the armed
+            // window on the broad-blast-radius admin primitives
+            // self-closing for a body a user can type by accident.
+            //
+            // takeAny is an in-memory map removal, which is why it may
+            // precede the parser at all; the step-4.6 anchor clear is a DB
+            // write and is deliberately NOT hoisted with it, matching the
+            // body-cap branch above. A surviving /retry anchor only
+            // re-rolls the same user's own last summary in the same scope.
+            if (isMultiLineCommand(normalized)) {
+                confirmStateService.takeAny(snapshot.get().id(), msg.scope()).ifPresent(cancelled ->
+                        sendReply(msg.scope(),
+                                MessageFormat.format(
+                                        bundleLoader.get(BundleKeys.REPLY_CONFIRM_CANCELLED,
+                                                inboundContext.effectiveLanguage()),
+                                        cancelled.commandName()),
+                                adapterName));
+                sendReply(msg.scope(),
+                        bundleLoader.get(BundleKeys.ERROR_COMMAND_MULTILINE, inboundContext.effectiveLanguage()),
                         adapterName);
                 return;
             }
@@ -1436,6 +1490,100 @@ public class InboundRouter {
                     target.name(), ContactIds.redact(scopeIdOf(scope)));
         }
         return handle;
+    }
+
+    /**
+     * Is {@code normalized} a slash body carrying content past its first
+     * line? Per {@code docs/spec/commands.md} §Surface conventions a
+     * command and all its arguments occupy ONE line; such a body is
+     * rejected unparsed.
+     *
+     * <p><b>Why the rule exists.</b> The command word is pinned to
+     * position 0 by the {@code startsWith("/")} classification, but every
+     * argument parser tokenizes with {@code split("\\s+")}, and Java's
+     * {@code \s} matches {@code \n}. Arguments were therefore gathered
+     * across every line of the body while the command word was not — so
+     * {@code /list-sources} with {@code --all} on a later line reached
+     * the admin-only deployment-wide listing branch (§Source URL
+     * visibility), and {@code /retry} with {@code --digest} reached the
+     * admin digest-retry branch ({@code RetryCommandHandler.hasFlag}
+     * scans every token of the body). Neither was an authorization
+     * bypass — both branches re-check the actor and refuse a caller who
+     * lacks the tier — but an ADMIN who pasted a note under a bare
+     * {@code /list-sources} got the deployment-wide enumeration, and its
+     * privileged-read audit row, from a command they did not type.
+     * Rejecting at this funnel closes the class for every command at
+     * once instead of per parser. (M1-772.)
+     *
+     * <p><b>Testing for {@code \n} alone would not close it.</b>
+     * {@link #normalize} splits on {@code \n} only, and
+     * {@code appendNormalized} preserves every other line terminator —
+     * none of {@code \r}, {@code U+000B}, {@code \f}, {@code U+0085},
+     * {@code U+2028}, {@code U+2029} is a bidi control or a zero-width
+     * codepoint, and NFKC folds none of them. A bare {@code \r} is
+     * therefore invisible to a newline test while still being a token
+     * separator for the handlers' {@code split("\\s+")}, so
+     * {@code /list-sources\r--all} would have dispatched the admin
+     * listing with the body never appearing to hold a second line. The
+     * predicate matches the whole {@code \R} set for that reason: the
+     * rule is "no line boundary at all", not "no content past the first
+     * newline". The three that {@code \s} misses ({@code U+0085},
+     * {@code U+2028}, {@code U+2029}) cannot split a token today and are
+     * rejected anyway — they are line boundaries to the READER, and a
+     * rule about what occupies one line has to read them the way the
+     * reader does.
+     *
+     * <p>A trailing terminator is rejected rather than tolerated. The
+     * common ones are already gone — {@link #normalize} ends with
+     * {@code trim()}, which strips everything at or below {@code U+0020}
+     * — so this only bites on a trailing {@code U+0085} / {@code U+2028}
+     * / {@code U+2029}, where rejecting is the safe direction and keeps
+     * the rule stateable in one sentence.
+     *
+     * <p>Ordinary in-line whitespace stays legal: {@code \t} and the
+     * space are not line boundaries, so {@code /list-sources\t--all}
+     * dispatches exactly as before. It is one line, and a closed-list
+     * entry spanning it is matched by the sanitizer's within-line scan.
+     *
+     * <p>Chat bodies are deliberately unaffected: {@link #normalize}
+     * preserves fenced code blocks verbatim precisely so chat mode can
+     * carry them, and this predicate is false for anything not beginning
+     * with a slash.
+     *
+     * <p>Package-private + static so
+     * {@code InboundRouterCommandCapTest} can exercise the predicate
+     * directly without booting Quarkus, the same as {@link #normalize}
+     * and {@link #isInterruptible}.
+     */
+    static boolean isMultiLineCommand(String normalized) {
+        if (!normalized.startsWith("/")) {
+            return false;
+        }
+        for (int i = 0; i < normalized.length(); i++) {
+            if (isLineBoundary(normalized.charAt(i))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The {@code \R} set as a char test — every codepoint Java's
+     * {@code \R} treats as a line boundary. All are BMP, so a
+     * {@code charAt} scan cannot split one across a surrogate pair.
+     */
+    private static boolean isLineBoundary(char c) {
+        // Written as numeric comparisons, not char literals: VT, NEL and
+        // the two Unicode separators have no escape mnemonic, and a raw
+        // control character embedded in the source is unreadable and easy
+        // to corrupt in transit.
+        return c == '\n'        // LF
+                || c == '\r'    // CR
+                || c == '\f'    // FF
+                || c == 0x000B  // VT
+                || c == 0x0085  // NEL
+                || c == 0x2028  // LINE SEPARATOR
+                || c == 0x2029; // PARAGRAPH SEPARATOR
     }
 
     /**

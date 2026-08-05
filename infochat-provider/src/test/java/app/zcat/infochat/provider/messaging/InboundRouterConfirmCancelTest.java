@@ -39,6 +39,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>(c) empty pending: peek → empty, no-op path; no takeAny, no
  *       cancellation, dispatch proceeds.</li>
  * </ul>
+ *
+ * <p>Two further scenarios pin the M1-772 single-line rule's own drain,
+ * which fires ahead of the sweep because the rejection returns before
+ * it: (d) a multi-line body drains unconditionally — even one shaped
+ * like a confirm — and reaches no handler; (e) with nothing pending the
+ * rejection stays a single reply.</p>
  */
 class InboundRouterConfirmCancelTest {
 
@@ -128,6 +134,52 @@ class InboundRouterConfirmCancelTest {
                 "sweep must call peek even on empty pending (to determine emptiness)");
         assertFalse(confirmState.calls.contains("takeAny"),
                 "sweep must NOT call takeAny when peek returns empty (no-op path)");
+    }
+
+    @Test
+    void multiLineSlashBodyCancelsPendingEvenWhenItLooksLikeAConfirm() {
+        // M1-772 redteam finding 1: the single-line rejection returns
+        // ahead of the step-4.5 sweep, so it drains the pending itself.
+        // The body is deliberately one isConfirmShape would ACCEPT if it
+        // were on a single line — it starts with "/ban " and ends with
+        // " confirm" — proving the drain is unconditional rather than a
+        // copy of the sweep's predicate. A rejected body dispatches
+        // nothing, so it can never redeem the armed payload.
+        FakeConfirmStateService confirmState = new FakeConfirmStateService(
+                Optional.of(new BanConfirm("target-3", null, "intent-req")));
+        CapturingAdapter capture = new CapturingAdapter();
+        CountingCommandHandler banHandler = new CountingCommandHandler("ban", "ban-dispatched");
+        InboundRouter router = newRouter(confirmState, capture);
+        router.commandHandlers = new SingletonInstance<>(banHandler);
+
+        router.onMessage(dmInbound(DM_CONTACT, "/ban target-3\nnote to self confirm"), ADAPTER);
+
+        assertEquals(0, banHandler.dispatchCount,
+                "a multi-line body must reach NO handler");
+        assertEquals(2, capture.captured.size(),
+                "expected one cancellation + one multiline error; got: " + capture.captured);
+        assertEquals("Pending `ban` cancelled.", capture.captured.get(0).text(),
+                "first outbound must be the cancellation acknowledgement");
+        assertEquals("bundle:" + BundleKeys.ERROR_COMMAND_MULTILINE, capture.captured.get(1).text(),
+                "second outbound must be the multiline rejection");
+        assertTrue(confirmState.calls.contains("takeAny"),
+                "the rejection must drain the pending confirm, not leave it armed");
+    }
+
+    @Test
+    void multiLineSlashBodyWithNoPendingConfirmRepliesOnlyOnce() {
+        // The drain is a no-op in the common case: no pending entry
+        // means the rejection stays a single reply.
+        FakeConfirmStateService confirmState = new FakeConfirmStateService(Optional.empty());
+        CapturingAdapter capture = new CapturingAdapter();
+        InboundRouter router = newRouter(confirmState, capture);
+
+        router.onMessage(dmInbound(DM_CONTACT, "/help\nnote to self"), ADAPTER);
+
+        assertEquals(1, capture.captured.size(),
+                "expected exactly one outbound (the multiline error); got: " + capture.captured);
+        assertEquals("bundle:" + BundleKeys.ERROR_COMMAND_MULTILINE, capture.captured.get(0).text(),
+                "outbound must be the multiline rejection, not a cancellation");
     }
 
     // ----- router wiring + fakes -------------------------------------------

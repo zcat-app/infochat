@@ -262,12 +262,19 @@ public final class LlmOutputSanitizerCore {
      * (M1-680 red-team DOS finding,
      * docs/plan/m1/redteam/M1-680-2026-07-23-r2.md.)
      *
-     * <p><b>Why it mirrors the parser exactly.</b> The router passes the
-     * whole, possibly multi-line, message to the handler, and the parser
-     * tokenizes it with {@code split("\\s+")} — and Java {@code \s}
-     * includes {@code \n} — so the argument run spans every line, not
-     * just the command word's own. The separator set here is therefore
-     * exactly the ASCII {@code \s} set: the command word must be followed
+     * <p><b>Why it mirrors the parser exactly.</b> The parser tokenizes
+     * the body it is handed with {@code split("\\s+")}, so the separator
+     * set here is exactly the ASCII {@code \s} set. It stays that wide
+     * across line boundaries even though M1-772 made a command occupy
+     * one line — the router now rejects a multi-line slash body unparsed
+     * ({@code docs/spec/commands.md} §Surface conventions), so an
+     * argument run can no longer span lines, but this scan reads bot
+     * output and feed text rather than command bodies and cannot rely on
+     * that rejection having happened. The detector staying wider than
+     * the dispatcher costs only redaction breadth; narrowing it is a
+     * separate change that must be argued on its own evidence
+     * ({@code docs/spec/security.md} §LLM output sanitizer). Concretely:
+     * the command word must be followed
      * by a separator; the flag must be a separator-delimited token equal
      * to the flag, with a trailing boundary admitting following
      * punctuation (so a copy-paste that drops a sentence-final {@code .}
@@ -371,9 +378,11 @@ public final class LlmOutputSanitizerCore {
 
     /**
      * The ASCII {@code \s} set — the token separators the parser's
-     * {@code split("\\s+")} sees. {@code \n} is a separator like any
-     * other: the router preserves internal newlines in the body it hands
-     * the handler, so the parser's argument run spans lines.
+     * {@code split("\\s+")} sees. The line boundaries in it stay
+     * separators here even though a multi-line slash body is now
+     * rejected before any parser (M1-772): this scan reads bot output
+     * and feed text, where no such rejection applies. See
+     * {@link #redactFlagEntry} for the full argument.
      */
     private static boolean isTokenSeparator(char c) {
         return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\u000B';

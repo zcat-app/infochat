@@ -502,23 +502,51 @@ adjacent-token match let that line ship verbatim — with no redaction
 marker, no WARN and no audit row, disclosing the deployment-wide
 source catalogue the entry exists to keep out of LLM output (§Source
 URL visibility). The argument run spans the **whole message, across
-newlines**: the router hands the handler the entire, possibly
-multi-line, body, and `ListSourcesArgs.parse` tokenizes it with
-`split("\s+")` — Java `\s` includes `\n` — so a `--all` on any line
-after `/list-sources` dispatches `all=true`, and the scan matches it
-there. It deliberately does **not** stop at a sentence terminator or an
-intervening `/`, because the parser does not either —
+newlines**. That scan was originally derived from the parser: the
+router handed the handler the entire, possibly multi-line, body and
+`ListSourcesArgs.parse` tokenized it with `split("\s+")` — Java `\s`
+includes `\n` — so a `--all` on any line after `/list-sources`
+dispatched `all=true`. **That premise no longer holds**: per
+`docs/spec/commands.md` §Surface conventions a command occupies exactly
+one line, and a slash body with content past its first line is rejected
+unparsed, so a command word and a flag on different lines no longer
+dispatch anything. The whole-message scan is **retained as defense in
+depth** rather than narrowed alongside it — the detector staying wider
+than the dispatcher costs only redaction breadth, whereas narrowing it
+first would open a window. Nothing about the residuals recorded below
+changes here: they are properties of the sanitize *unit*, and no
+sanitize call site was re-scoped by the parser rule. It deliberately
+does **not** stop at a sentence terminator or an intervening `/`,
+because the parser does not either —
 `ListSourcesArgs.parse` ignores any token it does not recognize rather
 than rejecting it, so a punctuation- or slash-bearing token
 (`/list-sources --filter rss/news --all`, `/list-sources why? --all`)
 is still a real argument that dispatches `all=true`. A sentence-scoped
-or line-scoped bound would leave exactly those forms dispatching while
-evading the match — and the line bound also regressed the adjacent
-`/list-sources\n--all` case the earlier `\s+` regex used to catch.
-Whitespace is read the way the parser's `split("\s+")` reads it — every
-ASCII `\s` character is a token separator, so `/list-sources` and
-`--all` separated by a bare `\r` or by newlines match, mirroring the
-dispatch. **The span's justification holds because every caller's unit of input is
+bound would leave exactly those forms dispatching while evading the
+match. A line-scoped bound is no longer *unsound* now that a
+cross-line pair cannot dispatch, but it is not taken here: narrowing
+the detector is a separate change that must be argued on its own
+evidence, not folded into the parser rule that merely made it
+possible. Whitespace is read the way `ListSourcesArgs.parse`'s
+`split("\s+")` reads it — every ASCII `\s` character is a token
+separator, so `/list-sources` and `--all` separated by a tab match,
+mirroring the dispatch within the command's one line. The `\s` members
+that are also line boundaries (`\r`, `U+000B`, `\f`) are matched here
+too, even though the single-line rule now rejects a command body
+containing one before it reaches a parser: the sanitizer scans bot
+output and feed text, not command bodies, so it cannot rely on that
+rejection having happened.
+
+That equivalence is stated against the parser that handles the entries
+actually on the closed list, **not** against every argument parser in
+the Provider: `CommandTokenizer` — used by the handlers that accept
+double-quoted values — splits on `Character.isWhitespace`, which is a
+strictly wider set (it includes `U+001C`–`U+001F`). Nothing on the
+closed list is parsed by it today, so no listed entry has a separator
+the scan misses. Adding a closed-list entry whose flag is parsed by
+`CommandTokenizer` would break the equivalence and hand back exactly
+the separator evasion this paragraph exists to close, so that pairing
+requires widening the scan's separator set in the same change. **The span's justification holds because every caller's unit of input is
 one author's field, or that field paired with its own ingest
 translation** (restoring the invariant the categorized-render
 work briefly widened). The argument below — that a collapsed span only ever swallows

@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -20,6 +21,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * with the fixed {@code error.command.body_too_large} reply BEFORE the
  * parser, while an under-cap slash body is parsed and dispatched
  * normally. Mirrors the existing chat-mode cap shape on the slash path.
+ *
+ * <p>Also pins the single-line rule that sits immediately after the cap
+ * (M1-772): a slash body carrying content past its first line is
+ * rejected with {@code error.command.multiline} before the parser, so a
+ * flag on a later line can no longer join the argument run of a command
+ * word on the first.</p>
  *
  * <p>Plain JUnit — {@code lookupUser} is overridden to return a
  * non-banned vouched snapshot so the body reaches the cap gate, and the
@@ -69,6 +76,133 @@ class InboundRouterCommandCapTest {
                 "under-cap slash body must be parsed and dispatched to the handler");
         assertTrue(log.calls.contains("handler.handle(help)"),
                 "under-cap slash body must reach the handler; got: " + log.calls);
+    }
+
+    @Test
+    void multiLineSlashBodyIsRejectedAndReachesNoHandler() {
+        CallLog log = new CallLog();
+        NoopBundleLoader bundleLoader = new NoopBundleLoader();
+        InboundRouter router = newVouchedRouter(bundleLoader);
+        router.commandBodyCap = 64;
+        router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
+        CapturingAdapter target = new CapturingAdapter();
+        router.setReplyTarget(target);
+
+        router.onMessage(dmInbound("/help\nand a second line"), ADAPTER);
+
+        assertEquals(1, target.captured.size(),
+                "multi-line slash body must produce exactly one error reply; got: " + target.captured);
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_COMMAND_MULTILINE),
+                target.captured.get(0).text(),
+                "the reply must be the error.command.multiline bundle entry");
+        assertTrue(log.calls.isEmpty(),
+                "a multi-line slash body must not reach any handler; got: " + log.calls);
+    }
+
+    @Test
+    void flagOnASecondLineDoesNotDispatchTheAdminListing() {
+        // The security case (M1-772): before the single-line rule, every
+        // argument parser tokenized the whole body with split("\\s+") — and
+        // Java's \s matches \n — so a --all on any later line set all=true
+        // and dispatched the admin-only deployment-wide source listing.
+        // Asserted on DISPATCH, not on the reply text: the point is that
+        // the handler never runs, not which string comes back.
+        CallLog log = new CallLog();
+        NoopBundleLoader bundleLoader = new NoopBundleLoader();
+        InboundRouter router = newVouchedRouter(bundleLoader);
+        router.commandBodyCap = 64;
+        router.commandHandlers =
+                new SingletonInstance<>(new RecordingCommandHandler(log, "list-sources"));
+        CapturingAdapter target = new CapturingAdapter();
+        router.setReplyTarget(target);
+
+        router.onMessage(dmInbound("/list-sources\n--all"), ADAPTER);
+
+        assertTrue(log.calls.isEmpty(),
+                "a flag on a second line must not reach the handler; got: " + log.calls);
+    }
+
+    @Test
+    void theSameCommandOnOneLineStillDispatches() {
+        // The contrast to the two tests above: the rejection keys on the
+        // newline alone, so the identical command with its argument on the
+        // command's own line is unaffected.
+        CallLog log = new CallLog();
+        NoopBundleLoader bundleLoader = new NoopBundleLoader();
+        InboundRouter router = newVouchedRouter(bundleLoader);
+        router.commandBodyCap = 64;
+        router.commandHandlers =
+                new SingletonInstance<>(new RecordingCommandHandler(log, "list-sources"));
+        CapturingAdapter target = new CapturingAdapter();
+        router.setReplyTarget(target);
+
+        router.onMessage(dmInbound("/list-sources --all"), ADAPTER);
+
+        assertTrue(log.calls.contains("handler.handle(list-sources)"),
+                "a single-line command must still reach the handler; got: " + log.calls);
+    }
+
+    @Test
+    void multiLineChatBodyIsNotACommandAndIsUnaffected() {
+        assertFalse(InboundRouter.isMultiLineCommand("hello\nworld"),
+                "a multi-line body without a leading slash is chat, not a command");
+        assertFalse(InboundRouter.isMultiLineCommand("```\ncode\n```"),
+                "normalize preserves fenced code blocks for chat mode; they must not be rejected");
+        assertTrue(InboundRouter.isMultiLineCommand("/help\nx"),
+                "a slash body with a second line is a multi-line command");
+        assertFalse(InboundRouter.isMultiLineCommand("/help x"),
+                "a single-line slash body is not a multi-line command");
+    }
+
+    @Test
+    void everyLineTerminatorIsRejectedNotJustNewline() {
+        // normalize() splits on \n alone and appendNormalized preserves
+        // every other terminator (none is a bidi control or zero-width,
+        // and NFKC folds none of them). A \n-only test would therefore
+        // pass "/list-sources\r--all" straight through while the
+        // handlers' split("\\s+") still tokenizes \r as a separator —
+        // the admin listing would dispatch from a body that never looked
+        // like it had a second line.
+        assertTrue(InboundRouter.isMultiLineCommand("/list-sources\r--all"),
+                "a bare CR separates tokens for split(\"\\\\s+\") and must be rejected");
+        assertTrue(InboundRouter.isMultiLineCommand("/list-sources" + (char) 0x000B + "--all"),
+                "VT is in \\s and must be rejected");
+        assertTrue(InboundRouter.isMultiLineCommand("/list-sources\f--all"),
+                "FF is in \\s and must be rejected");
+        // These three are line boundaries to the reader but are NOT in
+        // Java's \s, so they cannot split a token today. Rejected anyway:
+        // the rule is about what occupies one line, read as the reader
+        // reads it, and that must not depend on \s's coverage gaps.
+        assertTrue(InboundRouter.isMultiLineCommand("/list-sources" + (char) 0x0085 + "--all"),
+                "NEL is a line boundary and must be rejected");
+        assertTrue(InboundRouter.isMultiLineCommand("/list-sources" + (char) 0x2028 + "--all"),
+                "U+2028 is a line boundary and must be rejected");
+        assertTrue(InboundRouter.isMultiLineCommand("/list-sources" + (char) 0x2029 + "--all"),
+                "U+2029 is a line boundary and must be rejected");
+        // A tab is in-line whitespace, not a line boundary: one line, so
+        // it still dispatches and the sanitizer's within-line scan covers
+        // a closed-list entry spanning it.
+        assertFalse(InboundRouter.isMultiLineCommand("/list-sources\t--all"),
+                "a tab is not a line boundary and must not be rejected");
+    }
+
+    @Test
+    void carriageReturnSeparatedFlagDoesNotDispatch() {
+        // The dispatch-level twin of the predicate test above: this is
+        // the shape a \n-only check would have shipped.
+        CallLog log = new CallLog();
+        NoopBundleLoader bundleLoader = new NoopBundleLoader();
+        InboundRouter router = newVouchedRouter(bundleLoader);
+        router.commandBodyCap = 64;
+        router.commandHandlers =
+                new SingletonInstance<>(new RecordingCommandHandler(log, "list-sources"));
+        CapturingAdapter target = new CapturingAdapter();
+        router.setReplyTarget(target);
+
+        router.onMessage(dmInbound("/list-sources\r--all"), ADAPTER);
+
+        assertTrue(log.calls.isEmpty(),
+                "a flag behind a bare CR must not reach the handler; got: " + log.calls);
     }
 
     private InboundRouter newVouchedRouter(NoopBundleLoader bundleLoader) {

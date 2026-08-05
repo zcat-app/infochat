@@ -104,6 +104,48 @@ live in `docs/design/03-commands.md`.
   banned-user or unapproved-group message still gets the
   authorization reply, not a body-too-large reply. The cap *values*
   are tuning and live in `docs/design/`.
+- **A command occupies exactly one line.** The command word and all
+  of its arguments must sit on the first line of the body; a slash
+  body containing *any* line boundary is rejected unparsed with a
+  friendly error, alongside the two caps above and under the same
+  ordering guarantee (after the authorization gates, before the
+  parser and before any DB write). "Line boundary" is the full
+  Unicode set (`\R`), not just `\n` — normalization splits on `\n`
+  alone and preserves the rest, while the parsers' `split("\s+")`
+  tokenizes `\r`, `U+000B` and `\f` as separators, so a `\n`-only
+  rule would leave the same evasion open behind a bare `\r`. In-line
+  whitespace such as a tab is unaffected. Chat-mode bodies are
+  unaffected too and stay multi-line — normalization deliberately
+  preserves fenced code blocks so chat can carry them.
+
+  The rule closes a **dispatch asymmetry**, not merely a style
+  question. Routing pins the command word to the body's first
+  character, but every argument parser tokenizes with `split("\s+")`,
+  and Java's `\s` matches `\n` — so before this rule arguments were
+  gathered from *every* line while the command word was not. A
+  privileged flag on any later line therefore joined the argument run
+  of a command word on the first: `/list-sources` with `--all` five
+  lines below reached the admin-only deployment-wide listing branch
+  (§Source URL visibility), and `/retry` with `--digest` reached the
+  admin digest-retry branch. Neither was an authorization bypass —
+  both branches re-check the actor and refuse a caller who lacks the
+  tier, so a non-admin got the admin-only-flag error rather than the
+  data. What the asymmetry produced was a *privileged branch entered
+  without the caller asking for it*: an admin who pasted a note under
+  a bare `/list-sources` got the deployment-wide enumeration, and its
+  audit row, from a command they did not type. Rejecting the body at
+  the router closes that for every command at once, which is why no
+  per-command argument grammar is involved. Quoted argument values
+  (`--name`, `--reason`) consequently cannot span lines either; the
+  one value that is persisted already had its control characters
+  stripped downstream, so no storable shape is lost.
+
+  A rejected body also **cancels a pending confirmation** for that
+  (user, scope), exactly as any other non-confirming input does: it
+  dispatches nothing, so it cannot redeem an armed destructive
+  command, and leaving the window open for a body a user can type by
+  accident would erode the bound the confirmation rule above places on
+  the destructive primitives.
 
 ## Command catalogue
 

@@ -1473,6 +1473,15 @@ public final class BundleKeys {
     /** Slash-command body exceeds the profile-driven command body cap (infochat.command.body-cap). */
     public static final String ERROR_COMMAND_BODY_TOO_LARGE = "error.command.body_too_large";
 
+    /**
+     * Slash-command body carries content past its first line (M1-772).
+     * A command and all its arguments occupy ONE line per
+     * {@code docs/spec/commands.md} §Surface conventions; a body with a
+     * second line is rejected unparsed rather than having the extra
+     * lines silently folded into the argument run.
+     */
+    public static final String ERROR_COMMAND_MULTILINE = "error.command.multiline";
+
     /** Per-user LLM-triggering rate cap exceeded (infochat.chat.llm-rate-cap-per-minute). */
     public static final String ERROR_CHAT_LLM_RATE_CAP = "error.chat.llm_rate_cap";
 
